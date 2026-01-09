@@ -1,7 +1,5 @@
 """Tests for olmo_eval.core.scorers module."""
 
-import pytest
-
 from olmo_eval.core.datatypes import Instance, LMOutput
 from olmo_eval.core.scorers import ExactMatchScorer, MultipleChoiceScorer
 

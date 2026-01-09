@@ -11,7 +11,8 @@ To skip Docker management (if vLLM is already running):
     pytest tests/integration/test_vllm_backend.py -v --integration --no-docker
 
 To use a different model:
-    pytest tests/integration/test_vllm_backend.py -v --integration --vllm-model "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+    pytest tests/integration/test_vllm_backend.py -v --integration \\
+        --vllm-model "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 """
 
 import pytest
@@ -43,8 +44,7 @@ class TestVLLMBackendGenerate:
     def test_generate_multiple_prompts(self, vllm_backend, small_test_prompts):
         """Test generating from multiple prompts."""
         requests = [
-            LMRequest(request_type=RequestType.COMPLETION, prompt=p)
-            for p in small_test_prompts
+            LMRequest(request_type=RequestType.COMPLETION, prompt=p) for p in small_test_prompts
         ]
 
         results = vllm_backend.generate(requests)
@@ -327,7 +327,10 @@ class TestVLLMBackendWithTasks:
         requests = [
             LMRequest(
                 request_type=RequestType.COMPLETION,
-                prompt="Question: What is the chemical formula for water?\n\nA. H2O\nB. CO2\nC. NaCl\nD. O2\n\nAnswer:",
+                prompt=(
+                    "Question: What is the chemical formula for water?\n\n"
+                    "A. H2O\nB. CO2\nC. NaCl\nD. O2\n\nAnswer:"
+                ),
                 continuations=(" A", " B", " C", " D"),
             )
         ]

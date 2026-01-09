@@ -114,7 +114,9 @@ class TestRegisterRegime:
     def test_register_multiple_regimes(self):
         """Test registering multiple regimes for one task."""
 
-        @register("multi_regime", lambda: TaskConfig(name="multi_regime", hf_dataset="test/dataset"))
+        @register(
+            "multi_regime", lambda: TaskConfig(name="multi_regime", hf_dataset="test/dataset")
+        )
         class MultiRegimeTask(DummyTask):
             pass
 

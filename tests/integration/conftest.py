@@ -1,6 +1,5 @@
 """Pytest configuration and fixtures for integration tests."""
 
-import os
 import subprocess
 import time
 from pathlib import Path
@@ -118,7 +117,7 @@ def vllm_service(request):
     already_running = _is_container_running(VLLM_CONTAINER_NAME)
 
     if not already_running:
-        print(f"\nStarting vLLM container with docker-compose...")
+        print("\nStarting vLLM container with docker-compose...")
         subprocess.run(
             ["docker", "compose", "-f", str(DOCKER_COMPOSE_FILE), "up", "-d", "vllm"],
             check=True,

@@ -21,17 +21,13 @@ def main() -> None:
 
 
 @main.command()
-@click.option(
-    "--model", "-m", required=True, help="Model name or preset (e.g., llama3.1-8b)"
-)
+@click.option("--model", "-m", required=True, help="Model name or preset (e.g., llama3.1-8b)")
 @click.option("--task", "-t", multiple=True, required=True, help="Task spec or suite")
 @click.option("--config", "-c", type=click.Path(exists=True), help="YAML config file")
 @click.option("--output-dir", "-o", default="./results", help="Output directory")
 @click.option("--num-shots", type=int, help="Override num_fewshot for all tasks")
 @click.option("--limit", type=int, help="Override instance limit for all tasks")
-@click.option(
-    "--backend", type=click.Choice(["hf", "vllm", "litellm"]), help="Override backend"
-)
+@click.option("--backend", type=click.Choice(["hf", "vllm", "litellm"]), help="Override backend")
 @click.option("--dry-run", is_flag=True, help="Print config and exit without running")
 def run(
     model: str,
@@ -60,7 +56,7 @@ def run(
         runner.validate()
     except ValidationError as e:
         console.print(f"[red]Validation error:[/red]\n{e}")
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
     if dry_run:
         runner.print_config()

@@ -5,9 +5,9 @@ import re
 import pytest
 
 from olmo_eval.evals.suites.registry import (
+    _REGISTRY,
     AggregationStrategy,
     Suite,
-    _REGISTRY,
     format_tasks,
     get_suite,
     list_suites,

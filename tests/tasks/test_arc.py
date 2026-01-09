@@ -6,13 +6,12 @@ from olmo_eval.core import Instance, LMOutput, RequestType
 from olmo_eval.tasks.arc import (
     ARCChallenge,
     ARCEasy,
-    ARCTask,
     _arc_challenge_config,
     _arc_easy_config,
     _extract_mcqa_answer,
 )
 from olmo_eval.tasks.base import TaskConfig
-from olmo_eval.tasks.registry import clear_registry, get_task, list_tasks
+from olmo_eval.tasks.registry import get_task, list_tasks
 
 
 class TestExtractMCQAAnswer:

@@ -1,7 +1,5 @@
 """Tests for olmo_eval.core.formatters module."""
 
-import pytest
-
 from olmo_eval.core.datatypes import Instance, RequestType
 from olmo_eval.core.formatters import (
     ChatFormatter,

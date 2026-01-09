@@ -1,7 +1,5 @@
 """Tests for olmo_eval.core.configs module."""
 
-import pytest
-
 # Import to ensure suites are registered
 import olmo_eval.evals  # noqa: F401
 from olmo_eval.core.configs import ModelConfig, expand_tasks, get_model_config
@@ -111,9 +109,6 @@ class TestGetModelConfig:
 
     def test_get_model_extra_args_merged(self):
         """Test that extra_args are merged for presets."""
-        # First get base config to check if it has extra_args
-        base = get_model_config("llama3.1-8b")
-
         # Override with additional extra_args
         config = get_model_config(
             "llama3.1-8b",
