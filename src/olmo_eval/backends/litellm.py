@@ -37,7 +37,7 @@ class LiteLLMBackend:
             import litellm  # type: ignore[import-not-found]
         except ImportError as e:
             raise ImportError(
-                "litellm is required for LiteLLMBackend. " "Install with: pip install litellm"
+                "litellm is required for LiteLLMBackend. Install with: pip install litellm"
             ) from e
 
         self._litellm = litellm

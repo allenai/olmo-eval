@@ -4,15 +4,11 @@ set -euo pipefail
 echo "Running auto-fix..."
 
 echo ""
-echo "==> Formatting with black..."
-uv run black src/ tests/
+echo "==> Formatting with ruff..."
+uv run ruff format src/ tests/
 
 echo ""
-echo "==> Sorting imports with isort..."
-uv run isort src/ tests/
-
-echo ""
-echo "==> Running ruff with --fix..."
+echo "==> Running ruff check with --fix..."
 uv run ruff check --fix src/ tests/
 
 echo ""

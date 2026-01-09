@@ -3,7 +3,7 @@ name = "olmo-eval-internal"
 version = "0.1.0"
 description = "Evaluation toolkit for OLMo models"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 license = "Apache-2.0"
 authors = [
     { name = "Allen Institute for AI" },
@@ -15,6 +15,7 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
@@ -34,8 +35,6 @@ Issues = "https://github.com/allenai/olmo-eval/issues"
 
 [project.optional-dependencies]
 dev = [
-    "black~=25.1.0",
-    "isort~=6.0.1",
     "pytest~=9.0.2",
     "pytest-cov~=7.0.0",
     "ruff~=0.14.10",
@@ -60,9 +59,9 @@ olmo-eval = "olmo_eval.cli:main"
 
 [tool.uv]
 package = true
-dev-dependencies = [
-    "black~=25.1.0",
-    "isort~=6.0.1",
+
+[dependency-groups]
+dev = [
     "pytest~=9.0.2",
     "pytest-cov~=7.0.0",
     "ruff~=0.14.10",
@@ -84,13 +83,8 @@ select = [
     "SIM",
 ]
 
-[tool.black]
-line-length = 100
-target-version = ["py312"]
-
-[tool.isort]
-profile = "black"
-line_length = 100
+[tool.ruff.format]
+docstring-code-format = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
