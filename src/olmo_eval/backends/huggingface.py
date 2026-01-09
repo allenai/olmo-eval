@@ -7,12 +7,12 @@ from typing import TYPE_CHECKING
 from olmo_eval.core import LMOutput, LMRequest, SamplingParams
 
 if TYPE_CHECKING:
-    import torch
+    import torch  # type: ignore[import-not-found]
 
 
-def _get_device() -> "torch.device":
+def _get_device() -> torch.device:
     """Detect the best available device."""
-    import torch
+    import torch  # type: ignore[import-not-found]
 
     if torch.cuda.is_available():
         return torch.device("cuda")
@@ -32,7 +32,10 @@ class HuggingFaceBackend:
             **model_kwargs: Additional arguments passed to from_pretrained.
         """
         try:
-            from transformers import AutoModelForCausalLM, AutoTokenizer
+            from transformers import (  # type: ignore[import-not-found]
+                AutoModelForCausalLM,
+                AutoTokenizer,
+            )
         except ImportError as e:
             raise ImportError(
                 "transformers is required for HuggingFaceBackend. "
@@ -40,9 +43,7 @@ class HuggingFaceBackend:
             ) from e
 
         self.model_name = model_name
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            model_name, trust_remote_code=True
-        )
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name, trust_remote_code=True, **model_kwargs
         )
@@ -50,9 +51,7 @@ class HuggingFaceBackend:
         self.model.to(self.device)
         self.model.eval()
 
-    def _build_generate_kwargs(
-        self, params: SamplingParams
-    ) -> dict:
+    def _build_generate_kwargs(self, params: SamplingParams) -> dict:
         """Convert SamplingParams to HuggingFace generate kwargs."""
         kwargs = {
             "max_new_tokens": params.max_tokens,
@@ -69,8 +68,8 @@ class HuggingFaceBackend:
         return kwargs
 
     def _truncate_at_stop(
-        self, tokens: "torch.Tensor", stop_sequences: tuple[str, ...] | None
-    ) -> tuple["torch.Tensor", str]:
+        self, tokens: torch.Tensor, stop_sequences: tuple[str, ...] | None
+    ) -> tuple[torch.Tensor, str]:
         """Truncate generated tokens at first stop sequence."""
         if not stop_sequences:
             return tokens, self.tokenizer.decode(tokens, skip_special_tokens=True)
@@ -89,7 +88,7 @@ class HuggingFaceBackend:
         requests: list[LMRequest],
         sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
-        import torch
+        import torch  # type: ignore[import-not-found]
 
         params = sampling_params or SamplingParams()
         gen_kwargs = self._build_generate_kwargs(params)
@@ -132,14 +131,14 @@ class HuggingFaceBackend:
         self,
         requests: list[LMRequest],
     ) -> list[list[LMOutput]]:
-        import torch
+        import torch  # type: ignore[import-not-found]
 
         results = []
         for request in requests:
             prompt = request.prompt
-            ctx_enc = self.tokenizer(
-                prompt, add_special_tokens=False, return_tensors="pt"
-            ).to(self.device)
+            ctx_enc = self.tokenizer(prompt, add_special_tokens=False, return_tensors="pt").to(
+                self.device
+            )
             ctx_len = ctx_enc["input_ids"].shape[1]
 
             request_outputs = []

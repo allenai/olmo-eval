@@ -1,0 +1,45 @@
+version: 2
+updates:
+  # Python dependencies via uv
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    groups:
+      dev-dependencies:
+        patterns:
+          - "black"
+          - "isort"
+          - "pytest*"
+          - "ruff"
+          - "ty"
+        update-types:
+          - "minor"
+          - "patch"
+      ml-backends:
+        patterns:
+          - "torch*"
+          - "transformers"
+          - "vllm"
+          - "litellm"
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # Ignore major version updates for stability
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns:
+          - "*"

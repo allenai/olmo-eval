@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Any
 from olmo_eval.core import LMOutput, LMRequest, SamplingParams
 
 if TYPE_CHECKING:
-    from vllm import LLM
-    from vllm.outputs import RequestOutput
+    from vllm import LLM  # type: ignore[import-not-found]
+    from vllm.outputs import RequestOutput  # type: ignore[import-not-found]
 
 
 def _get_token_string(logprob_obj: Any, token_id: int, tokenizer: Any = None) -> str:
@@ -35,11 +35,9 @@ class VLLMBackend:
         os.environ.setdefault("VLLM_LOGGING_LEVEL", "WARNING")
 
         try:
-            from vllm import LLM
+            from vllm import LLM  # type: ignore[import-not-found]
         except ImportError as e:
-            raise ImportError(
-                "vllm is required for VLLMBackend. Install with: pip install vllm"
-            ) from e
+            raise ImportError("vllm is required for VLLMBackend") from e
 
         engine_kwargs.setdefault("gpu_memory_utilization", 0.7)
         self.model_name = model_name
@@ -47,7 +45,7 @@ class VLLMBackend:
 
     def _build_sampling_params(self, params: SamplingParams) -> Any:
         """Convert SamplingParams to vLLM SamplingParams."""
-        from vllm import SamplingParams as VLLMSamplingParams
+        from vllm import SamplingParams as VLLMSamplingParams  # type: ignore[import-not-found]
 
         kwargs: dict[str, Any] = {
             "max_tokens": params.max_tokens,
@@ -96,7 +94,10 @@ class VLLMBackend:
 
         return [
             [
-                LMOutput(text=completion.text, logprobs=self._convert_logprobs(completion.logprobs))
+                LMOutput(
+                    text=completion.text,
+                    logprobs=self._convert_logprobs(completion.logprobs),
+                )
                 for completion in output.outputs
             ]
             for output in outputs
@@ -106,7 +107,7 @@ class VLLMBackend:
         self,
         requests: list[LMRequest],
     ) -> list[list[LMOutput]]:
-        from vllm import SamplingParams as VLLMSamplingParams
+        from vllm import SamplingParams as VLLMSamplingParams  # type: ignore[import-not-found]
 
         vllm_params = VLLMSamplingParams(
             prompt_logprobs=5,
@@ -145,7 +146,7 @@ class VLLMBackend:
                 prompt_logprobs = output.prompt_logprobs or []
                 cont_logprobs = prompt_logprobs[ctx_len:]
 
-                for token_id, token_probs in zip(cont_tokens, cont_logprobs):
+                for token_id, token_probs in zip(cont_tokens, cont_logprobs, strict=False):
                     if token_probs and token_id in token_probs:
                         lp_obj = token_probs[token_id]
                         token_str = _get_token_string(lp_obj, token_id, tokenizer)

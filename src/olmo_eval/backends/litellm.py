@@ -34,11 +34,10 @@ class LiteLLMBackend:
             **api_kwargs: Additional arguments passed to litellm.completion.
         """
         try:
-            import litellm
+            import litellm  # type: ignore[import-not-found]
         except ImportError as e:
             raise ImportError(
-                "litellm is required for LiteLLMBackend. "
-                "Install with: pip install litellm"
+                "litellm is required for LiteLLMBackend. " "Install with: pip install litellm"
             ) from e
 
         self._litellm = litellm
@@ -53,9 +52,7 @@ class LiteLLMBackend:
             if value:
                 setattr(self._litellm, litellm_attr, value)
 
-    def _generate_single(
-        self, request: LMRequest, params: SamplingParams
-    ) -> list[LMOutput]:
+    def _generate_single(self, request: LMRequest, params: SamplingParams) -> list[LMOutput]:
         """Generate completions for a single request."""
         # Build messages from request
         if request.messages:
@@ -109,9 +106,7 @@ class LiteLLMBackend:
         params = sampling_params or SamplingParams()
 
         with ThreadPoolExecutor() as executor:
-            results = list(
-                executor.map(lambda req: self._generate_single(req, params), requests)
-            )
+            results = list(executor.map(lambda req: self._generate_single(req, params), requests))
 
         return results
 
@@ -148,14 +143,17 @@ class LiteLLMBackend:
                 logprobs_data = getattr(choice, "logprobs", None)
                 if logprobs_data and hasattr(logprobs_data, "content") and logprobs_data.content:
                     completion_logprobs = [
-                        {"token": lp.token, "logprob": lp.logprob}
-                        for lp in logprobs_data.content
+                        {"token": lp.token, "logprob": lp.logprob} for lp in logprobs_data.content
                     ]
 
             # Map to continuations
             outputs = []
             for continuation in request.continuations or ():
-                total = sum(lp["logprob"] for lp in completion_logprobs[:5]) if completion_logprobs else 0.0
+                total = (
+                    sum(lp["logprob"] for lp in completion_logprobs[:5])
+                    if completion_logprobs
+                    else 0.0
+                )
                 outputs.append(
                     LMOutput(
                         text=continuation,

@@ -1,4 +1,4 @@
-"""Evaluation task implementations."""
+"""Evaluation suites and orchestration."""
 
-# Import task modules to trigger registration
-from . import arc as _arc  # noqa: F401
+# Import suites to trigger suite registration
+from . import suites as _suites  # noqa: F401

@@ -11,3 +11,6 @@ __all__ = [
     "list_tasks",
     "clear_registry",
 ]
+
+# Import task modules to trigger registration (must be after exports to avoid circular import)
+from . import arc as _arc  # noqa: F401, E402

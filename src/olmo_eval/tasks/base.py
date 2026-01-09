@@ -5,7 +5,17 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from olmo_eval.core import Formatter, Instance, LMOutput, LMRequest, Metric, Response, Scorer
+from olmo_eval.core import (
+    Formatter,
+    Instance,
+    LMOutput,
+    LMRequest,
+    Metric,
+    MetricName,
+    Response,
+    Scorer,
+    Split,
+)
 
 
 @dataclass
@@ -21,6 +31,8 @@ class TaskConfig:
     num_fewshot: int = 0
     fewshot_seed: int = 42
     limit: int | None = None
+    split: Split = Split.TEST
+    primary_metric: MetricName | None = None
 
 
 class Task(ABC):

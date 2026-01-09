@@ -14,7 +14,7 @@ class RequestType(Enum):
 
 @dataclass(frozen=True, slots=True)
 class Instance:
-    """A single evaluation instance (immutable)."""
+    """A single evaluation instance."""
 
     question: str
     gold_answer: str | None = None
