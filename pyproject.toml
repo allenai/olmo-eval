@@ -1,0 +1,97 @@
+[project]
+name = "olmo-eval-internal"
+version = "0.1.0"
+description = "Evaluation toolkit for OLMo models"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [
+    { name = "Allen Institute for AI" },
+]
+keywords = ["olmo", "evaluation", "llm", "machine-learning"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "click~=8.3.1",
+    "datasets>=3.0.0",
+    "omegaconf~=2.3.0",
+    "rich~=14.2.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/allenai/olmo-eval"
+Repository = "https://github.com/allenai/olmo-eval"
+Issues = "https://github.com/allenai/olmo-eval/issues"
+
+[project.optional-dependencies]
+dev = [
+    "black~=25.1.0",
+    "isort~=6.0.1",
+    "pytest~=9.0.2",
+    "pytest-cov~=7.0.0",
+    "ruff~=0.14.10",
+    "ty~=0.0.10",
+]
+hf = [
+    "transformers~=4.57.3",
+    "torch>=2.0.0",
+]
+vllm = [
+    "vllm~=0.13.0",
+]
+litellm = [
+    "litellm~=1.80.11",
+]
+all-backends = [
+    "olmo-eval-internal[hf,vllm,litellm]",
+]
+
+[project.scripts]
+olmo-eval = "olmo_eval.cli:main"
+
+[tool.uv]
+package = true
+dev-dependencies = [
+    "black~=25.1.0",
+    "isort~=6.0.1",
+    "pytest~=9.0.2",
+    "pytest-cov~=7.0.0",
+    "ruff~=0.14.10",
+    "ty~=0.0.10",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "W",
+    "I",
+    "UP",
+    "B",
+    "SIM",
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"
