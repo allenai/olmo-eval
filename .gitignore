@@ -73,9 +73,6 @@ dmypy.json
 # ruff
 .ruff_cache/
 
-# uv
-uv.lock
-
 # OS
 .DS_Store
 Thumbs.db
