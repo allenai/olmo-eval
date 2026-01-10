@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Protocol
 
-from .datatypes import Instance, LMOutput
+from .types import Instance, LMOutput
 
 
 class Scorer(Protocol):

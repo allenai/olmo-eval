@@ -1,11 +1,11 @@
 """Tests for olmo_eval.core.formatters module."""
 
-from olmo_eval.core.datatypes import Instance, RequestType
 from olmo_eval.core.formatters import (
     ChatFormatter,
     CompletionFormatter,
     MultipleChoiceFormatter,
 )
+from olmo_eval.core.types import Instance, RequestType
 
 
 class TestChatFormatter:

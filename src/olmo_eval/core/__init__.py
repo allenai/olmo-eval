@@ -8,11 +8,20 @@ from .configs import (
     load_config,
 )
 from .constants.models import get_model_presets
-from .datatypes import Instance, LMOutput, LMRequest, RequestType, Response, Result, SamplingParams
-from .enums import MetricName, Split
 from .formatters import ChatFormatter, CompletionFormatter, Formatter, MultipleChoiceFormatter
 from .metrics import AccuracyMetric, Metric
 from .scorers import ExactMatchScorer, MultipleChoiceScorer, Scorer
+from .types import (
+    Instance,
+    LMOutput,
+    LMRequest,
+    MetricName,
+    RequestType,
+    Response,
+    Result,
+    SamplingParams,
+    Split,
+)
 
 __all__ = [
     # Enums

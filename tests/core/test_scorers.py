@@ -1,7 +1,7 @@
 """Tests for olmo_eval.core.scorers module."""
 
-from olmo_eval.core.datatypes import Instance, LMOutput
 from olmo_eval.core.scorers import ExactMatchScorer, MultipleChoiceScorer
+from olmo_eval.core.types import Instance, LMOutput
 
 
 class TestExactMatchScorer:

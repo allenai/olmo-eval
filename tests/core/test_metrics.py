@@ -2,8 +2,8 @@
 
 import pytest
 
-from olmo_eval.core.datatypes import Instance, LMOutput, LMRequest, RequestType, Response
 from olmo_eval.core.metrics import AccuracyMetric
+from olmo_eval.core.types import Instance, LMOutput, LMRequest, RequestType, Response
 
 
 class TestAccuracyMetric:

@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Protocol
 
-from .datatypes import Instance, LMRequest, RequestType
+from .types import Instance, LMRequest, RequestType
 
 
 class Formatter(Protocol):

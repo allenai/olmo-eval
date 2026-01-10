@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from .datatypes import Response
+from .types import Response
 
 
 class Metric(Protocol):
