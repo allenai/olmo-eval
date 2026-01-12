@@ -32,3 +32,17 @@ class AccuracyMetric:
             return 0.0
         total = sum(r.scores.get(self.scorer_name, 0.0) for r in responses)
         return total / len(responses)
+
+
+@dataclass(frozen=True, slots=True)
+class F1Metric:
+    """Mean F1 score across all responses."""
+
+    name: str = "f1"
+    scorer_name: str = "f1"
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        if not responses:
+            return 0.0
+        total = sum(r.scores.get(self.scorer_name, 0.0) for r in responses)
+        return total / len(responses)

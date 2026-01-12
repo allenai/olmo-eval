@@ -1,5 +1,6 @@
 """Core abstractions for evaluation."""
 
+from .code_execution import CodeExecutionScorer, PassAtKMetric, compute_pass_at_k
 from .configs import (
     ModelConfig,
     RunConfig,
@@ -9,8 +10,8 @@ from .configs import (
 )
 from .constants.models import get_model_presets
 from .formatters import ChatFormatter, CompletionFormatter, Formatter, MultipleChoiceFormatter
-from .metrics import AccuracyMetric, Metric
-from .scorers import ExactMatchScorer, MultipleChoiceScorer, Scorer
+from .metrics import AccuracyMetric, F1Metric, Metric
+from .scorers import ExactMatchScorer, F1Scorer, MultipleChoiceScorer, Scorer
 from .types import (
     Instance,
     LMOutput,
@@ -52,5 +53,11 @@ __all__ = [
     "Metric",
     "ExactMatchScorer",
     "MultipleChoiceScorer",
+    "F1Scorer",
     "AccuracyMetric",
+    "F1Metric",
+    # Code execution
+    "CodeExecutionScorer",
+    "PassAtKMetric",
+    "compute_pass_at_k",
 ]

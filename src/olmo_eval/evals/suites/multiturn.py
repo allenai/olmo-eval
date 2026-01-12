@@ -48,6 +48,7 @@ _styled_alpacaeval_tasks = tuple(
     for task_type in STYLED_TASKS
     for ref in ("og", "new")
 )
+
 STYLED_ALPACAEVAL_THINKER = make_suite(
     "styled_alpacaeval::tulu-thinker",
     _styled_alpacaeval_tasks,

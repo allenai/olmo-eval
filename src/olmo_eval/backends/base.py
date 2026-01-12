@@ -1,13 +1,28 @@
-"""Backend protocol definition."""
+"""Backend base class and protocol definition."""
 
-from typing import Protocol
+from abc import ABC, abstractmethod
 
 from olmo_eval.core import LMOutput, LMRequest, SamplingParams
 
 
-class Backend(Protocol):
-    """Protocol for language model backends."""
+class Backend(ABC):
+    """Abstract base class for language model backends.
 
+    All backends must implement `generate` and `logprobs` methods.
+    Common functionality like model name storage is handled here.
+    """
+
+    model_name: str
+
+    def __init__(self, model_name: str) -> None:
+        """Initialize the backend.
+
+        Args:
+            model_name: Model identifier or path.
+        """
+        self.model_name = model_name
+
+    @abstractmethod
     def generate(
         self,
         requests: list[LMRequest],
@@ -25,6 +40,7 @@ class Backend(Protocol):
         """
         ...
 
+    @abstractmethod
     def logprobs(
         self,
         requests: list[LMRequest],
@@ -39,3 +55,7 @@ class Backend(Protocol):
             continuation in the request, with logprobs populated.
         """
         ...
+
+    def _default_sampling_params(self, sampling_params: SamplingParams | None) -> SamplingParams:
+        """Return sampling params with defaults applied."""
+        return sampling_params or SamplingParams()

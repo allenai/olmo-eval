@@ -86,6 +86,7 @@ class MultipleChoiceFormatter:
 
     template: str = "{question}"
     choice_template: str = "{choice}"
+    include_choices_in_prompt: bool = True
 
     def format(
         self,
@@ -95,6 +96,12 @@ class MultipleChoiceFormatter:
         prompt = self.template.format(question=instance.question)
         continuations: tuple[str, ...] = ()
         if instance.choices:
+            if self.include_choices_in_prompt:
+                # Add labeled choices to the prompt
+                choices_text = "\n".join(
+                    f"{chr(ord('A') + i)}. {c}" for i, c in enumerate(instance.choices)
+                )
+                prompt = f"{prompt}\n\n{choices_text}"
             continuations = tuple(self.choice_template.format(choice=c) for c in instance.choices)
         return LMRequest(
             request_type=RequestType.COMPLETION,

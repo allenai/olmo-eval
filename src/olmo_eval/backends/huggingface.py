@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 
 from olmo_eval.core import LMOutput, LMRequest, SamplingParams
 
+from .base import Backend
+
 if TYPE_CHECKING:
     import torch  # type: ignore[import-not-found]
 
@@ -21,7 +23,7 @@ def _get_device() -> torch.device:
     return torch.device("cpu")
 
 
-class HuggingFaceBackend:
+class HuggingFaceBackend(Backend):
     """Backend using Hugging Face Transformers for local inference."""
 
     def __init__(self, model_name: str, **model_kwargs) -> None:
@@ -42,7 +44,7 @@ class HuggingFaceBackend:
                 "Install with: pip install transformers"
             ) from e
 
-        self.model_name = model_name
+        super().__init__(model_name)
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name, trust_remote_code=True, **model_kwargs
@@ -90,7 +92,7 @@ class HuggingFaceBackend:
     ) -> list[list[LMOutput]]:
         import torch  # type: ignore[import-not-found]
 
-        params = sampling_params or SamplingParams()
+        params = self._default_sampling_params(sampling_params)
         gen_kwargs = self._build_generate_kwargs(params)
 
         results = []

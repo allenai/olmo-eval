@@ -30,6 +30,7 @@ class RequestType(Enum):
 
     CHAT = auto()
     COMPLETION = auto()
+    LOGLIKELIHOOD = auto()
 
 
 @dataclass(frozen=True, slots=True)

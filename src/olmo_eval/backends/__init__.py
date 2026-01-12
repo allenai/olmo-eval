@@ -43,7 +43,7 @@ def create_backend(backend_type: BackendType | str, model_name: str, **kwargs) -
 
     match backend_type:
         case BackendType.MOCK:
-            return MockBackend()
+            return MockBackend(model_name)
         case BackendType.HUGGINGFACE:
             from .huggingface import HuggingFaceBackend
 

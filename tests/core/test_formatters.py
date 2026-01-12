@@ -146,9 +146,28 @@ class TestCompletionFormatter:
 class TestMultipleChoiceFormatter:
     """Tests for MultipleChoiceFormatter."""
 
-    def test_format_basic(self):
-        """Test basic multiple choice formatting."""
+    def test_format_basic_with_choices_in_prompt(self):
+        """Test basic multiple choice formatting (default includes choices in prompt)."""
         formatter = MultipleChoiceFormatter()
+        instance = Instance(
+            question="What color is the sky?",
+            gold_answer="B",
+            choices=("Red", "Blue", "Green"),
+        )
+
+        request = formatter.format(instance)
+
+        assert request.request_type == RequestType.COMPLETION
+        # Default behavior includes labeled choices in prompt
+        assert "What color is the sky?" in request.prompt
+        assert "A. Red" in request.prompt
+        assert "B. Blue" in request.prompt
+        assert "C. Green" in request.prompt
+        assert request.continuations == ("Red", "Blue", "Green")
+
+    def test_format_without_choices_in_prompt(self):
+        """Test multiple choice formatting without choices in prompt."""
+        formatter = MultipleChoiceFormatter(include_choices_in_prompt=False)
         instance = Instance(
             question="What color is the sky?",
             gold_answer="B",
@@ -166,6 +185,7 @@ class TestMultipleChoiceFormatter:
         formatter = MultipleChoiceFormatter(
             template="Q: {question}",
             choice_template=" {choice}",
+            include_choices_in_prompt=False,
         )
         instance = Instance(
             question="Capital?",
@@ -199,7 +219,7 @@ class TestMultipleChoiceFormatter:
 
     def test_format_ignores_fewshot(self):
         """Test that MultipleChoiceFormatter ignores fewshot (by design)."""
-        formatter = MultipleChoiceFormatter()
+        formatter = MultipleChoiceFormatter(include_choices_in_prompt=False)
         instance = Instance(
             question="Test?",
             gold_answer="A",

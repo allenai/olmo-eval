@@ -8,11 +8,13 @@ from typing import Any
 
 from olmo_eval.core import LMOutput, LMRequest, SamplingParams
 
+from .base import Backend
+
 # Maximum stop sequences supported by OpenAI-compatible APIs
 _MAX_STOP_SEQUENCES = 4
 
 
-class LiteLLMBackend:
+class LiteLLMBackend(Backend):
     """Backend using LiteLLM for unified API access to various providers."""
 
     # Environment variable to LiteLLM attribute mappings
@@ -40,8 +42,8 @@ class LiteLLMBackend:
                 "litellm is required for LiteLLMBackend. Install with: pip install litellm"
             ) from e
 
+        super().__init__(model_name)
         self._litellm = litellm
-        self.model_name = model_name
         self.api_kwargs = api_kwargs
         self._setup_api_keys()
 
@@ -103,7 +105,7 @@ class LiteLLMBackend:
         requests: list[LMRequest],
         sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
-        params = sampling_params or SamplingParams()
+        params = self._default_sampling_params(sampling_params)
 
         with ThreadPoolExecutor() as executor:
             results = list(executor.map(lambda req: self._generate_single(req, params), requests))

@@ -8,7 +8,7 @@ license = "Apache-2.0"
 authors = [
     { name = "Allen Institute for AI" },
 ]
-keywords = ["olmo", "evaluation", "llm", "machine-learning"]
+keywords = ["olmo", "evaluation", "llm"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -24,8 +24,10 @@ classifiers = [
 dependencies = [
     "click~=8.3.1",
     "datasets>=3.0.0",
+    "numpy>=1.20.0",
     "omegaconf~=2.3.0",
     "rich~=14.2.0",
+    "sympy>=1.12",
 ]
 
 [project.urls]
@@ -62,6 +64,7 @@ package = true
 
 [dependency-groups]
 dev = [
+    "coverage[toml]~=7.6.0",
     "pytest~=9.0.2",
     "pytest-cov~=7.0.0",
     "ruff~=0.14.10",
@@ -89,3 +92,26 @@ docstring-code-format = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v"
+
+[tool.coverage.run]
+source = ["src/olmo_eval"]
+branch = true
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "@abstractmethod",
+]
+show_missing = true
+skip_covered = false
+
+[tool.coverage.html]
+directory = "htmlcov"

@@ -122,14 +122,32 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Run unit tests
+      - name: Run unit tests with coverage
         run: |
           uv run pytest tests/ \
             --ignore=tests/integration/ \
             -v \
             --cov=src/olmo_eval \
             --cov-report=xml \
+            --cov-report=html \
             --cov-report=term-missing
+
+      - name: Generate coverage summary
+        if: matrix.python-version == '3.12'
+        run: |
+          echo "## Coverage Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          uv run coverage report --format=markdown >> $GITHUB_STEP_SUMMARY || uv run coverage report >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload coverage HTML report
+        uses: actions/upload-artifact@v4
+        if: matrix.python-version == '3.12'
+        with:
+          name: coverage-report
+          path: htmlcov/
+          retention-days: 14
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4

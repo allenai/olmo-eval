@@ -1,4 +1,4 @@
-"""vLLM backend for high-performance inference."""
+"""vLLM backend."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ import os
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.core import LMOutput, LMRequest, SamplingParams
+
+from .base import Backend
 
 if TYPE_CHECKING:
     from vllm import LLM  # type: ignore[import-not-found]
@@ -21,7 +23,7 @@ def _get_token_string(logprob_obj: Any, token_id: int, tokenizer: Any = None) ->
     return str(token_id)
 
 
-class VLLMBackend:
+class VLLMBackend(Backend):
     """Backend using vLLM for high-throughput inference."""
 
     def __init__(self, model_name: str, **engine_kwargs) -> None:
@@ -39,8 +41,8 @@ class VLLMBackend:
         except ImportError as e:
             raise ImportError("vllm is required for VLLMBackend") from e
 
+        super().__init__(model_name)
         engine_kwargs.setdefault("gpu_memory_utilization", 0.7)
-        self.model_name = model_name
         self.llm: LLM = LLM(model=model_name, **engine_kwargs)
 
     def _build_sampling_params(self, params: SamplingParams) -> Any:
@@ -86,7 +88,7 @@ class VLLMBackend:
         requests: list[LMRequest],
         sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
-        params = sampling_params or SamplingParams()
+        params = self._default_sampling_params(sampling_params)
         vllm_params = self._build_sampling_params(params)
 
         prompts = [req.prompt for req in requests]

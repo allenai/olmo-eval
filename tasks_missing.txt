@@ -1,0 +1,95 @@
+# Missing Tasks
+# =============
+# These tasks are referenced by suites in olmo-eval but do not yet have implementations.
+# They require additional infrastructure or complex dependencies.
+
+## OMEGA Benchmark (50+ tasks)
+# Compositional, explorative, and transformative math tasks
+# See OMEGA_SUB_CATEGORIES in constants/benchmarks.py
+# Requires: Complex math benchmark infrastructure
+
+## Long Context - HELMET Benchmark
+# Long-context evaluation at various lengths (8k, 16k, 32k, 64k, 128k)
+# See HELMET_SUITES in constants/long_context.py
+# Requires: HELMET dependency, custom data loading
+
+## Long Context - RULER Benchmark
+# Long-context evaluation at various lengths (4k, 8k, 16k, 32k, 64k, 128k)
+# See RULER_SUITES in constants/long_context.py
+# Requires: RULER dependency, custom data loading
+
+## Code Tasks (Additional)
+# CRUXEval - code understanding
+cruxeval_input
+cruxeval_output
+# Requires: Code execution infrastructure
+
+# Fill-in-the-Middle (FIM)
+fim_humaneval
+fim_mbpp
+fim_random_span
+# Requires: Special FIM prompt formatting
+
+# MultiPL-E - multilingual code (many languages)
+# multipl_e_humaneval_{lang}, multipl_e_mbpp_{lang}
+# Languages: c++, c#, d, go, java, javascript, julia, lua, perl, php, r, ruby, rust, scala, swift, typescript
+# Requires: Multi-language code execution
+
+# BigCodeBench
+bigcodebench
+# Requires: Large code benchmark infrastructure
+
+## Instruction Following
+# IFEval benchmark
+ifeval
+# Requires: Custom IFEvalMetric implementation
+
+# IFBench
+ifbench
+# Requires: Custom IFBench evaluation
+
+## Styled Tasks (10 tasks)
+# Robustness testing with text style variations
+# Requires: Base tasks + styled datasets
+styled_missense
+styled_leetspeak
+styled_grammar
+styled_random_case
+styled_keywords
+styled_phonetic
+styled_mechanical
+styled_aae
+styled_informal
+styled_afrikaans_backtranslated
+
+## Multi-Turn Evaluation (10+ tasks)
+# Multi-turn dialogue evaluation
+# Requires: Multi-turn dialogue handling infrastructure
+mt_eval_refinement_single
+mt_eval_refinement_multi
+mt_eval_expansion_single
+mt_eval_expansion_multi
+mt_eval_follow_up_single
+mt_eval_follow_up_multi
+mt_eval_recollection_single_cls
+mt_eval_recollection_multi_cls
+mt_eval_recollection_single_global_inst
+mt_eval_recollection_multi_global_inst
+
+# AlpacaEval multi-turn variants (25+ tasks)
+# See MULTITURN_ALPACAEVAL_TASKS in constants/benchmarks.py
+# Requires: Judge-based evaluation infrastructure
+
+## Notes
+# - Some tasks have multiple variants (e.g., :rc, :mc, :bpb for scoring methods)
+# - Some tasks have multiple configs (e.g., ::olmes, ::xlarge, ::olmo3)
+# - Tasks with :: in the name are config variants of base tasks
+# - Many suites define tasks with templates like "{}:rc::olmes" applied to task lists
+
+## Implemented Tasks (for reference)
+# The following tasks have been implemented and are no longer missing:
+# - Core Tasks (6): boolq, csqa, openbookqa, piqa, socialiqa, winogrande
+# - BIG-Bench Hard (27): bbh_* tasks
+# - Basic Skills (6): basic_skills_* tasks
+# - DeepMind Math (56): deepmind_math_* tasks
+# Total implemented: 95 tasks

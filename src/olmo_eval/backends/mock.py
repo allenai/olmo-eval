@@ -2,16 +2,26 @@
 
 from olmo_eval.core import LMOutput, LMRequest, SamplingParams
 
+from .base import Backend
 
-class MockBackend:
+
+class MockBackend(Backend):
     """Mock backend that returns fixed responses for testing."""
+
+    def __init__(self, model_name: str = "mock-model") -> None:
+        """Initialize the mock backend.
+
+        Args:
+            model_name: Model name (defaults to "mock-model").
+        """
+        super().__init__(model_name)
 
     def generate(
         self,
         requests: list[LMRequest],
         sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
-        params = sampling_params or SamplingParams()
+        params = self._default_sampling_params(sampling_params)
         num_samples = params.num_samples
 
         mock_output = LMOutput(
