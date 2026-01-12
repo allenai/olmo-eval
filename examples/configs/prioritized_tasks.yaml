@@ -1,0 +1,28 @@
+# Config with per-task priorities
+# Tasks marked with @priority will run at different priority levels
+# Usage: olmo-eval launch -f examples/configs/prioritized_tasks.yaml --dry-run
+
+name: eval-prioritized
+models:
+  - llama3.1-8b
+  - olmo-2-7b
+
+tasks:
+  # High priority - run first
+  - mmlu@high
+  - gsm8k@high
+
+  # Normal priority
+  - hellaswag@normal
+  - arc_challenge@normal
+
+  # Low priority - run when resources available
+  - winogrande@low
+  - truthfulqa@low
+
+cluster: h100
+gpus: 1
+preemptible: true
+timeout: 24h
+
+# Note: This will create 6 experiments (2 models x 3 priority levels)

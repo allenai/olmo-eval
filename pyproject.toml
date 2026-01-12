@@ -52,8 +52,14 @@ vllm = [
 litellm = [
     "litellm~=1.80.11",
 ]
+beaker = [
+    "beaker-py>=2.5.3,<3",
+]
 all-backends = [
     "olmo-eval-internal[hf,vllm,litellm]",
+]
+all = [
+    "olmo-eval-internal[hf,vllm,litellm,beaker]",
 ]
 
 [project.scripts]

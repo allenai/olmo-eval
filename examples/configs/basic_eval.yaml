@@ -1,0 +1,16 @@
+# Basic evaluation config
+# Usage: olmo-eval launch -f examples/configs/basic_eval.yaml --dry-run
+
+name: eval-llama3-core
+models:
+  - llama3.1-8b
+tasks:
+  - mmlu
+  - gsm8k
+  - hellaswag
+  - arc_challenge
+
+cluster: h100
+gpus: 1
+priority: normal
+timeout: 24h

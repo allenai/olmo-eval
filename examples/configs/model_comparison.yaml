@@ -1,0 +1,22 @@
+# Multi-model comparison config
+# Evaluates multiple models on the same tasks
+# Usage: olmo-eval launch -f examples/configs/model_comparison.yaml --dry-run
+
+name: eval-model-comparison
+models:
+  - llama3.1-8b
+  - olmo-2-7b
+  - mistral-7b
+
+tasks:
+  - mmlu
+  - gsm8k
+  - hellaswag
+  - arc_challenge
+  - winogrande
+
+cluster: h100
+gpus: 1
+priority: normal
+preemptible: true
+timeout: 24h
