@@ -24,12 +24,6 @@ cruxeval_input
 cruxeval_output
 # Requires: Code execution infrastructure
 
-# Fill-in-the-Middle (FIM)
-fim_humaneval
-fim_mbpp
-fim_random_span
-# Requires: Special FIM prompt formatting
-
 # MultiPL-E - multilingual code (many languages)
 # multipl_e_humaneval_{lang}, multipl_e_mbpp_{lang}
 # Languages: c++, c#, d, go, java, javascript, julia, lua, perl, php, r, ruby, rust, scala, swift, typescript
@@ -92,4 +86,5 @@ mt_eval_recollection_multi_global_inst
 # - BIG-Bench Hard (27): bbh_* tasks
 # - Basic Skills (6): basic_skills_* tasks
 # - DeepMind Math (56): deepmind_math_* tasks
-# Total implemented: 95 tasks
+# - FIM Tasks (3): codex_humanevalfim_single, codex_humanevalfim_multi, codex_humanevalfim_random
+# Total implemented: 98 tasks

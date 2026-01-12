@@ -21,6 +21,7 @@ from . import bbh as _bbh  # noqa: F401, E402
 from . import code as _code  # noqa: F401, E402
 from . import core_tasks as _core_tasks  # noqa: F401, E402
 from . import deepmind_math as _deepmind_math  # noqa: F401, E402
+from . import fim as _fim  # noqa: F401, E402
 from . import gpqa as _gpqa  # noqa: F401, E402
 from . import gsm as _gsm  # noqa: F401, E402
 from . import hellaswag as _hellaswag  # noqa: F401, E402
