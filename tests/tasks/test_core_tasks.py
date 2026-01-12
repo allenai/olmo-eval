@@ -2,20 +2,14 @@
 
 import pytest
 
-from olmo_eval.core import Instance, LMOutput, RequestType
+from olmo_eval.core import Instance, RequestType
 from olmo_eval.tasks.core_tasks import (
-    BoolQ,
-    BoolQTask,
     CSQA,
-    CSQATask,
-    OpenBookQA,
-    OpenBookQATask,
     PIQA,
-    PIQATask,
+    BoolQ,
+    OpenBookQA,
     SocialIQA,
-    SocialIQATask,
     WinoGrande,
-    WinoGrandeTask,
     _boolq_config,
     _csqa_config,
     _openbookqa_config,
@@ -23,9 +17,7 @@ from olmo_eval.tasks.core_tasks import (
     _socialiqa_config,
     _winogrande_config,
 )
-from olmo_eval.tasks.base import TaskConfig
 from olmo_eval.tasks.registry import get_task, list_tasks
-
 
 # =============================================================================
 # BoolQ Tests

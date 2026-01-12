@@ -5,16 +5,13 @@ import pytest
 from olmo_eval.core import Instance, LMOutput, RequestType
 from olmo_eval.evals.constants.benchmarks import DEEPMIND_MATH_CATEGORIES
 from olmo_eval.tasks.deepmind_math import (
-    DeepMindMathTask,
     _check_sympy_equal,
     _clean_deepmind_string,
     _clean_prediction,
     _compare_math_answers,
     _make_deepmind_math_config,
 )
-from olmo_eval.tasks.base import TaskConfig
 from olmo_eval.tasks.registry import get_task, list_tasks
-
 
 # =============================================================================
 # String Cleaning Tests

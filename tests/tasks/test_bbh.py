@@ -3,14 +3,8 @@
 import pytest
 
 from olmo_eval.core import Instance, LMOutput, RequestType
-from olmo_eval.tasks.bbh import (
-    BBH_ANSWER_REGEX,
-    BBHTask,
-    _make_bbh_config,
-)
-from olmo_eval.tasks.base import TaskConfig
+from olmo_eval.tasks.bbh import BBH_ANSWER_REGEX, _make_bbh_config
 from olmo_eval.tasks.registry import get_task, list_tasks
-
 
 # =============================================================================
 # BBH Task Tests
@@ -23,15 +17,16 @@ class TestBBHTask:
     @pytest.fixture
     def bbh_boolean_task(self):
         """Create a BBH boolean_expressions task for testing."""
-        config = _make_bbh_config("boolean_expressions")
-        task = get_task("bbh_boolean_expressions")
-        return task
+        return get_task("bbh_boolean_expressions")
 
     def test_process_doc_with_answer_pattern(self, bbh_boolean_task):
         """Test processing doc with 'answer is X' pattern."""
         doc = {
             "input": "not ( ( not not True ) ) is",
-            "target": "Let's think step by step. not not True is True. not True is False. So the answer is False.",
+            "target": (
+                "Let's think step by step. not not True is True. "
+                "not True is False. So the answer is False."
+            ),
         }
 
         instance = bbh_boolean_task._process_doc(doc, index=0)

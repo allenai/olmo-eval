@@ -5,13 +5,10 @@ import pytest
 from olmo_eval.core import Instance, LMOutput, RequestType
 from olmo_eval.tasks.basic_skills import (
     BASIC_SKILLS_SUBSETS,
-    BasicSkillsTask,
     _make_basic_skills_config,
     _shuffle_and_insert,
 )
-from olmo_eval.tasks.base import TaskConfig
 from olmo_eval.tasks.registry import get_task, list_tasks
-
 
 # =============================================================================
 # Shuffle and Insert Tests
