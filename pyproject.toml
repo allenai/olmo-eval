@@ -37,10 +37,10 @@ Issues = "https://github.com/allenai/olmo-eval/issues"
 
 [project.optional-dependencies]
 dev = [
-    "pytest~=9.0.2",
-    "pytest-cov~=7.0.0",
-    "ruff~=0.14.10",
-    "ty~=0.0.10",
+    "pytest>=9.0.0",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.14.0",
+    "ty>=0.0.10",
 ]
 hf = [
     "transformers~=4.57.3",
@@ -64,11 +64,10 @@ package = true
 
 [dependency-groups]
 dev = [
-    "coverage[toml]~=7.6.0",
-    "pytest~=9.0.2",
-    "pytest-cov~=7.0.0",
-    "ruff~=0.14.10",
-    "ty~=0.0.10",
+    "pytest>=9.0.0",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.14.0",
+    "ty>=0.0.10",
 ]
 
 [tool.ruff]

@@ -2625,14 +2625,14 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.20.0" },
     { name = "olmo-eval-internal", extras = ["hf", "vllm", "litellm"], marker = "extra == 'all-backends'" },
     { name = "omegaconf", specifier = "~=2.3.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = "~=9.0.2" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = "~=7.0.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.0" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.0.0" },
     { name = "rich", specifier = "~=14.2.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = "~=0.14.10" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.0" },
     { name = "sympy", specifier = ">=1.12" },
     { name = "torch", marker = "extra == 'hf'", specifier = ">=2.0.0" },
     { name = "transformers", marker = "extra == 'hf'", specifier = "~=4.57.3" },
-    { name = "ty", marker = "extra == 'dev'", specifier = "~=0.0.10" },
+    { name = "ty", marker = "extra == 'dev'", specifier = ">=0.0.10" },
     { name = "vllm", marker = "extra == 'vllm'", specifier = "~=0.13.0" },
 ]
 
