@@ -504,7 +504,7 @@ def results(
 
     # Try to get the group
     try:
-        from beaker.exceptions import BeakerGroupNotFound
+        from beaker.exceptions import BeakerGroupNotFound  # type: ignore[import-not-found]
 
         beaker_group = launcher.beaker.group.get(group)
     except BeakerGroupNotFound:

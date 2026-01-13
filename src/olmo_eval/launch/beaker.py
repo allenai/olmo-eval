@@ -35,7 +35,7 @@ from olmo_eval.core.constants.infrastructure import (
 )
 
 if TYPE_CHECKING:
-    from beaker import Beaker, BeakerExperiment, BeakerGroup
+    from beaker import Beaker, BeakerExperiment, BeakerGroup  # type: ignore[import-not-found]
 
 log = logging.getLogger(__name__)
 
@@ -122,7 +122,9 @@ def print_experiment_config(
         header_lines.append(f"[bold blue]Preemptible:[/] {preempt_str}")
 
         header_text = Text.from_markup("\n".join(header_lines))
-        _console.print(Panel(header_text, title="[bold]Beaker Experiment[/]", border_style="blue"))
+        _console.print(
+            Panel(header_text, title="[bold]Beaker Experiment[/]", border_style="blue")
+        )
 
     # Print JSON with syntax highlighting
     json_str = json.dumps(spec_dict, indent=2)
@@ -134,7 +136,9 @@ def print_experiment_config(
 VALID_PRIORITIES = ("low", "normal", "high", "urgent")
 
 
-def parse_task_with_priority(task_spec: str, default_priority: str = "normal") -> tuple[str, str]:
+def parse_task_with_priority(
+    task_spec: str, default_priority: str = "normal"
+) -> tuple[str, str]:
     """Parse task spec with optional @priority suffix.
 
     Format: task_name[@priority] or task_name::regime[@priority]
@@ -374,7 +378,9 @@ class BeakerLauncher:
             self._beaker = Beaker.from_env(default_workspace=self._workspace)
         return self._beaker
 
-    def launch(self, config: BeakerJobConfig, dry_run: bool = False) -> BeakerExperiment | None:
+    def launch(
+        self, config: BeakerJobConfig, dry_run: bool = False
+    ) -> BeakerExperiment | None:
         """Launch an experiment on Beaker using gantry.
 
         Args:
@@ -462,7 +468,9 @@ class BeakerLauncher:
         )
 
         if workload is None:
-            log.warning("Gantry returned None workload - experiment may not have been created")
+            log.warning(
+                "Gantry returned None workload - experiment may not have been created"
+            )
             return None
 
         # Get the experiment from the workload
@@ -472,7 +480,9 @@ class BeakerLauncher:
         log.info(f"Experiment submitted: {self.experiment_url(experiment)}")
         return experiment
 
-    def _print_dry_run_config(self, config: BeakerJobConfig, clusters: list[str]) -> None:
+    def _print_dry_run_config(
+        self, config: BeakerJobConfig, clusters: list[str]
+    ) -> None:
         """Print a summary of the config for dry run mode."""
         # Build header with key metadata
         header_lines = []
@@ -508,7 +518,9 @@ class BeakerLauncher:
         header_lines.append(f"[bold blue]Preemptible:[/] {preempt_str}")
 
         header_text = Text.from_markup("\n".join(header_lines))
-        _console.print(Panel(header_text, title="[bold]Beaker Experiment[/]", border_style="blue"))
+        _console.print(
+            Panel(header_text, title="[bold]Beaker Experiment[/]", border_style="blue")
+        )
 
     def experiment_url(self, experiment: BeakerExperiment) -> str:
         """Get the Beaker URL for an experiment.
@@ -602,7 +614,10 @@ class BeakerLauncher:
                 status_counts["failed"] += 1
             elif status == BeakerWorkloadStatus.canceled:
                 status_counts["canceled"] += 1
-            elif status in (BeakerWorkloadStatus.running, BeakerWorkloadStatus.uploading_results):
+            elif status in (
+                BeakerWorkloadStatus.running,
+                BeakerWorkloadStatus.uploading_results,
+            ):
                 status_counts["running"] += 1
             else:
                 # queued, initializing, submitted
