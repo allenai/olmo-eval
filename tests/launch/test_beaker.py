@@ -18,7 +18,6 @@ class TestResolveClustors:
     def test_resolve_h100_alias(self):
         """Test resolving h100 alias."""
         clusters = resolve_clusters("h100")
-        assert "ai2/augusta" in clusters
         assert "ai2/jupiter" in clusters
         assert "ai2/ceres" in clusters
 
@@ -49,8 +48,8 @@ class TestResolveClustors:
     def test_resolve_mixed_aliases_and_names(self):
         """Test resolving mixed aliases and full names."""
         clusters = resolve_clusters(["h100", "ai2/saturn"])
-        assert "ai2/augusta" in clusters
         assert "ai2/jupiter" in clusters
+        assert "ai2/ceres" in clusters
         assert "ai2/saturn" in clusters
 
     def test_resolve_legacy_cluster_name(self):

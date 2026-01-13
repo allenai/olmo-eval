@@ -52,9 +52,7 @@ BEAKER_KNOWN_CLUSTERS: dict[str, list[str]] = {
         "ai2/saturn",
         "ai2/ceres",
     ],
-    "goog": ["ai2/augusta"],
     "h100": [
-        "ai2/augusta",
         "ai2/jupiter",
         "ai2/ceres",
     ],
@@ -65,7 +63,6 @@ BEAKER_KNOWN_CLUSTERS: dict[str, list[str]] = {
         "ai2/neptune",
     ],
     "80g": [
-        "ai2/augusta",
         "ai2/jupiter",
         "ai2/saturn",
         "ai2/ceres",
@@ -77,8 +74,6 @@ BEAKER_KNOWN_CLUSTERS: dict[str, list[str]] = {
 NEW_CLUSTER_ALIASES: dict[str, str] = {
     "ai2/allennlp-elanding-a100-40g": "ai2/allennlp",
     "ai2/allennlp-dev-a100-sea": "ai2/allennlp",
-    "ai2/augusta-batch-h100-dsm-tcpxo": "ai2/augusta",
-    "ai2/augusta-google-1": "ai2/augusta",
     "ai2/ceres-dev-h100-aus-ib": "ai2/ceres",
     "ai2/ceres-cirrascale": "ai2/ceres",
     "ai2/jupiter-batch-h100-aus-ib": "ai2/jupiter",

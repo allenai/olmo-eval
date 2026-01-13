@@ -41,6 +41,9 @@ dev = [
     "pytest-cov>=6.0.0",
     "ruff>=0.14.0",
     "ty>=0.0.10",
+    # Storage backend dependencies for integration tests
+    "boto3>=1.34.0",
+    "psycopg[binary]>=3.1.0",
 ]
 hf = [
     "transformers~=4.57.3",
@@ -54,12 +57,22 @@ litellm = [
 ]
 beaker = [
     "beaker-py>=2.5.3,<3",
+    "beaker-gantry>=3.2.0,<4",
+]
+s3 = [
+    "boto3>=1.34.0",
+]
+postgres = [
+    "psycopg[binary]>=3.1.0",
+]
+storage = [
+    "olmo-eval-internal[s3,postgres]",
 ]
 all-backends = [
     "olmo-eval-internal[hf,vllm,litellm]",
 ]
 all = [
-    "olmo-eval-internal[hf,vllm,litellm,beaker]",
+    "olmo-eval-internal[hf,vllm,litellm,beaker,storage]",
 ]
 
 [project.scripts]
@@ -74,6 +87,8 @@ dev = [
     "pytest-cov>=6.0.0",
     "ruff>=0.14.0",
     "ty>=0.0.10",
+    "boto3>=1.34.0",
+    "psycopg[binary]>=3.1.0",
 ]
 
 [tool.ruff]
@@ -97,6 +112,9 @@ docstring-code-format = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v"
+markers = [
+    "integration: marks tests requiring external services (docker, etc.)",
+]
 
 [tool.coverage.run]
 source = ["src/olmo_eval"]

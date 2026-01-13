@@ -1,7 +1,7 @@
-"""Unified Beaker launcher for olmo-eval jobs.
+"""Unified Beaker launcher for olmo-eval jobs using beaker-gantry.
 
 Provides a clean, dataclass-based API for submitting evaluation jobs
-to Beaker using beaker-py directly (no Gantry CLI dependency).
+to Beaker using beaker-gantry's Python API for reproducible experiments.
 
 Example:
     config = BeakerJobConfig(
@@ -35,7 +35,7 @@ from olmo_eval.core.constants.infrastructure import (
 )
 
 if TYPE_CHECKING:
-    from beaker import Beaker, BeakerExperiment, BeakerExperimentSpec
+    from beaker import Beaker, BeakerExperiment, BeakerGroup
 
 log = logging.getLogger(__name__)
 
@@ -337,25 +337,23 @@ def _parse_timeout(timeout: str) -> int:
 
 
 class BeakerLauncher:
-    """Launches evaluation jobs on Beaker using beaker-py directly.
+    """Launches evaluation jobs on Beaker using beaker-gantry.
 
     This class provides a clean API for submitting Beaker experiments
-    without requiring the Gantry CLI. It builds proper ExperimentSpec
-    objects using the beaker-py library.
+    using gantry's Python API for reproducible, git-tracked experiments.
 
     Example:
         launcher = BeakerLauncher()
-
-        # Preview the spec
-        spec = launcher.build_spec(config)
-        print(spec.to_json())
 
         # Launch the job
         experiment = launcher.launch(config)
         print(f"Experiment: {launcher.experiment_url(experiment)}")
 
+        # Or do a dry run
+        launcher.launch(config, dry_run=True)
+
     Attributes:
-        beaker: Lazy-initialized Beaker client.
+        beaker: Lazy-initialized Beaker client (for group operations).
     """
 
     def __init__(self, workspace: str | None = None) -> None:
@@ -364,7 +362,7 @@ class BeakerLauncher:
         Args:
             workspace: Override default workspace. Uses BEAKER_DEFAULT_WORKSPACE if None.
         """
-        self._workspace = workspace
+        self._workspace = workspace or BEAKER_DEFAULT_WORKSPACE
         self._beaker: Beaker | None = None
 
     @property
@@ -376,84 +374,8 @@ class BeakerLauncher:
             self._beaker = Beaker.from_env(default_workspace=self._workspace)
         return self._beaker
 
-    def build_spec(self, config: BeakerJobConfig) -> BeakerExperimentSpec:
-        """Build a Beaker ExperimentSpec from config.
-
-        This is useful for dry-run mode or debugging the generated spec.
-
-        Args:
-            config: Job configuration.
-
-        Returns:
-            ExperimentSpec ready for submission.
-        """
-        from beaker import (
-            BeakerExperimentSpec,
-            BeakerJobPriority,
-            BeakerRetrySpec,
-            BeakerTaskResources,
-            BeakerTaskSpec,
-        )
-
-        clusters = resolve_clusters(config.cluster)
-
-        # Build TaskSpec using fluent builder pattern
-        task_spec = BeakerTaskSpec.new(
-            name="eval",
-            beaker_image=self._resolve_image(config.beaker_image),
-            priority=BeakerJobPriority[config.priority],
-            preemptible=config.preemptible,
-            result_path=config.result_path,
-            resources=BeakerTaskResources(
-                gpu_count=config.num_gpus,
-                shared_memory=config.shared_memory,
-            ),
-        )
-
-        # Set command and cluster constraints
-        task_spec = task_spec.with_command(config.command)  # type: ignore[arg-type]
-        task_spec = task_spec.with_constraint(cluster=clusters)
-
-        # Add timeout if specified
-        if config.timeout:
-            import dataclasses
-
-            timeout_ns = _parse_timeout(config.timeout)
-            task_spec = dataclasses.replace(task_spec, timeout=timeout_ns)
-
-        # Add environment variables
-        for name, value in config.env_vars.items():
-            task_spec = task_spec.with_env_var(name=name, value=value)
-
-        # Add secrets
-        for secret in config.env_secrets:
-            task_spec = task_spec.with_env_var(name=secret.name, secret=secret.secret)
-
-        # Add Weka mounts
-        for bucket in config.weka_buckets:
-            assert bucket.mount is not None  # Set by __post_init__
-            task_spec = task_spec.with_dataset(bucket.mount, weka=bucket.bucket)
-
-        # Add NFS if requested
-        if config.nfs:
-            task_spec = task_spec.with_dataset(
-                "/net/nfs.cirrascale", host_path="/net/nfs.cirrascale"
-            )
-
-        # Build ExperimentSpec
-        retry_spec = None
-        if config.retries:
-            retry_spec = BeakerRetrySpec(allowed_task_retries=config.retries)
-
-        return BeakerExperimentSpec(
-            budget=config.budget,
-            description=config.description,
-            tasks=[task_spec],
-            retry=retry_spec,
-        )
-
     def launch(self, config: BeakerJobConfig, dry_run: bool = False) -> BeakerExperiment | None:
-        """Launch an experiment on Beaker.
+        """Launch an experiment on Beaker using gantry.
 
         Args:
             config: Job configuration.
@@ -462,19 +384,131 @@ class BeakerLauncher:
         Returns:
             Experiment object if launched, None if dry_run.
         """
-        spec = self.build_spec(config)
+        from gantry.api import launch_experiment
 
+        clusters = resolve_clusters(config.cluster)
+
+        # Build weka mounts as tuples: (bucket, mount_path)
+        weka_mounts: list[tuple[str, str]] = []
+        for bucket in config.weka_buckets:
+            assert bucket.mount is not None  # Set by __post_init__
+            weka_mounts.append((bucket.bucket, bucket.mount))
+
+        # Build env secrets as tuples: (env_var_name, secret_name)
+        env_secrets: list[tuple[str, str]] = [
+            (secret.name, secret.secret) for secret in config.env_secrets
+        ]
+
+        # Build env vars as tuples: (name, value)
+        env_vars: list[tuple[str, str]] = list(config.env_vars.items())
+
+        # Build mounts for NFS if requested
+        mounts: list[tuple[str, str]] | None = None
+        if config.nfs:
+            mounts = [("/net/nfs.cirrascale", "/net/nfs.cirrascale")]
+
+        # If doing a dry run, print config summary and return
         if dry_run:
-            print_experiment_config(spec.to_json(), name=config.name)
+            self._print_dry_run_config(config, clusters)
+            # Still call launch_experiment with dry_run=True to show full spec
+            launch_experiment(
+                args=config.command,
+                name=config.name,
+                description=config.description,
+                workspace=config.workspace,
+                clusters=clusters,
+                gpus=config.num_gpus,
+                shared_memory=config.shared_memory,
+                priority=config.priority,
+                preemptible=config.preemptible,
+                task_timeout=config.timeout,
+                retries=config.retries,
+                budget=config.budget,
+                beaker_image=config.beaker_image,
+                weka=weka_mounts if weka_mounts else None,
+                env_vars=env_vars if env_vars else None,
+                env_secrets=env_secrets if env_secrets else None,
+                mounts=mounts,
+                results=config.result_path,
+                no_python=True,  # Use pre-built image, skip Python setup
+                dry_run=True,
+                yes=True,  # Skip confirmation prompts
+            )
             return None
 
-        experiment = self.beaker.experiment.create(
-            config.name,
-            spec,
+        # Launch the experiment
+        workload = launch_experiment(
+            args=config.command,
+            name=config.name,
+            description=config.description,
             workspace=config.workspace,
+            clusters=clusters,
+            gpus=config.num_gpus,
+            shared_memory=config.shared_memory,
+            priority=config.priority,
+            preemptible=config.preemptible,
+            task_timeout=config.timeout,
+            retries=config.retries,
+            budget=config.budget,
+            beaker_image=config.beaker_image,
+            weka=weka_mounts if weka_mounts else None,
+            env_vars=env_vars if env_vars else None,
+            env_secrets=env_secrets if env_secrets else None,
+            mounts=mounts,
+            results=config.result_path,
+            no_python=True,  # Use pre-built image, skip Python setup
+            timeout=0,  # Don't wait for completion
+            yes=True,  # Skip confirmation prompts
         )
+
+        if workload is None:
+            log.warning("Gantry returned None workload - experiment may not have been created")
+            return None
+
+        # Get the experiment from the workload
+        # The workload contains an embedded experiment object, but we need the full one
+        # from the Beaker client for URL generation
+        experiment = self.beaker.experiment.get(workload.experiment.id)
         log.info(f"Experiment submitted: {self.experiment_url(experiment)}")
         return experiment
+
+    def _print_dry_run_config(self, config: BeakerJobConfig, clusters: list[str]) -> None:
+        """Print a summary of the config for dry run mode."""
+        # Build header with key metadata
+        header_lines = []
+        header_lines.append(f"[bold cyan]Experiment:[/] {config.name}")
+
+        # Extract model and tasks from command
+        model = None
+        task_names = []
+        for i, arg in enumerate(config.command):
+            if arg == "-m" and i + 1 < len(config.command):
+                model = config.command[i + 1]
+            elif arg == "-t" and i + 1 < len(config.command):
+                task_names.append(config.command[i + 1])
+
+        if model:
+            header_lines.append(f"[bold blue]Model:[/] {model}")
+        if task_names:
+            header_lines.append(f"[bold blue]Tasks:[/] {', '.join(task_names)}")
+
+        # Resource info
+        priority = config.priority
+        priority_color = {
+            "low": "dim",
+            "normal": "white",
+            "high": "yellow",
+            "urgent": "red bold",
+        }.get(priority, "white")
+        header_lines.append(f"[bold blue]Priority:[/] [{priority_color}]{priority}[/]")
+        header_lines.append(f"[bold blue]GPUs:[/] {config.num_gpus}")
+        header_lines.append(f"[bold blue]Clusters:[/] {', '.join(clusters)}")
+
+        preempt_str = "[green]yes[/]" if config.preemptible else "[red]no[/]"
+        header_lines.append(f"[bold blue]Preemptible:[/] {preempt_str}")
+
+        header_text = Text.from_markup("\n".join(header_lines))
+        _console.print(Panel(header_text, title="[bold]Beaker Experiment[/]", border_style="blue"))
 
     def experiment_url(self, experiment: BeakerExperiment) -> str:
         """Get the Beaker URL for an experiment.
@@ -487,20 +521,116 @@ class BeakerLauncher:
         """
         return self.beaker.experiment.url(experiment)
 
-    def _resolve_image(self, image: str) -> str:
-        """Resolve image name to full Beaker image ID.
+    # -------------------------------------------------------------------------
+    # Group Management
+    # -------------------------------------------------------------------------
+
+    def get_or_create_group(
+        self,
+        name: str,
+        workspace: str | None = None,
+        description: str | None = None,
+    ) -> BeakerGroup:
+        """Get existing group or create a new one.
 
         Args:
-            image: Image name or ID.
+            name: Group name.
+            workspace: Workspace for the group. Uses default if None.
+            description: Optional description for new groups.
 
         Returns:
-            Resolved image ID.
+            The existing or newly created group.
         """
+        from beaker.exceptions import BeakerGroupNotFound
+
         try:
-            return self.beaker.image.get(image).id
-        except Exception:
-            # Try with ai2/ prefix
-            try:
-                return self.beaker.image.get(f"ai2/{image}").id
-            except Exception:
-                return image  # Return as-is, let Beaker handle it
+            return self.beaker.group.get(name)
+        except BeakerGroupNotFound:
+            return self.beaker.group.create(
+                name=name,
+                workspace=workspace or self._workspace,
+                description=description,
+            )
+
+    def add_experiments_to_group(
+        self,
+        group: str | BeakerGroup,
+        experiment_ids: list[str],
+    ) -> BeakerGroup:
+        """Add experiments to a group.
+
+        Args:
+            group: Group name or object.
+            experiment_ids: List of experiment IDs to add.
+
+        Returns:
+            Updated group object.
+        """
+        return self.beaker.group.update(
+            group,
+            add_experiment_ids=experiment_ids,
+        )
+
+    def get_group_status(self, group: str | BeakerGroup) -> dict[str, int]:
+        """Get status summary for all experiments in a group.
+
+        Args:
+            group: Group name or object.
+
+        Returns:
+            Dictionary mapping status to count.
+        """
+        from beaker import BeakerWorkloadStatus
+
+        experiments = list(self.beaker.group.experiments(group))
+        status_counts = {
+            "succeeded": 0,
+            "failed": 0,
+            "running": 0,
+            "pending": 0,
+            "canceled": 0,
+        }
+
+        for exp in experiments:
+            # Get the workload status
+            workload = self.beaker.workload.get(exp.id)
+            status = workload.status
+
+            if status == BeakerWorkloadStatus.succeeded:
+                status_counts["succeeded"] += 1
+            elif status == BeakerWorkloadStatus.failed:
+                status_counts["failed"] += 1
+            elif status == BeakerWorkloadStatus.canceled:
+                status_counts["canceled"] += 1
+            elif status in (BeakerWorkloadStatus.running, BeakerWorkloadStatus.uploading_results):
+                status_counts["running"] += 1
+            else:
+                # queued, initializing, submitted
+                status_counts["pending"] += 1
+
+        return status_counts
+
+    def get_group_experiments(
+        self,
+        group: str | BeakerGroup,
+    ) -> list[BeakerExperiment]:
+        """Get all experiments in a group.
+
+        Args:
+            group: Group name or object.
+
+        Returns:
+            List of experiment objects.
+        """
+        return list(self.beaker.group.experiments(group))
+
+    def export_group_metrics(self, group: str | BeakerGroup) -> str:
+        """Export group metrics as CSV.
+
+        Args:
+            group: Group name or object.
+
+        Returns:
+            CSV string with experiment metrics.
+        """
+        return self.beaker.group.export_metrics(group)

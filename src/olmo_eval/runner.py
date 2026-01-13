@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
 from rich.table import Table
@@ -16,6 +17,9 @@ from olmo_eval.core import Response, expand_tasks, get_model_config
 from olmo_eval.evals.suites import suite_exists
 from olmo_eval.tasks import get_task, list_tasks
 from olmo_eval.tasks.registry import list_regimes
+
+if TYPE_CHECKING:
+    from olmo_eval.storage import StorageBackend
 
 console = Console()
 
@@ -36,6 +40,7 @@ class EvalRunner:
     num_shots_override: int | None = None
     limit_override: int | None = None
     backend_override: str | None = None
+    storage: StorageBackend | None = None
 
     def validate(self) -> None:
         """Validate all inputs before running.
@@ -198,16 +203,26 @@ class EvalRunner:
         }
 
     def _save_results(self, results: dict[str, Any]) -> None:
-        """Save results to output directory."""
-        output_path = Path(self.output_dir)
-        output_path.mkdir(parents=True, exist_ok=True)
+        """Save results using storage backend or legacy file output."""
+        if self.storage is not None:
+            # Use the storage backend
+            from olmo_eval.storage.file import convert_runner_results
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        model_slug = self.model_name.replace("/", "_").replace(".", "-")
-        filename = f"{model_slug}_{timestamp}.json"
+            run_id = str(uuid.uuid4())
+            eval_result = convert_runner_results(results, run_id)
+            self.storage.save(eval_result)
+            console.print(f"\n[green]Results saved (run_id: {run_id})[/green]")
+        else:
+            # Legacy behavior: save to JSON file directly
+            output_path = Path(self.output_dir)
+            output_path.mkdir(parents=True, exist_ok=True)
 
-        filepath = output_path / filename
-        with open(filepath, "w") as f:
-            json.dump(results, f, indent=2)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            model_slug = self.model_name.replace("/", "_").replace(".", "-")
+            filename = f"{model_slug}_{timestamp}.json"
 
-        console.print(f"\n[green]Results saved to {filepath}[/green]")
+            filepath = output_path / filename
+            with open(filepath, "w") as f:
+                json.dump(results, f, indent=2)
+
+            console.print(f"\n[green]Results saved to {filepath}[/green]")

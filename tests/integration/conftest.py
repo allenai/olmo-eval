@@ -179,3 +179,132 @@ def small_test_prompts() -> list[str]:
         "2 + 2 equals",
         "The color of the sky is",
     ]
+
+
+# Storage backend integration test fixtures
+STORAGE_DOCKER_COMPOSE_FILE = Path(__file__).parent / "docker-compose.yml"
+
+
+@pytest.fixture(scope="session")
+def storage_docker_services():
+    """Start docker compose services for storage backend tests.
+
+    This fixture starts postgres and localstack containers, waits for them
+    to be healthy, and tears them down after all tests complete.
+    """
+    # Start services
+    result = subprocess.run(
+        ["docker", "compose", "-f", str(STORAGE_DOCKER_COMPOSE_FILE), "up", "-d", "--wait"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"Docker compose up failed: {result.stderr}")
+        pytest.skip("Could not start storage docker services")
+
+    # Give services a moment to fully initialize
+    time.sleep(2)
+
+    yield
+
+    # Tear down services
+    subprocess.run(
+        ["docker", "compose", "-f", str(STORAGE_DOCKER_COMPOSE_FILE), "down", "-v"],
+        capture_output=True,
+    )
+
+
+@pytest.fixture
+def postgres_backend(storage_docker_services):
+    """Provide a PostgresBackend connected to the test database.
+
+    Creates tables before yielding, drops them after.
+    """
+    pytest.importorskip("psycopg")
+
+    from olmo_eval.storage.postgres import PostgresBackend
+
+    backend = PostgresBackend(
+        host="localhost",
+        port=5433,
+        database="olmo_eval_test",
+        user="test",
+        password="test",
+    )
+
+    backend.initialize()
+    yield backend
+    backend.cleanup()
+
+
+@pytest.fixture
+def s3_backend(storage_docker_services):
+    """Provide an S3Backend connected to LocalStack.
+
+    Creates bucket before yielding, cleans up after.
+    """
+    pytest.importorskip("boto3")
+
+    from olmo_eval.storage.s3 import S3Backend
+
+    backend = S3Backend(
+        bucket="test-eval-bucket",
+        prefix="results/",
+        endpoint_url="http://localhost:4566",
+        region="us-east-1",
+    )
+
+    backend.initialize()
+    yield backend
+    backend.cleanup()
+
+
+@pytest.fixture
+def sample_eval_result():
+    """Create a sample EvalResult for storage testing."""
+    from datetime import datetime
+
+    from olmo_eval.storage import EvalResult, TaskResult
+
+    return EvalResult(
+        run_id="test-integration-001",
+        model_name="llama3.1-8b",
+        backend_name="vllm",
+        timestamp=datetime(2024, 1, 15, 10, 30, 0),
+        tasks=[
+            TaskResult(task_name="mmlu", metrics={"accuracy": 0.65}, num_samples=100),
+            TaskResult(task_name="gsm8k", metrics={"exact_match": 0.58}, num_samples=50),
+        ],
+        config={"batch_size": 32},
+        metadata={"test": True},
+    )
+
+
+@pytest.fixture
+def multiple_eval_results():
+    """Create multiple EvalResults for query testing."""
+    from datetime import datetime
+
+    from olmo_eval.storage import EvalResult, TaskResult
+
+    results = []
+    models = ["llama3.1-8b", "llama3.1-70b", "olmo-2-7b"]
+    tasks_data = [
+        ("mmlu", {"accuracy": 0.65}),
+        ("gsm8k", {"exact_match": 0.58}),
+        ("arc_challenge", {"accuracy": 0.52}),
+    ]
+
+    for i, model in enumerate(models):
+        for j, (task_name, metrics) in enumerate(tasks_data):
+            results.append(
+                EvalResult(
+                    run_id=f"run-{i}-{j}",
+                    model_name=model,
+                    backend_name="vllm",
+                    timestamp=datetime(2024, 1, 15, 10 + i, j, 0),
+                    tasks=[TaskResult(task_name=task_name, metrics=metrics)],
+                )
+            )
+
+    return results

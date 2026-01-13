@@ -161,6 +161,32 @@ olmo-eval launch -n "eval" -m llama3.1-8b -t "mmlu::olmes@high"
 olmo-eval launch -n "eval" -m llama3.1-8b -t mmlu -t gsm8k --priority high
 ```
 
+### Experiment Groups
+
+Organize multiple experiments into a Beaker group for result aggregation:
+
+```bash
+# Launch with grouping
+olmo-eval launch -n "benchmark-v1" --group "benchmark-2024" \
+    -m llama3.1-8b -m olmo-2-7b \
+    -t mmlu -t gsm8k -t hellaswag
+
+# Creates experiments and adds them to "benchmark-2024" group
+# Output:
+#   Launched: benchmark-v1-llama3.1-8b -> https://beaker.org/ex/...
+#   Launched: benchmark-v1-olmo-2-7b -> https://beaker.org/ex/...
+#   Group: Added 2 experiment(s) to 'benchmark-2024'
+
+# Check results
+olmo-eval results --group "benchmark-2024"
+
+# Wait for completion and export as CSV
+olmo-eval results --group "benchmark-2024" --wait --format csv > results.csv
+
+# Export as JSON
+olmo-eval results --group "benchmark-2024" --format json
+```
+
 ### CLI Options
 
 | Option | Short | Default | Description |
@@ -175,6 +201,7 @@ olmo-eval launch -n "eval" -m llama3.1-8b -t mmlu -t gsm8k --priority high
 | `--preemptible` | | `true` | Allow preemption |
 | `--timeout` | | `24h` | Job timeout (e.g., `24h`, `30m`) |
 | `--retries` | | none | Number of retries on failure |
+| `--group` | `-g` | none | Add experiments to this Beaker group |
 | `--workspace` | | `ai2/oe-data` | Beaker workspace |
 | `--budget` | | `ai2/oe-base` | Beaker budget |
 | `--dry-run` | | `false` | Print spec without launching |
@@ -309,10 +336,10 @@ See `examples/configs/` for more configuration examples.
 
 | Alias | Clusters |
 |-------|----------|
-| `h100` | ai2/augusta, ai2/jupiter, ai2/ceres |
+| `h100` | ai2/jupiter, ai2/ceres |
 | `a100` | ai2/saturn |
 | `aus` | ai2/jupiter, ai2/neptune, ai2/saturn, ai2/ceres |
-| `80g` | ai2/augusta, ai2/jupiter, ai2/saturn, ai2/ceres |
+| `80g` | ai2/jupiter, ai2/saturn, ai2/ceres |
 
 ### Programmatic API
 

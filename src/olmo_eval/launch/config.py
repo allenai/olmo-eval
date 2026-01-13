@@ -16,6 +16,20 @@ Example config (eval_config.yaml):
     gpus: 1
     priority: normal
 
+Example with per-model resources:
+    name: eval-mixed-sizes
+    models:
+      - name: llama3.1-8b
+        gpus: 1
+      - name: llama3.1-70b
+        gpus: 4
+        timeout: 48h
+        priority: high
+    tasks:
+      - mmlu
+      - gsm8k
+    cluster: h100
+
 Example usage:
     config = LaunchConfig.from_yaml("eval_config.yaml")
     # Or with CLI overrides:
@@ -32,21 +46,97 @@ from omegaconf import MISSING, OmegaConf
 
 
 @dataclass
+class ModelConfig:
+    """Configuration for a single model with optional resource overrides.
+
+    This allows specifying per-model resources for mixed-size evaluations.
+
+    Attributes:
+        name: Model name or HuggingFace path (required).
+        gpus: Number of GPUs for this model (overrides default).
+        cluster: Cluster for this model (overrides default).
+        priority: Priority for this model (overrides default).
+        preemptible: Whether this model's jobs can be preempted.
+        timeout: Timeout for this model's jobs.
+        shared_memory: Shared memory size (e.g., "10GiB").
+
+    Example:
+        models:
+          - name: llama3.1-8b
+            gpus: 1
+          - name: llama3.1-70b
+            gpus: 4
+            timeout: 48h
+            priority: high
+    """
+
+    name: str = MISSING
+    gpus: int | None = None
+    cluster: str | None = None
+    priority: str | None = None
+    preemptible: bool | None = None
+    timeout: str | None = None
+    shared_memory: str | None = None
+
+
+def parse_model_config(model: str | dict[str, Any] | ModelConfig) -> ModelConfig:
+    """Parse a model specification into ModelConfig.
+
+    Handles both simple string format and detailed dict/ModelConfig format.
+
+    Args:
+        model: Model name string, dict with model config, or ModelConfig.
+
+    Returns:
+        ModelConfig instance.
+
+    Examples:
+        parse_model_config("llama3.1-8b")
+        parse_model_config({"name": "llama3.1-70b", "gpus": 4})
+    """
+    if isinstance(model, ModelConfig):
+        return model
+    if isinstance(model, str):
+        return ModelConfig(name=model)
+    if isinstance(model, dict):
+        schema = OmegaConf.structured(ModelConfig)
+        merged = OmegaConf.merge(schema, OmegaConf.create(model))
+        return OmegaConf.to_object(merged)  # type: ignore[return-value]
+    raise TypeError(f"Invalid model specification: {type(model)}")
+
+
+@dataclass
 class LaunchConfig:
     """Configuration for launching Beaker evaluation jobs.
 
     This dataclass can be loaded from YAML files using OmegaConf,
     allowing for complex configuration composition and overrides.
 
+    Models can be specified as simple strings or with per-model resource overrides:
+
+        # Simple format
+        models:
+          - llama3.1-8b
+          - olmo-2-7b
+
+        # Per-model resources
+        models:
+          - name: llama3.1-8b
+            gpus: 1
+          - name: llama3.1-70b
+            gpus: 4
+            timeout: 48h
+            priority: high
+
     Attributes:
         name: Experiment name (required).
-        models: List of model names or HuggingFace paths (required).
+        models: List of model names/paths or ModelConfig dicts (required).
         tasks: List of task specs, optionally with @priority suffix (required).
-        cluster: Cluster alias or full name.
-        gpus: Number of GPUs per job.
-        priority: Default job priority (can be overridden per-task with @priority).
-        preemptible: Whether jobs can be preempted.
-        timeout: Job timeout (e.g., "24h", "48h").
+        cluster: Default cluster alias or full name.
+        gpus: Default number of GPUs per job.
+        priority: Default job priority (can be overridden per-task or per-model).
+        preemptible: Default preemption setting.
+        timeout: Default job timeout (e.g., "24h", "48h").
         retries: Number of retries on failure.
         workspace: Beaker workspace.
         budget: Beaker budget.
@@ -56,14 +146,14 @@ class LaunchConfig:
 
     # Required fields
     name: str = MISSING
-    models: list[str] = MISSING
+    models: list[Any] = MISSING  # list[str] or list[dict] for ModelConfig
     tasks: list[str] = MISSING
 
-    # Cluster and resources
+    # Default cluster and resources (can be overridden per-model)
     cluster: str = "h100"
     gpus: int = 1
 
-    # Job settings
+    # Default job settings (can be overridden per-model)
     priority: str = "normal"
     preemptible: bool = True
     timeout: str = "24h"
@@ -74,6 +164,35 @@ class LaunchConfig:
     budget: str | None = None
     beaker_image: str | None = None
     description: str | None = None
+
+    def get_model_configs(self) -> list[ModelConfig]:
+        """Get parsed ModelConfig objects for all models.
+
+        Returns a list of ModelConfig objects, parsing simple strings
+        into ModelConfig with just the name set.
+
+        Returns:
+            List of ModelConfig objects.
+        """
+        return [parse_model_config(m) for m in self.models]
+
+    def get_model_resources(self, model: ModelConfig) -> dict[str, Any]:
+        """Get effective resources for a model, merging defaults with overrides.
+
+        Args:
+            model: ModelConfig with optional resource overrides.
+
+        Returns:
+            Dict with effective resource values (gpus, cluster, priority, etc.).
+        """
+        return {
+            "gpus": model.gpus if model.gpus is not None else self.gpus,
+            "cluster": model.cluster if model.cluster is not None else self.cluster,
+            "priority": model.priority if model.priority is not None else self.priority,
+            "preemptible": model.preemptible if model.preemptible is not None else self.preemptible,
+            "timeout": model.timeout if model.timeout is not None else self.timeout,
+            "shared_memory": model.shared_memory,  # None uses BeakerJobConfig default
+        }
 
     @classmethod
     def from_yaml(

@@ -28,6 +28,17 @@ def main() -> None:
 @click.option("--num-shots", type=int, help="Override num_fewshot for all tasks")
 @click.option("--limit", type=int, help="Override instance limit for all tasks")
 @click.option("--backend", type=click.Choice(["hf", "vllm", "litellm"]), help="Override backend")
+@click.option(
+    "--storage-backend",
+    type=click.Choice(["file", "s3", "postgres"]),
+    default=None,
+    help="Storage backend for results (default: legacy file output)",
+)
+@click.option(
+    "--storage-config",
+    type=click.Path(exists=True),
+    help="YAML config file for storage backend",
+)
 @click.option("--dry-run", is_flag=True, help="Print config and exit without running")
 def run(
     model: str,
@@ -37,10 +48,44 @@ def run(
     num_shots: int | None,
     limit: int | None,
     backend: str | None,
+    storage_backend: str | None,
+    storage_config: str | None,
     dry_run: bool,
 ) -> None:
     """Run evaluation on specified tasks."""
     from olmo_eval.runner import EvalRunner, ValidationError
+
+    # Set up storage backend if specified
+    storage = None
+    if storage_backend:
+        from olmo_eval.storage import get_backend
+
+        # Load storage config if provided
+        storage_kwargs: dict = {}
+        if storage_config:
+            from omegaconf import DictConfig, OmegaConf
+
+            cfg = OmegaConf.load(storage_config)
+            # Get backend-specific config section
+            if isinstance(cfg, DictConfig):
+                backend_cfg = cfg.get(storage_backend, {})
+                storage_kwargs = OmegaConf.to_container(backend_cfg, resolve=True) or {}  # type: ignore
+            else:
+                console.print("[red]Error:[/red] Storage config must be a YAML dict, not a list")
+                raise SystemExit(1)
+
+        # Add default output_dir for file backend
+        if storage_backend == "file" and "output_dir" not in storage_kwargs:
+            storage_kwargs["output_dir"] = output_dir
+
+        try:
+            storage = get_backend(storage_backend, **storage_kwargs)
+        except ImportError as e:
+            console.print(f"[red]Storage backend error:[/red] {e}")
+            raise SystemExit(1) from None
+        except Exception as e:
+            console.print(f"[red]Failed to initialize storage backend:[/red] {e}")
+            raise SystemExit(1) from None
 
     runner = EvalRunner(
         model_name=model,
@@ -49,6 +94,7 @@ def run(
         num_shots_override=num_shots,
         limit_override=limit,
         backend_override=backend,
+        storage=storage,
     )
 
     # Validate inputs before running (applies to both dry-run and actual runs)
@@ -152,6 +198,7 @@ def suites(filter: str) -> None:
 @click.option("--retries", type=int, help="Number of retries on failure")
 @click.option("--workspace", help="Beaker workspace")
 @click.option("--budget", help="Beaker budget")
+@click.option("--group", "-g", help="Add experiments to this Beaker group (creates if needed)")
 @click.option("--dry-run", is_flag=True, help="Print spec without launching")
 def launch(
     config: str | None,
@@ -166,6 +213,7 @@ def launch(
     retries: int | None,
     workspace: str | None,
     budget: str | None,
+    group: str | None,
     dry_run: bool,
 ) -> None:
     """Launch an evaluation job on Beaker.
@@ -174,6 +222,7 @@ def launch(
 
     Multiple models and/or tasks with different priorities will create separate experiments.
     Use --config/-f to load settings from a YAML file; CLI arguments override config values.
+    Use --group/-g to organize experiments into a Beaker group for result aggregation.
 
     Examples:
 
@@ -194,6 +243,9 @@ def launch(
 
         # Config file with CLI overrides
         olmo-eval launch -f eval_config.yaml --gpus 4 --priority high
+
+        # With grouping for result aggregation
+        olmo-eval launch -n "benchmark" --group "benchmark-2024" -m llama3.1-8b -t mmlu -t gsm8k
     """
     from collections import defaultdict
 
@@ -202,6 +254,8 @@ def launch(
             BeakerJobConfig,
             BeakerLauncher,
             LaunchConfig,
+            ModelConfig,
+            parse_model_config,
             parse_task_with_priority,
         )
     except ImportError:
@@ -216,7 +270,17 @@ def launch(
         BEAKER_DEFAULT_WORKSPACE,
     )
 
+    # Track which CLI args were explicitly set (vs using defaults)
+    cli_cluster = cluster
+    cli_gpus = gpus
+    cli_priority = priority
+    cli_preemptible = preemptible
+    cli_timeout = timeout
+
     # Load config from file if provided
+    cfg: LaunchConfig | None = None
+    model_configs: list[ModelConfig] = []
+
     if config:
         try:
             cfg = LaunchConfig.from_yaml(config)
@@ -229,16 +293,27 @@ def launch(
 
         # Use config values as defaults, CLI args override
         name = name or cfg.name
-        model = model if model else tuple(cfg.models)
         task = task if task else tuple(cfg.tasks)
+        retries = retries if retries is not None else cfg.retries
+        workspace = workspace or cfg.workspace
+        budget = budget or cfg.budget
+
+        # Get model configs from file (with per-model resource overrides)
+        if not model:
+            model_configs = cfg.get_model_configs()
+        else:
+            # CLI models override config file models
+            model_configs = [parse_model_config(m) for m in model]
+
+        # Set defaults from config (will be overridden by per-model or CLI)
         cluster = cluster if cluster is not None else cfg.cluster
         gpus = gpus if gpus is not None else cfg.gpus
         priority = priority if priority is not None else cfg.priority
         preemptible = preemptible if preemptible is not None else cfg.preemptible
         timeout = timeout if timeout is not None else cfg.timeout
-        retries = retries if retries is not None else cfg.retries
-        workspace = workspace or cfg.workspace
-        budget = budget or cfg.budget
+    else:
+        # No config file - use CLI models
+        model_configs = [parse_model_config(m) for m in model] if model else []
 
     # Apply defaults for values not set by config or CLI
     cluster = cluster or "h100"
@@ -251,7 +326,7 @@ def launch(
     if not name:
         console.print("[red]Error:[/red] --name/-n is required (or set 'name' in config)")
         raise SystemExit(1)
-    if not model:
+    if not model_configs:
         console.print("[red]Error:[/red] --model/-m is required (or set 'models' in config)")
         raise SystemExit(1)
     if not task:
@@ -269,18 +344,60 @@ def launch(
         raise SystemExit(1) from None
 
     launcher = BeakerLauncher(workspace=workspace or BEAKER_DEFAULT_WORKSPACE)
-    multiple_models = len(model) > 1
+    multiple_models = len(model_configs) > 1
     multiple_priorities = len(tasks_by_priority) > 1
 
     if dry_run:
         console.print("[yellow]Dry run mode - not submitting[/yellow]")
 
+    # Track launched experiments for grouping
+    launched_experiments: list[str] = []
+
     # Launch one experiment per model and priority level
-    for model_name in model:
+    for model_cfg in model_configs:
+        model_name = model_cfg.name
+
+        # Get effective resources for this model (per-model overrides merged with defaults)
+        if cfg is not None:
+            model_resources = cfg.get_model_resources(model_cfg)
+        else:
+            # No config file - use ModelConfig values or defaults
+            model_resources = {
+                "gpus": model_cfg.gpus if model_cfg.gpus is not None else gpus,
+                "cluster": model_cfg.cluster if model_cfg.cluster is not None else cluster,
+                "priority": model_cfg.priority if model_cfg.priority is not None else priority,
+                "preemptible": (
+                    model_cfg.preemptible if model_cfg.preemptible is not None else preemptible
+                ),
+                "timeout": model_cfg.timeout if model_cfg.timeout is not None else timeout,
+                "shared_memory": model_cfg.shared_memory,
+            }
+
+        # CLI args always override per-model config
+        # Cast values from model_resources dict to expected types
+        effective_cluster: str = (
+            cli_cluster if cli_cluster is not None else str(model_resources["cluster"])
+        )
+        res_gpus = model_resources["gpus"]
+        effective_gpus: int = (
+            cli_gpus if cli_gpus is not None else (int(res_gpus) if res_gpus else 1)
+        )
+        effective_preemptible: bool = (
+            cli_preemptible if cli_preemptible is not None else bool(model_resources["preemptible"])
+        )
+        effective_timeout: str = (
+            cli_timeout if cli_timeout is not None else str(model_resources["timeout"])
+        )
+        res_shared_memory = model_resources.get("shared_memory")
+        effective_shared_memory: str = str(res_shared_memory) if res_shared_memory else "10GiB"
+
         # Get short model name for experiment naming (last part after /)
         short_model = model_name.split("/")[-1].lower()
 
         for task_priority, task_list in tasks_by_priority.items():
+            # CLI priority override applies to task priorities too
+            effective_priority = cli_priority if cli_priority is not None else task_priority
+
             # Build experiment name with model and/or priority suffix as needed
             exp_name = name
             if multiple_models:
@@ -296,11 +413,12 @@ def launch(
             job_config = BeakerJobConfig(
                 name=exp_name,
                 command=command,
-                cluster=cluster,
-                num_gpus=gpus,
-                priority=task_priority,
-                preemptible=preemptible,
-                timeout=timeout,
+                cluster=effective_cluster,
+                num_gpus=effective_gpus,
+                priority=effective_priority,
+                preemptible=effective_preemptible,
+                timeout=effective_timeout,
+                shared_memory=effective_shared_memory,
                 retries=retries,
                 workspace=workspace or BEAKER_DEFAULT_WORKSPACE,
                 budget=budget or BEAKER_DEFAULT_BUDGET,
@@ -314,6 +432,179 @@ def launch(
                 experiment = launcher.launch(job_config)
                 if experiment:
                     console.print(f"[green]Launched:[/green] {launcher.experiment_url(experiment)}")
+                    launched_experiments.append(experiment.id)
+
+    # Add experiments to group if specified
+    if group and launched_experiments and not dry_run:
+        try:
+            beaker_group = launcher.get_or_create_group(
+                name=group,
+                workspace=workspace or BEAKER_DEFAULT_WORKSPACE,
+            )
+            launcher.add_experiments_to_group(beaker_group, launched_experiments)
+            console.print(
+                f"[blue]Group:[/blue] Added {len(launched_experiments)} experiment(s) to '{group}'"
+            )
+        except Exception as e:
+            console.print(f"[yellow]Warning:[/yellow] Failed to add experiments to group: {e}")
+
+
+@main.command()
+@click.option("--group", "-g", required=True, help="Beaker group name")
+@click.option(
+    "--format",
+    "-f",
+    "output_format",
+    type=click.Choice(["table", "csv", "json"]),
+    default="table",
+    help="Output format",
+)
+@click.option("--wait", is_flag=True, help="Wait for all experiments to complete")
+@click.option(
+    "--poll-interval",
+    type=int,
+    default=30,
+    help="Seconds between status checks when waiting",
+)
+def results(
+    group: str,
+    output_format: str,
+    wait: bool,
+    poll_interval: int,
+) -> None:
+    """Show results from a Beaker group.
+
+    Displays status and metrics for all experiments in a Beaker group.
+    Use --wait to block until all experiments complete.
+
+    Examples:
+
+        # Show status table
+        olmo-eval results --group "benchmark-2024"
+
+        # Export as CSV
+        olmo-eval results --group "benchmark-2024" --format csv > results.csv
+
+        # Wait for completion then show results
+        olmo-eval results --group "benchmark-2024" --wait
+    """
+    import json as json_module
+    import time
+
+    try:
+        from olmo_eval.launch import BeakerLauncher
+    except ImportError:
+        console.print(
+            "[red]beaker-py is not installed.[/red]\n"
+            "Install with: pip install 'olmo-eval-internal[beaker]'"
+        )
+        raise SystemExit(1) from None
+
+    launcher = BeakerLauncher()
+
+    # Try to get the group
+    try:
+        from beaker.exceptions import BeakerGroupNotFound
+
+        beaker_group = launcher.beaker.group.get(group)
+    except BeakerGroupNotFound:
+        console.print(f"[red]Error:[/red] Group '{group}' not found")
+        raise SystemExit(1) from None
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise SystemExit(1) from None
+
+    # Wait for completion if requested
+    if wait:
+        console.print(f"[dim]Waiting for experiments in '{group}' to complete...[/dim]")
+        while True:
+            status = launcher.get_group_status(beaker_group)
+            running = status.get("running", 0) + status.get("pending", 0)
+
+            if running == 0:
+                break
+
+            console.print(
+                f"[dim]  {status.get('succeeded', 0)} succeeded, "
+                f"{status.get('running', 0)} running, "
+                f"{status.get('pending', 0)} pending, "
+                f"{status.get('failed', 0)} failed[/dim]"
+            )
+            time.sleep(poll_interval)
+
+        console.print("[green]All experiments completed.[/green]\n")
+
+    # Get status summary
+    status = launcher.get_group_status(beaker_group)
+    experiments = launcher.get_group_experiments(beaker_group)
+
+    if output_format == "csv":
+        # Export raw metrics CSV from Beaker
+        try:
+            csv_data = launcher.export_group_metrics(beaker_group)
+            click.echo(csv_data)
+        except Exception as e:
+            console.print(f"[yellow]Warning:[/yellow] Could not export metrics: {e}")
+            # Fall back to basic experiment info
+            click.echo("experiment_id,name,status")
+            for exp in experiments:
+                workload = launcher.beaker.workload.get(exp.id)
+                click.echo(f"{exp.id},{exp.name},{workload.status.name}")
+
+    elif output_format == "json":
+        # Export as JSON
+        data = {
+            "group": group,
+            "status": status,
+            "experiments": [
+                {
+                    "id": exp.id,
+                    "name": exp.name,
+                    "status": launcher.beaker.workload.get(exp.id).status.name,
+                    "url": launcher.experiment_url(exp),
+                }
+                for exp in experiments
+            ],
+        }
+        click.echo(json_module.dumps(data, indent=2))
+
+    else:
+        # Table format (default)
+        console.print(f"[bold]Group:[/bold] {group}")
+        console.print(
+            f"[bold]Status:[/bold] "
+            f"[green]{status.get('succeeded', 0)} succeeded[/green], "
+            f"[yellow]{status.get('running', 0)} running[/yellow], "
+            f"[dim]{status.get('pending', 0)} pending[/dim], "
+            f"[red]{status.get('failed', 0)} failed[/red]"
+        )
+        console.print()
+
+        if experiments:
+            table = Table(title="Experiments")
+            table.add_column("Name", style="cyan")
+            table.add_column("Status")
+            table.add_column("URL", style="dim")
+
+            for exp in experiments:
+                workload = launcher.beaker.workload.get(exp.id)
+                status_str = workload.status.name
+                status_style = {
+                    "succeeded": "[green]succeeded[/green]",
+                    "failed": "[red]failed[/red]",
+                    "running": "[yellow]running[/yellow]",
+                    "canceled": "[red]canceled[/red]",
+                }.get(status_str.lower(), f"[dim]{status_str}[/dim]")
+
+                table.add_row(
+                    exp.name,
+                    status_style,
+                    launcher.experiment_url(exp),
+                )
+
+            console.print(table)
+        else:
+            console.print("[dim]No experiments in group.[/dim]")
 
 
 if __name__ == "__main__":

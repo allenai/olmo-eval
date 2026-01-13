@@ -25,7 +25,12 @@ from olmo_eval.launch.beaker import (
     print_experiment_config,
     resolve_clusters,
 )
-from olmo_eval.launch.config import LaunchConfig, get_template
+from olmo_eval.launch.config import (
+    LaunchConfig,
+    ModelConfig,
+    get_template,
+    parse_model_config,
+)
 
 __all__ = [
     "BeakerEnvSecret",
@@ -33,7 +38,9 @@ __all__ = [
     "BeakerLauncher",
     "BeakerWekaBucket",
     "LaunchConfig",
+    "ModelConfig",
     "get_template",
+    "parse_model_config",
     "parse_task_with_priority",
     "print_experiment_config",
     "resolve_clusters",
