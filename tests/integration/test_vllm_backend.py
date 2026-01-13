@@ -1,17 +1,17 @@
-"""Integration tests for the vLLM backend.
+"""GPU integration tests for the vLLM backend.
 
 These tests require:
 - Docker with GPU support, OR
 - vLLM installed locally with GPU access
 
 Run with:
-    pytest tests/integration/test_vllm_backend.py -v --integration
+    pytest tests/integration/test_vllm_backend.py -v --gpu
 
 To skip Docker management (if vLLM is already running):
-    pytest tests/integration/test_vllm_backend.py -v --integration --no-docker
+    pytest tests/integration/test_vllm_backend.py -v --gpu --no-docker
 
 To use a different model:
-    pytest tests/integration/test_vllm_backend.py -v --integration \\
+    pytest tests/integration/test_vllm_backend.py -v --gpu \\
         --vllm-model "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 """
 
@@ -19,7 +19,7 @@ import pytest
 
 from olmo_eval.core import LMRequest, RequestType, SamplingParams
 
-pytestmark = [pytest.mark.integration]
+pytestmark = [pytest.mark.gpu]
 
 
 class TestVLLMBackendGenerate:

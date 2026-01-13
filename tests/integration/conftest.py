@@ -6,51 +6,18 @@ from pathlib import Path
 
 import pytest
 
-# Mark all tests in this directory as integration tests
-pytestmark = pytest.mark.integration
-
 DOCKER_COMPOSE_FILE = Path(__file__).parent / "docker-compose.vllm.yml"
 VLLM_CONTAINER_NAME = "olmo-eval-vllm-test"
 VLLM_STARTUP_TIMEOUT = 300  # 5 minutes for model loading
 
 
-def pytest_configure(config):
-    """Register custom markers."""
-    config.addinivalue_line(
-        "markers", "integration: mark test as integration test (requires external services)"
-    )
-
-
-def pytest_collection_modifyitems(config, items):
-    """Skip integration tests unless --integration flag is passed."""
-    if config.getoption("--integration", default=False):
-        return
-
-    skip_integration = pytest.mark.skip(reason="Integration tests require --integration flag")
-    for item in items:
-        if "integration" in item.keywords:
-            item.add_marker(skip_integration)
-
-
 def pytest_addoption(parser):
-    """Add custom command line options."""
-    parser.addoption(
-        "--integration",
-        action="store_true",
-        default=False,
-        help="Run integration tests (requires Docker and GPU)",
-    )
+    """Add custom command line options for vLLM tests."""
     parser.addoption(
         "--vllm-model",
         action="store",
         default="Qwen/Qwen2-0.5B",
         help="Model to use for vLLM integration tests",
-    )
-    parser.addoption(
-        "--no-docker",
-        action="store_true",
-        default=False,
-        help="Skip Docker management (assume vLLM is already running)",
     )
 
 
@@ -272,9 +239,30 @@ def sample_eval_result():
         backend_name="vllm",
         timestamp=datetime(2024, 1, 15, 10, 30, 0),
         tasks=[
-            TaskResult(task_name="mmlu", metrics={"accuracy": 0.65}, num_samples=100),
-            TaskResult(task_name="gsm8k", metrics={"exact_match": 0.58}, num_samples=50),
+            TaskResult(
+                task_name="mmlu",
+                metrics={"accuracy": 0.65},
+                num_instances=100,
+                task_hash="mmlu-hash-001",
+                primary_metric="accuracy",
+                primary_score=0.65,
+            ),
+            TaskResult(
+                task_name="gsm8k",
+                metrics={"exact_match": 0.58},
+                num_instances=50,
+                task_hash="gsm8k-hash-001",
+                primary_metric="exact_match",
+                primary_score=0.58,
+            ),
         ],
+        experiment_name="integration-test",
+        workspace="ai2/olmo-test",
+        author="test-runner",
+        tags=["test", "integration"],
+        git_ref="abc123",
+        model_hash="model-hash-test",
+        s3_location="s3://test-bucket/results/test-integration-001/",
         config={"batch_size": 32},
         metadata={"test": True},
     )
@@ -290,20 +278,29 @@ def multiple_eval_results():
     results = []
     models = ["llama3.1-8b", "llama3.1-70b", "olmo-2-7b"]
     tasks_data = [
-        ("mmlu", {"accuracy": 0.65}),
-        ("gsm8k", {"exact_match": 0.58}),
-        ("arc_challenge", {"accuracy": 0.52}),
+        ("mmlu", {"accuracy": 0.65}, "accuracy", 0.65),
+        ("gsm8k", {"exact_match": 0.58}, "exact_match", 0.58),
+        ("arc_challenge", {"accuracy": 0.52}, "accuracy", 0.52),
     ]
 
     for i, model in enumerate(models):
-        for j, (task_name, metrics) in enumerate(tasks_data):
+        for j, (task_name, metrics, primary_metric, primary_score) in enumerate(tasks_data):
             results.append(
                 EvalResult(
                     run_id=f"run-{i}-{j}",
                     model_name=model,
                     backend_name="vllm",
                     timestamp=datetime(2024, 1, 15, 10 + i, j, 0),
-                    tasks=[TaskResult(task_name=task_name, metrics=metrics)],
+                    tasks=[
+                        TaskResult(
+                            task_name=task_name,
+                            metrics=metrics,
+                            primary_metric=primary_metric,
+                            primary_score=primary_score,
+                        )
+                    ],
+                    workspace="ai2/olmo-test",
+                    author="test-runner",
                 )
             )
 

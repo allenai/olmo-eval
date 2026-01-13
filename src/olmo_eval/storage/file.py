@@ -63,13 +63,19 @@ class FileBackend(StorageBackend):
         with open(filepath, "w") as f:
             json.dump(result.to_dict(), f, indent=2)
 
-        # Update index
+        # Update index with queryable fields
         self._index[result.run_id] = {
             "path": str(filepath.relative_to(self.output_dir)),
             "model_name": result.model_name,
             "backend_name": result.backend_name,
             "timestamp": result.timestamp.isoformat(),
             "task_names": [t.task_name for t in result.tasks],
+            # Additional queryable metadata
+            "experiment_name": result.experiment_name,
+            "workspace": result.workspace,
+            "author": result.author,
+            "model_hash": result.model_hash,
+            "s3_location": result.s3_location,
         }
         self._save_index()
 
@@ -168,6 +174,10 @@ class FileBackend(StorageBackend):
                     "backend_name": entry["backend_name"],
                     "timestamp": entry["timestamp"],
                     "task_names": entry.get("task_names", []),
+                    "experiment_name": entry.get("experiment_name"),
+                    "workspace": entry.get("workspace"),
+                    "author": entry.get("author"),
+                    "s3_location": entry.get("s3_location"),
                 }
             )
 
@@ -179,23 +189,57 @@ class FileBackend(StorageBackend):
 def convert_runner_results(
     results: dict[str, Any],
     run_id: str,
+    s3_location: str | None = None,
+    experiment_name: str | None = None,
+    workspace: str | None = None,
+    author: str | None = None,
+    git_ref: str | None = None,
+    model_hash: str | None = None,
+    revision: str | None = None,
+    tags: list[str] | None = None,
 ) -> EvalResult:
     """Convert EvalRunner results dict to EvalResult.
 
     Args:
         results: The results dict from EvalRunner.run()
         run_id: Unique identifier for this run.
+        s3_location: Base S3 path where task results are stored.
+        experiment_name: Descriptive name for the experiment.
+        workspace: Beaker workspace name.
+        author: Who ran the evaluation.
+        git_ref: Git commit/ref for reproducibility.
+        model_hash: Hash of model configuration.
+        revision: Model revision/checkpoint.
+        tags: List of tags for categorization.
 
     Returns:
         EvalResult instance.
     """
     tasks = []
-    for spec, task_data in results.get("tasks", {}).items():
+    for task_idx, (spec, task_data) in enumerate(results.get("tasks", {}).items()):
+        # Build S3 keys for this task if s3_location is provided
+        s3_metrics_key = None
+        s3_predictions_key = None
+        if s3_location:
+            base = s3_location.rstrip("/")
+            s3_metrics_key = f"{base}/task-{task_idx:03d}-{spec}-metrics.json"
+            s3_predictions_key = f"{base}/task-{task_idx:03d}-{spec}-predictions.jsonl"
+
+        # Extract primary metric info
+        metrics = task_data.get("metrics", {})
+        primary_metric = task_data.get("primary_metric")
+        primary_score = metrics.get(primary_metric) if primary_metric else None
+
         tasks.append(
             TaskResult(
                 task_name=spec,
-                metrics=task_data.get("metrics", {}),
-                num_samples=task_data.get("num_instances"),
+                metrics=metrics,
+                num_instances=task_data.get("num_instances"),
+                task_hash=task_data.get("task_hash"),
+                primary_metric=primary_metric,
+                primary_score=primary_score,
+                s3_metrics_key=s3_metrics_key,
+                s3_predictions_key=s3_predictions_key,
             )
         )
 
@@ -205,6 +249,14 @@ def convert_runner_results(
         backend_name=results["backend"],
         timestamp=datetime.fromisoformat(results["timestamp"]),
         tasks=tasks,
-        config=None,  # Could include original config if available
-        metadata=None,
+        experiment_name=experiment_name,
+        workspace=workspace,
+        author=author,
+        tags=tags,
+        git_ref=git_ref,
+        model_hash=model_hash,
+        revision=revision,
+        s3_location=s3_location,
+        config=results.get("config"),
+        metadata=results.get("metadata"),
     )

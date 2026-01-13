@@ -130,7 +130,7 @@ class S3Backend(StorageBackend):
             ContentType="application/json",
         )
 
-        # Update index
+        # Update index with queryable fields
         model_slug = self._model_slug(result.model_name)
         index = self._load_model_index(model_slug)
         index[result.run_id] = {
@@ -139,6 +139,12 @@ class S3Backend(StorageBackend):
             "backend_name": result.backend_name,
             "timestamp": result.timestamp.isoformat(),
             "task_names": [t.task_name for t in result.tasks],
+            # Additional queryable metadata
+            "experiment_name": result.experiment_name,
+            "workspace": result.workspace,
+            "author": result.author,
+            "model_hash": result.model_hash,
+            "s3_location": result.s3_location,
         }
         self._save_model_index(model_slug, index)
 

@@ -24,9 +24,25 @@ def sample_result():
         backend_name="vllm",
         timestamp=datetime(2024, 1, 15, 10, 30, 0),
         tasks=[
-            TaskResult(task_name="mmlu", metrics={"accuracy": 0.65}, num_samples=100),
-            TaskResult(task_name="gsm8k", metrics={"exact_match": 0.58}, num_samples=50),
+            TaskResult(
+                task_name="mmlu",
+                metrics={"accuracy": 0.65},
+                num_instances=100,
+                primary_metric="accuracy",
+                primary_score=0.65,
+            ),
+            TaskResult(
+                task_name="gsm8k",
+                metrics={"exact_match": 0.58},
+                num_instances=50,
+                primary_metric="exact_match",
+                primary_score=0.58,
+            ),
         ],
+        experiment_name="test-experiment",
+        workspace="ai2/test",
+        author="tester",
+        s3_location="s3://test-bucket/results/",
         config={"batch_size": 32},
         metadata={"git_sha": "abc123"},
     )
@@ -281,7 +297,7 @@ class TestConvertRunnerResults:
 
         mmlu_task = next(t for t in result.tasks if t.task_name == "mmlu")
         assert mmlu_task.metrics == {"accuracy": 0.65}
-        assert mmlu_task.num_samples == 100
+        assert mmlu_task.num_instances == 100
 
     def test_convert_empty_tasks(self):
         """Test converting results with no tasks."""

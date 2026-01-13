@@ -10,12 +10,21 @@ from typing import Any
 
 @dataclass
 class TaskResult:
-    """Result for a single task within an evaluation."""
+    """Result for a single task within an evaluation.
+
+    Stores task-level metrics and references to S3 locations where
+    detailed predictions and metrics files are stored.
+    """
 
     task_name: str
     metrics: dict[str, float]
-    num_samples: int | None = None
-    subset: str | None = None
+    num_instances: int | None = None
+    task_hash: str | None = None
+    primary_metric: str | None = None
+    primary_score: float | None = None
+    # S3 references for detailed data
+    s3_metrics_key: str | None = None
+    s3_predictions_key: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -23,10 +32,18 @@ class TaskResult:
             "task_name": self.task_name,
             "metrics": self.metrics,
         }
-        if self.num_samples is not None:
-            result["num_samples"] = self.num_samples
-        if self.subset is not None:
-            result["subset"] = self.subset
+        if self.num_instances is not None:
+            result["num_instances"] = self.num_instances
+        if self.task_hash is not None:
+            result["task_hash"] = self.task_hash
+        if self.primary_metric is not None:
+            result["primary_metric"] = self.primary_metric
+        if self.primary_score is not None:
+            result["primary_score"] = self.primary_score
+        if self.s3_metrics_key is not None:
+            result["s3_metrics_key"] = self.s3_metrics_key
+        if self.s3_predictions_key is not None:
+            result["s3_predictions_key"] = self.s3_predictions_key
         return result
 
     @classmethod
@@ -35,20 +52,46 @@ class TaskResult:
         return cls(
             task_name=data["task_name"],
             metrics=data["metrics"],
-            num_samples=data.get("num_samples"),
-            subset=data.get("subset"),
+            num_instances=data.get("num_instances"),
+            task_hash=data.get("task_hash"),
+            primary_metric=data.get("primary_metric"),
+            primary_score=data.get("primary_score"),
+            s3_metrics_key=data.get("s3_metrics_key"),
+            s3_predictions_key=data.get("s3_predictions_key"),
         )
 
 
 @dataclass
 class EvalResult:
-    """Complete result for an evaluation run."""
+    """Complete result for an evaluation run.
+
+    Stores run-level metadata and references to S3 locations where
+    the full evaluation data (completions, metrics, predictions) is stored.
+
+    Fields align with the evaluation tracking schema:
+    - Core identifiers: run_id, model_name, backend_name
+    - Experiment info: experiment_name, workspace, author, tags
+    - Version tracking: git_ref, model_hash, revision
+    - S3 reference: s3_location points to base path with all task results
+    """
 
     run_id: str
     model_name: str
     backend_name: str
     timestamp: datetime
     tasks: list[TaskResult] = field(default_factory=list)
+    # Experiment metadata
+    experiment_name: str | None = None
+    workspace: str | None = None
+    author: str | None = None
+    tags: list[str] | None = None
+    # Version tracking
+    git_ref: str | None = None
+    model_hash: str | None = None
+    revision: str | None = None
+    # S3 reference - base path where all task results are stored
+    s3_location: str | None = None
+    # Flexible config and metadata
     config: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
 
@@ -61,6 +104,22 @@ class EvalResult:
             "timestamp": self.timestamp.isoformat(),
             "tasks": [t.to_dict() for t in self.tasks],
         }
+        if self.experiment_name is not None:
+            result["experiment_name"] = self.experiment_name
+        if self.workspace is not None:
+            result["workspace"] = self.workspace
+        if self.author is not None:
+            result["author"] = self.author
+        if self.tags is not None:
+            result["tags"] = self.tags
+        if self.git_ref is not None:
+            result["git_ref"] = self.git_ref
+        if self.model_hash is not None:
+            result["model_hash"] = self.model_hash
+        if self.revision is not None:
+            result["revision"] = self.revision
+        if self.s3_location is not None:
+            result["s3_location"] = self.s3_location
         if self.config is not None:
             result["config"] = self.config
         if self.metadata is not None:
@@ -76,6 +135,14 @@ class EvalResult:
             backend_name=data["backend_name"],
             timestamp=datetime.fromisoformat(data["timestamp"]),
             tasks=[TaskResult.from_dict(t) for t in data.get("tasks", [])],
+            experiment_name=data.get("experiment_name"),
+            workspace=data.get("workspace"),
+            author=data.get("author"),
+            tags=data.get("tags"),
+            git_ref=data.get("git_ref"),
+            model_hash=data.get("model_hash"),
+            revision=data.get("revision"),
+            s3_location=data.get("s3_location"),
             config=data.get("config"),
             metadata=data.get("metadata"),
         )
