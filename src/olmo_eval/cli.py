@@ -165,6 +165,48 @@ def suites(filter: str) -> None:
     console.print(table)
 
 
+@main.command(name="suite-info")
+@click.argument("suite_name")
+def suite_info(suite_name: str) -> None:
+    """Show tasks and regimes in a suite.
+
+    SUITE_NAME is the name of the suite to inspect.
+
+    Example: olmo-eval suite-info core
+    """
+    try:
+        suite = get_suite(suite_name)
+    except KeyError:
+        console.print(f"[red]Error:[/red] Suite '{suite_name}' not found")
+        console.print(f"\n[dim]Available suites: {', '.join(list_suites())}[/dim]")
+        raise SystemExit(1) from None
+
+    # Header with suite info
+    console.print(f"\n[bold cyan]Suite:[/bold cyan] {suite.name}")
+    if suite.description:
+        console.print(f"[dim]{suite.description}[/dim]")
+    console.print(f"[bold]Aggregation:[/bold] {suite.aggregation.value}")
+    console.print()
+
+    # Table of tasks
+    table = Table(title=f"Tasks in '{suite_name}'")
+    table.add_column("#", style="dim", justify="right")
+    table.add_column("Task", style="cyan")
+    table.add_column("Regime", style="yellow")
+
+    for idx, task_spec in enumerate(suite.expanded_tasks, 1):
+        # Parse task::regime format
+        if "::" in task_spec:
+            task_name, regime = task_spec.split("::", 1)
+        else:
+            task_name = task_spec
+            regime = "(default)"
+        table.add_row(str(idx), task_name, regime)
+
+    console.print(table)
+    console.print(f"\n[dim]Total: {len(suite.expanded_tasks)} tasks[/dim]")
+
+
 @main.command()
 @click.option(
     "--config",

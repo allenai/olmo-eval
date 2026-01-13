@@ -1,6 +1,6 @@
 """Unified Beaker launcher for olmo-eval jobs using beaker-gantry.
 
-Provides a clean, dataclass-based API for submitting evaluation jobs
+Dataclass-based API for submitting evaluation jobs
 to Beaker using beaker-gantry's Python API for reproducible experiments.
 
 Example:
