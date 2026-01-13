@@ -230,6 +230,10 @@ jobs:
       - name: Run storage integration tests
         env:
           CI_SERVICES_AVAILABLE: "true"
+          # Dummy AWS credentials for LocalStack (not real credentials)
+          AWS_ACCESS_KEY_ID: "test"
+          AWS_SECRET_ACCESS_KEY: "test"
+          AWS_DEFAULT_REGION: "us-east-1"
         run: |
           uv run pytest tests/integration/test_storage.py \
             -v \
