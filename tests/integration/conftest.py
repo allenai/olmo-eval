@@ -158,8 +158,18 @@ def storage_docker_services():
 
     This fixture starts postgres and localstack containers, waits for them
     to be healthy, and tears them down after all tests complete.
+
+    If CI_SERVICES_AVAILABLE environment variable is set, assumes services
+    are already running (e.g., managed by GitHub Actions services block).
     """
-    # Start services
+    import os
+
+    # In CI, services are managed externally (e.g., GitHub Actions services block)
+    if os.environ.get("CI_SERVICES_AVAILABLE"):
+        yield
+        return
+
+    # Start services locally
     result = subprocess.run(
         ["docker", "compose", "-f", str(STORAGE_DOCKER_COMPOSE_FILE), "up", "-d", "--wait"],
         capture_output=True,
