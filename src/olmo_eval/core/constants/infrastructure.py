@@ -19,6 +19,9 @@ BEAKER_DEFAULT_BUDGET = "ai2/oe-base"
 BEAKER_DEFAULT_PRIORITY = "normal"
 """Default job priority level."""
 
+BEAKER_DEFAULT_IMAGE = "ai2/oe-data/olmo-eval-latest"
+"""Default Docker image for Beaker evaluation jobs."""
+
 
 class BeakerPriority(str, Enum):
     """Valid Beaker job priority levels."""

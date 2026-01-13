@@ -29,6 +29,7 @@ from rich.text import Text
 
 from olmo_eval.core.constants.infrastructure import (
     BEAKER_DEFAULT_BUDGET,
+    BEAKER_DEFAULT_IMAGE,
     BEAKER_DEFAULT_WORKSPACE,
     BEAKER_KNOWN_CLUSTERS,
     NEW_CLUSTER_ALIASES,
@@ -164,10 +165,6 @@ def parse_task_with_priority(task_spec: str, default_priority: str = "normal") -
     return task_spec, default_priority
 
 
-# Default Beaker image for evaluation jobs
-DEFAULT_BEAKER_IMAGE = "ai2/olmo-eval-latest"
-
-
 @dataclass
 class BeakerEnvSecret:
     """Environment variable sourced from a Beaker secret.
@@ -254,7 +251,7 @@ class BeakerJobConfig:
     # Beaker settings
     workspace: str = BEAKER_DEFAULT_WORKSPACE
     budget: str = BEAKER_DEFAULT_BUDGET
-    beaker_image: str = DEFAULT_BEAKER_IMAGE
+    beaker_image: str = BEAKER_DEFAULT_IMAGE
     description: str | None = None
 
     # Storage - defaults include common eval buckets

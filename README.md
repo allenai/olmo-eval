@@ -358,6 +358,43 @@ experiment = launcher.launch(config)
 print(f"Launched: {launcher.beaker.experiment.url(experiment)}")
 ```
 
+## Docker Image Management
+
+The evaluation jobs on Beaker use a Docker image that contains olmo-eval and all its dependencies.
+
+### Building the Image
+
+```bash
+# Build locally
+./scripts/build_image.sh
+
+# Build with specific vLLM version
+./scripts/build_image.sh --vllm-version 0.14.0
+
+# Force rebuild without cache
+./scripts/build_image.sh --no-cache
+
+# Test locally
+docker run --rm olmo-eval:latest --help
+docker run --rm --gpus all olmo-eval:latest models
+```
+
+### Pushing to Beaker
+
+The push script safely versions images by archiving the previous version
+with a timestamp suffix before replacing it.
+
+```bash
+# Push to Beaker (requires beaker CLI authentication)
+./scripts/beaker/push_beaker_image.sh
+
+# Preview without pushing
+./scripts/beaker/push_beaker_image.sh --dry-run
+
+# Push with custom workspace
+./scripts/beaker/push_beaker_image.sh --workspace ai2/my-workspace
+```
+
 ## Development
 
 ```bash
