@@ -364,12 +364,12 @@ def launch(
             # No config file - use ModelConfig values or defaults
             model_resources = {
                 "gpus": model_cfg.gpus if model_cfg.gpus is not None else gpus,
-                "cluster": model_cfg.cluster if model_cfg.cluster is not None else cluster,
-                "priority": model_cfg.priority if model_cfg.priority is not None else priority,
+                "cluster": (model_cfg.cluster if model_cfg.cluster is not None else cluster),
+                "priority": (model_cfg.priority if model_cfg.priority is not None else priority),
                 "preemptible": (
                     model_cfg.preemptible if model_cfg.preemptible is not None else preemptible
                 ),
-                "timeout": model_cfg.timeout if model_cfg.timeout is not None else timeout,
+                "timeout": (model_cfg.timeout if model_cfg.timeout is not None else timeout),
                 "shared_memory": model_cfg.shared_memory,
             }
 
@@ -504,7 +504,7 @@ def results(
 
     # Try to get the group
     try:
-        from beaker.exceptions import BeakerGroupNotFound  # type: ignore[import-not-found]
+        from beaker.exceptions import BeakerGroupNotFound
 
         beaker_group = launcher.beaker.group.get(group)
     except BeakerGroupNotFound:
