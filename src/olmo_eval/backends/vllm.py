@@ -10,8 +10,8 @@ from olmo_eval.core import LMOutput, LMRequest, SamplingParams
 from .base import Backend
 
 if TYPE_CHECKING:
-    from vllm import LLM  # type: ignore[import-not-found]
-    from vllm.outputs import RequestOutput  # type: ignore[import-not-found]
+    from vllm import LLM
+    from vllm.outputs import RequestOutput
 
 
 def _get_token_string(logprob_obj: Any, token_id: int, tokenizer: Any = None) -> str:
@@ -37,7 +37,7 @@ class VLLMBackend(Backend):
         os.environ.setdefault("VLLM_LOGGING_LEVEL", "WARNING")
 
         try:
-            from vllm import LLM  # type: ignore[import-not-found]
+            from vllm import LLM
         except ImportError as e:
             raise ImportError("vllm is required for VLLMBackend") from e
 
@@ -47,7 +47,7 @@ class VLLMBackend(Backend):
 
     def _build_sampling_params(self, params: SamplingParams) -> Any:
         """Convert SamplingParams to vLLM SamplingParams."""
-        from vllm import SamplingParams as VLLMSamplingParams  # type: ignore[import-not-found]
+        from vllm import SamplingParams as VLLMSamplingParams
 
         kwargs: dict[str, Any] = {
             "max_tokens": params.max_tokens,
@@ -109,7 +109,7 @@ class VLLMBackend(Backend):
         self,
         requests: list[LMRequest],
     ) -> list[list[LMOutput]]:
-        from vllm import SamplingParams as VLLMSamplingParams  # type: ignore[import-not-found]
+        from vllm import SamplingParams as VLLMSamplingParams
 
         vllm_params = VLLMSamplingParams(
             prompt_logprobs=5,

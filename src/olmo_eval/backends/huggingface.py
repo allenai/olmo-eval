@@ -9,12 +9,12 @@ from olmo_eval.core import LMOutput, LMRequest, SamplingParams
 from .base import Backend
 
 if TYPE_CHECKING:
-    import torch  # type: ignore[import-not-found]
+    import torch
 
 
 def _get_device() -> torch.device:
     """Detect the best available device."""
-    import torch  # type: ignore[import-not-found]
+    import torch
 
     if torch.cuda.is_available():
         return torch.device("cuda")
@@ -34,10 +34,7 @@ class HuggingFaceBackend(Backend):
             **model_kwargs: Additional arguments passed to from_pretrained.
         """
         try:
-            from transformers import (  # type: ignore[import-not-found]
-                AutoModelForCausalLM,
-                AutoTokenizer,
-            )
+            from transformers import AutoModelForCausalLM, AutoTokenizer
         except ImportError as e:
             raise ImportError(
                 "transformers is required for HuggingFaceBackend. "
@@ -90,7 +87,7 @@ class HuggingFaceBackend(Backend):
         requests: list[LMRequest],
         sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
-        import torch  # type: ignore[import-not-found]
+        import torch
 
         params = self._default_sampling_params(sampling_params)
         gen_kwargs = self._build_generate_kwargs(params)
@@ -133,7 +130,7 @@ class HuggingFaceBackend(Backend):
         self,
         requests: list[LMRequest],
     ) -> list[list[LMOutput]]:
-        import torch  # type: ignore[import-not-found]
+        import torch
 
         results = []
         for request in requests:

@@ -36,7 +36,7 @@ class LiteLLMBackend(Backend):
             **api_kwargs: Additional arguments passed to litellm.completion.
         """
         try:
-            import litellm  # type: ignore[import-not-found]
+            import litellm
         except ImportError as e:
             raise ImportError(
                 "litellm is required for LiteLLMBackend. Install with: pip install litellm"
