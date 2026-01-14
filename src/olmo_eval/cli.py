@@ -553,14 +553,26 @@ def launch(
                 if model_gpus_per_worker and model_gpus_per_worker != 1:
                     command.extend(["--gpus-per-worker", str(model_gpus_per_worker)])
 
-            # CLI backends override per-model backend
-            model_backend = model_resources.get("backend")
+            # Determine the backend this model will use at runtime
+            # First check for explicit backend override in config, then get from model config
+            from olmo_eval.core.configs import get_model_config as get_runtime_model_config
+            from olmo_eval.core.constants.infrastructure import BACKEND_DEPENDENCIES
+
+            config_backend = model_resources.get("backend")  # Explicit override from launch config
+            if config_backend:
+                runtime_backend = config_backend
+            else:
+                # Get the backend from model config (preset or default)
+                runtime_model_config = get_runtime_model_config(model_name)
+                runtime_backend = runtime_model_config.backend
+
+            # CLI backends override auto-detected backend dependency
             if backends:
                 effective_backends = list(backends)
-            elif model_backend:
-                effective_backends = [model_backend]
             else:
-                effective_backends = []
+                # Auto-install the backend dependency with version spec
+                backend_dep = BACKEND_DEPENDENCIES.get(runtime_backend)
+                effective_backends = [backend_dep] if backend_dep else []
 
             job_config = BeakerJobConfig(
                 name=exp_name,

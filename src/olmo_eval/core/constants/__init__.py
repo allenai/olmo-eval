@@ -10,6 +10,7 @@ For evaluation-related constants (benchmarks, tasks), see `olmo_eval.evals.const
 
 # Infrastructure constants
 from olmo_eval.core.constants.infrastructure import (
+    BACKEND_DEPENDENCIES,
     BEAKER_DEFAULT_BUDGET,
     BEAKER_DEFAULT_PRIORITY,
     BEAKER_DEFAULT_WORKSPACE,
@@ -51,6 +52,7 @@ from olmo_eval.core.constants.models import (
 
 __all__ = [
     # Infrastructure
+    "BACKEND_DEPENDENCIES",
     "BEAKER_DEFAULT_BUDGET",
     "BEAKER_DEFAULT_PRIORITY",
     "BEAKER_DEFAULT_WORKSPACE",

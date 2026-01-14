@@ -135,3 +135,22 @@ OE_EVAL_COMMIT_HASH: str | None = None
 
 OE_EVAL_LAUNCH_COMMAND = "oe_eval/launch.py"
 """Entry point script for launching evaluations."""
+
+
+# =============================================================================
+# Backend Dependencies
+# =============================================================================
+# These version specs should match pyproject.toml optional dependencies
+
+BACKEND_DEPENDENCIES: dict[str, str | None] = {
+    "vllm": "vllm~=0.13.0",
+    "hf": "transformers~=4.57.3",
+    "litellm": "litellm~=1.80.11",
+    "mock": None,  # No dependency needed for mock backend
+}
+"""Mapping of backend types to their pip install specs.
+
+Used for auto-installing backend dependencies at runtime when launching
+Beaker jobs. Version specs should be kept in sync with pyproject.toml
+optional dependencies.
+"""
