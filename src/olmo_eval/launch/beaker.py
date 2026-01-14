@@ -500,9 +500,8 @@ class BeakerLauncher:
             return None
 
         # Get the experiment from the workload
-        # The workload contains an embedded experiment object, but we need the full one
-        # from the Beaker client for URL generation
-        experiment = self.beaker.experiment.get(workload.experiment.id)
+        # The workload contains an embedded experiment object from gantry
+        experiment = workload.experiment
         log.info(f"Experiment submitted: {self.experiment_url(experiment)}")
         return experiment
 
