@@ -62,6 +62,7 @@ LABEL torch_version="${TORCH_VERSION}"
 # Install minimal runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
+    curl \
     git \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
