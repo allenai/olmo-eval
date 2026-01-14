@@ -1,0 +1,20 @@
+# Mixed model sizes evaluation
+# Usage: olmo-eval launch -f examples/configs/mixed_gpu.yaml --dry-run
+
+name: test-mixed-gpus
+models:
+  # Small model - 1 GPU
+  - name: meta-llama/Llama-3.1-8B
+    gpus: 1
+
+  # Large model - 4 GPUs
+  - name: meta-llama/Llama-3.1-70B
+    gpus: 4
+
+tasks:
+  - arc:mc
+
+cluster: ai2/ceres
+priority: normal
+preemptible: true
+timeout: 24h
