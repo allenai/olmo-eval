@@ -1,5 +1,7 @@
 """olmo-eval CLI entry point."""
 
+from datetime import UTC
+
 import click
 from rich.console import Console
 from rich.table import Table
@@ -997,9 +999,7 @@ def group_cancel(group_name: str, yes: bool) -> None:
 @click.option("--limit", "-n", type=int, default=20, help="Number of groups to show")
 @click.option("--search", "-s", help="Search by name or description")
 @click.option("--mine/--all", default=True, help="Show only my groups (default) or all groups")
-def group_list(
-    workspace: str | None, limit: int, search: str | None, mine: bool
-) -> None:
+def group_list(workspace: str | None, limit: int, search: str | None, mine: bool) -> None:
     """List Beaker groups.
 
     Shows recent groups with their status summaries. By default, only shows
@@ -1034,7 +1034,9 @@ def group_list(
         try:
             current_user_id = launcher.beaker.user.get(launcher.beaker.user_name).id
         except Exception:
-            console.print("[yellow]Warning: Could not get current user, showing all groups[/yellow]")
+            console.print(
+                "[yellow]Warning: Could not get current user, showing all groups[/yellow]"
+            )
 
     try:
         # Fetch more than limit if filtering by user, since we filter client-side
@@ -1099,9 +1101,7 @@ def group_list(
                 failed = sum(1 for s in experiments.values() if s == FAILED_STATUS)
                 running = sum(1 for s in experiments.values() if s in RUNNING_STATUSES)
                 status_str = (
-                    f"[green]{succeeded}[/green]/"
-                    f"[yellow]{running}[/yellow]/"
-                    f"[red]{failed}[/red]"
+                    f"[green]{succeeded}[/green]/[yellow]{running}[/yellow]/[red]{failed}[/red]"
                 )
             else:
                 status_str = "[dim]empty[/dim]"
@@ -1109,9 +1109,9 @@ def group_list(
             # Format creation time from protobuf Timestamp
             created_str = "-"
             if grp.created and grp.created.seconds:
-                from datetime import datetime, timezone
+                from datetime import datetime
 
-                created_dt = datetime.fromtimestamp(grp.created.seconds, tz=timezone.utc)
+                created_dt = datetime.fromtimestamp(grp.created.seconds, tz=UTC)
                 created_str = created_dt.strftime("%Y-%m-%d %H:%M")
 
             # Get workspace name (with caching)
