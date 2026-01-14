@@ -257,8 +257,7 @@ class BeakerJobConfig:
     # Storage - defaults include common eval buckets
     weka_buckets: list[BeakerWekaBucket] = field(
         default_factory=lambda: [
-            BeakerWekaBucket("oe-eval-default"),
-            BeakerWekaBucket("oe-data-default"),
+            BeakerWekaBucket("oe-training-default"),
         ]
     )
     nfs: bool = False
