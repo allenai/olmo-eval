@@ -11,6 +11,7 @@ set -euo pipefail
 #   ./scripts/push_beaker_image.sh --source olmo-eval:latest    # Custom source
 #   ./scripts/push_beaker_image.sh --workspace ai2/oe-data      # Custom workspace
 #   ./scripts/push_beaker_image.sh --dry-run                    # Preview only
+#   ./scripts/push_beaker_image.sh --force                      # Force re-upload (delete existing tmp)
 #
 # The script will:
 #   1. Upload the source image as a temporary image (-tmp)
@@ -25,6 +26,7 @@ BEAKER_IMAGE=""
 WORKSPACE="ai2/oe-data"
 DRY_RUN=false
 AUTO_NAME=true
+FORCE=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -46,6 +48,10 @@ while [[ $# -gt 0 ]]; do
             DRY_RUN=true
             shift
             ;;
+        --force)
+            FORCE=true
+            shift
+            ;;
         --help)
             echo "Usage: $0 [OPTIONS]"
             echo ""
@@ -54,6 +60,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --beaker-image NAME   Beaker image name (default: olmo-eval-latest)"
             echo "  --workspace WS        Beaker workspace (default: ai2/oe-data)"
             echo "  --dry-run             Preview without pushing"
+            echo "  --force               Force upload even if tmp image exists (deletes existing tmp)"
             echo "  --help                Show this help"
             exit 0
             ;;
@@ -119,8 +126,13 @@ echo ""
 
 if [[ "$DRY_RUN" == "true" ]]; then
     echo "[DRY RUN] Would execute:"
-    echo "  1. beaker image create ${SOURCE_IMAGE} --name ${TMP_IMAGE_NAME} --workspace ${WORKSPACE}"
-    echo "     (or reuse existing temporary image from previous partial run)"
+    if [[ "$FORCE" == "true" ]]; then
+        echo "  1. beaker image delete ${TMP_IMAGE_NAME} (if exists, --force)"
+        echo "     beaker image create ${SOURCE_IMAGE} --name ${TMP_IMAGE_NAME} --workspace ${WORKSPACE}"
+    else
+        echo "  1. beaker image create ${SOURCE_IMAGE} --name ${TMP_IMAGE_NAME} --workspace ${WORKSPACE}"
+        echo "     (or reuse existing temporary image from previous partial run)"
+    fi
     echo "  2. beaker image rename ${IMAGE_REF} ${ARCHIVE_IMAGE} (if exists)"
     echo "  3. beaker image rename ${TMP_IMAGE_REF} ${BEAKER_IMAGE}"
     exit 0
@@ -129,14 +141,31 @@ fi
 # Step 1: Upload as temporary image (or reuse existing from partial run)
 echo "Step 1/3: Uploading image as temporary..."
 TMP_IMAGE_ID=$(beaker image get "${TMP_IMAGE_REF}" --format json 2>/dev/null | jq -r '.[0].id' || echo "")
+if [[ -n "$TMP_IMAGE_ID" && "$FORCE" == "true" ]]; then
+    echo "  Deleting existing temporary image (--force): ${TMP_IMAGE_ID}"
+    beaker image delete "${TMP_IMAGE_ID}" --yes
+    TMP_IMAGE_ID=""
+fi
 if [[ -n "$TMP_IMAGE_ID" ]]; then
     echo "  Reusing existing temporary image from previous run: ${TMP_IMAGE_ID}"
 else
-    TMP_IMAGE_ID=$(beaker image create \
+    echo "  Uploading ${SOURCE_IMAGE} (this may take a while for large images)..."
+
+    # Run beaker image create with output visible to user (no stdout redirection)
+    if ! beaker image create \
         "${SOURCE_IMAGE}" \
         --name "${TMP_IMAGE_NAME}" \
-        --workspace "${WORKSPACE}" \
-        --format json | jq -r '.[0].id // .id')
+        --workspace "${WORKSPACE}"; then
+        echo "Error: Failed to upload image"
+        exit 1
+    fi
+
+    # Query for the image ID after successful upload
+    TMP_IMAGE_ID=$(beaker image get "${TMP_IMAGE_REF}" --format json | jq -r '.[0].id')
+    if [[ -z "$TMP_IMAGE_ID" || "$TMP_IMAGE_ID" == "null" ]]; then
+        echo "Error: Could not find uploaded image: ${TMP_IMAGE_REF}"
+        exit 1
+    fi
     echo "  Created temporary image: ${TMP_IMAGE_ID}"
 fi
 
