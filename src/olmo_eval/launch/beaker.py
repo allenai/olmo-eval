@@ -275,6 +275,9 @@ class BeakerJobConfig:
     # Result path
     result_path: str = "/results"
 
+    # Runtime backend installation
+    backends: list[str] = field(default_factory=list)
+
 
 def resolve_clusters(cluster: str | list[str]) -> list[str]:
     """Resolve cluster aliases to full cluster names.
@@ -371,6 +374,31 @@ class BeakerLauncher:
             self._beaker = Beaker.from_env(default_workspace=self._workspace)
         return self._beaker
 
+    def _build_command_with_backends(self, command: list[str], backends: list[str]) -> list[str]:
+        """Build command with source installation and backend installation prepended.
+
+        Gantry mounts the source code at /workspace, so we:
+        1. Install olmo-eval from the mounted source
+        2. Install any requested backends
+        3. Run the actual command
+        """
+        # Build the full command
+        steps = []
+
+        # Install olmo-eval from gantry-mounted source
+        steps.append("uv pip install -e /workspace")
+
+        # Install backends if requested
+        if backends:
+            for backend in backends:
+                steps.append(f"uv pip install {backend}")
+
+        # Run the actual command
+        steps.append(" ".join(command))
+
+        wrapped_command = ["bash", "-c", " && ".join(steps)]
+        return wrapped_command
+
     def launch(self, config: BeakerJobConfig, dry_run: bool = False) -> BeakerExperiment | None:
         """Launch an experiment on Beaker using gantry.
 
@@ -384,6 +412,8 @@ class BeakerLauncher:
         from gantry.api import launch_experiment
 
         clusters = resolve_clusters(config.cluster)
+
+        final_command = self._build_command_with_backends(config.command, config.backends)
 
         # Build weka mounts as tuples: (bucket, mount_path)
         weka_mounts: list[tuple[str, str]] = []
@@ -409,7 +439,7 @@ class BeakerLauncher:
             self._print_dry_run_config(config, clusters)
             # Still call launch_experiment with dry_run=True to show full spec
             launch_experiment(
-                args=config.command,
+                args=final_command,
                 name=config.name,
                 description=config.description,
                 workspace=config.workspace,
@@ -435,7 +465,7 @@ class BeakerLauncher:
 
         # Launch the experiment
         workload = launch_experiment(
-            args=config.command,
+            args=final_command,
             name=config.name,
             description=config.description,
             workspace=config.workspace,

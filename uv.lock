@@ -2757,13 +2757,11 @@ all = [
     { name = "psycopg", extra = ["binary"] },
     { name = "torch" },
     { name = "transformers" },
-    { name = "vllm" },
 ]
 all-backends = [
     { name = "litellm" },
     { name = "torch" },
     { name = "transformers" },
-    { name = "vllm" },
 ]
 beaker = [
     { name = "beaker-gantry" },
@@ -2787,6 +2785,10 @@ litellm = [
 postgres = [
     { name = "psycopg", extra = ["binary"] },
 ]
+runtime = [
+    { name = "boto3" },
+    { name = "psycopg", extra = ["binary"] },
+]
 s3 = [
     { name = "boto3" },
 ]
@@ -2808,9 +2810,10 @@ requires-dist = [
     { name = "datasets", specifier = ">=3.0.0" },
     { name = "litellm", marker = "extra == 'litellm'", specifier = "~=1.80.11" },
     { name = "numpy", specifier = ">=1.20.0" },
-    { name = "olmo-eval-internal", extras = ["hf", "vllm", "litellm"], marker = "extra == 'all-backends'" },
-    { name = "olmo-eval-internal", extras = ["hf", "vllm", "litellm", "beaker", "storage"], marker = "extra == 'all'" },
+    { name = "olmo-eval-internal", extras = ["all-backends", "beaker", "storage"], marker = "extra == 'all'" },
+    { name = "olmo-eval-internal", extras = ["hf", "litellm"], marker = "extra == 'all-backends'" },
     { name = "olmo-eval-internal", extras = ["s3", "postgres"], marker = "extra == 'storage'" },
+    { name = "olmo-eval-internal", extras = ["storage"], marker = "extra == 'runtime'" },
     { name = "omegaconf", specifier = "~=2.3.0" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'dev'", specifier = ">=3.1.0" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.1.0" },

@@ -47,10 +47,10 @@ dev = [
 ]
 hf = [
     "transformers~=4.57.3",
-    "torch>=2.0.0",
+    "torch>=2.0.0",  # Shared with vllm
 ]
 vllm = [
-    "vllm~=0.13.0",
+    "vllm~=0.13.0",  # vllm requires torch, will reuse if present
 ]
 litellm = [
     "litellm~=1.80.11",
@@ -68,11 +68,17 @@ postgres = [
 storage = [
     "olmo-eval-internal[s3,postgres]",
 ]
-all-backends = [
-    "olmo-eval-internal[hf,vllm,litellm]",
+# New: Runtime without Beaker (most common for container execution)
+runtime = [
+    "olmo-eval-internal[storage]",
 ]
+# all-backends: HF and LiteLLM (vllm installed separately at runtime)
+all-backends = [
+    "olmo-eval-internal[hf,litellm]",
+]
+# all: everything including beaker launcher (vllm installed separately at runtime)
 all = [
-    "olmo-eval-internal[hf,vllm,litellm,beaker,storage]",
+    "olmo-eval-internal[all-backends,beaker,storage]",
 ]
 
 [project.scripts]

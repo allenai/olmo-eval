@@ -59,13 +59,19 @@ class ModelConfig:
         preemptible: Whether this model's jobs can be preempted.
         timeout: Timeout for this model's jobs.
         shared_memory: Shared memory size (e.g., "10GiB").
+        use_async: Enable parallel task execution (overrides default).
+        num_workers: Number of workers for async mode (overrides default).
+        gpus_per_worker: GPUs per worker for async mode (overrides default).
 
     Example:
         models:
           - name: llama3.1-8b
             gpus: 1
           - name: llama3.1-70b
-            gpus: 4
+            gpus: 8
+            use_async: true
+            num_workers: 2
+            gpus_per_worker: 4
             timeout: 48h
             priority: high
     """
@@ -77,6 +83,11 @@ class ModelConfig:
     preemptible: bool | None = None
     timeout: str | None = None
     shared_memory: str | None = None
+
+    # Async execution settings
+    use_async: bool | None = None
+    num_workers: int | None = None
+    gpus_per_worker: int | None = None
 
 
 def parse_model_config(model: str | dict[str, Any] | ModelConfig) -> ModelConfig:
@@ -142,6 +153,7 @@ class LaunchConfig:
         budget: Beaker budget.
         beaker_image: Container image to use.
         description: Optional experiment description.
+        backends: List of backends to install at runtime (e.g., ["vllm==0.13.0", "transformers"]).
     """
 
     # Required fields
@@ -159,11 +171,19 @@ class LaunchConfig:
     timeout: str = "24h"
     retries: int | None = None
 
+    # Async execution defaults
+    use_async: bool = False
+    num_workers: int | None = None
+    gpus_per_worker: int = 1
+
     # Beaker settings
     workspace: str | None = None
     budget: str | None = None
     beaker_image: str | None = None
     description: str | None = None
+
+    # Runtime backend installation
+    backends: list[str] | None = None
 
     def get_model_configs(self) -> list[ModelConfig]:
         """Get parsed ModelConfig objects for all models.
@@ -185,13 +205,28 @@ class LaunchConfig:
         Returns:
             Dict with effective resource values (gpus, cluster, priority, etc.).
         """
+        # Determine async settings
+        use_async = model.use_async if model.use_async is not None else self.use_async
+        num_workers = model.num_workers if model.num_workers is not None else self.num_workers
+        gpus_per_worker = model.gpus_per_worker if model.gpus_per_worker is not None else self.gpus_per_worker
+
+        # Calculate total GPUs needed for async mode
+        if use_async and num_workers is not None:
+            total_gpus = num_workers * gpus_per_worker
+        else:
+            # Fall back to explicit gpus setting or default
+            total_gpus = model.gpus if model.gpus is not None else self.gpus
+
         return {
-            "gpus": model.gpus if model.gpus is not None else self.gpus,
+            "gpus": total_gpus,
             "cluster": model.cluster if model.cluster is not None else self.cluster,
             "priority": model.priority if model.priority is not None else self.priority,
             "preemptible": model.preemptible if model.preemptible is not None else self.preemptible,
             "timeout": model.timeout if model.timeout is not None else self.timeout,
             "shared_memory": model.shared_memory,  # None uses BeakerJobConfig default
+            "use_async": use_async,
+            "num_workers": num_workers,
+            "gpus_per_worker": gpus_per_worker,
         }
 
     @classmethod

@@ -5,11 +5,11 @@ from rich.console import Console
 from rich.table import Table
 
 import olmo_eval.evals  # noqa: F401 - triggers suite registration
-import olmo_eval.tasks  # noqa: F401 - triggers task registration
+import olmo_eval.evals.tasks  # noqa: F401 - triggers task registration
 from olmo_eval.core import get_model_presets
 from olmo_eval.evals.suites import get_suite, list_suites
-from olmo_eval.tasks import list_tasks
-from olmo_eval.tasks.registry import list_regimes
+from olmo_eval.evals.tasks import list_tasks
+from olmo_eval.evals.tasks.registry import list_regimes
 
 console = Console()
 
@@ -40,6 +40,24 @@ def main() -> None:
     help="YAML config file for storage backend",
 )
 @click.option("--dry-run", is_flag=True, help="Print config and exit without running")
+@click.option(
+    "--async",
+    "use_async",
+    is_flag=True,
+    help="Use async runner for parallel task execution",
+)
+@click.option(
+    "--num-workers",
+    type=int,
+    default=None,
+    help="Number of workers for async mode (default: auto-detect from GPUs)",
+)
+@click.option(
+    "--gpus-per-worker",
+    type=int,
+    default=1,
+    help="Number of GPUs each worker uses (default: 1)",
+)
 def run(
     model: str,
     task: tuple[str, ...],
@@ -51,9 +69,21 @@ def run(
     storage_backend: str | None,
     storage_config: str | None,
     dry_run: bool,
+    use_async: bool,
+    num_workers: int | None,
+    gpus_per_worker: int,
 ) -> None:
     """Run evaluation on specified tasks."""
-    from olmo_eval.runner import EvalRunner, ValidationError
+    from olmo_eval.runners.sequential import EvalRunner, ValidationError
+
+    # Warning for num-workers without async
+    if num_workers is not None and not use_async:
+        console.print("[yellow]Warning:[/yellow] --num-workers has no effect without --async flag")
+
+    if gpus_per_worker != 1 and not use_async:
+        console.print(
+            "[yellow]Warning:[/yellow] --gpus-per-worker has no effect without --async flag"
+        )
 
     # Set up storage backend if specified
     storage = None
@@ -87,15 +117,33 @@ def run(
             console.print(f"[red]Failed to initialize storage backend:[/red] {e}")
             raise SystemExit(1) from None
 
-    runner = EvalRunner(
-        model_name=model,
-        task_specs=list(task),
-        output_dir=output_dir,
-        num_shots_override=num_shots,
-        limit_override=limit,
-        backend_override=backend,
-        storage=storage,
-    )
+    # Choose runner based on --async flag
+    if use_async:
+        from olmo_eval.runners.parallel import AsyncEvalRunner
+
+        console.print("[bold cyan]Using AsyncEvalRunner[/bold cyan] - parallel execution enabled")
+
+        runner = AsyncEvalRunner(
+            model_name=model,
+            task_specs=list(task),
+            output_dir=output_dir,
+            num_shots_override=num_shots,
+            limit_override=limit,
+            backend_override=backend,
+            storage=storage,
+            num_workers=num_workers,
+            gpus_per_worker=gpus_per_worker,
+        )
+    else:
+        runner = EvalRunner(
+            model_name=model,
+            task_specs=list(task),
+            output_dir=output_dir,
+            num_shots_override=num_shots,
+            limit_override=limit,
+            backend_override=backend,
+            storage=storage,
+        )
 
     # Validate inputs before running (applies to both dry-run and actual runs)
     try:
@@ -241,6 +289,12 @@ def suite_info(suite_name: str) -> None:
 @click.option("--workspace", help="Beaker workspace")
 @click.option("--budget", help="Beaker budget")
 @click.option("--group", "-g", help="Add experiments to this Beaker group (creates if needed)")
+@click.option(
+    "--backends", "-b", multiple=True, help="Backends to install at runtime (e.g., vllm==0.13.0)"
+)
+@click.option("--async", "use_async", is_flag=True, help="Enable parallel task execution")
+@click.option("--num-workers", type=int, help="Number of workers for async mode")
+@click.option("--gpus-per-worker", type=int, default=1, help="GPUs per worker for async mode")
 @click.option("--dry-run", is_flag=True, help="Print spec without launching")
 def launch(
     config: str | None,
@@ -256,6 +310,10 @@ def launch(
     workspace: str | None,
     budget: str | None,
     group: str | None,
+    backends: tuple[str, ...],
+    use_async: bool,
+    num_workers: int | None,
+    gpus_per_worker: int,
     dry_run: bool,
 ) -> None:
     """Launch an evaluation job on Beaker.
@@ -265,6 +323,7 @@ def launch(
     Multiple models and/or tasks with different priorities will create separate experiments.
     Use --config/-f to load settings from a YAML file; CLI arguments override config values.
     Use --group/-g to organize experiments into a Beaker group for result aggregation.
+    Use --backends/-b to install inference backends at runtime (e.g., vllm, transformers).
 
     Examples:
 
@@ -279,6 +338,9 @@ def launch(
 
         # Per-task priorities (creates separate experiments per priority level)
         olmo-eval launch -n "eval-mixed" -m llama3.1-8b -t "mmlu@high" -t "gsm8k@normal"
+
+        # Install backends at runtime
+        olmo-eval launch -n "eval-vllm" -m llama3.1-8b -t mmlu -b vllm==0.13.0
 
         # From YAML config file
         olmo-eval launch -f eval_config.yaml
@@ -318,6 +380,9 @@ def launch(
     cli_priority = priority
     cli_preemptible = preemptible
     cli_timeout = timeout
+    cli_use_async = use_async
+    cli_num_workers = num_workers
+    cli_gpus_per_worker = gpus_per_worker if gpus_per_worker != 1 else None
 
     # Load config from file if provided
     cfg: LaunchConfig | None = None
@@ -336,6 +401,7 @@ def launch(
         # Use config values as defaults, CLI args override
         name = name or cfg.name
         task = task if task else tuple(cfg.tasks)
+        backends = backends if backends else (tuple(cfg.backends) if cfg.backends else ())
         retries = retries if retries is not None else cfg.retries
         workspace = workspace or cfg.workspace
         budget = budget or cfg.budget
@@ -353,6 +419,9 @@ def launch(
         priority = priority if priority is not None else cfg.priority
         preemptible = preemptible if preemptible is not None else cfg.preemptible
         timeout = timeout if timeout is not None else cfg.timeout
+        use_async = use_async or cfg.use_async
+        num_workers = num_workers if num_workers is not None else cfg.num_workers
+        gpus_per_worker = gpus_per_worker if gpus_per_worker != 1 else cfg.gpus_per_worker
     else:
         # No config file - use CLI models
         model_configs = [parse_model_config(m) for m in model] if model else []
@@ -452,6 +521,18 @@ def launch(
             for t in task_list:
                 command.extend(["-t", t])
 
+            # Add async flags if enabled
+            model_use_async = model_resources.get("use_async", False)
+            model_num_workers = model_resources.get("num_workers")
+            model_gpus_per_worker = model_resources.get("gpus_per_worker", 1)
+
+            if model_use_async:
+                command.append("--async")
+                if model_num_workers is not None:
+                    command.extend(["--num-workers", str(model_num_workers)])
+                if model_gpus_per_worker and model_gpus_per_worker != 1:
+                    command.extend(["--gpus-per-worker", str(model_gpus_per_worker)])
+
             job_config = BeakerJobConfig(
                 name=exp_name,
                 command=command,
@@ -464,6 +545,7 @@ def launch(
                 retries=retries,
                 workspace=workspace or BEAKER_DEFAULT_WORKSPACE,
                 budget=budget or BEAKER_DEFAULT_BUDGET,
+                backends=list(backends) if backends else [],
             )
 
             if dry_run:

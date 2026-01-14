@@ -20,10 +20,11 @@ set -euo pipefail
 # This ensures safe rollback capability if issues are discovered.
 
 # Defaults matching beaker.py
-SOURCE_IMAGE="olmo-eval:latest"
-BEAKER_IMAGE="olmo-eval-latest"
+SOURCE_IMAGE=""
+BEAKER_IMAGE=""
 WORKSPACE="ai2/oe-data"
 DRY_RUN=false
+AUTO_NAME=true
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -34,6 +35,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --beaker-image)
             BEAKER_IMAGE="$2"
+            AUTO_NAME=false
             shift 2
             ;;
         --workspace)
@@ -62,6 +64,24 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Auto-detect source image if not specified (use most recent build)
+if [[ -z "$SOURCE_IMAGE" ]]; then
+    SOURCE_IMAGE=$(docker images olmo-eval --format "{{.Repository}}:{{.Tag}}" | head -n 1)
+    if [[ -z "$SOURCE_IMAGE" ]]; then
+        echo "Error: No olmo-eval images found. Build an image first."
+        exit 1
+    fi
+    echo "Auto-detected source image: ${SOURCE_IMAGE}"
+fi
+
+# Auto-generate Beaker image name from source tag
+if [[ "$AUTO_NAME" == "true" ]]; then
+    # Extract tag from source image (e.g., olmo-eval:cuda128-torch280-amd64 -> cuda128-torch280-amd64)
+    SOURCE_TAG=$(echo "$SOURCE_IMAGE" | cut -d':' -f2)
+    BEAKER_IMAGE="olmo-eval-${SOURCE_TAG}"
+    echo "Auto-generated Beaker image name: ${BEAKER_IMAGE}"
+fi
 
 # Check dependencies
 if ! command -v beaker &> /dev/null; then

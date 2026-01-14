@@ -41,3 +41,14 @@ Thumbs.db
 
 # Documentation builds
 docs/_build/
+
+# Development and CI
+tests/
+scripts/
+.github/
+.gitlab-ci.yml
+
+# Build files
+Dockerfile.backup
+*.md
+!README.md

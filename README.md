@@ -25,16 +25,40 @@ olmo-eval run -m llama3.1-8b -t arc_challenge::olmes --dry-run
 
 # Run evaluation
 olmo-eval run -m olmo-2-7b -t olmes_core --limit 100
+
+# Run tasks in parallel across GPUs (faster)
+olmo-eval run --async -m olmo-2-7b -t mmlu -t gsm8k -t arc
+
+# Specify number of workers and GPUs per worker
+olmo-eval run --async --num-workers 4 --gpus-per-worker 2 -m llama3.1-70b -t mmlu
+```
+
+## Parallel Execution
+
+By default, tasks run sequentially. Use `--async` to run tasks in parallel across multiple GPUs:
+
+```bash
+# Sequential (default) - runs one task at a time
+olmo-eval run -m llama3.1-8b -t mmlu -t gsm8k -t arc
+
+# Parallel - runs tasks in parallel across available GPUs
+olmo-eval run --async -m llama3.1-8b -t mmlu -t gsm8k -t arc
+
+# Control number of workers (default: auto-detect from GPUs)
+olmo-eval run --async --num-workers 4 -m llama3.1-8b -t mmlu -t gsm8k
+
+# For multi-GPU models, specify GPUs per worker
+olmo-eval run --async --num-workers 2 --gpus-per-worker 4 -m llama3.1-70b -t mmlu
 ```
 
 ## Key Concepts
 
 ### Tasks and Regimes
 
-Tasks live in `olmo_eval/tasks/` and are registered with the `@register` decorator. Regimes are named configuration variants:
+Tasks live in `olmo_eval/evals/tasks/` and are registered with the `@register` decorator. Regimes are named configuration variants:
 
 ```python
-from olmo_eval.tasks import Task, TaskConfig, register
+from olmo_eval.evals.tasks import Task, TaskConfig, register
 
 @register("arc_challenge", lambda: TaskConfig(...))
 class ARCChallenge(Task): ...
@@ -187,6 +211,26 @@ olmo-eval results --group "benchmark-2024" --wait --format csv > results.csv
 olmo-eval results --group "benchmark-2024" --format json
 ```
 
+### Runtime Backend Installation
+
+Docker images do NOT include inference backends (vllm, transformers, litellm) by default. Install them at runtime when launching jobs:
+
+```bash
+# Install vLLM at runtime
+olmo-eval launch -n "eval-vllm" -m llama3.1-8b -t mmlu \
+    --backends vllm==0.13.0
+
+# Install multiple backends
+olmo-eval launch -n "eval-multi" -m llama3.1-8b -t mmlu \
+    --backends vllm==0.13.0 \
+    --backends transformers
+
+# Short flag
+olmo-eval launch -n "eval-vllm" -m llama3.1-8b -t mmlu -b vllm==0.13.0
+```
+
+Backends are installed via `uv pip install` at job startup before evaluation runs.
+
 ### CLI Options
 
 | Option | Short | Default | Description |
@@ -202,6 +246,7 @@ olmo-eval results --group "benchmark-2024" --format json
 | `--timeout` | | `24h` | Job timeout (e.g., `24h`, `30m`) |
 | `--retries` | | none | Number of retries on failure |
 | `--group` | `-g` | none | Add experiments to this Beaker group |
+| `--backends` | `-b` | none | Backends to install at runtime (can specify multiple) |
 | `--workspace` | | `ai2/oe-data` | Beaker workspace |
 | `--budget` | | `ai2/oe-base` | Beaker budget |
 | `--dry-run` | | `false` | Print spec without launching |
@@ -240,6 +285,21 @@ olmo-eval launch -f eval_config.yaml --gpus 4 --priority high
 
 # Add additional models via CLI
 olmo-eval launch -f eval_config.yaml -m olmo-2-7b
+```
+
+**Config with runtime backends**:
+
+```yaml
+name: eval-vllm
+models:
+  - llama3.1-8b
+tasks:
+  - mmlu
+  - gsm8k
+backends:
+  - vllm==0.13.0
+cluster: h100
+gpus: 1
 ```
 
 **Multi-model comparison config**:
@@ -326,6 +386,7 @@ description: "Full evaluation suite for Llama 70B"
 | `preemptible` | bool | no | Allow preemption (default: `true`) |
 | `timeout` | string | no | Job timeout (default: `24h`) |
 | `retries` | int | no | Retry count on failure |
+| `backends` | list | no | Backends to install at runtime (e.g., `["vllm==0.13.0"]`) |
 | `workspace` | string | no | Beaker workspace |
 | `budget` | string | no | Beaker budget |
 | `description` | string | no | Experiment description |
@@ -360,40 +421,78 @@ print(f"Launched: {launcher.beaker.experiment.url(experiment)}")
 
 ## Docker Image Management
 
-The evaluation jobs on Beaker use a Docker image that contains olmo-eval and all its dependencies.
+Docker images provide the runtime environment (Python, PyTorch, CUDA) but do NOT include:
+- **Source code** - Gantry mounts your git repository at runtime
+- **Backends** - Install at job startup using `--backends` flag
 
-### Building the Image
+This approach allows you to:
+- Use any git commit without rebuilding images
+- Mix and match backend versions per job
+- Keep images small and cacheable
+
+### Building Images
+
+Images are tagged with CUDA and PyTorch versions: `cuda{version}-torch{version}-{arch}`
 
 ```bash
-# Build locally
+# Build with defaults (CUDA 12.8.0 + PyTorch 2.8.0)
 ./scripts/build_image.sh
 
-# Build with specific vLLM version
-./scripts/build_image.sh --vllm-version 0.14.0
+# Specific CUDA + PyTorch version
+./scripts/build_image.sh --cuda-version 12.8.0 --torch-version 2.8.0
 
-# Force rebuild without cache
-./scripts/build_image.sh --no-cache
+# Production build (amd64)
+./scripts/build_image.sh --platform linux/amd64
 
-# Test locally
-docker run --rm olmo-eval:latest --help
-docker run --rm --gpus all olmo-eval:latest models
+# See supported CUDA+PyTorch pairs
+./scripts/build_image.sh --help
+```
+
+**Supported CUDA versions**: 12.6.1, 12.8.0, 12.9.1
+**Supported PyTorch versions**: 2.7.1, 2.8.0, 2.9.1
+**Valid pairs**: See `scripts/build_config.sh`
+
+### What's in the Image
+
+The image contains ONLY:
+- Python 3.12 (via uv)
+- PyTorch with CUDA support
+- System dependencies (git, uv, ca-certificates)
+
+The image does NOT contain:
+- olmo-eval source code (provided by gantry at runtime)
+- olmo-eval dependencies like click, datasets, rich, etc. (installed at job startup)
+- Storage backends like boto3, psycopg (installed at job startup if needed)
+- Inference backends like vllm, transformers, litellm (installed at job startup)
+
+### Installing Backends at Runtime
+
+Inference backends are NOT baked into images. Install them when launching jobs:
+
+```bash
+# Install vLLM
+olmo-eval launch -n "eval" -m llama3.1-8b -t mmlu --backends vllm==0.13.0
+
+# Install multiple backends
+olmo-eval launch -n "eval" -m llama3.1-8b -t mmlu \
+  --backends vllm==0.13.0 \
+  --backends transformers
+
+# Or manually inside container
+uv pip install vllm==0.13.0
 ```
 
 ### Pushing to Beaker
 
-The push script safely versions images by archiving the previous version
-with a timestamp suffix before replacing it.
-
 ```bash
-# Push to Beaker (requires beaker CLI authentication)
+# Push most recent build
 ./scripts/beaker/push_beaker_image.sh
 
 # Preview without pushing
 ./scripts/beaker/push_beaker_image.sh --dry-run
-
-# Push with custom workspace
-./scripts/beaker/push_beaker_image.sh --workspace ai2/my-workspace
 ```
+
+The script auto-detects the image name from the tag (e.g., `multi-cuda128-torch280-amd64`)
 
 ## Development
 

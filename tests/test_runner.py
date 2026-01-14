@@ -4,8 +4,9 @@ import pytest
 
 # Import to ensure tasks and suites are registered
 import olmo_eval.evals  # noqa: F401
-import olmo_eval.tasks  # noqa: F401
-from olmo_eval.runner import EvalRunner, ValidationError
+import olmo_eval.evals.tasks  # noqa: F401
+from olmo_eval.runners import EvalRunner
+from olmo_eval.runners.sequential import ValidationError
 
 
 class TestEvalRunnerValidation:
