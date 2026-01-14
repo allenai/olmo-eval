@@ -567,23 +567,34 @@ class BeakerLauncher:
         """Get existing group or create a new one.
 
         Args:
-            name: Group name.
+            name: Group name (can be short name or user-qualified).
             workspace: Workspace for the group. Uses default if None.
             description: Optional description for new groups.
 
         Returns:
             The existing or newly created group.
         """
-        from beaker.exceptions import BeakerGroupNotFound
+        from beaker.exceptions import BeakerGroupConflict, BeakerGroupNotFound
+
+        # Try to get existing group - needs user-qualified name for lookup
+        # If name doesn't contain "/", try with current user prefix
+        if "/" not in name:
+            qualified_name = f"{self.beaker.user_name}/{name}"
+        else:
+            qualified_name = name
 
         try:
-            return self.beaker.group.get(name)
+            return self.beaker.group.get(qualified_name)
         except BeakerGroupNotFound:
-            return self.beaker.group.create(
-                name=name,
-                workspace=workspace or self._workspace,
-                description=description,
-            )
+            try:
+                return self.beaker.group.create(
+                    name=name,  # Create uses short name
+                    workspace=workspace or self._workspace,
+                    description=description,
+                )
+            except BeakerGroupConflict:
+                # Group was created between our get and create calls, fetch it
+                return self.beaker.group.get(qualified_name)
 
     def add_experiments_to_group(
         self,
