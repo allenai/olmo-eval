@@ -13,7 +13,7 @@ class ModelConfig:
     """Model/backend configuration."""
 
     model: str
-    backend: str = "hf"  # BackendType value as string to avoid circular import
+    backend: str = "vllm"  # BackendType value as string to avoid circular import
     revision: str | None = None
     trust_remote_code: bool = False
     dtype: str = "auto"
