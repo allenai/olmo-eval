@@ -1136,7 +1136,6 @@ def group_list(workspace: str | None, limit: int, search: str | None, mine: bool
             table.add_row(grp.name, "-", "?", "[dim]error[/dim]", "-")
 
     console.print(table)
-    console.print("\n[dim]Status format: succeeded/running/failed[/dim]")
 
 
 if __name__ == "__main__":
