@@ -297,6 +297,12 @@ def suite_info(suite_name: str) -> None:
 @click.option("--async", "use_async", is_flag=True, help="Enable parallel task execution")
 @click.option("--num-workers", type=int, help="Number of workers for async mode")
 @click.option("--gpus-per-worker", type=int, default=1, help="GPUs per worker for async mode")
+@click.option(
+    "--flash-attn",
+    type=click.Choice(["2", "3", "none"]),
+    default=None,
+    help="Flash Attention version to install (2, 3, or none)",
+)
 @click.option("--dry-run", is_flag=True, help="Print spec without launching")
 def launch(
     config: str | None,
@@ -316,6 +322,7 @@ def launch(
     use_async: bool,
     num_workers: int | None,
     gpus_per_worker: int,
+    flash_attn: str | None,
     dry_run: bool,
 ) -> None:
     """Launch an evaluation job on Beaker.
@@ -326,6 +333,7 @@ def launch(
     Use --config/-f to load settings from a YAML file; CLI arguments override config values.
     Use --group/-g to organize experiments into a Beaker group for result aggregation.
     Use --backends/-b to install inference backends at runtime (e.g., vllm, transformers).
+    Use --flash-attn to install Flash Attention at runtime (2 for FA2, 3 for FA3).
 
     Examples:
 
@@ -404,6 +412,10 @@ def launch(
         retries = retries if retries is not None else cfg.retries
         workspace = workspace or cfg.workspace
         budget = budget or cfg.budget
+
+        # Flash Attention: CLI overrides config
+        if flash_attn is None and cfg.flash_attn is not None:
+            flash_attn = str(cfg.flash_attn)
 
         # Get model configs from file (with per-model resource overrides)
         if not model:
@@ -588,6 +600,11 @@ def launch(
                 backend_dep = BACKEND_DEPENDENCIES.get(runtime_backend)
                 effective_backends = [backend_dep] if backend_dep else []
 
+            # Convert flash_attn string to int (None, 2, or 3)
+            effective_flash_attn: int | None = None
+            if flash_attn is not None and flash_attn != "none":
+                effective_flash_attn = int(flash_attn)
+
             job_config = BeakerJobConfig(
                 name=exp_name,
                 command=command,
@@ -601,6 +618,7 @@ def launch(
                 workspace=workspace or BEAKER_DEFAULT_WORKSPACE,
                 budget=budget or BEAKER_DEFAULT_BUDGET,
                 backends=effective_backends,
+                flash_attn=effective_flash_attn,
                 group=effective_group,
             )
 

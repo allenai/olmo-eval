@@ -160,6 +160,7 @@ class LaunchConfig:
         beaker_image: Container image to use.
         description: Optional experiment description.
         backends: List of backends to install at runtime (e.g., ["vllm==0.13.0", "transformers"]).
+        flash_attn: Flash Attention version to install (2, 3, or None for no FA).
     """
 
     # Required fields
@@ -190,6 +191,9 @@ class LaunchConfig:
 
     # Runtime backend installation
     backends: list[str] | None = None
+
+    # Flash Attention version (2, 3, or None)
+    flash_attn: int | None = None
 
     def get_model_configs(self) -> list[ModelConfig]:
         """Get parsed ModelConfig objects for all models.

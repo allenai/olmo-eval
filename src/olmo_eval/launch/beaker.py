@@ -277,6 +277,9 @@ class BeakerJobConfig:
     # Runtime backend installation
     backends: list[str] = field(default_factory=list)
 
+    # Flash Attention version (2, 3, or None)
+    flash_attn: int | None = None
+
     # Group assignment - experiment will be added to this group at creation time
     group: str | None = None
 
@@ -376,13 +379,19 @@ class BeakerLauncher:
             self._beaker = Beaker.from_env(default_workspace=self._workspace)
         return self._beaker
 
-    def _build_command_with_backends(self, command: list[str], backends: list[str]) -> list[str]:
+    def _build_command_with_backends(
+        self,
+        command: list[str],
+        backends: list[str],
+        flash_attn: int | None = None,
+    ) -> list[str]:
         """Build command with source installation and backend installation prepended.
 
         Gantry clones the source code to /gantry-runtime, so we:
         1. Install olmo-eval from the cloned source
         2. Install any requested backends
-        3. Run the actual command
+        3. Install Flash Attention if requested
+        4. Run the actual command
         """
         # Build the full command
         steps = []
@@ -394,6 +403,11 @@ class BeakerLauncher:
         if backends:
             for backend in backends:
                 steps.append(f"uv pip install {backend}")
+
+        # Install Flash Attention if requested
+        if flash_attn is not None:
+            # Use the install script from the cloned source
+            steps.append(f"/gantry-runtime/scripts/install_flash_attn.sh --fa{flash_attn}")
 
         # Run the actual command
         steps.append(" ".join(command))
@@ -415,7 +429,9 @@ class BeakerLauncher:
 
         clusters = resolve_clusters(config.cluster)
 
-        final_command = self._build_command_with_backends(config.command, config.backends)
+        final_command = self._build_command_with_backends(
+            config.command, config.backends, config.flash_attn
+        )
 
         # Build weka mounts as tuples: (bucket, mount_path)
         weka_mounts: list[tuple[str, str]] = []
