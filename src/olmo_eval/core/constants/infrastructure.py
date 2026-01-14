@@ -19,7 +19,7 @@ BEAKER_DEFAULT_BUDGET = "ai2/oe-base"
 BEAKER_DEFAULT_PRIORITY = "normal"
 """Default job priority level."""
 
-BEAKER_DEFAULT_IMAGE = "ai2/oe-data/olmo-eval-latest"
+BEAKER_DEFAULT_IMAGE = "ai2-tylerm/olmo-eval-cuda128-torch280-amd64"
 """Default Docker image for Beaker evaluation jobs."""
 
 
