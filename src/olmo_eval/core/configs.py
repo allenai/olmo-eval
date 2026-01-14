@@ -59,6 +59,40 @@ def expand_tasks(tasks: list[str]) -> list[str]:
     return result
 
 
+def validate_tasks(tasks: list[str]) -> tuple[list[str], list[str]]:
+    """Validate that all tasks/suites exist and return expanded task list.
+
+    Args:
+        tasks: List of task specs or suite names.
+
+    Returns:
+        Tuple of (valid_tasks, invalid_tasks). valid_tasks is the expanded list
+        of all task specs. invalid_tasks contains any specs that don't exist.
+    """
+    from olmo_eval.evals.suites import suite_exists
+    from olmo_eval.evals.tasks import parse_task_spec, task_exists
+
+    valid_tasks = []
+    invalid_tasks = []
+
+    expanded = expand_tasks(tasks)
+
+    for spec in expanded:
+        # Strip any priority suffix (e.g., "mmlu@high" -> "mmlu")
+        task_spec = spec.split("@")[0] if "@" in spec else spec
+
+        # Check if the base task exists
+        if task_exists(task_spec):
+            valid_tasks.append(spec)
+        elif suite_exists(task_spec):
+            # It's a suite that wasn't expanded (shouldn't happen but handle it)
+            valid_tasks.append(spec)
+        else:
+            invalid_tasks.append(spec)
+
+    return valid_tasks, invalid_tasks
+
+
 def get_model_config(name: str, **overrides: Any) -> ModelConfig:
     """Get a model config by preset name with optional overrides.
 

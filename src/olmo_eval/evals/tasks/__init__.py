@@ -1,15 +1,32 @@
 """Task framework for evaluation."""
 
 from .base import Task, TaskConfig
-from .registry import clear_registry, get_task, list_tasks, register
+from .registry import (
+    clear_registry,
+    get_task,
+    list_regimes,
+    list_tasks,
+    list_variants,
+    parse_task_spec,
+    register,
+    register_regime,
+    register_variant,
+    task_exists,
+)
 
 __all__ = [
     "Task",
     "TaskConfig",
-    "register",
-    "get_task",
-    "list_tasks",
     "clear_registry",
+    "get_task",
+    "list_regimes",
+    "list_tasks",
+    "list_variants",
+    "parse_task_spec",
+    "register",
+    "register_regime",
+    "register_variant",
+    "task_exists",
 ]
 
 # Import task modules to trigger registration (must be after exports to avoid circular import)
@@ -30,3 +47,6 @@ from . import minerva as _minerva  # noqa: F401, E402
 from . import mmlu as _mmlu  # noqa: F401, E402
 from . import qa as _qa  # noqa: F401, E402
 from . import wikitext as _wikitext  # noqa: F401, E402
+
+# Register common variants after all tasks are registered
+from . import variants as _variants  # noqa: F401, E402

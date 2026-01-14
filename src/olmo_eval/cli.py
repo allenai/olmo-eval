@@ -453,6 +453,20 @@ def launch(
         console.print(f"[red]Error:[/red] {e}")
         raise SystemExit(1) from None
 
+    # Validate all tasks exist before launching to Beaker
+    from olmo_eval.core.configs import validate_tasks
+
+    all_task_specs = [t for tasks in tasks_by_priority.values() for t in tasks]
+    valid_tasks, invalid_tasks = validate_tasks(all_task_specs)
+
+    if invalid_tasks:
+        console.print("[red]Error:[/red] The following tasks/suites do not exist:")
+        for inv in invalid_tasks:
+            console.print(f"  - {inv}")
+        console.print("\nUse 'olmo-eval list tasks' to see available tasks.")
+        console.print("Use 'olmo-eval list suites' to see available suites.")
+        raise SystemExit(1)
+
     launcher = BeakerLauncher(workspace=workspace or BEAKER_DEFAULT_WORKSPACE)
     multiple_models = len(model_configs) > 1
     multiple_priorities = len(tasks_by_priority) > 1
