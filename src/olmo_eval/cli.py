@@ -380,9 +380,6 @@ def launch(
     cli_priority = priority
     cli_preemptible = preemptible
     cli_timeout = timeout
-    cli_use_async = use_async
-    cli_num_workers = num_workers
-    cli_gpus_per_worker = gpus_per_worker if gpus_per_worker != 1 else None
 
     # Load config from file if provided
     cfg: LaunchConfig | None = None

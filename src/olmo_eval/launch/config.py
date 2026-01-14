@@ -208,7 +208,9 @@ class LaunchConfig:
         # Determine async settings
         use_async = model.use_async if model.use_async is not None else self.use_async
         num_workers = model.num_workers if model.num_workers is not None else self.num_workers
-        gpus_per_worker = model.gpus_per_worker if model.gpus_per_worker is not None else self.gpus_per_worker
+        gpus_per_worker = (
+            model.gpus_per_worker if model.gpus_per_worker is not None else self.gpus_per_worker
+        )
 
         # Calculate total GPUs needed for async mode
         if use_async and num_workers is not None:
