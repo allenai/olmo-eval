@@ -996,14 +996,20 @@ def group_cancel(group_name: str, yes: bool) -> None:
 @click.option("--workspace", "-w", help="Filter by workspace")
 @click.option("--limit", "-n", type=int, default=20, help="Number of groups to show")
 @click.option("--search", "-s", help="Search by name or description")
-def group_list(workspace: str | None, limit: int, search: str | None) -> None:
+@click.option("--mine/--all", default=True, help="Show only my groups (default) or all groups")
+def group_list(
+    workspace: str | None, limit: int, search: str | None, mine: bool
+) -> None:
     """List Beaker groups.
 
-    Shows recent groups with their status summaries.
+    Shows recent groups with their status summaries. By default, only shows
+    groups created by the current user. Use --all to show all groups.
 
     Examples:
 
         olmo-eval group list
+
+        olmo-eval group list --all
 
         olmo-eval group list --workspace ai2/oe-data
 
@@ -1022,14 +1028,30 @@ def group_list(workspace: str | None, limit: int, search: str | None) -> None:
 
     launcher = BeakerLauncher()
 
+    # Get current user ID for filtering
+    current_user_id = None
+    if mine:
+        try:
+            current_user_id = launcher.beaker.user.get(launcher.beaker.user_name).id
+        except Exception:
+            console.print("[yellow]Warning: Could not get current user, showing all groups[/yellow]")
+
     try:
-        groups = list(
+        # Fetch more than limit if filtering by user, since we filter client-side
+        fetch_limit = limit * 5 if mine and current_user_id else limit
+        all_groups = list(
             launcher.beaker.group.list(
                 workspace=workspace or BEAKER_DEFAULT_WORKSPACE,
                 name_or_description=search,
-                limit=limit,
+                limit=fetch_limit,
             )
         )
+
+        # Filter to current user's groups if requested
+        if mine and current_user_id:
+            groups = [g for g in all_groups if g.author_id == current_user_id][:limit]
+        else:
+            groups = all_groups[:limit]
     except Exception as e:
         console.print(f"[red]Error:[/red] {e}")
         raise SystemExit(1) from None
@@ -1038,38 +1060,80 @@ def group_list(workspace: str | None, limit: int, search: str | None) -> None:
         console.print("[dim]No groups found.[/dim]")
         return
 
+    # Cache workspace lookups
+    workspace_names: dict[str, str] = {}
+
+    # Status value mappings (from BeakerWorkloadStatus)
+    RUNNING_STATUSES = {1, 2, 3, 4, 5, 6, 10}  # submitted, queued, initializing, running, etc.
+    SUCCEEDED_STATUS = 8
+    FAILED_STATUS = 9
+
     table = Table(title="Beaker Groups")
     table.add_column("Name", style="cyan")
+    table.add_column("Workspace", style="dim")
     table.add_column("Experiments", justify="right")
     table.add_column("Status")
     table.add_column("Created", style="dim")
 
     for grp in groups:
         try:
-            experiments = launcher.get_group_experiments(grp)
+            # Get experiment info from task metrics
+            task_metrics = list(launcher.beaker.group.list_task_metrics(grp))
+
+            # Count unique experiments and their statuses
+            experiments: dict[str, int] = {}  # exp_id -> worst status
+            for tm in task_metrics:
+                exp_id = tm.experiment_id
+                # Keep the worst status (failed > running > succeeded)
+                if exp_id not in experiments:
+                    experiments[exp_id] = tm.task_status
+                elif tm.task_status == FAILED_STATUS:
+                    experiments[exp_id] = FAILED_STATUS
+                elif tm.task_status in RUNNING_STATUSES and experiments[exp_id] == SUCCEEDED_STATUS:
+                    experiments[exp_id] = tm.task_status
+
             exp_count = len(experiments)
 
             if exp_count > 0:
-                status = launcher.get_group_status(grp)
+                succeeded = sum(1 for s in experiments.values() if s == SUCCEEDED_STATUS)
+                failed = sum(1 for s in experiments.values() if s == FAILED_STATUS)
+                running = sum(1 for s in experiments.values() if s in RUNNING_STATUSES)
                 status_str = (
-                    f"[green]{status.get('succeeded', 0)}[/green]/"
-                    f"[yellow]{status.get('running', 0)}[/yellow]/"
-                    f"[red]{status.get('failed', 0)}[/red]"
+                    f"[green]{succeeded}[/green]/"
+                    f"[yellow]{running}[/yellow]/"
+                    f"[red]{failed}[/red]"
                 )
             else:
                 status_str = "[dim]empty[/dim]"
 
-            # Format creation time
-            created_str = grp.created.strftime("%Y-%m-%d %H:%M") if grp.created else "-"
+            # Format creation time from protobuf Timestamp
+            created_str = "-"
+            if grp.created and grp.created.seconds:
+                from datetime import datetime, timezone
+
+                created_dt = datetime.fromtimestamp(grp.created.seconds, tz=timezone.utc)
+                created_str = created_dt.strftime("%Y-%m-%d %H:%M")
+
+            # Get workspace name (with caching)
+            workspace_name = "-"
+            if grp.workspace_id:
+                if grp.workspace_id not in workspace_names:
+                    try:
+                        ws = launcher.beaker.workspace.get(grp.workspace_id)
+                        workspace_names[grp.workspace_id] = ws.name
+                    except Exception:
+                        workspace_names[grp.workspace_id] = grp.workspace_id
+                workspace_name = workspace_names[grp.workspace_id]
 
             table.add_row(
                 grp.name,
+                workspace_name,
                 str(exp_count),
                 status_str,
                 created_str,
             )
         except Exception:
-            table.add_row(grp.name, "?", "[dim]error[/dim]", "-")
+            table.add_row(grp.name, "-", "?", "[dim]error[/dim]", "-")
 
     console.print(table)
     console.print("\n[dim]Status format: succeeded/running/failed[/dim]")
