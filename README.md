@@ -492,7 +492,7 @@ uv pip install vllm==0.13.0
 ./scripts/beaker/push_beaker_image.sh --dry-run
 ```
 
-The script auto-detects the image name from the tag (e.g., `multi-cuda128-torch280-amd64`)
+The script auto-detects the image name from the tag (e.g., `olmo-eval-cuda128-amd64`)
 
 ## Development
 

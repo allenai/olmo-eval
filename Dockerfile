@@ -1,19 +1,18 @@
 # OLMo Evaluation Framework Docker Image
 #
-# Multi-stage build with configurable CUDA + PyTorch versions.
-# Contains ONLY: Python, PyTorch, CUDA, and system dependencies.
-# Everything else (source code, dependencies, backends) installed at runtime via gantry/uv.
+# Minimal base image with CUDA runtime and Python.
+# Backend dependencies (vllm, transformers, etc.) and torch installed at runtime via gantry/uv.
 #
 # Build:
 #   ./scripts/build_image.sh
-#   ./scripts/build_image.sh --cuda-version 12.8.0 --torch-version 2.8.0
+#   ./scripts/build_image.sh --cuda-version 12.8.0
 #   ./scripts/build_image.sh --platform linux/amd64
 #
-# Tags: cuda{ver}-torch{ver}-{arch}
-# Example: cuda128-torch280-amd64
+# Tags: cuda{ver}-{arch}
+# Example: cuda128-amd64
 
 # ============================================================================
-# Stage 1: Builder - Install PyTorch with CUDA support
+# Stage 1: Builder - Set up Python environment
 # ============================================================================
 ARG CUDA_VERSION=12.8.0
 FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04 AS builder
@@ -28,23 +27,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /build
 
-# Use uv to install Python 3.12
-RUN uv python install 3.12
-
-# Build arguments
-ARG TORCH_VERSION=2.8.0
-ARG CUDA_VERSION=12.8.0
-
-# Create virtual environment
-RUN echo "Installing Python 3.12 and creating virtual environment..." && \
+# Use uv to install Python 3.12 and create virtual environment
+RUN uv python install 3.12 && \
     uv venv /opt/venv --python 3.12
-
-# Install torch with CUDA support (only dependency in the image)
-RUN echo "Installing PyTorch ${TORCH_VERSION} with CUDA ${CUDA_VERSION} support..." && \
-    CUDA_SHORT=$(echo "${CUDA_VERSION}" | sed 's/\.//g' | cut -c1-3) && \
-    uv pip install --python /opt/venv/bin/python \
-        "torch==${TORCH_VERSION}" \
-        --index-url "https://download.pytorch.org/whl/cu${CUDA_SHORT}"
 
 # ============================================================================
 # Stage 2: Runtime - Minimal production image
@@ -55,15 +40,17 @@ FROM nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu22.04
 LABEL org.opencontainers.image.source="https://github.com/allenai/olmo-eval-internal"
 LABEL org.opencontainers.image.description="OLMo evaluation framework - minimal runtime"
 ARG CUDA_VERSION=12.8.0
-ARG TORCH_VERSION=2.8.0
 LABEL cuda_version="${CUDA_VERSION}"
-LABEL torch_version="${TORCH_VERSION}"
 
-# Install minimal runtime dependencies
+# Install runtime dependencies (includes build tools for triton/torch JIT compilation)
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
     ca-certificates \
+    cmake \
     curl \
+    gcc \
     git \
+    wget \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
