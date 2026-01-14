@@ -501,6 +501,7 @@ def launch(
                 ),
                 "timeout": (model_cfg.timeout if model_cfg.timeout is not None else timeout),
                 "shared_memory": model_cfg.shared_memory,
+                "backend": model_cfg.backend,
             }
 
         # CLI args always override per-model config
@@ -552,6 +553,15 @@ def launch(
                 if model_gpus_per_worker and model_gpus_per_worker != 1:
                     command.extend(["--gpus-per-worker", str(model_gpus_per_worker)])
 
+            # CLI backends override per-model backend
+            model_backend = model_resources.get("backend")
+            if backends:
+                effective_backends = list(backends)
+            elif model_backend:
+                effective_backends = [model_backend]
+            else:
+                effective_backends = []
+
             job_config = BeakerJobConfig(
                 name=exp_name,
                 command=command,
@@ -564,7 +574,7 @@ def launch(
                 retries=retries,
                 workspace=workspace or BEAKER_DEFAULT_WORKSPACE,
                 budget=budget or BEAKER_DEFAULT_BUDGET,
-                backends=list(backends) if backends else [],
+                backends=effective_backends,
                 group=effective_group,
             )
 

@@ -62,13 +62,16 @@ class ModelConfig:
         use_async: Enable parallel task execution (overrides default).
         num_workers: Number of workers for async mode (overrides default).
         gpus_per_worker: GPUs per worker for async mode (overrides default).
+        backend: Backend to install for this model (e.g., "vllm==0.13.0").
 
     Example:
         models:
           - name: llama3.1-8b
             gpus: 1
+            backend: vllm==0.13.0
           - name: llama3.1-70b
             gpus: 8
+            backend: transformers
             use_async: true
             num_workers: 2
             gpus_per_worker: 4
@@ -88,6 +91,9 @@ class ModelConfig:
     use_async: bool | None = None
     num_workers: int | None = None
     gpus_per_worker: int | None = None
+
+    # Runtime backend installation (overrides default backend)
+    backend: str | None = None
 
 
 def parse_model_config(model: str | dict[str, Any] | ModelConfig) -> ModelConfig:
@@ -229,6 +235,7 @@ class LaunchConfig:
             "use_async": use_async,
             "num_workers": num_workers,
             "gpus_per_worker": gpus_per_worker,
+            "backend": model.backend,
         }
 
     @classmethod

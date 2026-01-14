@@ -379,16 +379,16 @@ class BeakerLauncher:
     def _build_command_with_backends(self, command: list[str], backends: list[str]) -> list[str]:
         """Build command with source installation and backend installation prepended.
 
-        Gantry mounts the source code at /workspace, so we:
-        1. Install olmo-eval from the mounted source
+        Gantry clones the source code to /gantry-runtime, so we:
+        1. Install olmo-eval from the cloned source
         2. Install any requested backends
         3. Run the actual command
         """
         # Build the full command
         steps = []
 
-        # Install olmo-eval from gantry-mounted source
-        steps.append("uv pip install -e /workspace")
+        # Install olmo-eval from gantry-cloned source
+        steps.append("uv pip install -e /gantry-runtime")
 
         # Install backends if requested
         if backends:

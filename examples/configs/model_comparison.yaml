@@ -15,7 +15,7 @@ tasks:
   - arc_challenge
   - winogrande
 
-cluster: h100
+cluster: ai2/ceres
 gpus: 1
 priority: normal
 preemptible: true

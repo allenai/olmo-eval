@@ -14,7 +14,7 @@ tasks:
   - winogrande
   - truthfulqa
 
-cluster: h100
+cluster: ai2/ceres
 gpus: 4
 priority: high
 preemptible: false
