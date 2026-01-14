@@ -458,7 +458,27 @@ def launch(
     if dry_run:
         console.print("[yellow]Dry run mode - not submitting[/yellow]")
 
-    # Track launched experiments for grouping
+    # Always use groups for all experiments
+    # Auto-generate group name from experiment name if not specified
+    from datetime import datetime
+
+    effective_group = group or f"{name}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    console.print(f"[blue]Group:[/blue] {effective_group}")
+
+    # Pre-create the group so it exists when experiments reference it
+    if not dry_run:
+        try:
+            beaker_group = launcher.get_or_create_group(
+                name=effective_group,
+                workspace=workspace or BEAKER_DEFAULT_WORKSPACE,
+            )
+            group_url = launcher.get_group_url(beaker_group)
+            console.print(f"[blue]Group URL:[/blue] {group_url}")
+        except Exception as e:
+            console.print(f"[yellow]Warning:[/yellow] Failed to create group: {e}")
+            effective_group = None  # Fall back to no group if creation fails
+
+    # Track launched experiments
     launched_experiments: list[str] = []
 
     # Launch one experiment per model and priority level
@@ -543,6 +563,7 @@ def launch(
                 workspace=workspace or BEAKER_DEFAULT_WORKSPACE,
                 budget=budget or BEAKER_DEFAULT_BUDGET,
                 backends=list(backends) if backends else [],
+                group=effective_group,
             )
 
             if dry_run:
@@ -555,26 +576,9 @@ def launch(
                     console.print(f"[green]Launched:[/green] {launcher.experiment_url(experiment)}")
                     launched_experiments.append(experiment.id)
 
-    # Always use groups for all experiments
-    # Auto-generate group name from experiment name if not specified
+    # Summary of launched experiments
     if launched_experiments and not dry_run:
-        from datetime import datetime
-
-        effective_group = group or f"{name}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-        try:
-            beaker_group = launcher.get_or_create_group(
-                name=effective_group,
-                workspace=workspace or BEAKER_DEFAULT_WORKSPACE,
-            )
-            launcher.add_experiments_to_group(beaker_group, launched_experiments)
-            group_url = launcher.get_group_url(beaker_group)
-            num_exp = len(launched_experiments)
-            console.print(
-                f"[blue]Group:[/blue] Added {num_exp} experiment(s) to '{effective_group}'"
-            )
-            console.print(f"[blue]Group URL:[/blue] {group_url}")
-        except Exception as e:
-            console.print(f"[yellow]Warning:[/yellow] Failed to add experiments to group: {e}")
+        console.print(f"\n[bold]Launched {len(launched_experiments)} experiment(s)[/bold]")
 
 
 @main.command()
@@ -818,12 +822,14 @@ def group_info(group_name: str, output_format: str, verbose: bool) -> None:
                     task_list = []
                     for task in tasks:
                         job = launcher.beaker.job.get(task.latest_job) if task.latest_job else None
-                        task_list.append({
-                            "id": task.id,
-                            "name": task.name,
-                            "status": job.status.current if job else "unknown",
-                            "exit_code": job.status.exit_code if job and job.status else None,
-                        })
+                        task_list.append(
+                            {
+                                "id": task.id,
+                                "name": task.name,
+                                "status": job.status.current if job else "unknown",
+                                "exit_code": job.status.exit_code if job and job.status else None,
+                            }
+                        )
                     exp_info["tasks"] = task_list
                 except Exception:
                     pass

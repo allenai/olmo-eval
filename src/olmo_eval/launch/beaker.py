@@ -277,6 +277,9 @@ class BeakerJobConfig:
     # Runtime backend installation
     backends: list[str] = field(default_factory=list)
 
+    # Group assignment - experiment will be added to this group at creation time
+    group: str | None = None
+
 
 def resolve_clusters(cluster: str | list[str]) -> list[str]:
     """Resolve cluster aliases to full cluster names.
@@ -433,6 +436,9 @@ class BeakerLauncher:
         if config.nfs:
             mounts = [("/net/nfs.cirrascale", "/net/nfs.cirrascale")]
 
+        # Build group names list if group is specified
+        group_names: list[str] | None = [config.group] if config.group else None
+
         # If doing a dry run, print config summary and return
         if dry_run:
             self._print_dry_run_config(config, clusters)
@@ -442,6 +448,7 @@ class BeakerLauncher:
                 name=config.name,
                 description=config.description,
                 workspace=config.workspace,
+                group_names=group_names,
                 clusters=clusters,
                 gpus=config.num_gpus,
                 shared_memory=config.shared_memory,
@@ -468,6 +475,7 @@ class BeakerLauncher:
             name=config.name,
             description=config.description,
             workspace=config.workspace,
+            group_names=group_names,
             clusters=clusters,
             gpus=config.num_gpus,
             shared_memory=config.shared_memory,
