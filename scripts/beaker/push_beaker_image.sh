@@ -89,51 +89,73 @@ if ! command -v beaker &> /dev/null; then
     exit 1
 fi
 
+if ! command -v jq &> /dev/null; then
+    echo "Error: 'jq' not found. Install with: brew install jq (macOS) or apt install jq (Linux)"
+    exit 1
+fi
+
 # Generate timestamp for versioning
 TIMESTAMP=$(date -u +"%Y%m%d-%H%M%S")
 
-# Full image names
-FULL_IMAGE="${WORKSPACE}/${BEAKER_IMAGE}"
-TMP_IMAGE="${BEAKER_IMAGE}-tmp"
+# Get beaker account for image references
+BEAKER_ACCOUNT=$(beaker account whoami --format json | jq -r '.[0].name')
+if [[ -z "$BEAKER_ACCOUNT" ]]; then
+    echo "Error: Could not determine Beaker account"
+    exit 1
+fi
+
+# Image names (user-qualified for lookups)
+TMP_IMAGE_NAME="${BEAKER_IMAGE}-tmp"
+TMP_IMAGE_REF="${BEAKER_ACCOUNT}/${TMP_IMAGE_NAME}"
+IMAGE_REF="${BEAKER_ACCOUNT}/${BEAKER_IMAGE}"
 ARCHIVE_IMAGE="${BEAKER_IMAGE}-${TIMESTAMP}"
 
 echo "Pushing image to Beaker..."
 echo "  Source:      ${SOURCE_IMAGE}"
-echo "  Beaker:      ${FULL_IMAGE}"
+echo "  Beaker:      ${IMAGE_REF}"
 echo "  Workspace:   ${WORKSPACE}"
 echo "  Timestamp:   ${TIMESTAMP}"
 echo ""
 
 if [[ "$DRY_RUN" == "true" ]]; then
     echo "[DRY RUN] Would execute:"
-    echo "  1. beaker image create ${SOURCE_IMAGE} --name ${TMP_IMAGE} --workspace ${WORKSPACE}"
-    echo "  2. beaker image rename ${FULL_IMAGE} ${ARCHIVE_IMAGE} (if exists)"
-    echo "  3. beaker image rename ${WORKSPACE}/${TMP_IMAGE} ${BEAKER_IMAGE}"
+    echo "  1. beaker image create ${SOURCE_IMAGE} --name ${TMP_IMAGE_NAME} --workspace ${WORKSPACE}"
+    echo "     (or reuse existing temporary image from previous partial run)"
+    echo "  2. beaker image rename ${IMAGE_REF} ${ARCHIVE_IMAGE} (if exists)"
+    echo "  3. beaker image rename ${TMP_IMAGE_REF} ${BEAKER_IMAGE}"
     exit 0
 fi
 
-# Step 1: Upload as temporary image
+# Step 1: Upload as temporary image (or reuse existing from partial run)
 echo "Step 1/3: Uploading image as temporary..."
-beaker image create \
-    "${SOURCE_IMAGE}" \
-    --name "${TMP_IMAGE}" \
-    --workspace "${WORKSPACE}"
+TMP_IMAGE_ID=$(beaker image get "${TMP_IMAGE_REF}" --format json 2>/dev/null | jq -r '.[0].id' || echo "")
+if [[ -n "$TMP_IMAGE_ID" ]]; then
+    echo "  Reusing existing temporary image from previous run: ${TMP_IMAGE_ID}"
+else
+    TMP_IMAGE_ID=$(beaker image create \
+        "${SOURCE_IMAGE}" \
+        --name "${TMP_IMAGE_NAME}" \
+        --workspace "${WORKSPACE}" \
+        --format json | jq -r '.[0].id // .id')
+    echo "  Created temporary image: ${TMP_IMAGE_ID}"
+fi
 
 # Step 2: Archive existing image (if it exists)
 echo "Step 2/3: Archiving existing image..."
-if beaker image get "${FULL_IMAGE}" &> /dev/null; then
-    beaker image rename "${FULL_IMAGE}" "${ARCHIVE_IMAGE}"
-    echo "  Archived to: ${WORKSPACE}/${ARCHIVE_IMAGE}"
+EXISTING_IMAGE_ID=$(beaker image get "${IMAGE_REF}" --format json 2>/dev/null | jq -r '.[0].id' || echo "")
+if [[ -n "$EXISTING_IMAGE_ID" ]]; then
+    beaker image rename "${EXISTING_IMAGE_ID}" "${ARCHIVE_IMAGE}"
+    echo "  Archived to: ${ARCHIVE_IMAGE}"
 else
     echo "  No existing image to archive"
 fi
 
 # Step 3: Rename temporary to final
 echo "Step 3/3: Promoting temporary image..."
-beaker image rename "${WORKSPACE}/${TMP_IMAGE}" "${BEAKER_IMAGE}"
+beaker image rename "${TMP_IMAGE_ID}" "${BEAKER_IMAGE}"
 
 echo ""
-echo "Success! Image available at: ${FULL_IMAGE}"
+echo "Success! Image available at: ${IMAGE_REF}"
 echo ""
 echo "To use in Beaker jobs:"
-echo "  olmo-eval launch beaker --beaker-image ${FULL_IMAGE} ..."
+echo "  olmo-eval launch beaker --beaker-image ${IMAGE_REF} ..."
