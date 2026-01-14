@@ -20,7 +20,7 @@ tasks:
   - winogrande@low
   - truthfulqa@low
 
-cluster: h100
+cluster: ai2/ceres
 gpus: 1
 preemptible: true
 timeout: 24h
