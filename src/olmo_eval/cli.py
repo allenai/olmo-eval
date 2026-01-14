@@ -555,17 +555,24 @@ def launch(
                     console.print(f"[green]Launched:[/green] {launcher.experiment_url(experiment)}")
                     launched_experiments.append(experiment.id)
 
-    # Add experiments to group if specified
-    if group and launched_experiments and not dry_run:
+    # Always use groups for all experiments
+    # Auto-generate group name from experiment name if not specified
+    if launched_experiments and not dry_run:
+        from datetime import datetime
+
+        effective_group = group or f"{name}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
         try:
             beaker_group = launcher.get_or_create_group(
-                name=group,
+                name=effective_group,
                 workspace=workspace or BEAKER_DEFAULT_WORKSPACE,
             )
             launcher.add_experiments_to_group(beaker_group, launched_experiments)
+            group_url = launcher.get_group_url(beaker_group)
+            num_exp = len(launched_experiments)
             console.print(
-                f"[blue]Group:[/blue] Added {len(launched_experiments)} experiment(s) to '{group}'"
+                f"[blue]Group:[/blue] Added {num_exp} experiment(s) to '{effective_group}'"
             )
+            console.print(f"[blue]Group URL:[/blue] {group_url}")
         except Exception as e:
             console.print(f"[yellow]Warning:[/yellow] Failed to add experiments to group: {e}")
 
@@ -726,6 +733,340 @@ def results(
             console.print(table)
         else:
             console.print("[dim]No experiments in group.[/dim]")
+
+
+@main.group()
+def group() -> None:
+    """Manage Beaker groups.
+
+    Commands for viewing group status, getting detailed task info,
+    and bulk operations like canceling all experiments.
+    """
+    pass
+
+
+@group.command(name="info")
+@click.argument("group_name")
+@click.option(
+    "--format",
+    "-f",
+    "output_format",
+    type=click.Choice(["table", "json"]),
+    default="table",
+    help="Output format",
+)
+@click.option("--verbose", "-v", is_flag=True, help="Show detailed task info")
+def group_info(group_name: str, output_format: str, verbose: bool) -> None:
+    """Get detailed info about a Beaker group.
+
+    Shows status of all experiments and tasks in the group.
+
+    Examples:
+
+        olmo-eval group info my-experiment-group
+
+        olmo-eval group info my-experiment-group --verbose
+
+        olmo-eval group info my-experiment-group --format json
+    """
+    import json as json_module
+
+    try:
+        from olmo_eval.launch import BeakerLauncher
+    except ImportError:
+        console.print(
+            "[red]beaker-py is not installed.[/red]\n"
+            "Install with: pip install 'olmo-eval-internal[beaker]'"
+        )
+        raise SystemExit(1) from None
+
+    launcher = BeakerLauncher()
+
+    # Try to get the group
+    try:
+        from beaker.exceptions import BeakerGroupNotFound
+
+        beaker_group = launcher.beaker.group.get(group_name)
+    except BeakerGroupNotFound:
+        console.print(f"[red]Error:[/red] Group '{group_name}' not found")
+        raise SystemExit(1) from None
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise SystemExit(1) from None
+
+    # Get status summary
+    status = launcher.get_group_status(beaker_group)
+    experiments = launcher.get_group_experiments(beaker_group)
+    group_url = launcher.get_group_url(beaker_group)
+
+    if output_format == "json":
+        # Build detailed experiment data
+        exp_data = []
+        for exp in experiments:
+            workload = launcher.beaker.workload.get(exp.id)
+            exp_info = {
+                "id": exp.id,
+                "name": exp.name,
+                "status": workload.status.name,
+                "url": launcher.experiment_url(exp),
+            }
+
+            # Add task-level details if verbose
+            if verbose:
+                try:
+                    tasks = list(launcher.beaker.experiment.tasks(exp))
+                    task_list = []
+                    for task in tasks:
+                        job = launcher.beaker.job.get(task.latest_job) if task.latest_job else None
+                        task_list.append({
+                            "id": task.id,
+                            "name": task.name,
+                            "status": job.status.current if job else "unknown",
+                            "exit_code": job.status.exit_code if job and job.status else None,
+                        })
+                    exp_info["tasks"] = task_list
+                except Exception:
+                    pass
+
+            exp_data.append(exp_info)
+
+        data = {
+            "group": group_name,
+            "group_id": beaker_group.id,
+            "url": group_url,
+            "status": status,
+            "total_experiments": len(experiments),
+            "experiments": exp_data,
+        }
+        click.echo(json_module.dumps(data, indent=2))
+    else:
+        # Table format
+        console.print(f"\n[bold]Group:[/bold] {group_name}")
+        console.print(f"[bold]ID:[/bold] {beaker_group.id}")
+        console.print(f"[bold]URL:[/bold] {group_url}")
+        console.print()
+
+        # Status summary
+        total = sum(status.values())
+        console.print(
+            f"[bold]Status Summary:[/bold] {total} experiment(s)\n"
+            f"  [green]✓ {status.get('succeeded', 0)} succeeded[/green]\n"
+            f"  [yellow]● {status.get('running', 0)} running[/yellow]\n"
+            f"  [dim]○ {status.get('pending', 0)} pending[/dim]\n"
+            f"  [red]✗ {status.get('failed', 0)} failed[/red]\n"
+            f"  [red]⊘ {status.get('canceled', 0)} canceled[/red]"
+        )
+        console.print()
+
+        if experiments:
+            table = Table(title="Experiments")
+            table.add_column("Name", style="cyan")
+            table.add_column("Status")
+            if verbose:
+                table.add_column("Tasks")
+            table.add_column("URL", style="dim")
+
+            for exp in experiments:
+                workload = launcher.beaker.workload.get(exp.id)
+                status_str = workload.status.name
+                status_style = {
+                    "succeeded": "[green]succeeded[/green]",
+                    "failed": "[red]failed[/red]",
+                    "running": "[yellow]running[/yellow]",
+                    "canceled": "[red]canceled[/red]",
+                }.get(status_str.lower(), f"[dim]{status_str}[/dim]")
+
+                if verbose:
+                    # Get task-level details
+                    try:
+                        tasks = list(launcher.beaker.experiment.tasks(exp))
+                        task_info = []
+                        for task in tasks:
+                            job = (
+                                launcher.beaker.job.get(task.latest_job)
+                                if task.latest_job
+                                else None
+                            )
+                            task_status = job.status.current if job else "unknown"
+                            task_info.append(f"{task.name}: {task_status}")
+                        task_str = "\n".join(task_info) if task_info else "-"
+                    except Exception:
+                        task_str = "-"
+
+                    table.add_row(
+                        exp.name,
+                        status_style,
+                        task_str,
+                        launcher.experiment_url(exp),
+                    )
+                else:
+                    table.add_row(
+                        exp.name,
+                        status_style,
+                        launcher.experiment_url(exp),
+                    )
+
+            console.print(table)
+        else:
+            console.print("[dim]No experiments in group.[/dim]")
+
+
+@group.command(name="cancel")
+@click.argument("group_name")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
+def group_cancel(group_name: str, yes: bool) -> None:
+    """Cancel all active experiments in a Beaker group.
+
+    Stops all running and pending experiments. Completed experiments are skipped.
+
+    Examples:
+
+        olmo-eval group cancel my-experiment-group
+
+        olmo-eval group cancel my-experiment-group --yes
+    """
+    try:
+        from olmo_eval.launch import BeakerLauncher
+    except ImportError:
+        console.print(
+            "[red]beaker-py is not installed.[/red]\n"
+            "Install with: pip install 'olmo-eval-internal[beaker]'"
+        )
+        raise SystemExit(1) from None
+
+    launcher = BeakerLauncher()
+
+    # Try to get the group
+    try:
+        from beaker.exceptions import BeakerGroupNotFound
+
+        beaker_group = launcher.beaker.group.get(group_name)
+    except BeakerGroupNotFound:
+        console.print(f"[red]Error:[/red] Group '{group_name}' not found")
+        raise SystemExit(1) from None
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise SystemExit(1) from None
+
+    # Get current status to show what will be affected
+    status = launcher.get_group_status(beaker_group)
+    active_count = status.get("running", 0) + status.get("pending", 0)
+
+    if active_count == 0:
+        console.print(f"[yellow]No active experiments in group '{group_name}'[/yellow]")
+        console.print(
+            f"Status: {status.get('succeeded', 0)} succeeded, "
+            f"{status.get('failed', 0)} failed, "
+            f"{status.get('canceled', 0)} canceled"
+        )
+        return
+
+    # Confirm cancellation
+    console.print(f"[bold]Group:[/bold] {group_name}")
+    console.print(
+        f"[bold]Active experiments:[/bold] {active_count} "
+        f"({status.get('running', 0)} running, {status.get('pending', 0)} pending)"
+    )
+
+    if not yes and not click.confirm(f"Cancel all {active_count} active experiment(s)?"):
+        console.print("[dim]Cancelled.[/dim]")
+        return
+
+    # Perform cancellation
+    console.print(f"\n[yellow]Canceling {active_count} experiment(s)...[/yellow]")
+    result = launcher.cancel_group(beaker_group)
+
+    # Show results
+    console.print(
+        f"\n[bold]Results:[/bold]\n"
+        f"  [green]✓ {result.get('canceled', 0)} canceled[/green]\n"
+        f"  [dim]○ {result.get('skipped', 0)} skipped (already completed)[/dim]"
+    )
+    if result.get("failed", 0) > 0:
+        console.print(f"  [red]✗ {result.get('failed', 0)} failed to cancel[/red]")
+
+
+@group.command(name="list")
+@click.option("--workspace", "-w", help="Filter by workspace")
+@click.option("--limit", "-n", type=int, default=20, help="Number of groups to show")
+@click.option("--search", "-s", help="Search by name or description")
+def group_list(workspace: str | None, limit: int, search: str | None) -> None:
+    """List Beaker groups.
+
+    Shows recent groups with their status summaries.
+
+    Examples:
+
+        olmo-eval group list
+
+        olmo-eval group list --workspace ai2/oe-data
+
+        olmo-eval group list --search "benchmark" --limit 10
+    """
+    try:
+        from olmo_eval.launch import BeakerLauncher
+    except ImportError:
+        console.print(
+            "[red]beaker-py is not installed.[/red]\n"
+            "Install with: pip install 'olmo-eval-internal[beaker]'"
+        )
+        raise SystemExit(1) from None
+
+    from olmo_eval.core.constants.infrastructure import BEAKER_DEFAULT_WORKSPACE
+
+    launcher = BeakerLauncher()
+
+    try:
+        groups = list(
+            launcher.beaker.group.list(
+                workspace=workspace or BEAKER_DEFAULT_WORKSPACE,
+                name_or_description=search,
+                limit=limit,
+            )
+        )
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise SystemExit(1) from None
+
+    if not groups:
+        console.print("[dim]No groups found.[/dim]")
+        return
+
+    table = Table(title="Beaker Groups")
+    table.add_column("Name", style="cyan")
+    table.add_column("Experiments", justify="right")
+    table.add_column("Status")
+    table.add_column("Created", style="dim")
+
+    for grp in groups:
+        try:
+            experiments = launcher.get_group_experiments(grp)
+            exp_count = len(experiments)
+
+            if exp_count > 0:
+                status = launcher.get_group_status(grp)
+                status_str = (
+                    f"[green]{status.get('succeeded', 0)}[/green]/"
+                    f"[yellow]{status.get('running', 0)}[/yellow]/"
+                    f"[red]{status.get('failed', 0)}[/red]"
+                )
+            else:
+                status_str = "[dim]empty[/dim]"
+
+            # Format creation time
+            created_str = grp.created.strftime("%Y-%m-%d %H:%M") if grp.created else "-"
+
+            table.add_row(
+                grp.name,
+                str(exp_count),
+                status_str,
+                created_str,
+            )
+        except Exception:
+            table.add_row(grp.name, "?", "[dim]error[/dim]", "-")
+
+    console.print(table)
+    console.print("\n[dim]Status format: succeeded/running/failed[/dim]")
 
 
 if __name__ == "__main__":

@@ -663,3 +663,58 @@ class BeakerLauncher:
             CSV string with experiment metrics.
         """
         return self.beaker.group.export_metrics(group)
+
+    def cancel_group(self, group: str | BeakerGroup) -> dict[str, int]:
+        """Cancel all active experiments in a group.
+
+        Stops all running and pending experiments in the group. Experiments that
+        have already completed (succeeded, failed, or canceled) are skipped.
+
+        Args:
+            group: Group name or object.
+
+        Returns:
+            Dictionary with counts: {"canceled": N, "skipped": M, "failed": K}
+        """
+        from beaker import BeakerWorkloadStatus
+        from beaker.exceptions import ExperimentConflict, ExperimentNotFound
+
+        experiments = list(self.beaker.group.experiments(group))
+        results = {"canceled": 0, "skipped": 0, "failed": 0}
+
+        for exp in experiments:
+            # Check current status before attempting to cancel
+            workload = self.beaker.workload.get(exp.id)
+            status = workload.status
+
+            # Skip already-completed experiments
+            if status in (
+                BeakerWorkloadStatus.succeeded,
+                BeakerWorkloadStatus.failed,
+                BeakerWorkloadStatus.canceled,
+            ):
+                results["skipped"] += 1
+                continue
+
+            # Attempt to stop the experiment
+            try:
+                self.beaker.experiment.stop(exp)
+                results["canceled"] += 1
+            except (ExperimentNotFound, ExperimentConflict):
+                # Already completed or canceled while we were iterating
+                results["skipped"] += 1
+            except Exception:
+                results["failed"] += 1
+
+        return results
+
+    def get_group_url(self, group: BeakerGroup) -> str:
+        """Get the Beaker URL for a group.
+
+        Args:
+            group: The group object.
+
+        Returns:
+            URL to view the group in Beaker.
+        """
+        return f"https://beaker.org/gr/{group.id}"
