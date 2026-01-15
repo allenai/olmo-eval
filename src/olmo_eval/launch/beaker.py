@@ -813,10 +813,11 @@ class BeakerLauncher:
         try:
             since = datetime.now(timezone.utc) - timedelta(seconds=10) if tail else None
             for log_entry in self.beaker.job.logs(job, follow=True, since=since):
-                # log_entry is a BeakerJobLog protobuf with 'message' field
-                line = log_entry.message.rstrip("\n") if log_entry.message else ""
-                if line:
-                    print(line)
+                # log_entry.message is bytes, decode it
+                if log_entry.message:
+                    line = log_entry.message.decode(errors="ignore").rstrip("\n")
+                    if line:
+                        print(line)
         except KeyboardInterrupt:
             _console.print("\n[yellow]Interrupted. Experiment continues running.[/yellow]")
             _console.print(f"[dim]View at: {workload_url}[/dim]")
