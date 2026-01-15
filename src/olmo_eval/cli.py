@@ -293,18 +293,19 @@ def suite_info(suite_name: str) -> None:
     help="Task name with optional @priority suffix (e.g., mmlu, mmlu@high)",
 )
 @click.option("--cluster", "-c", default=None, help="Cluster alias (h100, a100, aus) or full name")
-@click.option("--gpus", default=None, type=int, help="Number of GPUs")
+@click.option("--gpus", "-G", default=None, type=int, help="Number of GPUs")
 @click.option(
     "--priority",
+    "-p",
     default=None,
     type=click.Choice(["low", "normal", "high", "urgent"]),
     help="Job priority",
 )
 @click.option("--preemptible/--no-preemptible", default=None, help="Allow preemption")
-@click.option("--timeout", default=None, help="Job timeout (e.g., 24h, 30m)")
-@click.option("--retries", type=int, help="Number of retries on failure")
-@click.option("--workspace", help="Beaker workspace")
-@click.option("--budget", help="Beaker budget")
+@click.option("--timeout", "-T", default=None, help="Job timeout (e.g., 24h, 30m)")
+@click.option("--retries", "-r", type=int, help="Number of retries on failure")
+@click.option("--workspace", "-w", help="Beaker workspace")
+@click.option("--budget", "-B", help="Beaker budget")
 @click.option("--group", "-g", help="Add experiments to this Beaker group (creates if needed)")
 @click.option(
     "--backends",
@@ -312,8 +313,8 @@ def suite_info(suite_name: str) -> None:
     multiple=True,
     help="Backend optional groups to install at runtime (e.g., vllm, hf, litellm)",
 )
-@click.option("--async", "use_async", is_flag=True, help="Enable parallel task execution")
-@click.option("--num-workers", type=int, help="Number of workers for async mode")
+@click.option("--async", "-a", "use_async", is_flag=True, help="Enable parallel task execution")
+@click.option("--num-workers", "-W", type=int, help="Number of workers for async mode")
 @click.option("--gpus-per-worker", type=int, default=1, help="GPUs per worker for async mode")
 @click.option(
     "--fa3",
@@ -323,7 +324,7 @@ def suite_info(suite_name: str) -> None:
 @click.option(
     "--no-flash-attn", is_flag=True, help="Disable Flash Attention (uninstalls FA2 at runtime)."
 )
-@click.option("--dry-run", is_flag=True, help="Print spec without launching")
+@click.option("--dry-run", "-d", is_flag=True, help="Print spec without launching")
 def launch(
     config: str | None,
     name: str | None,
