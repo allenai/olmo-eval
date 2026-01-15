@@ -9,6 +9,7 @@ from rich.table import Table
 import olmo_eval.evals  # noqa: F401 - triggers suite registration
 import olmo_eval.evals.tasks  # noqa: F401 - triggers task registration
 from olmo_eval.core import get_model_presets
+from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.evals.suites import get_suite, list_suites
 from olmo_eval.evals.tasks import list_tasks
 from olmo_eval.evals.tasks.registry import list_regimes
@@ -33,7 +34,7 @@ def main() -> None:
 )
 @click.option("--task", "-t", multiple=True, required=True, help="Task spec or suite")
 @click.option("--config", "-c", type=click.Path(exists=True), help="YAML config file")
-@click.option("--output-dir", "-o", default="./results", help="Output directory")
+@click.option("--output-dir", "-o", default=BEAKER_RESULT_DIR, help="Output directory")
 @click.option("--num-shots", type=int, help="Override num_fewshot for all tasks")
 @click.option("--limit", type=int, help="Override instance limit for all tasks")
 @click.option("--backend", type=click.Choice(["hf", "vllm", "litellm"]), help="Override backend")
