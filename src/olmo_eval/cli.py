@@ -418,7 +418,7 @@ def suite_info(suite_name: str) -> None:
 @click.option(
     "--follow/--no-follow",
     default=True,
-    help="Follow experiment logs after launching (default: --follow). Use --no-follow to submit and exit.",
+    help="Follow logs after launch (default). Use --no-follow to submit and exit immediately.",
 )
 def launch(
     config: str | None,

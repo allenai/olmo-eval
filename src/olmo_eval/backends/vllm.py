@@ -322,9 +322,7 @@ class AsyncVLLMBackend:
             try:
                 result = self.engine.shutdown()
                 # Handle both sync and async shutdown methods
-                if result is not None and (
-                    asyncio.iscoroutine(result) or asyncio.isfuture(result)
-                ):
+                if result is not None and (asyncio.iscoroutine(result) or asyncio.isfuture(result)):
                     await result
             except Exception:
                 pass  # Ignore shutdown errors

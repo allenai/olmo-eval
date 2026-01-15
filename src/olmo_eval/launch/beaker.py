@@ -20,6 +20,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
+from datetime import UTC
 from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
@@ -779,7 +780,7 @@ class BeakerLauncher:
             Exit code: 0 for success, non-zero for failure.
         """
         import time
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         # Get the workload (experiment)
         workload = self.beaker.workload.get(experiment_id)
@@ -811,7 +812,7 @@ class BeakerLauncher:
         # Phase 3: Stream logs
         _console.print("\n[bold]Logs:[/bold]")
         try:
-            since = datetime.now(timezone.utc) - timedelta(seconds=10) if tail else None
+            since = datetime.now(UTC) - timedelta(seconds=10) if tail else None
             for log_entry in self.beaker.job.logs(job, follow=True, since=since):
                 # log_entry.message is bytes, decode it
                 if log_entry.message:
