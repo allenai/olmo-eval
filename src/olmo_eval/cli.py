@@ -577,17 +577,17 @@ def launch(
             for t in task_list:
                 command.extend(["-t", t])
 
-            # Add async flags if enabled
-            model_use_async = model_resources.get("use_async", False)
-            model_num_workers = model_resources.get("num_workers")
-            model_gpus_per_worker = model_resources.get("gpus_per_worker", 1)
+            # Add async flags if enabled (CLI flags override config)
+            effective_use_async = use_async or model_resources.get("use_async", False)
+            effective_num_workers = num_workers if num_workers is not None else model_resources.get("num_workers")
+            effective_gpus_per_worker = gpus_per_worker if gpus_per_worker != 1 else model_resources.get("gpus_per_worker", 1)
 
-            if model_use_async:
+            if effective_use_async:
                 command.append("--async")
-                if model_num_workers is not None:
-                    command.extend(["--num-workers", str(model_num_workers)])
-                if model_gpus_per_worker and model_gpus_per_worker != 1:
-                    command.extend(["--gpus-per-worker", str(model_gpus_per_worker)])
+                if effective_num_workers is not None:
+                    command.extend(["--num-workers", str(effective_num_workers)])
+                if effective_gpus_per_worker and effective_gpus_per_worker != 1:
+                    command.extend(["--gpus-per-worker", str(effective_gpus_per_worker)])
 
             # Determine the backend this model will use at runtime
             # First check for explicit backend override in config, then get from model config
