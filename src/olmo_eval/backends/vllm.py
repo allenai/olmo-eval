@@ -11,8 +11,7 @@ from olmo_eval.core import LMOutput, LMRequest, SamplingParams
 from .base import Backend
 
 if TYPE_CHECKING:
-    from vllm import LLM
-    from vllm.engine.async_llm_engine import AsyncLLMEngine
+    from vllm import AsyncLLM, LLM
     from vllm.outputs import RequestOutput
 
 
@@ -188,40 +187,28 @@ class AsyncVLLMBackend:
         os.environ.setdefault("VLLM_LOGGING_LEVEL", "WARNING")
 
         try:
-            from vllm import AsyncEngineArgs
-            from vllm.engine.async_llm_engine import AsyncLLMEngine
+            from vllm import AsyncLLM
         except ImportError as e:
             raise ImportError("vllm is required for AsyncVLLMBackend") from e
 
         self.model_name = model_name
         engine_kwargs.setdefault("gpu_memory_utilization", 0.7)
 
-        engine_args = AsyncEngineArgs(model=model_name, **engine_kwargs)
-        self.engine: AsyncLLMEngine = AsyncLLMEngine.from_engine_args(engine_args)
+        self.engine: AsyncLLM = AsyncLLM(model=model_name, **engine_kwargs)
         self._request_counter = 0
+        # Store pending requests: request_id -> (prompt, vllm_params)
+        self._pending_requests: dict[str, tuple[str, Any]] = {}
 
     def _get_next_request_id(self) -> str:
         """Generate a unique request ID."""
         self._request_counter += 1
         return f"req-{self._request_counter}"
 
-    async def add_request(
-        self,
-        request_id: str,
-        request: LMRequest,
-        sampling_params: SamplingParams | None = None,
-    ) -> None:
-        """Add a single request to the engine (non-blocking).
-
-        Args:
-            request_id: Unique identifier for this request.
-            request: The LM request to process.
-            sampling_params: Optional sampling parameters.
-        """
+    def _build_sampling_params(self, params: SamplingParams) -> Any:
+        """Convert SamplingParams to vLLM SamplingParams."""
         from vllm import SamplingParams as VLLMSamplingParams
 
-        params = sampling_params or SamplingParams()
-        vllm_params = VLLMSamplingParams(
+        return VLLMSamplingParams(
             max_tokens=params.max_tokens,
             n=params.num_samples,
             temperature=params.temperature if params.temperature > 0 else 0.0,
@@ -231,28 +218,67 @@ class AsyncVLLMBackend:
             logprobs=params.logprobs,
         )
 
-        await self.engine.add_request(
-            request_id=request_id,
-            prompt=request.prompt,
-            params=vllm_params,
-        )
+    async def add_request(
+        self,
+        request_id: str,
+        request: LMRequest,
+        sampling_params: SamplingParams | None = None,
+    ) -> None:
+        """Add a single request to be processed (non-blocking).
+
+        Args:
+            request_id: Unique identifier for this request.
+            request: The LM request to process.
+            sampling_params: Optional sampling parameters.
+        """
+        params = sampling_params or SamplingParams()
+        vllm_params = self._build_sampling_params(params)
+        # Store for later processing in stream_results
+        self._pending_requests[request_id] = (request.prompt, vllm_params)
 
     async def stream_results(self) -> AsyncIterator[tuple[str, list[LMOutput]]]:
         """Stream results as they complete.
 
+        Processes all pending requests concurrently and yields results
+        as each request completes.
+
         Yields:
             Tuples of (request_id, list of LMOutput for that request).
         """
-        async for output in self.engine.generate(None, None):
-            if output.finished:
-                outputs = [
-                    LMOutput(
-                        text=completion.text,
-                        logprobs=self._convert_logprobs(completion.logprobs),
-                    )
-                    for completion in output.outputs
-                ]
-                yield output.request_id, outputs
+        import asyncio
+
+        if not self._pending_requests:
+            return
+
+        async def process_single_request(
+            request_id: str, prompt: str, params: Any
+        ) -> tuple[str, list[LMOutput]] | None:
+            """Process a single request and return when complete."""
+            async for output in self.engine.generate(prompt, params, request_id):
+                if output.finished:
+                    outputs = [
+                        LMOutput(
+                            text=completion.text,
+                            logprobs=self._convert_logprobs(completion.logprobs),
+                        )
+                        for completion in output.outputs
+                    ]
+                    return request_id, outputs
+            return None
+
+        # Create tasks for all pending requests
+        tasks = [
+            asyncio.create_task(process_single_request(req_id, prompt, params))
+            for req_id, (prompt, params) in list(self._pending_requests.items())
+        ]
+
+        # Yield results as they complete
+        for future in asyncio.as_completed(tasks):
+            result = await future
+            if result:
+                request_id, outputs = result
+                self._pending_requests.pop(request_id, None)
+                yield request_id, outputs
 
     def _convert_logprobs(self, vllm_logprobs: list | None) -> list[dict] | None:
         """Convert vLLM logprobs format to standard format."""
@@ -271,5 +297,10 @@ class AsyncVLLMBackend:
 
     async def shutdown(self) -> None:
         """Shutdown the engine gracefully."""
-        if hasattr(self.engine, "shutdown"):
-            await self.engine.shutdown()
+        import asyncio
+
+        if self.engine is not None and hasattr(self.engine, "shutdown"):
+            result = self.engine.shutdown()
+            # Handle both sync and async shutdown methods
+            if asyncio.iscoroutine(result) or asyncio.isfuture(result):
+                await result
