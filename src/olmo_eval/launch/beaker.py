@@ -277,7 +277,7 @@ class BeakerJobConfig:
     # Runtime backend installation
     backends: list[str] = field(default_factory=list)
 
-    # Flash Attention version (2, 3, or None)
+    # Flash Attention 3 for Hopper GPUs (FA2 is pre-installed, set to 3 to switch)
     flash_attn: int | None = None
 
     # Group assignment - experiment will be added to this group at creation time
@@ -404,10 +404,9 @@ class BeakerLauncher:
             for backend in backends:
                 steps.append(f"uv pip install {backend}")
 
-        # Install Flash Attention if requested
-        if flash_attn is not None:
-            # Use the install script from the cloned source
-            steps.append(f"/gantry-runtime/scripts/install_flash_attn.sh --fa{flash_attn}")
+        # Switch to Flash Attention 3 if requested (FA2 is pre-installed)
+        if flash_attn == 3:
+            steps.append("/gantry-runtime/scripts/use_fa3.sh")
 
         # Run the actual command
         steps.append(" ".join(command))

@@ -1,13 +1,17 @@
 """Storage backends for evaluation results."""
 
-from olmo_eval.storage.base import EvalResult, StorageBackend, TaskResult
-from olmo_eval.storage.file import FileBackend
+from olmo_eval.storage.base import (
+    EvalResult,
+    StorageBackend,
+    TaskResult,
+    convert_runner_results,
+)
 
 __all__ = [
     "EvalResult",
-    "FileBackend",
     "StorageBackend",
     "TaskResult",
+    "convert_runner_results",
     "get_backend",
 ]
 
@@ -19,7 +23,7 @@ def get_backend(
     """Create a storage backend by type.
 
     Args:
-        backend_type: The type of backend ("file", "s3", "postgres").
+        backend_type: The type of backend ("s3", "postgres").
         **kwargs: Backend-specific configuration options.
 
     Returns:
@@ -29,9 +33,7 @@ def get_backend(
         ValueError: If backend_type is not recognized.
         ImportError: If required dependencies are not installed.
     """
-    if backend_type == "file":
-        return FileBackend(**kwargs)
-    elif backend_type == "s3":
+    if backend_type == "s3":
         try:
             from olmo_eval.storage.s3 import S3Backend
         except ImportError as e:
@@ -49,6 +51,4 @@ def get_backend(
             ) from e
         return PostgresBackend(**kwargs)
     else:
-        raise ValueError(
-            f"Unknown backend type: {backend_type}. Supported types: file, s3, postgres"
-        )
+        raise ValueError(f"Unknown backend type: {backend_type}. Supported types: s3, postgres")

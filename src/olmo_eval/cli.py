@@ -32,9 +32,11 @@ def main() -> None:
 @click.option("--backend", type=click.Choice(["hf", "vllm", "litellm"]), help="Override backend")
 @click.option(
     "--storage-backend",
-    type=click.Choice(["file", "s3", "postgres"]),
-    default=None,
-    help="Storage backend for results (default: legacy file output)",
+    "-s",
+    "storage_backends",
+    type=click.Choice(["s3", "postgres"]),
+    multiple=True,
+    help="Storage backend(s) for results. Can be specified multiple times.",
 )
 @click.option(
     "--storage-config",
@@ -68,7 +70,7 @@ def run(
     num_shots: int | None,
     limit: int | None,
     backend: str | None,
-    storage_backend: str | None,
+    storage_backends: tuple[str, ...],
     storage_config: str | None,
     dry_run: bool,
     use_async: bool,
@@ -76,7 +78,15 @@ def run(
     gpus_per_worker: int,
 ) -> None:
     """Run evaluation on specified tasks."""
+    import logging
+
     from olmo_eval.runners.sequential import EvalRunner, ValidationError
+
+    # Configure logging for Beaker job visibility
+    logging.basicConfig(
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        level=logging.INFO,
+    )
 
     # Warning for num-workers without async
     if num_workers is not None and not use_async:
@@ -87,37 +97,40 @@ def run(
             "[yellow]Warning:[/yellow] --gpus-per-worker has no effect without --async flag"
         )
 
-    # Set up storage backend if specified
-    storage = None
-    if storage_backend:
-        from olmo_eval.storage import get_backend
+    # Set up storage backends if specified
+    storages: list = []
+    if storage_backends:
+        from olmo_eval.storage import StorageBackend, get_backend
 
         # Load storage config if provided
-        storage_kwargs: dict = {}
+        storage_cfg = None
         if storage_config:
             from omegaconf import DictConfig, OmegaConf
 
             cfg = OmegaConf.load(storage_config)
-            # Get backend-specific config section
             if isinstance(cfg, DictConfig):
-                backend_cfg = cfg.get(storage_backend, {})
-                storage_kwargs = OmegaConf.to_container(backend_cfg, resolve=True) or {}  # type: ignore
+                storage_cfg = cfg
             else:
                 console.print("[red]Error:[/red] Storage config must be a YAML dict, not a list")
                 raise SystemExit(1)
 
-        # Add default output_dir for file backend
-        if storage_backend == "file" and "output_dir" not in storage_kwargs:
-            storage_kwargs["output_dir"] = output_dir
+        for backend_name in storage_backends:
+            # Get backend-specific config section
+            storage_kwargs: dict = {}
+            if storage_cfg:
+                backend_cfg = storage_cfg.get(backend_name, {})
+                storage_kwargs = OmegaConf.to_container(backend_cfg, resolve=True) or {}  # type: ignore
 
-        try:
-            storage = get_backend(storage_backend, **storage_kwargs)
-        except ImportError as e:
-            console.print(f"[red]Storage backend error:[/red] {e}")
-            raise SystemExit(1) from None
-        except Exception as e:
-            console.print(f"[red]Failed to initialize storage backend:[/red] {e}")
-            raise SystemExit(1) from None
+            try:
+                storage = get_backend(backend_name, **storage_kwargs)
+                storages.append(storage)
+                console.print(f"[green]Initialized {backend_name} storage backend[/green]")
+            except ImportError as e:
+                console.print(f"[red]Storage backend error:[/red] {e}")
+                raise SystemExit(1) from None
+            except Exception as e:
+                console.print(f"[red]Failed to initialize {backend_name} storage backend:[/red] {e}")
+                raise SystemExit(1) from None
 
     # Choose runner based on --async flag
     if use_async:
@@ -132,7 +145,7 @@ def run(
             num_shots_override=num_shots,
             limit_override=limit,
             backend_override=backend,
-            storage=storage,
+            storages=storages,
             num_workers=num_workers,
             gpus_per_worker=gpus_per_worker,
         )
@@ -144,7 +157,7 @@ def run(
             num_shots_override=num_shots,
             limit_override=limit,
             backend_override=backend,
-            storage=storage,
+            storages=storages,
         )
 
     # Validate inputs before running (applies to both dry-run and actual runs)
@@ -297,12 +310,7 @@ def suite_info(suite_name: str) -> None:
 @click.option("--async", "use_async", is_flag=True, help="Enable parallel task execution")
 @click.option("--num-workers", type=int, help="Number of workers for async mode")
 @click.option("--gpus-per-worker", type=int, default=1, help="GPUs per worker for async mode")
-@click.option(
-    "--flash-attn",
-    type=click.Choice(["2", "3", "none"]),
-    default=None,
-    help="Flash Attention version to install (2, 3, or none)",
-)
+@click.option("--fa3", is_flag=True, help="Use Flash Attention 3 (for Hopper GPUs). FA2 is pre-installed by default.")
 @click.option("--dry-run", is_flag=True, help="Print spec without launching")
 def launch(
     config: str | None,
@@ -322,7 +330,7 @@ def launch(
     use_async: bool,
     num_workers: int | None,
     gpus_per_worker: int,
-    flash_attn: str | None,
+    fa3: bool,
     dry_run: bool,
 ) -> None:
     """Launch an evaluation job on Beaker.
@@ -333,7 +341,7 @@ def launch(
     Use --config/-f to load settings from a YAML file; CLI arguments override config values.
     Use --group/-g to organize experiments into a Beaker group for result aggregation.
     Use --backends/-b to install inference backends at runtime (e.g., vllm, transformers).
-    Use --flash-attn to install Flash Attention at runtime (2 for FA2, 3 for FA3).
+    Use --fa3 to switch to Flash Attention 3 (for Hopper GPUs). FA2 is pre-installed.
 
     Examples:
 
@@ -413,9 +421,9 @@ def launch(
         workspace = workspace or cfg.workspace
         budget = budget or cfg.budget
 
-        # Flash Attention: CLI overrides config
-        if flash_attn is None and cfg.flash_attn is not None:
-            flash_attn = str(cfg.flash_attn)
+        # Flash Attention 3: CLI flag overrides config
+        if not fa3 and cfg.flash_attn == 3:
+            fa3 = True
 
         # Get model configs from file (with per-model resource overrides)
         if not model:
@@ -596,14 +604,12 @@ def launch(
             if backends:
                 effective_backends = list(backends)
             else:
-                # Auto-install the backend dependency with version spec
-                backend_dep = BACKEND_DEPENDENCIES.get(runtime_backend)
-                effective_backends = [backend_dep] if backend_dep else []
+                # Auto-install the backend dependencies with version specs
+                backend_deps = BACKEND_DEPENDENCIES.get(runtime_backend)
+                effective_backends = list(backend_deps) if backend_deps else []
 
-            # Convert flash_attn string to int (None, 2, or 3)
-            effective_flash_attn: int | None = None
-            if flash_attn is not None and flash_attn != "none":
-                effective_flash_attn = int(flash_attn)
+            # Flash Attention 3 if requested (FA2 is pre-installed)
+            effective_flash_attn: int | None = 3 if fa3 else None
 
             job_config = BeakerJobConfig(
                 name=exp_name,

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import multiprocessing as mp
 import os
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -20,6 +22,7 @@ if TYPE_CHECKING:
     from olmo_eval.storage import StorageBackend
 
 console = Console()
+logger = logging.getLogger(__name__)
 
 
 def worker_process(
@@ -84,7 +87,7 @@ class AsyncEvalRunner:
     num_shots_override: int | None = None
     limit_override: int | None = None
     backend_override: str | None = None
-    storage: StorageBackend | None = None
+    storages: list[StorageBackend] = field(default_factory=list)
 
     # Async-specific config
     num_workers: int | None = None  # Number of workers (default: num GPUs)
@@ -258,6 +261,12 @@ class AsyncEvalRunner:
             msg = f"ERROR: {result.error}" if result.error else f"{result.num_instances} instances"
             console.print(f"  [{status}]✓[/] {result.spec} ({msg})")
 
+            # Log metrics (for Beaker job details)
+            if result.error is None and result.metrics:
+                logger.info(f"** Task metrics for {result.spec}: **")
+                for metric, value in result.metrics.items():
+                    logger.info(f"  {metric}: {value:.4f}")
+
         # Wait for workers
         for process in workers:
             process.join(timeout=5)
@@ -289,6 +298,9 @@ class AsyncEvalRunner:
             "errors": [{"spec": r.spec, "error": r.error} for r in results if r.error is not None],
         }
 
+        # Log summary of all scores
+        self._log_summary(results_dict)
+
         # Save results
         self._save_results(results_dict)
 
@@ -298,18 +310,27 @@ class AsyncEvalRunner:
         """Sync wrapper for async execution."""
         return asyncio.run(self.run_async())
 
+    def _log_summary(self, results: dict[str, Any]) -> None:
+        """Log summary of all task scores."""
+        logger.info("Summary of primary scores:")
+        for task_name, task_data in results["tasks"].items():
+            metrics = task_data.get("metrics", {})
+            if metrics:
+                # Use first metric as primary score
+                primary_score = next(iter(metrics.values()))
+                logger.info(f"  {task_name}: {primary_score:.4f}")
+
     def _save_results(self, results: dict[str, Any]) -> None:
-        """Save results to file."""
-        import json
-        from pathlib import Path
+        """Save results to all configured storage backends."""
+        if self.storages:
+            from olmo_eval.storage.base import convert_runner_results
 
-        output_dir = Path(self.output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_file = output_dir / f"async_results_{timestamp}.json"
-
-        with open(output_file, "w") as f:
-            json.dump(results, f, indent=2)
-
-        console.print(f"\n[bold green]Results saved to:[/bold green] {output_file}")
+            run_id = str(uuid.uuid4())
+            eval_result = convert_runner_results(results, run_id)
+            for storage in self.storages:
+                storage.save(eval_result)
+                backend_name = type(storage).__name__
+                logger.info(f"Results saved to {backend_name} (run_id: {run_id})")
+                console.print(f"[green]Results saved to {backend_name} (run_id: {run_id})[/green]")
+        else:
+            logger.info("No storage backend configured - results logged above only")

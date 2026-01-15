@@ -10,11 +10,12 @@
 SUPPORTED_CUDA_VERSIONS=(
     "12.6.1"
     "12.8.0"
+    "12.8.1"
     "12.9.1"
 )
 
 # Default CUDA version
-DEFAULT_CUDA_VERSION="12.8.0"
+DEFAULT_CUDA_VERSION="12.8.1"
 
 # Supported platforms
 SUPPORTED_PLATFORMS=(
@@ -25,10 +26,18 @@ SUPPORTED_PLATFORMS=(
 # Beaker workspace
 BEAKER_WORKSPACE="ai2/oe-data"
 
-# Helper function: Convert CUDA version to short format (12.6 -> 126)
+# Helper function: Convert CUDA version to short format
+# Examples: 12.8.0 -> 128, 12.8.1 -> 1281, 12.9.1 -> 1291
 cuda_short() {
     local version=$1
-    echo "${version}" | sed 's/\.//g' | cut -c1-3
+    local no_dots
+    no_dots=$(echo "${version}" | sed 's/\.//g')
+    # Strip trailing 0 for .0 patch versions (1280 -> 128)
+    if [[ "${no_dots}" == *0 ]] && [[ "${#no_dots}" -eq 4 ]]; then
+        echo "${no_dots:0:3}"
+    else
+        echo "${no_dots}"
+    fi
 }
 
 # Helper function: Validate CUDA version

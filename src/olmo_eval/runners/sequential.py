@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import json
+import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
@@ -23,6 +22,7 @@ if TYPE_CHECKING:
     from olmo_eval.storage import StorageBackend
 
 console = Console()
+logger = logging.getLogger(__name__)
 
 
 class ValidationError(Exception):
@@ -41,7 +41,7 @@ class EvalRunner:
     num_shots_override: int | None = None
     limit_override: int | None = None
     backend_override: str | None = None
-    storage: StorageBackend | None = None
+    storages: list[StorageBackend] = field(default_factory=list)
 
     def validate(self) -> None:
         """Validate all inputs before running.
@@ -148,11 +148,15 @@ class EvalRunner:
             task_results = self._run_task(spec, backend)
             results["tasks"][spec] = task_results
 
-            # Print metrics
+            # Log metrics (for Beaker job details)
             if "metrics" in task_results:
+                logger.info(f"** Task metrics for {spec}: **")
                 for metric, value in task_results["metrics"].items():
+                    logger.info(f"  {metric}: {value:.4f}")
                     console.print(f"  {metric}: {value:.4f}")
 
+        # Log summary of all scores
+        self._log_summary(results)
         self._save_results(results)
         return results
 
@@ -183,27 +187,27 @@ class EvalRunner:
             "metrics": result.metrics,
         }
 
+    def _log_summary(self, results: dict[str, Any]) -> None:
+        """Log summary of all task scores."""
+        logger.info("Summary of primary scores:")
+        for task_name, task_data in results["tasks"].items():
+            metrics = task_data.get("metrics", {})
+            if metrics:
+                # Use first metric as primary score
+                primary_score = next(iter(metrics.values()))
+                logger.info(f"  {task_name}: {primary_score:.4f}")
+
     def _save_results(self, results: dict[str, Any]) -> None:
-        """Save results using storage backend or legacy file output."""
-        if self.storage is not None:
-            # Use the storage backend
-            from olmo_eval.storage.file import convert_runner_results
+        """Save results to all configured storage backends."""
+        if self.storages:
+            from olmo_eval.storage.base import convert_runner_results
 
             run_id = str(uuid.uuid4())
             eval_result = convert_runner_results(results, run_id)
-            self.storage.save(eval_result)
-            console.print(f"\n[green]Results saved (run_id: {run_id})[/green]")
+            for storage in self.storages:
+                storage.save(eval_result)
+                backend_name = type(storage).__name__
+                logger.info(f"Results saved to {backend_name} (run_id: {run_id})")
+                console.print(f"[green]Results saved to {backend_name} (run_id: {run_id})[/green]")
         else:
-            # Legacy behavior: save to JSON file directly
-            output_path = Path(self.output_dir)
-            output_path.mkdir(parents=True, exist_ok=True)
-
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            model_slug = self.model_name.replace("/", "_").replace(".", "-")
-            filename = f"{model_slug}_{timestamp}.json"
-
-            filepath = output_path / filename
-            with open(filepath, "w") as f:
-                json.dump(results, f, indent=2)
-
-            console.print(f"\n[green]Results saved to {filepath}[/green]")
+            logger.info("No storage backend configured - results logged above only")

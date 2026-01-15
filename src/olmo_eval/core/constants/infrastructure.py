@@ -19,7 +19,7 @@ BEAKER_DEFAULT_BUDGET = "ai2/oe-base"
 BEAKER_DEFAULT_PRIORITY = "normal"
 """Default job priority level."""
 
-BEAKER_DEFAULT_IMAGE = "ai2-tylerm/olmo-eval-cuda128-amd64"
+BEAKER_DEFAULT_IMAGE = "ai2-tylerm/olmo-eval-cuda1281-amd64"
 """Default Docker image for Beaker evaluation jobs."""
 
 
@@ -142,10 +142,13 @@ OE_EVAL_LAUNCH_COMMAND = "oe_eval/launch.py"
 # =============================================================================
 # These version specs should match pyproject.toml optional dependencies
 
-BACKEND_DEPENDENCIES: dict[str, str | None] = {
-    "vllm": "vllm~=0.13.0",
-    "hf": "transformers~=4.57.3",
-    "litellm": "litellm~=1.80.11",
+BACKEND_DEPENDENCIES: dict[str, list[str] | None] = {
+    "vllm": [
+        "vllm~=0.13.0",
+        "torch-c-dlpack-ext",  # Required for TVM tensor allocation in vLLM
+    ],
+    "hf": ["transformers~=4.57.3"],
+    "litellm": ["litellm~=1.80.11"],
     "mock": None,  # No dependency needed for mock backend
 }
 """Mapping of backend types to their pip install specs.
