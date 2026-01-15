@@ -756,3 +756,110 @@ class BeakerLauncher:
             URL to view the group in Beaker.
         """
         return f"https://beaker.org/gr/{group.id}"
+
+    # -------------------------------------------------------------------------
+    # Experiment Following / Watching
+    # -------------------------------------------------------------------------
+
+    def follow_experiment(
+        self,
+        experiment_id: str,
+        tail: bool = False,
+    ) -> int:
+        """Follow an experiment's logs until completion.
+
+        Streams logs in real-time, showing startup events and job output.
+        Similar to olmo-core's follow_experiment() implementation.
+
+        Args:
+            experiment_id: Beaker experiment ID.
+            tail: If True, only show last 10 seconds of logs (useful for
+                  attaching to already-running experiments).
+
+        Returns:
+            Exit code: 0 for success, non-zero for failure.
+        """
+        import time
+        from datetime import timedelta
+
+        experiment = self.beaker.experiment.get(experiment_id)
+        _console.print(
+            f"[bold]Following experiment:[/bold] {self.beaker.experiment.url(experiment)}"
+        )
+
+        # Phase 1: Wait for job creation
+        tasks = self.beaker.experiment.tasks(experiment.id)
+        if not tasks:
+            _console.print("[red]Experiment has no tasks[/red]")
+            return 1
+
+        job = tasks[0].latest_job
+        if job is None:
+            _console.print("[dim]Waiting for job to be created...[/dim]")
+            while job is None:
+                time.sleep(1.0)
+                tasks = self.beaker.experiment.tasks(experiment.id)
+                job = tasks[0].latest_job if tasks else None
+
+        # Phase 2: Wait for job to start, showing events
+        events_seen: set[str] = set()
+        while not (job.is_finalized or job.is_running):
+            job = self.beaker.job.get(job.id)
+            for event in sorted(
+                self.beaker.job.summarized_events(job),
+                key=lambda e: e.latest_occurrence,
+            ):
+                # Use message as key since events don't have stable IDs
+                event_key = f"{event.status}:{event.latest_message}"
+                if event_key not in events_seen:
+                    events_seen.add(event_key)
+                    _console.print(f"[cyan]>[/cyan] {event.latest_message}")
+                    if event.status.lower() == "started":
+                        break
+            else:
+                time.sleep(1.0)
+                continue
+            break
+
+        # Phase 3: Stream logs
+        _console.print("\n[bold]Logs:[/bold]")
+        try:
+            for line_bytes in self.beaker.job.follow(
+                job,
+                include_timestamps=False,
+                since=None if not tail else timedelta(seconds=10),
+            ):
+                line = line_bytes.decode(errors="ignore").rstrip("\n")
+                print(line)
+        except KeyboardInterrupt:
+            _console.print("\n[yellow]Interrupted. Experiment continues running.[/yellow]")
+            _console.print(f"[dim]View at: {self.beaker.experiment.url(experiment)}[/dim]")
+            return 130  # Standard exit code for SIGINT
+
+        # Phase 4: Check exit status
+        _console.print()
+        job = self.beaker.job.get(job.id)
+        exit_code = job.status.exit_code
+
+        if exit_code is None:
+            _console.print(
+                f"[red]Experiment failed[/red]: {self.beaker.experiment.url(experiment)}"
+            )
+            return 1
+        elif exit_code > 0:
+            _console.print(f"[red]Experiment exited with code {exit_code}[/red]")
+            return exit_code
+        else:
+            _console.print("[green]Experiment completed successfully[/green]")
+            return 0
+
+    def get_experiment_url(self, experiment_id: str) -> str:
+        """Get the Beaker URL for an experiment by ID.
+
+        Args:
+            experiment_id: The experiment ID.
+
+        Returns:
+            URL to view the experiment in Beaker.
+        """
+        return f"https://beaker.org/ex/{experiment_id}"

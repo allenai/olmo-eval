@@ -415,6 +415,11 @@ def suite_info(suite_name: str) -> None:
     "--no-flash-attn", is_flag=True, help="Disable Flash Attention (uninstalls FA2 at runtime)."
 )
 @click.option("--dry-run", "-d", is_flag=True, help="Print spec without launching")
+@click.option(
+    "--follow/--no-follow",
+    default=True,
+    help="Follow experiment logs after launching (default: --follow). Use --no-follow to submit and exit.",
+)
 def launch(
     config: str | None,
     name: str | None,
@@ -437,6 +442,7 @@ def launch(
     fa3: bool,
     no_flash_attn: bool,
     dry_run: bool,
+    follow: bool,
 ) -> None:
     """Launch an evaluation job on Beaker.
 
@@ -764,6 +770,24 @@ def launch(
     if launched_experiments and not dry_run:
         console.print(f"\n[bold]Launched {len(launched_experiments)} experiment(s)[/bold]")
 
+        # Follow experiment(s) if requested
+        if follow:
+            if len(launched_experiments) == 1:
+                # Single experiment: follow it
+                import sys
+
+                exit_code = launcher.follow_experiment(launched_experiments[0])
+                sys.exit(exit_code)
+            else:
+                # Multiple experiments: don't follow, show URLs for watch command
+                console.print(
+                    "\n[bold]Multiple experiments launched. "
+                    "Use 'olmo-eval watch -e <id>' to follow:[/bold]"
+                )
+                for exp_id in launched_experiments:
+                    url = launcher.get_experiment_url(exp_id)
+                    console.print(f"  - {url}")
+
 
 @main.command()
 @click.option("--group", "-g", required=True, help="Beaker group name")
@@ -921,6 +945,57 @@ def results(
             console.print(table)
         else:
             console.print("[dim]No experiments in group.[/dim]")
+
+
+@main.command(name="watch")
+@click.option(
+    "--experiment",
+    "-e",
+    required=True,
+    help="Beaker experiment ID to watch",
+)
+@click.option(
+    "--tail",
+    "-t",
+    is_flag=True,
+    help="Only show recent logs (last 10 seconds). Useful for attaching to running experiments.",
+)
+def watch(experiment: str, tail: bool) -> None:
+    """Watch an experiment's logs in real-time.
+
+    Streams logs from a Beaker experiment until it completes. Shows startup
+    events (pulling image, scheduling) followed by live log output.
+
+    Use --tail/-t to show only recent logs when attaching to an already-running
+    experiment.
+
+    Examples:
+
+        # Watch an experiment from the start
+        olmo-eval watch -e 01abc123
+
+        # Attach to a running experiment (show recent logs only)
+        olmo-eval watch -e 01abc123 --tail
+    """
+    import sys
+
+    try:
+        from olmo_eval.launch import BeakerLauncher
+    except ImportError:
+        console.print(
+            "[red]beaker-py is not installed.[/red]\n"
+            "Install with: pip install 'olmo-eval-internal[beaker]'"
+        )
+        raise SystemExit(1) from None
+
+    launcher = BeakerLauncher()
+
+    try:
+        exit_code = launcher.follow_experiment(experiment, tail=tail)
+        sys.exit(exit_code)
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise SystemExit(1) from None
 
 
 @main.group()
