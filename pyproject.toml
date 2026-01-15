@@ -50,6 +50,8 @@ hf = [
 ]
 vllm = [
     "vllm~=0.13.0",
+    "torch>=2.2.0",
+    "torch-c-dlpack-ext",  # Required for TVM tensor allocation in vLLM
 ]
 litellm = [
     "litellm~=1.80.11",

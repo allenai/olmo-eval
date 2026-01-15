@@ -159,8 +159,9 @@ class LaunchConfig:
         budget: Beaker budget.
         beaker_image: Container image to use.
         description: Optional experiment description.
-        backends: List of backends to install at runtime (e.g., ["vllm==0.13.0", "transformers"]).
+        backends: Optional dependency groups to install at runtime (e.g., ["vllm", "hf", "litellm"]).
         flash_attn: Set to 3 to use Flash Attention 3 (for Hopper GPUs). FA2 is pre-installed.
+        no_flash_attn: If True, uninstall Flash Attention at runtime (disables FA2).
     """
 
     # Required fields
@@ -192,8 +193,9 @@ class LaunchConfig:
     # Runtime backend installation
     backends: list[str] | None = None
 
-    # Flash Attention 3 for Hopper GPUs (FA2 is pre-installed by default)
+    # Flash Attention options
     flash_attn: int | None = None  # Set to 3 to switch to FA3
+    no_flash_attn: bool = False  # Uninstall FA2 at runtime
 
     def get_model_configs(self) -> list[ModelConfig]:
         """Get parsed ModelConfig objects for all models.

@@ -305,12 +305,13 @@ def suite_info(suite_name: str) -> None:
 @click.option("--budget", help="Beaker budget")
 @click.option("--group", "-g", help="Add experiments to this Beaker group (creates if needed)")
 @click.option(
-    "--backends", "-b", multiple=True, help="Backends to install at runtime (e.g., vllm==0.13.0)"
+    "--backends", "-b", multiple=True, help="Backend optional groups to install at runtime (e.g., vllm, hf, litellm)"
 )
 @click.option("--async", "use_async", is_flag=True, help="Enable parallel task execution")
 @click.option("--num-workers", type=int, help="Number of workers for async mode")
 @click.option("--gpus-per-worker", type=int, default=1, help="GPUs per worker for async mode")
 @click.option("--fa3", is_flag=True, help="Use Flash Attention 3 (for Hopper GPUs). FA2 is pre-installed by default.")
+@click.option("--no-flash-attn", is_flag=True, help="Disable Flash Attention (uninstalls FA2 at runtime).")
 @click.option("--dry-run", is_flag=True, help="Print spec without launching")
 def launch(
     config: str | None,
@@ -331,6 +332,7 @@ def launch(
     num_workers: int | None,
     gpus_per_worker: int,
     fa3: bool,
+    no_flash_attn: bool,
     dry_run: bool,
 ) -> None:
     """Launch an evaluation job on Beaker.
@@ -590,7 +592,7 @@ def launch(
             # Determine the backend this model will use at runtime
             # First check for explicit backend override in config, then get from model config
             from olmo_eval.core.configs import get_model_config as get_runtime_model_config
-            from olmo_eval.core.constants.infrastructure import BACKEND_DEPENDENCIES
+            from olmo_eval.core.constants.infrastructure import BACKEND_OPTIONAL_GROUPS
 
             config_backend = model_resources.get("backend")  # Explicit override from launch config
             if config_backend:
@@ -600,15 +602,15 @@ def launch(
                 runtime_model_config = get_runtime_model_config(model_name)
                 runtime_backend = runtime_model_config.backend
 
-            # CLI backends override auto-detected backend dependency
+            # CLI backends override auto-detected backend optional group
             if backends:
                 effective_backends = list(backends)
             else:
-                # Auto-install the backend dependencies with version specs
-                backend_deps = BACKEND_DEPENDENCIES.get(runtime_backend)
-                effective_backends = list(backend_deps) if backend_deps else []
+                # Get the optional group name for this backend
+                backend_group = BACKEND_OPTIONAL_GROUPS.get(runtime_backend)
+                effective_backends = [backend_group] if backend_group else []
 
-            # Flash Attention 3 if requested (FA2 is pre-installed)
+            # Flash Attention: FA3 upgrade or disable entirely
             effective_flash_attn: int | None = 3 if fa3 else None
 
             job_config = BeakerJobConfig(
@@ -625,6 +627,7 @@ def launch(
                 budget=budget or BEAKER_DEFAULT_BUDGET,
                 backends=effective_backends,
                 flash_attn=effective_flash_attn,
+                no_flash_attn=no_flash_attn,
                 group=effective_group,
             )
 

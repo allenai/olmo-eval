@@ -277,8 +277,9 @@ class BeakerJobConfig:
     # Runtime backend installation
     backends: list[str] = field(default_factory=list)
 
-    # Flash Attention 3 for Hopper GPUs (FA2 is pre-installed, set to 3 to switch)
-    flash_attn: int | None = None
+    # Flash Attention options
+    flash_attn: int | None = None  # Set to 3 to switch to FA3
+    no_flash_attn: bool = False  # Uninstall FA2 at runtime
 
     # Group assignment - experiment will be added to this group at creation time
     group: str | None = None
@@ -384,28 +385,35 @@ class BeakerLauncher:
         command: list[str],
         backends: list[str],
         flash_attn: int | None = None,
+        no_flash_attn: bool = False,
     ) -> list[str]:
         """Build command with source installation and backend installation prepended.
 
         Gantry clones the source code to /gantry-runtime, so we:
-        1. Install olmo-eval from the cloned source
-        2. Install any requested backends
-        3. Install Flash Attention if requested
-        4. Run the actual command
+        1. Install olmo-eval from the cloned source with optional backend groups
+        2. Handle Flash Attention (upgrade to FA3, or disable entirely)
+        3. Run the actual command
+
+        Args:
+            command: The command to run after setup.
+            backends: Optional dependency group names from pyproject.toml (e.g., ["vllm", "hf"]).
+            flash_attn: Set to 3 to use Flash Attention 3 (FA2 is pre-installed).
+            no_flash_attn: If True, uninstall Flash Attention entirely.
         """
         # Build the full command
         steps = []
 
-        # Install olmo-eval from gantry-cloned source
-        steps.append("uv pip install -e /gantry-runtime")
-
-        # Install backends if requested
+        # Install olmo-eval from gantry-cloned source with optional backend groups
         if backends:
-            for backend in backends:
-                steps.append(f"uv pip install {backend}")
+            extras = ",".join(backends)
+            steps.append(f"uv pip install -e '/gantry-runtime[{extras}]'")
+        else:
+            steps.append("uv pip install -e /gantry-runtime")
 
-        # Switch to Flash Attention 3 if requested (FA2 is pre-installed)
-        if flash_attn == 3:
+        # Handle Flash Attention: upgrade to FA3, or disable entirely
+        if no_flash_attn:
+            steps.append("uv pip uninstall flash-attn || true")
+        elif flash_attn == 3:
             steps.append("/gantry-runtime/scripts/use_fa3.sh")
 
         # Run the actual command
@@ -429,7 +437,7 @@ class BeakerLauncher:
         clusters = resolve_clusters(config.cluster)
 
         final_command = self._build_command_with_backends(
-            config.command, config.backends, config.flash_attn
+            config.command, config.backends, config.flash_attn, config.no_flash_attn
         )
 
         # Build weka mounts as tuples: (bucket, mount_path)
