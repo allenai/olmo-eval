@@ -130,8 +130,14 @@ RUN rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* && \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* \
     && apt-get clean
 
-# Copy virtual environment with torch and FA2
-COPY --from=fa2-builder /opt/venv /opt/venv
+# Copy virtual environment in separate layers for parallel uploads
+# Layer 1: Base venv with Python and PyTorch
+COPY --from=builder /opt/venv /opt/venv
+
+# Layer 2: Flash Attention 2 packages
+COPY --from=fa2-builder /opt/venv/lib/python${PYTHON_VERSION}/site-packages/flash_attn* /opt/venv/lib/python${PYTHON_VERSION}/site-packages/
+
+# Copy uv resources
 COPY --from=fa2-builder /root/.local/share/uv /root/.local/share/uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
