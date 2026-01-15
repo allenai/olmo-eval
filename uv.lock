@@ -258,7 +258,7 @@ wheels = [
 
 [[package]]
 name = "beaker-py"
-version = "2.5.3"
+version = "2.5.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "google-crc32c" },
@@ -268,9 +268,9 @@ dependencies = [
     { name = "pyyaml" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9e/69/ee96d86746aa0916ceebfd6b03d2f6ede60995897ae98bca12f7fca3da99/beaker_py-2.5.3.tar.gz", hash = "sha256:724a24b18b6e0e195186d0444a388a9009855f46dab437798ea69a9aa77f8a7f", size = 95816 }
+sdist = { url = "https://files.pythonhosted.org/packages/1c/f7/5816cf63a0b29b23554a3515ba520b87f51fe34361927ba4118b368038fc/beaker_py-2.5.4.tar.gz", hash = "sha256:39c2bf9221f824c08c1062a3932c69b043f0ac14aa7fa58faaf7fafd635701e5", size = 96621 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e1/79/ac369a3766717fd5cad66133a3034f6b7e7015b36f78ee8b9ef183b94ff0/beaker_py-2.5.3-py3-none-any.whl", hash = "sha256:09bd4ef661368b05c588e7b11e9bda7fd6d6e6a97de32aa3c4f0755b1a1d6d14", size = 106929 },
+    { url = "https://files.pythonhosted.org/packages/34/86/2924508b3cabc07a23bf15501b56640e326756288acefb416995b3ccb25f/beaker_py-2.5.4-py3-none-any.whl", hash = "sha256:ec1a61ac50b87a9d30baac638d6d2b543ca7f9f2cca388ec351fac77f13ace2e", size = 107783 },
 ]
 
 [[package]]
@@ -2755,12 +2755,10 @@ all = [
     { name = "boto3" },
     { name = "litellm" },
     { name = "psycopg", extra = ["binary"] },
-    { name = "torch" },
     { name = "transformers" },
 ]
 all-backends = [
     { name = "litellm" },
-    { name = "torch" },
     { name = "transformers" },
 ]
 beaker = [
@@ -2776,7 +2774,6 @@ dev = [
     { name = "ty" },
 ]
 hf = [
-    { name = "torch" },
     { name = "transformers" },
 ]
 litellm = [
@@ -2803,7 +2800,7 @@ vllm = [
 [package.metadata]
 requires-dist = [
     { name = "beaker-gantry", marker = "extra == 'beaker'", specifier = ">=3.2.0,<4" },
-    { name = "beaker-py", marker = "extra == 'beaker'", specifier = ">=2.5.3,<3" },
+    { name = "beaker-py", marker = "extra == 'beaker'", specifier = ">=2.5.4,<3" },
     { name = "boto3", marker = "extra == 'dev'", specifier = ">=1.34.0" },
     { name = "boto3", marker = "extra == 's3'", specifier = ">=1.34.0" },
     { name = "click", specifier = "~=8.3.1" },
@@ -2822,7 +2819,6 @@ requires-dist = [
     { name = "rich", specifier = "~=14.2.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.0" },
     { name = "sympy", specifier = ">=1.12" },
-    { name = "torch", marker = "extra == 'hf'", specifier = ">=2.0.0" },
     { name = "transformers", marker = "extra == 'hf'", specifier = "~=4.57.3" },
     { name = "ty", marker = "extra == 'dev'", specifier = ">=0.0.10" },
     { name = "vllm", marker = "extra == 'vllm'", specifier = "~=0.13.0" },
