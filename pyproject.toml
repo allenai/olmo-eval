@@ -55,7 +55,7 @@ litellm = [
     "litellm~=1.80.11",
 ]
 beaker = [
-    "beaker-py>=2.5.3,<3",
+    "beaker-py>=2.5.4,<3",
     "beaker-gantry>=3.2.0,<4",
 ]
 s3 = [
