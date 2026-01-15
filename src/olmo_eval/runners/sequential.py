@@ -15,6 +15,7 @@ from rich.table import Table
 
 from olmo_eval.backends import Backend, BackendType, create_backend
 from olmo_eval.core import expand_tasks, get_model_config
+from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.evals.suites import suite_exists
 from olmo_eval.evals.tasks import list_tasks
 from olmo_eval.evals.tasks.registry import list_regimes
@@ -39,7 +40,7 @@ class EvalRunner:
 
     model_name: str
     task_specs: list[str]
-    output_dir: str = "./results"
+    output_dir: str = BEAKER_RESULT_DIR
     num_shots_override: int | None = None
     limit_override: int | None = None
     backend_override: str | None = None

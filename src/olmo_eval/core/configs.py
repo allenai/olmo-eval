@@ -7,6 +7,8 @@ from typing import Any
 
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
+from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
+
 
 @dataclass
 class ModelConfig:
@@ -26,7 +28,7 @@ class RunConfig:
 
     model: ModelConfig
     tasks: list[str] = field(default_factory=list)
-    output_dir: str = "./results"
+    output_dir: str = BEAKER_RESULT_DIR
     batch_size: int | str = "auto"
 
 

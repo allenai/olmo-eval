@@ -22,6 +22,9 @@ BEAKER_DEFAULT_PRIORITY = "normal"
 BEAKER_DEFAULT_IMAGE = "ai2-tylerm/olmo-eval-cuda1281-amd64"
 """Default Docker image for Beaker evaluation jobs."""
 
+BEAKER_RESULT_DIR = "/results"
+"""Default directory for evaluation results in Beaker jobs."""
+
 
 class BeakerPriority(str, Enum):
     """Valid Beaker job priority levels."""

@@ -18,6 +18,7 @@ from rich.console import Console
 
 from olmo_eval.backends import BackendType, create_backend
 from olmo_eval.core import Instance, LMOutput, LMRequest, Response, expand_tasks, get_model_config
+from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.evals.tasks import get_task
 from olmo_eval.evals.tasks.base import Task
 from olmo_eval.runners.sequential import ValidationError
@@ -434,7 +435,7 @@ class AsyncEvalRunner:
 
     model_names: list[str]
     task_specs: list[str]
-    output_dir: str = "./results"
+    output_dir: str = BEAKER_RESULT_DIR
     num_shots_override: int | None = None
     limit_override: int | None = None
     backend_override: str | None = None
@@ -905,7 +906,7 @@ class StreamingEvalRunner:
 
     model_names: list[str]
     task_specs: list[str]
-    output_dir: str = "./results"
+    output_dir: str = BEAKER_RESULT_DIR
     num_shots_override: int | None = None
     limit_override: int | None = None
     storages: list[StorageBackend] = field(default_factory=list)
