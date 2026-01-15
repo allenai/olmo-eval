@@ -769,7 +769,6 @@ class BeakerLauncher:
         """Follow an experiment's logs until completion.
 
         Streams logs in real-time, showing startup events and job output.
-        Similar to olmo-core's follow_experiment() implementation.
 
         Args:
             experiment_id: Beaker experiment ID.
@@ -780,60 +779,47 @@ class BeakerLauncher:
             Exit code: 0 for success, non-zero for failure.
         """
         import time
-        from datetime import timedelta
+        from datetime import datetime, timedelta, timezone
 
-        experiment = self.beaker.experiment.get(experiment_id)
-        _console.print(
-            f"[bold]Following experiment:[/bold] {self.beaker.experiment.url(experiment)}"
-        )
+        # Get the workload (experiment)
+        workload = self.beaker.workload.get(experiment_id)
+        workload_url = self.beaker.workload.url(workload)
+        _console.print(f"[bold]Following experiment:[/bold] {workload_url}")
 
         # Phase 1: Wait for job creation
-        tasks = self.beaker.experiment.tasks(experiment.id)
-        if not tasks:
-            _console.print("[red]Experiment has no tasks[/red]")
-            return 1
-
-        job = tasks[0].latest_job
+        job = self.beaker.workload.get_latest_job(workload)
         if job is None:
             _console.print("[dim]Waiting for job to be created...[/dim]")
             while job is None:
                 time.sleep(1.0)
-                tasks = self.beaker.experiment.tasks(experiment.id)
-                job = tasks[0].latest_job if tasks else None
+                workload = self.beaker.workload.get(experiment_id)
+                job = self.beaker.workload.get_latest_job(workload)
 
         # Phase 2: Wait for job to start, showing events
         events_seen: set[str] = set()
-        while not (job.is_finalized or job.is_running):
-            job = self.beaker.job.get(job.id)
-            for event in sorted(
-                self.beaker.job.summarized_events(job),
-                key=lambda e: e.latest_occurrence,
-            ):
+        job = self.beaker.job.get(job.id)
+        while not (job.status.finalized or job.status.started):
+            for event in self.beaker.job.list_summarized_events(job):
                 # Use message as key since events don't have stable IDs
-                event_key = f"{event.status}:{event.latest_message}"
+                event_key = f"{event.status}:{event.message}"
                 if event_key not in events_seen:
                     events_seen.add(event_key)
-                    _console.print(f"[cyan]>[/cyan] {event.latest_message}")
-                    if event.status.lower() == "started":
-                        break
-            else:
-                time.sleep(1.0)
-                continue
-            break
+                    _console.print(f"[cyan]>[/cyan] {event.message}")
+            time.sleep(1.0)
+            job = self.beaker.job.get(job.id)
 
         # Phase 3: Stream logs
         _console.print("\n[bold]Logs:[/bold]")
         try:
-            for line_bytes in self.beaker.job.follow(
-                job,
-                include_timestamps=False,
-                since=None if not tail else timedelta(seconds=10),
-            ):
-                line = line_bytes.decode(errors="ignore").rstrip("\n")
-                print(line)
+            since = datetime.now(timezone.utc) - timedelta(seconds=10) if tail else None
+            for log_entry in self.beaker.job.logs(job, follow=True, since=since):
+                # log_entry is a BeakerJobLog protobuf with 'message' field
+                line = log_entry.message.rstrip("\n") if log_entry.message else ""
+                if line:
+                    print(line)
         except KeyboardInterrupt:
             _console.print("\n[yellow]Interrupted. Experiment continues running.[/yellow]")
-            _console.print(f"[dim]View at: {self.beaker.experiment.url(experiment)}[/dim]")
+            _console.print(f"[dim]View at: {workload_url}[/dim]")
             return 130  # Standard exit code for SIGINT
 
         # Phase 4: Check exit status
@@ -842,9 +828,7 @@ class BeakerLauncher:
         exit_code = job.status.exit_code
 
         if exit_code is None:
-            _console.print(
-                f"[red]Experiment failed[/red]: {self.beaker.experiment.url(experiment)}"
-            )
+            _console.print(f"[red]Experiment failed[/red]: {workload_url}")
             return 1
         elif exit_code > 0:
             _console.print(f"[red]Experiment exited with code {exit_code}[/red]")
