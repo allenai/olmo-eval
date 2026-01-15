@@ -58,6 +58,12 @@ def main() -> None:
     help="Use async runner for parallel task execution",
 )
 @click.option(
+    "--async-stream",
+    "use_async_stream",
+    is_flag=True,
+    help="Use streaming async runner with vLLM's AsyncLLMEngine for true continuous batching",
+)
+@click.option(
     "--num-workers",
     type=int,
     default=None,
@@ -81,6 +87,7 @@ def run(
     storage_config: str | None,
     dry_run: bool,
     use_async: bool,
+    use_async_stream: bool,
     num_workers: int | None,
     gpus_per_worker: int,
 ) -> None:
@@ -88,7 +95,8 @@ def run(
 
     Supports multiple models: use -m multiple times for multi-model runs.
     With --async, runs all (model, task) pairs with per-model workers.
-    Without --async, runs sequentially for each model.
+    With --async-stream, uses vLLM's AsyncLLMEngine for true continuous batching.
+    Without --async or --async-stream, runs sequentially for each model.
     """
     import logging
 
@@ -101,12 +109,31 @@ def run(
     )
 
     # Warning for num-workers without async
-    if num_workers is not None and not use_async:
-        console.print("[yellow]Warning:[/yellow] --num-workers has no effect without --async flag")
-
-    if gpus_per_worker != 1 and not use_async:
+    if num_workers is not None and not use_async and not use_async_stream:
         console.print(
-            "[yellow]Warning:[/yellow] --gpus-per-worker has no effect without --async flag"
+            "[yellow]Warning:[/yellow] --num-workers has no effect without "
+            "--async or --async-stream"
+        )
+
+    if gpus_per_worker != 1 and not use_async and not use_async_stream:
+        console.print(
+            "[yellow]Warning:[/yellow] --gpus-per-worker has no effect without "
+            "--async or --async-stream"
+        )
+
+    # Warning for conflicting flags
+    if use_async and use_async_stream:
+        console.print(
+            "[yellow]Warning:[/yellow] Both --async and --async-stream specified. "
+            "Using --async-stream."
+        )
+        use_async = False
+
+    # Warning for backend override with async-stream
+    if use_async_stream and backend and backend != "vllm":
+        console.print(
+            f"[yellow]Warning:[/yellow] --async-stream only supports vLLM backend, "
+            f"ignoring --backend={backend}"
         )
 
     # Set up storage backends if specified
@@ -146,8 +173,27 @@ def run(
                 )
                 raise SystemExit(1) from None
 
-    # Choose runner based on --async flag
-    if use_async:
+    # Choose runner based on --async or --async-stream flag
+    if use_async_stream:
+        from olmo_eval.runners.parallel import StreamingEvalRunner
+
+        console.print(
+            "[bold cyan]Using StreamingEvalRunner[/bold cyan] - "
+            "true continuous batching with AsyncLLMEngine"
+        )
+        console.print(f"[bold]Models:[/bold] {len(models)}")
+
+        runner = StreamingEvalRunner(
+            model_names=list(models),
+            task_specs=list(task),
+            output_dir=output_dir,
+            num_shots_override=num_shots,
+            limit_override=limit,
+            storages=storages,
+            num_workers=num_workers,
+            gpus_per_worker=gpus_per_worker,
+        )
+    elif use_async:
         from olmo_eval.runners.parallel import AsyncEvalRunner
 
         console.print("[bold cyan]Using AsyncEvalRunner[/bold cyan] - parallel execution enabled")
