@@ -175,7 +175,7 @@ def run(
         # For sequential mode with multiple models, run each model separately
         for i, model in enumerate(models):
             if len(models) > 1:
-                console.print(f"\n[bold]Model {i+1}/{len(models)}:[/bold] {model}")
+                console.print(f"\n[bold]Model {i + 1}/{len(models)}:[/bold] {model}")
 
             runner = EvalRunner(
                 model_name=model,

@@ -400,7 +400,7 @@ class AsyncEvalRunner:
 
         # Auto-detect GPUs
         try:
-            import torch
+            import torch  # type: ignore[import-not-found]
 
             num_gpus = torch.cuda.device_count()
             if num_gpus == 0:
@@ -412,7 +412,7 @@ class AsyncEvalRunner:
     def _get_total_gpus(self) -> int:
         """Get total number of available GPUs."""
         try:
-            import torch
+            import torch  # type: ignore[import-not-found]
 
             return torch.cuda.device_count()
         except ImportError:
@@ -509,7 +509,7 @@ class AsyncEvalRunner:
         console.print(f"[bold]GPUs per model:[/bold] {gpus_per_model}")
 
         # Start workers for each model
-        workers: list[mp.Process] = []
+        workers: list[mp.process.BaseProcess] = []
         gpu_offset = 0
 
         for model_name in self.model_names:
@@ -678,11 +678,13 @@ class AsyncEvalRunner:
                 if key in results:
                     task_result = results[key]
                     if task_result.error:
-                        results_dict["errors"].append({
-                            "model": model_name,
-                            "spec": spec,
-                            "error": task_result.error,
-                        })
+                        results_dict["errors"].append(
+                            {
+                                "model": model_name,
+                                "spec": spec,
+                                "error": task_result.error,
+                            }
+                        )
                     else:
                         model_results["tasks"][spec] = {
                             "config": task_result.config,
@@ -758,12 +760,14 @@ class AsyncEvalRunner:
         tasks_list = []
         for model_name, model_data in results.get("models", {}).items():
             for task_name, task_data in model_data.get("tasks", {}).items():
-                tasks_list.append({
-                    "model": model_name,
-                    "task": task_name,
-                    "metrics": task_data.get("metrics", {}),
-                    "num_instances": task_data.get("num_instances", 0),
-                })
+                tasks_list.append(
+                    {
+                        "model": model_name,
+                        "task": task_name,
+                        "metrics": task_data.get("metrics", {}),
+                        "num_instances": task_data.get("num_instances", 0),
+                    }
+                )
 
         metrics_output = {
             "timestamp": results.get("timestamp", ""),
