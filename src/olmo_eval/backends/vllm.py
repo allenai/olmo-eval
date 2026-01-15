@@ -11,7 +11,7 @@ from olmo_eval.core import LMOutput, LMRequest, SamplingParams
 from .base import Backend
 
 if TYPE_CHECKING:
-    from vllm import AsyncLLM, LLM
+    from vllm import LLM
     from vllm.outputs import RequestOutput
 
 
@@ -172,9 +172,9 @@ class VLLMBackend(Backend):
 class AsyncVLLMBackend:
     """Async vLLM backend with continuous batching for streaming results.
 
-    Uses vLLM's AsyncLLMEngine to enable true continuous batching where
-    requests can be added while others are processing, and results stream
-    back as they complete.
+    Uses vLLM's AsyncLLM (V1 engine) or AsyncLLMEngine (legacy) to enable
+    true continuous batching where requests can be added while others are
+    processing, and results stream back as they complete.
     """
 
     def __init__(self, model_name: str, **engine_kwargs) -> None:
@@ -186,15 +186,29 @@ class AsyncVLLMBackend:
         """
         os.environ.setdefault("VLLM_LOGGING_LEVEL", "WARNING")
 
-        try:
-            from vllm import AsyncLLM
-        except ImportError as e:
-            raise ImportError("vllm is required for AsyncVLLMBackend") from e
-
         self.model_name = model_name
         engine_kwargs.setdefault("gpu_memory_utilization", 0.7)
 
-        self.engine: AsyncLLM = AsyncLLM(model=model_name, **engine_kwargs)
+        # Try V1 engine first (vLLM 0.6.0+), fall back to legacy AsyncLLMEngine
+        self._use_v1_engine = False
+        try:
+            from vllm.engine.arg_utils import AsyncEngineArgs
+            from vllm.v1.engine.async_llm import AsyncLLM
+
+            engine_args = AsyncEngineArgs(model=model_name, **engine_kwargs)
+            self.engine: Any = AsyncLLM.from_engine_args(engine_args)
+            self._use_v1_engine = True
+        except ImportError:
+            # Fall back to legacy AsyncLLMEngine
+            try:
+                from vllm import AsyncEngineArgs
+                from vllm.engine.async_llm_engine import AsyncLLMEngine
+
+                engine_args = AsyncEngineArgs(model=model_name, **engine_kwargs)
+                self.engine = AsyncLLMEngine.from_engine_args(engine_args)
+            except ImportError as e:
+                raise ImportError("vllm is required for AsyncVLLMBackend") from e
+
         self._request_counter = 0
         # Store pending requests: request_id -> (prompt, vllm_params)
         self._pending_requests: dict[str, tuple[str, Any]] = {}
@@ -254,6 +268,7 @@ class AsyncVLLMBackend:
             request_id: str, prompt: str, params: Any
         ) -> tuple[str, list[LMOutput]] | None:
             """Process a single request and return when complete."""
+            # Use AsyncLLMEngine.generate() with positional args: prompt, params, request_id
             async for output in self.engine.generate(prompt, params, request_id):
                 if output.finished:
                     outputs = [
@@ -299,8 +314,17 @@ class AsyncVLLMBackend:
         """Shutdown the engine gracefully."""
         import asyncio
 
-        if self.engine is not None and hasattr(self.engine, "shutdown"):
-            result = self.engine.shutdown()
-            # Handle both sync and async shutdown methods
-            if asyncio.iscoroutine(result) or asyncio.isfuture(result):
-                await result
+        if self.engine is None:
+            return
+
+        # Try different shutdown methods depending on vLLM version
+        if hasattr(self.engine, "shutdown"):
+            try:
+                result = self.engine.shutdown()
+                # Handle both sync and async shutdown methods
+                if result is not None and (
+                    asyncio.iscoroutine(result) or asyncio.isfuture(result)
+                ):
+                    await result
+            except Exception:
+                pass  # Ignore shutdown errors
