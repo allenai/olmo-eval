@@ -601,10 +601,7 @@ class BeakerLauncher:
 
         # Try to get existing group - needs user-qualified name for lookup
         # If name doesn't contain "/", try with current user prefix
-        if "/" not in name:
-            qualified_name = f"{self.beaker.user_name}/{name}"
-        else:
-            qualified_name = name
+        qualified_name = f"{self.beaker.user_name}/{name}" if "/" not in name else name
 
         try:
             return self.beaker.group.get(qualified_name)

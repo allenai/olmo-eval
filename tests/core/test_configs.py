@@ -59,7 +59,7 @@ class TestGetModelConfig:
 
         assert isinstance(config, ModelConfig)
         assert config.model == "meta-llama/Meta-Llama-3.1-8B"
-        assert config.backend == "hf"
+        assert config.backend == "vllm"
 
     def test_get_preset_with_trust_remote_code(self):
         """Test preset that requires trust_remote_code."""
@@ -73,7 +73,7 @@ class TestGetModelConfig:
         config = get_model_config("some-org/custom-model")
 
         assert config.model == "some-org/custom-model"
-        assert config.backend == "hf"  # Default
+        assert config.backend == "vllm"  # Default
 
     def test_get_model_with_override(self):
         """Test getting model with field override."""
@@ -121,7 +121,7 @@ class TestGetModelConfig:
     def test_preset_not_mutated(self):
         """Test that getting with overrides doesn't mutate preset."""
         original = get_model_config("llama3.1-8b")
-        _ = get_model_config("llama3.1-8b", backend="vllm")
+        _ = get_model_config("llama3.1-8b", backend="hf")
         after = get_model_config("llama3.1-8b")
 
-        assert original.backend == after.backend == "hf"
+        assert original.backend == after.backend == "vllm"

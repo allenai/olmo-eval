@@ -70,7 +70,7 @@ def validate_tasks(tasks: list[str]) -> tuple[list[str], list[str]]:
         of all task specs. invalid_tasks contains any specs that don't exist.
     """
     from olmo_eval.evals.suites import suite_exists
-    from olmo_eval.evals.tasks import parse_task_spec, task_exists
+    from olmo_eval.evals.tasks import task_exists
 
     valid_tasks = []
     invalid_tasks = []

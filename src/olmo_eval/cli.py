@@ -100,7 +100,7 @@ def run(
     # Set up storage backends if specified
     storages: list = []
     if storage_backends:
-        from olmo_eval.storage import StorageBackend, get_backend
+        from olmo_eval.storage import get_backend
 
         # Load storage config if provided
         storage_cfg = None
@@ -129,7 +129,9 @@ def run(
                 console.print(f"[red]Storage backend error:[/red] {e}")
                 raise SystemExit(1) from None
             except Exception as e:
-                console.print(f"[red]Failed to initialize {backend_name} storage backend:[/red] {e}")
+                console.print(
+                    f"[red]Failed to initialize {backend_name} storage backend:[/red] {e}"
+                )
                 raise SystemExit(1) from None
 
     # Choose runner based on --async flag
@@ -305,13 +307,22 @@ def suite_info(suite_name: str) -> None:
 @click.option("--budget", help="Beaker budget")
 @click.option("--group", "-g", help="Add experiments to this Beaker group (creates if needed)")
 @click.option(
-    "--backends", "-b", multiple=True, help="Backend optional groups to install at runtime (e.g., vllm, hf, litellm)"
+    "--backends",
+    "-b",
+    multiple=True,
+    help="Backend optional groups to install at runtime (e.g., vllm, hf, litellm)",
 )
 @click.option("--async", "use_async", is_flag=True, help="Enable parallel task execution")
 @click.option("--num-workers", type=int, help="Number of workers for async mode")
 @click.option("--gpus-per-worker", type=int, default=1, help="GPUs per worker for async mode")
-@click.option("--fa3", is_flag=True, help="Use Flash Attention 3 (for Hopper GPUs). FA2 is pre-installed by default.")
-@click.option("--no-flash-attn", is_flag=True, help="Disable Flash Attention (uninstalls FA2 at runtime).")
+@click.option(
+    "--fa3",
+    is_flag=True,
+    help="Use Flash Attention 3 (for Hopper GPUs). FA2 is pre-installed by default.",
+)
+@click.option(
+    "--no-flash-attn", is_flag=True, help="Disable Flash Attention (uninstalls FA2 at runtime)."
+)
 @click.option("--dry-run", is_flag=True, help="Print spec without launching")
 def launch(
     config: str | None,
@@ -579,8 +590,14 @@ def launch(
 
             # Add async flags if enabled (CLI flags override config)
             effective_use_async = use_async or model_resources.get("use_async", False)
-            effective_num_workers = num_workers if num_workers is not None else model_resources.get("num_workers")
-            effective_gpus_per_worker = gpus_per_worker if gpus_per_worker != 1 else model_resources.get("gpus_per_worker", 1)
+            effective_num_workers = (
+                num_workers if num_workers is not None else model_resources.get("num_workers")
+            )
+            effective_gpus_per_worker = (
+                gpus_per_worker
+                if gpus_per_worker != 1
+                else model_resources.get("gpus_per_worker", 1)
+            )
 
             if effective_use_async:
                 command.append("--async")
@@ -596,7 +613,7 @@ def launch(
 
             config_backend = model_resources.get("backend")  # Explicit override from launch config
             if config_backend:
-                runtime_backend = config_backend
+                runtime_backend: str = str(config_backend)
             else:
                 # Get the backend from model config (preset or default)
                 runtime_model_config = get_runtime_model_config(model_name)

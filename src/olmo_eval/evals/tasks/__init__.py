@@ -46,7 +46,7 @@ from . import medmcqa as _medmcqa  # noqa: F401, E402
 from . import minerva as _minerva  # noqa: F401, E402
 from . import mmlu as _mmlu  # noqa: F401, E402
 from . import qa as _qa  # noqa: F401, E402
-from . import wikitext as _wikitext  # noqa: F401, E402
 
 # Register common variants after all tasks are registered
 from . import variants as _variants  # noqa: F401, E402
+from . import wikitext as _wikitext  # noqa: F401, E402
