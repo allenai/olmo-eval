@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import multiprocessing as mp
 import os
@@ -39,6 +40,7 @@ logger = logging.getLogger(__name__)
 class QueueItem:
     """Single instance ready for generation."""
 
+    model_name: str  # Which model this is for
     task_id: str  # Task spec string
     instance_idx: int  # Index within task's instance list
     instance: Instance
@@ -48,8 +50,9 @@ class QueueItem:
 
 @dataclass
 class TaskTracker:
-    """Tracks completion state for a single task."""
+    """Tracks completion state for a single (model, task) pair."""
 
+    model_name: str  # Which model this is for
     spec: str
     task: Task | None  # None if task prep failed
     total_instances: int
@@ -73,6 +76,7 @@ class TaskTracker:
 class ResultItem:
     """Result for a single instance from the worker."""
 
+    model_name: str  # Which model produced this result
     task_id: str
     instance_idx: int
     instance: Instance
@@ -89,12 +93,14 @@ class ResultItem:
 
 def prepare_task_items(
     spec: str,
+    model_name: str,
     overrides: dict[str, Any] | None,
 ) -> tuple[Task, list[QueueItem]]:
     """Prepare a task and its queue items.
 
     Args:
         spec: Task specification string
+        model_name: Model name this task is for
         overrides: Optional config overrides (num_fewshot, limit)
 
     Returns:
@@ -111,6 +117,7 @@ def prepare_task_items(
 
     items = [
         QueueItem(
+            model_name=model_name,
             task_id=spec,
             instance_idx=idx,
             instance=inst,
@@ -199,6 +206,7 @@ def _process_batch(
         for item, outputs in zip(batch, outputs_list, strict=True):
             result_queue.put(
                 ResultItem(
+                    model_name=item.model_name,
                     task_id=item.task_id,
                     instance_idx=item.instance_idx,
                     instance=item.instance,
@@ -213,6 +221,7 @@ def _process_batch(
         for item in batch:
             result_queue.put(
                 ResultItem(
+                    model_name=item.model_name,
                     task_id=item.task_id,
                     instance_idx=item.instance_idx,
                     instance=item.instance,
@@ -285,17 +294,23 @@ def instance_worker_process(
 class AsyncEvalRunner:
     """Async evaluation runner with instance-level queuing.
 
-    Uses a unified queue where instances from all tasks are mixed together,
+    Uses per-model queues where instances from all tasks are mixed together,
     enabling better GPU utilization and early completion reporting.
+    Supports multiple models in a single run, producing results for each
+    unique (model, task) pair.
     """
 
-    model_name: str
+    model_names: list[str]
     task_specs: list[str]
     output_dir: str = "./results"
     num_shots_override: int | None = None
     limit_override: int | None = None
     backend_override: str | None = None
     storages: list[StorageBackend] = field(default_factory=list)
+
+    # Multi-worker config
+    num_workers: int | None = None  # Total workers (distributed across models)
+    gpus_per_worker: int = 1  # Number of GPUs each worker uses
 
     # Instance queue config
     batch_size: int = 32
@@ -307,8 +322,8 @@ class AsyncEvalRunner:
         from olmo_eval.evals.tasks import list_tasks
         from olmo_eval.evals.tasks.registry import list_regimes
 
-        if not self.model_name:
-            raise ValidationError("model_name is required")
+        if not self.model_names:
+            raise ValidationError("model_names is required")
 
         if not self.task_specs:
             raise ValidationError("task_specs is required")
@@ -353,13 +368,13 @@ class AsyncEvalRunner:
         table.add_column("Setting", style="cyan")
         table.add_column("Value", style="white")
 
-        model_config = get_model_config(self.model_name)
-        backend_str = self.backend_override or model_config.backend
-
-        table.add_row("Model", model_config.model)
-        table.add_row("Backend", backend_str)
+        # Show all models
+        models_str = ", ".join(self.model_names)
+        table.add_row("Models", models_str)
         table.add_row("Mode", "Async (Instance Queue)")
         table.add_row("Output Dir", self.output_dir)
+        table.add_row("Workers", str(self.num_workers or "auto-detect"))
+        table.add_row("GPUs per Worker", str(self.gpus_per_worker))
         table.add_row("Batch Size", str(self.batch_size))
         table.add_row("Max Retries", str(self.max_retries))
 
@@ -371,28 +386,45 @@ class AsyncEvalRunner:
         console.print(table)
 
         expanded = expand_tasks(self.task_specs)
-        console.print(f"\n[bold]Tasks to run:[/bold] {len(expanded)}")
+        total_pairs = len(self.model_names) * len(expanded)
+        console.print(f"\n[bold]Models:[/bold] {len(self.model_names)}")
+        console.print(f"[bold]Tasks:[/bold] {len(expanded)}")
+        console.print(f"[bold]Total (model, task) pairs:[/bold] {total_pairs}")
         for spec in expanded:
             console.print(f"  - {spec}")
 
-    def _get_gpu_ids(self) -> list[int]:
-        """Get available GPU IDs."""
+    def _get_num_workers(self) -> int:
+        """Get number of workers based on available GPUs."""
+        if self.num_workers is not None:
+            return self.num_workers
+
+        # Auto-detect GPUs
         try:
             import torch
 
             num_gpus = torch.cuda.device_count()
-            return list(range(num_gpus))
+            if num_gpus == 0:
+                return 1  # Fallback to single worker for CPU
+            return max(1, num_gpus // self.gpus_per_worker)
         except ImportError:
-            return []
+            return 1  # Fallback to single worker if torch unavailable
+
+    def _get_total_gpus(self) -> int:
+        """Get total number of available GPUs."""
+        try:
+            import torch
+
+            return torch.cuda.device_count()
+        except ImportError:
+            return 0
 
     async def run_async(self) -> dict[str, Any]:
-        """Execute evaluations using instance-level queuing."""
-        # Get model config
-        model_config = get_model_config(self.model_name)
-        if self.backend_override:
-            model_config.backend = self.backend_override
+        """Execute evaluations using instance-level queuing with multi-model support.
 
-        backend_type = BackendType(model_config.backend)
+        Creates per-model instance queues and a shared result queue. Workers for each
+        model process instances and report to the shared queue. Results are reported
+        immediately when each (model, task) pair completes.
+        """
         expanded_tasks = expand_tasks(self.task_specs)
 
         # Build overrides
@@ -402,93 +434,149 @@ class AsyncEvalRunner:
         if self.limit_override is not None:
             overrides["limit"] = self.limit_override
 
-        # Prepare all tasks and collect items
-        trackers: dict[str, TaskTracker] = {}
-        all_items: list[QueueItem] = []
+        # Prepare all (model, task) pairs
+        # Key: (model_name, task_spec) -> TaskTracker
+        trackers: dict[tuple[str, str], TaskTracker] = {}
+        # Per-model items to queue
+        model_items: dict[str, list[QueueItem]] = {m: [] for m in self.model_names}
+        # Model configs for later use
+        model_configs: dict[str, Any] = {}
 
-        console.print(f"[bold]Model:[/bold] {model_config.model}")
-        console.print(f"[bold]Backend:[/bold] {backend_type.value}")
+        console.print(f"[bold]Models:[/bold] {len(self.model_names)}")
         console.print(f"[bold]Tasks:[/bold] {len(expanded_tasks)}")
+        total_pairs = len(self.model_names) * len(expanded_tasks)
+        console.print(f"[bold]Total (model, task) pairs:[/bold] {total_pairs}")
         console.print("[bold]Preparing tasks...[/bold]")
 
-        for spec in expanded_tasks:
-            try:
-                task, items = prepare_task_items(spec, overrides or None)
-                trackers[spec] = TaskTracker(
-                    spec=spec,
-                    task=task,
-                    total_instances=len(items),
-                )
-                all_items.extend(items)
-                console.print(f"  - {spec}: {len(items)} instances")
-            except Exception as e:
-                trackers[spec] = TaskTracker(
-                    spec=spec,
-                    task=None,
-                    total_instances=0,
-                    error=str(e),
-                )
-                console.print(f"  [red]- {spec}: ERROR - {e}[/red]")
+        for model_name in self.model_names:
+            model_config = get_model_config(model_name)
+            if self.backend_override:
+                model_config.backend = self.backend_override
+            model_configs[model_name] = model_config
 
-        total_instances = len(all_items)
-        console.print(f"\n[bold]Total instances:[/bold] {total_instances}")
+            console.print(f"\n[cyan]{model_name}[/cyan] ({model_config.model}):")
 
-        # Shuffle for better mixing across tasks
-        random.shuffle(all_items)
+            for spec in expanded_tasks:
+                key = (model_name, spec)
+                try:
+                    task, items = prepare_task_items(spec, model_name, overrides or None)
+                    trackers[key] = TaskTracker(
+                        model_name=model_name,
+                        spec=spec,
+                        task=task,
+                        total_instances=len(items),
+                    )
+                    model_items[model_name].extend(items)
+                    console.print(f"  - {spec}: {len(items)} instances")
+                except Exception as e:
+                    trackers[key] = TaskTracker(
+                        model_name=model_name,
+                        spec=spec,
+                        task=None,
+                        total_instances=0,
+                        error=str(e),
+                    )
+                    console.print(f"  [red]- {spec}: ERROR - {e}[/red]")
 
-        # Create queues
+        # Count total instances
+        total_instances = sum(len(items) for items in model_items.values())
+        console.print(f"\n[bold]Total instances across all models:[/bold] {total_instances}")
+
+        # Setup multiprocessing context
         ctx = mp.get_context("spawn")
-        instance_queue: mp.Queue = ctx.Queue()
+
+        # Create per-model queues + shared result queue
+        model_queues: dict[str, mp.Queue] = {m: ctx.Queue() for m in self.model_names}
         result_queue: mp.Queue = ctx.Queue()
 
-        # Enqueue all items
-        for item in all_items:
-            instance_queue.put(item)
-        instance_queue.put(None)  # Poison pill
+        # Shuffle and enqueue items per model
+        for model_name, items in model_items.items():
+            random.shuffle(items)
+            for item in items:
+                model_queues[model_name].put(item)
 
-        # Start worker
-        gpu_ids = self._get_gpu_ids()
-        worker = ctx.Process(
-            target=instance_worker_process,
-            args=(
-                gpu_ids,
-                instance_queue,
-                result_queue,
-                self.model_name,
-                backend_type.value,
-                self.batch_size,
-            ),
+        # GPU allocation across models
+        total_gpus = self._get_total_gpus()
+        total_workers = self._get_num_workers()
+
+        # Distribute workers across models
+        num_models = len(self.model_names)
+        workers_per_model = max(1, total_workers // num_models)
+        gpus_per_model = max(0, total_gpus // num_models) if total_gpus > 0 else 0
+
+        console.print(f"[bold]Total workers:[/bold] {total_workers}")
+        console.print(f"[bold]Workers per model:[/bold] {workers_per_model}")
+        console.print(f"[bold]GPUs per model:[/bold] {gpus_per_model}")
+
+        # Start workers for each model
+        workers: list[mp.Process] = []
+        gpu_offset = 0
+
+        for model_name in self.model_names:
+            model_config = model_configs[model_name]
+            backend_type = BackendType(model_config.backend)
+
+            # Add poison pills for this model's workers
+            for _ in range(workers_per_model):
+                model_queues[model_name].put(None)
+
+            # Spawn workers for this model
+            for i in range(workers_per_model):
+                if total_gpus > 0:
+                    start_gpu = gpu_offset + (i * self.gpus_per_worker)
+                    end_gpu = min(start_gpu + self.gpus_per_worker, gpu_offset + gpus_per_model)
+                    gpu_ids = list(range(start_gpu, end_gpu)) if start_gpu < end_gpu else []
+                else:
+                    gpu_ids = []
+
+                worker = ctx.Process(
+                    target=instance_worker_process,
+                    args=(
+                        gpu_ids,
+                        model_queues[model_name],
+                        result_queue,
+                        model_config.model,
+                        backend_type.value,
+                        self.batch_size,
+                    ),
+                )
+                worker.start()
+                workers.append(worker)
+
+            gpu_offset += gpus_per_model
+
+        total_workers_spawned = len(workers)
+        console.print(
+            f"[bold green]{total_workers_spawned} worker(s) started across "
+            f"{num_models} model(s), processing instances...[/bold green]"
         )
-        worker.start()
 
-        console.print("[bold green]Worker started, processing instances...[/bold green]")
-
-        # Track results
-        results: list[TaskResult] = []
-        completed_tasks = 0
-        total_tasks = len(expanded_tasks)
+        # Track results - keyed by (model, task)
+        results: dict[tuple[str, str], TaskResult] = {}
+        completed_pairs = 0
 
         # Pre-add error tasks to results
-        for _spec, tracker in trackers.items():
+        for key, tracker in trackers.items():
             if tracker.error:
                 task_result = finalize_task(tracker)
-                results.append(task_result)
-                completed_tasks += 1
-                self._report_task_completion(task_result)
+                results[key] = task_result
+                completed_pairs += 1
+                self._report_task_completion(tracker.model_name, task_result)
 
-        # Track pending retries
+        # Track pending instances
         pending_instances = total_instances
 
         processed = 0
-        while completed_tasks < total_tasks and pending_instances > 0:
+        while completed_pairs < total_pairs and pending_instances > 0:
             result_item: ResultItem = await asyncio.get_event_loop().run_in_executor(
                 None, result_queue.get
             )
             processed += 1
 
-            tracker = trackers[result_item.task_id]
+            key = (result_item.model_name, result_item.task_id)
+            tracker = trackers[key]
 
-            # Skip if task already failed
+            # Skip if this (model, task) already failed
             if tracker.error:
                 pending_instances -= 1
                 continue
@@ -498,19 +586,21 @@ class AsyncEvalRunner:
                 if result_item.attempt < self.max_retries:
                     # Re-enqueue with incremented attempt
                     retry_item = QueueItem(
+                        model_name=result_item.model_name,
                         task_id=result_item.task_id,
                         instance_idx=result_item.instance_idx,
                         instance=result_item.instance,
                         request=result_item.request,
                         attempt=result_item.attempt + 1,
                     )
-                    instance_queue.put(retry_item)
+                    model_queues[result_item.model_name].put(retry_item)
                     logger.warning(
-                        f"Retrying instance {result_item.instance_idx} of {result_item.task_id} "
+                        f"Retrying {result_item.model_name}:{result_item.task_id} "
+                        f"instance {result_item.instance_idx} "
                         f"(attempt {result_item.attempt + 1}/{self.max_retries})"
                     )
                 else:
-                    # Retries exhausted - fail task
+                    # Retries exhausted - fail this (model, task) pair only
                     tracker.error = (
                         f"Instance {result_item.instance_idx} failed after "
                         f"{self.max_retries} retries: {result_item.error}"
@@ -518,9 +608,9 @@ class AsyncEvalRunner:
                     pending_instances -= 1
                     if tracker.is_complete():
                         task_result = finalize_task(tracker)
-                        results.append(task_result)
-                        completed_tasks += 1
-                        self._report_task_completion(task_result)
+                        results[key] = task_result
+                        completed_pairs += 1
+                        self._report_task_completion(tracker.model_name, task_result)
             else:
                 # Success - add response
                 response = Response(
@@ -534,49 +624,73 @@ class AsyncEvalRunner:
 
                 if is_complete:
                     task_result = finalize_task(tracker)
-                    results.append(task_result)
-                    completed_tasks += 1
-                    self._report_task_completion(task_result)
+                    results[key] = task_result
+                    completed_pairs += 1
+                    self._report_task_completion(tracker.model_name, task_result)
 
             # Progress update
             if processed % 100 == 0:
                 console.print(
                     f"  Processed {processed} results, "
-                    f"{completed_tasks}/{total_tasks} tasks complete"
+                    f"{completed_pairs}/{total_pairs} (model, task) pairs complete"
                 )
 
-        # Send poison pill for any remaining retries and cleanup
-        instance_queue.put(None)
+        # Send additional poison pills for cleanup (in case of retries)
+        for model_name in self.model_names:
+            for _ in range(workers_per_model):
+                model_queues[model_name].put(None)
 
-        # Wait for worker
-        worker.join(timeout=10)
-        if worker.is_alive():
-            worker.terminate()
-            worker.join()
+        # Wait for all workers
+        for worker in workers:
+            worker.join(timeout=10)
+            if worker.is_alive():
+                worker.terminate()
+                worker.join()
 
         # Check for errors
-        errors = [r for r in results if r.error]
+        errors = [(k, r) for k, r in results.items() if r.error]
         if errors:
-            console.print(f"\n[bold red]Errors:[/bold red] {len(errors)} tasks failed")
-            for error_result in errors:
-                console.print(f"  - {error_result.spec}: {error_result.error}")
+            console.print(
+                f"\n[bold red]Errors:[/bold red] {len(errors)} (model, task) pairs failed"
+            )
+            for (model_name, spec), error_result in errors:
+                console.print(f"  - {model_name}:{spec}: {error_result.error}")
 
-        # Aggregate results
-        results_dict = {
-            "model": model_config.model,
-            "backend": backend_type.value,
+        # Aggregate results - grouped by model
+        results_dict: dict[str, Any] = {
             "timestamp": datetime.now().isoformat(),
-            "tasks": {
-                r.spec: {
-                    "config": r.config,
-                    "num_instances": r.num_instances,
-                    "metrics": r.metrics,
-                }
-                for r in results
-                if r.error is None
-            },
-            "errors": [{"spec": r.spec, "error": r.error} for r in results if r.error is not None],
+            "models": {},
+            "errors": [],
         }
+
+        for model_name in self.model_names:
+            model_config = model_configs[model_name]
+            backend_type = BackendType(model_config.backend)
+
+            model_results: dict[str, Any] = {
+                "model": model_config.model,
+                "backend": backend_type.value,
+                "tasks": {},
+            }
+
+            for spec in expanded_tasks:
+                key = (model_name, spec)
+                if key in results:
+                    task_result = results[key]
+                    if task_result.error:
+                        results_dict["errors"].append({
+                            "model": model_name,
+                            "spec": spec,
+                            "error": task_result.error,
+                        })
+                    else:
+                        model_results["tasks"][spec] = {
+                            "config": task_result.config,
+                            "num_instances": task_result.num_instances,
+                            "metrics": task_result.metrics,
+                        }
+
+            results_dict["models"][model_name] = model_results
 
         # Log summary of all scores
         self._log_summary(results_dict)
@@ -584,20 +698,24 @@ class AsyncEvalRunner:
         # Save results
         self._save_results(results_dict)
 
+        # Write metrics.json for Beaker
+        self._write_metrics_json(results_dict)
+
         return results_dict
 
-    def _report_task_completion(self, result: TaskResult) -> None:
-        """Report when a task completes."""
+    def _report_task_completion(self, model_name: str, result: TaskResult) -> None:
+        """Report when a (model, task) pair completes."""
+        label = f"{model_name}:{result.spec}"
         if result.error:
-            console.print(f"  [red]x[/red] {result.spec} (ERROR: {result.error})")
+            console.print(f"  [red]x[/red] {label} (ERROR: {result.error})")
         else:
             console.print(
-                f"  [green]v[/green] {result.spec} ({result.num_instances} instances, "
+                f"  [green]v[/green] {label} ({result.num_instances} instances, "
                 f"{result.duration_seconds:.1f}s)"
             )
             # Log metrics
             if result.metrics:
-                logger.info(f"** Task metrics for {result.spec}: **")
+                logger.info(f"** Task metrics for {label}: **")
                 for metric, value in result.metrics.items():
                     logger.info(f"  {metric}: {value:.4f}")
 
@@ -608,12 +726,14 @@ class AsyncEvalRunner:
     def _log_summary(self, results: dict[str, Any]) -> None:
         """Log summary of all task scores."""
         logger.info("Summary of primary scores:")
-        for task_name, task_data in results["tasks"].items():
-            metrics = task_data.get("metrics", {})
-            if metrics:
-                # Use first metric as primary score
-                primary_score = next(iter(metrics.values()))
-                logger.info(f"  {task_name}: {primary_score:.4f}")
+        for model_name, model_data in results.get("models", {}).items():
+            logger.info(f"  {model_name}:")
+            for task_name, task_data in model_data.get("tasks", {}).items():
+                metrics = task_data.get("metrics", {})
+                if metrics:
+                    # Use first metric as primary score
+                    primary_score = next(iter(metrics.values()))
+                    logger.info(f"    {task_name}: {primary_score:.4f}")
 
     def _save_results(self, results: dict[str, Any]) -> None:
         """Save results to all configured storage backends."""
@@ -629,3 +749,32 @@ class AsyncEvalRunner:
                 console.print(f"[green]Results saved to {backend_name} (run_id: {run_id})[/green]")
         else:
             logger.info("No storage backend configured - results logged above only")
+
+    def _write_metrics_json(self, results: dict[str, Any]) -> None:
+        """Write metrics.json for Beaker display."""
+        metrics_file = os.path.join(self.output_dir, "metrics.json")
+
+        # Build simplified metrics structure - flatten (model, task) pairs
+        tasks_list = []
+        for model_name, model_data in results.get("models", {}).items():
+            for task_name, task_data in model_data.get("tasks", {}).items():
+                tasks_list.append({
+                    "model": model_name,
+                    "task": task_name,
+                    "metrics": task_data.get("metrics", {}),
+                    "num_instances": task_data.get("num_instances", 0),
+                })
+
+        metrics_output = {
+            "timestamp": results.get("timestamp", ""),
+            "models": list(results.get("models", {}).keys()),
+            "tasks": tasks_list,
+            "errors": results.get("errors", []),
+        }
+
+        os.makedirs(self.output_dir, exist_ok=True)
+        with open(metrics_file, "w") as f:
+            json.dump(metrics_output, f, indent=2)
+
+        logger.info(f"Metrics written to {metrics_file}")
+        console.print(f"[green]Metrics written to {metrics_file}[/green]")

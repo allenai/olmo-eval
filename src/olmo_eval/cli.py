@@ -23,7 +23,14 @@ def main() -> None:
 
 
 @main.command()
-@click.option("--model", "-m", required=True, help="Model name or preset (e.g., llama3.1-8b)")
+@click.option(
+    "--model",
+    "-m",
+    "models",
+    multiple=True,
+    required=True,
+    help="Model name or preset. Can specify multiple times for multi-model runs.",
+)
 @click.option("--task", "-t", multiple=True, required=True, help="Task spec or suite")
 @click.option("--config", "-c", type=click.Path(exists=True), help="YAML config file")
 @click.option("--output-dir", "-o", default="./results", help="Output directory")
@@ -63,7 +70,7 @@ def main() -> None:
     help="Number of GPUs each worker uses (default: 1)",
 )
 def run(
-    model: str,
+    models: tuple[str, ...],
     task: tuple[str, ...],
     config: str | None,
     output_dir: str,
@@ -77,7 +84,12 @@ def run(
     num_workers: int | None,
     gpus_per_worker: int,
 ) -> None:
-    """Run evaluation on specified tasks."""
+    """Run evaluation on specified tasks.
+
+    Supports multiple models: use -m multiple times for multi-model runs.
+    With --async, runs all (model, task) pairs with per-model workers.
+    Without --async, runs sequentially for each model.
+    """
     import logging
 
     from olmo_eval.runners.sequential import EvalRunner, ValidationError
@@ -139,9 +151,10 @@ def run(
         from olmo_eval.runners.parallel import AsyncEvalRunner
 
         console.print("[bold cyan]Using AsyncEvalRunner[/bold cyan] - parallel execution enabled")
+        console.print(f"[bold]Models:[/bold] {len(models)}")
 
         runner = AsyncEvalRunner(
-            model_name=model,
+            model_names=list(models),
             task_specs=list(task),
             output_dir=output_dir,
             num_shots_override=num_shots,
@@ -152,15 +165,40 @@ def run(
             gpus_per_worker=gpus_per_worker,
         )
     else:
-        runner = EvalRunner(
-            model_name=model,
-            task_specs=list(task),
-            output_dir=output_dir,
-            num_shots_override=num_shots,
-            limit_override=limit,
-            backend_override=backend,
-            storages=storages,
-        )
+        # Sequential runner - run each model in sequence
+        if len(models) > 1:
+            console.print(
+                f"[bold cyan]Running {len(models)} models sequentially[/bold cyan] "
+                "(use --async for parallel execution)"
+            )
+
+        # For sequential mode with multiple models, run each model separately
+        for i, model in enumerate(models):
+            if len(models) > 1:
+                console.print(f"\n[bold]Model {i+1}/{len(models)}:[/bold] {model}")
+
+            runner = EvalRunner(
+                model_name=model,
+                task_specs=list(task),
+                output_dir=output_dir,
+                num_shots_override=num_shots,
+                limit_override=limit,
+                backend_override=backend,
+                storages=storages,
+            )
+
+            try:
+                runner.validate()
+            except ValidationError as e:
+                console.print(f"[red]Validation error:[/red]\n{e}")
+                raise SystemExit(1) from None
+
+            if dry_run:
+                runner.print_config()
+            else:
+                runner.run()
+
+        return  # Exit early since we handled everything in the loop
 
     # Validate inputs before running (applies to both dry-run and actual runs)
     try:

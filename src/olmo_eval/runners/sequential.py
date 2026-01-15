@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -158,6 +160,10 @@ class EvalRunner:
         # Log summary of all scores
         self._log_summary(results)
         self._save_results(results)
+
+        # Write metrics.json for Beaker
+        self._write_metrics_json(results)
+
         return results
 
     def _run_task(self, spec: str, backend: Backend) -> dict[str, Any]:
@@ -211,3 +217,32 @@ class EvalRunner:
                 console.print(f"[green]Results saved to {backend_name} (run_id: {run_id})[/green]")
         else:
             logger.info("No storage backend configured - results logged above only")
+
+    def _write_metrics_json(self, results: dict[str, Any]) -> None:
+        """Write metrics.json for Beaker display."""
+        metrics_file = os.path.join(self.output_dir, "metrics.json")
+
+        # Build simplified metrics structure
+        tasks_list = [
+            {
+                "task": task_name,
+                "metrics": task_data.get("metrics", {}),
+                "num_instances": task_data.get("num_instances", 0),
+            }
+            for task_name, task_data in results.get("tasks", {}).items()
+        ]
+
+        metrics_output = {
+            "model": results.get("model", ""),
+            "backend": results.get("backend", ""),
+            "timestamp": results.get("timestamp", ""),
+            "tasks": tasks_list,
+            "errors": results.get("errors", []),
+        }
+
+        os.makedirs(self.output_dir, exist_ok=True)
+        with open(metrics_file, "w") as f:
+            json.dump(metrics_output, f, indent=2)
+
+        logger.info(f"Metrics written to {metrics_file}")
+        console.print(f"[green]Metrics written to {metrics_file}[/green]")
