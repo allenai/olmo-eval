@@ -398,6 +398,12 @@ def suite_info(suite_name: str) -> None:
     help="Backend optional groups to install at runtime (e.g., vllm, hf, litellm)",
 )
 @click.option("--async", "-a", "use_async", is_flag=True, help="Enable parallel task execution")
+@click.option(
+    "--async-stream",
+    "use_async_stream",
+    is_flag=True,
+    help="Enable streaming async with vLLM's AsyncLLMEngine for true continuous batching",
+)
 @click.option("--num-workers", "-W", type=int, help="Number of workers for async mode")
 @click.option("--gpus-per-worker", type=int, default=1, help="GPUs per worker for async mode")
 @click.option(
@@ -425,6 +431,7 @@ def launch(
     group: str | None,
     backends: tuple[str, ...],
     use_async: bool,
+    use_async_stream: bool,
     num_workers: int | None,
     gpus_per_worker: int,
     fa3: bool,
@@ -675,6 +682,9 @@ def launch(
 
             # Add async flags if enabled (CLI flags override config)
             effective_use_async = use_async or model_resources.get("use_async", False)
+            effective_use_async_stream = use_async_stream or model_resources.get(
+                "use_async_stream", False
+            )
             effective_num_workers = (
                 num_workers if num_workers is not None else model_resources.get("num_workers")
             )
@@ -684,7 +694,14 @@ def launch(
                 else model_resources.get("gpus_per_worker", 1)
             )
 
-            if effective_use_async:
+            # --async-stream takes precedence over --async
+            if effective_use_async_stream:
+                command.append("--async-stream")
+                if effective_num_workers is not None:
+                    command.extend(["--num-workers", str(effective_num_workers)])
+                if effective_gpus_per_worker and effective_gpus_per_worker != 1:
+                    command.extend(["--gpus-per-worker", str(effective_gpus_per_worker)])
+            elif effective_use_async:
                 command.append("--async")
                 if effective_num_workers is not None:
                     command.extend(["--num-workers", str(effective_num_workers)])
