@@ -7,7 +7,6 @@ import json
 import logging
 import multiprocessing as mp
 import os
-import queue
 import random
 import time
 import uuid
@@ -239,10 +238,11 @@ def instance_worker_process(
     result_queue: mp.Queue,
     model_name: str,
     backend_type_str: str,
-    batch_size: int = 32,
-    batch_timeout: float = 0.1,
 ) -> None:
-    """Worker that processes instances in batches.
+    """Worker that collects all items then processes at once.
+
+    This allows vLLM to handle batching internally for optimal throughput,
+    rather than artificially limiting to small batches.
 
     Args:
         gpu_ids: List of GPU IDs to use (for CUDA_VISIBLE_DEVICES)
@@ -250,8 +250,6 @@ def instance_worker_process(
         result_queue: Queue to put ResultItems
         model_name: Model name for backend
         backend_type_str: Backend type string
-        batch_size: Maximum batch size
-        batch_timeout: Seconds to wait for more items when batching
     """
     if gpu_ids:
         os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in gpu_ids)
@@ -259,30 +257,19 @@ def instance_worker_process(
     backend_type = BackendType(backend_type_str)
     backend = create_backend(backend_type, model_name)
 
+    # Collect ALL items from queue until poison pill
+    items: list[QueueItem] = []
     while True:
-        # Collect batch
-        batch: list[QueueItem] = []
-        deadline = time.time() + batch_timeout
+        item = instance_queue.get()
+        if item is None:  # Poison pill
+            break
+        items.append(item)
 
-        while len(batch) < batch_size:
-            try:
-                remaining = max(0.001, deadline - time.time())
-                # Block indefinitely for first item, then use timeout
-                timeout = None if not batch else remaining
-                item = instance_queue.get(timeout=timeout)
-            except queue.Empty:
-                break
+    if not items:
+        return
 
-            if item is None:  # Poison pill
-                # Process remaining batch, then exit
-                if batch:
-                    _process_batch(batch, backend, result_queue)
-                return
-
-            batch.append(item)
-
-        if batch:
-            _process_batch(batch, backend, result_queue)
+    # Process all at once - vLLM handles internal batching for optimal throughput
+    _process_batch(items, backend, result_queue)
 
 
 # -----------------------------------------------------------------------------
@@ -311,10 +298,6 @@ class AsyncEvalRunner:
     # Multi-worker config
     num_workers: int | None = None  # Total workers (distributed across models)
     gpus_per_worker: int = 1  # Number of GPUs each worker uses
-
-    # Instance queue config
-    batch_size: int = 32
-    max_retries: int = 3
 
     def validate(self) -> None:
         """Validate configuration."""
@@ -371,12 +354,10 @@ class AsyncEvalRunner:
         # Show all models
         models_str = ", ".join(self.model_names)
         table.add_row("Models", models_str)
-        table.add_row("Mode", "Async (Instance Queue)")
+        table.add_row("Mode", "Async (All-at-once)")
         table.add_row("Output Dir", self.output_dir)
         table.add_row("Workers", str(self.num_workers or "auto-detect"))
         table.add_row("GPUs per Worker", str(self.gpus_per_worker))
-        table.add_row("Batch Size", str(self.batch_size))
-        table.add_row("Max Retries", str(self.max_retries))
 
         if self.num_shots_override is not None:
             table.add_row("Num Shots Override", str(self.num_shots_override))
@@ -508,6 +489,12 @@ class AsyncEvalRunner:
         console.print(f"[bold]Workers per model:[/bold] {workers_per_model}")
         console.print(f"[bold]GPUs per model:[/bold] {gpus_per_model}")
 
+        # Add poison pills for all models AFTER all items are enqueued
+        # This ensures workers see all items before the termination signal
+        for model_name in self.model_names:
+            for _ in range(workers_per_model):
+                model_queues[model_name].put(None)
+
         # Start workers for each model
         workers: list[mp.process.BaseProcess] = []
         gpu_offset = 0
@@ -515,10 +502,6 @@ class AsyncEvalRunner:
         for model_name in self.model_names:
             model_config = model_configs[model_name]
             backend_type = BackendType(model_config.backend)
-
-            # Add poison pills for this model's workers
-            for _ in range(workers_per_model):
-                model_queues[model_name].put(None)
 
             # Spawn workers for this model
             for i in range(workers_per_model):
@@ -537,7 +520,6 @@ class AsyncEvalRunner:
                         result_queue,
                         model_config.model,
                         backend_type.value,
-                        self.batch_size,
                     ),
                 )
                 worker.start()
@@ -582,35 +564,16 @@ class AsyncEvalRunner:
                 continue
 
             if result_item.error:
-                # Instance error - retry or fail task
-                if result_item.attempt < self.max_retries:
-                    # Re-enqueue with incremented attempt
-                    retry_item = QueueItem(
-                        model_name=result_item.model_name,
-                        task_id=result_item.task_id,
-                        instance_idx=result_item.instance_idx,
-                        instance=result_item.instance,
-                        request=result_item.request,
-                        attempt=result_item.attempt + 1,
-                    )
-                    model_queues[result_item.model_name].put(retry_item)
-                    logger.warning(
-                        f"Retrying {result_item.model_name}:{result_item.task_id} "
-                        f"instance {result_item.instance_idx} "
-                        f"(attempt {result_item.attempt + 1}/{self.max_retries})"
-                    )
-                else:
-                    # Retries exhausted - fail this (model, task) pair only
-                    tracker.error = (
-                        f"Instance {result_item.instance_idx} failed after "
-                        f"{self.max_retries} retries: {result_item.error}"
-                    )
-                    pending_instances -= 1
-                    if tracker.is_complete():
-                        task_result = finalize_task(tracker)
-                        results[key] = task_result
-                        completed_pairs += 1
-                        self._report_task_completion(tracker.model_name, task_result)
+                # Instance error - fail this (model, task) pair
+                tracker.error = (
+                    f"Instance {result_item.instance_idx} failed: {result_item.error}"
+                )
+                pending_instances -= 1
+                if tracker.is_complete():
+                    task_result = finalize_task(tracker)
+                    results[key] = task_result
+                    completed_pairs += 1
+                    self._report_task_completion(tracker.model_name, task_result)
             else:
                 # Success - add response
                 response = Response(
@@ -634,11 +597,6 @@ class AsyncEvalRunner:
                     f"  Processed {processed} results, "
                     f"{completed_pairs}/{total_pairs} (model, task) pairs complete"
                 )
-
-        # Send additional poison pills for cleanup (in case of retries)
-        for model_name in self.model_names:
-            for _ in range(workers_per_model):
-                model_queues[model_name].put(None)
 
         # Wait for all workers
         for worker in workers:
