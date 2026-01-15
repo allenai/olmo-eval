@@ -1,4 +1,4 @@
-"""Async evaluation runner for parallel task execution."""
+"""Async evaluation runner with instance-level queuing."""
 
 from __future__ import annotations
 
@@ -6,17 +6,22 @@ import asyncio
 import logging
 import multiprocessing as mp
 import os
+import queue
+import random
+import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
 
 from olmo_eval.backends import BackendType, create_backend
-from olmo_eval.core import expand_tasks, get_model_config
+from olmo_eval.core import Instance, LMOutput, LMRequest, Response, expand_tasks, get_model_config
+from olmo_eval.evals.tasks import get_task
+from olmo_eval.evals.tasks.base import Task
 from olmo_eval.runners.sequential import ValidationError
-from olmo_eval.runners.utils import TaskResult, run_task_impl
+from olmo_eval.runners.utils import TaskResult
 
 if TYPE_CHECKING:
     from olmo_eval.storage import StorageBackend
@@ -25,60 +30,263 @@ console = Console()
 logger = logging.getLogger(__name__)
 
 
-def worker_process(
-    worker_id: int,
-    gpu_ids: list[int],
-    task_queue: mp.Queue[tuple[str, str, dict] | None],
-    result_queue: mp.Queue[TaskResult],
-    overrides: dict[str, Any],
-) -> None:
-    """Worker process that executes tasks from queue.
+# -----------------------------------------------------------------------------
+# Data structures for instance-level queuing
+# -----------------------------------------------------------------------------
+
+
+@dataclass
+class QueueItem:
+    """Single instance ready for generation."""
+
+    task_id: str  # Task spec string
+    instance_idx: int  # Index within task's instance list
+    instance: Instance
+    request: LMRequest  # Pre-formatted request
+    attempt: int = 0  # Retry attempt number
+
+
+@dataclass
+class TaskTracker:
+    """Tracks completion state for a single task."""
+
+    spec: str
+    task: Task | None  # None if task prep failed
+    total_instances: int
+    completed_count: int = 0
+    responses: dict[int, Response] = field(default_factory=dict)
+    error: str | None = None
+    start_time: float = field(default_factory=time.time)
+
+    def is_complete(self) -> bool:
+        """Check if task is complete (all instances done or error occurred)."""
+        return self.completed_count >= self.total_instances or self.error is not None
+
+    def add_response(self, idx: int, response: Response) -> bool:
+        """Add a response. Returns True if task is now complete."""
+        self.responses[idx] = response
+        self.completed_count += 1
+        return self.is_complete()
+
+
+@dataclass
+class ResultItem:
+    """Result for a single instance from the worker."""
+
+    task_id: str
+    instance_idx: int
+    instance: Instance
+    request: LMRequest
+    outputs: list[LMOutput]
+    error: str | None = None
+    attempt: int = 0
+
+
+# -----------------------------------------------------------------------------
+# Helper functions
+# -----------------------------------------------------------------------------
+
+
+def prepare_task_items(
+    spec: str,
+    overrides: dict[str, Any] | None,
+) -> tuple[Task, list[QueueItem]]:
+    """Prepare a task and its queue items.
 
     Args:
-        worker_id: Worker identifier
-        gpu_ids: List of GPU IDs to use (for CUDA_VISIBLE_DEVICES)
-        task_queue: Queue of (task_spec, model_name, backend_type) tuples
-        result_queue: Queue to put results
-        overrides: Task overrides (num_fewshot, limit)
-    """
-    # Set CUDA devices for this worker
-    if gpu_ids:
-        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(gid) for gid in gpu_ids)
+        spec: Task specification string
+        overrides: Optional config overrides (num_fewshot, limit)
 
-    backend = None
-    current_model = None
+    Returns:
+        Tuple of (Task instance for scoring, list of QueueItems)
+    """
+    task = get_task(spec)
+
+    if overrides:
+        task.config = replace(task.config, **overrides)
+
+    instances = list(task.instances)
+    if task.config.limit:
+        instances = instances[: task.config.limit]
+
+    items = [
+        QueueItem(
+            task_id=spec,
+            instance_idx=idx,
+            instance=inst,
+            request=task.format_request(inst),
+        )
+        for idx, inst in enumerate(instances)
+    ]
+
+    return task, items
+
+
+def finalize_task(tracker: TaskTracker) -> TaskResult:
+    """Score responses and compute metrics for a completed task.
+
+    Args:
+        tracker: TaskTracker with all responses collected
+
+    Returns:
+        TaskResult with metrics or error
+    """
+    duration = time.time() - tracker.start_time
+
+    if tracker.error:
+        return TaskResult(
+            spec=tracker.spec,
+            config={},
+            num_instances=0,
+            metrics={},
+            error=tracker.error,
+            duration_seconds=duration,
+        )
+
+    if tracker.task is None:
+        return TaskResult(
+            spec=tracker.spec,
+            config={},
+            num_instances=0,
+            metrics={},
+            error="Task not initialized",
+            duration_seconds=duration,
+        )
+
+    # Reconstruct responses in original order
+    responses = [tracker.responses[i] for i in range(tracker.total_instances)]
+
+    # Score and compute metrics
+    scored = tracker.task.score_responses(responses)
+    metrics = tracker.task.compute_metrics(scored)
+
+    return TaskResult(
+        spec=tracker.spec,
+        config={
+            "name": tracker.task.config.name,
+            "split": tracker.task.config.split.value,
+            "num_fewshot": tracker.task.config.num_fewshot,
+            "limit": tracker.task.config.limit,
+        },
+        num_instances=tracker.total_instances,
+        metrics=metrics,
+        duration_seconds=duration,
+    )
+
+
+# -----------------------------------------------------------------------------
+# Worker process
+# -----------------------------------------------------------------------------
+
+
+def _process_batch(
+    batch: list[QueueItem],
+    backend: Any,
+    result_queue: mp.Queue,
+) -> None:
+    """Process a batch of instances through the backend.
+
+    Args:
+        batch: List of QueueItems to process
+        backend: Backend instance
+        result_queue: Queue to put results
+    """
+    requests = [item.request for item in batch]
+
+    try:
+        outputs_list = backend.generate(requests)
+
+        for item, outputs in zip(batch, outputs_list, strict=True):
+            result_queue.put(
+                ResultItem(
+                    task_id=item.task_id,
+                    instance_idx=item.instance_idx,
+                    instance=item.instance,
+                    request=item.request,
+                    outputs=outputs,
+                    error=None,
+                    attempt=item.attempt,
+                )
+            )
+    except Exception as e:
+        # On batch failure, report error for all items
+        for item in batch:
+            result_queue.put(
+                ResultItem(
+                    task_id=item.task_id,
+                    instance_idx=item.instance_idx,
+                    instance=item.instance,
+                    request=item.request,
+                    outputs=[],
+                    error=str(e),
+                    attempt=item.attempt,
+                )
+            )
+
+
+def instance_worker_process(
+    gpu_ids: list[int],
+    instance_queue: mp.Queue,
+    result_queue: mp.Queue,
+    model_name: str,
+    backend_type_str: str,
+    batch_size: int = 32,
+    batch_timeout: float = 0.1,
+) -> None:
+    """Worker that processes instances in batches.
+
+    Args:
+        gpu_ids: List of GPU IDs to use (for CUDA_VISIBLE_DEVICES)
+        instance_queue: Queue of QueueItems (None = poison pill)
+        result_queue: Queue to put ResultItems
+        model_name: Model name for backend
+        backend_type_str: Backend type string
+        batch_size: Maximum batch size
+        batch_timeout: Seconds to wait for more items when batching
+    """
+    if gpu_ids:
+        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in gpu_ids)
+
+    backend_type = BackendType(backend_type_str)
+    backend = create_backend(backend_type, model_name)
 
     while True:
-        item = task_queue.get()
-        if item is None:  # Poison pill
-            break
+        # Collect batch
+        batch: list[QueueItem] = []
+        deadline = time.time() + batch_timeout
 
-        task_spec, model_name, backend_type_str = item
+        while len(batch) < batch_size:
+            try:
+                remaining = max(0.001, deadline - time.time())
+                # Block indefinitely for first item, then use timeout
+                timeout = None if not batch else remaining
+                item = instance_queue.get(timeout=timeout)
+            except queue.Empty:
+                break
 
-        # Load backend if needed (reuse if same model)
-        if backend is None or current_model != model_name:
-            if backend is not None:
-                del backend
+            if item is None:  # Poison pill
+                # Process remaining batch, then exit
+                if batch:
+                    _process_batch(batch, backend, result_queue)
+                return
 
-            backend_type = BackendType(backend_type_str)
-            backend = create_backend(backend_type, model_name)
-            current_model = model_name
+            batch.append(item)
 
-        # Execute task
-        result = run_task_impl(
-            spec=task_spec,
-            backend=backend,
-            overrides=overrides or None,
-        )
-        result_queue.put(result)
+        if batch:
+            _process_batch(batch, backend, result_queue)
+
+
+# -----------------------------------------------------------------------------
+# AsyncEvalRunner
+# -----------------------------------------------------------------------------
 
 
 @dataclass
 class AsyncEvalRunner:
-    """Async evaluation runner with parallel task execution.
+    """Async evaluation runner with instance-level queuing.
 
-    Runs tasks in parallel across multiple GPUs/compute instances using a simple
-    queue-based approach. Tasks are pulled from a queue by worker processes.
+    Uses a unified queue where instances from all tasks are mixed together,
+    enabling better GPU utilization and early completion reporting.
     """
 
     model_name: str
@@ -89,9 +297,9 @@ class AsyncEvalRunner:
     backend_override: str | None = None
     storages: list[StorageBackend] = field(default_factory=list)
 
-    # Async-specific config
-    num_workers: int | None = None  # Number of workers (default: num GPUs)
-    gpus_per_worker: int = 1  # Number of GPUs each worker uses
+    # Instance queue config
+    batch_size: int = 32
+    max_retries: int = 3
 
     def validate(self) -> None:
         """Validate configuration."""
@@ -150,10 +358,10 @@ class AsyncEvalRunner:
 
         table.add_row("Model", model_config.model)
         table.add_row("Backend", backend_str)
-        table.add_row("Mode", "Async (Parallel Execution)")
+        table.add_row("Mode", "Async (Instance Queue)")
         table.add_row("Output Dir", self.output_dir)
-        table.add_row("Workers", str(self.num_workers or "auto-detect"))
-        table.add_row("GPUs per Worker", str(self.gpus_per_worker))
+        table.add_row("Batch Size", str(self.batch_size))
+        table.add_row("Max Retries", str(self.max_retries))
 
         if self.num_shots_override is not None:
             table.add_row("Num Shots Override", str(self.num_shots_override))
@@ -165,114 +373,186 @@ class AsyncEvalRunner:
         expanded = expand_tasks(self.task_specs)
         console.print(f"\n[bold]Tasks to run:[/bold] {len(expanded)}")
         for spec in expanded:
-            console.print(f"  • {spec}")
+            console.print(f"  - {spec}")
 
-    def _get_num_workers(self) -> int:
-        """Get number of workers."""
-        if self.num_workers is not None:
-            return self.num_workers
-
-        # Auto-detect GPUs
+    def _get_gpu_ids(self) -> list[int]:
+        """Get available GPU IDs."""
         try:
-            import torch  # type: ignore[import-untyped]
+            import torch
 
             num_gpus = torch.cuda.device_count()
-            if num_gpus == 0:
-                raise RuntimeError("No GPUs detected. Specify --num-workers explicitly.")
-            return num_gpus // self.gpus_per_worker
+            return list(range(num_gpus))
         except ImportError:
-            raise RuntimeError("torch not available. Specify --num-workers explicitly.") from None
+            return []
 
     async def run_async(self) -> dict[str, Any]:
-        """Execute evaluations asynchronously."""
+        """Execute evaluations using instance-level queuing."""
         # Get model config
         model_config = get_model_config(self.model_name)
         if self.backend_override:
             model_config.backend = self.backend_override
 
         backend_type = BackendType(model_config.backend)
-
-        # Expand tasks
         expanded_tasks = expand_tasks(self.task_specs)
 
-        # Determine number of workers
-        num_workers = self._get_num_workers()
-
-        console.print(f"[bold]Model:[/bold] {model_config.model}")
-        console.print(f"[bold]Backend:[/bold] {backend_type.value}")
-        console.print(f"[bold]Tasks:[/bold] {len(expanded_tasks)}")
-        console.print(f"[bold]Workers:[/bold] {num_workers}")
-        console.print(f"[bold]GPUs per worker:[/bold] {self.gpus_per_worker}")
-
-        # Create queues
-        ctx = mp.get_context("spawn")
-        task_queue: mp.Queue = ctx.Queue()
-        result_queue: mp.Queue = ctx.Queue()
-
         # Build overrides
-        overrides = {}
+        overrides: dict[str, Any] = {}
         if self.num_shots_override is not None:
             overrides["num_fewshot"] = self.num_shots_override
         if self.limit_override is not None:
             overrides["limit"] = self.limit_override
 
-        # Enqueue all tasks
-        for task_spec in expanded_tasks:
-            task_queue.put((task_spec, self.model_name, backend_type.value))
+        # Prepare all tasks and collect items
+        trackers: dict[str, TaskTracker] = {}
+        all_items: list[QueueItem] = []
 
-        # Add poison pills
-        for _ in range(num_workers):
-            task_queue.put(None)
+        console.print(f"[bold]Model:[/bold] {model_config.model}")
+        console.print(f"[bold]Backend:[/bold] {backend_type.value}")
+        console.print(f"[bold]Tasks:[/bold] {len(expanded_tasks)}")
+        console.print("[bold]Preparing tasks...[/bold]")
 
-        # Assign GPUs to workers
-        try:
-            import torch  # type: ignore[import-untyped]
+        for spec in expanded_tasks:
+            try:
+                task, items = prepare_task_items(spec, overrides or None)
+                trackers[spec] = TaskTracker(
+                    spec=spec,
+                    task=task,
+                    total_instances=len(items),
+                )
+                all_items.extend(items)
+                console.print(f"  - {spec}: {len(items)} instances")
+            except Exception as e:
+                trackers[spec] = TaskTracker(
+                    spec=spec,
+                    task=None,
+                    total_instances=0,
+                    error=str(e),
+                )
+                console.print(f"  [red]- {spec}: ERROR - {e}[/red]")
 
-            total_gpus = torch.cuda.device_count()
-        except ImportError:
-            total_gpus = 0
+        total_instances = len(all_items)
+        console.print(f"\n[bold]Total instances:[/bold] {total_instances}")
 
-        # Spawn workers
-        workers = []
-        for i in range(num_workers):
-            # Assign GPUs to this worker
-            if total_gpus > 0:
-                start_gpu = i * self.gpus_per_worker
-                gpu_ids = list(range(start_gpu, min(start_gpu + self.gpus_per_worker, total_gpus)))
-            else:
-                gpu_ids = []
+        # Shuffle for better mixing across tasks
+        random.shuffle(all_items)
 
-            process = ctx.Process(
-                target=worker_process,
-                args=(i, gpu_ids, task_queue, result_queue, overrides),
+        # Create queues
+        ctx = mp.get_context("spawn")
+        instance_queue: mp.Queue = ctx.Queue()
+        result_queue: mp.Queue = ctx.Queue()
+
+        # Enqueue all items
+        for item in all_items:
+            instance_queue.put(item)
+        instance_queue.put(None)  # Poison pill
+
+        # Start worker
+        gpu_ids = self._get_gpu_ids()
+        worker = ctx.Process(
+            target=instance_worker_process,
+            args=(
+                gpu_ids,
+                instance_queue,
+                result_queue,
+                self.model_name,
+                backend_type.value,
+                self.batch_size,
+            ),
+        )
+        worker.start()
+
+        console.print("[bold green]Worker started, processing instances...[/bold green]")
+
+        # Track results
+        results: list[TaskResult] = []
+        completed_tasks = 0
+        total_tasks = len(expanded_tasks)
+
+        # Pre-add error tasks to results
+        for _spec, tracker in trackers.items():
+            if tracker.error:
+                task_result = finalize_task(tracker)
+                results.append(task_result)
+                completed_tasks += 1
+                self._report_task_completion(task_result)
+
+        # Track pending retries
+        pending_instances = total_instances
+
+        processed = 0
+        while completed_tasks < total_tasks and pending_instances > 0:
+            result_item: ResultItem = await asyncio.get_event_loop().run_in_executor(
+                None, result_queue.get
             )
-            process.start()
-            workers.append(process)
+            processed += 1
 
-        console.print("[bold green]Workers started, processing tasks...[/bold green]")
+            tracker = trackers[result_item.task_id]
 
-        # Collect results
-        results = []
-        for _ in range(len(expanded_tasks)):
-            result = await asyncio.get_event_loop().run_in_executor(None, result_queue.get)
-            results.append(result)
+            # Skip if task already failed
+            if tracker.error:
+                pending_instances -= 1
+                continue
 
-            status = "red" if result.error else "green"
-            msg = f"ERROR: {result.error}" if result.error else f"{result.num_instances} instances"
-            console.print(f"  [{status}]✓[/] {result.spec} ({msg})")
+            if result_item.error:
+                # Instance error - retry or fail task
+                if result_item.attempt < self.max_retries:
+                    # Re-enqueue with incremented attempt
+                    retry_item = QueueItem(
+                        task_id=result_item.task_id,
+                        instance_idx=result_item.instance_idx,
+                        instance=result_item.instance,
+                        request=result_item.request,
+                        attempt=result_item.attempt + 1,
+                    )
+                    instance_queue.put(retry_item)
+                    logger.warning(
+                        f"Retrying instance {result_item.instance_idx} of {result_item.task_id} "
+                        f"(attempt {result_item.attempt + 1}/{self.max_retries})"
+                    )
+                else:
+                    # Retries exhausted - fail task
+                    tracker.error = (
+                        f"Instance {result_item.instance_idx} failed after "
+                        f"{self.max_retries} retries: {result_item.error}"
+                    )
+                    pending_instances -= 1
+                    if tracker.is_complete():
+                        task_result = finalize_task(tracker)
+                        results.append(task_result)
+                        completed_tasks += 1
+                        self._report_task_completion(task_result)
+            else:
+                # Success - add response
+                response = Response(
+                    instance=result_item.instance,
+                    request=result_item.request,
+                    outputs=result_item.outputs,
+                )
 
-            # Log metrics (for Beaker job details)
-            if result.error is None and result.metrics:
-                logger.info(f"** Task metrics for {result.spec}: **")
-                for metric, value in result.metrics.items():
-                    logger.info(f"  {metric}: {value:.4f}")
+                is_complete = tracker.add_response(result_item.instance_idx, response)
+                pending_instances -= 1
 
-        # Wait for workers
-        for process in workers:
-            process.join(timeout=5)
-            if process.is_alive():
-                process.terminate()
-                process.join()
+                if is_complete:
+                    task_result = finalize_task(tracker)
+                    results.append(task_result)
+                    completed_tasks += 1
+                    self._report_task_completion(task_result)
+
+            # Progress update
+            if processed % 100 == 0:
+                console.print(
+                    f"  Processed {processed} results, "
+                    f"{completed_tasks}/{total_tasks} tasks complete"
+                )
+
+        # Send poison pill for any remaining retries and cleanup
+        instance_queue.put(None)
+
+        # Wait for worker
+        worker.join(timeout=10)
+        if worker.is_alive():
+            worker.terminate()
+            worker.join()
 
         # Check for errors
         errors = [r for r in results if r.error]
@@ -305,6 +585,21 @@ class AsyncEvalRunner:
         self._save_results(results_dict)
 
         return results_dict
+
+    def _report_task_completion(self, result: TaskResult) -> None:
+        """Report when a task completes."""
+        if result.error:
+            console.print(f"  [red]x[/red] {result.spec} (ERROR: {result.error})")
+        else:
+            console.print(
+                f"  [green]v[/green] {result.spec} ({result.num_instances} instances, "
+                f"{result.duration_seconds:.1f}s)"
+            )
+            # Log metrics
+            if result.metrics:
+                logger.info(f"** Task metrics for {result.spec}: **")
+                for metric, value in result.metrics.items():
+                    logger.info(f"  {metric}: {value:.4f}")
 
     def run(self) -> dict[str, Any]:
         """Sync wrapper for async execution."""
