@@ -69,7 +69,7 @@ def run_task_impl(
         requests = [task.format_request(inst) for inst in instances]
 
         # Generate outputs
-        outputs = backend.generate(requests)
+        outputs = backend.generate(requests, task.config.sampling_params)
 
         # Build responses
         responses = [

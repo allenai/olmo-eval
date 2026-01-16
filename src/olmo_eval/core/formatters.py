@@ -108,3 +108,32 @@ class MultipleChoiceFormatter:
             prompt=prompt,
             continuations=continuations,
         )
+
+
+@dataclass(slots=True)
+class MCQAChatFormatter:
+    """Format multiple choice questions for chat-based CoT generation."""
+
+    system_prompt: str = ""
+
+    def format(
+        self,
+        instance: Instance,
+        fewshot: list[Instance] | None = None,
+    ) -> LMRequest:
+        messages: list[dict[str, str]] = []
+
+        if self.system_prompt:
+            messages.append({"role": "system", "content": self.system_prompt})
+
+        # Format question with choices
+        question_text = instance.question
+        if instance.choices:
+            choices_text = "\n".join(
+                f"({chr(ord('A') + i)}) {c}" for i, c in enumerate(instance.choices)
+            )
+            question_text = f"{question_text}\n\n{choices_text}"
+
+        messages.append({"role": "user", "content": question_text})
+
+        return LMRequest(request_type=RequestType.CHAT, messages=tuple(messages))

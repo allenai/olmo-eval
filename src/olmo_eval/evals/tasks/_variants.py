@@ -8,6 +8,8 @@ the :mc variant is a no-op. For generation tasks, :mc would convert them to
 multiple choice format.
 """
 
+from olmo_eval.core import MCQAChatFormatter, SamplingParams
+
 from .core.registry import _tasks, register_variant
 
 # Tasks that are already multiple choice by default
@@ -134,12 +136,57 @@ def register_3shot_variants() -> None:
         register_variant(task_name, "3shot", num_fewshot=3)
 
 
+# AGI Eval CoT variant configuration
+AGI_EVAL_COT_SYSTEM_PROMPT = (
+    "Answer the following multiple-choice question by giving the correct answer "
+    "letter in parentheses. Provide CONCISE reasoning for the answer, and make "
+    "sure to finish the response with 'Therefore, the answer is (ANSWER_LETTER)' "
+    "where (ANSWER_LETTER) is one of (A), (B), (C), (D), (E), etc."
+)
+
+COT_SAMPLING_PARAMS = SamplingParams(
+    temperature=0.6,
+    top_p=0.95,
+    max_tokens=131072,
+)
+
+_AGI_EVAL_TASKS = [
+    "agi_eval_aqua_rat",
+    "agi_eval_gaokao_english",
+    "agi_eval_logiqa_en",
+    "agi_eval_lsat_ar",
+    "agi_eval_lsat_lr",
+    "agi_eval_lsat_rc",
+    "agi_eval_sat_en",
+    "agi_eval_sat_en_without_passage",
+    "agi_eval_sat_math",
+]
+
+
+def register_cot_variants() -> None:
+    """Register :cot variant for AGI Eval tasks.
+
+    The :cot variant uses chat-based chain-of-thought generation
+    with answer extraction for multiple choice questions.
+    """
+    for task_name in _AGI_EVAL_TASKS:
+        if task_name in _tasks:
+            register_variant(
+                task_name,
+                "cot",
+                formatter=MCQAChatFormatter(system_prompt=AGI_EVAL_COT_SYSTEM_PROMPT),
+                sampling_params=COT_SAMPLING_PARAMS,
+                num_fewshot=0,
+            )
+
+
 def register_all_variants() -> None:
     """Register all common variants for all tasks."""
     register_all_mc_variants()
     register_bpb_variants()
     register_rc_variants()
     register_3shot_variants()
+    register_cot_variants()
 
 
 # Auto-register all variants for all tasks when this module is imported

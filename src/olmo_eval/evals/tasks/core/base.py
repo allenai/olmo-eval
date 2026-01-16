@@ -13,6 +13,7 @@ from olmo_eval.core import (
     Metric,
     MetricName,
     Response,
+    SamplingParams,
     Scorer,
     Split,
 )
@@ -33,6 +34,7 @@ class TaskConfig:
     limit: int | None = None
     split: Split = Split.TEST
     primary_metric: MetricName | None = None
+    sampling_params: SamplingParams | None = None
 
 
 class Task(ABC):

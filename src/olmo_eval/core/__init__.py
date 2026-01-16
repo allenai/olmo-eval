@@ -9,7 +9,13 @@ from .configs import (
     load_config,
 )
 from .constants.models import get_model_presets
-from .formatters import ChatFormatter, CompletionFormatter, Formatter, MultipleChoiceFormatter
+from .formatters import (
+    ChatFormatter,
+    CompletionFormatter,
+    Formatter,
+    MCQAChatFormatter,
+    MultipleChoiceFormatter,
+)
 from .metrics import AccuracyMetric, F1Metric, Metric
 from .scorers import ExactMatchScorer, F1Scorer, MultipleChoiceScorer, Scorer
 from .types import (
@@ -47,6 +53,7 @@ __all__ = [
     "Formatter",
     "ChatFormatter",
     "CompletionFormatter",
+    "MCQAChatFormatter",
     "MultipleChoiceFormatter",
     # Scoring
     "Scorer",
