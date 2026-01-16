@@ -6,7 +6,7 @@ Evaluation toolkit for OLMo and other language models.
 
 ```bash
 # Install
-pip install -e .
+uv pip install -e .
 
 # List available commands
 olmo-eval --help
@@ -72,11 +72,11 @@ olmo-eval run -m model -t arc_challenge::olmes
 Suites live in `olmo_eval/evals/suites/` and group multiple tasks for batch evaluation:
 
 ```python
-from olmo_eval.evals.suites import Suite, register_suite
+from olmo_eval.evals.suites import Suite, register
 
-register_suite(Suite(
+register(Suite(
     name="olmes_core",
-    tasks=["arc_easy::olmes", "arc_challenge::olmes", "hellaswag::olmes"],
+    tasks=("arc_easy::olmes", "arc_challenge::olmes", "hellaswag::olmes"),
 ))
 ```
 
@@ -105,7 +105,7 @@ olmo-eval includes built-in support for launching evaluation jobs on [Beaker](ht
 Install with the Beaker optional dependency:
 
 ```bash
-pip install 'olmo-eval-internal[beaker]'
+uv pip install 'olmo-eval-internal[beaker]'
 ```
 
 ### CLI Usage
@@ -435,11 +435,11 @@ This approach allows you to:
 Images are tagged with CUDA and PyTorch versions: `cuda{version}-torch{version}-{arch}`
 
 ```bash
-# Build with defaults (CUDA 12.8.0 + PyTorch 2.8.0)
+# Build with defaults (CUDA 12.8.1 + PyTorch 2.9.0)
 ./scripts/build_image.sh
 
 # Specific CUDA + PyTorch version
-./scripts/build_image.sh --cuda-version 12.8.0 --torch-version 2.8.0
+./scripts/build_image.sh --cuda-version 12.8.1 --torch-version 2.9.0
 
 # Production build (amd64)
 ./scripts/build_image.sh --platform linux/amd64
@@ -448,15 +448,17 @@ Images are tagged with CUDA and PyTorch versions: `cuda{version}-torch{version}-
 ./scripts/build_image.sh --help
 ```
 
-**Supported CUDA versions**: 12.6.1, 12.8.0, 12.9.1
-**Supported PyTorch versions**: 2.7.1, 2.8.0, 2.9.1
-**Valid pairs**: See `scripts/build_config.sh`
+**Supported CUDA versions**: 12.6.1, 12.8.0, 12.8.1, 12.9.1
+**PyTorch version**: Configurable via `--torch-version` (default: 2.9.0)
+**Configuration**: See `scripts/build_config.sh`
 
 ### What's in the Image
 
-The image contains ONLY:
+The image contains:
 - Python 3.12 (via uv)
 - PyTorch with CUDA support
+- Flash Attention 2 (pre-installed)
+- Flash Attention 3 (pre-built wheel, installed on-demand)
 - System dependencies (git, uv, ca-certificates)
 
 The image does NOT contain:
@@ -498,7 +500,7 @@ The script auto-detects the image name from the tag (e.g., `olmo-eval-cuda128-am
 
 ```bash
 # Install dev dependencies
-pip install -e ".[dev]"
+uv pip install -e ".[dev]"
 
 # Run linter
 ruff check src/
