@@ -1445,11 +1445,11 @@ def group_cancel(group_name: str, yes: bool) -> None:
 
 
 @group.command(name="list")
-@click.option("--workspace", "-w", help="Filter by workspace")
+@click.option("--workspace", "-w", required=True, help="Beaker workspace to list groups from")
 @click.option("--limit", "-n", type=int, default=20, help="Number of groups to show")
 @click.option("--search", "-s", help="Search by name or description")
 @click.option("--mine/--all", default=True, help="Show only my groups (default) or all groups")
-def group_list(workspace: str | None, limit: int, search: str | None, mine: bool) -> None:
+def group_list(workspace: str, limit: int, search: str | None, mine: bool) -> None:
     """List Beaker groups.
 
     Shows recent groups with their status summaries. By default, only shows
@@ -1457,13 +1457,11 @@ def group_list(workspace: str | None, limit: int, search: str | None, mine: bool
 
     Examples:
 
-        olmo-eval group list
+        olmo-eval group list -w ai2/oe-data
 
-        olmo-eval group list --all
+        olmo-eval group list -w ai2/oe-data --all
 
-        olmo-eval group list --workspace ai2/oe-data
-
-        olmo-eval group list --search "benchmark" --limit 10
+        olmo-eval group list -w ai2/oe-data --search "benchmark" --limit 10
     """
     try:
         from olmo_eval.launch import BeakerLauncher
@@ -1473,8 +1471,6 @@ def group_list(workspace: str | None, limit: int, search: str | None, mine: bool
             "Install with: pip install 'olmo-eval-internal[beaker]'"
         )
         raise SystemExit(1) from None
-
-    from olmo_eval.core.constants.infrastructure import BEAKER_DEFAULT_WORKSPACE
 
     launcher = BeakerLauncher()
 
@@ -1493,7 +1489,7 @@ def group_list(workspace: str | None, limit: int, search: str | None, mine: bool
         fetch_limit = limit * 5 if mine and current_user_id else limit
         all_groups = list(
             launcher.beaker.group.list(
-                workspace=workspace or BEAKER_DEFAULT_WORKSPACE,
+                workspace=workspace,
                 name_or_description=search,
                 limit=fetch_limit,
             )
