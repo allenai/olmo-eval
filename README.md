@@ -35,21 +35,142 @@ olmo-eval run --async --num-workers 4 --gpus-per-worker 2 -m llama3.1-70b -t mml
 
 ## Parallel Execution
 
-By default, tasks run sequentially. Use `--async` to run tasks in parallel across multiple GPUs:
+By default, tasks run sequentially. Two parallel execution modes are available:
+
+| Mode | Flag | Backend | Best For |
+|------|------|---------|----------|
+| Sequential | (default) | Any | Simple runs, debugging |
+| Async | `--async` | Any | Multi-GPU batch processing |
+| Streaming | `--async-stream` | vLLM only | Maximum throughput |
+
+### Sequential Mode (Default)
+
+Runs one task at a time on a single model instance:
 
 ```bash
-# Sequential (default) - runs one task at a time
 olmo-eval run -m llama3.1-8b -t mmlu -t gsm8k -t arc
+```
 
-# Parallel - runs tasks in parallel across available GPUs
+### Async Mode (`--async`)
+
+Spawns worker processes that each load the model and process batches. All instances are queued upfront, then processed in parallel:
+
+```bash
+# Auto-detect workers from available GPUs
 olmo-eval run --async -m llama3.1-8b -t mmlu -t gsm8k -t arc
 
-# Control number of workers (default: auto-detect from GPUs)
+# Specify number of workers
 olmo-eval run --async --num-workers 4 -m llama3.1-8b -t mmlu -t gsm8k
 
-# For multi-GPU models, specify GPUs per worker
+# Multi-GPU models (e.g., 70B on 4 GPUs per worker)
 olmo-eval run --async --num-workers 2 --gpus-per-worker 4 -m llama3.1-70b -t mmlu
 ```
+
+### Streaming Mode (`--async-stream`)
+
+Uses vLLM's AsyncLLMEngine for true continuous batching. Requests are added continuously and results stream back as they complete:
+
+```bash
+# Streaming with auto-detected workers
+olmo-eval run --async-stream -m llama3.1-8b -t mmlu -t gsm8k -t arc
+
+# Streaming with specific worker config
+olmo-eval run --async-stream --num-workers 2 --gpus-per-worker 4 -m llama3.1-70b -t mmlu
+```
+
+### Architecture
+
+**Async Mode (`--async`)**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Main Process                             │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐      │
+│  │ Prepare Task │───▶│ Prepare Task │───▶│ Prepare Task │      │
+│  │   (mmlu)     │    │   (gsm8k)    │    │    (arc)     │      │
+│  └──────────────┘    └──────────────┘    └──────────────┘      │
+│         │                   │                   │               │
+│         └───────────────────┴───────────────────┘               │
+│                             │                                   │
+│                             ▼                                   │
+│                  ┌─────────────────────┐                        │
+│                  │   Instance Queue    │ (all instances mixed)  │
+│                  │ [inst1, inst2, ...] │                        │
+│                  └─────────────────────┘                        │
+└─────────────────────────────┬───────────────────────────────────┘
+                              │
+          ┌───────────────────┼───────────────────┐
+          ▼                   ▼                   ▼
+   ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+   │  Worker 0   │     │  Worker 1   │     │  Worker 2   │
+   │  (GPU 0)    │     │  (GPU 1)    │     │  (GPU 2)    │
+   │             │     │             │     │             │
+   │ Load Model  │     │ Load Model  │     │ Load Model  │
+   │ Collect All │     │ Collect All │     │ Collect All │
+   │ Batch Infer │     │ Batch Infer │     │ Batch Infer │
+   └──────┬──────┘     └──────┬──────┘     └──────┬──────┘
+          │                   │                   │
+          └───────────────────┴───────────────────┘
+                              │
+                              ▼
+                  ┌─────────────────────┐
+                  │    Result Queue     │
+                  └─────────────────────┘
+                              │
+                              ▼
+                  ┌─────────────────────┐
+                  │  Score & Aggregate  │
+                  └─────────────────────┘
+```
+
+**Streaming Mode (`--async-stream`)**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Main Process                             │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐      │
+│  │ Prepare Task │───▶│ Prepare Task │───▶│ Prepare Task │      │
+│  └──────────────┘    └──────────────┘    └──────────────┘      │
+│         │                   │                   │               │
+│         └───────────────────┴───────────────────┘               │
+│                             │                                   │
+│                             ▼                                   │
+│                  ┌─────────────────────┐                        │
+│                  │   Instance Queue    │ (streams continuously) │
+│                  └─────────────────────┘                        │
+└─────────────────────────────┬───────────────────────────────────┘
+                              │
+                              ▼
+                 ┌────────────────────────┐
+                 │   Streaming Worker     │
+                 │   (AsyncLLMEngine)     │
+                 │                        │
+                 │  ┌──────────────────┐  │
+                 │  │ Add requests     │◀─┼─── Continuous input
+                 │  │ continuously     │  │
+                 │  └────────┬─────────┘  │
+                 │           │            │
+                 │  ┌────────▼─────────┐  │
+                 │  │ vLLM Continuous  │  │
+                 │  │ Batching Engine  │  │
+                 │  └────────┬─────────┘  │
+                 │           │            │
+                 │  ┌────────▼─────────┐  │
+                 │  │ Stream results   │──┼─── Results as they complete
+                 │  │ as completed     │  │
+                 │  └──────────────────┘  │
+                 └────────────────────────┘
+                              │
+                              ▼
+                  ┌─────────────────────┐
+                  │  Score immediately  │
+                  │  as tasks complete  │
+                  └─────────────────────┘
+```
+
+**Key Differences:**
+- **Async**: Workers collect all instances first, then batch process. Works with any backend.
+- **Streaming**: Requests flow continuously through vLLM's async engine. Maximum throughput, earliest completion. vLLM only.
 
 ## Key Concepts
 
