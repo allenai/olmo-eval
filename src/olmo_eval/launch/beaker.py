@@ -7,10 +7,12 @@ Example:
     config = BeakerJobConfig(
         name="eval-llama3-mmlu",
         command=["olmo-eval", "run", "-m", "llama3.1-8b", "-t", "mmlu"],
-        cluster="h100",
+        cluster="ai2/ceres",
+        workspace="ai2/oe-data",
+        budget="ai2/oe-base",
         num_gpus=1,
     )
-    launcher = BeakerLauncher()
+    launcher = BeakerLauncher(workspace="ai2/oe-data")
     experiment = launcher.launch(config)
 """
 
@@ -29,7 +31,6 @@ from rich.syntax import Syntax
 from rich.text import Text
 
 from olmo_eval.core.constants.infrastructure import (
-    BEAKER_DEFAULT_BUDGET,
     BEAKER_DEFAULT_IMAGE,
     BEAKER_DEFAULT_WORKSPACE,
     BEAKER_KNOWN_CLUSTERS,
@@ -46,6 +47,7 @@ __all__ = [
     "BeakerWekaBucket",
     "BeakerJobConfig",
     "BeakerLauncher",
+    "calculate_experiment_splits",
     "parse_task_with_priority",
     "validate_priority_configuration",
     "print_experiment_config",
@@ -236,6 +238,84 @@ def validate_priority_configuration(
     return dict(tasks_by_priority)
 
 
+def calculate_experiment_splits(
+    tasks: list[str],
+    gpus_per_model: int,
+    parallelism: int,
+    max_gpus_per_node: int,
+) -> list[dict[str, Any]]:
+    """Calculate how to split tasks across experiments based on GPU constraints.
+
+    When the total GPU requirement (gpus_per_model × parallelism) exceeds the
+    maximum GPUs available per node, tasks are split across multiple experiments.
+    Each experiment runs with reduced parallelism that fits within node limits.
+
+    Args:
+        tasks: List of task names to run.
+        gpus_per_model: GPUs required per model instance.
+        parallelism: Number of model instances desired.
+        max_gpus_per_node: Maximum GPUs available per node.
+
+    Returns:
+        List of dicts, each containing:
+        - tasks: list of tasks for this experiment
+        - num_gpus: GPUs to request for this experiment
+        - parallelism: effective parallelism for this split
+
+    Examples:
+        # Fits on single node: 4 instances × 2 GPUs = 8 GPUs
+        >>> calculate_experiment_splits(["a", "b", "c", "d"], 2, 4, 8)
+        [{"tasks": ["a", "b", "c", "d"], "num_gpus": 8, "parallelism": 4}]
+
+        # Needs splitting: 4 instances × 4 GPUs = 16 GPUs, max 8 per node
+        >>> calculate_experiment_splits(["a", "b", "c", "d"], 4, 4, 8)
+        [
+            {"tasks": ["a", "b"], "num_gpus": 8, "parallelism": 2},
+            {"tasks": ["c", "d"], "num_gpus": 8, "parallelism": 2},
+        ]
+    """
+    import math
+
+    total_gpus_needed = gpus_per_model * parallelism
+
+    if total_gpus_needed <= max_gpus_per_node:
+        # Fits on single node - no splitting needed
+        return [{
+            "tasks": tasks,
+            "num_gpus": total_gpus_needed,
+            "parallelism": parallelism,
+        }]
+
+    # Need to split across multiple experiments
+    # Calculate how many instances can fit per experiment
+    instances_per_experiment = max_gpus_per_node // gpus_per_model
+    if instances_per_experiment < 1:
+        # Edge case: single model instance needs more GPUs than max
+        # Fall back to 1 instance per experiment
+        instances_per_experiment = 1
+
+    gpus_per_experiment = instances_per_experiment * gpus_per_model
+    num_experiments = math.ceil(parallelism / instances_per_experiment)
+
+    # Distribute tasks across experiments
+    tasks_per_experiment = math.ceil(len(tasks) / num_experiments)
+    splits = []
+
+    for i in range(num_experiments):
+        start_idx = i * tasks_per_experiment
+        end_idx = min(start_idx + tasks_per_experiment, len(tasks))
+        split_tasks = tasks[start_idx:end_idx]
+
+        if split_tasks:  # Only add if there are tasks
+            splits.append({
+                "tasks": split_tasks,
+                "num_gpus": gpus_per_experiment,
+                "parallelism": instances_per_experiment,
+            })
+
+    return splits
+
+
 @dataclass
 class BeakerEnvSecret:
     """Environment variable sourced from a Beaker secret.
@@ -277,22 +357,24 @@ class BeakerJobConfig:
         config = BeakerJobConfig(
             name="eval-llama3-mmlu",
             command=["olmo-eval", "run", "-m", "llama3.1-8b", "-t", "mmlu"],
-            cluster="h100",
+            cluster="ai2/ceres",
+            workspace="ai2/oe-data",
+            budget="ai2/oe-base",
             num_gpus=1,
         )
 
     Attributes:
         name: Experiment name (required).
         command: Command to run in the container (required).
+        cluster: Cluster alias ("h100", "a100", "aus") or full name(s) (required).
+        workspace: Beaker workspace (required).
+        budget: Beaker budget (required).
         num_gpus: Number of GPUs to request.
         shared_memory: Shared memory size (e.g., "10GiB").
-        cluster: Cluster alias ("h100", "a100", "aus") or full name(s).
         priority: Job priority level.
         preemptible: Whether the job can be preempted.
         timeout: Job timeout (e.g., "24h", "30m").
         retries: Number of retries on failure.
-        workspace: Beaker workspace.
-        budget: Beaker budget.
         beaker_image: Container image to use.
         description: Optional job description.
         weka_buckets: Weka storage mounts.
@@ -305,13 +387,13 @@ class BeakerJobConfig:
     # Required
     name: str
     command: list[str]
+    cluster: str | list[str]  # Cluster alias ("h100", "a100", "aus") or full name(s)
+    workspace: str  # Beaker workspace
+    budget: str  # Beaker budget
 
     # Resources
     num_gpus: int = 1
     shared_memory: str = "10GiB"
-
-    # Cluster - supports aliases like "h100", "aus", or full names
-    cluster: str | list[str] = "h100"
 
     # Job settings
     priority: str = "normal"
@@ -320,8 +402,6 @@ class BeakerJobConfig:
     retries: int | None = None
 
     # Beaker settings
-    workspace: str = BEAKER_DEFAULT_WORKSPACE
-    budget: str = BEAKER_DEFAULT_BUDGET
     beaker_image: str = BEAKER_DEFAULT_IMAGE
     description: str | None = None
 
@@ -437,7 +517,9 @@ class BeakerLauncher:
         """Initialize the launcher.
 
         Args:
-            workspace: Override default workspace. Uses BEAKER_DEFAULT_WORKSPACE if None.
+            workspace: Beaker workspace for the launcher. Defaults to BEAKER_DEFAULT_WORKSPACE
+                for read-only operations (results, watch, group info). When launching jobs,
+                callers should always provide an explicit workspace.
         """
         self._workspace = workspace or BEAKER_DEFAULT_WORKSPACE
         self._beaker: Beaker | None = None

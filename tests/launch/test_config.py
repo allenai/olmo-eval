@@ -223,6 +223,35 @@ class TestLaunchConfigGetModelResources:
 
         assert resources["shared_memory"] == "10GiB"
 
+    def test_get_model_resources_parallelism_default(self):
+        """Test get_model_resources returns default parallelism."""
+        config = LaunchConfig(
+            name="test",
+            models=["llama3.1-8b"],
+            tasks=["mmlu"],
+            parallelism=4,
+        )
+        model = ModelConfig(name="llama3.1-8b")
+        resources = config.get_model_resources(model)
+
+        assert resources["parallelism"] == 4
+
+    def test_get_model_resources_parallelism_override(self):
+        """Test get_model_resources applies model parallelism override."""
+        config = LaunchConfig(
+            name="test",
+            models=["llama3.1-8b"],
+            tasks=["mmlu"],
+            parallelism=2,
+        )
+        model = ModelConfig(
+            name="llama3.1-8b",
+            parallelism=8,
+        )
+        resources = config.get_model_resources(model)
+
+        assert resources["parallelism"] == 8  # Model override wins
+
 
 class TestLaunchConfigFromYaml:
     """Tests for LaunchConfig.from_yaml with per-model configs."""

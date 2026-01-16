@@ -25,6 +25,9 @@ BEAKER_DEFAULT_IMAGE = "ai2-tylerm/olmo-eval-cuda1281-amd64"
 BEAKER_RESULT_DIR = "/results"
 """Default directory for evaluation results in Beaker jobs."""
 
+DEFAULT_MAX_GPUS_PER_NODE = 8
+"""Default maximum GPUs available per node for experiment splitting."""
+
 
 class BeakerPriority(str, Enum):
     """Valid Beaker job priority levels."""

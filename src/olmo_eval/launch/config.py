@@ -43,6 +43,8 @@ from typing import Any
 
 from omegaconf import MISSING, OmegaConf
 
+from olmo_eval.core.constants.infrastructure import DEFAULT_MAX_GPUS_PER_NODE
+
 
 @dataclass
 class ModelConfig:
@@ -52,7 +54,9 @@ class ModelConfig:
 
     Attributes:
         name: Model name or HuggingFace path (required).
-        gpus: Number of GPUs for this model (overrides default).
+        gpus: Number of GPUs per model instance (overrides default).
+        parallelism: Number of model instances to run in parallel. Total GPUs
+            requested will be gpus × parallelism.
         cluster: Cluster for this model (overrides default).
         preemptible: Whether this model's jobs can be preempted.
         timeout: Timeout for this model's jobs.
@@ -66,9 +70,11 @@ class ModelConfig:
         models:
           - name: llama3.1-8b
             gpus: 1
+            parallelism: 4  # 4 instances × 1 GPU = 4 GPUs total
             backend: vllm==0.13.0
           - name: llama3.1-70b
-            gpus: 8
+            gpus: 4
+            parallelism: 2  # 2 instances × 4 GPUs = 8 GPUs total
             backend: transformers
             use_async: true
             num_workers: 2
@@ -78,6 +84,7 @@ class ModelConfig:
 
     name: str = MISSING
     gpus: int | None = None
+    parallelism: int | None = None
     cluster: str | None = None
     preemptible: bool | None = None
     timeout: str | None = None
@@ -145,7 +152,10 @@ class LaunchConfig:
         models: List of model names/paths or ModelConfig dicts (required).
         tasks: List of task specs, optionally with @priority suffix (required).
         cluster: Default cluster alias or full name.
-        gpus: Default number of GPUs per job.
+        gpus: Default number of GPUs per model instance.
+        parallelism: Default number of model instances to run in parallel.
+        max_gpus_per_node: Maximum GPUs available per node. When total GPUs
+            (gpus × parallelism) exceeds this, tasks are split across experiments.
         priority: Default job priority for tasks without @priority suffix.
         preemptible: Default preemption setting.
         timeout: Default job timeout (e.g., "24h", "48h").
@@ -165,8 +175,10 @@ class LaunchConfig:
     tasks: list[str] = MISSING
 
     # Default cluster and resources (can be overridden per-model)
-    cluster: str = "h100"
+    cluster: str | None = None
     gpus: int = 1
+    parallelism: int = 1
+    max_gpus_per_node: int = DEFAULT_MAX_GPUS_PER_NODE
 
     # Default job settings (can be overridden per-model)
     priority: str = "normal"
@@ -210,7 +222,10 @@ class LaunchConfig:
             model: ModelConfig with optional resource overrides.
 
         Returns:
-            Dict with effective resource values (gpus, cluster, etc.).
+            Dict with effective resource values including:
+            - gpus: GPUs per model instance (not multiplied by parallelism)
+            - parallelism: Number of model instances to run
+            - Other resource settings (cluster, timeout, etc.)
         """
         # Determine async settings
         use_async = model.use_async if model.use_async is not None else self.use_async
@@ -219,15 +234,18 @@ class LaunchConfig:
             model.gpus_per_worker if model.gpus_per_worker is not None else self.gpus_per_worker
         )
 
-        # Calculate total GPUs needed for async mode
+        # Calculate GPUs per model instance
         if use_async and num_workers is not None:
-            total_gpus = num_workers * gpus_per_worker
+            gpus_per_model = num_workers * gpus_per_worker
         else:
-            # Fall back to explicit gpus setting or default
-            total_gpus = model.gpus if model.gpus is not None else self.gpus
+            gpus_per_model = model.gpus if model.gpus is not None else self.gpus
+
+        # Determine parallelism
+        parallelism = model.parallelism if model.parallelism is not None else self.parallelism
 
         return {
-            "gpus": total_gpus,
+            "gpus": gpus_per_model,
+            "parallelism": parallelism,
             "cluster": model.cluster if model.cluster is not None else self.cluster,
             "preemptible": model.preemptible if model.preemptible is not None else self.preemptible,
             "timeout": model.timeout if model.timeout is not None else self.timeout,

@@ -7,6 +7,7 @@ from olmo_eval.launch.beaker import (
     BeakerJobConfig,
     BeakerWekaBucket,
     _parse_timeout,
+    calculate_experiment_splits,
     parse_task_with_priority,
     resolve_clusters,
     validate_priority_configuration,
@@ -123,15 +124,20 @@ class TestBeakerJobConfig:
     """Tests for BeakerJobConfig."""
 
     def test_minimal_config(self):
-        """Test creating minimal config."""
+        """Test creating minimal config with required fields."""
         config = BeakerJobConfig(
             name="test-job",
             command=["echo", "hello"],
+            cluster="h100",
+            workspace="ai2/oe-data",
+            budget="ai2/oe-base",
         )
         assert config.name == "test-job"
         assert config.command == ["echo", "hello"]
         assert config.num_gpus == 1
         assert config.cluster == "h100"
+        assert config.workspace == "ai2/oe-data"
+        assert config.budget == "ai2/oe-base"
         assert config.priority == "normal"
         assert config.preemptible is True
         assert config.timeout == "24h"
@@ -167,7 +173,13 @@ class TestBeakerJobConfig:
 
     def test_default_weka_buckets(self):
         """Test default Weka buckets are set and properly configured."""
-        config = BeakerJobConfig(name="test", command=["echo"])
+        config = BeakerJobConfig(
+            name="test",
+            command=["echo"],
+            cluster="h100",
+            workspace="ai2/oe-data",
+            budget="ai2/oe-base",
+        )
         # Just verify defaults exist and have valid mount paths
         assert len(config.weka_buckets) >= 1
         for bucket in config.weka_buckets:
@@ -176,7 +188,13 @@ class TestBeakerJobConfig:
 
     def test_default_secrets(self):
         """Test default secrets are set."""
-        config = BeakerJobConfig(name="test", command=["echo"])
+        config = BeakerJobConfig(
+            name="test",
+            command=["echo"],
+            cluster="h100",
+            workspace="ai2/oe-data",
+            budget="ai2/oe-base",
+        )
         assert len(config.env_secrets) == 2
         secret_names = [s.name for s in config.env_secrets]
         assert "HF_TOKEN" in secret_names
@@ -327,3 +345,159 @@ class TestValidatePriorityConfiguration:
         """Test task with regime (::) and @priority suffix."""
         result = validate_priority_configuration(["mmlu::olmes@high"], None)
         assert result == {"high": ["mmlu::olmes"]}
+
+
+class TestCalculateExperimentSplits:
+    """Tests for calculate_experiment_splits function."""
+
+    def test_single_node_no_split(self):
+        """Test case where total GPUs fit on single node."""
+        # 4 instances × 2 GPUs = 8 GPUs (fits on 8-GPU node)
+        result = calculate_experiment_splits(
+            tasks=["a", "b", "c", "d"],
+            gpus_per_model=2,
+            parallelism=4,
+            max_gpus_per_node=8,
+        )
+        assert len(result) == 1
+        assert result[0]["tasks"] == ["a", "b", "c", "d"]
+        assert result[0]["num_gpus"] == 8
+        assert result[0]["parallelism"] == 4
+
+    def test_split_into_two_experiments(self):
+        """Test case requiring split into 2 experiments."""
+        # 4 instances × 4 GPUs = 16 GPUs, max 8 per node = 2 experiments
+        result = calculate_experiment_splits(
+            tasks=["a", "b", "c", "d"],
+            gpus_per_model=4,
+            parallelism=4,
+            max_gpus_per_node=8,
+        )
+        assert len(result) == 2
+        # Each experiment gets 2 instances (8 GPUs) and 2 tasks
+        assert result[0]["tasks"] == ["a", "b"]
+        assert result[0]["num_gpus"] == 8
+        assert result[0]["parallelism"] == 2
+        assert result[1]["tasks"] == ["c", "d"]
+        assert result[1]["num_gpus"] == 8
+        assert result[1]["parallelism"] == 2
+
+    def test_split_into_multiple_experiments(self):
+        """Test case requiring split into many experiments."""
+        # 8 instances × 4 GPUs = 32 GPUs, max 8 per node = 4 experiments
+        result = calculate_experiment_splits(
+            tasks=["a", "b", "c", "d", "e", "f", "g", "h"],
+            gpus_per_model=4,
+            parallelism=8,
+            max_gpus_per_node=8,
+        )
+        assert len(result) == 4
+        for split in result:
+            assert split["num_gpus"] == 8
+            assert split["parallelism"] == 2
+
+    def test_single_task_no_split(self):
+        """Test with single task, no split needed."""
+        result = calculate_experiment_splits(
+            tasks=["mmlu"],
+            gpus_per_model=2,
+            parallelism=4,
+            max_gpus_per_node=8,
+        )
+        assert len(result) == 1
+        assert result[0]["tasks"] == ["mmlu"]
+        assert result[0]["num_gpus"] == 8
+        assert result[0]["parallelism"] == 4
+
+    def test_single_task_with_split(self):
+        """Test single task distributed across splits."""
+        # With 1 task and 2 required experiments, task goes to first experiment
+        result = calculate_experiment_splits(
+            tasks=["mmlu"],
+            gpus_per_model=4,
+            parallelism=4,
+            max_gpus_per_node=8,
+        )
+        assert len(result) == 1
+        assert result[0]["tasks"] == ["mmlu"]
+        assert result[0]["num_gpus"] == 8
+        assert result[0]["parallelism"] == 2
+
+    def test_parallelism_one_no_split(self):
+        """Test with parallelism=1, should never split."""
+        result = calculate_experiment_splits(
+            tasks=["a", "b", "c"],
+            gpus_per_model=4,
+            parallelism=1,
+            max_gpus_per_node=8,
+        )
+        assert len(result) == 1
+        assert result[0]["tasks"] == ["a", "b", "c"]
+        assert result[0]["num_gpus"] == 4
+        assert result[0]["parallelism"] == 1
+
+    def test_exactly_fits_node(self):
+        """Test when total GPUs exactly equal max per node."""
+        # 2 instances × 4 GPUs = 8 GPUs = max
+        result = calculate_experiment_splits(
+            tasks=["a", "b"],
+            gpus_per_model=4,
+            parallelism=2,
+            max_gpus_per_node=8,
+        )
+        assert len(result) == 1
+        assert result[0]["num_gpus"] == 8
+        assert result[0]["parallelism"] == 2
+
+    def test_uneven_task_distribution(self):
+        """Test with odd number of tasks split unevenly."""
+        # 3 tasks split across 2 experiments
+        result = calculate_experiment_splits(
+            tasks=["a", "b", "c"],
+            gpus_per_model=4,
+            parallelism=4,
+            max_gpus_per_node=8,
+        )
+        assert len(result) == 2
+        assert result[0]["tasks"] == ["a", "b"]
+        assert result[1]["tasks"] == ["c"]
+
+    def test_more_experiments_than_tasks(self):
+        """Test when splitting would create more experiments than tasks."""
+        # 4 experiments needed, but only 2 tasks
+        result = calculate_experiment_splits(
+            tasks=["a", "b"],
+            gpus_per_model=4,
+            parallelism=8,
+            max_gpus_per_node=8,
+        )
+        # Should create experiments for all tasks, even if some splits are empty
+        assert len(result) == 2
+        assert result[0]["tasks"] == ["a"]
+        assert result[1]["tasks"] == ["b"]
+
+    def test_gpu_calculation(self):
+        """Test that GPU calculations are correct."""
+        # 3 instances × 2 GPUs = 6 GPUs (fits on 8-GPU node)
+        result = calculate_experiment_splits(
+            tasks=["a"],
+            gpus_per_model=2,
+            parallelism=3,
+            max_gpus_per_node=8,
+        )
+        assert result[0]["num_gpus"] == 6
+        assert result[0]["parallelism"] == 3
+
+    def test_large_model_exceeds_node(self):
+        """Test edge case where single model instance exceeds node GPUs."""
+        # Model needs 16 GPUs but max is 8 - falls back to 1 instance
+        result = calculate_experiment_splits(
+            tasks=["a", "b"],
+            gpus_per_model=16,
+            parallelism=2,
+            max_gpus_per_node=8,
+        )
+        # Should still work, using 1 instance per experiment
+        assert len(result) == 2
+        assert result[0]["num_gpus"] == 16
+        assert result[0]["parallelism"] == 1

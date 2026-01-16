@@ -8,11 +8,13 @@ Example:
     config = BeakerJobConfig(
         name="eval-llama3-mmlu",
         command=["olmo-eval", "run", "-m", "llama3.1-8b", "-t", "mmlu"],
-        cluster="h100",
+        cluster="ai2/ceres",
+        workspace="ai2/oe-data",
+        budget="ai2/oe-base",
         num_gpus=1,
     )
 
-    launcher = BeakerLauncher()
+    launcher = BeakerLauncher(workspace="ai2/oe-data")
     experiment = launcher.launch(config)
 """
 
@@ -21,6 +23,7 @@ from olmo_eval.launch.beaker import (
     BeakerJobConfig,
     BeakerLauncher,
     BeakerWekaBucket,
+    calculate_experiment_splits,
     parse_task_with_priority,
     print_experiment_config,
     resolve_clusters,
@@ -40,6 +43,7 @@ __all__ = [
     "BeakerWekaBucket",
     "LaunchConfig",
     "ModelConfig",
+    "calculate_experiment_splits",
     "get_template",
     "parse_model_config",
     "parse_task_with_priority",

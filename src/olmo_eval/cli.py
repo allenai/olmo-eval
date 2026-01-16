@@ -9,7 +9,7 @@ from rich.table import Table
 import olmo_eval.evals  # noqa: F401 - triggers suite registration
 import olmo_eval.evals.tasks  # noqa: F401 - triggers task registration
 from olmo_eval.core import get_model_presets
-from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
+from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR, DEFAULT_MAX_GPUS_PER_NODE
 from olmo_eval.evals.suites import get_suite, list_suites
 from olmo_eval.evals.tasks import list_tasks
 from olmo_eval.evals.tasks.registry import list_regimes
@@ -76,6 +76,13 @@ def main() -> None:
     default=1,
     help="Number of GPUs each worker uses (default: 1)",
 )
+@click.option(
+    "--parallelism",
+    "-P",
+    type=int,
+    default=1,
+    help="Number of model instances to run in parallel (passed from launch command)",
+)
 def run(
     models: tuple[str, ...],
     task: tuple[str, ...],
@@ -91,6 +98,7 @@ def run(
     use_async_stream: bool,
     num_workers: int | None,
     gpus_per_worker: int,
+    parallelism: int,
 ) -> None:
     """Run evaluation on specified tasks.
 
@@ -378,7 +386,20 @@ def suite_info(suite_name: str) -> None:
     help="Task name with optional @priority suffix (e.g., mmlu, mmlu@high)",
 )
 @click.option("--cluster", "-c", default=None, help="Cluster alias (h100, a100, aus) or full name")
-@click.option("--gpus", "-G", default=None, type=int, help="Number of GPUs")
+@click.option("--gpus", "-G", default=None, type=int, help="Number of GPUs per model instance")
+@click.option(
+    "--parallelism",
+    "-P",
+    default=None,
+    type=int,
+    help="Number of model instances to run in parallel",
+)
+@click.option(
+    "--max-gpus-per-node",
+    default=None,
+    type=int,
+    help="Maximum GPUs per node (default: 8). Tasks are split across experiments if exceeded.",
+)
 @click.option(
     "--priority",
     "-p",
@@ -428,6 +449,8 @@ def launch(
     task: tuple[str, ...],
     cluster: str | None,
     gpus: int | None,
+    parallelism: int | None,
+    max_gpus_per_node: int | None,
     priority: str | None,
     preemptible: bool | None,
     timeout: str | None,
@@ -487,6 +510,7 @@ def launch(
             BeakerLauncher,
             LaunchConfig,
             ModelConfig,
+            calculate_experiment_splits,
             parse_model_config,
             validate_priority_configuration,
         )
@@ -497,14 +521,10 @@ def launch(
         )
         raise SystemExit(1) from None
 
-    from olmo_eval.core.constants.infrastructure import (
-        BEAKER_DEFAULT_BUDGET,
-        BEAKER_DEFAULT_WORKSPACE,
-    )
-
     # Track which CLI args were explicitly set (vs using defaults)
     cli_cluster = cluster
     cli_gpus = gpus
+    cli_parallelism = parallelism
     cli_priority = priority
     cli_preemptible = preemptible
     cli_timeout = timeout
@@ -545,6 +565,9 @@ def launch(
         # Set defaults from config (will be overridden by per-model or CLI)
         cluster = cluster if cluster is not None else cfg.cluster
         gpus = gpus if gpus is not None else cfg.gpus
+        parallelism = parallelism if parallelism is not None else cfg.parallelism
+        if max_gpus_per_node is None:
+            max_gpus_per_node = cfg.max_gpus_per_node
         priority = priority if priority is not None else cfg.priority
         preemptible = preemptible if preemptible is not None else cfg.preemptible
         timeout = timeout if timeout is not None else cfg.timeout
@@ -556,8 +579,10 @@ def launch(
         model_configs = [parse_model_config(m) for m in model] if model else []
 
     # Apply defaults for values not set by config or CLI
-    cluster = cluster or "h100"
     gpus = gpus if gpus is not None else 1
+    parallelism = parallelism if parallelism is not None else 1
+    if max_gpus_per_node is None:
+        max_gpus_per_node = DEFAULT_MAX_GPUS_PER_NODE
     priority = priority or "normal"
     preemptible = preemptible if preemptible is not None else True
     timeout = timeout or "24h"
@@ -571,6 +596,15 @@ def launch(
         raise SystemExit(1)
     if not task:
         console.print("[red]Error:[/red] --task/-t is required (or set 'tasks' in config)")
+        raise SystemExit(1)
+    if not cluster:
+        console.print("[red]Error:[/red] --cluster/-c is required (or set 'cluster' in config)")
+        raise SystemExit(1)
+    if not workspace:
+        console.print("[red]Error:[/red] --workspace/-w is required (or set 'workspace' in config)")
+        raise SystemExit(1)
+    if not budget:
+        console.print("[red]Error:[/red] --budget/-B is required (or set 'budget' in config)")
         raise SystemExit(1)
 
     # Validate and group tasks by priority
@@ -599,7 +633,7 @@ def launch(
         console.print("Use 'olmo-eval suites' to see available suites.")
         raise SystemExit(1)
 
-    launcher = BeakerLauncher(workspace=workspace or BEAKER_DEFAULT_WORKSPACE)
+    launcher = BeakerLauncher(workspace=workspace)
     multiple_models = len(model_configs) > 1
     multiple_priorities = len(tasks_by_priority) > 1
 
@@ -618,7 +652,7 @@ def launch(
         try:
             beaker_group = launcher.get_or_create_group(
                 name=effective_group,
-                workspace=workspace or BEAKER_DEFAULT_WORKSPACE,
+                workspace=workspace,
             )
             group_url = launcher.get_group_url(beaker_group)
             console.print(f"[blue]Group URL:[/blue] {group_url}")
@@ -629,19 +663,9 @@ def launch(
     # Track launched experiments
     launched_experiments: list[str] = []
 
-    # Print experiment matrix summary
-    total_experiments = len(model_configs) * len(tasks_by_priority)
-    console.print(f"\n[bold]Experiment Matrix:[/bold]")
-    console.print(f"  Models: {len(model_configs)}")
-    console.print(f"  Priority levels: {len(tasks_by_priority)}")
-    console.print(f"  Total experiments: {total_experiments}")
-
-    matrix_table = Table(title="Experiments to Launch", show_header=True)
-    matrix_table.add_column("Experiment Name", style="cyan")
-    matrix_table.add_column("Model", style="blue")
-    matrix_table.add_column("Priority", style="yellow")
-    matrix_table.add_column("Tasks", style="white")
-    matrix_table.add_column("GPUs", style="green")
+    # Build experiment plan with parallelism and splitting
+    experiment_plan: list[dict] = []
+    split_models: list[str] = []  # Track models that require splitting
 
     for m_cfg in model_configs:
         m_name = m_cfg.name
@@ -649,38 +673,107 @@ def launch(
         if cfg is not None:
             m_resources = cfg.get_model_resources(m_cfg)
             m_gpus = cli_gpus if cli_gpus is not None else m_resources.get("gpus", 1)
+            m_parallelism = (
+                cli_parallelism if cli_parallelism is not None
+                else m_resources.get("parallelism", 1)
+            )
         else:
             m_gpus = cli_gpus if cli_gpus is not None else (m_cfg.gpus or gpus)
+            m_parallelism = (
+                cli_parallelism if cli_parallelism is not None
+                else (m_cfg.parallelism or parallelism)
+            )
 
         for t_priority, t_list in tasks_by_priority.items():
-            e_name = name
+            base_name = name
             if multiple_models:
-                e_name = f"{e_name}-{short_m}"
+                base_name = f"{base_name}-{short_m}"
             if multiple_priorities:
-                e_name = f"{e_name}-{t_priority}"
+                base_name = f"{base_name}-{t_priority}"
 
-            task_display = ", ".join(t_list[:3]) + ("..." if len(t_list) > 3 else "")
-            matrix_table.add_row(e_name, m_name, t_priority, task_display, str(m_gpus))
+            # Calculate splits based on GPU constraints
+            splits = calculate_experiment_splits(
+                tasks=t_list,
+                gpus_per_model=m_gpus,
+                parallelism=m_parallelism,
+                max_gpus_per_node=max_gpus_per_node,
+            )
+
+            if len(splits) > 1:
+                split_models.append(m_name)
+
+            for i, split in enumerate(splits):
+                # Add zero-padded suffix for splits
+                exp_name = f"{base_name}-{i + 1:03d}" if len(splits) > 1 else base_name
+
+                experiment_plan.append({
+                    "name": exp_name,
+                    "model_name": m_name,
+                    "model_cfg": m_cfg,
+                    "priority": t_priority,
+                    "tasks": split["tasks"],
+                    "num_gpus": split["num_gpus"],
+                    "parallelism": split["parallelism"],
+                })
+
+    # Print experiment matrix summary
+    console.print("\n[bold]Experiment Matrix:[/bold]")
+    console.print(f"  Models: {len(model_configs)}")
+    console.print(f"  Priority levels: {len(tasks_by_priority)}")
+    total_experiments = len(experiment_plan)
+    if split_models:
+        unique_splits = list(set(split_models))
+        split_msg = f"({len(unique_splits)} model(s) split due to GPU limits)"
+        console.print(f"  Total experiments: {total_experiments} {split_msg}")
+    else:
+        console.print(f"  Total experiments: {total_experiments}")
+
+    matrix_table = Table(title="Experiments to Launch", show_header=True)
+    matrix_table.add_column("Experiment Name", style="cyan")
+    matrix_table.add_column("Model", style="blue")
+    matrix_table.add_column("Priority", style="yellow")
+    matrix_table.add_column("Tasks", style="white")
+    matrix_table.add_column("GPUs", style="green")
+    matrix_table.add_column("Parallelism", style="magenta")
+
+    for exp in experiment_plan:
+        task_display = ", ".join(exp["tasks"][:3]) + ("..." if len(exp["tasks"]) > 3 else "")
+        matrix_table.add_row(
+            exp["name"],
+            exp["model_name"],
+            exp["priority"],
+            task_display,
+            str(exp["num_gpus"]),
+            str(exp["parallelism"]),
+        )
 
     console.print(matrix_table)
     console.print()
 
-    # Launch one experiment per model and priority level
-    for model_cfg in model_configs:
-        model_name = model_cfg.name
+    # Launch experiments from the plan
+    for exp in experiment_plan:
+        model_cfg = exp["model_cfg"]
+        model_name = exp["model_name"]
+        exp_name = exp["name"]
+        task_list = exp["tasks"]
+        exp_num_gpus = exp["num_gpus"]
+        exp_parallelism = exp["parallelism"]
+        effective_priority = exp["priority"]
 
         # Get effective resources for this model (per-model overrides merged with defaults)
         if cfg is not None:
             model_resources = cfg.get_model_resources(model_cfg)
         else:
             # No config file - use ModelConfig values or defaults
+            m_para = model_cfg.parallelism
             model_resources = {
                 "gpus": model_cfg.gpus if model_cfg.gpus is not None else gpus,
-                "cluster": (model_cfg.cluster if model_cfg.cluster is not None else cluster),
+                "parallelism": m_para if m_para is not None else parallelism,
+                "cluster": model_cfg.cluster if model_cfg.cluster is not None else cluster,
                 "preemptible": (
                     model_cfg.preemptible if model_cfg.preemptible is not None else preemptible
                 ),
-                "timeout": (model_cfg.timeout if model_cfg.timeout is not None else timeout),
+                "timeout": model_cfg.timeout if model_cfg.timeout is not None else timeout,
                 "shared_memory": model_cfg.shared_memory,
                 "backend": model_cfg.backend,
             }
@@ -689,10 +782,6 @@ def launch(
         # Cast values from model_resources dict to expected types
         effective_cluster: str = (
             cli_cluster if cli_cluster is not None else str(model_resources["cluster"])
-        )
-        res_gpus = model_resources["gpus"]
-        effective_gpus: int = (
-            cli_gpus if cli_gpus is not None else (int(res_gpus) if res_gpus else 1)
         )
         effective_preemptible: bool = (
             cli_preemptible if cli_preemptible is not None else bool(model_resources["preemptible"])
@@ -703,104 +792,94 @@ def launch(
         res_shared_memory = model_resources.get("shared_memory")
         effective_shared_memory: str = str(res_shared_memory) if res_shared_memory else "10GiB"
 
-        # Get short model name for experiment naming (last part after /)
-        short_model = model_name.split("/")[-1].lower()
+        # Build command with this model and experiment's tasks
+        command = ["olmo-eval", "run", "-m", model_name]
+        for t in task_list:
+            command.extend(["-t", t])
 
-        for task_priority, task_list in tasks_by_priority.items():
-            # Task priority is authoritative (CLI conflict already validated)
-            effective_priority = task_priority
+        # Add parallelism if > 1 (so the run command knows to run multiple instances)
+        if exp_parallelism > 1:
+            command.extend(["--parallelism", str(exp_parallelism)])
 
-            # Build experiment name with model and/or priority suffix as needed
-            exp_name = name
-            if multiple_models:
-                exp_name = f"{exp_name}-{short_model}"
-            if multiple_priorities:
-                exp_name = f"{exp_name}-{task_priority}"
+        # Add async flags if enabled (CLI flags override config)
+        effective_use_async = use_async or model_resources.get("use_async", False)
+        effective_use_async_stream = use_async_stream or model_resources.get(
+            "use_async_stream", False
+        )
+        effective_num_workers = (
+            num_workers if num_workers is not None else model_resources.get("num_workers")
+        )
+        effective_gpus_per_worker = (
+            gpus_per_worker
+            if gpus_per_worker != 1
+            else model_resources.get("gpus_per_worker", 1)
+        )
 
-            # Build command with this model and priority's tasks
-            command = ["olmo-eval", "run", "-m", model_name]
-            for t in task_list:
-                command.extend(["-t", t])
+        # --async-stream takes precedence over --async
+        if effective_use_async_stream:
+            command.append("--async-stream")
+            if effective_num_workers is not None:
+                command.extend(["--num-workers", str(effective_num_workers)])
+            if effective_gpus_per_worker and effective_gpus_per_worker != 1:
+                command.extend(["--gpus-per-worker", str(effective_gpus_per_worker)])
+        elif effective_use_async:
+            command.append("--async")
+            if effective_num_workers is not None:
+                command.extend(["--num-workers", str(effective_num_workers)])
+            if effective_gpus_per_worker and effective_gpus_per_worker != 1:
+                command.extend(["--gpus-per-worker", str(effective_gpus_per_worker)])
 
-            # Add async flags if enabled (CLI flags override config)
-            effective_use_async = use_async or model_resources.get("use_async", False)
-            effective_use_async_stream = use_async_stream or model_resources.get(
-                "use_async_stream", False
-            )
-            effective_num_workers = (
-                num_workers if num_workers is not None else model_resources.get("num_workers")
-            )
-            effective_gpus_per_worker = (
-                gpus_per_worker
-                if gpus_per_worker != 1
-                else model_resources.get("gpus_per_worker", 1)
-            )
+        # Determine the backend this model will use at runtime
+        # First check for explicit backend override in config, then get from model config
+        from olmo_eval.core.configs import get_model_config as get_runtime_model_config
+        from olmo_eval.core.constants.infrastructure import BACKEND_OPTIONAL_GROUPS
 
-            # --async-stream takes precedence over --async
-            if effective_use_async_stream:
-                command.append("--async-stream")
-                if effective_num_workers is not None:
-                    command.extend(["--num-workers", str(effective_num_workers)])
-                if effective_gpus_per_worker and effective_gpus_per_worker != 1:
-                    command.extend(["--gpus-per-worker", str(effective_gpus_per_worker)])
-            elif effective_use_async:
-                command.append("--async")
-                if effective_num_workers is not None:
-                    command.extend(["--num-workers", str(effective_num_workers)])
-                if effective_gpus_per_worker and effective_gpus_per_worker != 1:
-                    command.extend(["--gpus-per-worker", str(effective_gpus_per_worker)])
+        config_backend = model_resources.get("backend")  # Explicit override from launch config
+        if config_backend:
+            runtime_backend: str = str(config_backend)
+        else:
+            # Get the backend from model config (preset or default)
+            runtime_model_config = get_runtime_model_config(model_name)
+            runtime_backend = runtime_model_config.backend
 
-            # Determine the backend this model will use at runtime
-            # First check for explicit backend override in config, then get from model config
-            from olmo_eval.core.configs import get_model_config as get_runtime_model_config
-            from olmo_eval.core.constants.infrastructure import BACKEND_OPTIONAL_GROUPS
+        # CLI backends override auto-detected backend optional group
+        if backends:
+            effective_backends = list(backends)
+        else:
+            # Get the optional group name for this backend
+            backend_group = BACKEND_OPTIONAL_GROUPS.get(runtime_backend)
+            effective_backends = [backend_group] if backend_group else []
 
-            config_backend = model_resources.get("backend")  # Explicit override from launch config
-            if config_backend:
-                runtime_backend: str = str(config_backend)
-            else:
-                # Get the backend from model config (preset or default)
-                runtime_model_config = get_runtime_model_config(model_name)
-                runtime_backend = runtime_model_config.backend
+        # Flash Attention: FA3 upgrade or disable entirely
+        effective_flash_attn: int | None = 3 if fa3 else None
 
-            # CLI backends override auto-detected backend optional group
-            if backends:
-                effective_backends = list(backends)
-            else:
-                # Get the optional group name for this backend
-                backend_group = BACKEND_OPTIONAL_GROUPS.get(runtime_backend)
-                effective_backends = [backend_group] if backend_group else []
+        job_config = BeakerJobConfig(
+            name=exp_name,
+            command=command,
+            cluster=effective_cluster,
+            num_gpus=exp_num_gpus,
+            priority=effective_priority,
+            preemptible=effective_preemptible,
+            timeout=effective_timeout,
+            shared_memory=effective_shared_memory,
+            retries=retries,
+            workspace=workspace,
+            budget=budget,
+            backends=effective_backends,
+            flash_attn=effective_flash_attn,
+            no_flash_attn=no_flash_attn,
+            group=effective_group,
+        )
 
-            # Flash Attention: FA3 upgrade or disable entirely
-            effective_flash_attn: int | None = 3 if fa3 else None
-
-            job_config = BeakerJobConfig(
-                name=exp_name,
-                command=command,
-                cluster=effective_cluster,
-                num_gpus=effective_gpus,
-                priority=effective_priority,
-                preemptible=effective_preemptible,
-                timeout=effective_timeout,
-                shared_memory=effective_shared_memory,
-                retries=retries,
-                workspace=workspace or BEAKER_DEFAULT_WORKSPACE,
-                budget=budget or BEAKER_DEFAULT_BUDGET,
-                backends=effective_backends,
-                flash_attn=effective_flash_attn,
-                no_flash_attn=no_flash_attn,
-                group=effective_group,
-            )
-
-            if dry_run:
-                if multiple_models or multiple_priorities:
-                    console.print()  # Add spacing between multiple experiments
-                launcher.launch(job_config, dry_run=True)
-            else:
-                experiment = launcher.launch(job_config)
-                if experiment:
-                    console.print(f"[green]Launched:[/green] {launcher.experiment_url(experiment)}")
-                    launched_experiments.append(experiment.id)
+        if dry_run:
+            if len(experiment_plan) > 1:
+                console.print()  # Add spacing between multiple experiments
+            launcher.launch(job_config, dry_run=True)
+        else:
+            experiment = launcher.launch(job_config)
+            if experiment:
+                console.print(f"[green]Launched:[/green] {launcher.experiment_url(experiment)}")
+                launched_experiments.append(experiment.id)
 
     # Summary of launched experiments
     if launched_experiments and not dry_run:
