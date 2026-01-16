@@ -32,6 +32,7 @@ from olmo_eval.launch.beaker import (
 from olmo_eval.launch.config import (
     LaunchConfig,
     ModelConfig,
+    get_model_short_name,
     get_template,
     parse_model_config,
 )
@@ -44,6 +45,7 @@ __all__ = [
     "LaunchConfig",
     "ModelConfig",
     "calculate_experiment_splits",
+    "get_model_short_name",
     "get_template",
     "parse_model_config",
     "parse_task_with_priority",

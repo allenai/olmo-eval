@@ -54,6 +54,8 @@ class ModelConfig:
 
     Attributes:
         name_or_path: Model name, HuggingFace path, or local checkpoint path (required).
+        alias: Optional short name for experiment naming. If not set, a short name
+            is derived from name_or_path (last path component, or last 16 chars for long paths).
         gpus: Number of GPUs per model instance (overrides default).
         parallelism: Number of model instances to run in parallel. Total GPUs
             requested will be gpus × parallelism.
@@ -72,7 +74,8 @@ class ModelConfig:
             gpus: 1
             parallelism: 4  # 4 instances × 1 GPU = 4 GPUs total
             backend: vllm==0.13.0
-          - name_or_path: llama3.1-70b
+          - name_or_path: /weka/checkpoints/my-model/step1000-hf
+            alias: my-model-1k  # Short name for experiment naming
             gpus: 4
             parallelism: 2  # 2 instances × 4 GPUs = 8 GPUs total
             backend: transformers
@@ -83,6 +86,7 @@ class ModelConfig:
     """
 
     name_or_path: str = MISSING
+    alias: str | None = None
     gpus: int | None = None
     parallelism: int | None = None
     cluster: str | None = None
@@ -123,6 +127,49 @@ def parse_model_config(model: str | dict[str, Any] | ModelConfig) -> ModelConfig
         merged = OmegaConf.merge(schema, OmegaConf.create(model))
         return OmegaConf.to_object(merged)  # type: ignore[return-value]
     raise TypeError(f"Invalid model specification: {type(model)}")
+
+
+def get_model_short_name(model: ModelConfig) -> str:
+    """Get a short display name for a model suitable for experiment naming.
+
+    If alias is set, returns the alias. Otherwise derives a short name from
+    name_or_path by taking the last path component. If the result is empty
+    or longer than 32 characters, takes the last 16 characters of the path.
+
+    Args:
+        model: ModelConfig instance.
+
+    Returns:
+        Short name suitable for use in experiment names.
+
+    Examples:
+        >>> get_model_short_name(ModelConfig(name_or_path="llama3.1-8b"))
+        'llama3.1-8b'
+        >>> get_model_short_name(ModelConfig(name_or_path="meta-llama/Llama-3.1-8B"))
+        'llama-3.1-8b'
+        >>> get_model_short_name(ModelConfig(name_or_path="/weka/checkpoints/model/step1000-hf/"))
+        'step1000-hf'
+        >>> get_model_short_name(
+        ...     ModelConfig(name_or_path="/weka/checkpoints/model/", alias="my-model")
+        ... )
+        'my-model'
+    """
+    # Use alias if provided
+    if model.alias:
+        return model.alias.lower()
+
+    name = model.name_or_path
+
+    # Strip trailing slashes and get the last path component
+    name = name.rstrip("/")
+    short_name = name.split("/")[-1]
+
+    # If empty or too long, use last 16 chars of the full path
+    if not short_name or len(short_name) > 32:
+        # Clean up the name for use in experiment names
+        short_name = name[-16:].lstrip("/").lstrip("-").lstrip("_")
+
+    return short_name.lower()
 
 
 @dataclass

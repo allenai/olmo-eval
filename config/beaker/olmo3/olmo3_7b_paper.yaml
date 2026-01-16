@@ -7,6 +7,7 @@ models:
     # parallelism: 4
 
   - name_or_path: /weka/oe-training-default/ai2-llm/checkpoints/ai2-tylerm/olmo-cookbook-1b-5xC-olmo2-f50cc596/step26986-hf/
+    alias: olmo-cookbook-1b  # Short name for experiment naming
     gpus: 1
     # parallelism: 4
 

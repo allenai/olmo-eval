@@ -7,6 +7,7 @@ import pytest
 from olmo_eval.launch.config import (
     LaunchConfig,
     ModelConfig,
+    get_model_short_name,
     get_template,
     parse_model_config,
 )
@@ -19,11 +20,23 @@ class TestModelConfig:
         """Test creating a ModelConfig with name_or_path only."""
         config = ModelConfig(name_or_path="llama3.1-8b")
         assert config.name_or_path == "llama3.1-8b"
+        assert config.alias is None
         assert config.gpus is None
         assert config.cluster is None
         assert config.preemptible is None
         assert config.timeout is None
         assert config.shared_memory is None
+
+    def test_model_config_with_alias(self):
+        """Test creating a ModelConfig with an alias."""
+        config = ModelConfig(
+            name_or_path="/weka/checkpoints/my-model/step1000-hf",
+            alias="my-model-1k",
+            gpus=4,
+        )
+        assert config.name_or_path == "/weka/checkpoints/my-model/step1000-hf"
+        assert config.alias == "my-model-1k"
+        assert config.gpus == 4
 
     def test_model_config_with_overrides(self):
         """Test creating a ModelConfig with resource overrides."""
@@ -89,6 +102,74 @@ class TestParseModelConfig:
         """Test that invalid type raises TypeError."""
         with pytest.raises(TypeError, match="Invalid model specification"):
             parse_model_config(123)  # type: ignore[arg-type]
+
+    def test_parse_dict_with_alias(self):
+        """Test parsing a dict model config with alias."""
+        config = parse_model_config(
+            {
+                "name_or_path": "/weka/checkpoints/my-model/step1000-hf",
+                "alias": "my-model-1k",
+                "gpus": 4,
+            }
+        )
+        assert config.name_or_path == "/weka/checkpoints/my-model/step1000-hf"
+        assert config.alias == "my-model-1k"
+        assert config.gpus == 4
+
+
+class TestGetModelShortName:
+    """Tests for get_model_short_name function."""
+
+    def test_simple_model_name(self):
+        """Test simple model name returns as-is (lowercased)."""
+        config = ModelConfig(name_or_path="llama3.1-8b")
+        assert get_model_short_name(config) == "llama3.1-8b"
+
+    def test_huggingface_path(self):
+        """Test HuggingFace path returns last component."""
+        config = ModelConfig(name_or_path="meta-llama/Llama-3.1-8B")
+        assert get_model_short_name(config) == "llama-3.1-8b"
+
+    def test_local_path(self):
+        """Test local path returns last component."""
+        config = ModelConfig(name_or_path="/weka/checkpoints/model/step1000-hf")
+        assert get_model_short_name(config) == "step1000-hf"
+
+    def test_local_path_with_trailing_slash(self):
+        """Test local path with trailing slash returns last non-empty component."""
+        config = ModelConfig(name_or_path="/weka/checkpoints/model/step1000-hf/")
+        assert get_model_short_name(config) == "step1000-hf"
+
+    def test_alias_overrides_name(self):
+        """Test alias is used when provided."""
+        config = ModelConfig(
+            name_or_path="/weka/checkpoints/model/step1000-hf/",
+            alias="my-model-1k",
+        )
+        assert get_model_short_name(config) == "my-model-1k"
+
+    def test_alias_is_lowercased(self):
+        """Test alias is lowercased."""
+        config = ModelConfig(
+            name_or_path="some-model",
+            alias="My-Model-Name",
+        )
+        assert get_model_short_name(config) == "my-model-name"
+
+    def test_long_path_uses_last_16_chars(self):
+        """Test very long last component uses last 16 chars of full path."""
+        # Create a path where the last component is > 32 chars
+        long_component = "a" * 40
+        config = ModelConfig(name_or_path=f"/weka/checkpoints/{long_component}")
+        result = get_model_short_name(config)
+        assert len(result) == 16
+        assert result == "a" * 16
+
+    def test_empty_last_component_uses_last_16_chars(self):
+        """Test path ending with just slashes uses last 16 chars."""
+        config = ModelConfig(name_or_path="/weka/checkpoints/my-model-name")
+        # Last component is "my-model-name" which is fine
+        assert get_model_short_name(config) == "my-model-name"
 
 
 class TestLaunchConfigModelConfigs:

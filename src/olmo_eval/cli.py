@@ -524,6 +524,7 @@ def launch(
             LaunchConfig,
             ModelConfig,
             calculate_experiment_splits,
+            get_model_short_name,
             parse_model_config,
             validate_priority_configuration,
         )
@@ -730,7 +731,7 @@ def launch(
 
     for m_cfg in model_configs:
         m_name = m_cfg.name_or_path
-        short_m = m_name.split("/")[-1].lower()
+        short_m = get_model_short_name(m_cfg)
         if cfg is not None:
             m_resources = cfg.get_model_resources(m_cfg)
             m_gpus = cli_gpus if cli_gpus is not None else m_resources.get("gpus", 1)
