@@ -525,6 +525,7 @@ def launch(
             ModelConfig,
             calculate_experiment_splits,
             get_model_short_name,
+            get_tasks_short_name,
             parse_model_config,
             validate_priority_configuration,
         )
@@ -753,7 +754,9 @@ def launch(
             if multiple_models:
                 base_name = f"{base_name}-{short_m}"
             if multiple_priorities:
-                base_name = f"{base_name}-{t_priority}"
+                # Use shortened task names instead of priority for experiment naming
+                tasks_suffix = get_tasks_short_name(t_list)
+                base_name = f"{base_name}-{tasks_suffix}"
 
             # Calculate splits based on GPU constraints
             splits = calculate_experiment_splits(

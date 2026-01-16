@@ -8,6 +8,7 @@ from olmo_eval.launch.config import (
     LaunchConfig,
     ModelConfig,
     get_model_short_name,
+    get_tasks_short_name,
     get_template,
     parse_model_config,
 )
@@ -170,6 +171,64 @@ class TestGetModelShortName:
         config = ModelConfig(name_or_path="/weka/checkpoints/my-model-name")
         # Last component is "my-model-name" which is fine
         assert get_model_short_name(config) == "my-model-name"
+
+
+class TestGetTasksShortName:
+    """Tests for get_tasks_short_name function."""
+
+    def test_single_task(self):
+        """Test single task returns task name."""
+        assert get_tasks_short_name(["mmlu"]) == "mmlu"
+
+    def test_single_task_with_priority(self):
+        """Test single task strips @priority suffix."""
+        assert get_tasks_short_name(["mmlu@high"]) == "mmlu"
+
+    def test_single_task_with_variant(self):
+        """Test single task strips :variant suffix."""
+        assert get_tasks_short_name(["arc:mc"]) == "arc"
+
+    def test_single_task_with_regime(self):
+        """Test single task strips ::regime suffix."""
+        assert get_tasks_short_name(["mmlu::olmes"]) == "mmlu"
+
+    def test_two_tasks(self):
+        """Test two tasks joined with underscore."""
+        assert get_tasks_short_name(["gsm8k", "arc_challenge"]) == "gsm8k_arc"
+
+    def test_three_tasks(self):
+        """Test three tasks joined with underscore."""
+        assert get_tasks_short_name(["mmlu", "gsm8k", "hellaswag"]) == "mmlu_gsm8k_hellaswa"
+
+    def test_four_or_more_tasks(self):
+        """Test 4+ tasks uses first task and count."""
+        result = get_tasks_short_name(["mmlu", "gsm8k", "hellaswag", "arc_challenge"])
+        assert result == "mmlu_3more"
+
+    def test_many_tasks(self):
+        """Test many tasks uses first task and count."""
+        tasks = ["mmlu", "gsm8k", "hellaswag", "arc_challenge", "winogrande", "truthfulqa"]
+        result = get_tasks_short_name(tasks)
+        assert result == "mmlu_5more"
+
+    def test_empty_list(self):
+        """Test empty task list returns placeholder."""
+        assert get_tasks_short_name([]) == "notasks"
+
+    def test_strips_challenge_suffix(self):
+        """Test _challenge suffix is removed."""
+        assert get_tasks_short_name(["arc_challenge"]) == "arc"
+
+    def test_long_task_name_truncated(self):
+        """Test long task names are truncated."""
+        result = get_tasks_short_name(["verylongtasknamethatshouldbetruncated"])
+        assert len(result) <= 24
+
+    def test_mixed_priorities_and_variants(self):
+        """Test tasks with mixed priorities and variants."""
+        tasks = ["mmlu@high", "gsm8k::olmes", "arc:mc@low"]
+        result = get_tasks_short_name(tasks)
+        assert result == "mmlu_gsm8k_arc"
 
 
 class TestLaunchConfigModelConfigs:

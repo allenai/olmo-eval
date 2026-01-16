@@ -172,6 +172,76 @@ def get_model_short_name(model: ModelConfig) -> str:
     return short_name.lower()
 
 
+def _shorten_task_name(task: str, max_len: int = 8) -> str:
+    """Shorten a single task name for use in experiment naming.
+
+    Removes common suffixes and prefixes, strips variants (after ':' or '::'),
+    and truncates to max_len characters.
+    """
+    # Strip @priority suffix if present
+    if "@" in task:
+        task = task.split("@")[0]
+
+    # Strip variant/regime suffix (e.g., "mmlu::olmes" -> "mmlu", "arc:mc" -> "arc")
+    if "::" in task:
+        task = task.split("::")[0]
+    elif ":" in task:
+        task = task.split(":")[0]
+
+    # Remove common suffixes/prefixes
+    task = task.replace("_challenge", "").replace("_easy", "")
+
+    # Truncate if needed
+    if len(task) > max_len:
+        task = task[:max_len]
+
+    return task.lower().rstrip("_").rstrip("-")
+
+
+def get_tasks_short_name(tasks: list[str], max_total_len: int = 24) -> str:
+    """Generate a short identifier from a list of task names.
+
+    Creates a concise name suitable for experiment naming:
+    - Single task: uses the task name (shortened)
+    - 2-3 tasks: joins abbreviated names with '_'
+    - 4+ tasks: uses first task name + count (e.g., "mmlu_3more")
+
+    Args:
+        tasks: List of task names (may include @priority or ::variant suffixes).
+        max_total_len: Maximum length of the returned string.
+
+    Returns:
+        Short identifier string for the task list.
+
+    Examples:
+        >>> get_tasks_short_name(["mmlu"])
+        'mmlu'
+        >>> get_tasks_short_name(["gsm8k", "arc_challenge"])
+        'gsm8k_arc'
+        >>> get_tasks_short_name(["mmlu", "gsm8k", "hellaswag", "arc_challenge"])
+        'mmlu_3more'
+    """
+    if not tasks:
+        return "notasks"
+
+    if len(tasks) == 1:
+        return _shorten_task_name(tasks[0], max_len=max_total_len)
+
+    if len(tasks) <= 3:
+        # Join abbreviated names
+        shortened = [_shorten_task_name(t, max_len=8) for t in tasks]
+        result = "_".join(shortened)
+        if len(result) > max_total_len:
+            # Fall back to first task + count
+            first = _shorten_task_name(tasks[0], max_len=12)
+            return f"{first}_{len(tasks) - 1}more"
+        return result
+
+    # 4+ tasks: first task + count
+    first = _shorten_task_name(tasks[0], max_len=12)
+    return f"{first}_{len(tasks) - 1}more"
+
+
 @dataclass
 class LaunchConfig:
     """Configuration for launching Beaker evaluation jobs.
