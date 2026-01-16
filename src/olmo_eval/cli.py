@@ -1077,14 +1077,18 @@ def results(
             csv_data = launcher.export_group_metrics(beaker_group)
             click.echo(csv_data)
         except Exception as e:
+            from beaker import BeakerWorkloadStatus
+
             console.print(f"[yellow]Warning:[/yellow] Could not export metrics: {e}")
             # Fall back to basic experiment info
             click.echo("experiment_id,name,status")
             for exp in experiments:
                 workload = launcher.beaker.workload.get(exp.id)
-                click.echo(f"{exp.id},{exp.name},{workload.status.name}")
+                click.echo(f"{exp.id},{exp.name},{BeakerWorkloadStatus(workload.status).name}")
 
     elif output_format == "json":
+        from beaker import BeakerWorkloadStatus
+
         # Export as JSON
         data = {
             "group": group,
@@ -1093,7 +1097,7 @@ def results(
                 {
                     "id": exp.id,
                     "name": exp.name,
-                    "status": launcher.beaker.workload.get(exp.id).status.name,
+                    "status": BeakerWorkloadStatus(launcher.beaker.workload.get(exp.id).status).name,
                     "url": launcher.experiment_url(exp),
                 }
                 for exp in experiments
@@ -1114,6 +1118,8 @@ def results(
         console.print()
 
         if experiments:
+            from beaker import BeakerWorkloadStatus
+
             table = Table(title="Experiments")
             table.add_column("Name", style="cyan")
             table.add_column("Status")
@@ -1121,7 +1127,7 @@ def results(
 
             for exp in experiments:
                 workload = launcher.beaker.workload.get(exp.id)
-                status_str = workload.status.name
+                status_str = BeakerWorkloadStatus(workload.status).name
                 status_style = {
                     "succeeded": "[green]succeeded[/green]",
                     "failed": "[red]failed[/red]",
@@ -1257,13 +1263,16 @@ def group_info(group_name: str, output_format: str, verbose: bool) -> None:
 
     if output_format == "json":
         # Build detailed experiment data
+        from beaker import BeakerWorkloadStatus
+
         exp_data = []
         for exp in experiments:
             workload = launcher.beaker.workload.get(exp.id)
+            status_enum = BeakerWorkloadStatus(workload.status)
             exp_info = {
                 "id": exp.id,
                 "name": exp.name,
-                "status": workload.status.name,
+                "status": status_enum.name,
                 "url": launcher.experiment_url(exp),
             }
 
@@ -1317,6 +1326,8 @@ def group_info(group_name: str, output_format: str, verbose: bool) -> None:
         console.print()
 
         if experiments:
+            from beaker import BeakerWorkloadStatus
+
             table = Table(title="Experiments")
             table.add_column("Name", style="cyan")
             table.add_column("Status")
@@ -1326,7 +1337,7 @@ def group_info(group_name: str, output_format: str, verbose: bool) -> None:
 
             for exp in experiments:
                 workload = launcher.beaker.workload.get(exp.id)
-                status_str = workload.status.name
+                status_str = BeakerWorkloadStatus(workload.status).name
                 status_style = {
                     "succeeded": "[green]succeeded[/green]",
                     "failed": "[red]failed[/red]",

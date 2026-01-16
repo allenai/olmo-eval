@@ -794,6 +794,20 @@ class BeakerLauncher:
             add_experiment_ids=experiment_ids,
         )
 
+    def _get_experiment_ids_from_group(self, group: str | BeakerGroup) -> set[str]:
+        """Get unique experiment IDs from a group using task metrics.
+
+        Args:
+            group: Group name or object.
+
+        Returns:
+            Set of experiment IDs.
+        """
+        if isinstance(group, str):
+            group = self.beaker.group.get(group)
+        task_metrics = self.beaker.group.list_task_metrics(group)
+        return {tm.experiment_id for tm in task_metrics}
+
     def get_group_status(self, group: str | BeakerGroup) -> dict[str, int]:
         """Get status summary for all experiments in a group.
 
@@ -805,7 +819,7 @@ class BeakerLauncher:
         """
         from beaker import BeakerWorkloadStatus
 
-        experiments = list(self.beaker.group.experiments(group))
+        experiment_ids = self._get_experiment_ids_from_group(group)
         status_counts = {
             "succeeded": 0,
             "failed": 0,
@@ -814,9 +828,9 @@ class BeakerLauncher:
             "canceled": 0,
         }
 
-        for exp in experiments:
+        for exp_id in experiment_ids:
             # Get the workload status
-            workload = self.beaker.workload.get(exp.id)
+            workload = self.beaker.workload.get(exp_id)
             status = workload.status
 
             if status == BeakerWorkloadStatus.succeeded:
@@ -848,7 +862,12 @@ class BeakerLauncher:
         Returns:
             List of experiment objects.
         """
-        return list(self.beaker.group.experiments(group))
+        experiment_ids = self._get_experiment_ids_from_group(group)
+        experiments = []
+        for exp_id in experiment_ids:
+            workload = self.beaker.workload.get(exp_id)
+            experiments.append(workload.experiment)
+        return experiments
 
     def export_group_metrics(self, group: str | BeakerGroup) -> str:
         """Export group metrics as CSV.
@@ -874,14 +893,14 @@ class BeakerLauncher:
             Dictionary with counts: {"canceled": N, "skipped": M, "failed": K}
         """
         from beaker import BeakerWorkloadStatus
-        from beaker.exceptions import ExperimentConflict, ExperimentNotFound
+        from beaker.exceptions import BeakerExperimentConflict, BeakerExperimentNotFound
 
-        experiments = list(self.beaker.group.experiments(group))
+        experiment_ids = self._get_experiment_ids_from_group(group)
         results = {"canceled": 0, "skipped": 0, "failed": 0}
 
-        for exp in experiments:
+        for exp_id in experiment_ids:
             # Check current status before attempting to cancel
-            workload = self.beaker.workload.get(exp.id)
+            workload = self.beaker.workload.get(exp_id)
             status = workload.status
 
             # Skip already-completed experiments
@@ -893,11 +912,11 @@ class BeakerLauncher:
                 results["skipped"] += 1
                 continue
 
-            # Attempt to stop the experiment
+            # Attempt to cancel the workload
             try:
-                self.beaker.experiment.stop(exp)
+                list(self.beaker.workload.cancel(workload))
                 results["canceled"] += 1
-            except (ExperimentNotFound, ExperimentConflict):
+            except (BeakerExperimentNotFound, BeakerExperimentConflict):
                 # Already completed or canceled while we were iterating
                 results["skipped"] += 1
             except Exception:
