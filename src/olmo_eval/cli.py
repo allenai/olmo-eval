@@ -677,9 +677,7 @@ def launch(
     missing_groups: list[str] = []
 
     for grp in effective_groups:
-        qualified_name = (
-            f"{launcher.beaker.user_name}/{grp}" if "/" not in grp else grp
-        )
+        qualified_name = f"{launcher.beaker.user_name}/{grp}" if "/" not in grp else grp
         try:
             launcher.beaker.group.get(qualified_name)
             existing_groups.append(grp)
@@ -688,9 +686,7 @@ def launch(
 
     # Show existing groups
     for grp in existing_groups:
-        qualified_name = (
-            f"{launcher.beaker.user_name}/{grp}" if "/" not in grp else grp
-        )
+        qualified_name = f"{launcher.beaker.user_name}/{grp}" if "/" not in grp else grp
         beaker_group = launcher.beaker.group.get(qualified_name)
         group_url = launcher.get_group_url(beaker_group)
         console.print(f"[blue]  {grp}:[/blue] {group_url} [dim](exists)[/dim]")
@@ -706,8 +702,7 @@ def launch(
         # In real mode, prompt to create missing groups
         if missing_groups:
             console.print(
-                f"\n[yellow]The following groups do not exist:[/yellow] "
-                f"{', '.join(missing_groups)}"
+                f"\n[yellow]The following groups do not exist:[/yellow] {', '.join(missing_groups)}"
             )
             if not click.confirm("Would you like to create these groups?", default=True):
                 console.print("[red]Aborted.[/red] Cannot launch without required groups.")
