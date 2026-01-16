@@ -813,16 +813,14 @@ def launch(
     console.print(f"  Models: {len(model_configs)}")
     console.print(f"  Priority levels: {len(tasks_by_priority)}")
     total_experiments = len(experiment_plan)
-    if split_models:
-        unique_splits = list(set(split_models))
-        split_msg = f"({len(unique_splits)} model(s) split due to GPU limits)"
-        console.print(f"  Total experiments: {total_experiments} {split_msg}")
-    else:
-        console.print(f"  Total experiments: {total_experiments}")
+    console.print(f"  Total experiments: {total_experiments}")
 
     # Calculate and display total expanded tasks
     total_expanded_tasks = len(valid_tasks) * len(model_configs)
-    console.print(f"  Total tasks: {total_expanded_tasks} ({len(valid_tasks)} tasks × {len(model_configs)} model(s))")
+    if split_models:
+        console.print(f"  Total tasks: {total_expanded_tasks} (distributed across {total_experiments} experiments)")
+    else:
+        console.print(f"  Total tasks: {total_expanded_tasks}")
 
     matrix_table = Table(title="Experiments to Launch", show_header=True)
     matrix_table.add_column("Experiment Name", style="cyan")
@@ -982,15 +980,13 @@ def launch(
             groups=effective_groups,
         )
 
-        if dry_run:
+        if verbose:
             if len(experiment_plan) > 1:
                 console.print()  # Add spacing between multiple experiments
+            console.print("[bold]Experiment spec:[/bold]")
             launcher.launch(job_config, dry_run=True)
-        else:
-            if verbose:
-                console.print("\n[bold]Experiment spec:[/bold]")
-                launcher.launch(job_config, dry_run=True)
-                console.print()
+
+        if not dry_run:
             experiment = launcher.launch(job_config)
             if experiment:
                 console.print(f"[green]Launched:[/green] {launcher.experiment_url(experiment)}")
