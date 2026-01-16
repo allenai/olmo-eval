@@ -619,12 +619,14 @@ class BeakerLauncher:
         if dry_run:
             self._print_dry_run_config(config, clusters)
             # Still call launch_experiment with dry_run=True to show full spec
+            # Don't pass group_names in dry_run - the group doesn't exist yet
+            # and gantry would prompt to create it
             launch_experiment(
                 args=final_command,
                 name=config.name,
                 description=config.description,
                 workspace=config.workspace,
-                group_names=group_names,
+                group_names=None,
                 clusters=clusters,
                 gpus=config.num_gpus,
                 shared_memory=config.shared_memory,

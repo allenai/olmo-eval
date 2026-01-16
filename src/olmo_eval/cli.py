@@ -702,9 +702,10 @@ def launch(
             if len(splits) > 1:
                 split_models.append(m_name)
 
+            total_splits = len(splits)
             for i, split in enumerate(splits):
                 # Add zero-padded suffix for splits
-                exp_name = f"{base_name}-{i + 1:03d}" if len(splits) > 1 else base_name
+                exp_name = f"{base_name}-{i + 1:03d}" if total_splits > 1 else base_name
 
                 experiment_plan.append({
                     "name": exp_name,
@@ -712,8 +713,11 @@ def launch(
                     "model_cfg": m_cfg,
                     "priority": t_priority,
                     "tasks": split["tasks"],
+                    "gpus_per_model": m_gpus,
                     "num_gpus": split["num_gpus"],
                     "parallelism": split["parallelism"],
+                    "split_index": i + 1 if total_splits > 1 else None,
+                    "total_splits": total_splits if total_splits > 1 else None,
                 })
 
     # Print experiment matrix summary
@@ -733,18 +737,27 @@ def launch(
     matrix_table.add_column("Model", style="blue")
     matrix_table.add_column("Priority", style="yellow")
     matrix_table.add_column("Tasks", style="white")
-    matrix_table.add_column("GPUs", style="green")
-    matrix_table.add_column("Parallelism", style="magenta")
+    matrix_table.add_column("GPUs/Model", style="green", justify="right")
+    matrix_table.add_column("Instances", style="magenta", justify="right")
+    matrix_table.add_column("Total GPUs", style="green", justify="right")
+    matrix_table.add_column("Split", style="dim", justify="center")
 
     for exp in experiment_plan:
         task_display = ", ".join(exp["tasks"][:3]) + ("..." if len(exp["tasks"]) > 3 else "")
+        split_display = (
+            f"{exp['split_index']}/{exp['total_splits']}"
+            if exp["split_index"] is not None
+            else "-"
+        )
         matrix_table.add_row(
             exp["name"],
             exp["model_name"],
             exp["priority"],
             task_display,
-            str(exp["num_gpus"]),
+            str(exp["gpus_per_model"]),
             str(exp["parallelism"]),
+            str(exp["num_gpus"]),
+            split_display,
         )
 
     console.print(matrix_table)
