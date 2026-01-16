@@ -19,9 +19,9 @@ Example config (eval_config.yaml):
 Example with per-model resources:
     name: eval-mixed-sizes
     models:
-      - name: llama3.1-8b
+      - name_or_path: llama3.1-8b
         gpus: 1
-      - name: llama3.1-70b
+      - name_or_path: llama3.1-70b
         gpus: 4
         timeout: 48h
     tasks:

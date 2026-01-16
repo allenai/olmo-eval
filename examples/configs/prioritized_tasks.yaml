@@ -22,9 +22,9 @@ name: eval-prioritized
 
 models:
   # Models define compute resources (GPUs)
-  - name: llama3.1-8b
+  - name_or_path: llama3.1-8b
     gpus: 1
-  - name: olmo-2-7b
+  - name_or_path: olmo-2-7b
     gpus: 1
 
 tasks:

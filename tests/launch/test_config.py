@@ -16,9 +16,9 @@ class TestModelConfig:
     """Tests for ModelConfig dataclass."""
 
     def test_model_config_creation(self):
-        """Test creating a ModelConfig with name only."""
-        config = ModelConfig(name="llama3.1-8b")
-        assert config.name == "llama3.1-8b"
+        """Test creating a ModelConfig with name_or_path only."""
+        config = ModelConfig(name_or_path="llama3.1-8b")
+        assert config.name_or_path == "llama3.1-8b"
         assert config.gpus is None
         assert config.cluster is None
         assert config.preemptible is None
@@ -28,14 +28,14 @@ class TestModelConfig:
     def test_model_config_with_overrides(self):
         """Test creating a ModelConfig with resource overrides."""
         config = ModelConfig(
-            name="llama3.1-70b",
+            name_or_path="llama3.1-70b",
             gpus=4,
             cluster="h100",
             preemptible=False,
             timeout="48h",
             shared_memory="20GiB",
         )
-        assert config.name == "llama3.1-70b"
+        assert config.name_or_path == "llama3.1-70b"
         assert config.gpus == 4
         assert config.cluster == "h100"
         assert config.preemptible is False
@@ -50,21 +50,21 @@ class TestParseModelConfig:
         """Test parsing a simple string model name."""
         config = parse_model_config("llama3.1-8b")
         assert isinstance(config, ModelConfig)
-        assert config.name == "llama3.1-8b"
+        assert config.name_or_path == "llama3.1-8b"
         assert config.gpus is None
 
     def test_parse_dict_model(self):
         """Test parsing a dict model config."""
-        config = parse_model_config({"name": "llama3.1-70b", "gpus": 4})
+        config = parse_model_config({"name_or_path": "llama3.1-70b", "gpus": 4})
         assert isinstance(config, ModelConfig)
-        assert config.name == "llama3.1-70b"
+        assert config.name_or_path == "llama3.1-70b"
         assert config.gpus == 4
 
     def test_parse_dict_with_all_fields(self):
         """Test parsing a dict with all fields."""
         config = parse_model_config(
             {
-                "name": "llama3.1-70b",
+                "name_or_path": "llama3.1-70b",
                 "gpus": 4,
                 "cluster": "h100",
                 "preemptible": False,
@@ -72,7 +72,7 @@ class TestParseModelConfig:
                 "shared_memory": "20GiB",
             }
         )
-        assert config.name == "llama3.1-70b"
+        assert config.name_or_path == "llama3.1-70b"
         assert config.gpus == 4
         assert config.cluster == "h100"
         assert config.preemptible is False
@@ -81,7 +81,7 @@ class TestParseModelConfig:
 
     def test_parse_model_config_passthrough(self):
         """Test that ModelConfig passes through unchanged."""
-        original = ModelConfig(name="test", gpus=2)
+        original = ModelConfig(name_or_path="test", gpus=2)
         parsed = parse_model_config(original)
         assert parsed is original
 
@@ -104,26 +104,26 @@ class TestLaunchConfigModelConfigs:
         model_configs = config.get_model_configs()
 
         assert len(model_configs) == 2
-        assert model_configs[0].name == "llama3.1-8b"
+        assert model_configs[0].name_or_path == "llama3.1-8b"
         assert model_configs[0].gpus is None
-        assert model_configs[1].name == "olmo-2-7b"
+        assert model_configs[1].name_or_path == "olmo-2-7b"
 
     def test_get_model_configs_from_dicts(self):
         """Test get_model_configs with dict model configs."""
         config = LaunchConfig(
             name="test",
             models=[
-                {"name": "llama3.1-8b", "gpus": 1},
-                {"name": "llama3.1-70b", "gpus": 4, "timeout": "48h"},
+                {"name_or_path": "llama3.1-8b", "gpus": 1},
+                {"name_or_path": "llama3.1-70b", "gpus": 4, "timeout": "48h"},
             ],
             tasks=["mmlu"],
         )
         model_configs = config.get_model_configs()
 
         assert len(model_configs) == 2
-        assert model_configs[0].name == "llama3.1-8b"
+        assert model_configs[0].name_or_path == "llama3.1-8b"
         assert model_configs[0].gpus == 1
-        assert model_configs[1].name == "llama3.1-70b"
+        assert model_configs[1].name_or_path == "llama3.1-70b"
         assert model_configs[1].gpus == 4
         assert model_configs[1].timeout == "48h"
 
@@ -133,16 +133,16 @@ class TestLaunchConfigModelConfigs:
             name="test",
             models=[
                 "llama3.1-8b",  # Simple string
-                {"name": "llama3.1-70b", "gpus": 4},  # Dict with override
+                {"name_or_path": "llama3.1-70b", "gpus": 4},  # Dict with override
             ],
             tasks=["mmlu"],
         )
         model_configs = config.get_model_configs()
 
         assert len(model_configs) == 2
-        assert model_configs[0].name == "llama3.1-8b"
+        assert model_configs[0].name_or_path == "llama3.1-8b"
         assert model_configs[0].gpus is None
-        assert model_configs[1].name == "llama3.1-70b"
+        assert model_configs[1].name_or_path == "llama3.1-70b"
         assert model_configs[1].gpus == 4
 
 
@@ -159,7 +159,7 @@ class TestLaunchConfigGetModelResources:
             cluster="a100",
             timeout="12h",
         )
-        model = ModelConfig(name="llama3.1-8b")
+        model = ModelConfig(name_or_path="llama3.1-8b")
         resources = config.get_model_resources(model)
 
         assert resources["gpus"] == 2
@@ -177,7 +177,7 @@ class TestLaunchConfigGetModelResources:
             timeout="24h",
         )
         model = ModelConfig(
-            name="llama3.1-70b",
+            name_or_path="llama3.1-70b",
             gpus=4,
             timeout="48h",
         )
@@ -198,7 +198,7 @@ class TestLaunchConfigGetModelResources:
             preemptible=True,
         )
         model = ModelConfig(
-            name="llama3.1-13b",
+            name_or_path="llama3.1-13b",
             gpus=2,
             # No cluster, preemptible overrides
         )
@@ -216,7 +216,7 @@ class TestLaunchConfigGetModelResources:
             tasks=["mmlu"],
         )
         model = ModelConfig(
-            name="llama3.1-8b",
+            name_or_path="llama3.1-8b",
             shared_memory="10GiB",
         )
         resources = config.get_model_resources(model)
@@ -231,7 +231,7 @@ class TestLaunchConfigGetModelResources:
             tasks=["mmlu"],
             parallelism=4,
         )
-        model = ModelConfig(name="llama3.1-8b")
+        model = ModelConfig(name_or_path="llama3.1-8b")
         resources = config.get_model_resources(model)
 
         assert resources["parallelism"] == 4
@@ -245,7 +245,7 @@ class TestLaunchConfigGetModelResources:
             parallelism=2,
         )
         model = ModelConfig(
-            name="llama3.1-8b",
+            name_or_path="llama3.1-8b",
             parallelism=8,
         )
         resources = config.get_model_resources(model)
@@ -281,7 +281,7 @@ gpus: 1
             assert config.models[1] == "olmo-2-7b"
 
             model_configs = config.get_model_configs()
-            assert model_configs[0].name == "llama3.1-8b"
+            assert model_configs[0].name_or_path == "llama3.1-8b"
             assert model_configs[0].gpus is None
 
     def test_from_yaml_per_model_resources(self):
@@ -289,9 +289,9 @@ gpus: 1
         yaml_content = """
 name: test-eval
 models:
-  - name: llama3.1-8b
+  - name_or_path: llama3.1-8b
     gpus: 1
-  - name: llama3.1-70b
+  - name_or_path: llama3.1-70b
     gpus: 4
     timeout: 48h
     preemptible: false
@@ -312,11 +312,11 @@ priority: normal
             assert len(model_configs) == 2
 
             # First model
-            assert model_configs[0].name == "llama3.1-8b"
+            assert model_configs[0].name_or_path == "llama3.1-8b"
             assert model_configs[0].gpus == 1
 
             # Second model with overrides
-            assert model_configs[1].name == "llama3.1-70b"
+            assert model_configs[1].name_or_path == "llama3.1-70b"
             assert model_configs[1].gpus == 4
             assert model_configs[1].timeout == "48h"
             assert model_configs[1].preemptible is False
@@ -327,7 +327,7 @@ priority: normal
 name: test-eval
 models:
   - llama3.1-8b
-  - name: llama3.1-70b
+  - name_or_path: llama3.1-70b
     gpus: 4
 tasks:
   - mmlu
@@ -339,9 +339,9 @@ tasks:
             config = LaunchConfig.from_yaml(f.name)
             model_configs = config.get_model_configs()
 
-            assert model_configs[0].name == "llama3.1-8b"
+            assert model_configs[0].name_or_path == "llama3.1-8b"
             assert model_configs[0].gpus is None
-            assert model_configs[1].name == "llama3.1-70b"
+            assert model_configs[1].name_or_path == "llama3.1-70b"
             assert model_configs[1].gpus == 4
 
     def test_from_yaml_with_cli_overrides(self):
