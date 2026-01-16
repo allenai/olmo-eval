@@ -729,7 +729,7 @@ def launch(
     split_models: list[str] = []  # Track models that require splitting
 
     for m_cfg in model_configs:
-        m_name = m_cfg.name
+        m_name = m_cfg.name_or_path
         short_m = m_name.split("/")[-1].lower()
         if cfg is not None:
             m_resources = cfg.get_model_resources(m_cfg)

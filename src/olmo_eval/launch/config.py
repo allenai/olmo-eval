@@ -53,7 +53,7 @@ class ModelConfig:
     This allows specifying per-model resources for mixed-size evaluations.
 
     Attributes:
-        name: Model name or HuggingFace path (required).
+        name_or_path: Model name, HuggingFace path, or local checkpoint path (required).
         gpus: Number of GPUs per model instance (overrides default).
         parallelism: Number of model instances to run in parallel. Total GPUs
             requested will be gpus × parallelism.
@@ -68,11 +68,11 @@ class ModelConfig:
 
     Example:
         models:
-          - name: llama3.1-8b
+          - name_or_path: llama3.1-8b
             gpus: 1
             parallelism: 4  # 4 instances × 1 GPU = 4 GPUs total
             backend: vllm==0.13.0
-          - name: llama3.1-70b
+          - name_or_path: llama3.1-70b
             gpus: 4
             parallelism: 2  # 2 instances × 4 GPUs = 8 GPUs total
             backend: transformers
@@ -82,7 +82,7 @@ class ModelConfig:
             timeout: 48h
     """
 
-    name: str = MISSING
+    name_or_path: str = MISSING
     gpus: int | None = None
     parallelism: int | None = None
     cluster: str | None = None
@@ -105,19 +105,19 @@ def parse_model_config(model: str | dict[str, Any] | ModelConfig) -> ModelConfig
     Handles both simple string format and detailed dict/ModelConfig format.
 
     Args:
-        model: Model name string, dict with model config, or ModelConfig.
+        model: Model name/path string, dict with model config, or ModelConfig.
 
     Returns:
         ModelConfig instance.
 
     Examples:
         parse_model_config("llama3.1-8b")
-        parse_model_config({"name": "llama3.1-70b", "gpus": 4})
+        parse_model_config({"name_or_path": "llama3.1-70b", "gpus": 4})
     """
     if isinstance(model, ModelConfig):
         return model
     if isinstance(model, str):
-        return ModelConfig(name=model)
+        return ModelConfig(name_or_path=model)
     if isinstance(model, dict):
         schema = OmegaConf.structured(ModelConfig)
         merged = OmegaConf.merge(schema, OmegaConf.create(model))
@@ -141,9 +141,9 @@ class LaunchConfig:
 
         # Per-model resources
         models:
-          - name: llama3.1-8b
+          - name_or_path: llama3.1-8b
             gpus: 1
-          - name: llama3.1-70b
+          - name_or_path: llama3.1-70b
             gpus: 4
             timeout: 48h
 

@@ -13,11 +13,11 @@ name: test-mixed-gpus
 
 models:
   # Small model - 1 GPU
-  - name: meta-llama/Llama-3.1-8B
+  - name_or_path: meta-llama/Llama-3.1-8B
     gpus: 1
 
   # Large model - 4 GPUs, more shared memory
-  - name: meta-llama/Llama-3.1-70B
+  - name_or_path: meta-llama/Llama-3.1-70B
     gpus: 4
     shared_memory: "20GiB"
     timeout: 48h
