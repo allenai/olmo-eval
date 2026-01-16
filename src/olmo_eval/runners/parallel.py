@@ -19,8 +19,7 @@ from rich.console import Console
 from olmo_eval.backends import BackendType, create_backend
 from olmo_eval.core import Instance, LMOutput, LMRequest, Response, expand_tasks, get_model_config
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
-from olmo_eval.evals.tasks import get_task
-from olmo_eval.evals.tasks.base import Task
+from olmo_eval.evals.tasks import Task, get_task
 from olmo_eval.runners.sequential import ValidationError
 from olmo_eval.runners.utils import TaskResult
 
@@ -488,8 +487,7 @@ class AsyncEvalRunner:
     def validate(self) -> None:
         """Validate configuration."""
         from olmo_eval.evals.suites import suite_exists
-        from olmo_eval.evals.tasks import list_tasks
-        from olmo_eval.evals.tasks.registry import list_regimes
+        from olmo_eval.evals.tasks import list_regimes, list_tasks
 
         if not self.model_names:
             raise ValidationError("model_names is required")
@@ -969,8 +967,7 @@ class StreamingEvalRunner:
     def validate(self) -> None:
         """Validate configuration."""
         from olmo_eval.evals.suites import suite_exists
-        from olmo_eval.evals.tasks import list_tasks
-        from olmo_eval.evals.tasks.registry import list_regimes
+        from olmo_eval.evals.tasks import list_regimes, list_tasks
 
         if not self.model_names:
             raise ValidationError("model_names is required")

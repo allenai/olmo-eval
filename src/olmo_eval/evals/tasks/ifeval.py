@@ -19,7 +19,7 @@ from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
 # Import instruction checkers from the ifeval library if available
 try:
-    from instruction_following_eval import instructions_registry
+    from instruction_following_eval import instructions_registry  # type: ignore[import-not-found]
 
     IFEVAL_AVAILABLE = True
 except ImportError:
@@ -62,6 +62,7 @@ class IFEvalScorer(Scorer):
 
         # Use the official ifeval library
         try:
+            assert instructions_registry is not None
             checker_cls = instructions_registry.INSTRUCTION_DICT[instruction_id]
             checker = checker_cls(**instruction_kwargs)
 
@@ -198,7 +199,12 @@ class IFEvalMetric(Metric):
         """
         self.level = level
         self.strictness = strictness
-        self.name = f"{level}_level_{strictness}_acc"
+        self._name = f"{level}_level_{strictness}_acc"
+
+    @property
+    def name(self) -> str:
+        """Return the metric name."""
+        return self._name
 
     def compute(self, responses: Sequence[Response]) -> float:
         """Compute the metric across all responses."""

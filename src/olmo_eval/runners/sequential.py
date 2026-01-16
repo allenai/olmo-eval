@@ -17,8 +17,7 @@ from olmo_eval.backends import Backend, BackendType, create_backend
 from olmo_eval.core import expand_tasks, get_model_config
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.evals.suites import suite_exists
-from olmo_eval.evals.tasks import list_tasks
-from olmo_eval.evals.tasks.registry import list_regimes
+from olmo_eval.evals.tasks import list_regimes, list_tasks
 from olmo_eval.runners.utils import run_task_impl
 
 if TYPE_CHECKING:
