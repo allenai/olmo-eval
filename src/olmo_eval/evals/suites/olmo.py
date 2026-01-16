@@ -543,3 +543,27 @@ OLMO3_PAPER = make_suite(
     aggregation=AggregationStrategy.DISPLAY_ONLY,
     description="OLMo3 paper comprehensive benchmark suite",
 )
+
+
+def _build_mixed_priority_tasks() -> tuple[str, ...]:
+    """Build olmo3:paper tasks with mixed priorities (high, normal, low)."""
+    tasks = OLMO3_PAPER.expand()
+    n = len(tasks)
+    third = n // 3
+    result = []
+    for i, task in enumerate(tasks):
+        if i < third:
+            result.append(f"{task}@high")
+        elif i < 2 * third:
+            result.append(f"{task}@normal")
+        else:
+            result.append(f"{task}@low")
+    return tuple(result)
+
+
+OLMO3_PAPER_MIXED_PRIORITY = make_suite(
+    "olmo3:paper:mixed-priority",
+    _build_mixed_priority_tasks(),
+    aggregation=AggregationStrategy.DISPLAY_ONLY,
+    description="OLMo3 paper suite with mixed priorities (high/normal/low)",
+)

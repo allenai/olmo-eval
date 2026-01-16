@@ -11,7 +11,7 @@ models:
     parallelism: 64
 
 tasks:
-  - olmo3:paper
+  - olmo3:paper:mixed-priority
 
 cluster: ai2/ceres
 budget: ai2/oe-base

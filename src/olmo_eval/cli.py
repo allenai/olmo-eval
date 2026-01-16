@@ -633,11 +633,17 @@ def launch(
         console.print("[red]Error:[/red] --budget/-B is required (or set 'budget' in config)")
         raise SystemExit(1)
 
+    # Expand suites to individual tasks first, so @priority suffixes can be detected
+    from olmo_eval.core.configs import expand_tasks, validate_tasks
+
+    original_task_specs = list(task)  # Preserve original suite/task names for display
+    expanded_task_list = expand_tasks(original_task_specs)
+
     # Validate and group tasks by priority
     # This will raise an error if --priority is used together with @priority suffixes
     try:
         tasks_by_priority = validate_priority_configuration(
-            tasks=task,
+            tasks=expanded_task_list,
             cli_priority=cli_priority,
             default_priority=priority,
         )
@@ -646,8 +652,6 @@ def launch(
         raise SystemExit(1) from None
 
     # Validate all tasks exist before launching to Beaker
-    from olmo_eval.core.configs import expand_tasks, validate_tasks
-
     all_task_specs = [t for tasks in tasks_by_priority.values() for t in tasks]
     valid_tasks, invalid_tasks = validate_tasks(all_task_specs)
 
@@ -765,16 +769,12 @@ def launch(
             if multiple_models:
                 base_name = f"{base_name}-{short_m}"
             if multiple_priorities:
-                # Use shortened task names instead of priority for experiment naming
-                tasks_suffix = get_tasks_short_name(t_list)
-                base_name = f"{base_name}-{tasks_suffix}"
+                # Use priority level for experiment naming when multiple priorities
+                base_name = f"{base_name}-{t_priority}"
 
-            # Expand suites to individual tasks before splitting
-            expanded_task_list = expand_tasks(t_list)
-
-            # Calculate splits based on GPU constraints
+            # t_list is already expanded, calculate splits based on GPU constraints
             splits = calculate_experiment_splits(
-                tasks=expanded_task_list,
+                tasks=t_list,
                 gpus_per_model=m_gpus,
                 parallelism=m_parallelism,
                 max_gpus_per_node=max_gpus_per_node,
@@ -784,7 +784,7 @@ def launch(
                 split_models.append(m_name)
 
             total_splits = len(splits)
-            total_expanded = len(expanded_task_list)
+            total_expanded = len(t_list)
             for i, split in enumerate(splits):
                 # Add zero-padded suffix for splits
                 exp_name = f"{base_name}-{i + 1:03d}" if total_splits > 1 else base_name
@@ -796,8 +796,8 @@ def launch(
                         "model_cfg": m_cfg,
                         "priority": t_priority,
                         "tasks": split["tasks"],
-                        "original_task_specs": t_list,  # Original suite/task names for display
-                        "total_expanded_tasks": total_expanded,  # Total tasks across all splits
+                        "original_task_specs": original_task_specs,  # Original suite/task names
+                        "total_expanded_tasks": total_expanded,  # Total tasks in this priority
                         "gpus_per_model": m_gpus,
                         "num_gpus": split["num_gpus"],
                         "parallelism": split["parallelism"],
