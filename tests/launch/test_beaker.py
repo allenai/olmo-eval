@@ -294,9 +294,7 @@ class TestValidatePriorityConfiguration:
 
     def test_tasks_with_priority_no_cli_flag(self):
         """Test tasks with @priority suffixes are grouped correctly."""
-        result = validate_priority_configuration(
-            ["mmlu@high", "gsm8k@normal", "arc@high"], None
-        )
+        result = validate_priority_configuration(["mmlu@high", "gsm8k@normal", "arc@high"], None)
         assert result == {"high": ["mmlu", "arc"], "normal": ["gsm8k"]}
 
     def test_tasks_with_priority_and_cli_flag_raises(self):
@@ -311,24 +309,18 @@ class TestValidatePriorityConfiguration:
 
     def test_mixed_tasks_no_cli_flag(self):
         """Test mixed tasks (some with, some without @priority) and no CLI flag."""
-        result = validate_priority_configuration(
-            ["mmlu@high", "gsm8k", "arc@low"], None
-        )
+        result = validate_priority_configuration(["mmlu@high", "gsm8k", "arc@low"], None)
         # gsm8k should use default "normal"
         assert result == {"high": ["mmlu"], "normal": ["gsm8k"], "low": ["arc"]}
 
     def test_custom_default_priority(self):
         """Test custom default priority for tasks without @priority suffix."""
-        result = validate_priority_configuration(
-            ["mmlu", "gsm8k"], None, default_priority="high"
-        )
+        result = validate_priority_configuration(["mmlu", "gsm8k"], None, default_priority="high")
         assert result == {"high": ["mmlu", "gsm8k"]}
 
     def test_all_priority_levels(self):
         """Test all valid priority levels work."""
-        result = validate_priority_configuration(
-            ["a@low", "b@normal", "c@high", "d@urgent"], None
-        )
+        result = validate_priority_configuration(["a@low", "b@normal", "c@high", "d@urgent"], None)
         assert result == {"low": ["a"], "normal": ["b"], "high": ["c"], "urgent": ["d"]}
 
     def test_empty_tasks_list(self):

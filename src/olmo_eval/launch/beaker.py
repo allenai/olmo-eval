@@ -280,11 +280,13 @@ def calculate_experiment_splits(
 
     if total_gpus_needed <= max_gpus_per_node:
         # Fits on single node - no splitting needed
-        return [{
-            "tasks": tasks,
-            "num_gpus": total_gpus_needed,
-            "parallelism": parallelism,
-        }]
+        return [
+            {
+                "tasks": tasks,
+                "num_gpus": total_gpus_needed,
+                "parallelism": parallelism,
+            }
+        ]
 
     # Need to split across multiple experiments
     # Calculate how many instances can fit per experiment
@@ -307,11 +309,13 @@ def calculate_experiment_splits(
         split_tasks = tasks[start_idx:end_idx]
 
         if split_tasks:  # Only add if there are tasks
-            splits.append({
-                "tasks": split_tasks,
-                "num_gpus": gpus_per_experiment,
-                "parallelism": instances_per_experiment,
-            })
+            splits.append(
+                {
+                    "tasks": split_tasks,
+                    "num_gpus": gpus_per_experiment,
+                    "parallelism": instances_per_experiment,
+                }
+            )
 
     return splits
 

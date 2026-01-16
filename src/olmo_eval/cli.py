@@ -689,13 +689,15 @@ def launch(
             m_resources = cfg.get_model_resources(m_cfg)
             m_gpus = cli_gpus if cli_gpus is not None else m_resources.get("gpus", 1)
             m_parallelism = (
-                cli_parallelism if cli_parallelism is not None
+                cli_parallelism
+                if cli_parallelism is not None
                 else m_resources.get("parallelism", 1)
             )
         else:
             m_gpus = cli_gpus if cli_gpus is not None else (m_cfg.gpus or gpus)
             m_parallelism = (
-                cli_parallelism if cli_parallelism is not None
+                cli_parallelism
+                if cli_parallelism is not None
                 else (m_cfg.parallelism or parallelism)
             )
 
@@ -722,18 +724,20 @@ def launch(
                 # Add zero-padded suffix for splits
                 exp_name = f"{base_name}-{i + 1:03d}" if total_splits > 1 else base_name
 
-                experiment_plan.append({
-                    "name": exp_name,
-                    "model_name": m_name,
-                    "model_cfg": m_cfg,
-                    "priority": t_priority,
-                    "tasks": split["tasks"],
-                    "gpus_per_model": m_gpus,
-                    "num_gpus": split["num_gpus"],
-                    "parallelism": split["parallelism"],
-                    "split_index": i + 1 if total_splits > 1 else None,
-                    "total_splits": total_splits if total_splits > 1 else None,
-                })
+                experiment_plan.append(
+                    {
+                        "name": exp_name,
+                        "model_name": m_name,
+                        "model_cfg": m_cfg,
+                        "priority": t_priority,
+                        "tasks": split["tasks"],
+                        "gpus_per_model": m_gpus,
+                        "num_gpus": split["num_gpus"],
+                        "parallelism": split["parallelism"],
+                        "split_index": i + 1 if total_splits > 1 else None,
+                        "total_splits": total_splits if total_splits > 1 else None,
+                    }
+                )
 
     # Print experiment matrix summary
     console.print("\n[bold]Experiment Matrix:[/bold]")
@@ -760,9 +764,7 @@ def launch(
     for exp in experiment_plan:
         task_display = ", ".join(exp["tasks"])
         split_display = (
-            f"{exp['split_index']}/{exp['total_splits']}"
-            if exp["split_index"] is not None
-            else "-"
+            f"{exp['split_index']}/{exp['total_splits']}" if exp["split_index"] is not None else "-"
         )
         matrix_table.add_row(
             exp["name"],
@@ -838,9 +840,7 @@ def launch(
             num_workers if num_workers is not None else model_resources.get("num_workers")
         )
         effective_gpus_per_worker = (
-            gpus_per_worker
-            if gpus_per_worker != 1
-            else model_resources.get("gpus_per_worker", 1)
+            gpus_per_worker if gpus_per_worker != 1 else model_resources.get("gpus_per_worker", 1)
         )
 
         # --async-stream takes precedence over --async
