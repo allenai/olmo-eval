@@ -55,17 +55,32 @@ olmo-eval run --async --num-workers 2 --gpus-per-worker 4 -m llama3.1-70b -t mml
 
 ### Tasks and Regimes
 
-Tasks live in `olmo_eval/evals/tasks/` and are registered with the `@register` decorator. Regimes are named configuration variants:
+Tasks live in `olmo_eval/evals/tasks/` and are registered with the `@register` decorator. Regimes are named configuration presets that override task settings:
 
 ```python
-from olmo_eval.evals.tasks import Task, TaskConfig, register
+from olmo_eval.evals.tasks import Task, TaskConfig, register, register_regime
 
-@register("arc_challenge", lambda: TaskConfig(...))
+# Register the base task
+@register("arc_challenge", lambda: TaskConfig(
+    name="arc_challenge",
+    hf_dataset="allenai/ai2_arc",
+    num_fewshot=0,
+))
 class ARCChallenge(Task): ...
 
-# Regime: task_name::regime_name
+# Register a regime with configuration overrides
+register_regime(
+    "arc_challenge",
+    "olmes",
+    num_fewshot=5,
+    fewshot_seed=42,
+)
+
+# Usage: task_name::regime_name
 olmo-eval run -m model -t arc_challenge::olmes
 ```
+
+Regimes allow you to define reusable evaluation configurations (e.g., few-shot settings, prompts) that can be applied to any task.
 
 ### Task Suites
 
@@ -213,23 +228,30 @@ olmo-eval results --group "benchmark-2024" --format json
 
 ### Runtime Backend Installation
 
-Docker images do NOT include inference backends (vllm, transformers, litellm) by default. Install them at runtime when launching jobs:
+Docker images do NOT include inference backends (vllm, transformers, litellm) by default. Install them at runtime when launching jobs using optional dependency group names:
 
 ```bash
-# Install vLLM at runtime
-olmo-eval launch -n "eval-vllm" -m llama3.1-8b -t mmlu \
-    --backends vllm==0.13.0
+# Install vLLM backend
+olmo-eval launch -n "eval-vllm" -m llama3.1-8b -t mmlu --backends vllm
+
+# Install HuggingFace transformers backend
+olmo-eval launch -n "eval-hf" -m llama3.1-8b -t mmlu --backends hf
 
 # Install multiple backends
 olmo-eval launch -n "eval-multi" -m llama3.1-8b -t mmlu \
-    --backends vllm==0.13.0 \
-    --backends transformers
+    --backends vllm \
+    --backends hf
 
 # Short flag
-olmo-eval launch -n "eval-vllm" -m llama3.1-8b -t mmlu -b vllm==0.13.0
+olmo-eval launch -n "eval-vllm" -m llama3.1-8b -t mmlu -b vllm
 ```
 
-Backends are installed via `uv pip install` at job startup before evaluation runs.
+Available backend groups (defined in `pyproject.toml`):
+- `vllm` - vLLM inference engine
+- `hf` - HuggingFace transformers
+- `litellm` - LiteLLM for API-based models
+
+Backends are installed via `uv pip install -e '.[backend]'` at job startup.
 
 ### CLI Options
 
@@ -239,17 +261,26 @@ Backends are installed via `uv pip install` at job startup before evaluation run
 | `--name` | `-n` | required | Experiment name |
 | `--model` | `-m` | required | Model name or HuggingFace path (can specify multiple) |
 | `--task` | `-t` | required | Task name with optional `@priority` suffix (can specify multiple) |
-| `--cluster` | `-c` | `h100` | Cluster alias (`h100`, `a100`, `aus`) or full name |
-| `--gpus` | | `1` | Number of GPUs |
-| `--priority` | | `normal` | Job priority (`low`, `normal`, `high`, `urgent`) |
+| `--cluster` | `-c` | required | Cluster alias (`h100`, `a100`, `aus`) or full name |
+| `--gpus` | `-G` | `1` | Number of GPUs per model instance |
+| `--parallelism` | `-P` | `1` | Number of model instances to run in parallel |
+| `--max-gpus-per-node` | | `8` | Maximum GPUs per node (tasks split if exceeded) |
+| `--priority` | `-p` | `normal` | Job priority (`low`, `normal`, `high`, `urgent`) |
 | `--preemptible` | | `true` | Allow preemption |
-| `--timeout` | | `24h` | Job timeout (e.g., `24h`, `30m`) |
-| `--retries` | | none | Number of retries on failure |
-| `--group` | `-g` | none | Add experiments to this Beaker group |
+| `--timeout` | `-T` | `24h` | Job timeout (e.g., `24h`, `30m`) |
+| `--retries` | `-r` | none | Number of retries on failure |
+| `--workspace` | `-w` | required | Beaker workspace |
+| `--budget` | `-B` | required | Beaker budget |
+| `--group` | `-g` | none | Add experiments to Beaker group(s) (can specify multiple) |
 | `--backends` | `-b` | none | Backends to install at runtime (can specify multiple) |
-| `--workspace` | | `ai2/oe-data` | Beaker workspace |
-| `--budget` | | `ai2/oe-base` | Beaker budget |
-| `--dry-run` | | `false` | Print spec without launching |
+| `--async` | `-a` | `false` | Enable parallel task execution |
+| `--async-stream` | | `false` | Use vLLM's AsyncLLMEngine for continuous batching |
+| `--num-workers` | `-W` | auto | Number of workers for async mode |
+| `--gpus-per-worker` | | `1` | GPUs per worker for async mode |
+| `--fa3` | | `false` | Use Flash Attention 3 (for Hopper GPUs) |
+| `--no-flash-attn` | | `false` | Disable Flash Attention |
+| `--dry-run` | `-d` | `false` | Print spec without launching |
+| `--follow/--no-follow` | | `true` | Follow logs after launch |
 
 ### YAML Configuration
 
@@ -297,7 +328,7 @@ tasks:
   - mmlu
   - gsm8k
 backends:
-  - vllm==0.13.0
+  - vllm
 cluster: h100
 gpus: 1
 ```
@@ -378,17 +409,25 @@ description: "Full evaluation suite for Llama 70B"
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `name` | string | yes | Experiment name |
-| `models` | list | yes | List of model names or HuggingFace paths |
+| `models` | list | yes | List of model names/paths or ModelConfig objects |
 | `tasks` | list | yes | List of task specs (with optional `@priority`) |
-| `cluster` | string | no | Cluster alias or full name (default: `h100`) |
-| `gpus` | int | no | Number of GPUs (default: `1`) |
+| `cluster` | string | yes | Cluster alias or full name |
+| `gpus` | int | no | GPUs per model instance (default: `1`) |
+| `parallelism` | int | no | Model instances to run in parallel (default: `1`) |
+| `max_gpus_per_node` | int | no | Max GPUs per node, splits tasks if exceeded (default: `8`) |
 | `priority` | string | no | Default priority (default: `normal`) |
 | `preemptible` | bool | no | Allow preemption (default: `true`) |
 | `timeout` | string | no | Job timeout (default: `24h`) |
 | `retries` | int | no | Retry count on failure |
-| `backends` | list | no | Backends to install at runtime (e.g., `["vllm==0.13.0"]`) |
-| `workspace` | string | no | Beaker workspace |
-| `budget` | string | no | Beaker budget |
+| `workspace` | string | yes | Beaker workspace |
+| `budget` | string | yes | Beaker budget |
+| `groups` | list | no | Beaker groups to add experiments to |
+| `backends` | list | no | Backends to install at runtime (e.g., `["vllm"]`) |
+| `use_async` | bool | no | Enable parallel task execution (default: `false`) |
+| `num_workers` | int | no | Number of workers for async mode |
+| `gpus_per_worker` | int | no | GPUs per worker for async mode (default: `1`) |
+| `flash_attn` | int | no | Set to `3` to use Flash Attention 3 |
+| `no_flash_attn` | bool | no | Disable Flash Attention (default: `false`) |
 | `description` | string | no | Experiment description |
 
 See `examples/configs/` for more configuration examples.
@@ -399,7 +438,9 @@ See `examples/configs/` for more configuration examples.
 |-------|----------|
 | `h100` | ai2/jupiter, ai2/ceres |
 | `a100` | ai2/saturn |
+| `l40` | ai2/neptune |
 | `aus` | ai2/jupiter, ai2/neptune, ai2/saturn, ai2/ceres |
+| `aus80g` | ai2/jupiter, ai2/saturn, ai2/ceres |
 | `80g` | ai2/jupiter, ai2/saturn, ai2/ceres |
 
 ### Programmatic API
@@ -469,19 +510,19 @@ The image does NOT contain:
 
 ### Installing Backends at Runtime
 
-Inference backends are NOT baked into images. Install them when launching jobs:
+Inference backends are NOT baked into images. Install them when launching jobs using optional dependency group names:
 
 ```bash
-# Install vLLM
-olmo-eval launch -n "eval" -m llama3.1-8b -t mmlu --backends vllm==0.13.0
+# Install vLLM backend
+olmo-eval launch -n "eval" -m llama3.1-8b -t mmlu --backends vllm
 
 # Install multiple backends
 olmo-eval launch -n "eval" -m llama3.1-8b -t mmlu \
-  --backends vllm==0.13.0 \
-  --backends transformers
+  --backends vllm \
+  --backends hf
 
 # Or manually inside container
-uv pip install vllm==0.13.0
+uv pip install -e '.[vllm]'
 ```
 
 ### Pushing to Beaker
