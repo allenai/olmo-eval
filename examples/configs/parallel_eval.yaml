@@ -5,26 +5,17 @@
 # tasks are automatically split across multiple experiments.
 #
 # Usage: olmo-eval launch -f examples/configs/parallel_eval.yaml --dry-run
-#
-# This config will create 3 experiments:
-#   - eval-parallel-llama3.1-8b    (4 instances x 1 GPU = 4 GPUs, all tasks)
-#   - eval-parallel-llama3.1-70b-001 (2 instances x 4 GPUs = 8 GPUs, first 2 tasks)
-#   - eval-parallel-llama3.1-70b-002 (2 instances x 4 GPUs = 8 GPUs, last 2 tasks)
-#
-# The 70B model is split because 4 instances x 4 GPUs = 16 GPUs exceeds max_gpus_per_node (8)
 
-name: eval-parallel
+name: eval-parallel-splits
 
 models:
-  # Small model - 4 parallel instances fit on one node
   - name: meta-llama/Llama-3.1-8B
     gpus: 1
-    parallelism: 4  # 4 instances x 1 GPU = 4 GPUs (fits)
+    parallelism: 4
 
-  # Large model - 4 parallel instances require splitting
   - name: meta-llama/Llama-3.1-70B
     gpus: 4
-    parallelism: 4  # 4 instances x 4 GPUs = 16 GPUs (splits into 2 x 8)
+    parallelism: 4
     timeout: 48h
 
 tasks:
@@ -32,9 +23,6 @@ tasks:
   - arc_challenge
   - hellaswag
   - winogrande
-
-# Maximum GPUs available per node (default: 8)
-max_gpus_per_node: 8
 
 cluster: ai2/ceres
 preemptible: true
