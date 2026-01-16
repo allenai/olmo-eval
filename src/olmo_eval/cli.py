@@ -1097,7 +1097,9 @@ def results(
                 {
                     "id": exp.id,
                     "name": exp.name,
-                    "status": BeakerWorkloadStatus(launcher.beaker.workload.get(exp.id).status).name,
+                    "status": BeakerWorkloadStatus(
+                        launcher.beaker.workload.get(exp.id).status
+                    ).name,
                     "url": launcher.experiment_url(exp),
                 }
                 for exp in experiments
