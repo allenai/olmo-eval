@@ -521,7 +521,7 @@ OLMO3_PAPER = make_suite(
     (
         # Base easy (1B)
         OLMO3_DEV_1B_MATH_BPB,
-        OLMO3_DEV_1B_CODE_BPB,
+        # OLMO3_DEV_1B_CODE_BPB, TODO(undfined): Enable once we add code execution
         OLMO3_DEV_1B_QA_BPB_V2,
         OLMO3_DEV_1B_QA_RC_V2,
         # Base (7B)
@@ -529,8 +529,8 @@ OLMO3_PAPER = make_suite(
         OLMO3_DEV_7B_MCQA_NON_STEM_V2,
         OLMO3_DEV_7B_GEN,
         OLMO3_DEV_7B_MATH_V2,
-        OLMO3_DEV_7B_CODE_GEN_V2,
-        OLMO3_DEV_7B_CODE_FIM,
+        # OLMO3_DEV_7B_CODE_GEN_V2, TODO(undfined): Enable once we add code execution
+        # OLMO3_DEV_7B_CODE_FIM, TODO(undfined): Enable once we add code execution
         # Base chat
         OLMO3_DEV_MIDTRAIN_V2,
         # Heldout

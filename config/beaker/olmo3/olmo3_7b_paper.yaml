@@ -6,8 +6,7 @@ models:
     gpus: 1
     # parallelism: 4
 
-  - name_or_path: /weka/oe-training-default/ai2-llm/checkpoints/OLMo3-7B-swafix/step144000-hf/
-    alias: olmo3-7b-swafix-144000
+  - name_or_path: allenai/Olmo-3-1025-7B
     gpus: 1
     # parallelism: 4
 
