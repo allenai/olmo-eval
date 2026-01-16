@@ -24,10 +24,9 @@ Example with per-model resources:
       - name: llama3.1-70b
         gpus: 4
         timeout: 48h
-        priority: high
     tasks:
-      - mmlu
-      - gsm8k
+      - mmlu@high
+      - gsm8k@normal
     cluster: h100
 
 Example usage:
@@ -55,7 +54,6 @@ class ModelConfig:
         name: Model name or HuggingFace path (required).
         gpus: Number of GPUs for this model (overrides default).
         cluster: Cluster for this model (overrides default).
-        priority: Priority for this model (overrides default).
         preemptible: Whether this model's jobs can be preempted.
         timeout: Timeout for this model's jobs.
         shared_memory: Shared memory size (e.g., "10GiB").
@@ -76,13 +74,11 @@ class ModelConfig:
             num_workers: 2
             gpus_per_worker: 4
             timeout: 48h
-            priority: high
     """
 
     name: str = MISSING
     gpus: int | None = None
     cluster: str | None = None
-    priority: str | None = None
     preemptible: bool | None = None
     timeout: str | None = None
     shared_memory: str | None = None
@@ -143,7 +139,6 @@ class LaunchConfig:
           - name: llama3.1-70b
             gpus: 4
             timeout: 48h
-            priority: high
 
     Attributes:
         name: Experiment name (required).
@@ -151,7 +146,7 @@ class LaunchConfig:
         tasks: List of task specs, optionally with @priority suffix (required).
         cluster: Default cluster alias or full name.
         gpus: Default number of GPUs per job.
-        priority: Default job priority (can be overridden per-task or per-model).
+        priority: Default job priority for tasks without @priority suffix.
         preemptible: Default preemption setting.
         timeout: Default job timeout (e.g., "24h", "48h").
         retries: Number of retries on failure.
@@ -215,7 +210,7 @@ class LaunchConfig:
             model: ModelConfig with optional resource overrides.
 
         Returns:
-            Dict with effective resource values (gpus, cluster, priority, etc.).
+            Dict with effective resource values (gpus, cluster, etc.).
         """
         # Determine async settings
         use_async = model.use_async if model.use_async is not None else self.use_async
@@ -234,7 +229,6 @@ class LaunchConfig:
         return {
             "gpus": total_gpus,
             "cluster": model.cluster if model.cluster is not None else self.cluster,
-            "priority": model.priority if model.priority is not None else self.priority,
             "preemptible": model.preemptible if model.preemptible is not None else self.preemptible,
             "timeout": model.timeout if model.timeout is not None else self.timeout,
             "shared_memory": model.shared_memory,  # None uses BeakerJobConfig default

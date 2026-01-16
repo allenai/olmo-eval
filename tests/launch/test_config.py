@@ -21,7 +21,6 @@ class TestModelConfig:
         assert config.name == "llama3.1-8b"
         assert config.gpus is None
         assert config.cluster is None
-        assert config.priority is None
         assert config.preemptible is None
         assert config.timeout is None
         assert config.shared_memory is None
@@ -32,7 +31,6 @@ class TestModelConfig:
             name="llama3.1-70b",
             gpus=4,
             cluster="h100",
-            priority="high",
             preemptible=False,
             timeout="48h",
             shared_memory="20GiB",
@@ -40,7 +38,6 @@ class TestModelConfig:
         assert config.name == "llama3.1-70b"
         assert config.gpus == 4
         assert config.cluster == "h100"
-        assert config.priority == "high"
         assert config.preemptible is False
         assert config.timeout == "48h"
         assert config.shared_memory == "20GiB"
@@ -70,7 +67,6 @@ class TestParseModelConfig:
                 "name": "llama3.1-70b",
                 "gpus": 4,
                 "cluster": "h100",
-                "priority": "high",
                 "preemptible": False,
                 "timeout": "48h",
                 "shared_memory": "20GiB",
@@ -79,7 +75,6 @@ class TestParseModelConfig:
         assert config.name == "llama3.1-70b"
         assert config.gpus == 4
         assert config.cluster == "h100"
-        assert config.priority == "high"
         assert config.preemptible is False
         assert config.timeout == "48h"
         assert config.shared_memory == "20GiB"
@@ -119,7 +114,7 @@ class TestLaunchConfigModelConfigs:
             name="test",
             models=[
                 {"name": "llama3.1-8b", "gpus": 1},
-                {"name": "llama3.1-70b", "gpus": 4, "priority": "high"},
+                {"name": "llama3.1-70b", "gpus": 4, "timeout": "48h"},
             ],
             tasks=["mmlu"],
         )
@@ -130,7 +125,7 @@ class TestLaunchConfigModelConfigs:
         assert model_configs[0].gpus == 1
         assert model_configs[1].name == "llama3.1-70b"
         assert model_configs[1].gpus == 4
-        assert model_configs[1].priority == "high"
+        assert model_configs[1].timeout == "48h"
 
     def test_get_model_configs_mixed(self):
         """Test get_model_configs with mixed string and dict models."""
@@ -162,7 +157,6 @@ class TestLaunchConfigGetModelResources:
             tasks=["mmlu"],
             gpus=2,
             cluster="a100",
-            priority="high",
             timeout="12h",
         )
         model = ModelConfig(name="llama3.1-8b")
@@ -170,7 +164,6 @@ class TestLaunchConfigGetModelResources:
 
         assert resources["gpus"] == 2
         assert resources["cluster"] == "a100"
-        assert resources["priority"] == "high"
         assert resources["timeout"] == "12h"
 
     def test_get_model_resources_with_overrides(self):
@@ -181,20 +174,17 @@ class TestLaunchConfigGetModelResources:
             tasks=["mmlu"],
             gpus=1,
             cluster="h100",
-            priority="normal",
             timeout="24h",
         )
         model = ModelConfig(
             name="llama3.1-70b",
             gpus=4,
-            priority="high",
             timeout="48h",
         )
         resources = config.get_model_resources(model)
 
         assert resources["gpus"] == 4  # Model override
         assert resources["cluster"] == "h100"  # Default (no override)
-        assert resources["priority"] == "high"  # Model override
         assert resources["timeout"] == "48h"  # Model override
 
     def test_get_model_resources_partial_overrides(self):
@@ -205,19 +195,17 @@ class TestLaunchConfigGetModelResources:
             tasks=["mmlu"],
             gpus=1,
             cluster="h100",
-            priority="normal",
             preemptible=True,
         )
         model = ModelConfig(
             name="llama3.1-13b",
             gpus=2,
-            # No cluster, priority, preemptible overrides
+            # No cluster, preemptible overrides
         )
         resources = config.get_model_resources(model)
 
         assert resources["gpus"] == 2  # Model override
         assert resources["cluster"] == "h100"  # Default
-        assert resources["priority"] == "normal"  # Default
         assert resources["preemptible"] is True  # Default
 
     def test_get_model_resources_shared_memory(self):
@@ -277,10 +265,10 @@ models:
   - name: llama3.1-70b
     gpus: 4
     timeout: 48h
-    priority: high
     preemptible: false
 tasks:
-  - mmlu
+  - mmlu@high
+  - gsm8k@normal
 cluster: h100
 gpus: 1
 priority: normal
@@ -302,7 +290,6 @@ priority: normal
             assert model_configs[1].name == "llama3.1-70b"
             assert model_configs[1].gpus == 4
             assert model_configs[1].timeout == "48h"
-            assert model_configs[1].priority == "high"
             assert model_configs[1].preemptible is False
 
     def test_from_yaml_mixed_models(self):

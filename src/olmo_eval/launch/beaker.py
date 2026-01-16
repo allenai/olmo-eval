@@ -47,6 +47,7 @@ __all__ = [
     "BeakerJobConfig",
     "BeakerLauncher",
     "parse_task_with_priority",
+    "validate_priority_configuration",
     "print_experiment_config",
     "resolve_clusters",
 ]
@@ -164,6 +165,75 @@ def parse_task_with_priority(task_spec: str, default_priority: str = "normal") -
             )
         return task_name, priority
     return task_spec, default_priority
+
+
+def validate_priority_configuration(
+    tasks: tuple[str, ...] | list[str],
+    cli_priority: str | None,
+    default_priority: str = "normal",
+) -> dict[str, list[str]]:
+    """Validate priority configuration and group tasks by priority.
+
+    Detects conflicting priority specifications where --priority CLI flag
+    is used together with @priority suffixes on tasks.
+
+    Args:
+        tasks: Task specifications (may include @priority suffixes).
+        cli_priority: Priority from --priority CLI flag, or None.
+        default_priority: Default priority for tasks without @priority suffix.
+
+    Returns:
+        Dictionary mapping priority levels to lists of task names.
+
+    Raises:
+        ValueError: If conflicting priority specifications detected
+            (--priority used with @priority suffixes).
+
+    Examples:
+        # Tasks without @priority suffix, no CLI flag
+        >>> validate_priority_configuration(["mmlu", "gsm8k"], None)
+        {"normal": ["mmlu", "gsm8k"]}
+
+        # Tasks with @priority suffixes
+        >>> validate_priority_configuration(["mmlu@high", "gsm8k@normal"], None)
+        {"high": ["mmlu"], "normal": ["gsm8k"]}
+
+        # CLI flag with no @priority suffixes
+        >>> validate_priority_configuration(["mmlu", "gsm8k"], "high")
+        {"high": ["mmlu", "gsm8k"]}
+
+        # CLI flag WITH @priority suffixes - raises error
+        >>> validate_priority_configuration(["mmlu@high"], "normal")
+        ValueError: Conflicting priority specification...
+    """
+    from collections import defaultdict
+
+    tasks_by_priority: dict[str, list[str]] = defaultdict(list)
+    tasks_with_priority_suffix: list[str] = []
+
+    for task_spec in tasks:
+        if "@" in task_spec:
+            tasks_with_priority_suffix.append(task_spec)
+            task_name, task_priority = parse_task_with_priority(task_spec)
+            tasks_by_priority[task_priority].append(task_name)
+        else:
+            # Use CLI priority if provided, otherwise use default
+            effective_priority = cli_priority if cli_priority is not None else default_priority
+            tasks_by_priority[effective_priority].append(task_spec)
+
+    # Conflict check: --priority used with @priority suffixes
+    if cli_priority is not None and tasks_with_priority_suffix:
+        raise ValueError(
+            f"Conflicting priority specification: --priority={cli_priority} "
+            f"cannot be used together with @priority suffixes on tasks.\n\n"
+            f"Either:\n"
+            f"  1. Use --priority to set priority for ALL tasks, or\n"
+            f"  2. Use @priority suffixes to set priority per-task\n\n"
+            f"Tasks with @priority suffixes:\n"
+            + "\n".join(f"  - {t}" for t in tasks_with_priority_suffix)
+        )
+
+    return dict(tasks_by_priority)
 
 
 @dataclass

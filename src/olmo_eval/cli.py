@@ -481,8 +481,6 @@ def launch(
         # With grouping for result aggregation
         olmo-eval launch -n "benchmark" --group "benchmark-2024" -m llama3.1-8b -t mmlu -t gsm8k
     """
-    from collections import defaultdict
-
     try:
         from olmo_eval.launch import (
             BeakerJobConfig,
@@ -490,7 +488,7 @@ def launch(
             LaunchConfig,
             ModelConfig,
             parse_model_config,
-            parse_task_with_priority,
+            validate_priority_configuration,
         )
     except ImportError:
         console.print(
@@ -575,12 +573,14 @@ def launch(
         console.print("[red]Error:[/red] --task/-t is required (or set 'tasks' in config)")
         raise SystemExit(1)
 
-    # Parse tasks and group by priority
-    tasks_by_priority: dict[str, list[str]] = defaultdict(list)
+    # Validate and group tasks by priority
+    # This will raise an error if --priority is used together with @priority suffixes
     try:
-        for t in task:
-            task_name, task_priority = parse_task_with_priority(t, default_priority=priority)
-            tasks_by_priority[task_priority].append(task_name)
+        tasks_by_priority = validate_priority_configuration(
+            tasks=task,
+            cli_priority=cli_priority,
+            default_priority=priority,
+        )
     except ValueError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise SystemExit(1) from None
@@ -629,6 +629,42 @@ def launch(
     # Track launched experiments
     launched_experiments: list[str] = []
 
+    # Print experiment matrix summary
+    total_experiments = len(model_configs) * len(tasks_by_priority)
+    console.print(f"\n[bold]Experiment Matrix:[/bold]")
+    console.print(f"  Models: {len(model_configs)}")
+    console.print(f"  Priority levels: {len(tasks_by_priority)}")
+    console.print(f"  Total experiments: {total_experiments}")
+
+    matrix_table = Table(title="Experiments to Launch", show_header=True)
+    matrix_table.add_column("Experiment Name", style="cyan")
+    matrix_table.add_column("Model", style="blue")
+    matrix_table.add_column("Priority", style="yellow")
+    matrix_table.add_column("Tasks", style="white")
+    matrix_table.add_column("GPUs", style="green")
+
+    for m_cfg in model_configs:
+        m_name = m_cfg.name
+        short_m = m_name.split("/")[-1].lower()
+        if cfg is not None:
+            m_resources = cfg.get_model_resources(m_cfg)
+            m_gpus = cli_gpus if cli_gpus is not None else m_resources.get("gpus", 1)
+        else:
+            m_gpus = cli_gpus if cli_gpus is not None else (m_cfg.gpus or gpus)
+
+        for t_priority, t_list in tasks_by_priority.items():
+            e_name = name
+            if multiple_models:
+                e_name = f"{e_name}-{short_m}"
+            if multiple_priorities:
+                e_name = f"{e_name}-{t_priority}"
+
+            task_display = ", ".join(t_list[:3]) + ("..." if len(t_list) > 3 else "")
+            matrix_table.add_row(e_name, m_name, t_priority, task_display, str(m_gpus))
+
+    console.print(matrix_table)
+    console.print()
+
     # Launch one experiment per model and priority level
     for model_cfg in model_configs:
         model_name = model_cfg.name
@@ -641,7 +677,6 @@ def launch(
             model_resources = {
                 "gpus": model_cfg.gpus if model_cfg.gpus is not None else gpus,
                 "cluster": (model_cfg.cluster if model_cfg.cluster is not None else cluster),
-                "priority": (model_cfg.priority if model_cfg.priority is not None else priority),
                 "preemptible": (
                     model_cfg.preemptible if model_cfg.preemptible is not None else preemptible
                 ),
@@ -672,8 +707,8 @@ def launch(
         short_model = model_name.split("/")[-1].lower()
 
         for task_priority, task_list in tasks_by_priority.items():
-            # CLI priority override applies to task priorities too
-            effective_priority = cli_priority if cli_priority is not None else task_priority
+            # Task priority is authoritative (CLI conflict already validated)
+            effective_priority = task_priority
 
             # Build experiment name with model and/or priority suffix as needed
             exp_name = name

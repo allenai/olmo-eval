@@ -24,6 +24,7 @@ from olmo_eval.launch.beaker import (
     parse_task_with_priority,
     print_experiment_config,
     resolve_clusters,
+    validate_priority_configuration,
 )
 from olmo_eval.launch.config import (
     LaunchConfig,
@@ -44,4 +45,5 @@ __all__ = [
     "parse_task_with_priority",
     "print_experiment_config",
     "resolve_clusters",
+    "validate_priority_configuration",
 ]
