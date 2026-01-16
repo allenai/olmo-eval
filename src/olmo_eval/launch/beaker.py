@@ -247,32 +247,20 @@ def calculate_experiment_splits(
     """Calculate how to split tasks across experiments based on GPU constraints.
 
     When the total GPU requirement (gpus_per_model × parallelism) exceeds the
-    maximum GPUs available per node, tasks are split across multiple experiments.
-    Each experiment runs with reduced parallelism that fits within node limits.
+    maximum GPUs available per node, tasks are distributed across multiple experiments.
+    Each experiment runs a subset of tasks with reduced parallelism.
 
     Args:
-        tasks: List of task names to run.
+        tasks: List of expanded task specs to run.
         gpus_per_model: GPUs required per model instance.
         parallelism: Number of model instances desired.
         max_gpus_per_node: Maximum GPUs available per node.
 
     Returns:
         List of dicts, each containing:
-        - tasks: list of tasks for this experiment
+        - tasks: subset of tasks for this experiment
         - num_gpus: GPUs to request for this experiment
         - parallelism: effective parallelism for this split
-
-    Examples:
-        # Fits on single node: 4 instances × 2 GPUs = 8 GPUs
-        >>> calculate_experiment_splits(["a", "b", "c", "d"], 2, 4, 8)
-        [{"tasks": ["a", "b", "c", "d"], "num_gpus": 8, "parallelism": 4}]
-
-        # Needs splitting: 4 instances × 4 GPUs = 16 GPUs, max 8 per node
-        >>> calculate_experiment_splits(["a", "b", "c", "d"], 4, 4, 8)
-        [
-            {"tasks": ["a", "b"], "num_gpus": 8, "parallelism": 2},
-            {"tasks": ["c", "d"], "num_gpus": 8, "parallelism": 2},
-        ]
     """
     import math
 

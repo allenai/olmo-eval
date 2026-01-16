@@ -771,9 +771,12 @@ def launch(
                 tasks_suffix = get_tasks_short_name(t_list)
                 base_name = f"{base_name}-{tasks_suffix}"
 
+            # Expand suites to individual tasks before splitting
+            expanded_task_list = expand_tasks(t_list)
+
             # Calculate splits based on GPU constraints
             splits = calculate_experiment_splits(
-                tasks=t_list,
+                tasks=expanded_task_list,
                 gpus_per_model=m_gpus,
                 parallelism=m_parallelism,
                 max_gpus_per_node=max_gpus_per_node,
@@ -783,6 +786,7 @@ def launch(
                 split_models.append(m_name)
 
             total_splits = len(splits)
+            total_expanded = len(expanded_task_list)
             for i, split in enumerate(splits):
                 # Add zero-padded suffix for splits
                 exp_name = f"{base_name}-{i + 1:03d}" if total_splits > 1 else base_name
@@ -794,6 +798,8 @@ def launch(
                         "model_cfg": m_cfg,
                         "priority": t_priority,
                         "tasks": split["tasks"],
+                        "original_task_specs": t_list,  # Original suite/task names for display
+                        "total_expanded_tasks": total_expanded,  # Total tasks across all splits
                         "gpus_per_model": m_gpus,
                         "num_gpus": split["num_gpus"],
                         "parallelism": split["parallelism"],
@@ -830,8 +836,15 @@ def launch(
     matrix_table.add_column("Split", style="dim", justify="center")
 
     for exp in experiment_plan:
-        task_display = ", ".join(exp["tasks"])
-        expanded_task_count = len(expand_tasks(exp["tasks"]))
+        # Show original suite/task names for reference
+        suite_display = ", ".join(exp["original_task_specs"])
+        # Show task count - if split, show subset count of total
+        task_count = len(exp["tasks"])
+        total_tasks = exp["total_expanded_tasks"]
+        if exp["split_index"] is not None:
+            task_display = f"{task_count}/{total_tasks}"
+        else:
+            task_display = str(task_count)
         split_display = (
             f"{exp['split_index']}/{exp['total_splits']}" if exp["split_index"] is not None else "-"
         )
@@ -839,8 +852,8 @@ def launch(
             exp["name"],
             exp["model_name"],
             exp["priority"],
+            suite_display,
             task_display,
-            str(expanded_task_count),
             str(exp["gpus_per_model"]),
             str(exp["parallelism"]),
             str(exp["num_gpus"]),
