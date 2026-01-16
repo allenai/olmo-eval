@@ -6,16 +6,13 @@ models:
     gpus: 1
     # parallelism: 4
 
-  - name_or_path: /weka/oe-training-default/ai2-llm/checkpoints/ai2-tylerm/olmo-cookbook-1b-5xC-olmo2-f50cc596/step26986-hf/
-    alias: olmo-cookbook-1b  # Short name for experiment naming
+  - name_or_path: /weka/oe-training-default/ai2-llm/checkpoints/OLMo3-7B-swafix/step144000-hf/
+    alias: olmo3-7b-swafix-144000
     gpus: 1
     # parallelism: 4
 
 tasks:
-  - gsm8k@urgent
-  - arc_challenge@high
-  - hellaswag@high
-  - winogrande
+  - olmo3:paper
 
 cluster: ai2/ceres
 budget: ai2/oe-base
