@@ -50,3 +50,6 @@ from . import qa as _qa  # noqa: F401, E402
 # Register common variants after all tasks are registered
 from . import variants as _variants  # noqa: F401, E402
 from . import wikitext as _wikitext  # noqa: F401, E402
+
+# Register common regimes after all tasks and variants are registered
+from . import regimes as _regimes  # noqa: F401, E402
