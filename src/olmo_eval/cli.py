@@ -458,9 +458,7 @@ def suite_info(suite_name: str) -> None:
     "--no-flash-attn", is_flag=True, help="Disable Flash Attention (uninstalls FA2 at runtime)."
 )
 @click.option("--dry-run", "-d", is_flag=True, help="Print spec without launching")
-@click.option(
-    "--verbose", "-v", is_flag=True, help="Print experiment spec before launching"
-)
+@click.option("--verbose", "-v", is_flag=True, help="Print experiment spec before launching")
 @click.option(
     "--follow/--no-follow",
     default=True,
@@ -818,7 +816,7 @@ def launch(
     # Calculate and display total expanded tasks
     total_expanded_tasks = len(valid_tasks) * len(model_configs)
     if split_models:
-        console.print(f"  Total tasks: {total_expanded_tasks} (distributed across {total_experiments} experiments)")
+        console.print(f"  Total tasks: {total_expanded_tasks} (distributed across experiments)")
     else:
         console.print(f"  Total tasks: {total_expanded_tasks}")
 
@@ -862,10 +860,9 @@ def launch(
     console.print()
 
     # Confirm before launching (skip in dry-run mode)
-    if not dry_run:
-        if not click.confirm("Proceed with launch?", default=True):
-            console.print("[yellow]Launch cancelled[/yellow]")
-            raise SystemExit(0)
+    if not dry_run and not click.confirm("Proceed with launch?", default=True):
+        console.print("[yellow]Launch cancelled[/yellow]")
+        raise SystemExit(0)
 
     # Launch experiments from the plan
     for exp in experiment_plan:

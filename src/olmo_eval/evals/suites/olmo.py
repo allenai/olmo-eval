@@ -52,7 +52,6 @@ from olmo_eval.evals.suites.reasoning import (
     AGI_EVAL_MIDTRAIN,
     AGI_EVAL_THINKER,
     BBH_COT_HELDOUT,
-    BBH_COT_MIDTRAIN,
     BBH_COT_THINKER,
 )
 from olmo_eval.evals.suites.registry import AggregationStrategy, make_suite
