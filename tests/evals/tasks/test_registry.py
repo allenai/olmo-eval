@@ -5,8 +5,9 @@ from collections.abc import Iterator
 import pytest
 
 from olmo_eval.core import Instance, LMOutput, LMRequest, RequestType
-from olmo_eval.evals.tasks import Task, TaskConfig
 from olmo_eval.evals.tasks import (
+    Task,
+    TaskConfig,
     clear_registry,
     get_task,
     list_regimes,

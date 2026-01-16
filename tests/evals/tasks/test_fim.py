@@ -10,6 +10,7 @@ from olmo_eval.evals.constants.code import (
     SANTACODER_FIM,
     STARCODER_FIM,
 )
+from olmo_eval.evals.tasks import get_task, list_tasks
 from olmo_eval.evals.tasks.fim import (
     HumanEvalFIMMulti,
     HumanEvalFIMRandom,
@@ -19,7 +20,6 @@ from olmo_eval.evals.tasks.fim import (
     _fim_random_config,
     _fim_single_config,
 )
-from olmo_eval.evals.tasks import get_task, list_tasks
 
 # =============================================================================
 # FIM Config Tests

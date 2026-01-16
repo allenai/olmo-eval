@@ -20,6 +20,7 @@ from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 # Import instruction checkers from the ifeval library if available
 try:
     from instruction_following_eval import instructions_registry
+
     IFEVAL_AVAILABLE = True
 except ImportError:
     IFEVAL_AVAILABLE = False
@@ -87,12 +88,12 @@ class IFEvalScorer(Scorer):
             relation = instruction_kwargs.get("relation", "at least")
             num_words = instruction_kwargs.get("num_words", 0)
 
-            if relation == "at least":
-                return word_count >= num_words
-            elif relation == "at most":
-                return word_count <= num_words
-            elif relation == "less than":
-                return word_count < num_words
+            relation_checks = {
+                "at least": word_count >= num_words,
+                "at most": word_count <= num_words,
+                "less than": word_count < num_words,
+            }
+            return relation_checks.get(relation, word_count >= num_words)
 
         # Keyword checks
         if "keywords" in instruction_id:
@@ -106,6 +107,7 @@ class IFEvalScorer(Scorer):
         if "json_format" in instruction_id:
             try:
                 import json
+
                 json.loads(response)
                 return True
             except (json.JSONDecodeError, ValueError):
@@ -124,20 +126,26 @@ class IFEvalScorer(Scorer):
         # Remove common prefixes/suffixes that models add
         cleaned = response.strip()
         prefixes = [
-            "Sure, ", "Here is ", "Here's ", "Of course, ",
-            "Certainly, ", "I'd be happy to ", "Let me ",
+            "Sure, ",
+            "Here is ",
+            "Here's ",
+            "Of course, ",
+            "Certainly, ",
+            "I'd be happy to ",
+            "Let me ",
         ]
         for prefix in prefixes:
             if cleaned.startswith(prefix):
-                cleaned = cleaned[len(prefix):]
+                cleaned = cleaned[len(prefix) :]
 
         suffixes = [
-            "Hope this helps!", "Let me know if you need anything else.",
+            "Hope this helps!",
+            "Let me know if you need anything else.",
             "Is there anything else I can help with?",
         ]
         for suffix in suffixes:
             if cleaned.endswith(suffix):
-                cleaned = cleaned[:-len(suffix)].strip()
+                cleaned = cleaned[: -len(suffix)].strip()
 
         try:
             return checker.check_following(cleaned)
@@ -158,7 +166,7 @@ class IFEvalScorer(Scorer):
 
         # Check each instruction
         results = []
-        for inst_id, kwargs in zip(instruction_ids, instruction_kwargs):
+        for inst_id, kwargs in zip(instruction_ids, instruction_kwargs, strict=True):
             results.append(self._check_instruction(inst_id, kwargs, response))
 
         # Store detailed results in metadata

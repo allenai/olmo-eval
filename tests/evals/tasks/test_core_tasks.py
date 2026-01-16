@@ -3,6 +3,7 @@
 import pytest
 
 from olmo_eval.core import Instance, RequestType
+from olmo_eval.evals.tasks import get_task, list_tasks
 from olmo_eval.evals.tasks.core_tasks import (
     CSQA,
     PIQA,
@@ -17,7 +18,6 @@ from olmo_eval.evals.tasks.core_tasks import (
     _socialiqa_config,
     _winogrande_config,
 )
-from olmo_eval.evals.tasks import get_task, list_tasks
 
 # =============================================================================
 # BoolQ Tests

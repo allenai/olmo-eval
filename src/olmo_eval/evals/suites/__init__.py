@@ -20,6 +20,10 @@ Example usage:
 """
 
 # Import and re-export core types and functions
+import importlib
+import pkgutil
+from pathlib import Path
+
 from olmo_eval.evals.suites.registry import (
     AggregationStrategy,
     Suite,
@@ -31,10 +35,6 @@ from olmo_eval.evals.suites.registry import (
     search_suites,
     suite_exists,
 )
-
-import importlib
-import pkgutil
-from pathlib import Path
 
 
 def _discover_and_load_suites() -> None:

@@ -50,11 +50,7 @@ class PopQAScorer(ExactMatchScorer):
 
         # Check if any alias appears in the prediction
         for alias in aliases:
-            if (
-                alias in pred
-                or alias.lower() in pred.lower()
-                or alias.capitalize() in pred
-            ):
+            if alias in pred or alias.lower() in pred.lower() or alias.capitalize() in pred:
                 return 1.0
         return 0.0
 

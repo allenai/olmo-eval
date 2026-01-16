@@ -295,10 +295,7 @@ def _create_omega_task_class(broad_cate: str, sub_cate: str, split: str) -> type
 # Register all OMEGA tasks dynamically
 for broad_cate, sub_cates in OMEGA_SUB_CATEGORIES.items():
     # Determine splits based on category
-    if broad_cate == "explorative":
-        splits = ["test_in", "test_out"]
-    else:
-        splits = ["test"]
+    splits = ["test_in", "test_out"] if broad_cate == "explorative" else ["test"]
 
     for sub_cate in sub_cates:
         for split in splits:

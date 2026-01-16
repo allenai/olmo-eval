@@ -30,8 +30,10 @@ class MedQAEnTask(Task):
 
     Citation:
     @article{jin2021disease,
-      title={What disease does this patient have? a large-scale open domain question answering dataset from medical exams},
-      author={Jin, Di and Pan, Eileen and Oufattole, Nassim and Weng, Wei-Hung and Fang, Hanyi and Szolovits, Peter},
+      title={What disease does this patient have?
+             A large-scale open domain question answering dataset from medical exams},
+      author={Jin, Di and Pan, Eileen and Oufattole, Nassim and Weng, Wei-Hung
+              and Fang, Hanyi and Szolovits, Peter},
       journal={Applied Sciences},
       volume={11},
       number={14},

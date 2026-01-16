@@ -121,8 +121,8 @@ class SciriffYesNoTask(Task):
     """SciRIFF Yes/No question answering task.
 
     Subset of yes/no questions from the SciRIFF dataset.
-    See: SciRIFF: A Resource to Enhance Language Model Instruction-Following over Scientific Literature
-    https://arxiv.org/abs/2406.07835
+    See: SciRIFF: A Resource to Enhance Language Model Instruction-Following
+    over Scientific Literature - https://arxiv.org/abs/2406.07835
 
     SciRIFF is a dataset of 137K instruction-following demonstrations for 54 tasks
     covering five essential scientific literature understanding capabilities.

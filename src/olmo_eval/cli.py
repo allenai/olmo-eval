@@ -524,7 +524,8 @@ def launch(
         olmo-eval beaker launch -f eval_config.yaml --gpus 4 --priority high
 
         # With grouping for result aggregation
-        olmo-eval beaker launch -n "benchmark" --group "benchmark-2024" -m llama3.1-8b -t mmlu -t gsm8k
+        olmo-eval beaker launch -n "benchmark" --group "benchmark-2024" \\
+            -m llama3.1-8b -t mmlu -t gsm8k
     """
     try:
         from olmo_eval.launch import (

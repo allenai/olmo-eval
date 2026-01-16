@@ -1,5 +1,9 @@
 """Task framework for evaluation."""
 
+import importlib
+import pkgutil
+from pathlib import Path
+
 # Re-export from core for backward compatibility
 from .core import (
     Task,
@@ -31,10 +35,6 @@ __all__ = [
     "task_exists",
 ]
 
-import importlib
-import pkgutil
-from pathlib import Path
-
 
 def _discover_and_load_tasks() -> None:
     """Auto-discover and import all task modules to trigger registration."""
@@ -53,7 +53,6 @@ def _discover_and_load_tasks() -> None:
 _discover_and_load_tasks()
 
 # Register common variants after all tasks are registered
-from . import _variants  # noqa: F401, E402
-
 # Register common regimes after all tasks and variants are registered
-from . import _regimes  # noqa: F401, E402
+from . import _regimes as _regimes  # noqa: F401, E402
+from . import _variants as _variants  # noqa: F401, E402

@@ -20,15 +20,34 @@ from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 # Grid sizes categorized by difficulty
 EASY_SIZES = ["2*2", "2*3", "2*4", "2*5", "2*6", "3*2", "3*3"]
 HARD_SIZES = [
-    "3*4", "3*5", "4*2", "3*6", "4*3", "4*4", "5*2", "6*2",
-    "4*5", "4*6", "5*3", "5*4", "5*5", "5*6", "6*3", "6*4", "6*5", "6*6",
+    "3*4",
+    "3*5",
+    "4*2",
+    "3*6",
+    "4*3",
+    "4*4",
+    "5*2",
+    "6*2",
+    "4*5",
+    "4*6",
+    "5*3",
+    "5*4",
+    "5*5",
+    "5*6",
+    "6*3",
+    "6*4",
+    "6*5",
+    "6*6",
 ]
 
 # Prompt template for ZebraLogic
+# fmt: off
 ZEBRA_GRID_TEMPLATE = """
 # Example Puzzle
 
-There are 3 houses, numbered 1 to 3 from left to right, as seen from across the street. Each house is occupied by a different person. Each house has a unique attribute for each of the following characteristics:
+There are 3 houses, numbered 1 to 3 from left to right, as seen from across \
+the street. Each house is occupied by a different person. Each house has a \
+unique attribute for each of the following characteristics:
  - Each person has a unique name: `Peter`, `Eric`, `Arnold`.
  - Each person has a unique favorite drink: `tea`, `water`, `milk`
 
@@ -41,7 +60,11 @@ There are 3 houses, numbered 1 to 3 from left to right, as seen from across the 
 ## Answer to the Example Puzzle
 
 {
-    "reasoning": "Given Clue 1, we know Peter is in House 2. According to Clue 2, Arnold is directly left of the one who only drinks water. The person in House 3 cannot be on the left of anyone, so Arnold must be in House 1. Thus, Peter drinks water, and Eric lives in House 3. Then, according to Clue 3, Eric drinks milk. Therefore, Arnold drinks tea.",
+    "reasoning": "Given Clue 1, we know Peter is in House 2. According to \
+Clue 2, Arnold is directly left of the one who only drinks water. The person \
+in House 3 cannot be on the left of anyone, so Arnold must be in House 1. \
+Thus, Peter drinks water, and Eric lives in House 3. Then, according to \
+Clue 3, Eric drinks milk. Therefore, Arnold drinks tea.",
     "solution": {
         "House 1": {
             "Name": "Arnold",
@@ -70,6 +93,7 @@ Now please solve the above puzzle. Present your reasoning and solution in the fo
 {json_template}
 
 """
+# fmt: on
 
 
 def extract_last_complete_json(text: str) -> dict | None:
@@ -211,7 +235,7 @@ class ZebraLogicTask(Task):
         columns = solution["header"]
 
         for i in range(num_houses):
-            json_template["solution"][f"House {i+1}"] = {
+            json_template["solution"][f"House {i + 1}"] = {
                 columns[j]: "___" for j in range(1, len(columns))
             }
 
@@ -223,7 +247,7 @@ class ZebraLogicTask(Task):
         total_cells = 0
 
         for i in range(num_houses):
-            solution_table[f"House {i+1}"] = {
+            solution_table[f"House {i + 1}"] = {
                 columns[j]: solution["rows"][i][j] for j in range(1, len(columns))
             }
             total_cells += len(columns) - 1
