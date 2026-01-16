@@ -861,6 +861,12 @@ def launch(
     console.print(matrix_table)
     console.print()
 
+    # Confirm before launching (skip in dry-run mode)
+    if not dry_run:
+        if not click.confirm("Proceed with launch?", default=True):
+            console.print("[yellow]Launch cancelled[/yellow]")
+            raise SystemExit(0)
+
     # Launch experiments from the plan
     for exp in experiment_plan:
         model_cfg = exp["model_cfg"]
