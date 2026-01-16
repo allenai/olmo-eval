@@ -663,6 +663,8 @@ def launch(
     console.print(f"[blue]Groups:[/blue] {', '.join(effective_groups)}")
 
     # Pre-create groups so they exist when experiments reference them
+    # Track which groups were successfully created - only pass these to gantry
+    created_groups: list[str] = []
     if not dry_run:
         for grp in effective_groups:
             try:
@@ -672,8 +674,15 @@ def launch(
                 )
                 group_url = launcher.get_group_url(beaker_group)
                 console.print(f"[blue]  {grp}:[/blue] {group_url}")
+                created_groups.append(grp)
             except Exception as e:
                 console.print(f"[yellow]Warning:[/yellow] Failed to create group '{grp}': {e}")
+
+        # Only use groups that were successfully created
+        effective_groups = created_groups if created_groups else None  # type: ignore[assignment]
+    else:
+        # In dry_run mode, we don't create groups, so pass None to avoid gantry prompts
+        effective_groups = None  # type: ignore[assignment]
 
     # Track launched experiments
     launched_experiments: list[str] = []
