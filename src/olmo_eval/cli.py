@@ -644,7 +644,7 @@ def launch(
         raise SystemExit(1) from None
 
     # Validate all tasks exist before launching to Beaker
-    from olmo_eval.core.configs import validate_tasks
+    from olmo_eval.core.configs import expand_tasks, validate_tasks
 
     all_task_specs = [t for tasks in tasks_by_priority.values() for t in tasks]
     valid_tasks, invalid_tasks = validate_tasks(all_task_specs)
@@ -810,11 +810,16 @@ def launch(
     else:
         console.print(f"  Total experiments: {total_experiments}")
 
+    # Calculate and display total expanded tasks
+    total_expanded_tasks = len(valid_tasks) * len(model_configs)
+    console.print(f"  Total tasks: {total_expanded_tasks} ({len(valid_tasks)} tasks × {len(model_configs)} model(s))")
+
     matrix_table = Table(title="Experiments to Launch", show_header=True)
     matrix_table.add_column("Experiment Name", style="cyan")
     matrix_table.add_column("Model", style="blue")
     matrix_table.add_column("Priority", style="yellow")
-    matrix_table.add_column("Tasks", style="white")
+    matrix_table.add_column("Suites/Tasks", style="white")
+    matrix_table.add_column("# Tasks", style="white", justify="right")
     matrix_table.add_column("GPUs/Model", style="green", justify="right")
     matrix_table.add_column("Instances", style="magenta", justify="right")
     matrix_table.add_column("Total GPUs", style="green", justify="right")
@@ -822,6 +827,7 @@ def launch(
 
     for exp in experiment_plan:
         task_display = ", ".join(exp["tasks"])
+        expanded_task_count = len(expand_tasks(exp["tasks"]))
         split_display = (
             f"{exp['split_index']}/{exp['total_splits']}" if exp["split_index"] is not None else "-"
         )
@@ -830,6 +836,7 @@ def launch(
             exp["model_name"],
             exp["priority"],
             task_display,
+            str(expanded_task_count),
             str(exp["gpus_per_model"]),
             str(exp["parallelism"]),
             str(exp["num_gpus"]),
