@@ -11,8 +11,7 @@ import olmo_eval.evals.tasks  # noqa: F401 - triggers task registration
 from olmo_eval.core import get_model_presets
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR, DEFAULT_MAX_GPUS_PER_NODE
 from olmo_eval.evals.suites import get_suite, list_suites
-from olmo_eval.evals.tasks import list_tasks
-from olmo_eval.evals.tasks.registry import list_regimes
+from olmo_eval.evals.tasks import list_regimes, list_tasks
 
 console = Console()
 
