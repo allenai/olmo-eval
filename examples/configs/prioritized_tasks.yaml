@@ -1,28 +1,40 @@
 # Config with per-task priorities
-# Tasks marked with @priority will run at different priority levels
+#
+# Tasks can have @priority suffixes to run at different Beaker priority levels.
+# Tasks sharing the same priority will be batched together in one experiment per model.
+#
+# IMPORTANT: Priorities are set on TASKS, not on models. Each model runs all its
+# tasks, but tasks are grouped by priority into separate experiments.
+#
 # Usage: olmo-eval launch -f examples/configs/prioritized_tasks.yaml --dry-run
+#
+# This config will create 6 experiments (2 models x 3 priority levels):
+#   - eval-prioritized-llama3.1-8b-high     (gsm8k, arc_challenge)
+#   - eval-prioritized-llama3.1-8b-normal   (hellaswag, winogrande)
+#   - eval-prioritized-llama3.1-8b-low      (arc_easy, boolq)
+#   - eval-prioritized-olmo-2-7b-high       (gsm8k, arc_challenge)
+#   - eval-prioritized-olmo-2-7b-normal     (hellaswag, winogrande)
+#   - eval-prioritized-olmo-2-7b-low        (arc_easy, boolq)
 
 name: eval-prioritized
+
 models:
-  - llama3.1-8b
-  - olmo-2-7b
+  # Models define compute resources (GPUs)
+  - name: llama3.1-8b
+    gpus: 1
+  - name: olmo-2-7b
+    gpus: 1
 
 tasks:
-  # High priority - run first
-  - mmlu@high
   - gsm8k@high
+  - arc_challenge@high
 
-  # Normal priority
   - hellaswag@normal
-  - arc_challenge@normal
+  - winogrande@normal
 
-  # Low priority - run when resources available
-  - winogrande@low
-  - truthfulqa@low
+  - arc_easy@low
+  - boolq@low
 
 cluster: ai2/ceres
-gpus: 1
 preemptible: true
 timeout: 24h
-
-# Note: This will create 6 experiments (2 models x 3 priority levels)
