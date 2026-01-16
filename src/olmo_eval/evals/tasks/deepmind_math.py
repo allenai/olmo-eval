@@ -23,7 +23,7 @@ from olmo_eval.core import (
     RequestType,
 )
 from olmo_eval.evals.constants.benchmarks import DEEPMIND_MATH_CATEGORIES
-from olmo_eval.evals.tasks import Task, TaskConfig, register
+from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
 logger = logging.getLogger(__name__)
 

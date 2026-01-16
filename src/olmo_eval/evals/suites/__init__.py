@@ -19,18 +19,6 @@ Example usage:
     ...     print(name)
 """
 
-# Import suite definition modules to trigger registration
-from olmo_eval.evals.suites import (  # noqa: F401
-    code,
-    core_tasks,
-    long_context,
-    math,
-    mmlu,
-    multiturn,
-    olmo,
-    reasoning,
-)
-
 # Import and re-export core types and functions
 from olmo_eval.evals.suites.registry import (
     AggregationStrategy,
@@ -43,6 +31,27 @@ from olmo_eval.evals.suites.registry import (
     search_suites,
     suite_exists,
 )
+
+import importlib
+import pkgutil
+from pathlib import Path
+
+
+def _discover_and_load_suites() -> None:
+    """Auto-discover and import all suite modules to trigger registration."""
+    package_dir = Path(__file__).parent
+
+    for _finder, module_name, _is_pkg in pkgutil.iter_modules([str(package_dir)]):
+        # Skip the registry module and private modules
+        if module_name == "registry" or module_name.startswith("_"):
+            continue
+
+        # Import the module (triggers suite registration)
+        importlib.import_module(f".{module_name}", package=__package__)
+
+
+# Auto-discover and load all suite modules
+_discover_and_load_suites()
 
 __all__ = [
     # Core types

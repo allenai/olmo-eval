@@ -10,8 +10,7 @@ from olmo_eval.evals.tasks.arc import (
     _arc_easy_config,
     _extract_mcqa_answer,
 )
-from olmo_eval.evals.tasks.base import TaskConfig
-from olmo_eval.evals.tasks.registry import get_task, list_tasks
+from olmo_eval.evals.tasks import TaskConfig, get_task, list_tasks
 
 
 class TestExtractMCQAAnswer:

@@ -11,7 +11,7 @@ from olmo_eval.core import (
     LMRequest,
     RequestType,
 )
-from olmo_eval.evals.tasks import Task, TaskConfig, register
+from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
 
 class WikiTextTask(Task):

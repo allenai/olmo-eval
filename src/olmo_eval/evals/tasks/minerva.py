@@ -14,7 +14,7 @@ from olmo_eval.core import (
     RequestType,
 )
 from olmo_eval.evals.extract import extract_math_answer
-from olmo_eval.evals.tasks import Task, TaskConfig, register
+from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
 MINERVA_SUBSETS = (
     "algebra",
@@ -166,5 +166,22 @@ for subset in MINERVA_SUBSETS:
 @register("math500", _math500_config)
 class Math500(Math500Task):
     """MATH-500 task."""
+
+    pass
+
+
+def _minerva_math_500_config() -> TaskConfig:
+    """Alias config for minerva_math_500 (same as math500)."""
+    return TaskConfig(
+        name="minerva_math_500",
+        hf_dataset="HuggingFaceH4/MATH-500",
+        scorers=(ExactMatchScorer(),),
+        metrics=(AccuracyMetric(scorer_name="exact_match"),),
+    )
+
+
+@register("minerva_math_500", _minerva_math_500_config)
+class MinervaMath500(Math500Task):
+    """Minerva MATH-500 task (alias for math500)."""
 
     pass

@@ -8,7 +8,7 @@ Regimes are applied after variants, allowing combinations like:
     arc_challenge:mc::olmes  (multiple-choice variant with olmes regime)
 """
 
-from .registry import _tasks, register_regime
+from .core.registry import _tasks, register_regime
 
 
 def register_olmes_regimes() -> None:
@@ -99,6 +99,93 @@ def register_zero_shot_regime() -> None:
         )
 
 
+def register_olmo3_regimes() -> None:
+    """Register the 'olmo3' regime for all tasks.
+
+    The 'olmo3' regime uses OLMo3-style evaluation settings:
+    - 5-shot evaluation
+    - Consistent fewshot seed (42)
+    """
+    for task_name in list(_tasks.keys()):
+        register_regime(
+            task_name,
+            "olmo3",
+            num_fewshot=5,
+            fewshot_seed=42,
+        )
+
+
+def register_olmo3_midtrain_regimes() -> None:
+    """Register the 'olmo3:midtrain' regime for all tasks.
+
+    The 'olmo3:midtrain' regime uses zero-shot evaluation
+    for mid-training checkpoint evaluations.
+    """
+    for task_name in list(_tasks.keys()):
+        register_regime(
+            task_name,
+            "olmo3:midtrain",
+            num_fewshot=0,
+        )
+
+
+def register_xlarge_regimes() -> None:
+    """Register the 'xlarge' regime for all tasks.
+
+    The 'xlarge' regime uses full dataset evaluation:
+    - 5-shot evaluation
+    - No instance limit (full dataset)
+    """
+    for task_name in list(_tasks.keys()):
+        register_regime(
+            task_name,
+            "xlarge",
+            num_fewshot=5,
+            fewshot_seed=42,
+            limit=None,
+        )
+
+
+def register_none_regime() -> None:
+    """Register the 'none' regime for zero-shot baseline evaluation."""
+    for task_name in list(_tasks.keys()):
+        register_regime(
+            task_name,
+            "none",
+            num_fewshot=0,
+        )
+
+
+def register_olmo3_n32_v2_regimes() -> None:
+    """Register the 'olmo3:n32:v2' regime for code tasks.
+
+    The 'olmo3:n32:v2' regime is for code generation with:
+    - Zero-shot evaluation
+    - 32 samples per problem (for pass@k)
+    """
+    for task_name in list(_tasks.keys()):
+        register_regime(
+            task_name,
+            "olmo3:n32:v2",
+            num_fewshot=0,
+        )
+
+
+def register_olmo3_v2_regimes() -> None:
+    """Register the 'olmo3:v2' regime for code tasks.
+
+    The 'olmo3:v2' regime is for code benchmarks with:
+    - 3-shot evaluation
+    """
+    for task_name in list(_tasks.keys()):
+        register_regime(
+            task_name,
+            "olmo3:v2",
+            num_fewshot=3,
+            fewshot_seed=42,
+        )
+
+
 def register_all_regimes() -> None:
     """Register all common regimes."""
     register_olmes_regimes()
@@ -106,6 +193,12 @@ def register_all_regimes() -> None:
     register_gen2mc_regimes()
     register_gen2mc_xlarge_regimes()
     register_zero_shot_regime()
+    register_olmo3_regimes()
+    register_olmo3_midtrain_regimes()
+    register_xlarge_regimes()
+    register_none_regime()
+    register_olmo3_n32_v2_regimes()
+    register_olmo3_v2_regimes()
 
 
 # Auto-register all regimes when this module is imported

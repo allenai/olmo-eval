@@ -28,7 +28,7 @@ from olmo_eval.core import (
     RequestType,
 )
 from olmo_eval.evals.constants.code import FIM_CONFIGS, SANTACODER_FIM, FIMConfig
-from olmo_eval.evals.tasks import Task, TaskConfig, register
+from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
 
 class HumanEvalFIMTask(Task):

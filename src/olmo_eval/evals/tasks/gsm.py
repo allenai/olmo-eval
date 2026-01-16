@@ -15,7 +15,7 @@ from olmo_eval.core import (
     RequestType,
 )
 from olmo_eval.evals.extract import extract_math_answer
-from olmo_eval.evals.tasks import Task, TaskConfig, register
+from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
 
 def _clean_answer(answer: str) -> str:

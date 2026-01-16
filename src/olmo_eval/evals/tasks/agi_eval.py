@@ -17,7 +17,7 @@ from olmo_eval.core import (
 )
 from olmo_eval.evals.constants.benchmarks import AGI_EVAL_ENGLISH_TASKS
 from olmo_eval.evals.extract import extract_mcqa_answer
-from olmo_eval.evals.tasks import Task, TaskConfig, register
+from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
 
 class AGIEvalTask(Task):

@@ -11,7 +11,7 @@ from olmo_eval.evals.tasks.deepmind_math import (
     _compare_math_answers,
     _make_deepmind_math_config,
 )
-from olmo_eval.evals.tasks.registry import get_task, list_tasks
+from olmo_eval.evals.tasks import get_task, list_tasks
 
 # =============================================================================
 # String Cleaning Tests

@@ -4,7 +4,7 @@ import pytest
 
 from olmo_eval.core import Instance, LMOutput, RequestType
 from olmo_eval.evals.tasks.bbh import BBH_ANSWER_REGEX, _make_bbh_config
-from olmo_eval.evals.tasks.registry import get_task, list_tasks
+from olmo_eval.evals.tasks import get_task, list_tasks
 
 # =============================================================================
 # BBH Task Tests

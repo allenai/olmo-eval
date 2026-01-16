@@ -15,7 +15,7 @@ from olmo_eval.core import (
     RequestType,
 )
 from olmo_eval.evals.constants.benchmarks import BBH_TASKS
-from olmo_eval.evals.tasks import Task, TaskConfig, register
+from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
 # Answer extraction regex patterns for each BBH task type
 # "MC" indicates multiple choice tasks where answer is in format "(A)", "(B)", etc.

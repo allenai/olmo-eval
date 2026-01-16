@@ -14,7 +14,7 @@ from olmo_eval.core import (
     Response,
     Split,
 )
-from olmo_eval.evals.tasks.base import Task, TaskConfig
+from olmo_eval.evals.tasks import Task, TaskConfig
 
 
 class ConcreteTask(Task):

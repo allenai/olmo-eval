@@ -5,11 +5,8 @@ from collections.abc import Iterator
 import pytest
 
 from olmo_eval.core import Instance, LMOutput, LMRequest, RequestType
-from olmo_eval.evals.tasks.base import Task, TaskConfig
-from olmo_eval.evals.tasks.registry import (
-    _configs,
-    _regimes,
-    _tasks,
+from olmo_eval.evals.tasks import Task, TaskConfig
+from olmo_eval.evals.tasks import (
     clear_registry,
     get_task,
     list_regimes,
@@ -17,6 +14,7 @@ from olmo_eval.evals.tasks.registry import (
     register,
     register_regime,
 )
+from olmo_eval.evals.tasks.core.registry import _configs, _regimes, _tasks
 
 
 class DummyTask(Task):

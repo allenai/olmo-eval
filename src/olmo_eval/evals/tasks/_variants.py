@@ -8,7 +8,7 @@ the :mc variant is a no-op. For generation tasks, :mc would convert them to
 multiple choice format.
 """
 
-from .registry import _tasks, register_variant
+from .core.registry import _tasks, register_variant
 
 # Tasks that are already multiple choice by default
 # For these, :mc is a no-op (empty overrides)
@@ -105,6 +105,43 @@ def register_all_mc_variants() -> None:
         register_variant(task_name, "mc")
 
 
-# Auto-register :mc variants for all tasks when this module is imported
-# This allows specs like "arc_easy:mc::olmes" to work
-register_all_mc_variants()
+def register_bpb_variants() -> None:
+    """Register :bpb variant for ALL registered tasks.
+
+    The :bpb variant indicates bits-per-byte (perplexity) evaluation.
+    This uses loglikelihood scoring rather than generation.
+    """
+    for task_name in list(_tasks.keys()):
+        register_variant(task_name, "bpb")
+
+
+def register_rc_variants() -> None:
+    """Register :rc variant for ALL registered tasks.
+
+    The :rc variant indicates reading comprehension (cloze) format.
+    This uses completion-based scoring with answer continuation.
+    """
+    for task_name in list(_tasks.keys()):
+        register_variant(task_name, "rc")
+
+
+def register_3shot_variants() -> None:
+    """Register :3shot variant for ALL registered tasks.
+
+    The :3shot variant forces 3-shot evaluation regardless of regime.
+    """
+    for task_name in list(_tasks.keys()):
+        register_variant(task_name, "3shot", num_fewshot=3)
+
+
+def register_all_variants() -> None:
+    """Register all common variants for all tasks."""
+    register_all_mc_variants()
+    register_bpb_variants()
+    register_rc_variants()
+    register_3shot_variants()
+
+
+# Auto-register all variants for all tasks when this module is imported
+# This allows specs like "arc_easy:mc::olmes", "sciq:bpb::olmo3" to work
+register_all_variants()

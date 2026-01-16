@@ -8,7 +8,7 @@ from olmo_eval.evals.tasks.basic_skills import (
     _make_basic_skills_config,
     _shuffle_and_insert,
 )
-from olmo_eval.evals.tasks.registry import get_task, list_tasks
+from olmo_eval.evals.tasks import get_task, list_tasks
 
 # =============================================================================
 # Shuffle and Insert Tests

@@ -12,7 +12,7 @@ from olmo_eval.core import (
     RequestType,
 )
 from olmo_eval.evals.extract import extract_code
-from olmo_eval.evals.tasks import Task, TaskConfig, register
+from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
 
 class HumanEvalTask(Task):

@@ -19,7 +19,7 @@ from olmo_eval.evals.tasks.fim import (
     _fim_random_config,
     _fim_single_config,
 )
-from olmo_eval.evals.tasks.registry import get_task, list_tasks
+from olmo_eval.evals.tasks import get_task, list_tasks
 
 # =============================================================================
 # FIM Config Tests
