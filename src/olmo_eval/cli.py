@@ -595,8 +595,8 @@ def launch(
         console.print("[red]Error:[/red] The following tasks/suites do not exist:")
         for inv in invalid_tasks:
             console.print(f"  - {inv}")
-        console.print("\nUse 'olmo-eval list tasks' to see available tasks.")
-        console.print("Use 'olmo-eval list suites' to see available suites.")
+        console.print("\nUse 'olmo-eval tasks' to see available tasks.")
+        console.print("Use 'olmo-eval suites' to see available suites.")
         raise SystemExit(1)
 
     launcher = BeakerLauncher(workspace=workspace or BEAKER_DEFAULT_WORKSPACE)

@@ -8,13 +8,15 @@
 #
 # Usage: olmo-eval launch -f examples/configs/prioritized_tasks.yaml --dry-run
 #
-# This config will create 6 experiments (2 models x 3 priority levels):
+# This config will create 8 experiments (2 models x 4 priority levels):
 #   - eval-prioritized-llama3.1-8b-high     (gsm8k, arc_challenge)
 #   - eval-prioritized-llama3.1-8b-normal   (hellaswag, winogrande)
 #   - eval-prioritized-llama3.1-8b-low      (arc_easy, boolq)
 #   - eval-prioritized-olmo-2-7b-high       (gsm8k, arc_challenge)
 #   - eval-prioritized-olmo-2-7b-normal     (hellaswag, winogrande)
 #   - eval-prioritized-olmo-2-7b-low        (arc_easy, boolq)
+#   - eval-prioritized-llama3.1-8b-urgent   (arc:mc)
+#   - eval-prioritized-olmo-2-7b-urgent     (arc:mc)
 
 name: eval-prioritized
 
@@ -26,6 +28,8 @@ models:
     gpus: 1
 
 tasks:
+  - arc:mc@urgent
+
   - gsm8k@high
   - arc_challenge@high
 
