@@ -247,15 +247,15 @@ BBH_TASKS: tuple[str, ...] = (
 # =============================================================================
 
 AGI_EVAL_ENGLISH_TASKS: tuple[str, ...] = (
-    "lsat-ar",
-    "lsat-lr",
-    "lsat-rc",
-    "logiqa-en",
-    "sat-math",
-    "sat-en",
-    "aqua-rat",
-    "sat-en-without-passage",
-    "gaokao-english",
+    "lsat_ar",
+    "lsat_lr",
+    "lsat_rc",
+    "logiqa_en",
+    "sat_math",
+    "sat_en",
+    "aqua_rat",
+    "sat_en_without_passage",
+    "gaokao_english",
 )
 """AGI-Eval English standardized test tasks."""
 

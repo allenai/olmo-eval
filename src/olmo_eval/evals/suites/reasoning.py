@@ -12,7 +12,7 @@ from olmo_eval.evals.suites.registry import format_tasks, make_suite
 
 AGI_EVAL = make_suite(
     "agi_eval",
-    format_tasks(AGI_EVAL_ENGLISH_TASKS, "{}:1shot::olmes"),
+    format_tasks(AGI_EVAL_ENGLISH_TASKS, "agi_eval_{}:1shot::olmes"),
     description="AGI-Eval English standardized tests",
 )
 
