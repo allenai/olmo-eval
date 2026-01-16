@@ -252,25 +252,43 @@ def instance_worker_process(
         model_name: Model name for backend
         backend_type_str: Backend type string
     """
-    if gpu_ids:
-        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in gpu_ids)
+    import sys
 
-    backend_type = BackendType(backend_type_str)
-    backend = create_backend(backend_type, model_name)
+    try:
+        if gpu_ids:
+            os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in gpu_ids)
 
-    # Collect ALL items from queue until poison pill
-    items: list[QueueItem] = []
-    while True:
-        item = instance_queue.get()
-        if item is None:  # Poison pill
-            break
-        items.append(item)
+        backend_type = BackendType(backend_type_str)
+        backend = create_backend(backend_type, model_name)
 
-    if not items:
-        return
+        # Collect ALL items from queue until poison pill
+        items: list[QueueItem] = []
+        while True:
+            item = instance_queue.get()
+            if item is None:  # Poison pill
+                break
+            items.append(item)
 
-    # Process all at once - vLLM handles internal batching for optimal throughput
-    _process_batch(items, backend, result_queue)
+        if not items:
+            return
+
+        # Process all at once - vLLM handles internal batching for optimal throughput
+        _process_batch(items, backend, result_queue)
+    except Exception as e:
+        logger.error(f"Worker process failed: {e}")
+        # Put a fatal error marker in the result queue so main process knows we died
+        result_queue.put(
+            ResultItem(
+                model_name=model_name,
+                task_id="__WORKER_FATAL__",
+                instance_idx=-1,
+                instance=None,  # type: ignore[arg-type]
+                request=None,  # type: ignore[arg-type]
+                outputs=[],
+                error=f"Worker process crashed: {e}",
+            )
+        )
+        sys.exit(1)
 
 
 def streaming_worker_process(
@@ -292,11 +310,29 @@ def streaming_worker_process(
         result_queue: Queue to put ResultItems
         model_name: Model name for backend
     """
-    if gpu_ids:
-        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in gpu_ids)
+    import sys
 
-    # Run the async worker
-    asyncio.run(_streaming_worker_async(instance_queue, result_queue, model_name))
+    try:
+        if gpu_ids:
+            os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in gpu_ids)
+
+        # Run the async worker
+        asyncio.run(_streaming_worker_async(instance_queue, result_queue, model_name))
+    except Exception as e:
+        logger.error(f"Streaming worker process failed: {e}")
+        # Put a fatal error marker in the result queue so main process knows we died
+        result_queue.put(
+            ResultItem(
+                model_name=model_name,
+                task_id="__WORKER_FATAL__",
+                instance_idx=-1,
+                instance=None,  # type: ignore[arg-type]
+                request=None,  # type: ignore[arg-type]
+                outputs=[],
+                error=f"Streaming worker process crashed: {e}",
+            )
+        )
+        sys.exit(1)
 
 
 async def _streaming_worker_async(
@@ -700,6 +736,17 @@ class AsyncEvalRunner:
                 None, result_queue.get
             )
             processed += 1
+
+            # Check for fatal worker crash
+            if result_item.task_id == "__WORKER_FATAL__":
+                console.print("\n[bold red]FATAL: Worker crashed![/bold red]")
+                console.print(f"[red]{result_item.error}[/red]")
+                # Terminate all workers
+                for worker in workers:
+                    if worker.is_alive():
+                        worker.terminate()
+                        worker.join(timeout=5)
+                raise RuntimeError(f"Worker process crashed: {result_item.error}")
 
             key = (result_item.model_name, result_item.task_id)
             tracker = trackers[key]
@@ -1152,6 +1199,17 @@ class StreamingEvalRunner:
                 None, result_queue.get
             )
             processed += 1
+
+            # Check for fatal worker crash
+            if result_item.task_id == "__WORKER_FATAL__":
+                console.print("\n[bold red]FATAL: Worker crashed![/bold red]")
+                console.print(f"[red]{result_item.error}[/red]")
+                # Terminate all workers
+                for worker in workers:
+                    if worker.is_alive():
+                        worker.terminate()
+                        worker.join(timeout=5)
+                raise RuntimeError(f"Worker process crashed: {result_item.error}")
 
             key = (result_item.model_name, result_item.task_id)
             tracker = trackers[key]

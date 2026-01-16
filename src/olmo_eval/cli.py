@@ -251,7 +251,11 @@ def run(
             if dry_run:
                 runner.print_config()
             else:
-                runner.run()
+                try:
+                    runner.run()
+                except Exception as e:
+                    console.print(f"\n[bold red]Evaluation failed:[/bold red] {e}")
+                    raise SystemExit(1) from None
 
         return  # Exit early since we handled everything in the loop
 
@@ -265,7 +269,11 @@ def run(
     if dry_run:
         runner.print_config()
     else:
-        runner.run()
+        try:
+            runner.run()
+        except Exception as e:
+            console.print(f"\n[bold red]Evaluation failed:[/bold red] {e}")
+            raise SystemExit(1) from None
 
 
 @main.command()
@@ -662,27 +670,61 @@ def launch(
 
     console.print(f"[blue]Groups:[/blue] {', '.join(effective_groups)}")
 
-    # Pre-create groups so they exist when experiments reference them
-    # Track which groups were successfully created - only pass these to gantry
-    created_groups: list[str] = []
-    if not dry_run:
-        for grp in effective_groups:
-            try:
-                beaker_group = launcher.get_or_create_group(
-                    name=grp,
-                    workspace=workspace,
-                )
-                group_url = launcher.get_group_url(beaker_group)
-                console.print(f"[blue]  {grp}:[/blue] {group_url}")
-                created_groups.append(grp)
-            except Exception as e:
-                console.print(f"[yellow]Warning:[/yellow] Failed to create group '{grp}': {e}")
+    # Check which groups exist and which need to be created
+    from beaker.exceptions import BeakerGroupNotFound
 
-        # Only use groups that were successfully created
-        effective_groups = created_groups if created_groups else None  # type: ignore[assignment]
+    existing_groups: list[str] = []
+    missing_groups: list[str] = []
+
+    for grp in effective_groups:
+        qualified_name = (
+            f"{launcher.beaker.user_name}/{grp}" if "/" not in grp else grp
+        )
+        try:
+            launcher.beaker.group.get(qualified_name)
+            existing_groups.append(grp)
+        except BeakerGroupNotFound:
+            missing_groups.append(grp)
+
+    # Show existing groups
+    for grp in existing_groups:
+        qualified_name = (
+            f"{launcher.beaker.user_name}/{grp}" if "/" not in grp else grp
+        )
+        beaker_group = launcher.beaker.group.get(qualified_name)
+        group_url = launcher.get_group_url(beaker_group)
+        console.print(f"[blue]  {grp}:[/blue] {group_url} [dim](exists)[/dim]")
+
+    if dry_run:
+        # In dry-run mode, just inform about groups that would be created
+        if missing_groups:
+            console.print(
+                f"[yellow]Note:[/yellow] The following groups would be created: "
+                f"{', '.join(missing_groups)}"
+            )
     else:
-        # In dry_run mode, we don't create groups, so pass None to avoid gantry prompts
-        effective_groups = None  # type: ignore[assignment]
+        # In real mode, prompt to create missing groups
+        if missing_groups:
+            console.print(
+                f"\n[yellow]The following groups do not exist:[/yellow] "
+                f"{', '.join(missing_groups)}"
+            )
+            if not click.confirm("Would you like to create these groups?", default=True):
+                console.print("[red]Aborted.[/red] Cannot launch without required groups.")
+                raise SystemExit(1)
+
+            # Create the missing groups
+            for grp in missing_groups:
+                try:
+                    beaker_group = launcher.beaker.group.create(
+                        name=grp,
+                        workspace=workspace,
+                    )
+                    group_url = launcher.get_group_url(beaker_group)
+                    console.print(f"[green]  Created {grp}:[/green] {group_url}")
+                except Exception as e:
+                    console.print(f"[red]Error:[/red] Failed to create group '{grp}': {e}")
+                    raise SystemExit(1) from None
 
     # Track launched experiments
     launched_experiments: list[str] = []
