@@ -1,0 +1,23 @@
+# WIP
+name: olmo3-paper-eval
+
+models:
+  - name: meta-llama/Llama-3.1-8B
+    gpus: 1
+    # parallelism: 4
+
+  - name: /weka/oe-training-default/ai2-llm/checkpoints/ai2-tylerm/olmo-cookbook-1b-5xC-olmo2-f50cc596/step26986-hf/
+    gpus: 1
+    # parallelism: 4
+
+tasks:
+  - gsm8k@urgent
+  - arc_challenge@high
+  - hellaswag@high
+  - winogrande
+
+cluster: ai2/ceres
+budget: ai2/oe-base
+workspace: ai2/olmo-3-evals
+preemptible: true
+timeout: 6h
