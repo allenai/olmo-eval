@@ -23,6 +23,15 @@ def main() -> None:
     pass
 
 
+@main.group()
+def beaker() -> None:
+    """Beaker job management commands.
+
+    Commands for launching, monitoring, and managing evaluation jobs on Beaker.
+    """
+    pass
+
+
 @main.command()
 @click.option(
     "--model",
@@ -373,7 +382,7 @@ def suite_info(suite_name: str) -> None:
     console.print(f"\n[dim]Total: {len(suite.expanded_tasks)} tasks[/dim]")
 
 
-@main.command()
+@beaker.command()
 @click.option(
     "--config",
     "-f",
@@ -493,29 +502,29 @@ def launch(
 
     Examples:
 
-        olmo-eval launch -n "eval-llama3" -m llama3.1-8b -t mmlu
+        olmo-eval beaker launch -n "eval-llama3" -m llama3.1-8b -t mmlu
 
-        olmo-eval launch -n "eval-suite" -m llama3.1-8b -t mmlu -t gsm8k -t arc
+        olmo-eval beaker launch -n "eval-suite" -m llama3.1-8b -t mmlu -t gsm8k -t arc
 
-        olmo-eval launch -n "eval-70b" -m llama3.1-70b -t mmlu --cluster h100 --gpus 4
+        olmo-eval beaker launch -n "eval-70b" -m llama3.1-70b -t mmlu --cluster h100 --gpus 4
 
         # Multiple models (creates separate experiments per model)
-        olmo-eval launch -n "eval-compare" -m llama3.1-8b -m olmo-2-7b -t mmlu -t gsm8k
+        olmo-eval beaker launch -n "eval-compare" -m llama3.1-8b -m olmo-2-7b -t mmlu -t gsm8k
 
         # Per-task priorities (creates separate experiments per priority level)
-        olmo-eval launch -n "eval-mixed" -m llama3.1-8b -t "mmlu@high" -t "gsm8k@normal"
+        olmo-eval beaker launch -n "eval-mixed" -m llama3.1-8b -t "mmlu@high" -t "gsm8k@normal"
 
         # Install backends at runtime
-        olmo-eval launch -n "eval-vllm" -m llama3.1-8b -t mmlu -b vllm==0.13.0
+        olmo-eval beaker launch -n "eval-vllm" -m llama3.1-8b -t mmlu -b vllm==0.13.0
 
         # From YAML config file
-        olmo-eval launch -f eval_config.yaml
+        olmo-eval beaker launch -f eval_config.yaml
 
         # Config file with CLI overrides
-        olmo-eval launch -f eval_config.yaml --gpus 4 --priority high
+        olmo-eval beaker launch -f eval_config.yaml --gpus 4 --priority high
 
         # With grouping for result aggregation
-        olmo-eval launch -n "benchmark" --group "benchmark-2024" -m llama3.1-8b -t mmlu -t gsm8k
+        olmo-eval beaker launch -n "benchmark" --group "benchmark-2024" -m llama3.1-8b -t mmlu -t gsm8k
     """
     try:
         from olmo_eval.launch import (
@@ -975,14 +984,14 @@ def launch(
                 # Multiple experiments: don't follow, show URLs for watch command
                 console.print(
                     "\n[bold]Multiple experiments launched. "
-                    "Use 'olmo-eval watch -e <id>' to follow:[/bold]"
+                    "Use 'olmo-eval beaker watch -e <id>' to follow:[/bold]"
                 )
                 for exp_id in launched_experiments:
                     url = launcher.get_experiment_url(exp_id)
                     console.print(f"  - {url}")
 
 
-@main.command()
+@beaker.command()
 @click.option("--group", "-g", required=True, help="Beaker group name")
 @click.option(
     "--format",
@@ -1013,13 +1022,13 @@ def results(
     Examples:
 
         # Show status table
-        olmo-eval results --group "benchmark-2024"
+        olmo-eval beaker results --group "benchmark-2024"
 
         # Export as CSV
-        olmo-eval results --group "benchmark-2024" --format csv > results.csv
+        olmo-eval beaker results --group "benchmark-2024" --format csv > results.csv
 
         # Wait for completion then show results
-        olmo-eval results --group "benchmark-2024" --wait
+        olmo-eval beaker results --group "benchmark-2024" --wait
     """
     import json as json_module
     import time
@@ -1148,7 +1157,7 @@ def results(
             console.print("[dim]No experiments in group.[/dim]")
 
 
-@main.command(name="watch")
+@beaker.command(name="watch")
 @click.option(
     "--experiment",
     "-e",
@@ -1173,10 +1182,10 @@ def watch(experiment: str, tail: bool) -> None:
     Examples:
 
         # Watch an experiment from the start
-        olmo-eval watch -e 01abc123
+        olmo-eval beaker watch -e 01abc123
 
         # Attach to a running experiment (show recent logs only)
-        olmo-eval watch -e 01abc123 --tail
+        olmo-eval beaker watch -e 01abc123 --tail
     """
     import sys
 
@@ -1199,7 +1208,7 @@ def watch(experiment: str, tail: bool) -> None:
         raise SystemExit(1) from None
 
 
-@main.group()
+@beaker.group()
 def group() -> None:
     """Manage Beaker groups.
 
@@ -1227,11 +1236,11 @@ def group_info(group_name: str, output_format: str, verbose: bool) -> None:
 
     Examples:
 
-        olmo-eval group info my-experiment-group
+        olmo-eval beaker group info my-experiment-group
 
-        olmo-eval group info my-experiment-group --verbose
+        olmo-eval beaker group info my-experiment-group --verbose
 
-        olmo-eval group info my-experiment-group --format json
+        olmo-eval beaker group info my-experiment-group --format json
     """
     import json as json_module
 
@@ -1392,9 +1401,9 @@ def group_cancel(group_name: str, yes: bool) -> None:
 
     Examples:
 
-        olmo-eval group cancel my-experiment-group
+        olmo-eval beaker group cancel my-experiment-group
 
-        olmo-eval group cancel my-experiment-group --yes
+        olmo-eval beaker group cancel my-experiment-group --yes
     """
     try:
         from olmo_eval.launch import BeakerLauncher
@@ -1470,11 +1479,11 @@ def group_list(workspace: str, limit: int, search: str | None, mine: bool) -> No
 
     Examples:
 
-        olmo-eval group list -w ai2/oe-data
+        olmo-eval beaker group list -w ai2/oe-data
 
-        olmo-eval group list -w ai2/oe-data --all
+        olmo-eval beaker group list -w ai2/oe-data --all
 
-        olmo-eval group list -w ai2/oe-data --search "benchmark" --limit 10
+        olmo-eval beaker group list -w ai2/oe-data --search "benchmark" --limit 10
     """
     try:
         from olmo_eval.launch import BeakerLauncher

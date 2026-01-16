@@ -6,7 +6,7 @@
 # IMPORTANT: Priorities are set on TASKS, not on models. Each model runs all its
 # tasks, but tasks are grouped by priority into separate experiments.
 #
-# Usage: olmo-eval launch -f examples/configs/prioritized_tasks.yaml --dry-run
+# Usage: olmo-eval beaker launch -f examples/configs/prioritized_tasks.yaml --dry-run
 #
 # This config will create 8 experiments (2 models x 4 priority levels):
 #   - eval-prioritized-llama3.1-8b-high     (gsm8k, arc_challenge)

@@ -1,6 +1,6 @@
 # Large model evaluation config
 # Configured for 70B+ models requiring multiple GPUs
-# Usage: olmo-eval launch -f examples/configs/large_model.yaml --dry-run
+# Usage: olmo-eval beaker launch -f examples/configs/large_model.yaml --dry-run
 
 name: eval-llama70b-full
 models:

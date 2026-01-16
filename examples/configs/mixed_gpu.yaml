@@ -3,7 +3,7 @@
 # Demonstrates per-model GPU allocation. Each model specifies how many GPUs
 # it needs for inference. Priorities are set on tasks, not models.
 #
-# Usage: olmo-eval launch -f examples/configs/mixed_gpu.yaml --dry-run
+# Usage: olmo-eval beaker launch -f examples/configs/mixed_gpu.yaml --dry-run
 #
 # This config creates 2 experiments (one per model, same priority):
 #   - test-mixed-gpus-llama-3.1-8b   (1 GPU)

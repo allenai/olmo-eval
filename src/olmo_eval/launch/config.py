@@ -64,9 +64,10 @@ class ModelConfig:
         timeout: Timeout for this model's jobs.
         shared_memory: Shared memory size (e.g., "10GiB").
         use_async: Enable parallel task execution (overrides default).
-        num_workers: Number of workers for async mode (overrides default).
-        gpus_per_worker: GPUs per worker for async mode (overrides default).
-        backend: Backend to install for this model (e.g., "vllm==0.13.0").
+        use_async_stream: Enable streaming async with vLLM (overrides default).
+        num_workers: Number of workers for async modes (overrides default).
+        gpus_per_worker: GPUs per worker for async modes (overrides default).
+        backend: Backend to install for this model (e.g., "vllm").
 
     Example:
         models:
@@ -96,6 +97,7 @@ class ModelConfig:
 
     # Async execution settings
     use_async: bool | None = None
+    use_async_stream: bool | None = None
     num_workers: int | None = None
     gpus_per_worker: int | None = None
 
@@ -283,6 +285,10 @@ class LaunchConfig:
         description: Optional experiment description.
         groups: List of Beaker groups to add experiments to.
         backends: Optional dependency groups to install at runtime (e.g., ["vllm", "hf"]).
+        use_async: Enable parallel task execution with multiple workers.
+        use_async_stream: Enable streaming async with vLLM's AsyncLLMEngine (vLLM only).
+        num_workers: Number of workers for async modes.
+        gpus_per_worker: GPUs per worker for async modes.
         flash_attn: Set to 3 to use Flash Attention 3 (for Hopper GPUs). FA2 is pre-installed.
         no_flash_attn: If True, uninstall Flash Attention at runtime (disables FA2).
     """
@@ -306,6 +312,7 @@ class LaunchConfig:
 
     # Async execution defaults
     use_async: bool = False
+    use_async_stream: bool = False
     num_workers: int | None = None
     gpus_per_worker: int = 1
 
@@ -348,13 +355,16 @@ class LaunchConfig:
         """
         # Determine async settings
         use_async = model.use_async if model.use_async is not None else self.use_async
+        use_async_stream = (
+            model.use_async_stream if model.use_async_stream is not None else self.use_async_stream
+        )
         num_workers = model.num_workers if model.num_workers is not None else self.num_workers
         gpus_per_worker = (
             model.gpus_per_worker if model.gpus_per_worker is not None else self.gpus_per_worker
         )
 
         # Calculate GPUs per model instance
-        if use_async and num_workers is not None:
+        if (use_async or use_async_stream) and num_workers is not None:
             gpus_per_model = num_workers * gpus_per_worker
         else:
             gpus_per_model = model.gpus if model.gpus is not None else self.gpus
@@ -370,6 +380,7 @@ class LaunchConfig:
             "timeout": model.timeout if model.timeout is not None else self.timeout,
             "shared_memory": model.shared_memory,  # None uses BeakerJobConfig default
             "use_async": use_async,
+            "use_async_stream": use_async_stream,
             "num_workers": num_workers,
             "gpus_per_worker": gpus_per_worker,
             "backend": model.backend,

@@ -250,15 +250,15 @@ Launch an evaluation job:
 
 ```bash
 # Basic evaluation
-olmo-eval launch -n "eval-llama3-mmlu" -m llama3.1-8b -t mmlu
+olmo-eval beaker launch -n "eval-llama3-mmlu" -m llama3.1-8b -t mmlu
 
 # Multiple tasks
-olmo-eval launch -n "eval-llama3-suite" \
+olmo-eval beaker launch -n "eval-llama3-suite" \
     -m llama3.1-8b \
     -t mmlu -t gsm8k -t hellaswag
 
 # Large model with multiple GPUs
-olmo-eval launch \
+olmo-eval beaker launch \
     --name "eval-70b-full" \
     --model meta-llama/Llama-3.1-70B-Instruct \
     --task mmlu --task gsm8k --task arc \
@@ -268,7 +268,7 @@ olmo-eval launch \
     --timeout 48h
 
 # Preview the Beaker spec without launching
-olmo-eval launch -n "test" -m llama3.1-8b -t arc_easy --dry-run
+olmo-eval beaker launch -n "test" -m llama3.1-8b -t arc_easy --dry-run
 ```
 
 ### Multiple Models
@@ -278,7 +278,7 @@ Each model will be launched as a separate experiment:
 
 ```bash
 # Compare two models on the same tasks
-olmo-eval launch -n "eval-compare" \
+olmo-eval beaker launch -n "eval-compare" \
     -m llama3.1-8b \
     -m olmo-2-7b \
     -t mmlu -t gsm8k -t hellaswag
@@ -288,7 +288,7 @@ olmo-eval launch -n "eval-compare" \
 #   eval-compare-olmo-2-7b:   runs all tasks on olmo-2-7b
 
 # Combine with per-task priorities (creates model x priority experiments)
-olmo-eval launch -n "eval-full" \
+olmo-eval beaker launch -n "eval-full" \
     -m llama3.1-8b -m olmo-2-7b \
     -t "mmlu@high" -t "gsm8k@normal"
 
@@ -304,7 +304,7 @@ Tasks with different priorities will be launched as separate Beaker experiments:
 
 ```bash
 # Mixed priorities - creates separate experiments per priority level
-olmo-eval launch -n "eval-suite" -m llama3.1-8b \
+olmo-eval beaker launch -n "eval-suite" -m llama3.1-8b \
     -t "mmlu@high" \
     -t "gsm8k@normal" \
     -t "arc@low"
@@ -315,10 +315,10 @@ olmo-eval launch -n "eval-suite" -m llama3.1-8b \
 #   eval-suite-low:    runs arc at low priority
 
 # With task regimes (@ comes after ::)
-olmo-eval launch -n "eval" -m llama3.1-8b -t "mmlu::olmes@high"
+olmo-eval beaker launch -n "eval" -m llama3.1-8b -t "mmlu::olmes@high"
 
 # Tasks without @priority use the --priority flag (default: normal)
-olmo-eval launch -n "eval" -m llama3.1-8b -t mmlu -t gsm8k --priority high
+olmo-eval beaker launch -n "eval" -m llama3.1-8b -t mmlu -t gsm8k --priority high
 ```
 
 ### Experiment Groups
@@ -327,7 +327,7 @@ Organize multiple experiments into a Beaker group for result aggregation:
 
 ```bash
 # Launch with grouping
-olmo-eval launch -n "benchmark-v1" --group "benchmark-2024" \
+olmo-eval beaker launch -n "benchmark-v1" --group "benchmark-2024" \
     -m llama3.1-8b -m olmo-2-7b \
     -t mmlu -t gsm8k -t hellaswag
 
@@ -338,13 +338,13 @@ olmo-eval launch -n "benchmark-v1" --group "benchmark-2024" \
 #   Group: Added 2 experiment(s) to 'benchmark-2024'
 
 # Check results
-olmo-eval results --group "benchmark-2024"
+olmo-eval beaker results --group "benchmark-2024"
 
 # Wait for completion and export as CSV
-olmo-eval results --group "benchmark-2024" --wait --format csv > results.csv
+olmo-eval beaker results --group "benchmark-2024" --wait --format csv > results.csv
 
 # Export as JSON
-olmo-eval results --group "benchmark-2024" --format json
+olmo-eval beaker results --group "benchmark-2024" --format json
 ```
 
 ### Runtime Backend Installation
@@ -353,18 +353,18 @@ Docker images do NOT include inference backends (vllm, transformers, litellm) by
 
 ```bash
 # Install vLLM backend
-olmo-eval launch -n "eval-vllm" -m llama3.1-8b -t mmlu --backends vllm
+olmo-eval beaker launch -n "eval-vllm" -m llama3.1-8b -t mmlu --backends vllm
 
 # Install HuggingFace transformers backend
-olmo-eval launch -n "eval-hf" -m llama3.1-8b -t mmlu --backends hf
+olmo-eval beaker launch -n "eval-hf" -m llama3.1-8b -t mmlu --backends hf
 
 # Install multiple backends
-olmo-eval launch -n "eval-multi" -m llama3.1-8b -t mmlu \
+olmo-eval beaker launch -n "eval-multi" -m llama3.1-8b -t mmlu \
     --backends vllm \
     --backends hf
 
 # Short flag
-olmo-eval launch -n "eval-vllm" -m llama3.1-8b -t mmlu -b vllm
+olmo-eval beaker launch -n "eval-vllm" -m llama3.1-8b -t mmlu -b vllm
 ```
 
 Available backend groups (defined in `pyproject.toml`):
@@ -430,13 +430,13 @@ timeout: 24h
 
 ```bash
 # Run from config file
-olmo-eval launch -f eval_config.yaml --dry-run
+olmo-eval beaker launch -f eval_config.yaml --dry-run
 
 # Override specific values
-olmo-eval launch -f eval_config.yaml --gpus 4 --priority high
+olmo-eval beaker launch -f eval_config.yaml --gpus 4 --priority high
 
 # Add additional models via CLI
-olmo-eval launch -f eval_config.yaml -m olmo-2-7b
+olmo-eval beaker launch -f eval_config.yaml -m olmo-2-7b
 ```
 
 **Config with runtime backends**:
@@ -542,14 +542,16 @@ description: "Full evaluation suite for Llama 70B"
 | `retries` | int | no | Retry count on failure |
 | `workspace` | string | yes | Beaker workspace |
 | `budget` | string | yes | Beaker budget |
+| `beaker_image` | string | no | Container image to use (config-only) |
 | `groups` | list | no | Beaker groups to add experiments to |
 | `backends` | list | no | Backends to install at runtime (e.g., `["vllm"]`) |
 | `use_async` | bool | no | Enable parallel task execution (default: `false`) |
-| `num_workers` | int | no | Number of workers for async mode |
-| `gpus_per_worker` | int | no | GPUs per worker for async mode (default: `1`) |
+| `use_async_stream` | bool | no | Enable streaming async with vLLM (default: `false`) |
+| `num_workers` | int | no | Number of workers for async modes |
+| `gpus_per_worker` | int | no | GPUs per worker for async modes (default: `1`) |
 | `flash_attn` | int | no | Set to `3` to use Flash Attention 3 |
 | `no_flash_attn` | bool | no | Disable Flash Attention (default: `false`) |
-| `description` | string | no | Experiment description |
+| `description` | string | no | Experiment description (config-only) |
 
 See `examples/configs/` for more configuration examples.
 
@@ -635,10 +637,10 @@ Inference backends are NOT baked into images. Install them when launching jobs u
 
 ```bash
 # Install vLLM backend
-olmo-eval launch -n "eval" -m llama3.1-8b -t mmlu --backends vllm
+olmo-eval beaker launch -n "eval" -m llama3.1-8b -t mmlu --backends vllm
 
 # Install multiple backends
-olmo-eval launch -n "eval" -m llama3.1-8b -t mmlu \
+olmo-eval beaker launch -n "eval" -m llama3.1-8b -t mmlu \
   --backends vllm \
   --backends hf
 

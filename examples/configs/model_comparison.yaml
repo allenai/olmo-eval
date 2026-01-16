@@ -1,6 +1,6 @@
 # Multi-model comparison config
 # Evaluates multiple models on the same tasks
-# Usage: olmo-eval launch -f examples/configs/model_comparison.yaml --dry-run
+# Usage: olmo-eval beaker launch -f examples/configs/model_comparison.yaml --dry-run
 
 name: eval-model-comparison
 models:

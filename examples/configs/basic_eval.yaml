@@ -1,5 +1,5 @@
 # Basic evaluation config
-# Usage: olmo-eval launch -f examples/configs/basic_eval.yaml --dry-run
+# Usage: olmo-eval beaker launch -f examples/configs/basic_eval.yaml --dry-run
 
 name: eval-llama3-core
 models:
