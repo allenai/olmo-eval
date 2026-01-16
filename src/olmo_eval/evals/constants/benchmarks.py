@@ -194,7 +194,7 @@ MMLU_PRO_CATEGORIES: tuple[str, ...] = (
     "mmlu_pro_business",
     "mmlu_pro_biology",
     "mmlu_pro_chemistry",
-    "mmlu_pro_computer science",
+    "mmlu_pro_computer_science",
     "mmlu_pro_economics",
     "mmlu_pro_engineering",
     "mmlu_pro_philosophy",
