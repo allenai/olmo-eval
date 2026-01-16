@@ -412,7 +412,12 @@ def suite_info(suite_name: str) -> None:
 @click.option("--retries", "-r", type=int, help="Number of retries on failure")
 @click.option("--workspace", "-w", help="Beaker workspace")
 @click.option("--budget", "-B", help="Beaker budget")
-@click.option("--group", "-g", help="Add experiments to this Beaker group (creates if needed)")
+@click.option(
+    "--group",
+    "-g",
+    multiple=True,
+    help="Add experiments to Beaker group(s) (can specify multiple, creates if needed)",
+)
 @click.option(
     "--backends",
     "-b",
@@ -457,7 +462,7 @@ def launch(
     retries: int | None,
     workspace: str | None,
     budget: str | None,
-    group: str | None,
+    group: tuple[str, ...],
     backends: tuple[str, ...],
     use_async: bool,
     use_async_stream: bool,
@@ -640,25 +645,35 @@ def launch(
     if dry_run:
         console.print("[yellow]Dry run mode - not submitting[/yellow]")
 
-    # Always use groups for all experiments
-    # Auto-generate group name from experiment name if not specified
+    # Build list of groups from CLI and config
+    # Auto-generate one group name if none specified
     from datetime import datetime
 
-    effective_group = group or f"{name}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-    console.print(f"[blue]Group:[/blue] {effective_group}")
+    effective_groups: list[str] = list(group)  # CLI groups
+    if cfg is not None and cfg.groups:
+        # Add config groups (CLI groups take precedence, so they're first)
+        for g in cfg.groups:
+            if g not in effective_groups:
+                effective_groups.append(g)
 
-    # Pre-create the group so it exists when experiments reference it
+    # Auto-generate a group if none specified
+    if not effective_groups:
+        effective_groups = [f"{name}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"]
+
+    console.print(f"[blue]Groups:[/blue] {', '.join(effective_groups)}")
+
+    # Pre-create groups so they exist when experiments reference them
     if not dry_run:
-        try:
-            beaker_group = launcher.get_or_create_group(
-                name=effective_group,
-                workspace=workspace,
-            )
-            group_url = launcher.get_group_url(beaker_group)
-            console.print(f"[blue]Group URL:[/blue] {group_url}")
-        except Exception as e:
-            console.print(f"[yellow]Warning:[/yellow] Failed to create group: {e}")
-            effective_group = None  # Fall back to no group if creation fails
+        for grp in effective_groups:
+            try:
+                beaker_group = launcher.get_or_create_group(
+                    name=grp,
+                    workspace=workspace,
+                )
+                group_url = launcher.get_group_url(beaker_group)
+                console.print(f"[blue]  {grp}:[/blue] {group_url}")
+            except Exception as e:
+                console.print(f"[yellow]Warning:[/yellow] Failed to create group '{grp}': {e}")
 
     # Track launched experiments
     launched_experiments: list[str] = []
@@ -743,7 +758,7 @@ def launch(
     matrix_table.add_column("Split", style="dim", justify="center")
 
     for exp in experiment_plan:
-        task_display = ", ".join(exp["tasks"][:3]) + ("..." if len(exp["tasks"]) > 3 else "")
+        task_display = ", ".join(exp["tasks"])
         split_display = (
             f"{exp['split_index']}/{exp['total_splits']}"
             if exp["split_index"] is not None
@@ -881,7 +896,7 @@ def launch(
             backends=effective_backends,
             flash_attn=effective_flash_attn,
             no_flash_attn=no_flash_attn,
-            group=effective_group,
+            groups=effective_groups,
         )
 
         if dry_run:

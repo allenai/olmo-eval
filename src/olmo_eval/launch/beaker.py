@@ -432,8 +432,8 @@ class BeakerJobConfig:
     flash_attn: int | None = None  # Set to 3 to switch to FA3
     no_flash_attn: bool = False  # Uninstall FA2 at runtime
 
-    # Group assignment - experiment will be added to this group at creation time
-    group: str | None = None
+    # Group assignment - experiment will be added to these groups at creation time
+    groups: list[str] | None = None
 
 
 def resolve_clusters(cluster: str | list[str]) -> list[str]:
@@ -612,8 +612,8 @@ class BeakerLauncher:
         if config.nfs:
             mounts = [("/net/nfs.cirrascale", "/net/nfs.cirrascale")]
 
-        # Build group names list if group is specified
-        group_names: list[str] | None = [config.group] if config.group else None
+        # Build group names list if groups are specified
+        group_names: list[str] | None = config.groups if config.groups else None
 
         # If doing a dry run, print config summary and return
         if dry_run:

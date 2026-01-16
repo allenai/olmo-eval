@@ -164,6 +164,7 @@ class LaunchConfig:
         budget: Beaker budget.
         beaker_image: Container image to use.
         description: Optional experiment description.
+        groups: List of Beaker groups to add experiments to.
         backends: Optional dependency groups to install at runtime (e.g., ["vllm", "hf"]).
         flash_attn: Set to 3 to use Flash Attention 3 (for Hopper GPUs). FA2 is pre-installed.
         no_flash_attn: If True, uninstall Flash Attention at runtime (disables FA2).
@@ -196,6 +197,7 @@ class LaunchConfig:
     budget: str | None = None
     beaker_image: str | None = None
     description: str | None = None
+    groups: list[str] | None = None  # Groups to add experiments to
 
     # Runtime backend installation
     backends: list[str] | None = None
