@@ -381,7 +381,12 @@ OLMO3_DEV_MIDTRAIN_V2 = make_suite(
 
 OLMO3_BASE_HELDOUT = make_suite(
     "olmo3:base_heldout",
-    (BBH_COT_HELDOUT, MMLU_PRO_MC, DEEPMIND_MATH_HELDOUT, "lbpp::olmo3"),
+    (
+        BBH_COT_HELDOUT,
+        MMLU_PRO_MC,
+        DEEPMIND_MATH_HELDOUT,
+        # "lbpp::olmo3" TODO(undfined): Enable once we add code execution
+    ),
     aggregation=AggregationStrategy.DISPLAY_ONLY,
     description="OLMo3 base heldout evaluation suite",
 )
