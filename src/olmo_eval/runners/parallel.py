@@ -259,7 +259,9 @@ def instance_worker_process(
             os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in gpu_ids)
 
         backend_type = BackendType(backend_type_str)
-        backend = create_backend(backend_type, model_name)
+        # Pass tensor_parallel_size for vLLM to use all assigned GPUs
+        engine_kwargs = {"tensor_parallel_size": len(gpu_ids)} if gpu_ids else {}
+        backend = create_backend(backend_type, model_name, **engine_kwargs)
 
         # Collect ALL items from queue until poison pill
         items: list[QueueItem] = []
@@ -317,7 +319,8 @@ def streaming_worker_process(
             os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in gpu_ids)
 
         # Run the async worker
-        asyncio.run(_streaming_worker_async(instance_queue, result_queue, model_name))
+        num_gpus = len(gpu_ids) if gpu_ids else 1
+        asyncio.run(_streaming_worker_async(instance_queue, result_queue, model_name, num_gpus))
     except Exception as e:
         logger.error(f"Streaming worker process failed: {e}")
         # Put a fatal error marker in the result queue so main process knows we died
@@ -339,6 +342,7 @@ async def _streaming_worker_async(
     instance_queue: mp.Queue,
     result_queue: mp.Queue,
     model_name: str,
+    num_gpus: int = 1,
 ) -> None:
     """Async implementation of streaming worker.
 
@@ -346,7 +350,7 @@ async def _streaming_worker_async(
     """
     from olmo_eval.backends.vllm import AsyncVLLMBackend
 
-    backend = AsyncVLLMBackend(model_name)
+    backend = AsyncVLLMBackend(model_name, tensor_parallel_size=num_gpus)
 
     # Track request_id -> QueueItem mapping
     pending_requests: dict[str, QueueItem] = {}
