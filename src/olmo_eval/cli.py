@@ -459,6 +459,9 @@ def suite_info(suite_name: str) -> None:
 )
 @click.option("--dry-run", "-d", is_flag=True, help="Print spec without launching")
 @click.option(
+    "--verbose", "-v", is_flag=True, help="Print experiment spec before launching"
+)
+@click.option(
     "--follow/--no-follow",
     default=True,
     help="Follow logs after launch (default). Use --no-follow to submit and exit immediately.",
@@ -487,6 +490,7 @@ def launch(
     fa3: bool,
     no_flash_attn: bool,
     dry_run: bool,
+    verbose: bool,
     follow: bool,
 ) -> None:
     """Launch an evaluation job on Beaker.
@@ -970,6 +974,10 @@ def launch(
                 console.print()  # Add spacing between multiple experiments
             launcher.launch(job_config, dry_run=True)
         else:
+            if verbose:
+                console.print("\n[bold]Experiment spec:[/bold]")
+                launcher.launch(job_config, dry_run=True)
+                console.print()
             experiment = launcher.launch(job_config)
             if experiment:
                 console.print(f"[green]Launched:[/green] {launcher.experiment_url(experiment)}")
