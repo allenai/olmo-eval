@@ -68,17 +68,9 @@ postgres = [
 storage = [
     "olmo-eval-internal[s3,postgres]",
 ]
-# New: Runtime without Beaker (most common for container execution)
+# Runtime without Beaker (most common for container execution)
 runtime = [
     "olmo-eval-internal[storage]",
-]
-# all-backends: HF and LiteLLM (vllm installed separately at runtime)
-all-backends = [
-    "olmo-eval-internal[hf,litellm]",
-]
-# all: everything including beaker launcher (vllm installed separately at runtime)
-all = [
-    "olmo-eval-internal[all-backends,beaker,storage]",
 ]
 
 [project.scripts]
