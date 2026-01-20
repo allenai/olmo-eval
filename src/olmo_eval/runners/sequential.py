@@ -18,7 +18,7 @@ from olmo_eval.core import expand_tasks, get_model_config
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.evals.suites import suite_exists
 from olmo_eval.evals.tasks import list_regimes, list_tasks
-from olmo_eval.runners.utils import get_primary_metric, run_task_impl
+from olmo_eval.runners.utils import TaskResult, get_primary_metric, run_task_impl
 
 if TYPE_CHECKING:
     from olmo_eval.storage import StorageBackend
@@ -153,13 +153,21 @@ class EvalRunner:
         # scheduling and possibly asynchronous runner.
         for spec in expanded_tasks:
             console.print(f"\n[bold blue]Running {spec}...[/bold blue]")
-            task_results = self._run_task(spec, backend)
-            results["tasks"][spec] = task_results
+            task_result = self._run_task(spec, backend)
+            results["tasks"][spec] = {
+                "config": task_result.config,
+                "num_instances": task_result.num_instances,
+                "metrics": task_result.metrics,
+            }
+
+            # Write predictions to JSONL
+            if task_result.predictions:
+                self._write_predictions(spec, task_result.predictions)
 
             # Log metrics (for Beaker job details)
-            if "metrics" in task_results:
+            if task_result.metrics:
                 logger.info(f"** Task metrics for {spec}: **")
-                for metric, value in task_results["metrics"].items():
+                for metric, value in task_result.metrics.items():
                     logger.info(f"  {metric}: {value:.4f}")
                     console.print(f"  {metric}: {value:.4f}")
 
@@ -172,7 +180,7 @@ class EvalRunner:
 
         return results
 
-    def _run_task(self, spec: str, backend: Backend) -> dict[str, Any]:
+    def _run_task(self, spec: str, backend: Backend) -> TaskResult:
         """Run a single task and return results."""
         # Build overrides from instance settings
         overrides = {}
@@ -193,11 +201,7 @@ class EvalRunner:
         if result.error:
             raise RuntimeError(f"Task {spec} failed: {result.error}")
 
-        return {
-            "config": result.config,
-            "num_instances": result.num_instances,
-            "metrics": result.metrics,
-        }
+        return result
 
     def _log_summary(self, results: dict[str, Any]) -> None:
         """Log summary of all task scores."""
@@ -262,3 +266,23 @@ class EvalRunner:
 
         logger.info(f"Metrics written to {metrics_file}")
         console.print(f"[green]Metrics written to {metrics_file}[/green]")
+
+    def _write_predictions(self, spec: str, predictions: list[dict]) -> None:
+        """Write per-instance predictions to JSONL.
+
+        Args:
+            spec: Task specification string (used for filename)
+            predictions: List of prediction dicts to write
+        """
+        pred_dir = os.path.join(self.output_dir, "predictions")
+        os.makedirs(pred_dir, exist_ok=True)
+
+        # Sanitize spec for filename: arc_challenge:bpb::olmes -> arc_challenge_bpb__olmes
+        filename = spec.replace(":", "_").replace("/", "_") + ".jsonl"
+        filepath = os.path.join(pred_dir, filename)
+
+        with open(filepath, "w") as f:
+            for pred in predictions:
+                f.write(json.dumps(pred) + "\n")
+
+        logger.info(f"Predictions written to {filepath}")

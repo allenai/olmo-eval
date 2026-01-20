@@ -21,7 +21,7 @@ from olmo_eval.core import Instance, LMOutput, LMRequest, Response, expand_tasks
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.evals.tasks import Task, get_task
 from olmo_eval.runners.sequential import ValidationError
-from olmo_eval.runners.utils import TaskResult, get_primary_metric
+from olmo_eval.runners.utils import TaskResult, build_predictions, get_primary_metric
 
 if TYPE_CHECKING:
     from olmo_eval.storage import StorageBackend
@@ -166,6 +166,9 @@ def finalize_task(tracker: TaskTracker) -> TaskResult:
     scored = tracker.task.score_responses(responses)
     metrics = tracker.task.compute_metrics(scored)
 
+    # Build predictions for per-instance inspection
+    predictions = build_predictions(scored)
+
     return TaskResult(
         spec=tracker.spec,
         config={
@@ -177,6 +180,7 @@ def finalize_task(tracker: TaskTracker) -> TaskResult:
         num_instances=tracker.total_instances,
         metrics=metrics,
         duration_seconds=duration,
+        predictions=predictions,
     )
 
 
@@ -934,6 +938,11 @@ class AsyncEvalRunner:
                     results[key] = task_result
                     completed_pairs += 1
                     self._report_task_completion(tracker.model_name, task_result)
+                    # Write predictions to JSONL
+                    if task_result.predictions:
+                        self._write_predictions(
+                            tracker.model_name, task_result.spec, task_result.predictions
+                        )
 
             # Progress update
             if processed % 100 == 0:
@@ -1096,6 +1105,28 @@ class AsyncEvalRunner:
 
         logger.info(f"Metrics written to {metrics_file}")
         console.print(f"[green]Metrics written to {metrics_file}[/green]")
+
+    def _write_predictions(self, model_name: str, spec: str, predictions: list[dict]) -> None:
+        """Write per-instance predictions to JSONL.
+
+        Args:
+            model_name: Model name (used in directory structure)
+            spec: Task specification string (used for filename)
+            predictions: List of prediction dicts to write
+        """
+        # Include model name in path for multi-model runs
+        pred_dir = os.path.join(self.output_dir, "predictions", model_name.replace("/", "_"))
+        os.makedirs(pred_dir, exist_ok=True)
+
+        # Sanitize spec for filename: arc_challenge:bpb::olmes -> arc_challenge_bpb__olmes
+        filename = spec.replace(":", "_").replace("/", "_") + ".jsonl"
+        filepath = os.path.join(pred_dir, filename)
+
+        with open(filepath, "w") as f:
+            for pred in predictions:
+                f.write(json.dumps(pred) + "\n")
+
+        logger.info(f"Predictions written to {filepath}")
 
 
 # -----------------------------------------------------------------------------
@@ -1428,6 +1459,11 @@ class StreamingEvalRunner:
                     results[key] = task_result
                     completed_pairs += 1
                     self._report_task_completion(tracker.model_name, task_result)
+                    # Write predictions to JSONL
+                    if task_result.predictions:
+                        self._write_predictions(
+                            tracker.model_name, task_result.spec, task_result.predictions
+                        )
 
             if processed % 100 == 0:
                 console.print(
@@ -1581,3 +1617,25 @@ class StreamingEvalRunner:
 
         logger.info(f"Metrics written to {metrics_file}")
         console.print(f"[green]Metrics written to {metrics_file}[/green]")
+
+    def _write_predictions(self, model_name: str, spec: str, predictions: list[dict]) -> None:
+        """Write per-instance predictions to JSONL.
+
+        Args:
+            model_name: Model name (used in directory structure)
+            spec: Task specification string (used for filename)
+            predictions: List of prediction dicts to write
+        """
+        # Include model name in path for multi-model runs
+        pred_dir = os.path.join(self.output_dir, "predictions", model_name.replace("/", "_"))
+        os.makedirs(pred_dir, exist_ok=True)
+
+        # Sanitize spec for filename: arc_challenge:bpb::olmes -> arc_challenge_bpb__olmes
+        filename = spec.replace(":", "_").replace("/", "_") + ".jsonl"
+        filepath = os.path.join(pred_dir, filename)
+
+        with open(filepath, "w") as f:
+            for pred in predictions:
+                f.write(json.dumps(pred) + "\n")
+
+        logger.info(f"Predictions written to {filepath}")

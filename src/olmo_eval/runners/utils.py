@@ -10,6 +10,9 @@ from olmo_eval.backends import Backend
 from olmo_eval.core import Response
 from olmo_eval.evals.tasks import get_task
 
+# Re-export build_predictions for parallel runner
+__all__ = ["TaskResult", "build_predictions", "get_primary_metric", "run_task_impl"]
+
 
 def get_primary_metric(metrics: dict[str, float]) -> tuple[str, float] | None:
     """Get the primary metric name and value from a metrics dict.
@@ -45,6 +48,47 @@ class TaskResult:
     metrics: dict[str, float]
     error: str | None = None
     duration_seconds: float = 0.0
+    predictions: list[dict] | None = None
+
+
+def build_predictions(scored: list[Response]) -> list[dict]:
+    """Build per-instance predictions from scored responses.
+
+    Args:
+        scored: List of scored Response objects
+
+    Returns:
+        List of prediction dicts suitable for JSONL output
+    """
+    predictions = []
+    for idx, resp in enumerate(scored):
+        # Build doc from instance
+        doc: dict[str, Any] = {"query": resp.instance.question}
+        if resp.instance.choices:
+            doc["choices"] = list(resp.instance.choices)
+        if resp.instance.gold_answer is not None:
+            # Use gold_idx from metadata if available, otherwise use gold_answer
+            doc["gold"] = resp.instance.metadata.get("gold_idx", resp.instance.gold_answer)
+
+        # Build model_output from LMOutput objects
+        model_output = []
+        for out in resp.outputs:
+            out_data: dict[str, Any] = {"text": out.text}
+            if out.logprobs:
+                out_data["sum_logprob"] = sum(t.get("logprob", 0) for t in out.logprobs)
+                out_data["num_tokens"] = len(out.logprobs)
+            out_data["num_bytes"] = len(out.text.encode("utf-8"))
+            model_output.append(out_data)
+
+        predictions.append({
+            "doc_id": idx,
+            "native_id": resp.instance.metadata.get("id", f"doc_{idx}"),
+            "doc": doc,
+            "model_output": model_output,
+            "scores": dict(resp.scores),
+        })
+
+    return predictions
 
 
 def run_task_impl(
@@ -110,6 +154,9 @@ def run_task_impl(
         scored = task.score_responses(responses)
         metrics = task.compute_metrics(scored)
 
+        # Build predictions for per-instance inspection
+        predictions = build_predictions(scored)
+
         duration = time.time() - start_time
 
         return TaskResult(
@@ -123,6 +170,7 @@ def run_task_impl(
             num_instances=len(instances),
             metrics=metrics,
             duration_seconds=duration,
+            predictions=predictions,
         )
 
     except Exception as e:
