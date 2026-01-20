@@ -525,47 +525,6 @@ class BeakerLauncher:
             self._beaker = Beaker.from_env(default_workspace=self._workspace)
         return self._beaker
 
-    def _print_runtime_command(self) -> str:
-        """Return a Python command that prints runtime environment summary."""
-        script = r"""
-import sys
-print("\n" + "=" * 60)
-print("RUNTIME ENVIRONMENT SUMMARY")
-print("=" * 60)
-print(f"Python:          {sys.version.split()[0]}")
-try:
-    import torch
-    print(f"PyTorch:         {torch.__version__}")
-    print(f"CUDA available:  {torch.cuda.is_available()}")
-    if torch.cuda.is_available():
-        print(f"CUDA version:    {torch.version.cuda}")
-        print(f"cuDNN version:   {torch.backends.cudnn.version()}")
-        print(f"GPU count:       {torch.cuda.device_count()}")
-        for i in range(torch.cuda.device_count()):
-            print(f"  GPU {i}:         {torch.cuda.get_device_name(i)}")
-except ImportError:
-    print("PyTorch:         NOT INSTALLED")
-try:
-    import flash_attn
-    print(f"Flash Attention: {flash_attn.__version__}")
-except ImportError:
-    print("Flash Attention: NOT INSTALLED")
-try:
-    import transformers
-    print(f"Transformers:    {transformers.__version__}")
-except ImportError:
-    print("Transformers:    NOT INSTALLED")
-try:
-    import vllm
-    print(f"vLLM:            {vllm.__version__}")
-except ImportError:
-    print("vLLM:            NOT INSTALLED")
-print("=" * 60 + "\n")
-"""
-        # Escape for shell and run with python -c
-        escaped = script.strip().replace("'", "'\"'\"'")
-        return f"python -c '{escaped}'"
-
     def _build_command_with_backends(
         self,
         command: list[str],
@@ -605,9 +564,6 @@ print("=" * 60 + "\n")
             steps.append("uv pip uninstall flash-attn || true")
         elif flash_attn == 3:
             steps.append("/gantry-runtime/scripts/use_fa3.sh")
-
-        # Print runtime environment summary
-        steps.append(self._print_runtime_command())
 
         # Run the actual command
         steps.append(" ".join(command))
