@@ -536,7 +536,6 @@ def launch(
             ModelConfig,
             calculate_experiment_splits,
             get_model_short_name,
-            get_tasks_short_name,
             parse_model_config,
             validate_priority_configuration,
         )
