@@ -144,11 +144,19 @@ class PPLFormatter:
     """Format instances for perplexity/BPB (bits-per-byte) evaluation.
 
     This formatter creates requests for loglikelihood scoring where the
-    gold answer is used as the continuation to evaluate. It does not use
-    few-shot examples, as BPB evaluation typically measures raw language
-    modeling performance on the target text.
+    gold answer is used as the continuation to evaluate.
 
-    The instance's gold_answer is treated as the text to compute logprobs over.
+    For multiple choice tasks:
+    - Uses the question as the prompt/context (measures P(answer | question))
+    - Uses the actual gold answer TEXT (not the letter)
+    - Adds a leading space to the continuation (following minieval convention)
+
+    For pure text tasks (no question):
+    - Uses empty prompt for unconditional probability
+
+    This approach avoids the "first token has no logprob" issue that occurs
+    with empty prompts, since vLLM returns None for the first position when
+    there's no conditioning context.
     """
 
     def format(
@@ -156,13 +164,34 @@ class PPLFormatter:
         instance: Instance,
         fewshot: list[Instance] | None = None,
     ) -> LMRequest:
-        # For BPB evaluation, we use an empty prompt and the gold answer as continuation
-        # This measures the model's logprob of generating the gold text
-        if instance.gold_answer is None:
-            raise ValueError("PPLFormatter requires instance.gold_answer to be set")
+        # Determine the text to compute logprobs over
+        gold_text: str | None = None
+
+        # For MC tasks: use the actual choice text, not just the letter
+        if instance.choices and "gold_idx" in instance.metadata:
+            gold_idx = instance.metadata["gold_idx"]
+            if 0 <= gold_idx < len(instance.choices):
+                gold_text = instance.choices[gold_idx]
+        # Fallback to gold_text from metadata if available
+        if gold_text is None and "gold_text" in instance.metadata:
+            gold_text = instance.metadata["gold_text"]
+        # Final fallback to gold_answer
+        if gold_text is None:
+            gold_text = instance.gold_answer
+
+        if gold_text is None:
+            raise ValueError("PPLFormatter requires a gold answer to be set")
+
+        # Build prompt: use question as context for MC tasks (avoids first-token issue)
+        # This measures P(answer | question) which is more meaningful for MC eval
+        prompt = ""
+        if instance.question:
+            prompt = instance.question
+            # Add leading space to continuation when there's a prompt (minieval convention)
+            gold_text = " " + gold_text
 
         return LMRequest(
             request_type=RequestType.LOGLIKELIHOOD,
-            prompt="",
-            continuations=(instance.gold_answer,),
+            prompt=prompt,
+            continuations=(gold_text,),
         )
