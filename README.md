@@ -599,13 +599,13 @@ This approach allows you to:
 Images are tagged with CUDA and PyTorch versions: `cu{version}-trc{version}-{arch}`
 
 ```bash
-# Build with defaults (CUDA 12.8.1 + PyTorch 2.9.1)
+# Build with defaults
 ./scripts/build_image.sh
 
 # Specific CUDA + PyTorch version
 ./scripts/build_image.sh --cuda-version 12.8.1 --torch-version 2.9.1
 
-# Production build (amd64)
+# Production build
 ./scripts/build_image.sh --platform linux/amd64
 
 # See supported CUDA+PyTorch pairs
@@ -613,7 +613,7 @@ Images are tagged with CUDA and PyTorch versions: `cu{version}-trc{version}-{arc
 ```
 
 **Supported CUDA versions**: 12.6.1, 12.8.0, 12.8.1, 12.9.1
-**PyTorch version**: Configurable via `--torch-version` (default: 2.9.1)
+**PyTorch version**: Configurable via `--torch-version`
 **Configuration**: See `scripts/build_config.sh`
 
 ### What's in the Image
