@@ -56,16 +56,13 @@ RUN CUDA_SHORT=$(echo "${CUDA_VERSION}" | sed 's/\.//g' | cut -c1-3) && \
     torch==${TORCH_VERSION} torchvision torchaudio
 
 # ============================================================================
-# Stage 2: Install Flash Attention 2 from pre-built wheel
+# Stage 2: Install Flash Attention 2
+# Inherits from builder: uv, venv, PATH, VIRTUAL_ENV, torch, build tools
 # ============================================================================
 FROM builder AS fa2-builder
 
-ARG CUDA_VERSION
-ARG TORCH_VERSION
-ARG PYTHON_VERSION
 ARG FA2_VERSION
 
-# Install flash-attn 2
 RUN uv pip install --no-build-isolation --no-cache-dir flash-attn==${FA2_VERSION}
 
 # Verify FA2 installation

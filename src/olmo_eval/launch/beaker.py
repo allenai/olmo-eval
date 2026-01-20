@@ -527,7 +527,7 @@ class BeakerLauncher:
 
     def _print_runtime_command(self) -> str:
         """Return a Python command that prints runtime environment summary."""
-        script = r'''
+        script = r"""
 import sys
 print("\n" + "=" * 60)
 print("RUNTIME ENVIRONMENT SUMMARY")
@@ -561,7 +561,7 @@ try:
 except ImportError:
     print("vLLM:            NOT INSTALLED")
 print("=" * 60 + "\n")
-'''
+"""
         # Escape for shell and run with python -c
         escaped = script.strip().replace("'", "'\"'\"'")
         return f"python -c '{escaped}'"
@@ -593,9 +593,7 @@ print("=" * 60 + "\n")
         # Install olmo-eval from gantry-cloned source with optional backend groups
         # Generate constraints from pre-installed CUDA packages to prevent uv from changing them
         constraints = "/tmp/cuda-constraints.txt"
-        steps.append(
-            f"uv pip freeze | grep -E '^(torch|flash-attn|nvidia-)' > {constraints}"
-        )
+        steps.append(f"uv pip freeze | grep -E '^(torch|flash-attn|nvidia-)' > {constraints}")
         if backends:
             extras = ",".join(backends)
             steps.append(f"cd /gantry-runtime && uv pip install -e '.[{extras}]' -c {constraints}")
