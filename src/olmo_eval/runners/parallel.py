@@ -344,6 +344,7 @@ def instance_worker_process(
     result_queue: mp.Queue,
     model_name: str,
     backend_type_str: str,
+    attention_backend: str | None = None,
 ) -> None:
     """Worker that collects all items then processes at once.
 
@@ -356,6 +357,7 @@ def instance_worker_process(
         result_queue: Queue to put ResultItems
         model_name: Model name for backend
         backend_type_str: Backend type string
+        attention_backend: Attention backend to use (e.g., "FLASHINFER", "FLASH_ATTN")
     """
     import sys
 
@@ -365,7 +367,9 @@ def instance_worker_process(
 
         backend_type = BackendType(backend_type_str)
         # Pass tensor_parallel_size for vLLM to use all assigned GPUs
-        engine_kwargs = {"tensor_parallel_size": len(gpu_ids)} if gpu_ids else {}
+        engine_kwargs: dict[str, Any] = {"tensor_parallel_size": len(gpu_ids)} if gpu_ids else {}
+        if attention_backend:
+            engine_kwargs["attention_backend"] = attention_backend
         backend = create_backend(backend_type, model_name, **engine_kwargs)
 
         # Collect ALL items from queue until poison pill
@@ -601,6 +605,9 @@ class AsyncEvalRunner:
     num_workers: int | None = None  # Total workers (distributed across models)
     gpus_per_worker: int = 1  # Number of GPUs each worker uses
 
+    # vLLM config
+    attention_backend: str | None = None  # e.g., "FLASHINFER", "FLASH_ATTN"
+
     def validate(self) -> None:
         """Validate configuration."""
         from olmo_eval.evals.suites import suite_exists
@@ -821,6 +828,7 @@ class AsyncEvalRunner:
                         result_queue,
                         model_config.model,
                         backend_type.value,
+                        self.attention_backend,
                     ),
                 )
                 worker.start()

@@ -191,12 +191,6 @@ def run(
             "--async or --async-stream"
         )
 
-    if attention_backend and not use_async_stream:
-        console.print(
-            "[yellow]Warning:[/yellow] --attention-backend only applies to "
-            "--async-stream mode (vLLM streaming)"
-        )
-
     # Warning for conflicting flags
     if use_async and use_async_stream:
         console.print(
@@ -283,6 +277,7 @@ def run(
             storages=storages,
             num_workers=num_workers,
             gpus_per_worker=gpus_per_worker,
+            attention_backend=attention_backend.upper() if attention_backend else None,
         )
     else:
         # Sequential runner - run each model in sequence
@@ -302,6 +297,7 @@ def run(
                 limit_override=limit,
                 backend_override=backend,
                 storages=storages,
+                attention_backend=attention_backend.upper() if attention_backend else None,
             )
 
             try:

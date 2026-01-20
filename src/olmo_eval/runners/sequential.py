@@ -45,6 +45,9 @@ class EvalRunner:
     backend_override: str | None = None
     storages: list[StorageBackend] = field(default_factory=list)
 
+    # vLLM config
+    attention_backend: str | None = None  # e.g., "FLASHINFER", "FLASH_ATTN"
+
     def validate(self) -> None:
         """Validate all inputs before running.
 
@@ -126,13 +129,16 @@ class EvalRunner:
         backend_type = BackendType(backend_str)
 
         console.print(f"[bold]Initializing {backend_type.value} backend...[/bold]")
+        extra_kwargs = dict(model_config.extra_args)
+        if self.attention_backend:
+            extra_kwargs["attention_backend"] = self.attention_backend
         backend = create_backend(
             backend_type,
             model_config.model,
             revision=model_config.revision,
             trust_remote_code=model_config.trust_remote_code,
             dtype=model_config.dtype,
-            **model_config.extra_args,
+            **extra_kwargs,
         )
 
         expanded_tasks = expand_tasks(self.task_specs)
