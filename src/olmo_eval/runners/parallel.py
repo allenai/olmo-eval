@@ -21,7 +21,7 @@ from olmo_eval.core import Instance, LMOutput, LMRequest, Response, expand_tasks
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.evals.tasks import Task, get_task
 from olmo_eval.runners.sequential import ValidationError
-from olmo_eval.runners.utils import TaskResult
+from olmo_eval.runners.utils import TaskResult, get_primary_metric
 
 if TYPE_CHECKING:
     from olmo_eval.storage import StorageBackend
@@ -1009,10 +1009,10 @@ class AsyncEvalRunner:
             logger.info(f"  {model_name}:")
             for task_name, task_data in model_data.get("tasks", {}).items():
                 metrics = task_data.get("metrics", {})
-                if metrics:
-                    # Use first metric as primary score
-                    primary_score = next(iter(metrics.values()))
-                    logger.info(f"    {task_name}: {primary_score:.4f}")
+                primary = get_primary_metric(metrics)
+                if primary:
+                    metric_name, score = primary
+                    logger.info(f"    {task_name}: {score:.4f} ({metric_name})")
 
     def _save_results(self, results: dict[str, Any]) -> None:
         """Save results to all configured storage backends."""
@@ -1046,10 +1046,22 @@ class AsyncEvalRunner:
                     }
                 )
 
+        # Build summary with primary metric for each (model, task) pair
+        summary: dict[str, dict[str, dict[str, Any]]] = {}
+        for model_name, model_data in results.get("models", {}).items():
+            summary[model_name] = {}
+            for task_name, task_data in model_data.get("tasks", {}).items():
+                metrics = task_data.get("metrics", {})
+                primary = get_primary_metric(metrics)
+                if primary:
+                    metric_name, score = primary
+                    summary[model_name][task_name] = {"metric": metric_name, "score": score}
+
         metrics_output = {
             "timestamp": results.get("timestamp", ""),
             "models": list(results.get("models", {}).keys()),
             "tasks": tasks_list,
+            "summary": summary,
             "errors": results.get("errors", []),
         }
 
@@ -1479,9 +1491,10 @@ class StreamingEvalRunner:
             logger.info(f"  {model_name}:")
             for task_name, task_data in model_data.get("tasks", {}).items():
                 metrics = task_data.get("metrics", {})
-                if metrics:
-                    primary_score = next(iter(metrics.values()))
-                    logger.info(f"    {task_name}: {primary_score:.4f}")
+                primary = get_primary_metric(metrics)
+                if primary:
+                    metric_name, score = primary
+                    logger.info(f"    {task_name}: {score:.4f} ({metric_name})")
 
     def _save_results(self, results: dict[str, Any]) -> None:
         """Save results to all configured storage backends."""
@@ -1514,10 +1527,22 @@ class StreamingEvalRunner:
                     }
                 )
 
+        # Build summary with primary metric for each (model, task) pair
+        summary: dict[str, dict[str, dict[str, Any]]] = {}
+        for model_name, model_data in results.get("models", {}).items():
+            summary[model_name] = {}
+            for task_name, task_data in model_data.get("tasks", {}).items():
+                metrics = task_data.get("metrics", {})
+                primary = get_primary_metric(metrics)
+                if primary:
+                    metric_name, score = primary
+                    summary[model_name][task_name] = {"metric": metric_name, "score": score}
+
         metrics_output = {
             "timestamp": results.get("timestamp", ""),
             "models": list(results.get("models", {}).keys()),
             "tasks": tasks_list,
+            "summary": summary,
             "errors": results.get("errors", []),
         }
 

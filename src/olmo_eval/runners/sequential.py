@@ -18,7 +18,7 @@ from olmo_eval.core import expand_tasks, get_model_config
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.evals.suites import suite_exists
 from olmo_eval.evals.tasks import list_regimes, list_tasks
-from olmo_eval.runners.utils import run_task_impl
+from olmo_eval.runners.utils import get_primary_metric, run_task_impl
 
 if TYPE_CHECKING:
     from olmo_eval.storage import StorageBackend
@@ -198,10 +198,10 @@ class EvalRunner:
         logger.info("Summary of primary scores:")
         for task_name, task_data in results["tasks"].items():
             metrics = task_data.get("metrics", {})
-            if metrics:
-                # Use first metric as primary score
-                primary_score = next(iter(metrics.values()))
-                logger.info(f"  {task_name}: {primary_score:.4f}")
+            primary = get_primary_metric(metrics)
+            if primary:
+                metric_name, score = primary
+                logger.info(f"  {task_name}: {score:.4f} ({metric_name})")
 
     def _save_results(self, results: dict[str, Any]) -> None:
         """Save results to all configured storage backends."""
@@ -232,11 +232,21 @@ class EvalRunner:
             for task_name, task_data in results.get("tasks", {}).items()
         ]
 
+        # Build summary with primary metric for each task
+        summary: dict[str, dict[str, Any]] = {}
+        for task_name, task_data in results.get("tasks", {}).items():
+            metrics = task_data.get("metrics", {})
+            primary = get_primary_metric(metrics)
+            if primary:
+                metric_name, score = primary
+                summary[task_name] = {"metric": metric_name, "score": score}
+
         metrics_output = {
             "model": results.get("model", ""),
             "backend": results.get("backend", ""),
             "timestamp": results.get("timestamp", ""),
             "tasks": tasks_list,
+            "summary": summary,
             "errors": results.get("errors", []),
         }
 

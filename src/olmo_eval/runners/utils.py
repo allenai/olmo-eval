@@ -11,6 +11,30 @@ from olmo_eval.core import Response
 from olmo_eval.evals.tasks import get_task
 
 
+def get_primary_metric(metrics: dict[str, float]) -> tuple[str, float] | None:
+    """Get the primary metric name and value from a metrics dict.
+
+    Priority:
+    1. "accuracy" if present (most common metric)
+    2. First metric alphabetically (for determinism)
+
+    Args:
+        metrics: Dictionary of metric names to values
+
+    Returns:
+        Tuple of (metric_name, metric_value), or None if metrics is empty
+    """
+    if not metrics:
+        return None
+
+    if "accuracy" in metrics:
+        return ("accuracy", metrics["accuracy"])
+
+    # Fallback: first metric alphabetically for determinism
+    name = sorted(metrics.keys())[0]
+    return (name, metrics[name])
+
+
 @dataclass
 class TaskResult:
     """Result from executing a single task."""
