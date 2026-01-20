@@ -49,8 +49,8 @@ ENV VIRTUAL_ENV="/opt/venv"
 
 RUN uv pip install numpy packaging ninja wheel setuptools
 
+# Install PyTorch with CUDA support
 ARG INSTALL_CHANNEL=whl
-# Install PyTorch with CUDA support, and numpy to avoid torch warnings
 RUN CUDA_SHORT=$(echo "${CUDA_VERSION}" | sed 's/\.//g' | cut -c1-3) && \
     uv pip install --no-cache-dir --index-url https://download.pytorch.org/${INSTALL_CHANNEL}/cu${CUDA_SHORT}/ \
     torch==${TORCH_VERSION} torchvision torchaudio

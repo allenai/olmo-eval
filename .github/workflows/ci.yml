@@ -33,9 +33,9 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
+
+      - name: Generate lockfile
+        run: uv lock
 
       - name: Restore uv cache
         uses: actions/cache@v4
@@ -68,9 +68,9 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
+
+      - name: Generate lockfile
+        run: uv lock
 
       - name: Restore uv cache
         uses: actions/cache@v4
@@ -107,9 +107,9 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
+
+      - name: Generate lockfile
+        run: uv lock
 
       - name: Restore uv cache
         uses: actions/cache@v4
@@ -202,9 +202,9 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
+
+      - name: Generate lockfile
+        run: uv lock
 
       - name: Restore uv cache
         uses: actions/cache@v4
@@ -262,9 +262,9 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
+
+      - name: Generate lockfile
+        run: uv lock
 
       - name: Install dependencies with vLLM
         run: uv sync --dev --extra vllm
@@ -305,9 +305,9 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
+
+      - name: Generate lockfile
+        run: uv lock
 
       - name: Install dependencies
         run: uv sync --dev
@@ -349,9 +349,9 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
+
+      - name: Generate lockfile
+        run: uv lock
 
       - name: Build package
         run: uv build
