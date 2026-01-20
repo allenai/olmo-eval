@@ -549,13 +549,12 @@ class BeakerLauncher:
         steps = []
 
         # Install olmo-eval from gantry-cloned source with optional backend groups
-        # Use --no-install-package torch to use pre-installed torch from Docker image
-        uv_install = "uv pip install --no-install-package torch"
+        # Use uv sync with --no-install-package torch to use pre-installed torch from Docker image
         if backends:
-            extras = ",".join(backends)
-            steps.append(f"{uv_install} -e '/gantry-runtime[{extras}]'")
+            extras_flags = " ".join(f"--extra {b}" for b in backends)
+            steps.append(f"cd /gantry-runtime && uv sync --no-install-package torch {extras_flags}")
         else:
-            steps.append(f"{uv_install} -e /gantry-runtime")
+            steps.append("cd /gantry-runtime && uv sync --no-install-package torch")
 
         # Handle Flash Attention: upgrade to FA3, or disable entirely
         if no_flash_attn:
