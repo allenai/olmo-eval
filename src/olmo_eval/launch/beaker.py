@@ -308,59 +308,6 @@ def calculate_experiment_splits(
     return splits
 
 
-def _build_gpu_env_summary_command() -> str:
-    """Build a Python command that prints GPU environment summary at container startup."""
-    python_code = r'''
-import sys
-print("\n" + "=" * 60)
-print("GPU ENVIRONMENT SUMMARY")
-print("=" * 60)
-
-# Python version
-print(f"Python:          {sys.version.split()[0]}")
-
-# PyTorch and CUDA
-try:
-    import torch
-    print(f"PyTorch:         {torch.__version__}")
-    print(f"CUDA available:  {torch.cuda.is_available()}")
-    if torch.cuda.is_available():
-        print(f"CUDA version:    {torch.version.cuda}")
-        print(f"cuDNN version:   {torch.backends.cudnn.version()}")
-        print(f"GPU count:       {torch.cuda.device_count()}")
-        for i in range(torch.cuda.device_count()):
-            print(f"  GPU {i}:         {torch.cuda.get_device_name(i)}")
-except ImportError:
-    print("PyTorch:         NOT INSTALLED")
-
-# Flash Attention
-try:
-    import flash_attn
-    print(f"Flash Attention: {flash_attn.__version__}")
-except ImportError:
-    print("Flash Attention: NOT INSTALLED")
-
-# Transformers
-try:
-    import transformers
-    print(f"Transformers:    {transformers.__version__}")
-except ImportError:
-    print("Transformers:    NOT INSTALLED")
-
-# vLLM
-try:
-    import vllm
-    print(f"vLLM:            {vllm.__version__}")
-except ImportError:
-    print("vLLM:            NOT INSTALLED")
-
-print("=" * 60 + "\n")
-'''
-    # Escape for bash -c: single quotes inside need special handling
-    escaped_code = python_code.replace("'", "'\"'\"'")
-    return f"uv run python -c '{escaped_code}'"
-
-
 @dataclass
 class BeakerEnvSecret:
     """Environment variable sourced from a Beaker secret.
@@ -615,7 +562,7 @@ class BeakerLauncher:
             steps.append("/gantry-runtime/scripts/use_fa3.sh")
 
         # Print GPU environment summary
-        steps.append(_build_gpu_env_summary_command())
+        steps.append("uv run python /gantry-runtime/scripts/print_gpu_env.py")
 
         # Run the actual command
         steps.append(" ".join(command))

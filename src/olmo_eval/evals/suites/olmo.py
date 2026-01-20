@@ -515,6 +515,7 @@ OLMO3_DEV_7B_MAIN_V2_FAST = make_suite(
         MINERVA_N4_V2,
         "codex_humaneval:3shot::olmo3:n32:v2",
         "mbpp:3shot::olmo3:n32:v2",
+        OLMO3_DEV_1B_CODE_BPB,  # TODO(undfined): Temporary inclusion to cover code for now
     ),
     aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
     description="OLMo3 7B main development suite v2 (fast)",

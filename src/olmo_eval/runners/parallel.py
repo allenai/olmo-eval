@@ -181,6 +181,112 @@ def finalize_task(tracker: TaskTracker) -> TaskResult:
 
 
 # -----------------------------------------------------------------------------
+# Worker health monitoring
+# -----------------------------------------------------------------------------
+
+
+def check_workers_alive(
+    workers: list[mp.process.BaseProcess],
+    result_queue: mp.Queue,
+    timeout: float = 0.1,
+) -> None:
+    """Check if workers are alive and handle any fatal errors in the queue.
+
+    Args:
+        workers: List of worker processes
+        result_queue: Queue to check for fatal error markers
+        timeout: How long to wait for queue items
+
+    Raises:
+        RuntimeError: If all workers are dead or a fatal error is found
+    """
+    # Check for fatal errors in queue (non-blocking)
+    try:
+        while True:
+            result_item = result_queue.get_nowait()
+            if result_item.task_id == "__WORKER_FATAL__":
+                console.print("\n[bold red]FATAL: Worker crashed![/bold red]")
+                console.print(f"[red]{result_item.error}[/red]")
+                # Terminate all workers
+                for worker in workers:
+                    if worker.is_alive():
+                        worker.terminate()
+                        worker.join(timeout=5)
+                raise RuntimeError(f"Worker process crashed: {result_item.error}")
+            else:
+                # Put non-fatal item back (this is rare but handle it)
+                result_queue.put(result_item)
+                break
+    except Exception:
+        pass  # Queue empty, continue
+
+    # Check if all workers are dead
+    alive_count = sum(1 for w in workers if w.is_alive())
+    if alive_count == 0:
+        # All workers dead - check exit codes
+        exit_codes = [w.exitcode for w in workers]
+        if any(code != 0 and code is not None for code in exit_codes):
+            raise RuntimeError(
+                f"All workers died unexpectedly. Exit codes: {exit_codes}"
+            )
+
+
+def wait_for_workers_ready(
+    workers: list[mp.process.BaseProcess],
+    result_queue: mp.Queue,
+    startup_timeout: float = 30.0,
+) -> None:
+    """Wait briefly for workers to start and check for early failures.
+
+    Args:
+        workers: List of worker processes
+        result_queue: Queue to check for fatal error markers
+        startup_timeout: How long to wait for workers to stabilize
+
+    Raises:
+        RuntimeError: If workers fail during startup
+    """
+    # Give workers a moment to initialize and potentially fail
+    start_time = time.time()
+    check_interval = 0.5
+
+    while time.time() - start_time < startup_timeout:
+        time.sleep(check_interval)
+
+        # Check for fatal errors
+        try:
+            result_item = result_queue.get_nowait()
+            if result_item.task_id == "__WORKER_FATAL__":
+                console.print("\n[bold red]FATAL: Worker failed during startup![/bold red]")
+                console.print(f"[red]{result_item.error}[/red]")
+                # Terminate all workers
+                for worker in workers:
+                    if worker.is_alive():
+                        worker.terminate()
+                        worker.join(timeout=5)
+                raise RuntimeError(f"Worker failed during startup: {result_item.error}")
+            else:
+                # Put non-fatal item back
+                result_queue.put(result_item)
+        except Exception:
+            pass  # Queue empty
+
+        # Check if any worker died with non-zero exit code
+        for worker in workers:
+            if not worker.is_alive() and worker.exitcode is not None and worker.exitcode != 0:
+                raise RuntimeError(
+                    f"Worker died during startup with exit code {worker.exitcode}"
+                )
+
+        # If all workers are alive, we're good
+        if all(w.is_alive() for w in workers):
+            return
+
+    # Final check
+    check_workers_alive(workers, result_queue)
+
+
+# -----------------------------------------------------------------------------
 # Worker process
 # -----------------------------------------------------------------------------
 
@@ -717,6 +823,11 @@ class AsyncEvalRunner:
             f"{num_models} model(s), processing instances...[/bold green]"
         )
 
+        # Wait for workers to initialize and check for early failures
+        console.print("[dim]Waiting for workers to initialize...[/dim]")
+        wait_for_workers_ready(workers, result_queue, startup_timeout=60.0)
+        console.print("[dim]Workers initialized successfully[/dim]")
+
         # Track results - keyed by (model, task)
         results: dict[tuple[str, str], TaskResult] = {}
         completed_pairs = 0
@@ -733,10 +844,22 @@ class AsyncEvalRunner:
         pending_instances = total_instances
 
         processed = 0
+        last_health_check = time.time()
+        health_check_interval = 5.0  # Check worker health every 5 seconds
+
         while completed_pairs < total_pairs and pending_instances > 0:
-            result_item: ResultItem = await asyncio.get_event_loop().run_in_executor(
-                None, result_queue.get
-            )
+            # Use timeout-based queue get to allow periodic health checks
+            try:
+                result_item: ResultItem = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: result_queue.get(timeout=1.0)
+                )
+            except Exception:
+                # Queue timeout - check worker health
+                if time.time() - last_health_check > health_check_interval:
+                    check_workers_alive(workers, result_queue)
+                    last_health_check = time.time()
+                continue
+
             processed += 1
 
             # Check for fatal worker crash
@@ -1169,6 +1292,11 @@ class StreamingEvalRunner:
             f"{num_models} model(s)[/bold green]"
         )
 
+        # Wait for workers to initialize and check for early failures
+        console.print("[dim]Waiting for workers to initialize...[/dim]")
+        wait_for_workers_ready(workers, result_queue, startup_timeout=60.0)
+        console.print("[dim]Workers initialized successfully[/dim]")
+
         # Enqueue items - workers will start processing immediately
         for model_name, items in model_items.items():
             random.shuffle(items)
@@ -1194,16 +1322,27 @@ class StreamingEvalRunner:
 
         pending_instances = total_instances
         processed = 0
+        last_health_check = time.time()
+        health_check_interval = 5.0  # Check worker health every 5 seconds
 
         while completed_pairs < total_pairs and pending_instances > 0:
-            result_item: ResultItem = await asyncio.get_event_loop().run_in_executor(
-                None, result_queue.get
-            )
+            # Use timeout-based queue get to allow periodic health checks
+            try:
+                result_item: ResultItem = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: result_queue.get(timeout=1.0)
+                )
+            except Exception:
+                # Queue timeout - check worker health
+                if time.time() - last_health_check > health_check_interval:
+                    check_workers_alive(workers, result_queue)
+                    last_health_check = time.time()
+                continue
+
             processed += 1
 
             # Check for fatal worker crash
             if result_item.task_id == "__WORKER_FATAL__":
-                console.print("\n[bold red]FATAL: Worker crashed![/bold red]")
+                console.print("\n[bold red]FATAL: Worker crashed![/bold bold]")
                 console.print(f"[red]{result_item.error}[/red]")
                 # Terminate all workers
                 for worker in workers:

@@ -125,6 +125,13 @@ def run(
         level=logging.INFO,
     )
 
+    # Suppress noisy HuggingFace warnings
+    import os
+
+    os.environ.setdefault("HF_DATASETS_DISABLE_PROGRESS_BAR", "1")
+    os.environ.setdefault("DATASETS_VERBOSITY", "error")
+    logging.getLogger("datasets").setLevel(logging.ERROR)
+
     # Warning for num-workers without async
     if num_workers is not None and not use_async and not use_async_stream:
         console.print(
