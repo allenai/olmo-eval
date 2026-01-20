@@ -554,7 +554,8 @@ class BeakerLauncher:
         steps.append("cp /opt/uv.lock /gantry-runtime/uv.lock")
 
         # Install olmo-eval from gantry-cloned source with optional backend groups
-        uv_sync = "uv sync --frozen"
+        # Use --no-install-package to preserve specific pre-installed packages from Docker image
+        uv_sync = "uv sync --frozen --no-install-package torch --no-install-package flash-attn"
         if backends:
             extras_flags = " ".join(f"--extra {b}" for b in backends)
             steps.append(f"cd /gantry-runtime && {uv_sync} {extras_flags}")
