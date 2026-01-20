@@ -212,6 +212,8 @@ def check_workers_alive(
                     if worker.is_alive():
                         worker.terminate()
                         worker.join(timeout=5)
+                # Cancel queue join thread to allow clean process exit
+                result_queue.cancel_join_thread()
                 raise RuntimeError(f"Worker process crashed: {result_item.error}")
             else:
                 # Put non-fatal item back (this is rare but handle it)
@@ -262,6 +264,8 @@ def wait_for_workers_ready(
                     if worker.is_alive():
                         worker.terminate()
                         worker.join(timeout=5)
+                # Cancel queue join thread to allow clean process exit
+                result_queue.cancel_join_thread()
                 raise RuntimeError(f"Worker failed during startup: {result_item.error}")
             else:
                 # Put non-fatal item back
@@ -867,6 +871,9 @@ class AsyncEvalRunner:
                     if worker.is_alive():
                         worker.terminate()
                         worker.join(timeout=5)
+                # Cancel queue join threads to allow clean process exit
+                for queue in list(model_queues.values()) + [result_queue]:
+                    queue.cancel_join_thread()
                 raise RuntimeError(f"Worker process crashed: {result_item.error}")
 
             key = (result_item.model_name, result_item.task_id)
@@ -1345,6 +1352,9 @@ class StreamingEvalRunner:
                     if worker.is_alive():
                         worker.terminate()
                         worker.join(timeout=5)
+                # Cancel queue join threads to allow clean process exit
+                for queue in list(model_queues.values()) + [result_queue]:
+                    queue.cancel_join_thread()
                 raise RuntimeError(f"Worker process crashed: {result_item.error}")
 
             key = (result_item.model_name, result_item.task_id)

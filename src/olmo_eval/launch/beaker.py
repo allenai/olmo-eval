@@ -546,17 +546,16 @@ class BeakerLauncher:
             no_flash_attn: If True, uninstall Flash Attention entirely.
         """
         # Build the full command
-        steps = []
+        # Export UV_PROJECT_ENVIRONMENT so all uv commands use Docker's /opt/venv
+        steps = ["export UV_PROJECT_ENVIRONMENT=/opt/venv"]
 
         # Install olmo-eval from gantry-cloned source with optional backend groups
-        # Set UV_PROJECT_ENVIRONMENT to use Docker's /opt/venv instead of creating .venv
         # Use --no-install-package torch to preserve pre-installed torch from the Docker image
-        uv_sync = "UV_PROJECT_ENVIRONMENT=/opt/venv uv sync --no-install-package torch"
         if backends:
             extras_flags = " ".join(f"--extra {b}" for b in backends)
-            steps.append(f"cd /gantry-runtime && {uv_sync} {extras_flags}")
+            steps.append(f"cd /gantry-runtime && uv sync --no-install-package torch {extras_flags}")
         else:
-            steps.append(f"cd /gantry-runtime && {uv_sync}")
+            steps.append("cd /gantry-runtime && uv sync --no-install-package torch")
 
         # Handle Flash Attention: upgrade to FA3, or disable entirely
         if no_flash_attn:
