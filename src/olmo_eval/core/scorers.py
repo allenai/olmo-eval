@@ -1,5 +1,6 @@
 """Scoring protocols and implementations."""
 
+import math
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -99,3 +100,86 @@ class F1Scorer:
         if instance.gold_answer is None or output.extracted_answer is None:
             return 0.0
         return _compute_f1(str(output.extracted_answer), str(instance.gold_answer))
+
+
+@dataclass(frozen=True, slots=True)
+class BitsPerByteScorer:
+    """Compute bits per byte from logprobs.
+
+    Bits per byte is a measure of language model performance that normalizes
+    perplexity by the number of bytes in the text, making it comparable across
+    different tokenizers and vocabularies.
+
+    Formula: bits_per_byte = -sum(logprobs) / (num_bytes * log(2))
+    """
+
+    name: str = "bits_per_byte"
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        if output.logprobs is None:
+            return 0.0
+
+        # Extract logprobs from the token data
+        logprobs = [tok["logprob"] for tok in output.logprobs if "logprob" in tok]
+
+        if not logprobs:
+            return 0.0
+
+        # Count UTF-8 bytes in the output text
+        num_bytes = len(output.text.encode("utf-8"))
+        if num_bytes == 0:
+            return 0.0
+
+        # Compute bits per byte
+        total_logprob = sum(logprobs)
+        logprob_per_byte = total_logprob / num_bytes
+        bits_per_byte = -logprob_per_byte / math.log(2)
+
+        return bits_per_byte
+
+
+@dataclass(frozen=True, slots=True)
+class PerplexityScorer:
+    """Compute perplexity from logprobs.
+
+    Perplexity measures how well a language model predicts a sequence,
+    defined as exp(-average_logprob).
+    """
+
+    name: str = "perplexity"
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        if output.logprobs is None:
+            return 0.0
+
+        logprobs = [tok["logprob"] for tok in output.logprobs if "logprob" in tok]
+
+        if not logprobs:
+            return 0.0
+
+        avg_logprob = sum(logprobs) / len(logprobs)
+        perplexity = math.exp(-avg_logprob)
+
+        return perplexity
+
+
+@dataclass(frozen=True, slots=True)
+class LogprobScorer:
+    """Compute total logprob for a sequence.
+
+    This returns the sum of all token logprobs, useful for comparing
+    continuation likelihoods.
+    """
+
+    name: str = "logprob"
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        if output.logprobs is None:
+            return float("-inf")
+
+        logprobs = [tok["logprob"] for tok in output.logprobs if "logprob" in tok]
+
+        if not logprobs:
+            return float("-inf")
+
+        return sum(logprobs)

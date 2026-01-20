@@ -15,9 +15,18 @@ from .formatters import (
     Formatter,
     MCQAChatFormatter,
     MultipleChoiceFormatter,
+    PPLFormatter,
 )
-from .metrics import AccuracyMetric, F1Metric, Metric
-from .scorers import ExactMatchScorer, F1Scorer, MultipleChoiceScorer, Scorer
+from .metrics import AccuracyMetric, F1Metric, LogprobGoldMetric, MeanPerplexityMetric, Metric
+from .scorers import (
+    BitsPerByteScorer,
+    ExactMatchScorer,
+    F1Scorer,
+    LogprobScorer,
+    MultipleChoiceScorer,
+    PerplexityScorer,
+    Scorer,
+)
 from .types import (
     Instance,
     LMOutput,
@@ -55,14 +64,20 @@ __all__ = [
     "CompletionFormatter",
     "MCQAChatFormatter",
     "MultipleChoiceFormatter",
+    "PPLFormatter",
     # Scoring
     "Scorer",
     "Metric",
     "ExactMatchScorer",
     "MultipleChoiceScorer",
     "F1Scorer",
+    "BitsPerByteScorer",
+    "PerplexityScorer",
+    "LogprobScorer",
     "AccuracyMetric",
     "F1Metric",
+    "LogprobGoldMetric",
+    "MeanPerplexityMetric",
     # Code execution
     "CodeExecutionScorer",
     "PassAtKMetric",

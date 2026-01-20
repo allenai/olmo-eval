@@ -8,7 +8,13 @@ the :mc variant is a no-op. For generation tasks, :mc would convert them to
 multiple choice format.
 """
 
-from olmo_eval.core import MCQAChatFormatter, SamplingParams
+from olmo_eval.core import (
+    BitsPerByteScorer,
+    LogprobGoldMetric,
+    MCQAChatFormatter,
+    PPLFormatter,
+    SamplingParams,
+)
 
 from .core.registry import _tasks, register_variant
 
@@ -111,10 +117,23 @@ def register_bpb_variants() -> None:
     """Register :bpb variant for ALL registered tasks.
 
     The :bpb variant indicates bits-per-byte (perplexity) evaluation.
-    This uses loglikelihood scoring rather than generation.
+    This uses loglikelihood scoring with the PPL formatter, BitsPerByte scorer,
+    and LogprobGold metric.
+
+    Configuration follows the minieval pattern:
+        formatter = PPL()
+        scorer = [BitsPerByte()]
+        metric = [LogprobGold()]
     """
     for task_name in list(_tasks.keys()):
-        register_variant(task_name, "bpb")
+        register_variant(
+            task_name,
+            "bpb",
+            formatter=PPLFormatter(),
+            scorers=(BitsPerByteScorer(),),
+            metrics=(LogprobGoldMetric(),),
+            num_fewshot=0,  # BPB evaluation doesn't use few-shot examples
+        )
 
 
 def register_rc_variants() -> None:

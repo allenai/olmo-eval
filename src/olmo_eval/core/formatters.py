@@ -137,3 +137,32 @@ class MCQAChatFormatter:
         messages.append({"role": "user", "content": question_text})
 
         return LMRequest(request_type=RequestType.CHAT, messages=tuple(messages))
+
+
+@dataclass(slots=True)
+class PPLFormatter:
+    """Format instances for perplexity/BPB (bits-per-byte) evaluation.
+
+    This formatter creates requests for loglikelihood scoring where the
+    gold answer is used as the continuation to evaluate. It does not use
+    few-shot examples, as BPB evaluation typically measures raw language
+    modeling performance on the target text.
+
+    The instance's gold_answer is treated as the text to compute logprobs over.
+    """
+
+    def format(
+        self,
+        instance: Instance,
+        fewshot: list[Instance] | None = None,
+    ) -> LMRequest:
+        # For BPB evaluation, we use an empty prompt and the gold answer as continuation
+        # This measures the model's logprob of generating the gold text
+        if instance.gold_answer is None:
+            raise ValueError("PPLFormatter requires instance.gold_answer to be set")
+
+        return LMRequest(
+            request_type=RequestType.LOGLIKELIHOOD,
+            prompt="",
+            continuations=(instance.gold_answer,),
+        )
