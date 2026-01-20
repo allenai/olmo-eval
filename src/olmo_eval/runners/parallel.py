@@ -303,10 +303,16 @@ def _process_batch(
         backend: Backend instance
         result_queue: Queue to put results
     """
+    from olmo_eval.core import RequestType
+
     requests = [item.request for item in batch]
 
     try:
-        outputs_list = backend.generate(requests)
+        # Use logprobs for LOGLIKELIHOOD requests (e.g., BPB tasks)
+        if requests and requests[0].request_type == RequestType.LOGLIKELIHOOD:
+            outputs_list = backend.logprobs(requests)
+        else:
+            outputs_list = backend.generate(requests)
 
         for item, outputs in zip(batch, outputs_list, strict=True):
             result_queue.put(

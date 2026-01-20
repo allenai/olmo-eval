@@ -92,8 +92,13 @@ def run_task_impl(
         # Format requests
         requests = [task.format_request(inst) for inst in instances]
 
-        # Generate outputs
-        outputs = backend.generate(requests, task.config.sampling_params)
+        # Generate outputs - use logprobs for LOGLIKELIHOOD requests
+        from olmo_eval.core import RequestType
+
+        if requests and requests[0].request_type == RequestType.LOGLIKELIHOOD:
+            outputs = backend.logprobs(requests)
+        else:
+            outputs = backend.generate(requests, task.config.sampling_params)
 
         # Build responses
         responses = [
