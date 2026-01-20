@@ -591,14 +591,16 @@ print("=" * 60 + "\n")
         steps = ["export UV_PROJECT_ENVIRONMENT=/opt/venv"]
 
         # Install olmo-eval from gantry-cloned source with optional backend groups
-        # Use `uv pip install` instead of `uv sync` to avoid lockfile version enforcement
-        # This preserves pre-installed torch, flash-attn, and nvidia-* packages from Docker
-        # which have specific CUDA versions that differ from PyPI defaults
+        # Generate constraints from pre-installed CUDA packages to prevent uv from changing them
+        constraints = "/tmp/cuda-constraints.txt"
+        steps.append(
+            f"uv pip freeze | grep -E '^(torch|flash-attn|nvidia-)' > {constraints}"
+        )
         if backends:
             extras = ",".join(backends)
-            steps.append(f"cd /gantry-runtime && uv pip install -e '.[{extras}]'")
+            steps.append(f"cd /gantry-runtime && uv pip install -e '.[{extras}]' -c {constraints}")
         else:
-            steps.append("cd /gantry-runtime && uv pip install -e .")
+            steps.append(f"cd /gantry-runtime && uv pip install -e . -c {constraints}")
 
         # Handle Flash Attention: upgrade to FA3, or disable entirely
         if no_flash_attn:
@@ -998,7 +1000,6 @@ print("=" * 60 + "\n")
         # Get the workload (experiment)
         workload = self.beaker.workload.get(experiment_id)
         workload_url = self.beaker.workload.url(workload)
-        _console.print(f"[bold]Following experiment:[/bold] {workload_url}")
 
         # Phase 1: Wait for job creation
         job = self.beaker.workload.get_latest_job(workload)

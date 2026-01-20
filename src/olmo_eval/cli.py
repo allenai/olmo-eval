@@ -995,9 +995,11 @@ def launch(
                 console.print(f"[green]Launched:[/green] {launcher.experiment_url(experiment)}")
                 launched_experiments.append(experiment.id)
 
-    # Summary of launched experiments
+    # Summary and follow logic for launched experiments
     if launched_experiments and not dry_run:
-        console.print(f"\n[bold]Launched {len(launched_experiments)} experiment(s)[/bold]")
+        # Only show summary count for multiple experiments
+        if len(launched_experiments) > 1:
+            console.print(f"\n[bold]Launched {len(launched_experiments)} experiment(s)[/bold]")
 
         # Follow experiment(s) if requested
         if follow:
