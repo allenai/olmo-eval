@@ -51,7 +51,7 @@ ENV VIRTUAL_ENV="/opt/venv"
 RUN CUDA_SHORT=$(echo "${CUDA_VERSION}" | sed 's/\.//g' | cut -c1-3) && \
     uv pip install numpy && \
     uv pip install "torch==${TORCH_VERSION}" torchvision torchaudio \
-        --index-url "https://download.pytorch.org/whl/cu${CUDA_SHORT}"
+        --extra-index-url "https://download.pytorch.org/whl/cu${CUDA_SHORT}"
 
 # ============================================================================
 # Stage 2: Install Flash Attention 2 from pre-built wheel
