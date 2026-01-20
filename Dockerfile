@@ -47,11 +47,13 @@ RUN uv python install ${PYTHON_VERSION} && \
 ENV PATH="/opt/venv/bin:${PATH}"
 ENV VIRTUAL_ENV="/opt/venv"
 
+RUN uv pip install numpy
+
+ARG INSTALL_CHANNEL=whl
 # Install PyTorch with CUDA support, and numpy to avoid torch warnings
 RUN CUDA_SHORT=$(echo "${CUDA_VERSION}" | sed 's/\.//g' | cut -c1-3) && \
-    uv pip install numpy && \
-    uv pip install "torch==${TORCH_VERSION}" torchvision torchaudio \
-        --extra-index-url "https://download.pytorch.org/whl/cu${CUDA_SHORT}"
+    uv pip install --no-cache-dir --index-url https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_SHORT}/ \
+    torch==${TORCH_VERSION} torchvision torchaudio
 
 # ============================================================================
 # Stage 2: Install Flash Attention 2 from pre-built wheel
