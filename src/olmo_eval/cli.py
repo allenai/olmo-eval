@@ -16,6 +16,48 @@ from olmo_eval.evals.tasks import list_regimes, list_tasks
 console = Console()
 
 
+def _print_runtime_environment() -> None:
+    """Print runtime environment summary for debugging."""
+    import sys
+
+    console.print("\n" + "=" * 60)
+    console.print("RUNTIME ENVIRONMENT SUMMARY")
+    console.print("=" * 60)
+    console.print(f"Python:          {sys.version.split()[0]}")
+    try:
+        import torch
+
+        console.print(f"PyTorch:         {torch.__version__}")
+        console.print(f"CUDA available:  {torch.cuda.is_available()}")
+        if torch.cuda.is_available():
+            console.print(f"CUDA version:    {torch.version.cuda}")
+            console.print(f"cuDNN version:   {torch.backends.cudnn.version()}")
+            console.print(f"GPU count:       {torch.cuda.device_count()}")
+            for i in range(torch.cuda.device_count()):
+                console.print(f"  GPU {i}:         {torch.cuda.get_device_name(i)}")
+    except ImportError:
+        console.print("PyTorch:         NOT INSTALLED")
+    try:
+        import flash_attn
+
+        console.print(f"Flash Attention: {flash_attn.__version__}")
+    except ImportError:
+        console.print("Flash Attention: NOT INSTALLED")
+    try:
+        import transformers
+
+        console.print(f"Transformers:    {transformers.__version__}")
+    except ImportError:
+        console.print("Transformers:    NOT INSTALLED")
+    try:
+        import vllm
+
+        console.print(f"vLLM:            {vllm.__version__}")
+    except ImportError:
+        console.print("vLLM:            NOT INSTALLED")
+    console.print("=" * 60 + "\n")
+
+
 @click.group()
 def main() -> None:
     """olmo-eval command line interface."""
@@ -131,6 +173,9 @@ def run(
     os.environ.setdefault("HF_DATASETS_DISABLE_PROGRESS_BAR", "1")
     os.environ.setdefault("DATASETS_VERBOSITY", "error")
     logging.getLogger("datasets").setLevel(logging.ERROR)
+
+    # Print runtime environment summary
+    _print_runtime_environment()
 
     # Warning for num-workers without async
     if num_workers is not None and not use_async and not use_async_stream:
