@@ -1,0 +1,16 @@
+# WIP
+name: olmo3-dev-7b-fast
+
+models:
+  - name_or_path: allenai/Olmo-3-1025-7B
+    gpus: 1
+    parallelism: 16
+
+tasks:
+  - olmo3:dev:7b:main:v2:fast
+
+cluster: ai2/ceres
+budget: ai2/oe-base
+workspace: ai2/olmo-3-evals
+preemptible: true
+timeout: 6h

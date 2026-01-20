@@ -2794,7 +2794,6 @@ storage = [
     { name = "psycopg", extra = ["binary"] },
 ]
 vllm = [
-    { name = "torch" },
     { name = "torch-c-dlpack-ext" },
     { name = "vllm" },
 ]
@@ -2821,7 +2820,6 @@ requires-dist = [
     { name = "rich", specifier = "~=14.2.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.0" },
     { name = "sympy", specifier = ">=1.12" },
-    { name = "torch", marker = "extra == 'vllm'", specifier = ">=2.2.0" },
     { name = "torch-c-dlpack-ext", marker = "extra == 'vllm'" },
     { name = "transformers", marker = "extra == 'hf'", specifier = "~=4.57.3" },
     { name = "ty", marker = "extra == 'dev'", specifier = ">=0.0.10" },
