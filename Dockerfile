@@ -153,10 +153,5 @@ ENV PYTHONUNBUFFERED=1
 RUN python -c "import torch; print(f'PyTorch {torch.__version__}')" && \
     python -c "import flash_attn; print(f'Flash Attention {flash_attn.__version__}')"
 
-# Generate lockfile with pre-installed packages (torch, flash-attn) included
-# This lockfile is used at runtime instead of the repo's lockfile
-COPY pyproject.toml /opt/pyproject.toml
-RUN cd /opt && uv lock && rm pyproject.toml
-
 WORKDIR /workspace
 CMD ["bash"]

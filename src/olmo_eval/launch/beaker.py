@@ -549,18 +549,15 @@ class BeakerLauncher:
         # Export UV_PROJECT_ENVIRONMENT so all uv commands use Docker's /opt/venv
         steps = ["export UV_PROJECT_ENVIRONMENT=/opt/venv"]
 
-        # Use lockfile generated during Docker build (includes torch, flash-attn)
-        # This replaces the repo's lockfile which was generated locally without these packages
-        steps.append("cp /opt/uv.lock /gantry-runtime/uv.lock")
-
         # Install olmo-eval from gantry-cloned source with optional backend groups
-        # Use --no-install-package to preserve specific pre-installed packages from Docker image
-        uv_sync = "uv sync --frozen --no-install-package torch --no-install-package flash-attn"
+        # Use `uv pip install` instead of `uv sync` to avoid lockfile version enforcement
+        # This preserves pre-installed torch, flash-attn, and nvidia-* packages from Docker
+        # which have specific CUDA versions that differ from PyPI defaults
         if backends:
-            extras_flags = " ".join(f"--extra {b}" for b in backends)
-            steps.append(f"cd /gantry-runtime && {uv_sync} {extras_flags}")
+            extras = ",".join(backends)
+            steps.append(f"cd /gantry-runtime && uv pip install -e '.[{extras}]'")
         else:
-            steps.append(f"cd /gantry-runtime && {uv_sync}")
+            steps.append("cd /gantry-runtime && uv pip install -e .")
 
         # Handle Flash Attention: upgrade to FA3, or disable entirely
         if no_flash_attn:
