@@ -15,7 +15,7 @@
 # Build arguments
 # ============================================================================
 ARG CUDA_VERSION=12.8.1
-ARG TORCH_VERSION=2.9.1
+ARG TORCH_VERSION=2.9.0
 ARG PYTHON_VERSION=3.12
 ARG FA2_VERSION=2.8.3
 ARG FA3_COMMIT=92ca9da8d66f7b34ff50dc080ec0fef9661260d6

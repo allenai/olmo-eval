@@ -603,7 +603,7 @@ Images are tagged with CUDA and PyTorch versions: `cu{version}-trc{version}-{arc
 ./scripts/build_image.sh
 
 # Specific CUDA + PyTorch version
-./scripts/build_image.sh --cuda-version 12.8.1 --torch-version 2.9.1
+./scripts/build_image.sh --cuda-version 12.8.1 --torch-version 2.9.0
 
 # Production build
 ./scripts/build_image.sh --platform linux/amd64
