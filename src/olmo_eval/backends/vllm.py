@@ -27,11 +27,18 @@ def _get_token_string(logprob_obj: Any, token_id: int, tokenizer: Any = None) ->
 class VLLMBackend(Backend):
     """Backend using vLLM for high-throughput inference."""
 
-    def __init__(self, model_name: str, **engine_kwargs) -> None:
+    def __init__(
+        self,
+        model_name: str,
+        attention_backend: str | None = None,
+        **engine_kwargs,
+    ) -> None:
         """Initialize the backend.
 
         Args:
             model_name: HuggingFace model identifier or local path.
+            attention_backend: Attention backend to use (e.g., "FLASHINFER", "FLASH_ATTN").
+                If not specified, vLLM will auto-select based on available backends.
             **engine_kwargs: Additional arguments passed to vLLM LLM engine.
         """
         # Suppress verbose vLLM logging
@@ -44,6 +51,11 @@ class VLLMBackend(Backend):
 
         super().__init__(model_name)
         engine_kwargs.setdefault("gpu_memory_utilization", 0.7)
+
+        # Configure attention backend if specified (e.g., FLASHINFER, FLASH_ATTN)
+        if attention_backend:
+            engine_kwargs.setdefault("attention_backend", attention_backend)
+
         self.llm: LLM = LLM(model=model_name, **engine_kwargs)
 
     def _build_sampling_params(self, params: SamplingParams) -> Any:
@@ -177,17 +189,28 @@ class AsyncVLLMBackend:
     processing, and results stream back as they complete.
     """
 
-    def __init__(self, model_name: str, **engine_kwargs) -> None:
+    def __init__(
+        self,
+        model_name: str,
+        attention_backend: str | None = None,
+        **engine_kwargs,
+    ) -> None:
         """Initialize the async backend.
 
         Args:
             model_name: HuggingFace model identifier or local path.
+            attention_backend: Attention backend to use (e.g., "FLASHINFER", "FLASH_ATTN").
+                If not specified, vLLM will auto-select based on available backends.
             **engine_kwargs: Additional arguments passed to vLLM engine.
         """
         os.environ.setdefault("VLLM_LOGGING_LEVEL", "WARNING")
 
         self.model_name = model_name
         engine_kwargs.setdefault("gpu_memory_utilization", 0.7)
+
+        # Configure attention backend if specified
+        if attention_backend:
+            engine_kwargs.setdefault("attention_backend", attention_backend)
 
         # Try V1 engine first (vLLM 0.6.0+), fall back to legacy AsyncLLMEngine
         self._use_v1_engine = False

@@ -1,6 +1,6 @@
 # OLMo Evaluation Framework Docker Image
 #
-# Base image with CUDA, Python, PyTorch, and Flash Attention 2 & 3.
+# Base image with CUDA, Python, and PyTorch.
 # Backend dependencies (vllm, transformers, etc.) installed at runtime via gantry/uv.
 #
 # Build:
@@ -17,8 +17,6 @@
 ARG CUDA_VERSION=12.8.1
 ARG TORCH_VERSION=2.9.0
 ARG PYTHON_VERSION=3.12
-ARG FA2_VERSION=2.8.3
-ARG FA3_COMMIT=92ca9da8d66f7b34ff50dc080ec0fef9661260d6
 
 # ============================================================================
 # Stage 1: Base builder with CUDA, Python and PyTorch
@@ -56,45 +54,7 @@ RUN CUDA_SHORT=$(echo "${CUDA_VERSION}" | sed 's/\.//g' | cut -c1-3) && \
     torch==${TORCH_VERSION}
 
 # ============================================================================
-# Stage 2: Install Flash Attention 2
-# Inherits from builder: uv, venv, PATH, VIRTUAL_ENV, torch, build tools
-# ============================================================================
-FROM builder AS fa2-builder
-
-ARG FA2_VERSION
-
-RUN uv pip install --no-build-isolation --no-cache-dir flash-attn==${FA2_VERSION}
-
-# Verify FA2 installation
-RUN python -c "import flash_attn; print(f'flash_attn {flash_attn.__version__} installed successfully')"
-
-# ============================================================================
-# Stage 3: Build Flash Attention 3 wheel (Hopper GPUs)
-# TEMPORARILY DISABLED - FA3 build has issues, re-enable when fixed
-# ============================================================================
-# FROM builder AS fa3-builder
-#
-# ARG FA3_COMMIT
-#
-# ENV FA3_MAX_JOBS=4
-#
-# WORKDIR /build
-#
-# # Clone and build FA3 wheel (no pre-built wheels available)
-# # FLASH_ATTENTION_FORCE_BUILD=TRUE skips attempting to download pre-built wheels (which don't exist for this commit)
-# RUN git clone --depth 1 --recurse-submodules --shallow-submodules \
-#         https://github.com/Dao-AILab/flash-attention.git && \
-#     cd flash-attention && \
-#     git fetch --depth 1 origin ${FA3_COMMIT} && \
-#     git checkout ${FA3_COMMIT} && \
-#     git submodule update --init --recursive && \
-#     cd hopper && \
-#     uv pip install packaging ninja wheel setuptools && \
-#     FLASH_ATTENTION_FORCE_BUILD=TRUE FLASH_ATTENTION_DISABLE_FP16=TRUE MAX_JOBS=${FA3_MAX_JOBS} python setup.py bdist_wheel && \
-#     cp dist/*.whl /build/
-
-# ============================================================================
-# Stage 4: Runtime image
+# Stage 2: Runtime image
 # ============================================================================
 ARG CUDA_VERSION
 FROM nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu22.04
@@ -102,16 +62,12 @@ FROM nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu22.04
 ARG CUDA_VERSION
 ARG TORCH_VERSION
 ARG PYTHON_VERSION
-ARG FA2_VERSION
-ARG FA3_COMMIT
 
 LABEL org.opencontainers.image.source="https://github.com/allenai/olmo-eval-internal"
-LABEL org.opencontainers.image.description="OLMo evaluation framework with Flash Attention 2"
+LABEL org.opencontainers.image.description="OLMo evaluation framework"
 LABEL cuda_version="${CUDA_VERSION}"
 LABEL torch_version="${TORCH_VERSION}"
 LABEL python_version="${PYTHON_VERSION}"
-LABEL flash_attn_2_version="${FA2_VERSION}"
-LABEL flash_attn_3_commit="${FA3_COMMIT}"
 
 # Install runtime dependencies
 # Clean up first to free space in the runtime image
@@ -124,15 +80,12 @@ RUN rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* && \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* \
     && apt-get clean
 
-# Copy virtual environment from fa2-builder (includes PyTorch + Flash Attention 2)
-COPY --from=fa2-builder /opt/venv /opt/venv
+# Copy virtual environment from builder (includes PyTorch)
+COPY --from=builder /opt/venv /opt/venv
 
 # Copy uv resources
-COPY --from=fa2-builder /root/.local/share/uv /root/.local/share/uv
+COPY --from=builder /root/.local/share/uv /root/.local/share/uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
-
-# Copy FA3 wheel for on-demand installation (TEMPORARILY DISABLED)
-# COPY --from=fa3-builder /build/*.whl /opt/flash-attn-3/
 
 # Set up environment
 ENV PATH="/opt/venv/bin:${PATH}"
@@ -141,16 +94,8 @@ ENV VLLM_LOGGING_LEVEL=WARNING
 ENV HF_HOME=/root/.cache/huggingface
 ENV PYTHONUNBUFFERED=1
 
-ENV NVIDIA_VISIBLE_DEVICES=all
-ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
-
-ENV VLLM_ATTENTION_BACKEND=FLASHINFER
-
-# ENV FA3_WHEEL_DIR=/opt/flash-attn-3  # TEMPORARILY DISABLED
-
 # Verify installation
-RUN python -c "import torch; print(f'PyTorch {torch.__version__}')" && \
-    python -c "import flash_attn; print(f'Flash Attention {flash_attn.__version__}')"
+RUN python -c "import torch; print(f'PyTorch {torch.__version__}')"
 
 WORKDIR /workspace
 CMD ["bash"]

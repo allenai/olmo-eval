@@ -11,8 +11,6 @@ set -euo pipefail
 # The image includes:
 #   - CUDA runtime
 #   - Python 3.12 with PyTorch
-#   - Flash Attention 2 (pre-installed)
-#   - Flash Attention 3 (pre-built wheel, installed on-demand)
 #
 # Backend dependencies (vllm, transformers, etc.) are installed at runtime.
 
@@ -28,8 +26,6 @@ TAG=""
 CUDA_VERSION="${DEFAULT_CUDA_VERSION}"
 TORCH_VERSION="${DEFAULT_TORCH_VERSION}"
 PYTHON_VERSION="3.12"
-FA2_VERSION="2.8.3"
-FA3_COMMIT="92ca9da8d66f7b34ff50dc080ec0fef9661260d6"
 PLATFORM=""
 NO_CACHE=""
 
@@ -59,14 +55,6 @@ while [[ $# -gt 0 ]]; do
             PYTHON_VERSION="$2"
             shift 2
             ;;
-        --fa2-version)
-            FA2_VERSION="$2"
-            shift 2
-            ;;
-        --fa3-commit)
-            FA3_COMMIT="$2"
-            shift 2
-            ;;
         --platform)
             PLATFORM="$2"
             shift 2
@@ -80,15 +68,12 @@ while [[ $# -gt 0 ]]; do
             echo "                        Supported: ${SUPPORTED_CUDA_VERSIONS[*]}"
             echo "  --torch-version VER   PyTorch version (default: ${TORCH_VERSION})"
             echo "  --python-version VER  Python version (default: ${PYTHON_VERSION})"
-            echo "  --fa2-version VER     Flash Attention 2 version (default: ${FA2_VERSION})"
-            echo "  --fa3-commit SHA      Flash Attention 3 commit (default: ${FA3_COMMIT:0:12}...)"
             echo "  --platform PLATFORM   Target platform (default: auto-detect)"
             echo "                        Options: linux/amd64, linux/arm64"
             echo "  --no-cache            Force rebuild without cache"
             echo "  --help                Show this help"
             echo ""
-            echo "The image includes PyTorch, Flash Attention 2 (pre-installed), and"
-            echo "Flash Attention 3 (pre-built wheel). Backend deps installed at runtime."
+            echo "The image includes PyTorch. Backend deps installed at runtime."
             echo ""
             echo "Examples:"
             echo "  $0 --cuda-version 12.8.0"
@@ -134,8 +119,6 @@ echo "  Image:          ${IMAGE_NAME}:${TAG}"
 echo "  CUDA version:   ${CUDA_VERSION}"
 echo "  Python version: ${PYTHON_VERSION}"
 echo "  Torch version:  ${TORCH_VERSION}"
-echo "  FA2 version:    ${FA2_VERSION}"
-echo "  FA3 commit:     ${FA3_COMMIT:0:12}..."
 echo "  Platform:       ${PLATFORM}"
 echo ""
 
@@ -145,8 +128,6 @@ docker build \
     --build-arg CUDA_VERSION="${CUDA_VERSION}" \
     --build-arg TORCH_VERSION="${TORCH_VERSION}" \
     --build-arg PYTHON_VERSION="${PYTHON_VERSION}" \
-    --build-arg FA2_VERSION="${FA2_VERSION}" \
-    --build-arg FA3_COMMIT="${FA3_COMMIT}" \
     -t "${IMAGE_NAME}:${TAG}" \
     -f "${REPO_ROOT}/Dockerfile" \
     "${REPO_ROOT}"
@@ -160,9 +141,7 @@ echo ""
 echo "Image includes:"
 echo "  - Python ${PYTHON_VERSION}"
 echo "  - PyTorch ${TORCH_VERSION}"
-echo "  - Flash Attention 2 v${FA2_VERSION} (pre-installed from wheel)"
-echo "  - Flash Attention 3 (pre-built wheel at /opt/flash-attn-3/)"
 echo ""
 echo "To test locally:"
-echo "  docker run --rm -v \$(pwd):/workspace ${IMAGE_NAME}:${TAG} python -c 'import flash_attn; print(flash_attn.__version__)'"
+echo "  docker run --rm -v \$(pwd):/workspace ${IMAGE_NAME}:${TAG} python -c 'import torch; print(torch.__version__)'"
 echo ""

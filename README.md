@@ -398,8 +398,6 @@ Backends are installed via `uv pip install -e '.[backend]'` at job startup.
 | `--async-stream` | | `false` | Use vLLM's AsyncLLMEngine for continuous batching |
 | `--num-workers` | `-W` | auto | Number of workers for async mode |
 | `--gpus-per-worker` | | `1` | GPUs per worker for async mode |
-| `--fa3` | | `false` | Use Flash Attention 3 (for Hopper GPUs) |
-| `--no-flash-attn` | | `false` | Disable Flash Attention |
 | `--dry-run` | `-d` | `false` | Print spec without launching |
 | `--follow/--no-follow` | | `true` | Follow logs after launch |
 
@@ -549,8 +547,6 @@ description: "Full evaluation suite for Llama 70B"
 | `use_async_stream` | bool | no | Enable streaming async with vLLM (default: `false`) |
 | `num_workers` | int | no | Number of workers for async modes |
 | `gpus_per_worker` | int | no | GPUs per worker for async modes (default: `1`) |
-| `flash_attn` | int | no | Set to `3` to use Flash Attention 3 |
-| `no_flash_attn` | bool | no | Disable Flash Attention (default: `false`) |
 | `description` | string | no | Experiment description (config-only) |
 
 See `examples/configs/` for more configuration examples.
@@ -621,8 +617,6 @@ Images are tagged with CUDA and PyTorch versions: `cu{version}-trc{version}-{arc
 The image contains:
 - Python 3.12 (via uv)
 - PyTorch with CUDA support
-- Flash Attention 2 (pre-installed)
-- Flash Attention 3 (pre-built wheel, installed on-demand)
 - System dependencies (git, uv, ca-certificates)
 
 The image does NOT contain:

@@ -38,12 +38,6 @@ def _print_runtime_environment() -> None:
     except ImportError:
         console.print("PyTorch:         NOT INSTALLED")
     try:
-        import flash_attn
-
-        console.print(f"Flash Attention: {flash_attn.__version__}")
-    except ImportError:
-        console.print("Flash Attention: NOT INSTALLED")
-    try:
         import transformers
 
         console.print(f"Transformers:    {transformers.__version__}")
@@ -127,6 +121,12 @@ def beaker() -> None:
     help="Number of GPUs each worker uses (default: 1)",
 )
 @click.option(
+    "--attention-backend",
+    type=click.Choice(["FLASHINFER", "FLASH_ATTN"], case_sensitive=False),
+    default=None,
+    help="vLLM attention backend (e.g., FLASHINFER for better performance on supported GPUs)",
+)
+@click.option(
     "--parallelism",
     "-P",
     type=int,
@@ -148,6 +148,7 @@ def run(
     use_async_stream: bool,
     num_workers: int | None,
     gpus_per_worker: int,
+    attention_backend: str | None,
     parallelism: int,
 ) -> None:
     """Run evaluation on specified tasks.
@@ -188,6 +189,12 @@ def run(
         console.print(
             "[yellow]Warning:[/yellow] --gpus-per-worker has no effect without "
             "--async or --async-stream"
+        )
+
+    if attention_backend and not use_async_stream:
+        console.print(
+            "[yellow]Warning:[/yellow] --attention-backend only applies to "
+            "--async-stream mode (vLLM streaming)"
         )
 
     # Warning for conflicting flags
@@ -258,6 +265,7 @@ def run(
             storages=storages,
             num_workers=num_workers,
             gpus_per_worker=gpus_per_worker,
+            attention_backend=attention_backend.upper() if attention_backend else None,
         )
     elif use_async:
         from olmo_eval.runners.parallel import AsyncEvalRunner
@@ -495,14 +503,6 @@ def suite_info(suite_name: str) -> None:
 )
 @click.option("--num-workers", "-W", type=int, help="Number of workers for async mode")
 @click.option("--gpus-per-worker", type=int, default=1, help="GPUs per worker for async mode")
-@click.option(
-    "--fa3",
-    is_flag=True,
-    help="Use Flash Attention 3 (for Hopper GPUs). FA2 is pre-installed by default.",
-)
-@click.option(
-    "--no-flash-attn", is_flag=True, help="Disable Flash Attention (uninstalls FA2 at runtime)."
-)
 @click.option("--dry-run", "-d", is_flag=True, help="Print spec without launching")
 @click.option("--verbose", "-v", is_flag=True, help="Print experiment spec before launching")
 @click.option(
@@ -531,8 +531,6 @@ def launch(
     use_async_stream: bool,
     num_workers: int | None,
     gpus_per_worker: int,
-    fa3: bool,
-    no_flash_attn: bool,
     dry_run: bool,
     verbose: bool,
     follow: bool,
@@ -545,7 +543,6 @@ def launch(
     Use --config/-f to load settings from a YAML file; CLI arguments override config values.
     Use --group/-g to organize experiments into a Beaker group for result aggregation.
     Use --backends/-b to install inference backends at runtime (e.g., vllm, transformers).
-    Use --fa3 to switch to Flash Attention 3 (for Hopper GPUs). FA2 is pre-installed.
 
     Examples:
 
@@ -621,10 +618,6 @@ def launch(
         retries = retries if retries is not None else cfg.retries
         workspace = workspace or cfg.workspace
         budget = budget or cfg.budget
-
-        # Flash Attention 3: CLI flag overrides config
-        if not fa3 and cfg.flash_attn == 3:
-            fa3 = True
 
         # Get model configs from file (with per-model resource overrides)
         if not model:
@@ -1007,9 +1000,6 @@ def launch(
             backend_group = BACKEND_OPTIONAL_GROUPS.get(runtime_backend)
             effective_backends = [backend_group] if backend_group else []
 
-        # Flash Attention: FA3 upgrade or disable entirely
-        effective_flash_attn: int | None = 3 if fa3 else None
-
         job_config = BeakerJobConfig(
             name=exp_name,
             command=command,
@@ -1023,8 +1013,6 @@ def launch(
             workspace=workspace,
             budget=budget,
             backends=effective_backends,
-            flash_attn=effective_flash_attn,
-            no_flash_attn=no_flash_attn,
             groups=effective_groups,
         )
 

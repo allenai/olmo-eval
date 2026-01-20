@@ -403,6 +403,7 @@ def streaming_worker_process(
     instance_queue: mp.Queue,
     result_queue: mp.Queue,
     model_name: str,
+    attention_backend: str | None = None,
 ) -> None:
     """Worker using async streaming for true continuous batching.
 
@@ -416,6 +417,7 @@ def streaming_worker_process(
         instance_queue: Queue of QueueItems (None = poison pill)
         result_queue: Queue to put ResultItems
         model_name: Model name for backend
+        attention_backend: Attention backend to use (e.g., "FLASHINFER", "FLASH_ATTN")
     """
     import sys
 
@@ -425,7 +427,11 @@ def streaming_worker_process(
 
         # Run the async worker
         num_gpus = len(gpu_ids) if gpu_ids else 1
-        asyncio.run(_streaming_worker_async(instance_queue, result_queue, model_name, num_gpus))
+        asyncio.run(
+            _streaming_worker_async(
+                instance_queue, result_queue, model_name, num_gpus, attention_backend
+            )
+        )
     except Exception as e:
         logger.error(f"Streaming worker process failed: {e}")
         # Put a fatal error marker in the result queue so main process knows we died
@@ -448,6 +454,7 @@ async def _streaming_worker_async(
     result_queue: mp.Queue,
     model_name: str,
     num_gpus: int = 1,
+    attention_backend: str | None = None,
 ) -> None:
     """Async implementation of streaming worker.
 
@@ -455,7 +462,11 @@ async def _streaming_worker_async(
     """
     from olmo_eval.backends.vllm import AsyncVLLMBackend
 
-    backend = AsyncVLLMBackend(model_name, tensor_parallel_size=num_gpus)
+    backend = AsyncVLLMBackend(
+        model_name,
+        attention_backend=attention_backend,
+        tensor_parallel_size=num_gpus,
+    )
 
     # Track request_id -> QueueItem mapping
     pending_requests: dict[str, QueueItem] = {}
@@ -1102,6 +1113,9 @@ class StreamingEvalRunner:
     num_workers: int | None = None
     gpus_per_worker: int = 1
 
+    # vLLM config
+    attention_backend: str | None = None  # e.g., "FLASHINFER", "FLASH_ATTN"
+
     def validate(self) -> None:
         """Validate configuration."""
         from olmo_eval.evals.suites import suite_exists
@@ -1294,6 +1308,7 @@ class StreamingEvalRunner:
                         model_queues[model_name],
                         result_queue,
                         model_config.model,
+                        self.attention_backend,
                     ),
                 )
                 worker.start()
