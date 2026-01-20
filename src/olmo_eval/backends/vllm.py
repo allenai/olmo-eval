@@ -267,7 +267,26 @@ class AsyncVLLMBackend:
             request_id: Unique identifier for this request.
             request: The LM request to process.
             sampling_params: Optional sampling parameters.
+
+        Raises:
+            ValueError: If request type is LOGLIKELIHOOD (not supported in streaming mode).
         """
+        from olmo_eval.core import RequestType
+
+        # Streaming backend only supports COMPLETION requests
+        # LOGLIKELIHOOD/BPB tasks require prompt_logprobs which isn't supported here
+        if request.request_type == RequestType.LOGLIKELIHOOD:
+            raise ValueError(
+                "LOGLIKELIHOOD requests (e.g., :bpb tasks) are not supported in "
+                "--async-stream mode. Use --async or default sequential mode instead."
+            )
+
+        if not request.prompt:
+            raise ValueError(
+                "Empty prompts are not supported in --async-stream mode. "
+                "This may be a :bpb task - use --async or default sequential mode instead."
+            )
+
         params = sampling_params or SamplingParams()
         vllm_params = self._build_sampling_params(params)
         # Store for later processing in stream_results

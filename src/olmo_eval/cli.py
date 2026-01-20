@@ -243,6 +243,20 @@ def run(
                 )
                 raise SystemExit(1) from None
 
+    # Check for incompatible task types with --async-stream
+    if use_async_stream:
+        bpb_tasks = [t for t in task if ":bpb" in t]
+        if bpb_tasks:
+            console.print(
+                "\n[bold red]Error:[/bold red] The following :bpb tasks cannot run with --async-stream:\n"
+                f"  {', '.join(bpb_tasks)}\n\n"
+                "[yellow]BPB (bits-per-byte) tasks use loglikelihood scoring which requires\n"
+                "prompt_logprobs - a feature not supported by the streaming vLLM backend.[/yellow]\n\n"
+                "Use [bold]--async[/bold] or the default sequential mode instead:\n"
+                f"  olmo-eval run -m <model> -t {' -t '.join(bpb_tasks)} --async\n"
+            )
+            raise SystemExit(1)
+
     # Choose runner based on --async or --async-stream flag
     if use_async_stream:
         from olmo_eval.runners.parallel import StreamingEvalRunner
@@ -721,6 +735,12 @@ def launch(
 
     console.print(f"[blue]Groups:[/blue] {', '.join(effective_groups)}")
 
+    # Print the image being used (config can override default)
+    from olmo_eval.core.constants.infrastructure import BEAKER_DEFAULT_IMAGE
+
+    effective_image = (cfg.beaker_image if cfg and cfg.beaker_image else BEAKER_DEFAULT_IMAGE)
+    console.print(f"[blue]Image:[/blue] {effective_image}")
+
     # Check which groups exist and which need to be created
     from beaker.exceptions import BeakerGroupNotFound
 
@@ -1010,6 +1030,7 @@ def launch(
             budget=budget,
             backends=effective_backends,
             groups=effective_groups,
+            beaker_image=effective_image,
         )
 
         if verbose:

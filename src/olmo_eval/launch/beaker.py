@@ -693,6 +693,7 @@ class BeakerLauncher:
         header_lines.append(f"[bold blue]Priority:[/] [{priority_color}]{priority}[/]")
         header_lines.append(f"[bold blue]GPUs:[/] {config.num_gpus}")
         header_lines.append(f"[bold blue]Clusters:[/] {', '.join(clusters)}")
+        header_lines.append(f"[bold blue]Image:[/] {config.beaker_image}")
 
         preempt_str = "[green]yes[/]" if config.preemptible else "[red]no[/]"
         header_lines.append(f"[bold blue]Preemptible:[/] {preempt_str}")
