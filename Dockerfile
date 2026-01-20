@@ -15,7 +15,7 @@
 # Build arguments
 # ============================================================================
 ARG CUDA_VERSION=12.8.1
-ARG TORCH_VERSION=2.7.1
+ARG TORCH_VERSION=2.9.1
 ARG PYTHON_VERSION=3.12
 ARG FA2_VERSION=2.8.3
 ARG FA3_COMMIT=92ca9da8d66f7b34ff50dc080ec0fef9661260d6
@@ -49,9 +49,9 @@ ENV VIRTUAL_ENV="/opt/venv"
 
 # Install PyTorch with CUDA support, and numpy to avoid torch warnings
 RUN CUDA_SHORT=$(echo "${CUDA_VERSION}" | sed 's/\.//g' | cut -c1-3) && \
-    uv pip install "torch==${TORCH_VERSION}" \
-        --extra-index-url "https://download.pytorch.org/whl/cu${CUDA_SHORT}" && \
-    uv pip install numpy
+    uv pip install numpy && \
+    uv pip install "torch==${TORCH_VERSION}" torchvision torchaudio \
+        --index-url "https://download.pytorch.org/whl/cu${CUDA_SHORT}"
 
 # ============================================================================
 # Stage 2: Install Flash Attention 2 from pre-built wheel
@@ -63,14 +63,8 @@ ARG TORCH_VERSION
 ARG PYTHON_VERSION
 ARG FA2_VERSION
 
-# Install FA2 from pre-built wheel (much faster than building from source)
-# Format: flash_attn-{ver}+cu{cuda}torch{torch}cxx11abi{abi}-cp{py}-cp{py}-linux_x86_64.whl
-RUN TORCH_SHORT=$(python -c "import torch; print('.'.join(torch.__version__.split('+')[0].split('.')[:2]))") && \
-    CUDA_SHORT=$(python -c "import torch; print(torch.version.cuda.replace('.', '')[:2])") && \
-    PYTHON_V=$(echo ${PYTHON_VERSION} | sed 's/\.//g') && \
-    ABI=$(python -c "import torch; print('TRUE' if torch._C._GLIBCXX_USE_CXX11_ABI else 'FALSE')") && \
-    echo "Installing flash-attn ${FA2_VERSION} for CUDA ${CUDA_SHORT} PyTorch ${TORCH_SHORT} ABI ${ABI}" && \
-    uv pip install "https://github.com/Dao-AILab/flash-attention/releases/download/v${FA2_VERSION}/flash_attn-${FA2_VERSION}+cu${CUDA_SHORT}torch${TORCH_SHORT}cxx11abi${ABI}-cp${PYTHON_V}-cp${PYTHON_V}-linux_x86_64.whl" --no-cache
+# Install flash-attn 2
+RUN pip install --no-build-isolation --no-cache-dir flash-attn==${FA2_VERSION}
 
 # Verify FA2 installation
 RUN python -c "import flash_attn; print(f'flash_attn {flash_attn.__version__} installed successfully')"
