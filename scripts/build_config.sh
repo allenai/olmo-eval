@@ -17,6 +17,9 @@ SUPPORTED_CUDA_VERSIONS=(
 # Default CUDA version
 DEFAULT_CUDA_VERSION="12.8.1"
 
+# Default PyTorch version
+DEFAULT_TORCH_VERSION="2.7.1"
+
 # Supported platforms
 SUPPORTED_PLATFORMS=(
     "linux/amd64"

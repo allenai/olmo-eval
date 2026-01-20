@@ -226,9 +226,7 @@ def check_workers_alive(
         # All workers dead - check exit codes
         exit_codes = [w.exitcode for w in workers]
         if any(code != 0 and code is not None for code in exit_codes):
-            raise RuntimeError(
-                f"All workers died unexpectedly. Exit codes: {exit_codes}"
-            )
+            raise RuntimeError(f"All workers died unexpectedly. Exit codes: {exit_codes}")
 
 
 def wait_for_workers_ready(
@@ -274,9 +272,7 @@ def wait_for_workers_ready(
         # Check if any worker died with non-zero exit code
         for worker in workers:
             if not worker.is_alive() and worker.exitcode is not None and worker.exitcode != 0:
-                raise RuntimeError(
-                    f"Worker died during startup with exit code {worker.exitcode}"
-                )
+                raise RuntimeError(f"Worker died during startup with exit code {worker.exitcode}")
 
         # If all workers are alive, we're good
         if all(w.is_alive() for w in workers):
@@ -1342,7 +1338,7 @@ class StreamingEvalRunner:
 
             # Check for fatal worker crash
             if result_item.task_id == "__WORKER_FATAL__":
-                console.print("\n[bold red]FATAL: Worker crashed![/bold bold]")
+                console.print("\n[bold red]FATAL: Worker crashed![/bold red]")
                 console.print(f"[red]{result_item.error}[/red]")
                 # Terminate all workers
                 for worker in workers:

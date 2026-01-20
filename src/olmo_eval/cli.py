@@ -201,10 +201,7 @@ def run(
     if use_async_stream:
         from olmo_eval.runners.parallel import StreamingEvalRunner
 
-        console.print(
-            "[bold cyan]Using StreamingEvalRunner[/bold cyan] - "
-            "true continuous batching with AsyncLLMEngine"
-        )
+        console.print("[bold cyan]Using StreamingEvalRunner[/bold cyan]")
         console.print(f"[bold]Models:[/bold] {len(models)}")
 
         runner = StreamingEvalRunner(
@@ -220,7 +217,7 @@ def run(
     elif use_async:
         from olmo_eval.runners.parallel import AsyncEvalRunner
 
-        console.print("[bold cyan]Using AsyncEvalRunner[/bold cyan] - parallel execution enabled")
+        console.print("[bold cyan]Using AsyncEvalRunner[/bold cyan]")
         console.print(f"[bold]Models:[/bold] {len(models)}")
 
         runner = AsyncEvalRunner(
@@ -237,10 +234,7 @@ def run(
     else:
         # Sequential runner - run each model in sequence
         if len(models) > 1:
-            console.print(
-                f"[bold cyan]Running {len(models)} models sequentially[/bold cyan] "
-                "(use --async for parallel execution)"
-            )
+            console.print(f"[bold cyan]Running {len(models)} models sequentially[/bold cyan]")
 
         # For sequential mode with multiple models, run each model separately
         for i, model in enumerate(models):
