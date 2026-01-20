@@ -66,7 +66,7 @@ ARG PYTHON_VERSION
 ARG FA2_VERSION
 
 # Install flash-attn 2
-RUN uv ip install --no-build-isolation --no-cache-dir flash-attn==${FA2_VERSION}
+RUN uv pip install --no-build-isolation --no-cache-dir flash-attn==${FA2_VERSION}
 
 # Verify FA2 installation
 RUN python -c "import flash_attn; print(f'flash_attn {flash_attn.__version__} installed successfully')"
