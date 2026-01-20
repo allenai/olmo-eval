@@ -122,7 +122,7 @@ PLATFORM_ARCH=$(echo "$PLATFORM" | cut -d'/' -f2)
 # Auto-generate tag if not specified
 if [[ -z "$TAG" ]]; then
     # Format: cu{version}-trc{version}-{arch}
-    # Example: cu128-trc291-amd64 (for CUDA 12.8.x, PyTorch 2.9.1)
+    # Example: cu128-trc290-amd64 (for CUDA 12.8.x, PyTorch 2.9.0)
     CUDA_SHORT=$(cuda_short "$CUDA_VERSION")
     TORCH_SHORT=$(echo "${TORCH_VERSION}" | sed 's/\.//g')
     TAG="cu${CUDA_SHORT}-trc${TORCH_SHORT}-${PLATFORM_ARCH}"
