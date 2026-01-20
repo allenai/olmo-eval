@@ -49,7 +49,7 @@ hf = [
     "transformers~=4.57.3",
 ]
 vllm = [
-    "vllm~=0.13.0",
+    "vllm~=0.12.0",
     "torch-c-dlpack-ext",  # Required for TVM tensor allocation in vLLM
 ]
 litellm = [
