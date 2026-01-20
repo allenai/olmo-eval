@@ -22,14 +22,14 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 # Load build configuration
 source "${SCRIPT_DIR}/build_config.sh"
 
-# Defaults
+# Defaults (never inherit from environment - use explicit --flags to override)
 IMAGE_NAME="olmo-eval"
 TAG=""
-CUDA_VERSION="${CUDA_VERSION:-${DEFAULT_CUDA_VERSION}}"
-TORCH_VERSION="${TORCH_VERSION:-${DEFAULT_TORCH_VERSION}}"
-PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
-FA2_VERSION="${FA2_VERSION:-2.8.3}"
-FA3_COMMIT="${FA3_COMMIT:-92ca9da8d66f7b34ff50dc080ec0fef9661260d6}"
+CUDA_VERSION="${DEFAULT_CUDA_VERSION}"
+TORCH_VERSION="${DEFAULT_TORCH_VERSION}"
+PYTHON_VERSION="3.12"
+FA2_VERSION="2.8.3"
+FA3_COMMIT="92ca9da8d66f7b34ff50dc080ec0fef9661260d6"
 PLATFORM=""
 NO_CACHE=""
 
