@@ -84,7 +84,7 @@ fi
 
 # Auto-generate Beaker image name from source tag
 if [[ "$AUTO_NAME" == "true" ]]; then
-    # Extract tag from source image (e.g., olmo-eval:cuda128-amd64 -> cuda128-amd64)
+    # Extract tag from source image (e.g., olmo-eval:cu128-trc291-amd64 -> cu128-trc291-amd64)
     SOURCE_TAG=$(echo "$SOURCE_IMAGE" | cut -d':' -f2)
     BEAKER_IMAGE="olmo-eval-${SOURCE_TAG}"
     echo "Auto-generated Beaker image name: ${BEAKER_IMAGE}"

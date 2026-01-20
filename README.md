@@ -596,7 +596,7 @@ This approach allows you to:
 
 ### Building Images
 
-Images are tagged with CUDA and PyTorch versions: `cuda{version}-torch{version}-{arch}`
+Images are tagged with CUDA and PyTorch versions: `cu{version}-trc{version}-{arch}`
 
 ```bash
 # Build with defaults (CUDA 12.8.1 + PyTorch 2.9.1)
@@ -658,7 +658,7 @@ uv pip install -e '.[vllm]'
 ./scripts/beaker/push_beaker_image.sh --dry-run
 ```
 
-The script auto-detects the image name from the tag (e.g., `olmo-eval-cuda128-amd64`)
+The script auto-detects the image name from the tag (e.g., `olmo-eval-cu128-trc291-amd64`)
 
 ## Development
 

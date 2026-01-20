@@ -8,8 +8,8 @@
 #   ./scripts/build_image.sh --cuda-version 12.8.0
 #   ./scripts/build_image.sh --platform linux/amd64
 #
-# Tags: cuda{ver}-{arch}
-# Example: cuda128-amd64
+# Tags: cu{cuda}-trc{torch}-{arch}
+# Example: cu128-trc291-amd64
 
 # ============================================================================
 # Build arguments

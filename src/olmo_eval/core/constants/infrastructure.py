@@ -19,8 +19,8 @@ BEAKER_DEFAULT_BUDGET = "ai2/oe-base"
 BEAKER_DEFAULT_PRIORITY = "normal"
 """Default job priority level."""
 
-BEAKER_DEFAULT_IMAGE = "ai2-tylerm/olmo-eval-cuda1281-amd64"
-"""Default Docker image for Beaker evaluation jobs."""
+BEAKER_DEFAULT_IMAGE = "ai2-tylerm/olmo-eval-cu1281-trc291-amd64"
+"""Default Docker image for Beaker evaluation jobs (CUDA 12.8.1, PyTorch 2.9.1)."""
 
 BEAKER_RESULT_DIR = "/results"
 """Default directory for evaluation results in Beaker jobs."""
