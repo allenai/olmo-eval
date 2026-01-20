@@ -516,7 +516,7 @@ def launch(
         olmo-eval beaker launch -n "eval-mixed" -m llama3.1-8b -t "mmlu@high" -t "gsm8k@normal"
 
         # Install backends at runtime
-        olmo-eval beaker launch -n "eval-vllm" -m llama3.1-8b -t mmlu -b vllm==0.13.0
+        olmo-eval beaker launch -n "eval-vllm" -m llama3.1-8b -t mmlu -b vllm
 
         # From YAML config file
         olmo-eval beaker launch -f eval_config.yaml
