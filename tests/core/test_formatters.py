@@ -240,30 +240,35 @@ class TestMultipleChoiceFormatter:
 class TestPPLFormatter:
     """Tests for PPLFormatter."""
 
-    def test_ppl_formatter_empty_context(self):
-        """PPLFormatter uses empty context for unconditional probability."""
+    def test_ppl_formatter_uses_question_as_context(self):
+        """PPLFormatter uses question as context to avoid first-token issue."""
         formatter = PPLFormatter()
 
-        # With question - still uses empty context
+        # With question - uses question as prompt
         instance = Instance(question="What is 2+2?", gold_answer="4")
         request = formatter.format(instance)
-        assert request.prompt == ""
+        assert request.prompt == "What is 2+2?"
         assert request.request_type == RequestType.LOGLIKELIHOOD
 
-        # Without question
+        # Without question - empty prompt
         instance = Instance(question="", gold_answer="text")
         request = formatter.format(instance)
         assert request.prompt == ""
 
-    def test_ppl_formatter_no_leading_space(self):
-        """PPLFormatter does not add leading space to continuation."""
+    def test_ppl_formatter_leading_space_with_context(self):
+        """PPLFormatter adds leading space to continuation when there's context."""
         formatter = PPLFormatter()
+
+        # With question - adds leading space
         instance = Instance(question="Context", gold_answer="answer")
-
         request = formatter.format(instance)
+        assert request.continuations[0] == " answer"
+        assert request.continuations[0][0] == " "
 
+        # Without question - no leading space
+        instance = Instance(question="", gold_answer="answer")
+        request = formatter.format(instance)
         assert request.continuations[0] == "answer"
-        assert request.continuations[0][0] != " "
 
     def test_ppl_formatter_mc_uses_choice_text(self):
         """MC tasks use actual choice text via gold_idx."""
@@ -277,8 +282,9 @@ class TestPPLFormatter:
 
         request = formatter.format(instance)
 
-        assert request.continuations == ("Option B",)
-        assert request.prompt == ""
+        # Leading space added because there's a question
+        assert request.continuations == (" Option B",)
+        assert request.prompt == "Question?"
 
     def test_ppl_formatter_gold_text_metadata(self):
         """PPLFormatter uses gold_text from metadata when available."""
@@ -291,7 +297,8 @@ class TestPPLFormatter:
 
         request = formatter.format(instance)
 
-        assert request.continuations == ("The actual gold text",)
+        # Leading space added because there's a question
+        assert request.continuations == (" The actual gold text",)
 
     def test_ppl_formatter_fallback_to_gold_answer(self):
         """PPLFormatter falls back to gold_answer when no other source."""
@@ -300,7 +307,8 @@ class TestPPLFormatter:
 
         request = formatter.format(instance)
 
-        assert request.continuations == ("fallback answer",)
+        # Leading space added because there's a question
+        assert request.continuations == (" fallback answer",)
 
     def test_ppl_formatter_requires_gold_answer(self):
         """PPLFormatter raises ValueError when no gold answer is available."""
@@ -311,13 +319,13 @@ class TestPPLFormatter:
             formatter.format(instance)
 
     def test_ppl_formatter_ignores_fewshot(self):
-        """PPLFormatter ignores fewshot examples (unconditional probability)."""
+        """PPLFormatter ignores fewshot examples."""
         formatter = PPLFormatter()
         instance = Instance(question="Test?", gold_answer="answer")
         fewshot = [Instance(question="Example?", gold_answer="example")]
 
         request = formatter.format(instance, fewshot)
 
-        # Fewshot is ignored - prompt is still empty
-        assert request.prompt == ""
-        assert request.continuations == ("answer",)
+        # Fewshot is ignored - only question used as prompt
+        assert request.prompt == "Test?"
+        assert request.continuations == (" answer",)

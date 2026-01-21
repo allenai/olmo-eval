@@ -143,16 +143,13 @@ class MCQAChatFormatter:
 class PPLFormatter:
     """Format instances for perplexity/BPB (bits-per-byte) evaluation.
 
-    Uses empty context and no leading space to measure unconditional P(text).
-    This computes the true bits-per-byte of the text itself, not conditioned
-    on any question or context.
+    Uses the question as context and measures P(answer | question).
+    This avoids the first-token logprob issue where vLLM returns None
+    for prompt_logprobs[0] when there's no conditioning context.
 
     For multiple choice tasks:
     - Uses the actual gold answer TEXT (not the letter) via gold_idx
     - Falls back to gold_text metadata or gold_answer
-
-    Note: This is a breaking change from previous behavior which used
-    P(text | question) with a leading space.
     """
 
     def format(
@@ -178,9 +175,16 @@ class PPLFormatter:
         if gold_text is None:
             raise ValueError("PPLFormatter requires a gold answer to be set")
 
-        # Use empty prompt and no leading space for unconditional probability
+        # Use question as context to avoid first-token logprob issue
+        # vLLM returns None for prompt_logprobs[0] when there's no context
+        prompt = ""
+        if instance.question:
+            prompt = instance.question
+            # Add leading space when there's context (standard tokenization)
+            gold_text = " " + gold_text
+
         return LMRequest(
             request_type=RequestType.LOGLIKELIHOOD,
-            prompt="",
+            prompt=prompt,
             continuations=(gold_text,),
         )
