@@ -526,7 +526,7 @@ olmo-eval beaker launch -n "eval-vllm" -m llama3.1-8b -t mmlu -b vllm
 ```
 
 Available backend groups (defined in `pyproject.toml`):
-- `vllm` - vLLM inference engine
+- `vllm` - vLLM inference engine (includes `vllm[runai]` for S3 model loading)
 - `hf` - HuggingFace transformers
 - `litellm` - LiteLLM for API-based models
 
@@ -796,8 +796,8 @@ olmo-eval beaker launch -n "eval" -m llama3.1-8b -t mmlu \
   --backends vllm \
   --backends hf
 
-# Or manually inside container
-uv pip install -e '.[vllm]'
+# Or manually inside container (runai extras enable S3 model loading)
+uv pip install -e '.[vllm]'  # includes vllm[runai]
 ```
 
 ### Pushing to Beaker
