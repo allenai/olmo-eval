@@ -1152,7 +1152,6 @@ class AsyncEvalRunner:
 
         metrics_output = {
             "timestamp": results.get("timestamp", ""),
-            "models": list(results.get("models", {}).keys()),
             "tasks": tasks_list,
             "suites": suites_list,
             "summary": summary,
@@ -1723,7 +1722,6 @@ class StreamingEvalRunner:
 
         metrics_output = {
             "timestamp": results.get("timestamp", ""),
-            "models": list(results.get("models", {}).keys()),
             "tasks": tasks_list,
             "suites": suites_list,
             "summary": summary,
