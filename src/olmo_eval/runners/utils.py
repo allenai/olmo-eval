@@ -44,16 +44,27 @@ def get_primary_metric(metrics: dict[str, float]) -> tuple[str, float] | None:
     return (name, metrics[name])
 
 
+@dataclass
+class _ChildAverageResult:
+    """Result from computing a child average."""
+
+    metrics: dict[str, float]
+    tasks: list[str]
+    # If child was a Suite, include its info for separate reporting
+    nested_suite: Any | None = None  # Suite or None
+    nested_suite_key: str | None = None  # Key to use in results (with suffixes)
+
+
 def _compute_child_average(
     child: str | Any,  # str or Suite
     override_suffix: str,
     priority_suffix: str,
     task_results: dict[str, dict[str, Any]],
-) -> tuple[dict[str, float], list[str]] | None:
+) -> _ChildAverageResult | None:
     """Compute average metrics for a single child (task string or nested Suite).
 
     Returns:
-        Tuple of (metrics dict, list of tasks included) or None if no results found.
+        _ChildAverageResult with metrics and task info, or None if no results found.
     """
     from olmo_eval.evals.suites.registry import Suite
 
@@ -82,7 +93,14 @@ def _compute_child_average(
             return None
 
         averaged = {name: sum(vals) / len(vals) for name, vals in child_metrics.items()}
-        return averaged, tasks_included
+        # Build the key for this nested suite (with suffixes)
+        nested_key = f"{child.name}{override_suffix}{priority_suffix}"
+        return _ChildAverageResult(
+            metrics=averaged,
+            tasks=tasks_included,
+            nested_suite=child,
+            nested_suite_key=nested_key,
+        )
     else:
         # Child is a task string - get its metrics directly
         full_task_spec = f"{child}{override_suffix}{priority_suffix}"
@@ -94,7 +112,12 @@ def _compute_child_average(
         if not metrics:
             return None
 
-        return dict(metrics), [full_task_spec]
+        return _ChildAverageResult(
+            metrics=dict(metrics),
+            tasks=[full_task_spec],
+            nested_suite=None,
+            nested_suite_key=None,
+        )
 
 
 def compute_suite_aggregations(
@@ -153,6 +176,7 @@ def compute_suite_aggregations(
             child_averages: dict[str, list[float]] = {}
             all_tasks_included: list[str] = []
             children_included = 0
+            nested_suites_included: list[str] = []
 
             for child in suite.tasks:
                 result = _compute_child_average(
@@ -161,14 +185,24 @@ def compute_suite_aggregations(
                 if result is None:
                     continue
 
-                child_metrics, child_tasks = result
-                all_tasks_included.extend(child_tasks)
+                all_tasks_included.extend(result.tasks)
                 children_included += 1
 
-                for metric_name, value in child_metrics.items():
+                for metric_name, value in result.metrics.items():
                     if metric_name not in child_averages:
                         child_averages[metric_name] = []
                     child_averages[metric_name].append(value)
+
+                # If this child is a nested Suite, also report its aggregation separately
+                if result.nested_suite is not None and result.nested_suite_key:
+                    nested_suites_included.append(result.nested_suite_key)
+                    suite_aggregations[result.nested_suite_key] = {
+                        "metrics": result.metrics,
+                        "tasks": result.tasks,
+                        "num_tasks": len(result.tasks),
+                        "aggregation": result.nested_suite.aggregation.value,
+                        "parent_suite": spec,  # Track which parent suite this belongs to
+                    }
 
             if not child_averages:
                 continue
@@ -183,6 +217,7 @@ def compute_suite_aggregations(
                 "tasks": all_tasks_included,
                 "num_tasks": len(all_tasks_included),
                 "num_children": children_included,
+                "nested_suites": nested_suites_included,
                 "aggregation": suite.aggregation.value,
             }
         else:

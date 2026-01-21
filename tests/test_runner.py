@@ -237,12 +237,22 @@ class TestSuiteAggregations:
 
             result = compute_suite_aggregations(["_test_aoa"], task_results)
 
+            # Check top-level suite aggregation
             assert "_test_aoa" in result
             # Average of averages: (1.0 + 0.5) / 2 = 0.75
             assert result["_test_aoa"]["metrics"]["bits_per_byte"] == pytest.approx(0.75)
             assert result["_test_aoa"]["num_tasks"] == 4  # All tasks included
             assert result["_test_aoa"]["num_children"] == 2  # 2 children
             assert result["_test_aoa"]["aggregation"] == "average_of_averages"
+            assert result["_test_aoa"]["nested_suites"] == ["_test_nested"]
+
+            # Check nested suite aggregation is also reported
+            assert "_test_nested" in result
+            # Nested suite average: (0.4 + 0.5 + 0.6) / 3 = 0.5
+            assert result["_test_nested"]["metrics"]["bits_per_byte"] == pytest.approx(0.5)
+            assert result["_test_nested"]["num_tasks"] == 3
+            assert result["_test_nested"]["aggregation"] == "average"
+            assert result["_test_nested"]["parent_suite"] == "_test_aoa"
         finally:
             # Clean up
             del _REGISTRY["_test_aoa"]
