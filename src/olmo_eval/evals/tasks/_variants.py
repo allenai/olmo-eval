@@ -114,20 +114,14 @@ def register_all_mc_variants() -> None:
 
 
 def register_bpb_variants() -> None:
-    """Register :bpb variant for ALL registered tasks.
-
-    The :bpb variant indicates bits-per-byte (perplexity) evaluation.
-    This uses loglikelihood scoring with the PPL formatter, BitsPerByte scorer,
-    and BPB metric.
-    """
+    """Register :bpb variant for ALL registered tasks."""
     for task_name in list(_tasks.keys()):
         register_variant(
             task_name,
             "bpb",
             formatter=PPLFormatter(),
             scorers=(BitsPerByteScorer(),),
-            metrics=(BPBMetric(),),
-            num_fewshot=0,
+            metrics=(BPBMetric()),
         )
 
 

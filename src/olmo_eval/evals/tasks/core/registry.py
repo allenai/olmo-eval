@@ -1,12 +1,13 @@
 """Task registry for registering and retrieving tasks by name.
 
-Task specs follow the format: task_name[:variant][::regime]
+Task specs follow the format: task_name[:variant1[:variant2...]][::regime]
 
 Examples:
     - "arc_easy" - base task
     - "arc_easy:mc" - task with multiple-choice variant
     - "arc_easy::olmes" - task with olmes regime
     - "arc_easy:mc::olmes" - task with variant and regime
+    - "mbpp:3shot:bpb::none" - task with stacked variants and regime
 """
 
 from collections.abc import Callable
@@ -90,45 +91,49 @@ def register_regime(task_name: str, regime: str, **overrides: Any) -> None:
     _regimes.setdefault(task_name, {})[regime] = overrides
 
 
-def parse_task_spec(spec: str) -> tuple[str, str | None, str | None]:
-    """Parse a task spec into (task_name, variant, regime).
+def parse_task_spec(spec: str) -> tuple[str, list[str], str | None]:
+    """Parse a task spec into (task_name, variants, regime).
 
-    Spec format: task_name[:variant][::regime]
+    Spec format: task_name[:variant1[:variant2...]][::regime]
 
     Args:
         spec: Task specification string.
 
     Returns:
-        Tuple of (task_name, variant, regime). Variant and regime may be None.
+        Tuple of (task_name, variants, regime). Variants is a list (may be empty).
+        Regime may be None.
 
     Examples:
         >>> parse_task_spec("arc_easy")
-        ("arc_easy", None, None)
+        ("arc_easy", [], None)
         >>> parse_task_spec("arc_easy:mc")
-        ("arc_easy", "mc", None)
+        ("arc_easy", ["mc"], None)
         >>> parse_task_spec("arc_easy::olmes")
-        ("arc_easy", None, "olmes")
+        ("arc_easy", [], "olmes")
         >>> parse_task_spec("arc_easy:mc::olmes")
-        ("arc_easy", "mc", "olmes")
+        ("arc_easy", ["mc"], "olmes")
+        >>> parse_task_spec("mbpp:3shot:bpb::none")
+        ("mbpp", ["3shot", "bpb"], "none")
     """
     # First split on :: to separate regime
     task_part, _, regime = spec.partition("::")
     regime = regime or None
 
-    # Then split task_part on : to separate variant
-    task_name, _, variant = task_part.partition(":")
-    variant = variant or None
+    # Split task_part on : to get task name and variants
+    parts = task_part.split(":")
+    task_name = parts[0]
+    variants = parts[1:] if len(parts) > 1 else []
 
-    return task_name, variant, regime
+    return task_name, variants, regime
 
 
 def get_task(spec: str) -> Task:
     """Instantiate a task by spec.
 
-    Spec format: task_name[:variant][::regime]
+    Spec format: task_name[:variant1[:variant2...]][::regime]
 
     Args:
-        spec: Task specification (e.g., "arc_easy", "arc_easy:mc::olmes").
+        spec: Task specification (e.g., "arc_easy", "arc_easy:mc::olmes", "mbpp:3shot:bpb").
 
     Returns:
         Instantiated Task with config (and variant/regime overrides if specified).
@@ -136,7 +141,7 @@ def get_task(spec: str) -> Task:
     Raises:
         KeyError: If task_name is not registered.
     """
-    task_name, variant, regime = parse_task_spec(spec)
+    task_name, variants, regime = parse_task_spec(spec)
 
     if task_name not in _tasks:
         available = ", ".join(sorted(_tasks.keys()))
@@ -144,11 +149,12 @@ def get_task(spec: str) -> Task:
 
     config = _configs[task_name]()
 
-    # Apply variant overrides first (if specified and registered)
-    if variant and task_name in _variants and variant in _variants[task_name]:
-        config = replace(config, **_variants[task_name][variant])
+    # Apply variant overrides in order (if specified and registered)
+    for variant in variants:
+        if task_name in _variants and variant in _variants[task_name]:
+            config = replace(config, **_variants[task_name][variant])
 
-    # Apply regime overrides second (if specified and registered)
+    # Apply regime overrides last (if specified and registered)
     if regime and task_name in _regimes and regime in _regimes[task_name]:
         config = replace(config, **_regimes[task_name][regime])
 

@@ -72,16 +72,16 @@ class EvalRunner:
             if suite_exists(spec):
                 continue
 
-            # Parse task_name[:variant][::regime] format
-            task_name, variant, regime = parse_task_spec(spec)
+            # Parse task_name[:variant1[:variant2...]][::regime] format
+            task_name, variants, regime = parse_task_spec(spec)
 
             if task_name not in available_tasks:
                 errors.append(f"Unknown task or suite: '{spec}'")
                 continue
 
-            # If variant specified, validate it exists
-            if variant:
-                task_variants = variants_by_task.get(task_name, [])
+            # Validate each variant exists
+            task_variants = variants_by_task.get(task_name, [])
+            for variant in variants:
                 if variant not in task_variants:
                     if task_variants:
                         errors.append(
