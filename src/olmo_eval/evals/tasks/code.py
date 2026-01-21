@@ -277,3 +277,19 @@ class MBPPPlus(MBPPPlusTask):
     """MBPP+ code generation task."""
 
     pass
+
+
+def _codex_humaneval_config() -> TaskConfig:
+    return TaskConfig(
+        name="codex_humaneval",
+        hf_dataset="openai_humaneval",
+        scorers=(),
+        metrics=(),
+    )
+
+
+@register("codex_humaneval", _codex_humaneval_config)
+class CodexHumanEval(HumanEvalTask):
+    """Alias for HumanEval (codex_humaneval name used by oe-eval)."""
+
+    pass
