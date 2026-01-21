@@ -410,11 +410,12 @@ def instance_worker_process(
     backend_type_str: str,
     attention_backend: str | None = None,
     tokenizer: str | None = None,
+    batch_size: int = 256,
 ) -> None:
-    """Worker that collects all items then processes at once.
+    """Worker that processes items in batches for progress reporting.
 
-    This allows vLLM to handle batching internally for optimal throughput,
-    rather than artificially limiting to small batches.
+    Processes items in configurable batch sizes to provide progress updates
+    while still allowing vLLM to handle internal batching efficiently.
 
     Args:
         gpu_ids: List of GPU IDs to use (for CUDA_VISIBLE_DEVICES)
@@ -424,6 +425,7 @@ def instance_worker_process(
         backend_type_str: Backend type string
         attention_backend: Attention backend to use (e.g., "FLASHINFER", "FLASH_ATTN")
         tokenizer: Tokenizer path/identifier, defaults to model if None
+        batch_size: Number of items to process per batch (default 256)
     """
     import sys
 
@@ -438,19 +440,22 @@ def instance_worker_process(
             engine_kwargs["attention_backend"] = attention_backend
         backend = create_backend(backend_type, model_name, tokenizer=tokenizer, **engine_kwargs)
 
-        # Collect ALL items from queue until poison pill
+        # Process items in batches for better progress reporting
         items: list[QueueItem] = []
         while True:
             item = instance_queue.get()
             if item is None:  # Poison pill
+                # Process any remaining items
+                if items:
+                    _process_batch(items, backend, result_queue)
                 break
+
             items.append(item)
 
-        if not items:
-            return
-
-        # Process all at once - vLLM handles internal batching for optimal throughput
-        _process_batch(items, backend, result_queue)
+            # Process batch when we hit the size limit
+            if len(items) >= batch_size:
+                _process_batch(items, backend, result_queue)
+                items = []
     except Exception as e:
         logger.error(f"Worker process failed: {e}")
         # Put a fatal error marker in the result queue so main process knows we died
