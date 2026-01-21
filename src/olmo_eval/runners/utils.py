@@ -17,7 +17,28 @@ __all__ = [
     "compute_suite_aggregations",
     "get_primary_metric",
     "run_task_impl",
+    "serialize_sampling_params",
 ]
+
+
+def serialize_sampling_params(params: SamplingParams | None) -> dict[str, Any] | None:
+    """Serialize SamplingParams to a dictionary for JSON output.
+
+    Args:
+        params: SamplingParams instance or None
+
+    Returns:
+        Dictionary representation or None if params is None
+    """
+    if params is None:
+        return None
+    return {
+        "temperature": params.temperature,
+        "max_tokens": params.max_tokens,
+        "top_p": params.top_p,
+        "top_k": params.top_k,
+        "num_samples": params.num_samples,
+    }
 
 
 def get_primary_metric(
@@ -432,7 +453,9 @@ def run_task_impl(
                 "name": task.config.name,
                 "split": task.config.split.value,
                 "num_fewshot": task.config.num_fewshot,
+                "fewshot_seed": task.config.fewshot_seed,
                 "limit": task.config.limit,
+                "sampling_params": serialize_sampling_params(task.config.sampling_params),
             },
             num_instances=len(instances),
             metrics=metrics,

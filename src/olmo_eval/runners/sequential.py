@@ -178,6 +178,15 @@ class EvalRunner:
             "backend": backend_type.value,
             "timestamp": datetime.now().isoformat(),
             "tasks": {},
+            # Store model config details for metrics.json
+            "_model_config": {
+                "model": model_config.model,
+                "tokenizer": model_config.tokenizer,
+                "backend": backend_type.value,
+                "dtype": model_config.dtype,
+                "revision": model_config.revision,
+                "attention_backend": self.attention_backend,
+            },
         }
 
         # TODO(undfined): This is starting with the naive approach. Add intelligent
@@ -189,6 +198,7 @@ class EvalRunner:
                 "config": task_result.config,
                 "num_instances": task_result.num_instances,
                 "metrics": task_result.metrics,
+                "duration_seconds": task_result.duration_seconds,
             }
             if task_result.primary_metric:
                 task_data["primary_metric"] = task_result.primary_metric
@@ -292,15 +302,36 @@ class EvalRunner:
         """Write metrics.json for Beaker display."""
         metrics_file = os.path.join(self.output_dir, "metrics.json")
 
-        # Build simplified metrics structure
-        tasks_list = [
-            {
+        # Build config section from stored model config
+        model_cfg = results.get("_model_config", {})
+        config: dict[str, Any] = {
+            "model": model_cfg.get("model", results.get("model", "")),
+            "backend": model_cfg.get("backend", results.get("backend", "")),
+            "dtype": model_cfg.get("dtype", "auto"),
+        }
+        # Only include optional fields if they have values
+        if model_cfg.get("tokenizer"):
+            config["tokenizer"] = model_cfg["tokenizer"]
+        if model_cfg.get("revision"):
+            config["revision"] = model_cfg["revision"]
+        if model_cfg.get("attention_backend"):
+            config["attention_backend"] = model_cfg["attention_backend"]
+
+        # Build enhanced task entries
+        tasks_list = []
+        for task_name, task_data in results.get("tasks", {}).items():
+            task_entry: dict[str, Any] = {
                 "task": task_name,
                 "metrics": task_data.get("metrics", {}),
                 "num_instances": task_data.get("num_instances", 0),
             }
-            for task_name, task_data in results.get("tasks", {}).items()
-        ]
+            if task_data.get("primary_metric"):
+                task_entry["primary_metric"] = task_data["primary_metric"]
+            if task_data.get("config"):
+                task_entry["config"] = task_data["config"]
+            if task_data.get("duration_seconds"):
+                task_entry["duration_seconds"] = task_data["duration_seconds"]
+            tasks_list.append(task_entry)
 
         # Build summary with primary metric for each task
         summary: dict[str, dict[str, Any]] = {}
@@ -312,18 +343,9 @@ class EvalRunner:
                 metric_name, score = primary
                 summary[task_name] = {"metric": metric_name, "score": score}
 
-        # Build suite summaries if present
-        suites_list = []
+        # Add suite summaries to summary (without separate suites list)
         if "suites" in results:
             for suite_name, suite_data in results["suites"].items():
-                suites_list.append(
-                    {
-                        "suite": suite_name,
-                        "metrics": suite_data.get("metrics", {}),
-                        "num_tasks": suite_data.get("num_tasks", 0),
-                        "aggregation": suite_data.get("aggregation", "mean"),
-                    }
-                )
                 metrics = suite_data.get("metrics", {})
                 primary = get_primary_metric(metrics)
                 if primary:
@@ -331,11 +353,9 @@ class EvalRunner:
                     summary[suite_name] = {"metric": metric_name, "score": score}
 
         metrics_output = {
-            "model": results.get("model", ""),
-            "backend": results.get("backend", ""),
             "timestamp": results.get("timestamp", ""),
+            "config": config,
             "tasks": tasks_list,
-            "suites": suites_list,
             "summary": summary,
             "errors": results.get("errors", []),
         }

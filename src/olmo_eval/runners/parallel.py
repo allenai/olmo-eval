@@ -35,6 +35,7 @@ from olmo_eval.runners.utils import (
     build_predictions,
     compute_suite_aggregations,
     get_primary_metric,
+    serialize_sampling_params,
 )
 
 if TYPE_CHECKING:
@@ -225,7 +226,9 @@ def finalize_task(tracker: TaskTracker) -> TaskResult:
             "name": tracker.task.config.name,
             "split": tracker.task.config.split.value,
             "num_fewshot": tracker.task.config.num_fewshot,
+            "fewshot_seed": tracker.task.config.fewshot_seed,
             "limit": tracker.task.config.limit,
+            "sampling_params": serialize_sampling_params(tracker.task.config.sampling_params),
         },
         num_instances=tracker.total_instances,
         metrics=metrics,
@@ -1106,10 +1109,21 @@ class AsyncEvalRunner:
                             "config": task_result.config,
                             "num_instances": task_result.num_instances,
                             "metrics": task_result.metrics,
+                            "duration_seconds": task_result.duration_seconds,
                         }
                         if task_result.primary_metric:
                             task_data["primary_metric"] = task_result.primary_metric
                         model_results["tasks"][spec] = task_data
+
+            # Store model config details for metrics.json
+            model_results["_model_config"] = {
+                "model": model_config.model,
+                "tokenizer": model_config.tokenizer,
+                "backend": backend_type.value,
+                "dtype": model_config.dtype,
+                "revision": model_config.revision,
+                "attention_backend": self.attention_backend,
+            }
 
             results_dict["models"][model_name] = model_results
 
@@ -1183,18 +1197,43 @@ class AsyncEvalRunner:
         """Write metrics.json for Beaker display."""
         metrics_file = os.path.join(self.output_dir, "metrics.json")
 
-        # Build simplified metrics structure - flatten (model, task) pairs
+        # Build config section with per-model details
+        models_config: dict[str, dict[str, Any]] = {}
+        for model_name, model_data in results.get("models", {}).items():
+            model_cfg = model_data.get("_model_config", {})
+            cfg: dict[str, Any] = {
+                "model": model_cfg.get("model", model_data.get("model", "")),
+                "backend": model_cfg.get("backend", model_data.get("backend", "")),
+                "dtype": model_cfg.get("dtype", "auto"),
+            }
+            # Only include optional fields if they have values
+            if model_cfg.get("tokenizer"):
+                cfg["tokenizer"] = model_cfg["tokenizer"]
+            if model_cfg.get("revision"):
+                cfg["revision"] = model_cfg["revision"]
+            if model_cfg.get("attention_backend"):
+                cfg["attention_backend"] = model_cfg["attention_backend"]
+            models_config[model_name] = cfg
+
+        config: dict[str, Any] = {"models": models_config}
+
+        # Build enhanced task entries - flatten (model, task) pairs
         tasks_list = []
         for model_name, model_data in results.get("models", {}).items():
             for task_name, task_data in model_data.get("tasks", {}).items():
-                tasks_list.append(
-                    {
-                        "model": model_name,
-                        "task": task_name,
-                        "metrics": task_data.get("metrics", {}),
-                        "num_instances": task_data.get("num_instances", 0),
-                    }
-                )
+                task_entry: dict[str, Any] = {
+                    "model": model_name,
+                    "task": task_name,
+                    "metrics": task_data.get("metrics", {}),
+                    "num_instances": task_data.get("num_instances", 0),
+                }
+                if task_data.get("primary_metric"):
+                    task_entry["primary_metric"] = task_data["primary_metric"]
+                if task_data.get("config"):
+                    task_entry["config"] = task_data["config"]
+                if task_data.get("duration_seconds"):
+                    task_entry["duration_seconds"] = task_data["duration_seconds"]
+                tasks_list.append(task_entry)
 
         # Build summary with primary metric for each (model, task) pair
         summary: dict[str, dict[str, dict[str, Any]]] = {}
@@ -1208,31 +1247,19 @@ class AsyncEvalRunner:
                     metric_name, score = primary
                     summary[model_name][task_name] = {"metric": metric_name, "score": score}
 
-        # Build suite summaries and add to summary
-        suites_list = []
-        for model_name, model_data in results.get("models", {}).items():
-            if "suites" not in model_data:
-                continue
-            for suite_name, suite_data in model_data["suites"].items():
-                suites_list.append(
-                    {
-                        "model": model_name,
-                        "suite": suite_name,
-                        "metrics": suite_data.get("metrics", {}),
-                        "num_tasks": suite_data.get("num_tasks", 0),
-                        "aggregation": suite_data.get("aggregation", "mean"),
-                    }
-                )
-                metrics = suite_data.get("metrics", {})
-                primary = get_primary_metric(metrics)
-                if primary:
-                    metric_name, score = primary
-                    summary[model_name][suite_name] = {"metric": metric_name, "score": score}
+            # Add suite summaries to this model's summary
+            if "suites" in model_data:
+                for suite_name, suite_data in model_data["suites"].items():
+                    metrics = suite_data.get("metrics", {})
+                    primary = get_primary_metric(metrics)
+                    if primary:
+                        metric_name, score = primary
+                        summary[model_name][suite_name] = {"metric": metric_name, "score": score}
 
         metrics_output = {
             "timestamp": results.get("timestamp", ""),
+            "config": config,
             "tasks": tasks_list,
-            "suites": suites_list,
             "summary": summary,
             "errors": results.get("errors", []),
         }
@@ -1708,10 +1735,21 @@ class StreamingEvalRunner:
                             "config": task_result.config,
                             "num_instances": task_result.num_instances,
                             "metrics": task_result.metrics,
+                            "duration_seconds": task_result.duration_seconds,
                         }
                         if task_result.primary_metric:
                             task_data["primary_metric"] = task_result.primary_metric
                         model_results["tasks"][spec] = task_data
+
+            # Store model config details for metrics.json
+            model_results["_model_config"] = {
+                "model": model_config.model,
+                "tokenizer": model_config.tokenizer,
+                "backend": "vllm",
+                "dtype": model_config.dtype,
+                "revision": model_config.revision,
+                "attention_backend": self.attention_backend,
+            }
 
             results_dict["models"][model_name] = model_results
 
@@ -1780,17 +1818,43 @@ class StreamingEvalRunner:
         """Write metrics.json for Beaker display."""
         metrics_file = os.path.join(self.output_dir, "metrics.json")
 
+        # Build config section with per-model details
+        models_config: dict[str, dict[str, Any]] = {}
+        for model_name, model_data in results.get("models", {}).items():
+            model_cfg = model_data.get("_model_config", {})
+            cfg: dict[str, Any] = {
+                "model": model_cfg.get("model", model_data.get("model", "")),
+                "backend": model_cfg.get("backend", model_data.get("backend", "")),
+                "dtype": model_cfg.get("dtype", "auto"),
+            }
+            # Only include optional fields if they have values
+            if model_cfg.get("tokenizer"):
+                cfg["tokenizer"] = model_cfg["tokenizer"]
+            if model_cfg.get("revision"):
+                cfg["revision"] = model_cfg["revision"]
+            if model_cfg.get("attention_backend"):
+                cfg["attention_backend"] = model_cfg["attention_backend"]
+            models_config[model_name] = cfg
+
+        config: dict[str, Any] = {"models": models_config}
+
+        # Build enhanced task entries - flatten (model, task) pairs
         tasks_list = []
         for model_name, model_data in results.get("models", {}).items():
             for task_name, task_data in model_data.get("tasks", {}).items():
-                tasks_list.append(
-                    {
-                        "model": model_name,
-                        "task": task_name,
-                        "metrics": task_data.get("metrics", {}),
-                        "num_instances": task_data.get("num_instances", 0),
-                    }
-                )
+                task_entry: dict[str, Any] = {
+                    "model": model_name,
+                    "task": task_name,
+                    "metrics": task_data.get("metrics", {}),
+                    "num_instances": task_data.get("num_instances", 0),
+                }
+                if task_data.get("primary_metric"):
+                    task_entry["primary_metric"] = task_data["primary_metric"]
+                if task_data.get("config"):
+                    task_entry["config"] = task_data["config"]
+                if task_data.get("duration_seconds"):
+                    task_entry["duration_seconds"] = task_data["duration_seconds"]
+                tasks_list.append(task_entry)
 
         # Build summary with primary metric for each (model, task) pair
         summary: dict[str, dict[str, dict[str, Any]]] = {}
@@ -1804,31 +1868,19 @@ class StreamingEvalRunner:
                     metric_name, score = primary
                     summary[model_name][task_name] = {"metric": metric_name, "score": score}
 
-        # Build suite summaries and add to summary
-        suites_list = []
-        for model_name, model_data in results.get("models", {}).items():
-            if "suites" not in model_data:
-                continue
-            for suite_name, suite_data in model_data["suites"].items():
-                suites_list.append(
-                    {
-                        "model": model_name,
-                        "suite": suite_name,
-                        "metrics": suite_data.get("metrics", {}),
-                        "num_tasks": suite_data.get("num_tasks", 0),
-                        "aggregation": suite_data.get("aggregation", "mean"),
-                    }
-                )
-                metrics = suite_data.get("metrics", {})
-                primary = get_primary_metric(metrics)
-                if primary:
-                    metric_name, score = primary
-                    summary[model_name][suite_name] = {"metric": metric_name, "score": score}
+            # Add suite summaries to this model's summary
+            if "suites" in model_data:
+                for suite_name, suite_data in model_data["suites"].items():
+                    metrics = suite_data.get("metrics", {})
+                    primary = get_primary_metric(metrics)
+                    if primary:
+                        metric_name, score = primary
+                        summary[model_name][suite_name] = {"metric": metric_name, "score": score}
 
         metrics_output = {
             "timestamp": results.get("timestamp", ""),
+            "config": config,
             "tasks": tasks_list,
-            "suites": suites_list,
             "summary": summary,
             "errors": results.get("errors", []),
         }
