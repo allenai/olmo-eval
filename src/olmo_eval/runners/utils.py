@@ -44,14 +44,70 @@ def get_primary_metric(metrics: dict[str, float]) -> tuple[str, float] | None:
     return (name, metrics[name])
 
 
+def _compute_child_average(
+    child: str | Any,  # str or Suite
+    override_suffix: str,
+    priority_suffix: str,
+    task_results: dict[str, dict[str, Any]],
+) -> tuple[dict[str, float], list[str]] | None:
+    """Compute average metrics for a single child (task string or nested Suite).
+
+    Returns:
+        Tuple of (metrics dict, list of tasks included) or None if no results found.
+    """
+    from olmo_eval.evals.suites.registry import Suite
+
+    if isinstance(child, Suite):
+        # Child is a nested Suite - average all its expanded tasks
+        child_metrics: dict[str, list[float]] = {}
+        tasks_included = []
+
+        for task_spec in child.expand():
+            full_task_spec = f"{task_spec}{override_suffix}{priority_suffix}"
+            if full_task_spec not in task_results:
+                continue
+
+            task_data = task_results[full_task_spec]
+            metrics = task_data.get("metrics", {})
+            if not metrics:
+                continue
+
+            tasks_included.append(full_task_spec)
+            for metric_name, value in metrics.items():
+                if metric_name not in child_metrics:
+                    child_metrics[metric_name] = []
+                child_metrics[metric_name].append(value)
+
+        if not child_metrics:
+            return None
+
+        averaged = {name: sum(vals) / len(vals) for name, vals in child_metrics.items()}
+        return averaged, tasks_included
+    else:
+        # Child is a task string - get its metrics directly
+        full_task_spec = f"{child}{override_suffix}{priority_suffix}"
+        if full_task_spec not in task_results:
+            return None
+
+        task_data = task_results[full_task_spec]
+        metrics = task_data.get("metrics", {})
+        if not metrics:
+            return None
+
+        return dict(metrics), [full_task_spec]
+
+
 def compute_suite_aggregations(
     task_specs: list[str],
     task_results: dict[str, dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
     """Compute aggregated metrics for suites in the task specs.
 
-    For each suite in task_specs, computes the average of primary metrics
-    across all tasks in that suite.
+    For each suite in task_specs, computes aggregated metrics based on the
+    suite's aggregation strategy:
+    - AVERAGE: Simple average of all expanded task scores
+    - AVERAGE_OF_AVERAGES: Average over children, where nested suites are
+      averaged first (each child gets equal weight)
 
     Handles specs with inline overrides (::key=value) and priority suffixes (@priority).
     When a suite has these suffixes, they are propagated to expanded task lookups.
@@ -91,47 +147,85 @@ def compute_suite_aggregations(
         if suite.aggregation == AggregationStrategy.NONE:
             continue
 
-        # Get results for all tasks in this suite
-        # Note: suite.expand() returns task specs without suffixes
-        suite_tasks = suite.expand()
-        suite_metrics: dict[str, list[float]] = {}
-        tasks_included = []
+        if suite.aggregation == AggregationStrategy.AVERAGE_OF_AVERAGES:
+            # Average of averages: each child (task or nested suite) gets equal weight
+            # Process each child separately, then average the child averages
+            child_averages: dict[str, list[float]] = {}
+            all_tasks_included: list[str] = []
+            children_included = 0
 
-        for task_spec in suite_tasks:
-            # Build the full task spec with the same suffixes as the suite
-            full_task_spec = f"{task_spec}{override_suffix}{priority_suffix}"
+            for child in suite.tasks:
+                result = _compute_child_average(
+                    child, override_suffix, priority_suffix, task_results
+                )
+                if result is None:
+                    continue
 
-            if full_task_spec not in task_results:
+                child_metrics, child_tasks = result
+                all_tasks_included.extend(child_tasks)
+                children_included += 1
+
+                for metric_name, value in child_metrics.items():
+                    if metric_name not in child_averages:
+                        child_averages[metric_name] = []
+                    child_averages[metric_name].append(value)
+
+            if not child_averages:
                 continue
 
-            task_data = task_results[full_task_spec]
-            metrics = task_data.get("metrics", {})
+            # Average the child averages (each child weighted equally)
+            aggregated_metrics = {
+                name: sum(values) / len(values) for name, values in child_averages.items()
+            }
 
-            if not metrics:
+            suite_aggregations[spec] = {
+                "metrics": aggregated_metrics,
+                "tasks": all_tasks_included,
+                "num_tasks": len(all_tasks_included),
+                "num_children": children_included,
+                "aggregation": suite.aggregation.value,
+            }
+        else:
+            # AVERAGE or DISPLAY_ONLY: simple average of all expanded tasks
+            suite_tasks = suite.expand()
+            suite_metrics: dict[str, list[float]] = {}
+            tasks_included: list[str] = []
+
+            for task_spec in suite_tasks:
+                # Build the full task spec with the same suffixes as the suite
+                full_task_spec = f"{task_spec}{override_suffix}{priority_suffix}"
+
+                if full_task_spec not in task_results:
+                    continue
+
+                task_data = task_results[full_task_spec]
+                metrics = task_data.get("metrics", {})
+
+                if not metrics:
+                    continue
+
+                tasks_included.append(full_task_spec)
+
+                # Collect all metrics for averaging
+                for metric_name, value in metrics.items():
+                    if metric_name not in suite_metrics:
+                        suite_metrics[metric_name] = []
+                    suite_metrics[metric_name].append(value)
+
+            if not suite_metrics:
                 continue
 
-            tasks_included.append(full_task_spec)
+            # Compute averages
+            aggregated_metrics = {
+                name: sum(values) / len(values) for name, values in suite_metrics.items()
+            }
 
-            # Collect all metrics for averaging
-            for metric_name, value in metrics.items():
-                if metric_name not in suite_metrics:
-                    suite_metrics[metric_name] = []
-                suite_metrics[metric_name].append(value)
-
-        if not suite_metrics:
-            continue
-
-        # Compute averages
-        aggregated_metrics = {
-            name: sum(values) / len(values) for name, values in suite_metrics.items()
-        }
-
-        suite_aggregations[spec] = {
-            "metrics": aggregated_metrics,
-            "tasks": tasks_included,
-            "num_tasks": len(tasks_included),
-            "aggregation": suite.aggregation.value,
-        }
+            suite_aggregations[spec] = {
+                "metrics": aggregated_metrics,
+                "tasks": tasks_included,
+                "num_tasks": len(tasks_included),
+                "aggregation": suite.aggregation.value,
+            }
 
     return suite_aggregations
 

@@ -191,3 +191,58 @@ class TestSuiteAggregations:
 
         # arc_challenge is a task, not a suite
         assert result == {}
+
+    def test_suite_aggregation_average_of_averages(self):
+        """Test AVERAGE_OF_AVERAGES aggregation weights children equally."""
+        from olmo_eval.runners.utils import compute_suite_aggregations
+        from olmo_eval.evals.suites.registry import (
+            AggregationStrategy,
+            Suite,
+            register,
+            _REGISTRY,
+        )
+
+        # Create a nested suite for testing
+        nested_suite = Suite(
+            name="_test_nested",
+            tasks=("task_a", "task_b", "task_c"),  # 3 tasks
+            aggregation=AggregationStrategy.AVERAGE,
+        )
+
+        # Create an average-of-averages suite
+        aoa_suite = Suite(
+            name="_test_aoa",
+            tasks=(
+                "task_single",  # Individual task
+                nested_suite,   # Nested suite with 3 tasks
+            ),
+            aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+        )
+
+        # Register temporarily
+        _REGISTRY["_test_aoa"] = aoa_suite
+
+        try:
+            # Create task results:
+            # - task_single: 1.0
+            # - task_a, task_b, task_c: 0.4, 0.5, 0.6 (average = 0.5)
+            # Expected AVERAGE_OF_AVERAGES: (1.0 + 0.5) / 2 = 0.75
+            # (NOT simple average: (1.0 + 0.4 + 0.5 + 0.6) / 4 = 0.625)
+            task_results = {
+                "task_single": {"metrics": {"bits_per_byte": 1.0}},
+                "task_a": {"metrics": {"bits_per_byte": 0.4}},
+                "task_b": {"metrics": {"bits_per_byte": 0.5}},
+                "task_c": {"metrics": {"bits_per_byte": 0.6}},
+            }
+
+            result = compute_suite_aggregations(["_test_aoa"], task_results)
+
+            assert "_test_aoa" in result
+            # Average of averages: (1.0 + 0.5) / 2 = 0.75
+            assert result["_test_aoa"]["metrics"]["bits_per_byte"] == pytest.approx(0.75)
+            assert result["_test_aoa"]["num_tasks"] == 4  # All tasks included
+            assert result["_test_aoa"]["num_children"] == 2  # 2 children
+            assert result["_test_aoa"]["aggregation"] == "average_of_averages"
+        finally:
+            # Clean up
+            del _REGISTRY["_test_aoa"]
