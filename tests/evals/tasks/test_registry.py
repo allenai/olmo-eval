@@ -146,7 +146,11 @@ class TestGetTask:
         assert task.config.num_fewshot == 0
 
     def test_get_task_with_regime(self):
-        """Test getting a task with regime overrides."""
+        """Test getting a task with regime overrides.
+
+        Note: Regimes are now accessed as variants using single colon syntax.
+        Old syntax: task::regime  ->  New syntax: task:regime
+        """
 
         @register(
             "regime_task",
@@ -161,8 +165,8 @@ class TestGetTask:
         task_base = get_task("regime_task")
         assert task_base.config.num_fewshot == 0
 
-        # With regime
-        task_regime = get_task("regime_task::fewshot")
+        # With regime (using new variant-style syntax)
+        task_regime = get_task("regime_task:fewshot")
         assert task_regime.config.num_fewshot == 5
 
     def test_get_task_unknown_raises(self):
@@ -171,7 +175,11 @@ class TestGetTask:
             get_task("nonexistent_task")
 
     def test_get_task_with_unknown_regime_uses_base(self):
-        """Test that unknown regime falls back to base config."""
+        """Test that unknown regime/variant falls back to base config.
+
+        Note: Regimes are now accessed as variants using single colon syntax.
+        Unknown variants are silently ignored (no override applied).
+        """
 
         @register(
             "fallback_task",
@@ -180,8 +188,8 @@ class TestGetTask:
         class FallbackTask(DummyTask):
             pass
 
-        # Unknown regime should use base config
-        task = get_task("fallback_task::unknown_regime")
+        # Unknown variant/regime should use base config
+        task = get_task("fallback_task:unknown_regime")
         assert task.config.num_fewshot == 3
 
 

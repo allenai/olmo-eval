@@ -39,6 +39,13 @@ class ValidationError(Exception):
     pass
 
 
+# Keys that apply to TaskConfig
+TASKCONFIG_KEYS = {"num_fewshot", "limit", "fewshot_seed"}
+
+# Keys that apply to SamplingParams
+SAMPLING_KEYS = {"temperature", "max_tokens", "top_p", "top_k", "num_samples"}
+
+
 @dataclass
 class EvalRunner:
     """Orchestrates evaluation runs across tasks."""
@@ -48,11 +55,15 @@ class EvalRunner:
     output_dir: str = BEAKER_RESULT_DIR
     num_shots_override: int | None = None
     limit_override: int | None = None
+    temperature: float | None = None
     backend_override: str | None = None
     storages: list[StorageBackend] = field(default_factory=list)
 
     # vLLM config
     attention_backend: str | None = None  # e.g., "FLASHINFER", "FLASH_ATTN"
+
+    # Per-task overrides from inline spec (e.g., task::temperature=0.6)
+    task_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def validate(self) -> None:
         """Validate all inputs before running.
@@ -72,41 +83,31 @@ class EvalRunner:
             if suite_exists(spec):
                 continue
 
-            # Parse task_name[:variant1[:variant2...]][::regime] format
-            task_name, variants, regime = parse_task_spec(spec)
+            # Parse task_name[:variant1[:variant2...]][::key=value,...] format
+            # Note: regimes are now treated as variants
+            task_name, variants, _overrides = parse_task_spec(spec)
 
             if task_name not in available_tasks:
                 errors.append(f"Unknown task or suite: '{spec}'")
                 continue
 
-            # Validate each variant exists
-            task_variants = variants_by_task.get(task_name, [])
-            for variant in variants:
-                if variant not in task_variants:
-                    if task_variants:
-                        errors.append(
-                            f"Unknown variant '{variant}' for task '{task_name}'. "
-                            f"Available: {', '.join(task_variants)}"
-                        )
-                    else:
-                        errors.append(
-                            f"Unknown variant '{variant}' for task '{task_name}'. "
-                            f"This task has no registered variants."
-                        )
+            # Validate each variant/regime exists (check both registries)
+            task_variants = set(variants_by_task.get(task_name, []))
+            task_regimes = set(regimes_by_task.get(task_name, []))
+            all_valid_variants = task_variants | task_regimes
 
-            # If regime specified, validate it exists
-            if regime:
-                task_regimes = regimes_by_task.get(task_name, [])
-                if regime not in task_regimes:
-                    if task_regimes:
+            for variant in variants:
+                if variant not in all_valid_variants:
+                    available_list = sorted(all_valid_variants)
+                    if available_list:
                         errors.append(
-                            f"Unknown regime '{regime}' for task '{task_name}'. "
-                            f"Available: {', '.join(task_regimes)}"
+                            f"Unknown variant/regime '{variant}' for task '{task_name}'. "
+                            f"Available: {', '.join(available_list)}"
                         )
                     else:
                         errors.append(
-                            f"Unknown regime '{regime}' for task '{task_name}'. "
-                            f"This task has no registered regimes."
+                            f"Unknown variant/regime '{variant}' for task '{task_name}'. "
+                            f"This task has no registered variants or regimes."
                         )
 
         if errors:
@@ -209,12 +210,24 @@ class EvalRunner:
 
     def _run_task(self, spec: str, backend: Backend) -> TaskResult:
         """Run a single task and return results."""
-        # Build overrides from instance settings
-        overrides = {}
+        # Build overrides from instance settings (global CLI overrides)
+        overrides: dict[str, Any] = {}
+        sampling_overrides: dict[str, Any] = {}
+
         if self.num_shots_override is not None:
             overrides["num_fewshot"] = self.num_shots_override
         if self.limit_override is not None:
             overrides["limit"] = self.limit_override
+        if self.temperature is not None:
+            sampling_overrides["temperature"] = self.temperature
+
+        # Apply per-task overrides from spec (highest priority)
+        task_specific_overrides = self.task_overrides.get(spec, {})
+        for key, value in task_specific_overrides.items():
+            if key in TASKCONFIG_KEYS:
+                overrides[key] = value
+            elif key in SAMPLING_KEYS:
+                sampling_overrides[key] = value
 
         # Use shared task execution logic
         result = run_task_impl(
@@ -222,6 +235,7 @@ class EvalRunner:
             backend=backend,
             overrides=overrides or None,
             progress_callback=lambda msg: console.print(f"  {msg}"),
+            sampling_overrides=sampling_overrides or None,
         )
 
         # Check for errors
@@ -289,12 +303,14 @@ class EvalRunner:
         suites_list = []
         if "suites" in results:
             for suite_name, suite_data in results["suites"].items():
-                suites_list.append({
-                    "suite": suite_name,
-                    "metrics": suite_data.get("metrics", {}),
-                    "num_tasks": suite_data.get("num_tasks", 0),
-                    "aggregation": suite_data.get("aggregation", "mean"),
-                })
+                suites_list.append(
+                    {
+                        "suite": suite_name,
+                        "metrics": suite_data.get("metrics", {}),
+                        "num_tasks": suite_data.get("num_tasks", 0),
+                        "aggregation": suite_data.get("aggregation", "mean"),
+                    }
+                )
                 metrics = suite_data.get("metrics", {})
                 primary = get_primary_metric(metrics)
                 if primary:

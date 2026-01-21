@@ -58,12 +58,15 @@ class TestEvalRunnerValidation:
             runner.validate()
 
     def test_validate_invalid_regime_raises(self):
-        """Test validation fails for unknown regime."""
+        """Test validation fails for unknown variant/regime.
+
+        Note: Regimes are now accessed as variants using single colon syntax.
+        """
         runner = EvalRunner(
             model_name="llama3.1-8b",
-            task_specs=["arc_challenge::nonexistent_regime"],
+            task_specs=["arc_challenge:nonexistent_regime"],
         )
-        with pytest.raises(ValidationError, match="Unknown regime"):
+        with pytest.raises(ValidationError, match="Unknown variant/regime"):
             runner.validate()
 
     def test_validate_collects_multiple_errors(self):

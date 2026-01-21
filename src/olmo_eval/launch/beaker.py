@@ -546,7 +546,9 @@ class BeakerLauncher:
         steps.append(f"uv pip freeze -q | grep -E '^(torch|nvidia-)' > {constraints}")
         if backends:
             extras = ",".join(backends)
-            steps.append(f"cd /gantry-runtime && uv pip install -q -e '.[{extras}]' -c {constraints}")
+            steps.append(
+                f"cd /gantry-runtime && uv pip install -q -e '.[{extras}]' -c {constraints}"
+            )
         else:
             steps.append(f"cd /gantry-runtime && uv pip install -q -e . -c {constraints}")
 
@@ -742,9 +744,12 @@ class BeakerLauncher:
             return self.beaker.group.get(qualified_name)
         except BeakerGroupNotFound:
             try:
+                # Get workspace object for the API call
+                ws_name = workspace or self._workspace
+                ws_obj = self.beaker.workspace.get(ws_name) if ws_name else None
                 return self.beaker.group.create(
                     name=name,  # Create uses short name
-                    workspace=workspace or self._workspace,
+                    workspace=ws_obj,
                     description=description,
                 )
             except BeakerGroupConflict:
@@ -765,8 +770,10 @@ class BeakerLauncher:
         Returns:
             Updated group object.
         """
+        # Convert string to Group object if needed
+        group_obj = self.beaker.group.get(group) if isinstance(group, str) else group
         return self.beaker.group.update(
-            group,
+            group_obj,
             add_experiment_ids=experiment_ids,
         )
 
@@ -854,7 +861,9 @@ class BeakerLauncher:
         Returns:
             CSV string with experiment metrics.
         """
-        return self.beaker.group.export_metrics(group)
+        # Convert string to Group object if needed
+        group_obj = self.beaker.group.get(group) if isinstance(group, str) else group
+        return self.beaker.group.export_metrics(group_obj)
 
     def cancel_group(self, group: str | BeakerGroup) -> dict[str, int]:
         """Cancel all active experiments in a group.
@@ -950,14 +959,15 @@ class BeakerLauncher:
 
         # Phase 2: Wait for job to start, showing events
         events_seen: set[str] = set()
+        assert job is not None  # We waited for job creation above
         job = self.beaker.job.get(job.id)
         while not (job.status.finalized or job.status.started):
             for event in self.beaker.job.list_summarized_events(job):
-                # Use message as key since events don't have stable IDs
-                event_key = f"{event.status}:{event.message}"
+                # Use latest_message as key since events don't have stable IDs
+                event_key = f"{event.status}:{event.latest_message}"
                 if event_key not in events_seen:
                     events_seen.add(event_key)
-                    _console.print(f"[cyan]>[/cyan] {event.message}")
+                    _console.print(f"[cyan]>[/cyan] {event.latest_message}")
             time.sleep(1.0)
             job = self.beaker.job.get(job.id)
 

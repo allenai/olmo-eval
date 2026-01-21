@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
 from olmo_eval.backends import Backend
-from olmo_eval.core import Response
+from olmo_eval.core import Response, SamplingParams
 from olmo_eval.evals.tasks import get_task
 
 # Re-export build_predictions for parallel runner
@@ -101,8 +101,7 @@ def compute_suite_aggregations(
 
         # Compute averages
         aggregated_metrics = {
-            name: sum(values) / len(values)
-            for name, values in suite_metrics.items()
+            name: sum(values) / len(values) for name, values in suite_metrics.items()
         }
 
         suite_aggregations[spec] = {
@@ -128,11 +127,11 @@ class TaskResult:
     predictions: list[dict] | None = None
 
 
-def build_predictions(scored: list[Response]) -> list[dict]:
+def build_predictions(scored: Sequence[Response]) -> list[dict]:
     """Build per-instance predictions from scored responses.
 
     Args:
-        scored: List of scored Response objects
+        scored: Sequence of scored Response objects
 
     Returns:
         List of prediction dicts suitable for JSONL output
@@ -157,13 +156,15 @@ def build_predictions(scored: list[Response]) -> list[dict]:
             out_data["num_bytes"] = len(out.text.encode("utf-8"))
             model_output.append(out_data)
 
-        predictions.append({
-            "doc_id": idx,
-            "native_id": resp.instance.metadata.get("id", f"doc_{idx}"),
-            "doc": doc,
-            "model_output": model_output,
-            "scores": dict(resp.scores),
-        })
+        predictions.append(
+            {
+                "doc_id": idx,
+                "native_id": resp.instance.metadata.get("id", f"doc_{idx}"),
+                "doc": doc,
+                "model_output": model_output,
+                "scores": dict(resp.scores),
+            }
+        )
 
     return predictions
 
@@ -173,16 +174,20 @@ def run_task_impl(
     backend: Backend,
     overrides: dict[str, Any] | None = None,
     progress_callback: Callable[[str], None] | None = None,
+    temperature: float | None = None,
+    sampling_overrides: dict[str, Any] | None = None,
 ) -> TaskResult:
     """Execute a single task and return results.
 
     This is the core task execution logic shared by both EvalRunner and AsyncEvalRunner.
 
     Args:
-        spec: Task specification (e.g., "mmlu_history" or "mmlu_history::olmes")
+        spec: Task specification (e.g., "mmlu_history" or "mmlu_history:olmes")
         backend: Backend instance to use for generation
-        overrides: Optional overrides for task config (num_fewshot, limit)
+        overrides: Optional overrides for task config (num_fewshot, limit, fewshot_seed)
         progress_callback: Optional callback for progress messages
+        temperature: Optional temperature for sampling (deprecated, use sampling_overrides)
+        sampling_overrides: Optional overrides for sampling params (temperature, max_tokens, etc.)
 
     Returns:
         TaskResult with metrics and metadata
@@ -201,6 +206,24 @@ def run_task_impl(
         # Apply overrides
         if overrides:
             task.config = replace(task.config, **overrides)
+
+        # Build sampling params from overrides
+        # Priority: sampling_overrides > temperature > task default
+        existing_params = task.config.sampling_params or SamplingParams()
+
+        # Apply legacy temperature parameter (deprecated)
+        if temperature is not None:
+            existing_params = replace(existing_params, temperature=temperature)
+
+        # Apply sampling_overrides (highest priority)
+        if sampling_overrides:
+            for key, value in sampling_overrides.items():
+                if hasattr(existing_params, key):
+                    existing_params = replace(existing_params, **{key: value})
+
+        # Update task config with final sampling params
+        if temperature is not None or sampling_overrides:
+            task.config = replace(task.config, sampling_params=existing_params)
 
         # Collect instances
         instances = list(task.instances)

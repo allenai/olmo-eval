@@ -18,7 +18,15 @@ from typing import TYPE_CHECKING, Any
 from rich.console import Console
 
 from olmo_eval.backends import BackendType, create_backend
-from olmo_eval.core import Instance, LMOutput, LMRequest, Response, expand_tasks, get_model_config
+from olmo_eval.core import (
+    Instance,
+    LMOutput,
+    LMRequest,
+    Response,
+    SamplingParams,
+    expand_tasks,
+    get_model_config,
+)
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.evals.tasks import Task, get_task
 from olmo_eval.runners.sequential import ValidationError
@@ -36,6 +44,13 @@ console = Console()
 logger = logging.getLogger(__name__)
 
 
+# Keys that apply to TaskConfig
+TASKCONFIG_KEYS = {"num_fewshot", "limit", "fewshot_seed"}
+
+# Keys that apply to SamplingParams
+SAMPLING_KEYS = {"temperature", "max_tokens", "top_p", "top_k", "num_samples"}
+
+
 # -----------------------------------------------------------------------------
 # Data structures for instance-level queuing
 # -----------------------------------------------------------------------------
@@ -50,6 +65,7 @@ class QueueItem:
     instance_idx: int  # Index within task's instance list
     instance: Instance
     request: LMRequest  # Pre-formatted request
+    sampling_params: SamplingParams | None = None
     attempt: int = 0  # Retry attempt number
 
 
@@ -100,13 +116,17 @@ def prepare_task_items(
     spec: str,
     model_name: str,
     overrides: dict[str, Any] | None,
+    temperature: float | None = None,
+    sampling_overrides: dict[str, Any] | None = None,
 ) -> tuple[Task, list[QueueItem]]:
     """Prepare a task and its queue items.
 
     Args:
         spec: Task specification string
         model_name: Model name this task is for
-        overrides: Optional config overrides (num_fewshot, limit)
+        overrides: Optional config overrides (num_fewshot, limit, fewshot_seed)
+        temperature: Optional temperature for sampling (deprecated, use sampling_overrides)
+        sampling_overrides: Optional overrides for sampling params (temperature, max_tokens, etc.)
 
     Returns:
         Tuple of (Task instance for scoring, list of QueueItems)
@@ -115,6 +135,24 @@ def prepare_task_items(
 
     if overrides:
         task.config = replace(task.config, **overrides)
+
+    # Build sampling params from overrides
+    # Priority: sampling_overrides > temperature > task default
+    existing_params = task.config.sampling_params or SamplingParams()
+
+    # Apply legacy temperature parameter (deprecated)
+    if temperature is not None:
+        existing_params = replace(existing_params, temperature=temperature)
+
+    # Apply sampling_overrides (highest priority)
+    if sampling_overrides:
+        for key, value in sampling_overrides.items():
+            if hasattr(existing_params, key):
+                existing_params = replace(existing_params, **{key: value})
+
+    # Update task config with final sampling params
+    if temperature is not None or sampling_overrides:
+        task.config = replace(task.config, sampling_params=existing_params)
 
     instances = list(task.instances)
     if task.config.limit:
@@ -127,6 +165,7 @@ def prepare_task_items(
             instance_idx=idx,
             instance=inst,
             request=task.format_request(inst),
+            sampling_params=task.config.sampling_params,
         )
         for idx, inst in enumerate(instances)
     ]
@@ -316,13 +355,14 @@ def _process_batch(
     from olmo_eval.core import RequestType
 
     requests = [item.request for item in batch]
+    sampling_params = batch[0].sampling_params if batch else None
 
     try:
         # Use logprobs for LOGLIKELIHOOD requests (e.g., BPB tasks)
         if requests and requests[0].request_type == RequestType.LOGLIKELIHOOD:
             outputs_list = backend.logprobs(requests)
         else:
-            outputs_list = backend.generate(requests)
+            outputs_list = backend.generate(requests, sampling_params)
 
         for item, outputs in zip(batch, outputs_list, strict=True):
             result_queue.put(
@@ -614,6 +654,7 @@ class AsyncEvalRunner:
     output_dir: str = BEAKER_RESULT_DIR
     num_shots_override: int | None = None
     limit_override: int | None = None
+    temperature: float | None = None
     backend_override: str | None = None
     storages: list[StorageBackend] = field(default_factory=list)
 
@@ -623,6 +664,9 @@ class AsyncEvalRunner:
 
     # vLLM config
     attention_backend: str | None = None  # e.g., "FLASHINFER", "FLASH_ATTN"
+
+    # Per-task overrides from inline spec (e.g., task::temperature=0.6)
+    task_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def validate(self) -> None:
         """Validate configuration."""
@@ -646,40 +690,31 @@ class AsyncEvalRunner:
             if suite_exists(spec):
                 continue
 
-            # Parse task_name[:variant1[:variant2...]][::regime] format
-            task_name, variants, regime = parse_task_spec(spec)
+            # Parse task_name[:variant1[:variant2...]][::key=value,...] format
+            # Note: regimes are now treated as variants
+            task_name, variants, _overrides = parse_task_spec(spec)
 
             if task_name not in available_tasks:
                 errors.append(f"Unknown task or suite: '{spec}'")
                 continue
 
-            # Validate each variant exists
-            task_variants = variants_by_task.get(task_name, [])
-            for variant in variants:
-                if variant not in task_variants:
-                    if task_variants:
-                        errors.append(
-                            f"Unknown variant '{variant}' for task '{task_name}'. "
-                            f"Available: {', '.join(task_variants)}"
-                        )
-                    else:
-                        errors.append(
-                            f"Unknown variant '{variant}' for task '{task_name}'. "
-                            f"This task has no registered variants."
-                        )
+            # Validate each variant/regime exists (check both registries)
+            task_variants = set(variants_by_task.get(task_name, []))
+            task_regimes = set(regimes_by_task.get(task_name, []))
+            all_valid_variants = task_variants | task_regimes
 
-            if regime:
-                task_regimes = regimes_by_task.get(task_name, [])
-                if regime not in task_regimes:
-                    if task_regimes:
+            for variant in variants:
+                if variant not in all_valid_variants:
+                    available_list = sorted(all_valid_variants)
+                    if available_list:
                         errors.append(
-                            f"Unknown regime '{regime}' for task '{task_name}'. "
-                            f"Available: {', '.join(task_regimes)}"
+                            f"Unknown variant/regime '{variant}' for task '{task_name}'. "
+                            f"Available: {', '.join(available_list)}"
                         )
                     else:
                         errors.append(
-                            f"Unknown regime '{regime}' for task '{task_name}'. "
-                            f"This task has no registered regimes."
+                            f"Unknown variant/regime '{variant}' for task '{task_name}'. "
+                            f"This task has no registered variants or regimes."
                         )
 
         if errors:
@@ -750,12 +785,16 @@ class AsyncEvalRunner:
         """
         expanded_tasks = expand_tasks(self.task_specs)
 
-        # Build overrides
-        overrides: dict[str, Any] = {}
+        # Build global overrides from CLI args
+        global_overrides: dict[str, Any] = {}
+        global_sampling_overrides: dict[str, Any] = {}
+
         if self.num_shots_override is not None:
-            overrides["num_fewshot"] = self.num_shots_override
+            global_overrides["num_fewshot"] = self.num_shots_override
         if self.limit_override is not None:
-            overrides["limit"] = self.limit_override
+            global_overrides["limit"] = self.limit_override
+        if self.temperature is not None:
+            global_sampling_overrides["temperature"] = self.temperature
 
         # Prepare all (model, task) pairs
         trackers: dict[tuple[str, str], TaskTracker] = {}
@@ -777,9 +816,29 @@ class AsyncEvalRunner:
         # Prepare tasks in parallel
         console.print(f"[bold]Preparing {total_pairs} tasks...[/bold]")
 
-        def prepare_one(model_name: str, spec: str) -> tuple[str, str, TaskTracker, list[QueueItem]]:
+        def prepare_one(
+            model_name: str, spec: str
+        ) -> tuple[str, str, TaskTracker, list[QueueItem]]:
             try:
-                task, items = prepare_task_items(spec, model_name, overrides or None)
+                # Build overrides for this task
+                # 1. Start with global CLI overrides
+                overrides = dict(global_overrides)
+                sampling_overrides = dict(global_sampling_overrides)
+
+                # 2. Apply per-task overrides (highest priority)
+                task_specific = self.task_overrides.get(spec, {})
+                for key, value in task_specific.items():
+                    if key in TASKCONFIG_KEYS:
+                        overrides[key] = value
+                    elif key in SAMPLING_KEYS:
+                        sampling_overrides[key] = value
+
+                task, items = prepare_task_items(
+                    spec,
+                    model_name,
+                    overrides or None,
+                    sampling_overrides=sampling_overrides or None,
+                )
                 tracker = TaskTracker(
                     model_name=model_name,
                     spec=spec,
@@ -1132,13 +1191,15 @@ class AsyncEvalRunner:
             if "suites" not in model_data:
                 continue
             for suite_name, suite_data in model_data["suites"].items():
-                suites_list.append({
-                    "model": model_name,
-                    "suite": suite_name,
-                    "metrics": suite_data.get("metrics", {}),
-                    "num_tasks": suite_data.get("num_tasks", 0),
-                    "aggregation": suite_data.get("aggregation", "mean"),
-                })
+                suites_list.append(
+                    {
+                        "model": model_name,
+                        "suite": suite_name,
+                        "metrics": suite_data.get("metrics", {}),
+                        "num_tasks": suite_data.get("num_tasks", 0),
+                        "aggregation": suite_data.get("aggregation", "mean"),
+                    }
+                )
                 metrics = suite_data.get("metrics", {})
                 primary = get_primary_metric(metrics)
                 if primary:
@@ -1181,7 +1242,6 @@ class AsyncEvalRunner:
                 f.write(json.dumps(pred) + "\n")
 
 
-
 # -----------------------------------------------------------------------------
 # StreamingEvalRunner
 # -----------------------------------------------------------------------------
@@ -1205,6 +1265,7 @@ class StreamingEvalRunner:
     output_dir: str = BEAKER_RESULT_DIR
     num_shots_override: int | None = None
     limit_override: int | None = None
+    temperature: float | None = None
     storages: list[StorageBackend] = field(default_factory=list)
 
     # Multi-worker config
@@ -1213,6 +1274,9 @@ class StreamingEvalRunner:
 
     # vLLM config
     attention_backend: str | None = None  # e.g., "FLASHINFER", "FLASH_ATTN"
+
+    # Per-task overrides from inline spec (e.g., task::temperature=0.6)
+    task_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def validate(self) -> None:
         """Validate configuration."""
@@ -1236,40 +1300,31 @@ class StreamingEvalRunner:
             if suite_exists(spec):
                 continue
 
-            # Parse task_name[:variant1[:variant2...]][::regime] format
-            task_name, variants, regime = parse_task_spec(spec)
+            # Parse task_name[:variant1[:variant2...]][::key=value,...] format
+            # Note: regimes are now treated as variants
+            task_name, variants, _overrides = parse_task_spec(spec)
 
             if task_name not in available_tasks:
                 errors.append(f"Unknown task or suite: '{spec}'")
                 continue
 
-            # Validate each variant exists
-            task_variants = variants_by_task.get(task_name, [])
-            for variant in variants:
-                if variant not in task_variants:
-                    if task_variants:
-                        errors.append(
-                            f"Unknown variant '{variant}' for task '{task_name}'. "
-                            f"Available: {', '.join(task_variants)}"
-                        )
-                    else:
-                        errors.append(
-                            f"Unknown variant '{variant}' for task '{task_name}'. "
-                            f"This task has no registered variants."
-                        )
+            # Validate each variant/regime exists (check both registries)
+            task_variants = set(variants_by_task.get(task_name, []))
+            task_regimes = set(regimes_by_task.get(task_name, []))
+            all_valid_variants = task_variants | task_regimes
 
-            if regime:
-                task_regimes = regimes_by_task.get(task_name, [])
-                if regime not in task_regimes:
-                    if task_regimes:
+            for variant in variants:
+                if variant not in all_valid_variants:
+                    available_list = sorted(all_valid_variants)
+                    if available_list:
                         errors.append(
-                            f"Unknown regime '{regime}' for task '{task_name}'. "
-                            f"Available: {', '.join(task_regimes)}"
+                            f"Unknown variant/regime '{variant}' for task '{task_name}'. "
+                            f"Available: {', '.join(available_list)}"
                         )
                     else:
                         errors.append(
-                            f"Unknown regime '{regime}' for task '{task_name}'. "
-                            f"This task has no registered regimes."
+                            f"Unknown variant/regime '{variant}' for task '{task_name}'. "
+                            f"This task has no registered variants or regimes."
                         )
 
         if errors:
@@ -1337,12 +1392,16 @@ class StreamingEvalRunner:
         """
         expanded_tasks = expand_tasks(self.task_specs)
 
-        # Build overrides
-        overrides: dict[str, Any] = {}
+        # Build global overrides from CLI args
+        global_overrides: dict[str, Any] = {}
+        global_sampling_overrides: dict[str, Any] = {}
+
         if self.num_shots_override is not None:
-            overrides["num_fewshot"] = self.num_shots_override
+            global_overrides["num_fewshot"] = self.num_shots_override
         if self.limit_override is not None:
-            overrides["limit"] = self.limit_override
+            global_overrides["limit"] = self.limit_override
+        if self.temperature is not None:
+            global_sampling_overrides["temperature"] = self.temperature
 
         # Prepare all (model, task) pairs
         trackers: dict[tuple[str, str], TaskTracker] = {}
@@ -1362,9 +1421,29 @@ class StreamingEvalRunner:
         # Prepare tasks in parallel
         console.print(f"[bold]Preparing {total_pairs} tasks...[/bold]")
 
-        def prepare_one(model_name: str, spec: str) -> tuple[str, str, TaskTracker, list[QueueItem]]:
+        def prepare_one(
+            model_name: str, spec: str
+        ) -> tuple[str, str, TaskTracker, list[QueueItem]]:
             try:
-                task, items = prepare_task_items(spec, model_name, overrides or None)
+                # Build overrides for this task
+                # 1. Start with global CLI overrides
+                overrides = dict(global_overrides)
+                sampling_overrides = dict(global_sampling_overrides)
+
+                # 2. Apply per-task overrides (highest priority)
+                task_specific = self.task_overrides.get(spec, {})
+                for key, value in task_specific.items():
+                    if key in TASKCONFIG_KEYS:
+                        overrides[key] = value
+                    elif key in SAMPLING_KEYS:
+                        sampling_overrides[key] = value
+
+                task, items = prepare_task_items(
+                    spec,
+                    model_name,
+                    overrides or None,
+                    sampling_overrides=sampling_overrides or None,
+                )
                 tracker = TaskTracker(
                     model_name=model_name,
                     spec=spec,
@@ -1697,13 +1776,15 @@ class StreamingEvalRunner:
             if "suites" not in model_data:
                 continue
             for suite_name, suite_data in model_data["suites"].items():
-                suites_list.append({
-                    "model": model_name,
-                    "suite": suite_name,
-                    "metrics": suite_data.get("metrics", {}),
-                    "num_tasks": suite_data.get("num_tasks", 0),
-                    "aggregation": suite_data.get("aggregation", "mean"),
-                })
+                suites_list.append(
+                    {
+                        "model": model_name,
+                        "suite": suite_name,
+                        "metrics": suite_data.get("metrics", {}),
+                        "num_tasks": suite_data.get("num_tasks", 0),
+                        "aggregation": suite_data.get("aggregation", "mean"),
+                    }
+                )
                 metrics = suite_data.get("metrics", {})
                 primary = get_primary_metric(metrics)
                 if primary:
@@ -1744,4 +1825,3 @@ class StreamingEvalRunner:
         with open(filepath, "w") as f:
             for pred in predictions:
                 f.write(json.dumps(pred) + "\n")
-
