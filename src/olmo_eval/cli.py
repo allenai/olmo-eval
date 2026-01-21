@@ -12,7 +12,7 @@ import olmo_eval.evals.tasks  # noqa: F401 - triggers task registration
 from olmo_eval.core import get_model_presets
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR, DEFAULT_MAX_GPUS_PER_NODE
 from olmo_eval.evals.suites import get_suite, list_suites
-from olmo_eval.evals.tasks import list_regimes, list_tasks
+from olmo_eval.evals.tasks import list_regimes, list_tasks, list_variants
 from olmo_eval.evals.tasks.core.registry import parse_overrides
 
 console = Console()
@@ -469,6 +469,7 @@ def run(
 def tasks(filter: str) -> None:
     """List all available tasks in the registry."""
     task_names = list_tasks()
+    variants = list_variants()
     regimes = list_regimes()
 
     if not task_names:
@@ -477,13 +478,16 @@ def tasks(filter: str) -> None:
 
     table = Table(title="Available Tasks")
     table.add_column("Task", style="cyan")
+    table.add_column("Variants", style="green")
     table.add_column("Regimes", style="dim")
 
     for name in task_names:
         if filter.lower() in name.lower():
+            task_variants = variants.get(name, [])
             task_regimes = regimes.get(name, [])
+            variant_str = ", ".join(task_variants) if task_variants else "-"
             regime_str = ", ".join(task_regimes) if task_regimes else "-"
-            table.add_row(name, regime_str)
+            table.add_row(name, variant_str, regime_str)
 
     console.print(table)
 
