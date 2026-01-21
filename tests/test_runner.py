@@ -99,3 +99,95 @@ class TestEvalRunnerValidation:
         )
         # Should not raise (though running would be pointless)
         runner.validate()
+
+
+class TestSuiteAggregations:
+    """Tests for compute_suite_aggregations function."""
+
+    def test_suite_aggregation_basic(self):
+        """Test basic suite aggregation without overrides."""
+        from olmo_eval.runners.utils import compute_suite_aggregations
+
+        # Create mock task results that match expanded core:mc tasks
+        # Get actual tasks in core:mc suite
+        from olmo_eval.evals.suites import get_suite
+
+        suite = get_suite("core:mc")
+        expanded_tasks = suite.expand()
+
+        # Create mock results for each task
+        task_results = {}
+        for task in expanded_tasks:
+            task_results[task] = {"metrics": {"accuracy": 0.75}}
+
+        result = compute_suite_aggregations(["core:mc"], task_results)
+
+        assert "core:mc" in result
+        assert result["core:mc"]["metrics"]["accuracy"] == 0.75
+        assert result["core:mc"]["num_tasks"] == len(expanded_tasks)
+
+    def test_suite_aggregation_with_overrides(self):
+        """Test suite aggregation with inline overrides."""
+        from olmo_eval.runners.utils import compute_suite_aggregations
+        from olmo_eval.evals.suites import get_suite
+
+        suite = get_suite("core:mc")
+        expanded_tasks = suite.expand()
+
+        # Create mock results with override suffix (as would happen in real run)
+        task_results = {}
+        for task in expanded_tasks:
+            task_results[f"{task}::temperature=0.6"] = {"metrics": {"accuracy": 0.80}}
+
+        result = compute_suite_aggregations(["core:mc::temperature=0.6"], task_results)
+
+        assert "core:mc::temperature=0.6" in result
+        assert result["core:mc::temperature=0.6"]["metrics"]["accuracy"] == 0.80
+        assert result["core:mc::temperature=0.6"]["num_tasks"] == len(expanded_tasks)
+
+    def test_suite_aggregation_with_priority(self):
+        """Test suite aggregation with priority suffix."""
+        from olmo_eval.runners.utils import compute_suite_aggregations
+        from olmo_eval.evals.suites import get_suite
+
+        suite = get_suite("core:mc")
+        expanded_tasks = suite.expand()
+
+        # Create mock results with priority suffix
+        task_results = {}
+        for task in expanded_tasks:
+            task_results[f"{task}@high"] = {"metrics": {"accuracy": 0.85}}
+
+        result = compute_suite_aggregations(["core:mc@high"], task_results)
+
+        assert "core:mc@high" in result
+        assert result["core:mc@high"]["metrics"]["accuracy"] == 0.85
+
+    def test_suite_aggregation_with_overrides_and_priority(self):
+        """Test suite aggregation with both overrides and priority."""
+        from olmo_eval.runners.utils import compute_suite_aggregations
+        from olmo_eval.evals.suites import get_suite
+
+        suite = get_suite("core:mc")
+        expanded_tasks = suite.expand()
+
+        # Create mock results with both suffixes (order: ::overrides@priority)
+        task_results = {}
+        for task in expanded_tasks:
+            task_results[f"{task}::temperature=0@urgent"] = {"metrics": {"accuracy": 0.90}}
+
+        result = compute_suite_aggregations(["core:mc::temperature=0@urgent"], task_results)
+
+        assert "core:mc::temperature=0@urgent" in result
+        assert result["core:mc::temperature=0@urgent"]["metrics"]["accuracy"] == pytest.approx(0.90)
+
+    def test_suite_aggregation_non_suite_ignored(self):
+        """Test that non-suite specs are ignored."""
+        from olmo_eval.runners.utils import compute_suite_aggregations
+
+        task_results = {"arc_challenge": {"metrics": {"accuracy": 0.75}}}
+
+        result = compute_suite_aggregations(["arc_challenge"], task_results)
+
+        # arc_challenge is a task, not a suite
+        assert result == {}

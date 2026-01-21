@@ -53,8 +53,11 @@ def compute_suite_aggregations(
     For each suite in task_specs, computes the average of primary metrics
     across all tasks in that suite.
 
+    Handles specs with inline overrides (::key=value) and priority suffixes (@priority).
+    When a suite has these suffixes, they are propagated to expanded task lookups.
+
     Args:
-        task_specs: Original task specs (may include suite names)
+        task_specs: Original task specs (may include suite names with overrides/priority)
         task_results: Dict mapping task spec -> {"metrics": {...}, ...}
 
     Returns:
@@ -66,29 +69,48 @@ def compute_suite_aggregations(
     suite_aggregations: dict[str, dict[str, Any]] = {}
 
     for spec in task_specs:
-        if not suite_exists(spec):
+        # Parse out priority suffix first (e.g., "suite::temp=0@high" -> "suite::temp=0", "@high")
+        priority_suffix = ""
+        spec_without_priority = spec
+        if "@" in spec:
+            spec_without_priority, priority = spec.rsplit("@", 1)
+            priority_suffix = f"@{priority}"
+
+        # Parse out overrides (e.g., "suite:variant::temp=0" -> "suite:variant", "::temp=0")
+        override_suffix = ""
+        base_spec = spec_without_priority
+        if "::" in spec_without_priority:
+            base_spec, overrides = spec_without_priority.split("::", 1)
+            override_suffix = f"::{overrides}"
+
+        # Check if the base spec (without suffixes) is a suite
+        if not suite_exists(base_spec):
             continue
 
-        suite = get_suite(spec)
+        suite = get_suite(base_spec)
         if suite.aggregation == AggregationStrategy.NONE:
             continue
 
         # Get results for all tasks in this suite
+        # Note: suite.expand() returns task specs without suffixes
         suite_tasks = suite.expand()
         suite_metrics: dict[str, list[float]] = {}
         tasks_included = []
 
         for task_spec in suite_tasks:
-            if task_spec not in task_results:
+            # Build the full task spec with the same suffixes as the suite
+            full_task_spec = f"{task_spec}{override_suffix}{priority_suffix}"
+
+            if full_task_spec not in task_results:
                 continue
 
-            task_data = task_results[task_spec]
+            task_data = task_results[full_task_spec]
             metrics = task_data.get("metrics", {})
 
             if not metrics:
                 continue
 
-            tasks_included.append(task_spec)
+            tasks_included.append(full_task_spec)
 
             # Collect all metrics for averaging
             for metric_name, value in metrics.items():
