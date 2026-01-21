@@ -401,6 +401,7 @@ def instance_worker_process(
     model_name: str,
     backend_type_str: str,
     attention_backend: str | None = None,
+    tokenizer: str | None = None,
 ) -> None:
     """Worker that collects all items then processes at once.
 
@@ -414,6 +415,7 @@ def instance_worker_process(
         model_name: Model name for backend
         backend_type_str: Backend type string
         attention_backend: Attention backend to use (e.g., "FLASHINFER", "FLASH_ATTN")
+        tokenizer: Tokenizer path/identifier, defaults to model if None
     """
     import sys
 
@@ -426,7 +428,7 @@ def instance_worker_process(
         engine_kwargs: dict[str, Any] = {"tensor_parallel_size": len(gpu_ids)} if gpu_ids else {}
         if attention_backend:
             engine_kwargs["attention_backend"] = attention_backend
-        backend = create_backend(backend_type, model_name, **engine_kwargs)
+        backend = create_backend(backend_type, model_name, tokenizer=tokenizer, **engine_kwargs)
 
         # Collect ALL items from queue until poison pill
         items: list[QueueItem] = []
@@ -464,6 +466,7 @@ def streaming_worker_process(
     result_queue: mp.Queue,
     model_name: str,
     attention_backend: str | None = None,
+    tokenizer: str | None = None,
 ) -> None:
     """Worker using async streaming for true continuous batching.
 
@@ -478,6 +481,7 @@ def streaming_worker_process(
         result_queue: Queue to put ResultItems
         model_name: Model name for backend
         attention_backend: Attention backend to use (e.g., "FLASHINFER", "FLASH_ATTN")
+        tokenizer: Tokenizer path/identifier, defaults to model if None
     """
     import sys
 
@@ -489,7 +493,7 @@ def streaming_worker_process(
         num_gpus = len(gpu_ids) if gpu_ids else 1
         asyncio.run(
             _streaming_worker_async(
-                instance_queue, result_queue, model_name, num_gpus, attention_backend
+                instance_queue, result_queue, model_name, num_gpus, attention_backend, tokenizer
             )
         )
     except Exception as e:
@@ -515,6 +519,7 @@ async def _streaming_worker_async(
     model_name: str,
     num_gpus: int = 1,
     attention_backend: str | None = None,
+    tokenizer: str | None = None,
 ) -> None:
     """Async implementation of streaming worker.
 
@@ -524,6 +529,7 @@ async def _streaming_worker_async(
 
     backend = AsyncVLLMBackend(
         model_name,
+        tokenizer=tokenizer,
         attention_backend=attention_backend,
         tensor_parallel_size=num_gpus,
     )
@@ -668,6 +674,10 @@ class AsyncEvalRunner:
     # Per-task overrides from inline spec (e.g., task::temperature=0.6)
     task_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
 
+    # Per-model overrides from inline spec (e.g., model::tokenizer=...)
+    # Maps model name -> overrides dict
+    model_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
+
     def validate(self) -> None:
         """Validate configuration."""
         from olmo_eval.evals.suites import suite_exists
@@ -806,9 +816,10 @@ class AsyncEvalRunner:
         total_pairs = len(self.model_names) * len(expanded_tasks)
         console.print(f"[bold]Total (model, task) pairs:[/bold] {total_pairs}")
 
-        # Get model configs
+        # Get model configs with per-model overrides
         for model_name in self.model_names:
-            model_config = get_model_config(model_name)
+            overrides = self.model_overrides.get(model_name, {})
+            model_config = get_model_config(model_name, **overrides)
             if self.backend_override:
                 model_config.backend = self.backend_override
             model_configs[model_name] = model_config
@@ -933,6 +944,7 @@ class AsyncEvalRunner:
                         model_config.model,
                         backend_type.value,
                         self.attention_backend,
+                        model_config.tokenizer,
                     ),
                 )
                 worker.start()
@@ -1278,6 +1290,10 @@ class StreamingEvalRunner:
     # Per-task overrides from inline spec (e.g., task::temperature=0.6)
     task_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
 
+    # Per-model overrides from inline spec (e.g., model::tokenizer=...)
+    # Maps model name -> overrides dict
+    model_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
+
     def validate(self) -> None:
         """Validate configuration."""
         from olmo_eval.evals.suites import suite_exists
@@ -1413,9 +1429,10 @@ class StreamingEvalRunner:
         total_pairs = len(self.model_names) * len(expanded_tasks)
         console.print(f"[bold]Total (model, task) pairs:[/bold] {total_pairs}")
 
-        # Get model configs
+        # Get model configs with per-model overrides
         for model_name in self.model_names:
-            model_config = get_model_config(model_name)
+            overrides = self.model_overrides.get(model_name, {})
+            model_config = get_model_config(model_name, **overrides)
             model_configs[model_name] = model_config
 
         # Prepare tasks in parallel
@@ -1519,6 +1536,7 @@ class StreamingEvalRunner:
                         result_queue,
                         model_config.model,
                         self.attention_backend,
+                        model_config.tokenizer,
                     ),
                 )
                 worker.start()

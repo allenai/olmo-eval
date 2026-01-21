@@ -171,3 +171,36 @@ class TestGetModelConfig:
         after = get_model_config("llama3.1-8b")
 
         assert original.backend == after.backend == "vllm"
+
+    def test_tokenizer_override_preset(self):
+        """Test tokenizer override on a preset model."""
+        config = get_model_config("llama3.1-8b", tokenizer="allenai/dolma2-tokenizer")
+
+        assert config.model == "meta-llama/Meta-Llama-3.1-8B"
+        assert config.tokenizer == "allenai/dolma2-tokenizer"
+
+    def test_tokenizer_override_custom_model(self):
+        """Test tokenizer override on a custom (non-preset) model."""
+        config = get_model_config(
+            "custom/my-model",
+            tokenizer="custom/my-tokenizer",
+            trust_remote_code=True,
+        )
+
+        assert config.model == "custom/my-model"
+        assert config.tokenizer == "custom/my-tokenizer"
+        assert config.trust_remote_code is True
+
+    def test_tokenizer_default_is_none(self):
+        """Test that tokenizer defaults to None for models without preset tokenizer."""
+        config = get_model_config("llama3.1-8b")
+
+        # llama3.1 doesn't have a preset tokenizer - defaults to None
+        assert config.tokenizer is None
+
+    def test_preset_with_tokenizer_preserved(self):
+        """Test that presets with tokenizer keep their tokenizer."""
+        config = get_model_config("olmo-2-7b")
+
+        # OLMo-2 has a default tokenizer set in the preset
+        assert config.tokenizer is not None

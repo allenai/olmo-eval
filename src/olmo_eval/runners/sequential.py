@@ -65,6 +65,9 @@ class EvalRunner:
     # Per-task overrides from inline spec (e.g., task::temperature=0.6)
     task_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
 
+    # Model overrides from inline spec (e.g., model::tokenizer=...)
+    model_overrides: dict[str, Any] = field(default_factory=dict)
+
     def validate(self) -> None:
         """Validate all inputs before running.
 
@@ -119,10 +122,12 @@ class EvalRunner:
         table.add_column("Setting", style="cyan")
         table.add_column("Value", style="white")
 
-        model_config = get_model_config(self.model_name)
+        model_config = get_model_config(self.model_name, **self.model_overrides)
         backend_str = self.backend_override or model_config.backend
 
         table.add_row("Model", model_config.model)
+        if model_config.tokenizer:
+            table.add_row("Tokenizer", model_config.tokenizer)
         table.add_row("Backend", backend_str)
         table.add_row("Output Dir", self.output_dir)
 
@@ -145,19 +150,22 @@ class EvalRunner:
 
     def run(self) -> dict[str, Any]:
         """Execute the evaluation run."""
-        model_config = get_model_config(self.model_name)
+        model_config = get_model_config(self.model_name, **self.model_overrides)
 
         # Determine backend (model_config.backend is a string)
         backend_str = self.backend_override or model_config.backend
         backend_type = BackendType(backend_str)
 
         console.print(f"[bold]Initializing {backend_type.value} backend...[/bold]")
+        if model_config.tokenizer:
+            console.print(f"[dim]Tokenizer: {model_config.tokenizer}[/dim]")
         extra_kwargs = dict(model_config.extra_args)
         if self.attention_backend:
             extra_kwargs["attention_backend"] = self.attention_backend
         backend = create_backend(
             backend_type,
             model_config.model,
+            tokenizer=model_config.tokenizer,
             revision=model_config.revision,
             trust_remote_code=model_config.trust_remote_code,
             dtype=model_config.dtype,

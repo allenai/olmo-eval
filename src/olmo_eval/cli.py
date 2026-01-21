@@ -29,7 +29,7 @@ TASKCONFIG_KEYS = {"num_fewshot", "limit", "fewshot_seed"}
 SAMPLING_KEYS = {"temperature", "max_tokens", "top_p", "top_k", "num_samples"}
 
 # Keys that apply to model/backend config
-MODEL_KEYS = {"backend", "attention_backend", "gpus_per_worker"}
+MODEL_KEYS = {"backend", "attention_backend", "gpus_per_worker", "tokenizer"}
 
 
 def parse_model_spec(spec: str) -> tuple[str, dict[str, Any]]:
@@ -228,7 +228,7 @@ def run(
     Without --async or --async-stream, runs sequentially for each model.
 
     Inline overrides can be specified in -m and -t flags:
-        -m model::backend=vllm,attention_backend=FLASHINFER
+        -m model::backend=vllm,tokenizer=allenai/dolma2-tokenizer
         -t task:olmes::temperature=0.6,num_fewshot=5
     """
     import logging
@@ -356,8 +356,9 @@ def run(
             )
             raise SystemExit(1)
 
-    # Extract just the model names (without overrides) for runners
+    # Extract model names and build per-model overrides dict
     model_names = [name for name, _overrides in parsed_models]
+    per_model_overrides = {name: overrides for name, overrides in parsed_models if overrides}
 
     # Choose runner based on --async or --async-stream flag
     if use_async_stream:
@@ -378,6 +379,7 @@ def run(
             gpus_per_worker=gpus_per_worker,
             attention_backend=attention_backend.upper() if attention_backend else None,
             task_overrides=task_overrides,
+            model_overrides=per_model_overrides,
         )
     elif use_async:
         from olmo_eval.runners.parallel import AsyncEvalRunner
@@ -398,6 +400,7 @@ def run(
             gpus_per_worker=gpus_per_worker,
             attention_backend=attention_backend.upper() if attention_backend else None,
             task_overrides=task_overrides,
+            model_overrides=per_model_overrides,
         )
     else:
         # Sequential runner - run each model in sequence
@@ -428,6 +431,7 @@ def run(
                 if effective_attention_backend
                 else None,
                 task_overrides=task_overrides,
+                model_overrides=model_overrides,
             )
 
             try:

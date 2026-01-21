@@ -30,6 +30,7 @@ class VLLMBackend(Backend):
     def __init__(
         self,
         model_name: str,
+        tokenizer: str | None = None,
         attention_backend: str | None = None,
         **engine_kwargs,
     ) -> None:
@@ -37,6 +38,7 @@ class VLLMBackend(Backend):
 
         Args:
             model_name: HuggingFace model identifier or local path.
+            tokenizer: Tokenizer path/identifier. If not specified, uses the model path.
             attention_backend: Attention backend to use (e.g., "FLASHINFER", "FLASH_ATTN").
                 If not specified, vLLM will auto-select based on available backends.
             **engine_kwargs: Additional arguments passed to vLLM LLM engine.
@@ -55,6 +57,10 @@ class VLLMBackend(Backend):
         # Configure attention backend if specified (e.g., FLASHINFER, FLASH_ATTN)
         if attention_backend:
             engine_kwargs.setdefault("attention_backend", attention_backend)
+
+        # Use separate tokenizer if specified
+        if tokenizer:
+            engine_kwargs.setdefault("tokenizer", tokenizer)
 
         self.llm: LLM = LLM(model=model_name, **engine_kwargs)
 
@@ -192,6 +198,7 @@ class AsyncVLLMBackend:
     def __init__(
         self,
         model_name: str,
+        tokenizer: str | None = None,
         attention_backend: str | None = None,
         **engine_kwargs,
     ) -> None:
@@ -199,6 +206,7 @@ class AsyncVLLMBackend:
 
         Args:
             model_name: HuggingFace model identifier or local path.
+            tokenizer: Tokenizer path/identifier. If not specified, uses the model path.
             attention_backend: Attention backend to use (e.g., "FLASHINFER", "FLASH_ATTN").
                 If not specified, vLLM will auto-select based on available backends.
             **engine_kwargs: Additional arguments passed to vLLM engine.
@@ -211,6 +219,10 @@ class AsyncVLLMBackend:
         # Configure attention backend if specified
         if attention_backend:
             engine_kwargs.setdefault("attention_backend", attention_backend)
+
+        # Use separate tokenizer if specified
+        if tokenizer:
+            engine_kwargs.setdefault("tokenizer", tokenizer)
 
         # Try V1 engine first (vLLM 0.6.0+), fall back to legacy AsyncLLMEngine
         self._use_v1_engine = False

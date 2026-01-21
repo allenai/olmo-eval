@@ -26,11 +26,12 @@ def _get_device() -> torch.device:
 class HuggingFaceBackend(Backend):
     """Backend using Hugging Face Transformers for local inference."""
 
-    def __init__(self, model_name: str, **model_kwargs) -> None:
+    def __init__(self, model_name: str, tokenizer: str | None = None, **model_kwargs) -> None:
         """Initialize the backend.
 
         Args:
             model_name: HuggingFace model identifier or local path.
+            tokenizer: Tokenizer path/identifier. If not specified, uses the model path.
             **model_kwargs: Additional arguments passed to from_pretrained.
         """
         try:
@@ -42,7 +43,8 @@ class HuggingFaceBackend(Backend):
             ) from e
 
         super().__init__(model_name)
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+        tokenizer_path = tokenizer or model_name
+        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name, trust_remote_code=True, **model_kwargs
         )

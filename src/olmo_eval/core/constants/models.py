@@ -119,8 +119,16 @@ def get_model_presets() -> dict[str, ModelConfig]:
     return {
         "llama3.1-8b": ModelConfig(model="meta-llama/Meta-Llama-3.1-8B"),
         "llama3.1-70b": ModelConfig(model="meta-llama/Meta-Llama-3.1-70B"),
-        "olmo-2-7b": ModelConfig(model="allenai/OLMo-2-1124-7B", trust_remote_code=True),
-        "olmo-2-13b": ModelConfig(model="allenai/OLMo-2-1124-13B", trust_remote_code=True),
+        "olmo-2-7b": ModelConfig(
+            model="allenai/OLMo-2-1124-7B",
+            tokenizer=DEFAULT_OLMO2_TOKENIZER,
+            trust_remote_code=True,
+        ),
+        "olmo-2-13b": ModelConfig(
+            model="allenai/OLMo-2-1124-13B",
+            tokenizer=DEFAULT_OLMO2_TOKENIZER,
+            trust_remote_code=True,
+        ),
         "qwen2.5-7b": ModelConfig(model="Qwen/Qwen2.5-7B"),
         "mistral-7b": ModelConfig(model="mistralai/Mistral-7B-v0.3"),
     }

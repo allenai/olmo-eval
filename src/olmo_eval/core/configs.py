@@ -15,6 +15,7 @@ class ModelConfig:
     """Model/backend configuration."""
 
     model: str
+    tokenizer: str | None = None  # Tokenizer path/identifier, defaults to model if None
     backend: str = "vllm"  # BackendType value as string to avoid circular import
     revision: str | None = None
     trust_remote_code: bool = False
@@ -135,6 +136,7 @@ def get_model_config(name: str, **overrides: Any) -> ModelConfig:
             # Create new config with overrides
             return ModelConfig(
                 model=overrides.get("model", base.model),
+                tokenizer=overrides.get("tokenizer", base.tokenizer),
                 backend=overrides.get("backend", base.backend),
                 revision=overrides.get("revision", base.revision),
                 trust_remote_code=overrides.get("trust_remote_code", base.trust_remote_code),
