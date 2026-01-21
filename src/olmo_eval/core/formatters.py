@@ -143,20 +143,16 @@ class MCQAChatFormatter:
 class PPLFormatter:
     """Format instances for perplexity/BPB (bits-per-byte) evaluation.
 
-    This formatter creates requests for loglikelihood scoring where the
-    gold answer is used as the continuation to evaluate.
+    Uses empty context and no leading space to measure unconditional P(text).
+    This computes the true bits-per-byte of the text itself, not conditioned
+    on any question or context.
 
     For multiple choice tasks:
-    - Uses the question as the prompt/context (measures P(answer | question))
-    - Uses the actual gold answer TEXT (not the letter)
-    - Adds a leading space to the continuation (following minieval convention)
+    - Uses the actual gold answer TEXT (not the letter) via gold_idx
+    - Falls back to gold_text metadata or gold_answer
 
-    For pure text tasks (no question):
-    - Uses empty prompt for unconditional probability
-
-    This approach avoids the "first token has no logprob" issue that occurs
-    with empty prompts, since vLLM returns None for the first position when
-    there's no conditioning context.
+    Note: This is a breaking change from previous behavior which used
+    P(text | question) with a leading space.
     """
 
     def format(
@@ -182,16 +178,9 @@ class PPLFormatter:
         if gold_text is None:
             raise ValueError("PPLFormatter requires a gold answer to be set")
 
-        # Build prompt: use question as context for MC tasks (avoids first-token issue)
-        # This measures P(answer | question) which is more meaningful for MC eval
-        prompt = ""
-        if instance.question:
-            prompt = instance.question
-            # Add leading space to continuation when there's a prompt (minieval convention)
-            gold_text = " " + gold_text
-
+        # Use empty prompt and no leading space for unconditional probability
         return LMRequest(
             request_type=RequestType.LOGLIKELIHOOD,
-            prompt=prompt,
+            prompt="",
             continuations=(gold_text,),
         )
