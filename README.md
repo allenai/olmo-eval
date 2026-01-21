@@ -232,6 +232,164 @@ presets = get_model_presets()
 # }
 ```
 
+## Adding New Tasks
+
+This section explains how to create new evaluation tasks.
+
+### Quick Start: Minimal Task Example
+
+Here's a complete, minimal task implementation:
+
+```python
+"""Example: Minimal task implementation."""
+from collections.abc import Iterator
+from typing import Any
+
+from datasets import load_dataset
+
+from olmo_eval.core import (
+    AccuracyMetric,
+    Instance,
+    LMOutput,
+    LMRequest,
+    MultipleChoiceFormatter,
+    MultipleChoiceScorer,
+    RequestType,
+)
+from olmo_eval.evals.tasks.core import Task, TaskConfig, register
+
+
+class MyTask(Task):
+    """Base class for my task."""
+
+    def __init__(self, config: TaskConfig) -> None:
+        super().__init__(config)
+        self._instances_cache: list[Instance] | None = None
+
+    @property
+    def instances(self) -> Iterator[Instance]:
+        """Load and yield instances from the dataset."""
+        if self._instances_cache is None:
+            self._instances_cache = []
+            dataset = load_dataset("my-hf-dataset", split="test")
+            for doc in dataset:
+                self._instances_cache.append(self._process_doc(doc))
+        yield from self._instances_cache
+
+    def _process_doc(self, doc: dict[str, Any]) -> Instance:
+        """Convert a HuggingFace doc to an Instance."""
+        return Instance(
+            question=doc["question"],
+            gold_answer=doc["answer"],
+            choices=tuple(doc["choices"]),  # For MC tasks
+            metadata={"id": doc["id"]},
+        )
+
+    def format_request(self, instance: Instance) -> LMRequest:
+        """Format instance for the language model."""
+        if self.config.formatter is not None:
+            return self.config.formatter.format(instance, self.get_fewshot())
+        # Fallback formatting
+        return LMRequest(request_type=RequestType.COMPLETION, prompt=instance.question)
+
+    def extract_answer(self, output: LMOutput) -> str | None:
+        """Extract the answer from model output."""
+        return output.text.strip()
+
+
+def _my_task_config() -> TaskConfig:
+    return TaskConfig(
+        name="my_task",
+        hf_dataset="my-hf-dataset",
+        formatter=MultipleChoiceFormatter(template="Q: {question}\n\nA:"),
+        scorers=(MultipleChoiceScorer(),),
+        metrics=(AccuracyMetric(scorer_name="multiple_choice"),),
+    )
+
+
+@register("my_task", _my_task_config)
+class MyTaskImpl(MyTask):
+    """Registered task implementation."""
+    pass
+```
+
+### Task Class Overview
+
+| Method | Required | Purpose |
+|--------|----------|---------|
+| `instances` | Yes | Property that yields `Instance` objects from the dataset |
+| `format_request(instance)` | Yes | Converts an `Instance` into an `LMRequest` for the model |
+| `extract_answer(output)` | Yes | Extracts the answer string from `LMOutput` |
+| `_build_fewshot()` | No | Override to customize few-shot example loading |
+| `score_responses(...)` | No | Override to customize scoring logic |
+| `compute_metrics(...)` | No | Override to customize metric computation |
+
+### TaskConfig Reference
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | `str` | Required | Task identifier used in CLI |
+| `hf_dataset` | `str` | Required | HuggingFace dataset path |
+| `hf_subsets` | `tuple[str, ...]` | `None` | Dataset subsets/configs |
+| `formatter` | `Formatter` | `None` | Request formatter |
+| `scorers` | `tuple[Scorer, ...]` | `()` | Answer scorers |
+| `metrics` | `tuple[Metric, ...]` | `()` | Evaluation metrics |
+| `num_fewshot` | `int` | `0` | Number of few-shot examples |
+| `fewshot_seed` | `int` | `42` | Random seed for few-shot |
+| `limit` | `int \| None` | `None` | Max instances to evaluate |
+| `split` | `Split` | `Split.TEST` | Dataset split to use |
+
+### Common Patterns
+
+**Multiple Choice Tasks:**
+```python
+formatter=MultipleChoiceFormatter(template="Question: {question}\n\nAnswer:")
+scorers=(MultipleChoiceScorer(),)
+metrics=(AccuracyMetric(scorer_name="multiple_choice"),)
+```
+
+**Generation Tasks (exact match):**
+```python
+formatter=CompletionFormatter(template="{question}")
+scorers=(ExactMatchScorer(),)
+metrics=(AccuracyMetric(scorer_name="exact_match"),)
+```
+
+**Tasks with Multiple Subsets** (like MMLU with 57 subjects):
+```python
+class MMLUTask(Task):
+    def __init__(self, config: TaskConfig, subset: str) -> None:
+        super().__init__(config)
+        self.subset = subset
+        # Load dataset with self.subset as the config name
+
+# Register each subset
+@register("mmlu_anatomy", _mmlu_anatomy_config)
+class MMLUAnatomy(MMLUTask):
+    def __init__(self, config: TaskConfig) -> None:
+        super().__init__(config, subset="anatomy")
+```
+
+### Adding Variants and Regimes
+
+**Variants** modify how a task is formatted/scored (e.g., `:mc`, `:bpb`):
+```python
+from olmo_eval.evals.tasks import register_variant
+
+# Register after task is defined
+register_variant("my_task", "3shot", num_fewshot=3)
+```
+
+**Regimes** are configuration presets (e.g., `:olmes`, `:zero`):
+```python
+from olmo_eval.evals.tasks import register_regime
+
+register_regime("my_task", "olmes", num_fewshot=5, fewshot_seed=1234)
+register_regime("my_task", "zero", num_fewshot=0)
+```
+
+Usage: `olmo-eval run -t my_task:3shot:olmes`
+
 ## Launching on Beaker
 
 olmo-eval includes built-in support for launching evaluation jobs on [Beaker](https://beaker.org).
