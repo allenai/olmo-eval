@@ -813,17 +813,16 @@ def launch(
         console.print("[red]Error:[/red] --budget/-B is required (or set 'budget' in config)")
         raise SystemExit(1)
 
-    # Expand suites to individual tasks first, so @priority suffixes can be detected
+    # Keep suites unexpanded - let the runner expand them so it knows suite names for aggregation
     from olmo_eval.core.configs import expand_tasks, validate_tasks
 
-    original_task_specs = list(task)  # Preserve original suite/task names for display
-    expanded_task_list = expand_tasks(original_task_specs)
+    original_task_specs = list(task)  # Preserve original suite/task names
 
-    # Validate and group tasks by priority
-    # This will raise an error if --priority is used together with @priority suffixes
+    # Group by priority WITHOUT expanding first - this keeps suites as single units
+    # so suite aggregation works correctly in the runner
     try:
         tasks_by_priority = validate_priority_configuration(
-            tasks=expanded_task_list,
+            tasks=original_task_specs,  # Pass original specs, NOT expanded
             cli_priority=cli_priority,
             default_priority=priority,
         )
@@ -831,9 +830,17 @@ def launch(
         console.print(f"[red]Error:[/red] {e}")
         raise SystemExit(1) from None
 
-    # Validate all tasks exist before launching to Beaker
+    # Get all specs (without @priority suffix, but with ::overrides)
     all_task_specs = [t for tasks in tasks_by_priority.values() for t in tasks]
-    valid_tasks, invalid_tasks = validate_tasks(all_task_specs)
+
+    # Expand for validation only - ensure all tasks/suites exist
+    expanded_for_validation = expand_tasks(all_task_specs)
+    valid_tasks, invalid_tasks = validate_tasks(expanded_for_validation)
+
+    # Track expanded task counts per priority for display purposes
+    expanded_counts_by_priority: dict[str, int] = {}
+    for priority_level, specs in tasks_by_priority.items():
+        expanded_counts_by_priority[priority_level] = len(expand_tasks(specs))
 
     if invalid_tasks:
         console.print("[red]Error:[/red] The following tasks/suites do not exist:")
@@ -1001,7 +1008,8 @@ def launch(
                 # Use priority level for experiment naming when multiple priorities
                 base_name = f"{base_name}-{t_priority}"
 
-            # t_list is already expanded, calculate splits based on GPU constraints
+            # t_list contains unexpanded specs (suites stay as single units)
+            # Splits are based on number of specs, keeping suites together for aggregation
             splits = calculate_experiment_splits(
                 tasks=t_list,
                 gpus_per_model=m_gpus,
@@ -1013,7 +1021,8 @@ def launch(
                 split_models.append(m_name)
 
             total_splits = len(splits)
-            total_expanded = len(t_list)
+            # Use expanded count for display (actual number of tasks that will run)
+            total_expanded = expanded_counts_by_priority[t_priority]
             for i, split in enumerate(splits):
                 # Add zero-padded suffix for splits
                 exp_name = f"{base_name}-{i + 1:03d}" if total_splits > 1 else base_name
