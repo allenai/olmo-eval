@@ -465,7 +465,8 @@ def run(
 
 
 @main.command()
-def tasks() -> None:
+@click.option("--filter", "-f", default="", help="Filter by name substring")
+def tasks(filter: str) -> None:
     """List all available tasks in the registry."""
     task_names = list_tasks()
     regimes = list_regimes()
@@ -479,9 +480,10 @@ def tasks() -> None:
     table.add_column("Regimes", style="dim")
 
     for name in task_names:
-        task_regimes = regimes.get(name, [])
-        regime_str = ", ".join(task_regimes) if task_regimes else "-"
-        table.add_row(name, regime_str)
+        if filter.lower() in name.lower():
+            task_regimes = regimes.get(name, [])
+            regime_str = ", ".join(task_regimes) if task_regimes else "-"
+            table.add_row(name, regime_str)
 
     console.print(table)
 
