@@ -555,8 +555,10 @@ class BeakerLauncher:
         else:
             steps.append(f"cd /gantry-runtime && uv pip install -q -e . -c {constraints}")
 
-        # Run the actual command
-        steps.append(" ".join(command))
+        # Run the actual command (use shlex.join to properly quote special characters)
+        import shlex
+
+        steps.append(shlex.join(command))
 
         wrapped_command = ["bash", "-c", " && ".join(steps)]
         return wrapped_command
