@@ -621,7 +621,8 @@ class AsyncEvalRunner:
     def validate(self) -> None:
         """Validate configuration."""
         from olmo_eval.evals.suites import suite_exists
-        from olmo_eval.evals.tasks import list_regimes, list_tasks
+        from olmo_eval.evals.tasks import list_regimes, list_tasks, list_variants
+        from olmo_eval.evals.tasks.core.registry import parse_task_spec
 
         if not self.model_names:
             raise ValidationError("model_names is required")
@@ -633,16 +634,33 @@ class AsyncEvalRunner:
         errors: list[str] = []
         available_tasks = set(list_tasks())
         regimes_by_task = list_regimes()
+        variants_by_task = list_variants()
 
         for spec in self.task_specs:
             if suite_exists(spec):
                 continue
 
-            task_name, _, regime = spec.partition("::")
+            # Parse task_name[:variant][::regime] format
+            task_name, variant, regime = parse_task_spec(spec)
 
             if task_name not in available_tasks:
                 errors.append(f"Unknown task or suite: '{spec}'")
                 continue
+
+            # If variant specified, validate it exists
+            if variant:
+                task_variants = variants_by_task.get(task_name, [])
+                if variant not in task_variants:
+                    if task_variants:
+                        errors.append(
+                            f"Unknown variant '{variant}' for task '{task_name}'. "
+                            f"Available: {', '.join(task_variants)}"
+                        )
+                    else:
+                        errors.append(
+                            f"Unknown variant '{variant}' for task '{task_name}'. "
+                            f"This task has no registered variants."
+                        )
 
             if regime:
                 task_regimes = regimes_by_task.get(task_name, [])
@@ -1164,7 +1182,8 @@ class StreamingEvalRunner:
     def validate(self) -> None:
         """Validate configuration."""
         from olmo_eval.evals.suites import suite_exists
-        from olmo_eval.evals.tasks import list_regimes, list_tasks
+        from olmo_eval.evals.tasks import list_regimes, list_tasks, list_variants
+        from olmo_eval.evals.tasks.core.registry import parse_task_spec
 
         if not self.model_names:
             raise ValidationError("model_names is required")
@@ -1176,16 +1195,33 @@ class StreamingEvalRunner:
         errors: list[str] = []
         available_tasks = set(list_tasks())
         regimes_by_task = list_regimes()
+        variants_by_task = list_variants()
 
         for spec in self.task_specs:
             if suite_exists(spec):
                 continue
 
-            task_name, _, regime = spec.partition("::")
+            # Parse task_name[:variant][::regime] format
+            task_name, variant, regime = parse_task_spec(spec)
 
             if task_name not in available_tasks:
                 errors.append(f"Unknown task or suite: '{spec}'")
                 continue
+
+            # If variant specified, validate it exists
+            if variant:
+                task_variants = variants_by_task.get(task_name, [])
+                if variant not in task_variants:
+                    if task_variants:
+                        errors.append(
+                            f"Unknown variant '{variant}' for task '{task_name}'. "
+                            f"Available: {', '.join(task_variants)}"
+                        )
+                    else:
+                        errors.append(
+                            f"Unknown variant '{variant}' for task '{task_name}'. "
+                            f"This task has no registered variants."
+                        )
 
             if regime:
                 task_regimes = regimes_by_task.get(task_name, [])

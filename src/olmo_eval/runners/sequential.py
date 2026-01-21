@@ -17,7 +17,8 @@ from olmo_eval.backends import Backend, BackendType, create_backend
 from olmo_eval.core import expand_tasks, get_model_config
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.evals.suites import suite_exists
-from olmo_eval.evals.tasks import list_regimes, list_tasks
+from olmo_eval.evals.tasks import list_regimes, list_tasks, list_variants
+from olmo_eval.evals.tasks.core.registry import parse_task_spec
 from olmo_eval.runners.utils import TaskResult, get_primary_metric, run_task_impl
 
 if TYPE_CHECKING:
@@ -59,18 +60,34 @@ class EvalRunner:
         # Validate task specs
         available_tasks = set(list_tasks())
         regimes_by_task = list_regimes()
+        variants_by_task = list_variants()
 
         for spec in self.task_specs:
             # Check if it's a suite
             if suite_exists(spec):
                 continue
 
-            # Parse task::regime format
-            task_name, _, regime = spec.partition("::")
+            # Parse task_name[:variant][::regime] format
+            task_name, variant, regime = parse_task_spec(spec)
 
             if task_name not in available_tasks:
                 errors.append(f"Unknown task or suite: '{spec}'")
                 continue
+
+            # If variant specified, validate it exists
+            if variant:
+                task_variants = variants_by_task.get(task_name, [])
+                if variant not in task_variants:
+                    if task_variants:
+                        errors.append(
+                            f"Unknown variant '{variant}' for task '{task_name}'. "
+                            f"Available: {', '.join(task_variants)}"
+                        )
+                    else:
+                        errors.append(
+                            f"Unknown variant '{variant}' for task '{task_name}'. "
+                            f"This task has no registered variants."
+                        )
 
             # If regime specified, validate it exists
             if regime:
