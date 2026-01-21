@@ -67,6 +67,12 @@ MT_MBPP_V2FIX = make_suite(
     description="Multilingual MBPP v2 with fixes",
 )
 
+MT_MBPP_V2FIX_BPB = make_suite(
+    "mt_mbpp_v2fix:bpb",
+    tuple(f"{t}:bpb" for t in MULTILINGUAL_MBPP_TASKS_V2),
+    description="Multilingual MBPP v2 with BPB evaluation",
+)
+
 MULTIPL_E_HE_N32_V2 = make_suite(
     "multipl-e-humaneval:n32:v2",
     tuple(f"{t}:n32:v2" for t in MULTIPL_E_HE_TASKS),
