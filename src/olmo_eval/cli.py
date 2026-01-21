@@ -642,6 +642,11 @@ def suite_info(suite_name: str) -> None:
     default=True,
     help="Follow logs after launch (default). Use --no-follow to submit and exit immediately.",
 )
+@click.option(
+    "--aws-credentials/--no-aws-credentials",
+    default=None,
+    help="Inject AWS credentials for S3 model access. Auto-detected from s3:// model paths.",
+)
 def launch(
     config: str | None,
     name: str | None,
@@ -666,6 +671,7 @@ def launch(
     dry_run: bool,
     verbose: bool,
     follow: bool,
+    aws_credentials: bool | None,
 ) -> None:
     """Launch an evaluation job on Beaker.
 
@@ -836,6 +842,46 @@ def launch(
     launcher = BeakerLauncher(workspace=workspace)
     multiple_models = len(model_configs) > 1
     multiple_priorities = len(tasks_by_priority) > 1
+
+    # Auto-detect S3 model paths for AWS credential injection
+    from olmo_eval.launch.aws import get_local_aws_credentials, is_s3_path
+
+    s3_models = [m.name_or_path for m in model_configs if is_s3_path(m.name_or_path)]
+    inject_aws_credentials = aws_credentials
+    if inject_aws_credentials is None:
+        # Auto-detect: check if any model path is S3
+        inject_aws_credentials = bool(s3_models)
+
+    if inject_aws_credentials:
+        local_creds = get_local_aws_credentials()
+        beaker_user = launcher.beaker.user_name
+
+        s3_table = Table(title="S3 Access Configuration", show_header=False, box=None)
+        s3_table.add_column("Key", style="blue")
+        s3_table.add_column("Value")
+
+        if s3_models:
+            s3_table.add_row("S3 models", ", ".join(s3_models))
+        else:
+            s3_table.add_row("S3 models", "[dim]none (explicitly enabled)[/dim]")
+
+        if local_creds:
+            cred_type = "temporary" if local_creds.session_token else "long-term"
+            s3_table.add_row("Credentials", f"[green]found[/green] ({cred_type})")
+            s3_table.add_row("Beaker user", beaker_user)
+            s3_table.add_row(
+                "Beaker secrets",
+                f"{beaker_user}_AWS_ACCESS_KEY_ID, {beaker_user}_AWS_SECRET_ACCESS_KEY",
+            )
+        else:
+            s3_table.add_row(
+                "Credentials",
+                "[yellow]not found[/yellow] - job may fail if S3 access is required",
+            )
+
+        console.print()
+        console.print(s3_table)
+        console.print()
 
     # Get workspace object for beaker API calls that require it
     workspace_obj = launcher.beaker.workspace.get(workspace) if workspace else None
@@ -1156,6 +1202,7 @@ def launch(
             backends=effective_backends,
             groups=effective_groups,
             beaker_image=effective_image,
+            inject_aws_credentials=inject_aws_credentials,
         )
 
         if verbose:

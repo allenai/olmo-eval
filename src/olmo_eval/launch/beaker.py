@@ -423,6 +423,9 @@ class BeakerJobConfig:
     # Group assignment - experiment will be added to these groups at creation time
     groups: list[str] | None = None
 
+    # AWS S3 access - when True, injects user's AWS credentials as env secrets
+    inject_aws_credentials: bool = False
+
 
 def resolve_clusters(cluster: str | list[str]) -> list[str]:
     """Resolve cluster aliases to full cluster names.
@@ -584,6 +587,14 @@ class BeakerLauncher:
         env_secrets: list[tuple[str, str]] = [
             (secret.name, secret.secret) for secret in config.env_secrets
         ]
+
+        # Inject AWS credentials if requested
+        if config.inject_aws_credentials:
+            from olmo_eval.launch.aws import ensure_aws_secrets
+
+            aws_secrets = ensure_aws_secrets(config.workspace)
+            env_secrets.extend(aws_secrets)
+            log.info("Injecting AWS credentials for S3 access")
 
         # Build env vars as tuples: (name, value)
         env_vars: list[tuple[str, str]] = list(config.env_vars.items())
