@@ -20,6 +20,7 @@ class ModelConfig:
     revision: str | None = None
     trust_remote_code: bool = False
     dtype: str = "auto"
+    max_model_len: int | None = None  # Override model's default context length (vLLM)
     extra_args: dict[str, Any] = field(default_factory=dict)
 
 
@@ -117,6 +118,17 @@ def validate_tasks(tasks: list[str]) -> tuple[list[str], list[str]]:
     return valid_tasks, invalid_tasks
 
 
+def _parse_int_override(value: Any) -> int | None:
+    """Parse an override value as int, handling string conversion."""
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        return int(value)
+    return int(value)
+
+
 def get_model_config(name: str, **overrides: Any) -> ModelConfig:
     """Get a model config by preset name with optional overrides.
 
@@ -133,6 +145,14 @@ def get_model_config(name: str, **overrides: Any) -> ModelConfig:
     if name in models:
         base = models[name]
         if overrides:
+            # Parse max_model_len as int if present (inline overrides come as strings)
+            max_model_len_override = overrides.get("max_model_len")
+            effective_max_model_len = (
+                _parse_int_override(max_model_len_override)
+                if max_model_len_override is not None
+                else base.max_model_len
+            )
+
             # Create new config with overrides
             return ModelConfig(
                 model=overrides.get("model", base.model),
@@ -141,8 +161,12 @@ def get_model_config(name: str, **overrides: Any) -> ModelConfig:
                 revision=overrides.get("revision", base.revision),
                 trust_remote_code=overrides.get("trust_remote_code", base.trust_remote_code),
                 dtype=overrides.get("dtype", base.dtype),
+                max_model_len=effective_max_model_len,
                 extra_args={**base.extra_args, **overrides.get("extra_args", {})},
             )
         return base
-    # Treat as HuggingFace model path
+
+    # Treat as HuggingFace model path - parse max_model_len if present
+    if "max_model_len" in overrides:
+        overrides["max_model_len"] = _parse_int_override(overrides["max_model_len"])
     return ModelConfig(model=name, **overrides)

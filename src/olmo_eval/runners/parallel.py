@@ -411,6 +411,7 @@ def instance_worker_process(
     attention_backend: str | None = None,
     tokenizer: str | None = None,
     batch_size: int = 256,
+    max_model_len: int | None = None,
 ) -> None:
     """Worker that processes items in batches for progress reporting.
 
@@ -426,6 +427,7 @@ def instance_worker_process(
         attention_backend: Attention backend to use (e.g., "FLASHINFER", "FLASH_ATTN")
         tokenizer: Tokenizer path/identifier, defaults to model if None
         batch_size: Number of items to process per batch (default 256)
+        max_model_len: Maximum model context length (overrides model's default)
     """
     import sys
 
@@ -438,6 +440,8 @@ def instance_worker_process(
         engine_kwargs: dict[str, Any] = {"tensor_parallel_size": len(gpu_ids)} if gpu_ids else {}
         if attention_backend:
             engine_kwargs["attention_backend"] = attention_backend
+        if max_model_len:
+            engine_kwargs["max_model_len"] = max_model_len
         backend = create_backend(backend_type, model_name, tokenizer=tokenizer, **engine_kwargs)
 
         # Process items in batches for better progress reporting
@@ -480,6 +484,7 @@ def streaming_worker_process(
     model_name: str,
     attention_backend: str | None = None,
     tokenizer: str | None = None,
+    max_model_len: int | None = None,
 ) -> None:
     """Worker using async streaming for true continuous batching.
 
@@ -495,6 +500,7 @@ def streaming_worker_process(
         model_name: Model name for backend
         attention_backend: Attention backend to use (e.g., "FLASHINFER", "FLASH_ATTN")
         tokenizer: Tokenizer path/identifier, defaults to model if None
+        max_model_len: Maximum model context length (overrides model's default)
     """
     import sys
 
@@ -506,7 +512,13 @@ def streaming_worker_process(
         num_gpus = len(gpu_ids) if gpu_ids else 1
         asyncio.run(
             _streaming_worker_async(
-                instance_queue, result_queue, model_name, num_gpus, attention_backend, tokenizer
+                instance_queue,
+                result_queue,
+                model_name,
+                num_gpus,
+                attention_backend,
+                tokenizer,
+                max_model_len,
             )
         )
     except Exception as e:
@@ -533,6 +545,7 @@ async def _streaming_worker_async(
     num_gpus: int = 1,
     attention_backend: str | None = None,
     tokenizer: str | None = None,
+    max_model_len: int | None = None,
 ) -> None:
     """Async implementation of streaming worker.
 
@@ -540,11 +553,15 @@ async def _streaming_worker_async(
     """
     from olmo_eval.backends.vllm import AsyncVLLMBackend
 
+    engine_kwargs: dict[str, Any] = {"tensor_parallel_size": num_gpus}
+    if max_model_len:
+        engine_kwargs["max_model_len"] = max_model_len
+
     backend = AsyncVLLMBackend(
         model_name,
         tokenizer=tokenizer,
         attention_backend=attention_backend,
-        tensor_parallel_size=num_gpus,
+        **engine_kwargs,
     )
 
     # Track request_id -> QueueItem mapping
@@ -958,6 +975,8 @@ class AsyncEvalRunner:
                         backend_type.value,
                         self.attention_backend,
                         model_config.tokenizer,
+                        256,  # batch_size
+                        model_config.max_model_len,
                     ),
                 )
                 worker.start()
@@ -1579,6 +1598,7 @@ class StreamingEvalRunner:
                         model_config.model,
                         self.attention_backend,
                         model_config.tokenizer,
+                        model_config.max_model_len,
                     ),
                 )
                 worker.start()

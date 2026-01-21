@@ -162,6 +162,8 @@ class EvalRunner:
         extra_kwargs = dict(model_config.extra_args)
         if self.attention_backend:
             extra_kwargs["attention_backend"] = self.attention_backend
+        if model_config.max_model_len:
+            extra_kwargs["max_model_len"] = model_config.max_model_len
         backend = create_backend(
             backend_type,
             model_config.model,

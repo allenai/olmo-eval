@@ -29,7 +29,7 @@ TASKCONFIG_KEYS = {"num_fewshot", "limit", "fewshot_seed"}
 SAMPLING_KEYS = {"temperature", "max_tokens", "top_p", "top_k", "num_samples"}
 
 # Keys that apply to model/backend config
-MODEL_KEYS = {"backend", "attention_backend", "gpus_per_worker", "tokenizer"}
+MODEL_KEYS = {"backend", "attention_backend", "gpus_per_worker", "tokenizer", "max_model_len"}
 
 
 def parse_model_spec(spec: str) -> tuple[str, dict[str, Any]]:
