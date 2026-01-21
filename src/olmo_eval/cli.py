@@ -1173,9 +1173,9 @@ def launch(
 
         effective_extra_loader_config = model_resources.get("extra_loader_config")
         if effective_extra_loader_config:
-            # Serialize extra_loader_config as JSON for inline spec
+            # Serialize extra_loader_config as compact JSON (no spaces) for inline spec
             model_inline_overrides.append(
-                f"extra_loader_config={json_module.dumps(effective_extra_loader_config)}"
+                f"extra_loader_config={json_module.dumps(effective_extra_loader_config, separators=(',', ':'))}"
             )
 
         if model_inline_overrides:
