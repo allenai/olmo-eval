@@ -1059,11 +1059,6 @@ class AsyncEvalRunner:
                 f"  [green]v[/green] {label} ({result.num_instances} instances, "
                 f"{result.duration_seconds:.1f}s)"
             )
-            # Log metrics
-            if result.metrics:
-                logger.info(f"** Task metrics for {label}: **")
-                for metric, value in result.metrics.items():
-                    logger.info(f"  {metric}: {value:.4f}")
 
     def run(self) -> dict[str, Any]:
         """Sync wrapper for async execution."""
@@ -1185,7 +1180,6 @@ class AsyncEvalRunner:
             for pred in predictions:
                 f.write(json.dumps(pred) + "\n")
 
-        logger.info(f"Predictions written to {filepath}")
 
 
 # -----------------------------------------------------------------------------
@@ -1631,10 +1625,6 @@ class StreamingEvalRunner:
                 f"  [green]v[/green] {label} ({result.num_instances} instances, "
                 f"{result.duration_seconds:.1f}s)"
             )
-            if result.metrics:
-                logger.info(f"** Task metrics for {label}: **")
-                for metric, value in result.metrics.items():
-                    logger.info(f"  {metric}: {value:.4f}")
 
     def run(self) -> dict[str, Any]:
         """Sync wrapper for async execution."""
@@ -1755,4 +1745,3 @@ class StreamingEvalRunner:
             for pred in predictions:
                 f.write(json.dumps(pred) + "\n")
 
-        logger.info(f"Predictions written to {filepath}")
