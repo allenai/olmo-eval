@@ -68,6 +68,8 @@ class ModelConfig:
         num_workers: Number of workers for async modes (overrides default).
         gpus_per_worker: GPUs per worker for async modes (overrides default).
         backend: Backend to install for this model (e.g., "vllm").
+        load_format: vLLM model loading format (e.g., "runai_streamer" for distributed loading).
+        extra_loader_config: Extra config for model loader (e.g., {"distributed": true}).
 
     Example:
         models:
@@ -84,6 +86,12 @@ class ModelConfig:
             num_workers: 2
             gpus_per_worker: 4
             timeout: 48h
+          - name_or_path: llama3.1-70b
+            gpus: 4
+            load_format: runai_streamer  # Use distributed streaming loader
+            extra_loader_config:
+              distributed: true
+              concurrency: 16
     """
 
     name_or_path: str = MISSING
@@ -103,6 +111,10 @@ class ModelConfig:
 
     # Runtime backend installation (overrides default backend)
     backend: str | None = None
+
+    # vLLM model loading configuration
+    load_format: str | None = None  # e.g., "auto", "pt", "safetensors", "runai_streamer"
+    extra_loader_config: dict[str, Any] | None = None  # e.g., {"distributed": true}
 
 
 def parse_model_config(model: str | dict[str, Any] | ModelConfig) -> ModelConfig:
@@ -378,6 +390,8 @@ class LaunchConfig:
             "num_workers": num_workers,
             "gpus_per_worker": gpus_per_worker,
             "backend": model.backend,
+            "load_format": model.load_format,
+            "extra_loader_config": model.extra_loader_config,
         }
 
     @classmethod

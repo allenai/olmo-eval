@@ -96,6 +96,8 @@ def register_regime(task_name: str, regime: str, **overrides: Any) -> None:
 def parse_overrides(override_str: str) -> dict[str, Any]:
     """Parse 'key=value,key=value' into dict with type coercion.
 
+    Supports JSON values for complex configs (e.g., extra_loader_config={"distributed":true}).
+
     Args:
         override_str: Override string like "temperature=0.6,max_tokens=512"
 
@@ -107,25 +109,51 @@ def parse_overrides(override_str: str) -> dict[str, Any]:
         {"temperature": 0.6, "max_tokens": 512}
         >>> parse_overrides("backend=vllm")
         {"backend": "vllm"}
+        >>> parse_overrides('extra_loader_config={"distributed":true}')
+        {"extra_loader_config": {"distributed": True}}
     """
+    import json
+
     if not override_str:
         return {}
 
     result: dict[str, Any] = {}
-    for pair in override_str.split(","):
-        if not pair or "=" not in pair:
-            continue
-        key, _, value = pair.partition("=")
-        key = key.strip()
-        value = value.strip()
+    decoder = json.JSONDecoder()
+    i = 0
 
-        # Type coercion based on key name
-        if key in {"num_fewshot", "limit", "fewshot_seed", "max_tokens", "top_k", "num_samples"}:
-            result[key] = int(value)
-        elif key in {"temperature", "top_p"}:
-            result[key] = float(value)
+    while i < len(override_str):
+        # Skip commas and whitespace
+        while i < len(override_str) and override_str[i] in ", ":
+            i += 1
+        if i >= len(override_str):
+            break
+
+        # Find key=value
+        eq_pos = override_str.find("=", i)
+        if eq_pos == -1:
+            break
+
+        key = override_str[i:eq_pos].strip()
+        i = eq_pos + 1
+
+        # Parse value - use raw_decode for JSON, otherwise read until comma
+        if i < len(override_str) and override_str[i] in "{[":
+            value, end = decoder.raw_decode(override_str, i)
+            i = end
         else:
-            result[key] = value
+            comma_pos = override_str.find(",", i)
+            value_str = (override_str[i:comma_pos] if comma_pos != -1 else override_str[i:]).strip()
+            i = comma_pos if comma_pos != -1 else len(override_str)
+
+            # Type coercion
+            if key in {"num_fewshot", "limit", "fewshot_seed", "max_tokens", "top_k", "num_samples"}:
+                value = int(value_str)
+            elif key in {"temperature", "top_p"}:
+                value = float(value_str)
+            else:
+                value = value_str
+
+        result[key] = value
 
     return result
 

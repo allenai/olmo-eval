@@ -65,7 +65,7 @@ class EvalRunner:
     # Per-task overrides from inline spec (e.g., task::temperature=0.6)
     task_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
 
-    # Model overrides from inline spec (e.g., model::tokenizer=...)
+    # Model overrides from inline spec (e.g., model::tokenizer=..., model::load_format=...)
     model_overrides: dict[str, Any] = field(default_factory=dict)
 
     def validate(self) -> None:
@@ -164,6 +164,11 @@ class EvalRunner:
             extra_kwargs["attention_backend"] = self.attention_backend
         if model_config.max_model_len:
             extra_kwargs["max_model_len"] = model_config.max_model_len
+        # Per-model vLLM loading options from inline spec (e.g., model::load_format=runai_streamer)
+        if self.model_overrides.get("load_format"):
+            extra_kwargs["load_format"] = self.model_overrides["load_format"]
+        if self.model_overrides.get("extra_loader_config"):
+            extra_kwargs["model_loader_extra_config"] = self.model_overrides["extra_loader_config"]
         backend = create_backend(
             backend_type,
             model_config.model,

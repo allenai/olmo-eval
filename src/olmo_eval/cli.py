@@ -29,7 +29,7 @@ TASKCONFIG_KEYS = {"num_fewshot", "limit", "fewshot_seed"}
 SAMPLING_KEYS = {"temperature", "max_tokens", "top_p", "top_k", "num_samples"}
 
 # Keys that apply to model/backend config
-MODEL_KEYS = {"backend", "attention_backend", "gpus_per_worker", "tokenizer", "max_model_len"}
+MODEL_KEYS = {"backend", "attention_backend", "gpus_per_worker", "tokenizer", "max_model_len", "load_format"}
 
 
 def parse_model_spec(spec: str) -> tuple[str, dict[str, Any]]:
@@ -713,6 +713,8 @@ def launch(
         olmo-eval beaker launch -n "benchmark" --group "benchmark-2024" \\
             -m llama3.1-8b -t mmlu -t gsm8k
     """
+    import json as json_module
+
     try:
         from olmo_eval.launch import (
             BeakerJobConfig,
@@ -1161,8 +1163,26 @@ def launch(
         res_shared_memory = model_resources.get("shared_memory")
         effective_shared_memory: str = str(res_shared_memory) if res_shared_memory else "10GiB"
 
+        # Build model spec with inline overrides for per-model vLLM loading options
+        model_spec = model_name
+        model_inline_overrides: list[str] = []
+
+        effective_load_format = model_resources.get("load_format")
+        if effective_load_format:
+            model_inline_overrides.append(f"load_format={effective_load_format}")
+
+        effective_extra_loader_config = model_resources.get("extra_loader_config")
+        if effective_extra_loader_config:
+            # Serialize extra_loader_config as JSON for inline spec
+            model_inline_overrides.append(
+                f"extra_loader_config={json_module.dumps(effective_extra_loader_config)}"
+            )
+
+        if model_inline_overrides:
+            model_spec = f"{model_name}::{','.join(model_inline_overrides)}"
+
         # Build command with this model and experiment's tasks
-        command = ["olmo-eval", "run", "-m", model_name]
+        command = ["olmo-eval", "run", "-m", model_spec]
         for t in task_list:
             command.extend(["-t", t])
 

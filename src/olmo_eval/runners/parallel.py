@@ -411,6 +411,8 @@ def instance_worker_process(
     attention_backend: str | None = None,
     tokenizer: str | None = None,
     max_model_len: int | None = None,
+    load_format: str | None = None,
+    extra_loader_config: dict[str, Any] | None = None,
 ) -> None:
     """Worker that collects all items and processes them at once.
 
@@ -426,6 +428,8 @@ def instance_worker_process(
         attention_backend: Attention backend to use (e.g., "FLASHINFER", "FLASH_ATTN")
         tokenizer: Tokenizer path/identifier, defaults to model if None
         max_model_len: Maximum model context length (overrides model's default)
+        load_format: vLLM model loading format (e.g., "runai_streamer")
+        extra_loader_config: Extra config for model loader (e.g., {"distributed": true})
     """
     import sys
 
@@ -440,6 +444,10 @@ def instance_worker_process(
             engine_kwargs["attention_backend"] = attention_backend
         if max_model_len:
             engine_kwargs["max_model_len"] = max_model_len
+        if load_format:
+            engine_kwargs["load_format"] = load_format
+        if extra_loader_config:
+            engine_kwargs["model_loader_extra_config"] = extra_loader_config
         backend = create_backend(backend_type, model_name, tokenizer=tokenizer, **engine_kwargs)
 
         # Collect all items from queue
@@ -478,6 +486,8 @@ def streaming_worker_process(
     attention_backend: str | None = None,
     tokenizer: str | None = None,
     max_model_len: int | None = None,
+    load_format: str | None = None,
+    extra_loader_config: dict[str, Any] | None = None,
 ) -> None:
     """Worker using async streaming for true continuous batching.
 
@@ -494,6 +504,8 @@ def streaming_worker_process(
         attention_backend: Attention backend to use (e.g., "FLASHINFER", "FLASH_ATTN")
         tokenizer: Tokenizer path/identifier, defaults to model if None
         max_model_len: Maximum model context length (overrides model's default)
+        load_format: vLLM model loading format (e.g., "runai_streamer")
+        extra_loader_config: Extra config for model loader (e.g., {"distributed": true})
     """
     import sys
 
@@ -512,6 +524,8 @@ def streaming_worker_process(
                 attention_backend,
                 tokenizer,
                 max_model_len,
+                load_format,
+                extra_loader_config,
             )
         )
     except Exception as e:
@@ -539,6 +553,8 @@ async def _streaming_worker_async(
     attention_backend: str | None = None,
     tokenizer: str | None = None,
     max_model_len: int | None = None,
+    load_format: str | None = None,
+    extra_loader_config: dict[str, Any] | None = None,
 ) -> None:
     """Async implementation of streaming worker.
 
@@ -549,6 +565,10 @@ async def _streaming_worker_async(
     engine_kwargs: dict[str, Any] = {"tensor_parallel_size": num_gpus}
     if max_model_len:
         engine_kwargs["max_model_len"] = max_model_len
+    if load_format:
+        engine_kwargs["load_format"] = load_format
+    if extra_loader_config:
+        engine_kwargs["model_loader_extra_config"] = extra_loader_config
 
     backend = AsyncVLLMBackend(
         model_name,
@@ -697,7 +717,7 @@ class AsyncEvalRunner:
     # Per-task overrides from inline spec (e.g., task::temperature=0.6)
     task_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
 
-    # Per-model overrides from inline spec (e.g., model::tokenizer=...)
+    # Per-model overrides from inline spec (e.g., model::tokenizer=..., model::load_format=...)
     # Maps model name -> overrides dict
     model_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
 
@@ -949,6 +969,11 @@ class AsyncEvalRunner:
             model_config = model_configs[model_name]
             backend_type = BackendType(model_config.backend)
 
+            # Get per-model vLLM loading options from model_overrides
+            per_model_overrides = self.model_overrides.get(model_name, {})
+            effective_load_format = per_model_overrides.get("load_format")
+            effective_extra_loader_config = per_model_overrides.get("extra_loader_config")
+
             # Spawn workers for this model
             for i in range(workers_per_model):
                 if total_gpus > 0:
@@ -969,6 +994,8 @@ class AsyncEvalRunner:
                         self.attention_backend,
                         model_config.tokenizer,
                         model_config.max_model_len,
+                        effective_load_format,
+                        effective_extra_loader_config,
                     ),
                 )
                 worker.start()
@@ -1343,7 +1370,7 @@ class StreamingEvalRunner:
     # Per-task overrides from inline spec (e.g., task::temperature=0.6)
     task_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
 
-    # Per-model overrides from inline spec (e.g., model::tokenizer=...)
+    # Per-model overrides from inline spec (e.g., model::tokenizer=..., model::load_format=...)
     # Maps model name -> overrides dict
     model_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
 
@@ -1573,6 +1600,11 @@ class StreamingEvalRunner:
         for model_name in self.model_names:
             model_config = model_configs[model_name]
 
+            # Get per-model vLLM loading options from model_overrides
+            per_model_overrides = self.model_overrides.get(model_name, {})
+            effective_load_format = per_model_overrides.get("load_format")
+            effective_extra_loader_config = per_model_overrides.get("extra_loader_config")
+
             for i in range(workers_per_model):
                 if total_gpus > 0:
                     start_gpu = gpu_offset + (i * self.gpus_per_worker)
@@ -1591,6 +1623,8 @@ class StreamingEvalRunner:
                         self.attention_backend,
                         model_config.tokenizer,
                         model_config.max_model_len,
+                        effective_load_format,
+                        effective_extra_loader_config,
                     ),
                 )
                 worker.start()
