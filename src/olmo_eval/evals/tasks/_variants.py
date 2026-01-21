@@ -121,7 +121,7 @@ def register_bpb_variants() -> None:
             "bpb",
             formatter=PPLFormatter(),
             scorers=(BitsPerByteScorer(),),
-            metrics=(BPBMetric()),
+            metrics=(BPBMetric(),),
         )
 
 
