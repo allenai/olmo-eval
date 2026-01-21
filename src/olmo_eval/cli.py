@@ -1050,6 +1050,7 @@ def launch(
     matrix_table.add_column("Model", style="blue")
     matrix_table.add_column("Priority", style="yellow")
     matrix_table.add_column("Suites/Tasks", style="white")
+    matrix_table.add_column("Overrides", style="dim")
     matrix_table.add_column("# Tasks", style="white", justify="right")
     matrix_table.add_column("GPUs/Model", style="green", justify="right")
     matrix_table.add_column("Instances", style="magenta", justify="right")
@@ -1057,8 +1058,23 @@ def launch(
     matrix_table.add_column("Split", style="dim", justify="center")
 
     for exp in experiment_plan:
-        # Show original suite/task names for reference
-        suite_display = ", ".join(exp["original_task_specs"])
+        # Extract base names and overrides from original task specs
+        base_names = []
+        all_overrides: set[str] = set()
+        for spec in exp["original_task_specs"]:
+            # Strip priority suffix first
+            spec_no_priority = spec.rsplit("@", 1)[0] if "@" in spec else spec
+            # Split on :: to get base name and overrides
+            if "::" in spec_no_priority:
+                base, override_str = spec_no_priority.split("::", 1)
+                base_names.append(base)
+                all_overrides.add(override_str)
+            else:
+                base_names.append(spec_no_priority)
+
+        suite_display = ", ".join(base_names)
+        override_display = ", ".join(sorted(all_overrides)) if all_overrides else "-"
+
         # Show task count - if split, show subset count of total
         task_count = len(exp["tasks"])
         total_tasks = exp["total_expanded_tasks"]
@@ -1074,6 +1090,7 @@ def launch(
             exp["model_name"],
             exp["priority"],
             suite_display,
+            override_display,
             task_display,
             str(exp["gpus_per_model"]),
             str(exp["parallelism"]),
