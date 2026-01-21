@@ -129,6 +129,11 @@ def _parse_int_override(value: Any) -> int | None:
     return int(value)
 
 
+# Keys that are vLLM/backend-specific and should not be passed to ModelConfig
+# These are handled separately by the runners
+_BACKEND_ONLY_KEYS = {"load_format", "extra_loader_config", "attention_backend", "gpus_per_worker"}
+
+
 def get_model_config(name: str, **overrides: Any) -> ModelConfig:
     """Get a model config by preset name with optional overrides.
 
@@ -141,12 +146,15 @@ def get_model_config(name: str, **overrides: Any) -> ModelConfig:
     """
     from olmo_eval.core.constants.models import get_model_presets
 
+    # Filter out backend-specific keys that don't belong in ModelConfig
+    filtered_overrides = {k: v for k, v in overrides.items() if k not in _BACKEND_ONLY_KEYS}
+
     models = get_model_presets()
     if name in models:
         base = models[name]
-        if overrides:
+        if filtered_overrides:
             # Parse max_model_len as int if present (inline overrides come as strings)
-            max_model_len_override = overrides.get("max_model_len")
+            max_model_len_override = filtered_overrides.get("max_model_len")
             effective_max_model_len = (
                 _parse_int_override(max_model_len_override)
                 if max_model_len_override is not None
@@ -155,18 +163,18 @@ def get_model_config(name: str, **overrides: Any) -> ModelConfig:
 
             # Create new config with overrides
             return ModelConfig(
-                model=overrides.get("model", base.model),
-                tokenizer=overrides.get("tokenizer", base.tokenizer),
-                backend=overrides.get("backend", base.backend),
-                revision=overrides.get("revision", base.revision),
-                trust_remote_code=overrides.get("trust_remote_code", base.trust_remote_code),
-                dtype=overrides.get("dtype", base.dtype),
+                model=filtered_overrides.get("model", base.model),
+                tokenizer=filtered_overrides.get("tokenizer", base.tokenizer),
+                backend=filtered_overrides.get("backend", base.backend),
+                revision=filtered_overrides.get("revision", base.revision),
+                trust_remote_code=filtered_overrides.get("trust_remote_code", base.trust_remote_code),
+                dtype=filtered_overrides.get("dtype", base.dtype),
                 max_model_len=effective_max_model_len,
-                extra_args={**base.extra_args, **overrides.get("extra_args", {})},
+                extra_args={**base.extra_args, **filtered_overrides.get("extra_args", {})},
             )
         return base
 
     # Treat as HuggingFace model path - parse max_model_len if present
-    if "max_model_len" in overrides:
-        overrides["max_model_len"] = _parse_int_override(overrides["max_model_len"])
-    return ModelConfig(model=name, **overrides)
+    if "max_model_len" in filtered_overrides:
+        filtered_overrides["max_model_len"] = _parse_int_override(filtered_overrides["max_model_len"])
+    return ModelConfig(model=name, **filtered_overrides)
