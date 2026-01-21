@@ -10,7 +10,7 @@ multiple choice format.
 
 from olmo_eval.core import (
     BitsPerByteScorer,
-    LogprobGoldMetric,
+    BPBMetric,
     MCQAChatFormatter,
     PPLFormatter,
     SamplingParams,
@@ -118,12 +118,7 @@ def register_bpb_variants() -> None:
 
     The :bpb variant indicates bits-per-byte (perplexity) evaluation.
     This uses loglikelihood scoring with the PPL formatter, BitsPerByte scorer,
-    and LogprobGold metric.
-
-    Configuration follows the minieval pattern:
-        formatter = PPL()
-        scorer = [BitsPerByte()]
-        metric = [LogprobGold()]
+    and BPB metric.
     """
     for task_name in list(_tasks.keys()):
         register_variant(
@@ -131,8 +126,8 @@ def register_bpb_variants() -> None:
             "bpb",
             formatter=PPLFormatter(),
             scorers=(BitsPerByteScorer(),),
-            metrics=(LogprobGoldMetric(),),
-            num_fewshot=0,  # BPB evaluation doesn't use few-shot examples
+            metrics=(BPBMetric(),),
+            num_fewshot=0,
         )
 
 

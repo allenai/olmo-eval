@@ -240,19 +240,12 @@ class EvalRunner:
                 metric_name, score = primary
                 logger.info(f"  {task_name}: {score:.4f} ({metric_name})")
 
-        # Log suite aggregations
-        if "suites" in results:
-            logger.info("")
-            logger.info("Suite aggregations:")
-            console.print("\n[bold]Suite Aggregations:[/bold]")
-            for suite_name, suite_data in results["suites"].items():
-                metrics = suite_data.get("metrics", {})
-                num_tasks = suite_data.get("num_tasks", 0)
-                primary = get_primary_metric(metrics)
-                if primary:
-                    metric_name, score = primary
-                    logger.info(f"  {suite_name}: {score:.4f} ({metric_name}, {num_tasks} tasks)")
-                    console.print(f"  [cyan]{suite_name}[/cyan]: {score:.4f} ({metric_name}, {num_tasks} tasks)")
+        for suite_name, suite_data in results.get("suites", {}).items():
+            metrics = suite_data.get("metrics", {})
+            primary = get_primary_metric(metrics)
+            if primary:
+                metric_name, score = primary
+                logger.info(f"  {suite_name}: {score:.4f} ({metric_name})")
 
     def _save_results(self, results: dict[str, Any]) -> None:
         """Save results to all configured storage backends."""

@@ -10,6 +10,7 @@ import os
 import random
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -757,52 +758,63 @@ class AsyncEvalRunner:
             overrides["limit"] = self.limit_override
 
         # Prepare all (model, task) pairs
-        # Key: (model_name, task_spec) -> TaskTracker
         trackers: dict[tuple[str, str], TaskTracker] = {}
-        # Per-model items to queue
         model_items: dict[str, list[QueueItem]] = {m: [] for m in self.model_names}
-        # Model configs for later use
         model_configs: dict[str, Any] = {}
 
         console.print(f"[bold]Models:[/bold] {len(self.model_names)}")
         console.print(f"[bold]Tasks:[/bold] {len(expanded_tasks)}")
         total_pairs = len(self.model_names) * len(expanded_tasks)
         console.print(f"[bold]Total (model, task) pairs:[/bold] {total_pairs}")
-        console.print("[bold]Preparing tasks...[/bold]")
 
+        # Get model configs
         for model_name in self.model_names:
             model_config = get_model_config(model_name)
             if self.backend_override:
                 model_config.backend = self.backend_override
             model_configs[model_name] = model_config
 
-            console.print(f"\n[cyan]{model_name}[/cyan] ({model_config.model}):")
+        # Prepare tasks in parallel
+        console.print(f"[bold]Preparing {total_pairs} tasks...[/bold]")
 
-            for spec in expanded_tasks:
+        def prepare_one(model_name: str, spec: str) -> tuple[str, str, TaskTracker, list[QueueItem]]:
+            try:
+                task, items = prepare_task_items(spec, model_name, overrides or None)
+                tracker = TaskTracker(
+                    model_name=model_name,
+                    spec=spec,
+                    task=task,
+                    total_instances=len(items),
+                )
+                return (model_name, spec, tracker, items)
+            except Exception as e:
+                tracker = TaskTracker(
+                    model_name=model_name,
+                    spec=spec,
+                    task=None,
+                    total_instances=0,
+                    error=str(e),
+                )
+                return (model_name, spec, tracker, [])
+
+        with ThreadPoolExecutor(max_workers=min(32, total_pairs)) as executor:
+            futures = {
+                executor.submit(prepare_one, model_name, spec): (model_name, spec)
+                for model_name in self.model_names
+                for spec in expanded_tasks
+            }
+            for future in as_completed(futures):
+                model_name, spec, tracker, items = future.result()
                 key = (model_name, spec)
-                try:
-                    task, items = prepare_task_items(spec, model_name, overrides or None)
-                    trackers[key] = TaskTracker(
-                        model_name=model_name,
-                        spec=spec,
-                        task=task,
-                        total_instances=len(items),
-                    )
-                    model_items[model_name].extend(items)
-                    console.print(f"  - {spec}: {len(items)} instances")
-                except Exception as e:
-                    trackers[key] = TaskTracker(
-                        model_name=model_name,
-                        spec=spec,
-                        task=None,
-                        total_instances=0,
-                        error=str(e),
-                    )
-                    console.print(f"  [red]- {spec}: ERROR - {e}[/red]")
+                trackers[key] = tracker
+                model_items[model_name].extend(items)
+                if tracker.error:
+                    console.print(f"  [red]- {model_name}:{spec}: ERROR - {tracker.error}[/red]")
+                else:
+                    console.print(f"  - {model_name}:{spec}: {len(items)} instances")
 
-        # Count total instances
         total_instances = sum(len(items) for items in model_items.values())
-        console.print(f"\n[bold]Total instances across all models:[/bold] {total_instances}")
+        console.print(f"[bold]Total instances:[/bold] {total_instances}")
 
         # Setup multiprocessing context
         ctx = mp.get_context("spawn")
@@ -967,13 +979,6 @@ class AsyncEvalRunner:
                             tracker.model_name, task_result.spec, task_result.predictions
                         )
 
-            # Progress update
-            if processed % 100 == 0:
-                console.print(
-                    f"  Processed {processed} results, "
-                    f"{completed_pairs}/{total_pairs} (model, task) pairs complete"
-                )
-
         # Wait for all workers
         for worker in workers:
             worker.join(timeout=10)
@@ -1076,20 +1081,12 @@ class AsyncEvalRunner:
                     metric_name, score = primary
                     logger.info(f"    {task_name}: {score:.4f} ({metric_name})")
 
-            # Log suite aggregations for this model
-            if "suites" in model_data:
-                logger.info(f"  {model_name} - Suite Aggregations:")
-                console.print(f"\n[bold]{model_name} - Suite Aggregations:[/bold]")
-                for suite_name, suite_data in model_data["suites"].items():
-                    metrics = suite_data.get("metrics", {})
-                    num_tasks = suite_data.get("num_tasks", 0)
-                    primary = get_primary_metric(metrics)
-                    if primary:
-                        metric_name, score = primary
-                        logger.info(f"    {suite_name}: {score:.4f} ({metric_name}, {num_tasks} tasks)")
-                        console.print(
-                            f"  [cyan]{suite_name}[/cyan]: {score:.4f} ({metric_name}, {num_tasks} tasks)"
-                        )
+            for suite_name, suite_data in model_data.get("suites", {}).items():
+                metrics = suite_data.get("metrics", {})
+                primary = get_primary_metric(metrics)
+                if primary:
+                    metric_name, score = primary
+                    logger.info(f"    {suite_name}: {score:.4f} ({metric_name})")
 
     def _save_results(self, results: dict[str, Any]) -> None:
         """Save results to all configured storage backends."""
@@ -1363,38 +1360,53 @@ class StreamingEvalRunner:
         console.print(f"[bold]Tasks:[/bold] {len(expanded_tasks)}")
         total_pairs = len(self.model_names) * len(expanded_tasks)
         console.print(f"[bold]Total (model, task) pairs:[/bold] {total_pairs}")
-        console.print("[bold]Preparing tasks...[/bold]")
 
+        # Get model configs
         for model_name in self.model_names:
             model_config = get_model_config(model_name)
             model_configs[model_name] = model_config
 
-            console.print(f"\n[cyan]{model_name}[/cyan] ({model_config.model}):")
+        # Prepare tasks in parallel
+        console.print(f"[bold]Preparing {total_pairs} tasks...[/bold]")
 
-            for spec in expanded_tasks:
+        def prepare_one(model_name: str, spec: str) -> tuple[str, str, TaskTracker, list[QueueItem]]:
+            try:
+                task, items = prepare_task_items(spec, model_name, overrides or None)
+                tracker = TaskTracker(
+                    model_name=model_name,
+                    spec=spec,
+                    task=task,
+                    total_instances=len(items),
+                )
+                return (model_name, spec, tracker, items)
+            except Exception as e:
+                tracker = TaskTracker(
+                    model_name=model_name,
+                    spec=spec,
+                    task=None,
+                    total_instances=0,
+                    error=str(e),
+                )
+                return (model_name, spec, tracker, [])
+
+        with ThreadPoolExecutor(max_workers=min(32, total_pairs)) as executor:
+            futures = {
+                executor.submit(prepare_one, model_name, spec): (model_name, spec)
+                for model_name in self.model_names
+                for spec in expanded_tasks
+            }
+            for future in as_completed(futures):
+                model_name, spec, tracker, items = future.result()
                 key = (model_name, spec)
-                try:
-                    task, items = prepare_task_items(spec, model_name, overrides or None)
-                    trackers[key] = TaskTracker(
-                        model_name=model_name,
-                        spec=spec,
-                        task=task,
-                        total_instances=len(items),
-                    )
-                    model_items[model_name].extend(items)
-                    console.print(f"  - {spec}: {len(items)} instances")
-                except Exception as e:
-                    trackers[key] = TaskTracker(
-                        model_name=model_name,
-                        spec=spec,
-                        task=None,
-                        total_instances=0,
-                        error=str(e),
-                    )
-                    console.print(f"  [red]- {spec}: ERROR - {e}[/red]")
+                trackers[key] = tracker
+                model_items[model_name].extend(items)
+                if tracker.error:
+                    console.print(f"  [red]- {model_name}:{spec}: ERROR - {tracker.error}[/red]")
+                else:
+                    console.print(f"  - {model_name}:{spec}: {len(items)} instances")
 
         total_instances = sum(len(items) for items in model_items.values())
-        console.print(f"\n[bold]Total instances across all models:[/bold] {total_instances}")
+        console.print(f"[bold]Total instances:[/bold] {total_instances}")
 
         # Setup multiprocessing
         ctx = mp.get_context("spawn")
@@ -1546,12 +1558,6 @@ class StreamingEvalRunner:
                             tracker.model_name, task_result.spec, task_result.predictions
                         )
 
-            if processed % 100 == 0:
-                console.print(
-                    f"  Processed {processed} results, "
-                    f"{completed_pairs}/{total_pairs} (model, task) pairs complete"
-                )
-
         # Wait for workers
         for worker in workers:
             worker.join(timeout=10)
@@ -1647,20 +1653,12 @@ class StreamingEvalRunner:
                     metric_name, score = primary
                     logger.info(f"    {task_name}: {score:.4f} ({metric_name})")
 
-            # Log suite aggregations for this model
-            if "suites" in model_data:
-                logger.info(f"  {model_name} - Suite Aggregations:")
-                console.print(f"\n[bold]{model_name} - Suite Aggregations:[/bold]")
-                for suite_name, suite_data in model_data["suites"].items():
-                    metrics = suite_data.get("metrics", {})
-                    num_tasks = suite_data.get("num_tasks", 0)
-                    primary = get_primary_metric(metrics)
-                    if primary:
-                        metric_name, score = primary
-                        logger.info(f"    {suite_name}: {score:.4f} ({metric_name}, {num_tasks} tasks)")
-                        console.print(
-                            f"  [cyan]{suite_name}[/cyan]: {score:.4f} ({metric_name}, {num_tasks} tasks)"
-                        )
+            for suite_name, suite_data in model_data.get("suites", {}).items():
+                metrics = suite_data.get("metrics", {})
+                primary = get_primary_metric(metrics)
+                if primary:
+                    metric_name, score = primary
+                    logger.info(f"    {suite_name}: {score:.4f} ({metric_name})")
 
     def _save_results(self, results: dict[str, Any]) -> None:
         """Save results to all configured storage backends."""

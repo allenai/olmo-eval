@@ -49,18 +49,15 @@ class F1Metric:
 
 
 @dataclass(frozen=True, slots=True)
-class LogprobGoldMetric:
-    """Mean logprob of the gold/correct completion.
+class BPBMetric:
+    """Mean bits-per-byte of the gold/correct completion.
 
-    For tasks with multiple continuations, this returns the logprob of the
+    For tasks with multiple continuations, this returns the BPB of the
     correct continuation. For single-continuation tasks (like perplexity),
-    it returns the logprob of that continuation.
-
-    This is useful for BPB (bits-per-byte) evaluation where we want the
-    mean BPB score across all instances.
+    it returns the BPB of that continuation.
     """
 
-    name: str = "logprob_gold"
+    name: str = "bits_per_byte"
     scorer_name: str = "bits_per_byte"
 
     def compute(self, responses: Sequence[Response]) -> float:
