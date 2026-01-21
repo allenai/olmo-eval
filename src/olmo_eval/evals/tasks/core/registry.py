@@ -150,6 +150,8 @@ def parse_overrides(override_str: str) -> dict[str, Any]:
                 value = int(value_str)
             elif key in {"temperature", "top_p"}:
                 value = float(value_str)
+            elif key in {"add_leading_space"}:
+                value = value_str.lower() in ("true", "1", "yes")
             else:
                 value = value_str
 
@@ -239,7 +241,14 @@ def get_task(spec: str, config_overrides: dict[str, Any] | None = None) -> Task:
     # Apply inline overrides from spec (e.g., ::temperature=0.6)
     if inline_overrides:
         # Only apply TaskConfig fields, not sampling params
-        taskconfig_fields = {"num_fewshot", "limit", "fewshot_seed"}
+        taskconfig_fields = {"num_fewshot", "limit", "fewshot_seed", "formatter_overrides", "add_leading_space"}
+
+        # Translate add_leading_space to formatter_overrides
+        if "add_leading_space" in inline_overrides:
+            formatter_overrides = dict(config.formatter_overrides) if config.formatter_overrides else {}
+            formatter_overrides["add_leading_space"] = inline_overrides.pop("add_leading_space")
+            config = replace(config, formatter_overrides=formatter_overrides)
+
         for key, value in inline_overrides.items():
             if key in taskconfig_fields:
                 config = replace(config, **{key: value})

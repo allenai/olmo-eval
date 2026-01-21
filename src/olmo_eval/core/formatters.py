@@ -152,6 +152,8 @@ class PPLFormatter:
     - Falls back to gold_text metadata or gold_answer
     """
 
+    add_leading_space: bool = True
+
     def format(
         self,
         instance: Instance,
@@ -181,7 +183,8 @@ class PPLFormatter:
         if instance.question:
             prompt = instance.question
             # Add leading space when there's context (standard tokenization)
-            gold_text = " " + gold_text
+            if self.add_leading_space:
+                gold_text = " " + gold_text
 
         return LMRequest(
             request_type=RequestType.LOGLIKELIHOOD,

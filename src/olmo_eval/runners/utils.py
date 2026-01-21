@@ -390,6 +390,17 @@ def run_task_impl(
         if overrides:
             task.config = replace(task.config, **overrides)
 
+        # Apply formatter overrides if formatter is a dataclass
+        if task.config.formatter_overrides and task.config.formatter:
+            from dataclasses import is_dataclass
+
+            formatter = task.config.formatter
+            if is_dataclass(formatter) and not isinstance(formatter, type):
+                task.config = replace(
+                    task.config,
+                    formatter=replace(formatter, **task.config.formatter_overrides),
+                )
+
         # Build sampling params from overrides
         # Priority: sampling_overrides > temperature > task default
         existing_params = task.config.sampling_params or SamplingParams()
