@@ -83,10 +83,12 @@ class TestExpandTasks:
 
     def test_expand_mixed_with_overrides(self):
         """Test mix of tasks and suites with various suffixes."""
-        result = expand_tasks([
-            "arc_challenge::limit=10",
-            "core:mc::temperature=0@high",
-        ])
+        result = expand_tasks(
+            [
+                "arc_challenge::limit=10",
+                "core:mc::temperature=0@high",
+            ]
+        )
 
         # First task should be unchanged
         assert result[0] == "arc_challenge::limit=10"

@@ -106,11 +106,10 @@ class TestSuiteAggregations:
 
     def test_suite_aggregation_basic(self):
         """Test basic suite aggregation without overrides."""
-        from olmo_eval.runners.utils import compute_suite_aggregations
-
         # Create mock task results that match expanded core:mc tasks
         # Get actual tasks in core:mc suite
         from olmo_eval.evals.suites import get_suite
+        from olmo_eval.runners.utils import compute_suite_aggregations
 
         suite = get_suite("core:mc")
         expanded_tasks = suite.expand()
@@ -128,8 +127,8 @@ class TestSuiteAggregations:
 
     def test_suite_aggregation_with_overrides(self):
         """Test suite aggregation with inline overrides."""
-        from olmo_eval.runners.utils import compute_suite_aggregations
         from olmo_eval.evals.suites import get_suite
+        from olmo_eval.runners.utils import compute_suite_aggregations
 
         suite = get_suite("core:mc")
         expanded_tasks = suite.expand()
@@ -147,8 +146,8 @@ class TestSuiteAggregations:
 
     def test_suite_aggregation_with_priority(self):
         """Test suite aggregation with priority suffix."""
-        from olmo_eval.runners.utils import compute_suite_aggregations
         from olmo_eval.evals.suites import get_suite
+        from olmo_eval.runners.utils import compute_suite_aggregations
 
         suite = get_suite("core:mc")
         expanded_tasks = suite.expand()
@@ -165,8 +164,8 @@ class TestSuiteAggregations:
 
     def test_suite_aggregation_with_overrides_and_priority(self):
         """Test suite aggregation with both overrides and priority."""
-        from olmo_eval.runners.utils import compute_suite_aggregations
         from olmo_eval.evals.suites import get_suite
+        from olmo_eval.runners.utils import compute_suite_aggregations
 
         suite = get_suite("core:mc")
         expanded_tasks = suite.expand()
@@ -194,12 +193,12 @@ class TestSuiteAggregations:
 
     def test_suite_aggregation_average_of_averages(self):
         """Test AVERAGE_OF_AVERAGES aggregation weights children equally."""
-        from olmo_eval.runners.utils import compute_suite_aggregations
         from olmo_eval.evals.suites.registry import (
+            _REGISTRY,
             AggregationStrategy,
             Suite,
-            _REGISTRY,
         )
+        from olmo_eval.runners.utils import compute_suite_aggregations
 
         # Create a nested suite for testing
         nested_suite = Suite(
@@ -213,7 +212,7 @@ class TestSuiteAggregations:
             name="_test_aoa",
             tasks=(
                 "task_single",  # Individual task
-                nested_suite,   # Nested suite with 3 tasks
+                nested_suite,  # Nested suite with 3 tasks
             ),
             aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
         )

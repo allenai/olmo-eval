@@ -1311,7 +1311,7 @@ def results(
     console.print(
         "[yellow]Warning:[/yellow] 'olmo-eval beaker results' is deprecated.\n"
         f"Use: olmo-eval beaker group info {group}"
-        + (f" --wait" if wait else "")
+        + (" --wait" if wait else "")
         + (f" --format {output_format}" if output_format != "table" else "")
         + "\n"
     )
