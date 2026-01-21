@@ -141,7 +141,7 @@ def _gsm8k_config() -> TaskConfig:
         name="gsm8k",
         hf_dataset="gsm8k",
         scorers=(ExactMatchScorer(),),
-        metrics=(AccuracyMetric(scorer_name="exact_match"),),
+        metrics=(AccuracyMetric(scorer=ExactMatchScorer),),
     )
 
 
@@ -150,7 +150,7 @@ def _gsm_plus_config() -> TaskConfig:
         name="gsm_plus",
         hf_dataset="qintongli/GSM-Plus",
         scorers=(ExactMatchScorer(),),
-        metrics=(AccuracyMetric(scorer_name="exact_match"),),
+        metrics=(AccuracyMetric(scorer=ExactMatchScorer),),
     )
 
 
@@ -159,7 +159,7 @@ def _gsm_symbolic_main_config() -> TaskConfig:
         name="gsm_symbolic",
         hf_dataset="apple/GSM-Symbolic",
         scorers=(ExactMatchScorer(),),
-        metrics=(AccuracyMetric(scorer_name="exact_match"),),
+        metrics=(AccuracyMetric(scorer=ExactMatchScorer),),
     )
 
 
@@ -168,7 +168,7 @@ def _gsm_symbolic_p1_config() -> TaskConfig:
         name="gsm_symbolic_p1",
         hf_dataset="apple/GSM-Symbolic",
         scorers=(ExactMatchScorer(),),
-        metrics=(AccuracyMetric(scorer_name="exact_match"),),
+        metrics=(AccuracyMetric(scorer=ExactMatchScorer),),
     )
 
 
@@ -177,7 +177,7 @@ def _gsm_symbolic_p2_config() -> TaskConfig:
         name="gsm_symbolic_p2",
         hf_dataset="apple/GSM-Symbolic",
         scorers=(ExactMatchScorer(),),
-        metrics=(AccuracyMetric(scorer_name="exact_match"),),
+        metrics=(AccuracyMetric(scorer=ExactMatchScorer),),
     )
 
 

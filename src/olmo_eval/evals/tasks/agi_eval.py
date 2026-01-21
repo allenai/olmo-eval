@@ -112,7 +112,7 @@ def _make_agi_eval_config(subset: str) -> TaskConfig:
             template="Question: {question}\n\nAnswer:",
         ),
         scorers=(MultipleChoiceScorer(),),
-        metrics=(AccuracyMetric(scorer_name="multiple_choice"),),
+        metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
     )
 
 

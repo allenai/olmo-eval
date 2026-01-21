@@ -106,7 +106,7 @@ def _arc_challenge_config() -> TaskConfig:
             template="Question: {question}\n\nAnswer:",
         ),
         scorers=(MultipleChoiceScorer(),),
-        metrics=(AccuracyMetric(scorer_name="multiple_choice"),),
+        metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
     )
 
 
@@ -119,7 +119,7 @@ def _arc_easy_config() -> TaskConfig:
             template="Question: {question}\n\nAnswer:",
         ),
         scorers=(MultipleChoiceScorer(),),
-        metrics=(AccuracyMetric(scorer_name="multiple_choice"),),
+        metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
     )
 
 

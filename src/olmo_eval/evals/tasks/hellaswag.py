@@ -105,7 +105,7 @@ def _hellaswag_config() -> TaskConfig:
             include_choices_in_prompt=False,
         ),
         scorers=(MultipleChoiceScorer(),),
-        metrics=(AccuracyMetric(scorer_name="multiple_choice"),),
+        metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
     )
 
 

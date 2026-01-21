@@ -189,7 +189,7 @@ def _make_deepmind_math_config(category: str) -> TaskConfig:
         hf_dataset="deepmind/math_dataset",
         hf_subsets=(category,),
         scorers=(ExactMatchScorer(case_sensitive=False),),
-        metrics=(AccuracyMetric(scorer_name="exact_match"),),
+        metrics=(AccuracyMetric(scorer=ExactMatchScorer),),
     )
 
 

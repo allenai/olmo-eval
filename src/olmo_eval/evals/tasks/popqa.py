@@ -136,7 +136,7 @@ def _popqa_config() -> TaskConfig:
         name="popqa",
         hf_dataset="akariasai/PopQA",
         scorers=(PopQAScorer(),),
-        metrics=(AccuracyMetric(scorer_name="exact_match"),),
+        metrics=(AccuracyMetric(scorer=ExactMatchScorer),),
     )
 
 

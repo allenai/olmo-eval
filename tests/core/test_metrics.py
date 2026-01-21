@@ -3,6 +3,7 @@
 import pytest
 
 from olmo_eval.core.metrics import AccuracyMetric
+from olmo_eval.core.scorers import ExactMatchScorer, MultipleChoiceScorer
 from olmo_eval.core.types import Instance, LMOutput, LMRequest, RequestType, Response
 
 
@@ -74,9 +75,9 @@ class TestAccuracyMetric:
 
         assert accuracy == 1.0
 
-    def test_accuracy_custom_scorer_name(self):
-        """Test accuracy with custom scorer name."""
-        metric = AccuracyMetric(scorer_name="multiple_choice")
+    def test_accuracy_custom_scorer(self):
+        """Test accuracy with custom scorer type."""
+        metric = AccuracyMetric(scorer=MultipleChoiceScorer)
         responses = [
             self._make_response(1.0, "multiple_choice"),
             self._make_response(0.0, "multiple_choice"),
@@ -88,7 +89,7 @@ class TestAccuracyMetric:
 
     def test_accuracy_missing_scorer(self):
         """Test accuracy when scorer name not in scores dict."""
-        metric = AccuracyMetric(scorer_name="nonexistent")
+        metric = AccuracyMetric(scorer=MultipleChoiceScorer)
         responses = [
             self._make_response(1.0, "exact_match"),
             self._make_response(1.0, "exact_match"),
@@ -118,3 +119,14 @@ class TestAccuracyMetric:
         accuracy = metric.compute(responses)
 
         assert accuracy == 0.5
+
+    def test_accuracy_default_scorer(self):
+        """Test that default scorer is ExactMatchScorer."""
+        metric = AccuracyMetric()
+        assert metric.scorer == ExactMatchScorer
+        assert metric._scorer_name == "exact_match"
+
+    def test_accuracy_scorer_name_derived(self):
+        """Test that scorer name is derived from scorer class."""
+        metric = AccuracyMetric(scorer=MultipleChoiceScorer)
+        assert metric._scorer_name == "multiple_choice"

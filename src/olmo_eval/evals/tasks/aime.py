@@ -88,7 +88,7 @@ def _aime_config() -> TaskConfig:
         name="aime",
         hf_dataset="allenai/aime-2021-2025",
         scorers=(ExactMatchScorer(),),
-        metrics=(AccuracyMetric(scorer_name="exact_match"),),
+        metrics=(AccuracyMetric(scorer=ExactMatchScorer),),
     )
 
 
@@ -97,7 +97,7 @@ def _make_aime_year_config(year: str) -> TaskConfig:
         name=f"aime_{year}",
         hf_dataset="allenai/aime-2021-2025",
         scorers=(ExactMatchScorer(),),
-        metrics=(AccuracyMetric(scorer_name="exact_match"),),
+        metrics=(AccuracyMetric(scorer=ExactMatchScorer),),
     )
 
 

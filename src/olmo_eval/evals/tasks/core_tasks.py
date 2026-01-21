@@ -95,7 +95,7 @@ def _boolq_config() -> TaskConfig:
             template="Question: {question}\n\nAnswer:",
         ),
         scorers=(MultipleChoiceScorer(),),
-        metrics=(AccuracyMetric(scorer_name="multiple_choice"),),
+        metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
     )
 
 
@@ -179,7 +179,7 @@ def _csqa_config() -> TaskConfig:
             template="Question: {question}\n\nAnswer:",
         ),
         scorers=(MultipleChoiceScorer(),),
-        metrics=(AccuracyMetric(scorer_name="multiple_choice"),),
+        metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
     )
 
 
@@ -265,7 +265,7 @@ def _openbookqa_config() -> TaskConfig:
             template="Question: {question}\n\nAnswer:",
         ),
         scorers=(MultipleChoiceScorer(),),
-        metrics=(AccuracyMetric(scorer_name="multiple_choice"),),
+        metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
     )
 
 
@@ -349,7 +349,7 @@ def _piqa_config() -> TaskConfig:
             template="Goal: {question}\n\nAnswer:",
         ),
         scorers=(MultipleChoiceScorer(),),
-        metrics=(AccuracyMetric(scorer_name="multiple_choice"),),
+        metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
     )
 
 
@@ -434,7 +434,7 @@ def _socialiqa_config() -> TaskConfig:
             template="Question: {question}\n\nAnswer:",
         ),
         scorers=(MultipleChoiceScorer(),),
-        metrics=(AccuracyMetric(scorer_name="multiple_choice"),),
+        metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
     )
 
 
@@ -526,7 +526,7 @@ def _winogrande_config() -> TaskConfig:
             template="Fill in the blank: {question}\n\nAnswer:",
         ),
         scorers=(MultipleChoiceScorer(),),
-        metrics=(AccuracyMetric(scorer_name="multiple_choice"),),
+        metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
     )
 
 

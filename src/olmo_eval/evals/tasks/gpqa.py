@@ -193,7 +193,7 @@ def _gpqa_config() -> TaskConfig:
             template="Question: {question}\n\nAnswer:",
         ),
         scorers=(MultipleChoiceScorer(),),
-        metrics=(AccuracyMetric(scorer_name="multiple_choice"),),
+        metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
     )
 
 
@@ -206,7 +206,7 @@ def _gpqa_diamond_config() -> TaskConfig:
             template="Question: {question}\n\nAnswer:",
         ),
         scorers=(MultipleChoiceScorer(),),
-        metrics=(AccuracyMetric(scorer_name="multiple_choice"),),
+        metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
     )
 
 
@@ -218,7 +218,7 @@ def _super_gpqa_config() -> TaskConfig:
             template="Question: {question}\n\nAnswer:",
         ),
         scorers=(MultipleChoiceScorer(),),
-        metrics=(AccuracyMetric(scorer_name="multiple_choice"),),
+        metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
     )
 
 

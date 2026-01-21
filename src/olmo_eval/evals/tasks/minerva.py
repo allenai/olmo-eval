@@ -133,7 +133,7 @@ def _make_minerva_config(subset: str) -> TaskConfig:
         hf_dataset="EleutherAI/hendrycks_math",
         hf_subsets=(subset,),
         scorers=(ExactMatchScorer(),),
-        metrics=(AccuracyMetric(scorer_name="exact_match"),),
+        metrics=(AccuracyMetric(scorer=ExactMatchScorer),),
     )
 
 
@@ -142,7 +142,7 @@ def _math500_config() -> TaskConfig:
         name="math500",
         hf_dataset="HuggingFaceH4/MATH-500",
         scorers=(ExactMatchScorer(),),
-        metrics=(AccuracyMetric(scorer_name="exact_match"),),
+        metrics=(AccuracyMetric(scorer=ExactMatchScorer),),
     )
 
 
@@ -176,7 +176,7 @@ def _minerva_math_500_config() -> TaskConfig:
         name="minerva_math_500",
         hf_dataset="HuggingFaceH4/MATH-500",
         scorers=(ExactMatchScorer(),),
-        metrics=(AccuracyMetric(scorer_name="exact_match"),),
+        metrics=(AccuracyMetric(scorer=ExactMatchScorer),),
     )
 
 

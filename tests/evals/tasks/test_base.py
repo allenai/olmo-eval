@@ -80,7 +80,7 @@ class TestTaskConfig:
     def test_config_with_scorers_and_metrics(self):
         """Test config with scorers and metrics."""
         scorer = ExactMatchScorer()
-        metric = AccuracyMetric(scorer_name="exact_match")
+        metric = AccuracyMetric(scorer=ExactMatchScorer)
 
         config = TaskConfig(
             name="scored",
@@ -258,7 +258,7 @@ class TestTaskMetrics:
     def test_compute_metrics(self):
         """Test compute_metrics aggregates scores."""
         scorer = ExactMatchScorer()
-        metric = AccuracyMetric(scorer_name="exact_match")
+        metric = AccuracyMetric(scorer=ExactMatchScorer)
         config = TaskConfig(
             name="test",
             hf_dataset="test/dataset",
@@ -297,7 +297,7 @@ class TestTaskMetrics:
 
     def test_compute_metrics_empty_responses(self):
         """Test compute_metrics with empty responses."""
-        metric = AccuracyMetric(scorer_name="exact_match")
+        metric = AccuracyMetric(scorer=ExactMatchScorer)
         config = TaskConfig(
             name="test",
             hf_dataset="test/dataset",

@@ -101,7 +101,7 @@ def _qasper_yesno_config() -> TaskConfig:
             template="{question}\n\nAnswer:",
         ),
         scorers=(MultipleChoiceScorer(),),
-        metrics=(AccuracyMetric(scorer_name="multiple_choice"),),
+        metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
     )
 
 
@@ -194,7 +194,7 @@ def _sciriff_yesno_config() -> TaskConfig:
             template="{question}\n\nAnswer:",
         ),
         scorers=(MultipleChoiceScorer(),),
-        metrics=(AccuracyMetric(scorer_name="multiple_choice"),),
+        metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
     )
 
 

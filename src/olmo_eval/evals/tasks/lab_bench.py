@@ -160,7 +160,7 @@ def _lab_bench_protocolqa_config() -> TaskConfig:
             template="Question: {question}\n\nAnswer:",
         ),
         scorers=(MultipleChoiceScorer(),),
-        metrics=(AccuracyMetric(scorer_name="multiple_choice"),),
+        metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
     )
 
 
@@ -185,7 +185,7 @@ def _lab_bench_dbqa_config() -> TaskConfig:
             template="Question: {question}\n\nAnswer:",
         ),
         scorers=(MultipleChoiceScorer(),),
-        metrics=(AccuracyMetric(scorer_name="multiple_choice"),),
+        metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
     )
 
 

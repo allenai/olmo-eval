@@ -248,7 +248,7 @@ def _omega_500_config() -> TaskConfig:
         name="omega_500",
         hf_dataset="saumyamalik/omega-500",
         scorers=(OmegaScorer(),),
-        metrics=(AccuracyMetric(scorer_name="exact_match"),),
+        metrics=(AccuracyMetric(scorer=ExactMatchScorer),),
     )
 
 
@@ -272,7 +272,7 @@ def _make_omega_config(broad_cate: str, sub_cate: str, split: str) -> TaskConfig
         hf_dataset=f"allenai/omega-{broad_cate}",
         hf_subsets=(sub_cate,),
         scorers=(OmegaScorer(),),
-        metrics=(AccuracyMetric(scorer_name="exact_match"),),
+        metrics=(AccuracyMetric(scorer=ExactMatchScorer),),
     )
 
 

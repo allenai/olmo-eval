@@ -113,7 +113,7 @@ def _lambada_config() -> TaskConfig:
         name="lambada",
         hf_dataset="EleutherAI/lambada_openai",
         scorers=(ExactMatchScorer(),),
-        metrics=(AccuracyMetric(scorer_name="exact_match"),),
+        metrics=(AccuracyMetric(scorer=ExactMatchScorer),),
     )
 
 

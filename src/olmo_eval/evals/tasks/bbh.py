@@ -130,7 +130,7 @@ def _make_bbh_config(subset: str) -> TaskConfig:
         hf_dataset="lukaemon/bbh",
         hf_subsets=(subset,),
         scorers=(ExactMatchScorer(case_sensitive=False),),
-        metrics=(AccuracyMetric(scorer_name="exact_match"),),
+        metrics=(AccuracyMetric(scorer=ExactMatchScorer),),
     )
 
 

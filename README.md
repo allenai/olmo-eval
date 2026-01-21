@@ -303,7 +303,7 @@ def _my_task_config() -> TaskConfig:
         hf_dataset="my-hf-dataset",
         formatter=MultipleChoiceFormatter(template="Q: {question}\n\nA:"),
         scorers=(MultipleChoiceScorer(),),
-        metrics=(AccuracyMetric(scorer_name="multiple_choice"),),
+        metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
     )
 
 
@@ -345,14 +345,14 @@ class MyTaskImpl(MyTask):
 ```python
 formatter=MultipleChoiceFormatter(template="Question: {question}\n\nAnswer:")
 scorers=(MultipleChoiceScorer(),)
-metrics=(AccuracyMetric(scorer_name="multiple_choice"),)
+metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),)
 ```
 
 **Generation Tasks (exact match):**
 ```python
 formatter=CompletionFormatter(template="{question}")
 scorers=(ExactMatchScorer(),)
-metrics=(AccuracyMetric(scorer_name="exact_match"),)
+metrics=(AccuracyMetric(scorer=ExactMatchScorer),)
 ```
 
 **Tasks with Multiple Subsets** (like MMLU with 57 subjects):
