@@ -495,14 +495,17 @@ olmo-eval beaker launch -n "benchmark-v1" --group "benchmark-2024" \
 #   Launched: benchmark-v1-olmo-2-7b -> https://beaker.org/ex/...
 #   Group: Added 2 experiment(s) to 'benchmark-2024'
 
-# Check results
-olmo-eval beaker results --group "benchmark-2024"
+# Check group status and results
+olmo-eval beaker group info benchmark-2024
+
+# Show detailed task info
+olmo-eval beaker group info benchmark-2024 --verbose
 
 # Wait for completion and export as CSV
-olmo-eval beaker results --group "benchmark-2024" --wait --format csv > results.csv
+olmo-eval beaker group info benchmark-2024 --wait --format csv > results.csv
 
 # Export as JSON
-olmo-eval beaker results --group "benchmark-2024" --format json
+olmo-eval beaker group info benchmark-2024 --format json
 ```
 
 ### Runtime Backend Installation

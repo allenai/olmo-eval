@@ -1272,7 +1272,7 @@ def launch(
                     console.print(f"  - {url}")
 
 
-@beaker.command()
+@beaker.command(hidden=True)
 @click.option("--group", "-g", required=True, help="Beaker group name")
 @click.option(
     "--format",
@@ -1289,153 +1289,41 @@ def launch(
     default=30,
     help="Seconds between status checks when waiting",
 )
+@click.pass_context
 def results(
+    ctx: click.Context,
     group: str,
     output_format: str,
     wait: bool,
     poll_interval: int,
 ) -> None:
-    """Show results from a Beaker group.
+    """[DEPRECATED] Use 'olmo-eval beaker group info' instead.
 
-    Displays status and metrics for all experiments in a Beaker group.
-    Use --wait to block until all experiments complete.
+    This command is deprecated. Please use:
+
+        olmo-eval beaker group info <group_name> [options]
 
     Examples:
 
-        # Show status table
-        olmo-eval beaker results --group "benchmark-2024"
-
-        # Export as CSV
-        olmo-eval beaker results --group "benchmark-2024" --format csv > results.csv
-
-        # Wait for completion then show results
-        olmo-eval beaker results --group "benchmark-2024" --wait
+        olmo-eval beaker group info my-group
+        olmo-eval beaker group info my-group --wait --format csv > results.csv
     """
-    import json as json_module
-    import time
-
-    try:
-        from olmo_eval.launch import BeakerLauncher
-    except ImportError:
-        console.print(
-            "[red]beaker-py is not installed.[/red]\n"
-            "Install with: pip install 'olmo-eval-internal[beaker]'"
-        )
-        raise SystemExit(1) from None
-
-    launcher = BeakerLauncher()
-
-    # Try to get the group
-    try:
-        from beaker.exceptions import BeakerGroupNotFound
-
-        beaker_group = launcher.beaker.group.get(group)
-    except BeakerGroupNotFound:
-        console.print(f"[red]Error:[/red] Group '{group}' not found")
-        raise SystemExit(1) from None
-    except Exception as e:
-        console.print(f"[red]Error:[/red] {e}")
-        raise SystemExit(1) from None
-
-    # Wait for completion if requested
-    if wait:
-        console.print(f"[dim]Waiting for experiments in '{group}' to complete...[/dim]")
-        while True:
-            status = launcher.get_group_status(beaker_group)
-            running = status.get("running", 0) + status.get("pending", 0)
-
-            if running == 0:
-                break
-
-            console.print(
-                f"[dim]  {status.get('succeeded', 0)} succeeded, "
-                f"{status.get('running', 0)} running, "
-                f"{status.get('pending', 0)} pending, "
-                f"{status.get('failed', 0)} failed[/dim]"
-            )
-            time.sleep(poll_interval)
-
-        console.print("[green]All experiments completed.[/green]\n")
-
-    # Get status summary
-    status = launcher.get_group_status(beaker_group)
-    experiments = launcher.get_group_experiments(beaker_group)
-
-    if output_format == "csv":
-        # Export raw metrics CSV from Beaker
-        try:
-            csv_data = launcher.export_group_metrics(beaker_group)
-            click.echo(csv_data)
-        except Exception as e:
-            from beaker import BeakerWorkloadStatus
-
-            console.print(f"[yellow]Warning:[/yellow] Could not export metrics: {e}")
-            # Fall back to basic experiment info
-            click.echo("experiment_id,name,status")
-            for exp in experiments:
-                workload = launcher.beaker.workload.get(exp.id)
-                click.echo(f"{exp.id},{exp.name},{BeakerWorkloadStatus(workload.status).name}")
-
-    elif output_format == "json":
-        from beaker import BeakerWorkloadStatus
-
-        # Export as JSON
-        data = {
-            "group": group,
-            "status": status,
-            "experiments": [
-                {
-                    "id": exp.id,
-                    "name": exp.name,
-                    "status": BeakerWorkloadStatus(
-                        launcher.beaker.workload.get(exp.id).status
-                    ).name,
-                    "url": launcher.experiment_url(exp),
-                }
-                for exp in experiments
-            ],
-        }
-        click.echo(json_module.dumps(data, indent=2))
-
-    else:
-        # Table format (default)
-        console.print(f"[bold]Group:[/bold] {group}")
-        console.print(
-            f"[bold]Status:[/bold] "
-            f"[green]{status.get('succeeded', 0)} succeeded[/green], "
-            f"[yellow]{status.get('running', 0)} running[/yellow], "
-            f"[dim]{status.get('pending', 0)} pending[/dim], "
-            f"[red]{status.get('failed', 0)} failed[/red]"
-        )
-        console.print()
-
-        if experiments:
-            from beaker import BeakerWorkloadStatus
-
-            table = Table(title="Experiments")
-            table.add_column("Name", style="cyan")
-            table.add_column("Status")
-            table.add_column("URL", style="dim")
-
-            for exp in experiments:
-                workload = launcher.beaker.workload.get(exp.id)
-                status_str = BeakerWorkloadStatus(workload.status).name
-                status_style = {
-                    "succeeded": "[green]succeeded[/green]",
-                    "failed": "[red]failed[/red]",
-                    "running": "[yellow]running[/yellow]",
-                    "canceled": "[red]canceled[/red]",
-                }.get(status_str.lower(), f"[dim]{status_str}[/dim]")
-
-                table.add_row(
-                    exp.name,
-                    status_style,
-                    launcher.experiment_url(exp),
-                )
-
-            console.print(table)
-        else:
-            console.print("[dim]No experiments in group.[/dim]")
+    console.print(
+        "[yellow]Warning:[/yellow] 'olmo-eval beaker results' is deprecated.\n"
+        f"Use: olmo-eval beaker group info {group}"
+        + (f" --wait" if wait else "")
+        + (f" --format {output_format}" if output_format != "table" else "")
+        + "\n"
+    )
+    # Delegate to group_info
+    ctx.invoke(
+        group_info,
+        group_name=group,
+        output_format=output_format,
+        verbose=False,
+        wait=wait,
+        poll_interval=poll_interval,
+    )
 
 
 @beaker.command(name="watch")
@@ -1505,15 +1393,25 @@ def group() -> None:
     "--format",
     "-f",
     "output_format",
-    type=click.Choice(["table", "json"]),
+    type=click.Choice(["table", "csv", "json"]),
     default="table",
-    help="Output format",
+    help="Output format (csv exports raw metrics from Beaker)",
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed task info")
-def group_info(group_name: str, output_format: str, verbose: bool) -> None:
+@click.option("--wait", "-w", is_flag=True, help="Wait for all experiments to complete")
+@click.option(
+    "--poll-interval",
+    type=int,
+    default=30,
+    help="Seconds between status checks when waiting",
+)
+def group_info(
+    group_name: str, output_format: str, verbose: bool, wait: bool, poll_interval: int
+) -> None:
     """Get detailed info about a Beaker group.
 
     Shows status of all experiments and tasks in the group.
+    Use --wait to block until all experiments complete.
 
     Examples:
 
@@ -1522,6 +1420,9 @@ def group_info(group_name: str, output_format: str, verbose: bool) -> None:
         olmo-eval beaker group info my-experiment-group --verbose
 
         olmo-eval beaker group info my-experiment-group --format json
+
+        # Wait for completion and export as CSV
+        olmo-eval beaker group info my-experiment-group --wait --format csv > results.csv
     """
     import json as json_module
 
@@ -1548,12 +1449,49 @@ def group_info(group_name: str, output_format: str, verbose: bool) -> None:
         console.print(f"[red]Error:[/red] {e}")
         raise SystemExit(1) from None
 
+    # Wait for completion if requested
+    if wait:
+        import time
+
+        console.print(f"[dim]Waiting for experiments in '{group_name}' to complete...[/dim]")
+        while True:
+            status = launcher.get_group_status(beaker_group)
+            running = status.get("running", 0) + status.get("pending", 0)
+
+            if running == 0:
+                break
+
+            console.print(
+                f"[dim]  {status.get('succeeded', 0)} succeeded, "
+                f"{status.get('running', 0)} running, "
+                f"{status.get('pending', 0)} pending, "
+                f"{status.get('failed', 0)} failed[/dim]"
+            )
+            time.sleep(poll_interval)
+
+        console.print("[green]All experiments completed.[/green]\n")
+
     # Get status summary
     status = launcher.get_group_status(beaker_group)
     experiments = launcher.get_group_experiments(beaker_group)
     group_url = launcher.get_group_url(beaker_group)
 
-    if output_format == "json":
+    if output_format == "csv":
+        # Export raw metrics CSV from Beaker
+        try:
+            csv_data = launcher.export_group_metrics(beaker_group)
+            click.echo(csv_data)
+        except Exception as e:
+            from beaker import BeakerWorkloadStatus
+
+            console.print(f"[yellow]Warning:[/yellow] Could not export metrics: {e}")
+            # Fall back to basic experiment info
+            click.echo("experiment_id,name,status")
+            for exp in experiments:
+                workload = launcher.beaker.workload.get(exp.id)
+                click.echo(f"{exp.id},{exp.name},{BeakerWorkloadStatus(workload.status).name}")
+
+    elif output_format == "json":
         # Build detailed experiment data
         from beaker import BeakerWorkloadStatus
 
