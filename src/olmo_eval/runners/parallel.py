@@ -410,13 +410,12 @@ def instance_worker_process(
     backend_type_str: str,
     attention_backend: str | None = None,
     tokenizer: str | None = None,
-    batch_size: int = 256,
     max_model_len: int | None = None,
 ) -> None:
-    """Worker that processes items in batches for progress reporting.
+    """Worker that collects all items and processes them at once.
 
-    Processes items in configurable batch sizes to provide progress updates
-    while still allowing vLLM to handle internal batching efficiently.
+    Collects all items from the queue, then processes them in a single
+    backend call for maximum throughput. vLLM handles internal batching.
 
     Args:
         gpu_ids: List of GPU IDs to use (for CUDA_VISIBLE_DEVICES)
@@ -426,7 +425,6 @@ def instance_worker_process(
         backend_type_str: Backend type string
         attention_backend: Attention backend to use (e.g., "FLASHINFER", "FLASH_ATTN")
         tokenizer: Tokenizer path/identifier, defaults to model if None
-        batch_size: Number of items to process per batch (default 256)
         max_model_len: Maximum model context length (overrides model's default)
     """
     import sys
@@ -444,22 +442,17 @@ def instance_worker_process(
             engine_kwargs["max_model_len"] = max_model_len
         backend = create_backend(backend_type, model_name, tokenizer=tokenizer, **engine_kwargs)
 
-        # Process items in batches for better progress reporting
+        # Collect all items from queue
         items: list[QueueItem] = []
         while True:
             item = instance_queue.get()
             if item is None:  # Poison pill
-                # Process any remaining items
-                if items:
-                    _process_batch(items, backend, result_queue)
                 break
-
             items.append(item)
 
-            # Process batch when we hit the size limit
-            if len(items) >= batch_size:
-                _process_batch(items, backend, result_queue)
-                items = []
+        # Process all items at once - vLLM handles internal batching
+        if items:
+            _process_batch(items, backend, result_queue)
     except Exception as e:
         logger.error(f"Worker process failed: {e}")
         # Put a fatal error marker in the result queue so main process knows we died
@@ -975,7 +968,6 @@ class AsyncEvalRunner:
                         backend_type.value,
                         self.attention_backend,
                         model_config.tokenizer,
-                        256,  # batch_size
                         model_config.max_model_len,
                     ),
                 )
