@@ -11,7 +11,13 @@ from olmo_eval.core import Response
 from olmo_eval.evals.tasks import get_task
 
 # Re-export build_predictions for parallel runner
-__all__ = ["TaskResult", "build_predictions", "get_primary_metric", "run_task_impl"]
+__all__ = [
+    "TaskResult",
+    "build_predictions",
+    "compute_suite_aggregations",
+    "get_primary_metric",
+    "run_task_impl",
+]
 
 
 def get_primary_metric(metrics: dict[str, float]) -> tuple[str, float] | None:
@@ -36,6 +42,77 @@ def get_primary_metric(metrics: dict[str, float]) -> tuple[str, float] | None:
     # Fallback: first metric alphabetically for determinism
     name = sorted(metrics.keys())[0]
     return (name, metrics[name])
+
+
+def compute_suite_aggregations(
+    task_specs: list[str],
+    task_results: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Compute aggregated metrics for suites in the task specs.
+
+    For each suite in task_specs, computes the average of primary metrics
+    across all tasks in that suite.
+
+    Args:
+        task_specs: Original task specs (may include suite names)
+        task_results: Dict mapping task spec -> {"metrics": {...}, ...}
+
+    Returns:
+        Dict mapping suite name -> {"metrics": {...}, "tasks": [...], "aggregation": ...}
+    """
+    from olmo_eval.evals.suites import get_suite, suite_exists
+    from olmo_eval.evals.suites.registry import AggregationStrategy
+
+    suite_aggregations: dict[str, dict[str, Any]] = {}
+
+    for spec in task_specs:
+        if not suite_exists(spec):
+            continue
+
+        suite = get_suite(spec)
+        if suite.aggregation == AggregationStrategy.NONE:
+            continue
+
+        # Get results for all tasks in this suite
+        suite_tasks = suite.expand()
+        suite_metrics: dict[str, list[float]] = {}
+        tasks_included = []
+
+        for task_spec in suite_tasks:
+            if task_spec not in task_results:
+                continue
+
+            task_data = task_results[task_spec]
+            metrics = task_data.get("metrics", {})
+
+            if not metrics:
+                continue
+
+            tasks_included.append(task_spec)
+
+            # Collect all metrics for averaging
+            for metric_name, value in metrics.items():
+                if metric_name not in suite_metrics:
+                    suite_metrics[metric_name] = []
+                suite_metrics[metric_name].append(value)
+
+        if not suite_metrics:
+            continue
+
+        # Compute averages
+        aggregated_metrics = {
+            name: sum(values) / len(values)
+            for name, values in suite_metrics.items()
+        }
+
+        suite_aggregations[spec] = {
+            "metrics": aggregated_metrics,
+            "tasks": tasks_included,
+            "num_tasks": len(tasks_included),
+            "aggregation": suite.aggregation.value,
+        }
+
+    return suite_aggregations
 
 
 @dataclass

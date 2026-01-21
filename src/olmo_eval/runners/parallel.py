@@ -21,7 +21,12 @@ from olmo_eval.core import Instance, LMOutput, LMRequest, Response, expand_tasks
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.evals.tasks import Task, get_task
 from olmo_eval.runners.sequential import ValidationError
-from olmo_eval.runners.utils import TaskResult, build_predictions, get_primary_metric
+from olmo_eval.runners.utils import (
+    TaskResult,
+    build_predictions,
+    compute_suite_aggregations,
+    get_primary_metric,
+)
 
 if TYPE_CHECKING:
     from olmo_eval.storage import StorageBackend
@@ -1023,6 +1028,11 @@ class AsyncEvalRunner:
 
             results_dict["models"][model_name] = model_results
 
+            # Compute suite aggregations for this model
+            suite_aggs = compute_suite_aggregations(self.task_specs, model_results["tasks"])
+            if suite_aggs:
+                model_results["suites"] = suite_aggs
+
         # Log summary of all scores
         self._log_summary(results_dict)
 
@@ -1065,6 +1075,21 @@ class AsyncEvalRunner:
                 if primary:
                     metric_name, score = primary
                     logger.info(f"    {task_name}: {score:.4f} ({metric_name})")
+
+            # Log suite aggregations for this model
+            if "suites" in model_data:
+                logger.info(f"  {model_name} - Suite Aggregations:")
+                console.print(f"\n[bold]{model_name} - Suite Aggregations:[/bold]")
+                for suite_name, suite_data in model_data["suites"].items():
+                    metrics = suite_data.get("metrics", {})
+                    num_tasks = suite_data.get("num_tasks", 0)
+                    primary = get_primary_metric(metrics)
+                    if primary:
+                        metric_name, score = primary
+                        logger.info(f"    {suite_name}: {score:.4f} ({metric_name}, {num_tasks} tasks)")
+                        console.print(
+                            f"  [cyan]{suite_name}[/cyan]: {score:.4f} ({metric_name}, {num_tasks} tasks)"
+                        )
 
     def _save_results(self, results: dict[str, Any]) -> None:
         """Save results to all configured storage backends."""
@@ -1109,10 +1134,30 @@ class AsyncEvalRunner:
                     metric_name, score = primary
                     summary[model_name][task_name] = {"metric": metric_name, "score": score}
 
+        # Build suite summaries and add to summary
+        suites_list = []
+        for model_name, model_data in results.get("models", {}).items():
+            if "suites" not in model_data:
+                continue
+            for suite_name, suite_data in model_data["suites"].items():
+                suites_list.append({
+                    "model": model_name,
+                    "suite": suite_name,
+                    "metrics": suite_data.get("metrics", {}),
+                    "num_tasks": suite_data.get("num_tasks", 0),
+                    "aggregation": suite_data.get("aggregation", "mean"),
+                })
+                metrics = suite_data.get("metrics", {})
+                primary = get_primary_metric(metrics)
+                if primary:
+                    metric_name, score = primary
+                    summary[model_name][suite_name] = {"metric": metric_name, "score": score}
+
         metrics_output = {
             "timestamp": results.get("timestamp", ""),
             "models": list(results.get("models", {}).keys()),
             "tasks": tasks_list,
+            "suites": suites_list,
             "summary": summary,
             "errors": results.get("errors", []),
         }
@@ -1560,6 +1605,11 @@ class StreamingEvalRunner:
 
             results_dict["models"][model_name] = model_results
 
+            # Compute suite aggregations for this model
+            suite_aggs = compute_suite_aggregations(self.task_specs, model_results["tasks"])
+            if suite_aggs:
+                model_results["suites"] = suite_aggs
+
         self._log_summary(results_dict)
         self._save_results(results_dict)
         self._write_metrics_json(results_dict)
@@ -1596,6 +1646,21 @@ class StreamingEvalRunner:
                 if primary:
                     metric_name, score = primary
                     logger.info(f"    {task_name}: {score:.4f} ({metric_name})")
+
+            # Log suite aggregations for this model
+            if "suites" in model_data:
+                logger.info(f"  {model_name} - Suite Aggregations:")
+                console.print(f"\n[bold]{model_name} - Suite Aggregations:[/bold]")
+                for suite_name, suite_data in model_data["suites"].items():
+                    metrics = suite_data.get("metrics", {})
+                    num_tasks = suite_data.get("num_tasks", 0)
+                    primary = get_primary_metric(metrics)
+                    if primary:
+                        metric_name, score = primary
+                        logger.info(f"    {suite_name}: {score:.4f} ({metric_name}, {num_tasks} tasks)")
+                        console.print(
+                            f"  [cyan]{suite_name}[/cyan]: {score:.4f} ({metric_name}, {num_tasks} tasks)"
+                        )
 
     def _save_results(self, results: dict[str, Any]) -> None:
         """Save results to all configured storage backends."""
@@ -1639,10 +1704,30 @@ class StreamingEvalRunner:
                     metric_name, score = primary
                     summary[model_name][task_name] = {"metric": metric_name, "score": score}
 
+        # Build suite summaries and add to summary
+        suites_list = []
+        for model_name, model_data in results.get("models", {}).items():
+            if "suites" not in model_data:
+                continue
+            for suite_name, suite_data in model_data["suites"].items():
+                suites_list.append({
+                    "model": model_name,
+                    "suite": suite_name,
+                    "metrics": suite_data.get("metrics", {}),
+                    "num_tasks": suite_data.get("num_tasks", 0),
+                    "aggregation": suite_data.get("aggregation", "mean"),
+                })
+                metrics = suite_data.get("metrics", {})
+                primary = get_primary_metric(metrics)
+                if primary:
+                    metric_name, score = primary
+                    summary[model_name][suite_name] = {"metric": metric_name, "score": score}
+
         metrics_output = {
             "timestamp": results.get("timestamp", ""),
             "models": list(results.get("models", {}).keys()),
             "tasks": tasks_list,
+            "suites": suites_list,
             "summary": summary,
             "errors": results.get("errors", []),
         }
