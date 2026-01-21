@@ -151,9 +151,8 @@ def prepare_task_items(
             if hasattr(existing_params, key):
                 existing_params = replace(existing_params, **{key: value})
 
-    # Update task config with final sampling params
-    if temperature is not None or sampling_overrides:
-        task.config = replace(task.config, sampling_params=existing_params)
+    # Always update task config with final sampling params (so finalize_task captures them)
+    task.config = replace(task.config, sampling_params=existing_params)
 
     instances = list(task.instances)
     if task.config.limit:
@@ -166,7 +165,7 @@ def prepare_task_items(
             instance_idx=idx,
             instance=inst,
             request=task.format_request(inst),
-            sampling_params=task.config.sampling_params,
+            sampling_params=existing_params,
         )
         for idx, inst in enumerate(instances)
     ]

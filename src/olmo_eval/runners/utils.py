@@ -447,6 +447,7 @@ def run_task_impl(
         if task.config.primary_metric:
             primary_metric_name = task.config.primary_metric.value
 
+        # Use existing_params (the actual params used for generation)
         return TaskResult(
             spec=spec,
             config={
@@ -455,7 +456,7 @@ def run_task_impl(
                 "num_fewshot": task.config.num_fewshot,
                 "fewshot_seed": task.config.fewshot_seed,
                 "limit": task.config.limit,
-                "sampling_params": serialize_sampling_params(task.config.sampling_params),
+                "sampling_params": serialize_sampling_params(existing_params),
             },
             num_instances=len(instances),
             metrics=metrics,
