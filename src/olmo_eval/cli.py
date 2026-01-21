@@ -618,6 +618,7 @@ def suite_info(suite_name: str) -> None:
 @click.option("--retries", "-r", type=int, help="Number of retries on failure")
 @click.option("--workspace", "-w", help="Beaker workspace")
 @click.option("--budget", "-B", help="Beaker budget")
+@click.option("--image", "-I", help="Beaker image (e.g., ai2-tylerm/olmo-eval-cu1261-trc280-amd64)")
 @click.option(
     "--group",
     "-g",
@@ -666,6 +667,7 @@ def launch(
     retries: int | None,
     workspace: str | None,
     budget: str | None,
+    image: str | None,
     group: tuple[str, ...],
     backends: tuple[str, ...],
     use_async: bool,
@@ -919,10 +921,15 @@ def launch(
 
     console.print(f"[blue]Groups:[/blue] {', '.join(effective_groups)}")
 
-    # Print the image being used (config can override default)
+    # Print the image being used (CLI overrides config, config overrides default)
     from olmo_eval.core.constants.infrastructure import BEAKER_DEFAULT_IMAGE
 
-    effective_image = cfg.beaker_image if cfg and cfg.beaker_image else BEAKER_DEFAULT_IMAGE
+    if image:
+        effective_image = image
+    elif cfg and cfg.beaker_image:
+        effective_image = cfg.beaker_image
+    else:
+        effective_image = BEAKER_DEFAULT_IMAGE
     console.print(f"[blue]Image:[/blue] {effective_image}")
 
     # Check which groups exist and which need to be created
