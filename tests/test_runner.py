@@ -198,7 +198,6 @@ class TestSuiteAggregations:
         from olmo_eval.evals.suites.registry import (
             AggregationStrategy,
             Suite,
-            register,
             _REGISTRY,
         )
 
@@ -256,3 +255,63 @@ class TestSuiteAggregations:
         finally:
             # Clean up
             del _REGISTRY["_test_aoa"]
+
+
+class TestGetPrimaryMetric:
+    """Tests for get_primary_metric function."""
+
+    def test_preferred_metric_used_when_present(self):
+        """Test that preferred metric is used when specified and present."""
+        from olmo_eval.runners.utils import get_primary_metric
+
+        metrics = {"accuracy": 0.75, "bits_per_byte": 0.5, "f1": 0.8}
+        result = get_primary_metric(metrics, preferred="bits_per_byte")
+
+        assert result == ("bits_per_byte", 0.5)
+
+    def test_preferred_metric_ignored_when_not_present(self):
+        """Test fallback when preferred metric is not in metrics dict."""
+        from olmo_eval.runners.utils import get_primary_metric
+
+        metrics = {"accuracy": 0.75, "f1": 0.8}
+        result = get_primary_metric(metrics, preferred="bits_per_byte")
+
+        # Falls back to accuracy
+        assert result == ("accuracy", 0.75)
+
+    def test_accuracy_fallback_when_no_preferred(self):
+        """Test that accuracy is used when no preferred metric specified."""
+        from olmo_eval.runners.utils import get_primary_metric
+
+        metrics = {"accuracy": 0.75, "bits_per_byte": 0.5}
+        result = get_primary_metric(metrics)
+
+        assert result == ("accuracy", 0.75)
+
+    def test_alphabetical_fallback_when_no_accuracy(self):
+        """Test alphabetical fallback when no accuracy and no preferred."""
+        from olmo_eval.runners.utils import get_primary_metric
+
+        metrics = {"f1": 0.8, "bits_per_byte": 0.5}
+        result = get_primary_metric(metrics)
+
+        # bits_per_byte comes before f1 alphabetically
+        assert result == ("bits_per_byte", 0.5)
+
+    def test_empty_metrics_returns_none(self):
+        """Test that empty metrics returns None."""
+        from olmo_eval.runners.utils import get_primary_metric
+
+        result = get_primary_metric({})
+        assert result is None
+
+    def test_preferred_none_same_as_not_specified(self):
+        """Test that preferred=None behaves same as not specifying."""
+        from olmo_eval.runners.utils import get_primary_metric
+
+        metrics = {"accuracy": 0.75, "bits_per_byte": 0.5}
+
+        result_none = get_primary_metric(metrics, preferred=None)
+        result_default = get_primary_metric(metrics)
+
+        assert result_none == result_default

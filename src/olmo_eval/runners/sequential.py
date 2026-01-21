@@ -185,11 +185,14 @@ class EvalRunner:
         for spec in expanded_tasks:
             console.print(f"\n[bold blue]Running {spec}...[/bold blue]")
             task_result = self._run_task(spec, backend)
-            results["tasks"][spec] = {
+            task_data: dict[str, Any] = {
                 "config": task_result.config,
                 "num_instances": task_result.num_instances,
                 "metrics": task_result.metrics,
             }
+            if task_result.primary_metric:
+                task_data["primary_metric"] = task_result.primary_metric
+            results["tasks"][spec] = task_data
 
             # Write predictions to JSONL
             if task_result.predictions:
@@ -257,7 +260,8 @@ class EvalRunner:
         logger.info("Summary of primary scores:")
         for task_name, task_data in results["tasks"].items():
             metrics = task_data.get("metrics", {})
-            primary = get_primary_metric(metrics)
+            preferred = task_data.get("primary_metric")
+            primary = get_primary_metric(metrics, preferred)
             if primary:
                 metric_name, score = primary
                 logger.info(f"  {task_name}: {score:.4f} ({metric_name})")
@@ -302,7 +306,8 @@ class EvalRunner:
         summary: dict[str, dict[str, Any]] = {}
         for task_name, task_data in results.get("tasks", {}).items():
             metrics = task_data.get("metrics", {})
-            primary = get_primary_metric(metrics)
+            preferred = task_data.get("primary_metric")
+            primary = get_primary_metric(metrics, preferred)
             if primary:
                 metric_name, score = primary
                 summary[task_name] = {"metric": metric_name, "score": score}

@@ -214,6 +214,11 @@ def finalize_task(tracker: TaskTracker) -> TaskResult:
     # Build predictions for per-instance inspection
     predictions = build_predictions(scored)
 
+    # Extract primary metric name from task config if specified
+    primary_metric_name = None
+    if tracker.task.config.primary_metric:
+        primary_metric_name = tracker.task.config.primary_metric.value
+
     return TaskResult(
         spec=tracker.spec,
         config={
@@ -226,6 +231,7 @@ def finalize_task(tracker: TaskTracker) -> TaskResult:
         metrics=metrics,
         duration_seconds=duration,
         predictions=predictions,
+        primary_metric=primary_metric_name,
     )
 
 
@@ -1096,11 +1102,14 @@ class AsyncEvalRunner:
                             }
                         )
                     else:
-                        model_results["tasks"][spec] = {
+                        task_data: dict[str, Any] = {
                             "config": task_result.config,
                             "num_instances": task_result.num_instances,
                             "metrics": task_result.metrics,
                         }
+                        if task_result.primary_metric:
+                            task_data["primary_metric"] = task_result.primary_metric
+                        model_results["tasks"][spec] = task_data
 
             results_dict["models"][model_name] = model_results
 
@@ -1142,7 +1151,8 @@ class AsyncEvalRunner:
             logger.info(f"  {model_name}:")
             for task_name, task_data in model_data.get("tasks", {}).items():
                 metrics = task_data.get("metrics", {})
-                primary = get_primary_metric(metrics)
+                preferred = task_data.get("primary_metric")
+                primary = get_primary_metric(metrics, preferred)
                 if primary:
                     metric_name, score = primary
                     logger.info(f"    {task_name}: {score:.4f} ({metric_name})")
@@ -1192,7 +1202,8 @@ class AsyncEvalRunner:
             summary[model_name] = {}
             for task_name, task_data in model_data.get("tasks", {}).items():
                 metrics = task_data.get("metrics", {})
-                primary = get_primary_metric(metrics)
+                preferred = task_data.get("primary_metric")
+                primary = get_primary_metric(metrics, preferred)
                 if primary:
                     metric_name, score = primary
                     summary[model_name][task_name] = {"metric": metric_name, "score": score}
@@ -1693,11 +1704,14 @@ class StreamingEvalRunner:
                             }
                         )
                     else:
-                        model_results["tasks"][spec] = {
+                        task_data: dict[str, Any] = {
                             "config": task_result.config,
                             "num_instances": task_result.num_instances,
                             "metrics": task_result.metrics,
                         }
+                        if task_result.primary_metric:
+                            task_data["primary_metric"] = task_result.primary_metric
+                        model_results["tasks"][spec] = task_data
 
             results_dict["models"][model_name] = model_results
 
@@ -1734,7 +1748,8 @@ class StreamingEvalRunner:
             logger.info(f"  {model_name}:")
             for task_name, task_data in model_data.get("tasks", {}).items():
                 metrics = task_data.get("metrics", {})
-                primary = get_primary_metric(metrics)
+                preferred = task_data.get("primary_metric")
+                primary = get_primary_metric(metrics, preferred)
                 if primary:
                     metric_name, score = primary
                     logger.info(f"    {task_name}: {score:.4f} ({metric_name})")
@@ -1783,7 +1798,8 @@ class StreamingEvalRunner:
             summary[model_name] = {}
             for task_name, task_data in model_data.get("tasks", {}).items():
                 metrics = task_data.get("metrics", {})
-                primary = get_primary_metric(metrics)
+                preferred = task_data.get("primary_metric")
+                primary = get_primary_metric(metrics, preferred)
                 if primary:
                     metric_name, score = primary
                     summary[model_name][task_name] = {"metric": metric_name, "score": score}
