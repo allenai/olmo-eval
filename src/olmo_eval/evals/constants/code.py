@@ -5,31 +5,27 @@ from typing import Any
 # Stop Sequences for Code Generation
 # =============================================================================
 
-# HumanEval/MBPP stop sequences - signals end of function definition
 HUMANEVAL_STOP_SEQUENCES: tuple[str, ...] = (
     "\nclass",
-    "\ndef",
-    "\nif __name__",
-    "\nprint(",
+    "\nif",
+    "\nprint",
     "\n#",
     "\n```",
+    "\n```\n\n",
     "<|eot_id|>",
-    "<|endoftext|>",
-    "<|im_end|>",
 )
 """Stop sequences for HumanEval and similar code generation tasks."""
 
 MBPP_STOP_SEQUENCES: tuple[str, ...] = (
     "\nclass",
-    "\ndef",
-    "\nif __name__",
     "\nassert",
-    "\nprint(",
-    "\n#",
+    '\n"""',
+    "\nprint",
+    "\nif",
     "\n```",
+    "\n#",
+    "\n<|/",
     "<|eot_id|>",
-    "<|endoftext|>",
-    "<|im_end|>",
 )
 """Stop sequences for MBPP code generation tasks."""
 
