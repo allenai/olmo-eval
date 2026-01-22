@@ -25,20 +25,6 @@ from olmo_eval.evals.tasks.core.registry import parse_overrides
 
 
 @dataclass
-class BeakerSettings:
-    """Beaker-specific settings for the launch."""
-
-    workspace: str
-    budget: str
-    cluster: str
-    image: str
-    groups: list[str]
-    priority: str = "normal"
-    preemptible: bool = True
-    timeout: str = "24h"
-
-
-@dataclass
 class ModelSummary:
     """Summary of a model configuration."""
 
@@ -78,7 +64,6 @@ class AsyncSettings:
 class LaunchSummary:
     """Complete launch configuration summary for pretty-printing."""
 
-    beaker: BeakerSettings
     models: list[ModelSummary]
     tasks: list[TaskSummary]
     async_settings: AsyncSettings | None = None
@@ -1174,18 +1159,6 @@ def launch(
             )
         )
 
-    # Build beaker settings
-    beaker_settings = BeakerSettings(
-        workspace=workspace,
-        budget=budget,
-        cluster=cluster,
-        image=effective_image,
-        groups=effective_groups,
-        priority=priority,
-        preemptible=preemptible,
-        timeout=timeout,
-    )
-
     # Build async settings if enabled
     async_settings = None
     if use_async or use_async_stream:
@@ -1197,7 +1170,6 @@ def launch(
 
     # Build the complete launch summary dataclass
     launch_config_summary = LaunchSummary(
-        beaker=beaker_settings,
         models=model_summaries,
         tasks=task_summaries,
         async_settings=async_settings,
