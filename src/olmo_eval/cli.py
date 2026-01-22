@@ -53,12 +53,12 @@ class TaskSummary:
 
 
 @dataclass
-class AsyncSettings:
-    """Async execution settings."""
+class RunnerConfig:
+    """Runner configuration for display."""
 
-    mode: str  # "parallel" or "stream"
-    num_workers: int | str = "auto"  # "auto" means detected at runtime based on GPUs
-    gpus_per_worker: int = 1
+    runner: str  # "EvalRunner", "AsyncEvalRunner", or "StreamingEvalRunner"
+    num_workers: int | str | None = None  # None for sequential, "auto" or int for async
+    gpus_per_worker: int | None = None  # None for sequential
 
 
 @dataclass
@@ -67,7 +67,7 @@ class LaunchSummary:
 
     models: list[ModelSummary]
     tasks: list[TaskSummary]
-    async_settings: AsyncSettings | None = None
+    runner: RunnerConfig
 
 
 console = Console()
@@ -1157,9 +1157,8 @@ def launch(
             )
         )
 
-    # Build async settings if enabled
-    async_settings = None
-    if use_async or use_async_stream:
+    # Build runner config
+    if use_async_stream:
         # Resolve effective num_workers from CLI or first model's launch config
         effective_num_workers = num_workers
         if effective_num_workers is None and cfg is not None and model_configs:
@@ -1167,17 +1166,32 @@ def launch(
             model_resources = cfg.get_model_resources(first_model)
             effective_num_workers = model_resources.get("num_workers")
 
-        async_settings = AsyncSettings(
-            mode="stream" if use_async_stream else "parallel",
+        runner_config = RunnerConfig(
+            runner="StreamingEvalRunner",
             num_workers=effective_num_workers if effective_num_workers is not None else "auto",
             gpus_per_worker=gpus_per_worker,
         )
+    elif use_async:
+        # Resolve effective num_workers from CLI or first model's launch config
+        effective_num_workers = num_workers
+        if effective_num_workers is None and cfg is not None and model_configs:
+            first_model = model_configs[0]
+            model_resources = cfg.get_model_resources(first_model)
+            effective_num_workers = model_resources.get("num_workers")
+
+        runner_config = RunnerConfig(
+            runner="AsyncEvalRunner",
+            num_workers=effective_num_workers if effective_num_workers is not None else "auto",
+            gpus_per_worker=gpus_per_worker,
+        )
+    else:
+        runner_config = RunnerConfig(runner="EvalRunner")
 
     # Build the complete launch summary dataclass
     launch_config_summary = LaunchSummary(
         models=model_summaries,
         tasks=task_summaries,
-        async_settings=async_settings,
+        runner=runner_config,
     )
 
     # Print consolidated launch configuration using rich repr
