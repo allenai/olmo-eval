@@ -37,8 +37,10 @@ from olmo_eval.launch.config import (
     get_template,
     parse_model_config,
 )
+from olmo_eval.launch.secrets import ensure_common_secrets
 
 __all__ = [
+    "ensure_common_secrets",
     "BeakerEnvSecret",
     "BeakerJobConfig",
     "BeakerLauncher",

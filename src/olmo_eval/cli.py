@@ -1274,6 +1274,25 @@ def launch(
 
     console.print()
 
+    # Ensure common secrets exist in Beaker
+    from olmo_eval.launch.secrets import (
+        ensure_common_secrets,
+        get_local_hf_token,
+        get_local_wandb_api_key,
+    )
+
+    beaker_username = launcher.beaker.user_name
+    if dry_run:
+        # In dry-run mode, just show what secrets would be used
+        common_secrets: list[tuple[str, str]] = []
+        if get_local_hf_token():
+            common_secrets.append(("HF_TOKEN", f"{beaker_username}_HF_TOKEN"))
+        if get_local_wandb_api_key():
+            common_secrets.append(("WANDB_API_KEY", f"{beaker_username}_WANDB_API_KEY"))
+    else:
+        # Ensure secrets exist in Beaker (writes them if missing)
+        common_secrets = ensure_common_secrets(workspace=workspace)
+
     # Build all BeakerJobConfig objects first (before confirmation)
     # so we can display them in the summary
     job_configs: list[BeakerJobConfig] = []
@@ -1394,12 +1413,8 @@ def launch(
             backend_group = BACKEND_OPTIONAL_GROUPS.get(runtime_backend)
             effective_backends = [backend_group] if backend_group else []
 
-        # Build user-prefixed env secrets
-        beaker_username = launcher.beaker.user_name
-        env_secrets = [
-            BeakerEnvSecret("HF_TOKEN", f"{beaker_username}_HF_TOKEN"),
-            BeakerEnvSecret("WANDB_API_KEY", f"{beaker_username}_WANDB_API_KEY"),
-        ]
+        # Convert common secrets to BeakerEnvSecret objects
+        env_secrets = [BeakerEnvSecret(env_var, secret_name) for env_var, secret_name in common_secrets]
 
         job_config = BeakerJobConfig(
             name=exp_name,
