@@ -189,62 +189,72 @@ class SyncEvalRunner:
             **extra_kwargs,
         )
 
-        expanded_tasks = expand_tasks(self.task_specs)
-        results: dict[str, Any] = {
-            "model": model_config.model,
-            "backend": backend_type.value,
-            "timestamp": datetime.now().isoformat(),
-            "tasks": {},
-            # Store model config details for metrics.json
-            "_model_config": {
+        try:
+            expanded_tasks = expand_tasks(self.task_specs)
+            results: dict[str, Any] = {
                 "model": model_config.model,
-                "tokenizer": model_config.tokenizer,
                 "backend": backend_type.value,
-                "dtype": model_config.dtype,
-                "revision": model_config.revision,
-                "attention_backend": self.attention_backend,
-            },
-        }
-
-        # TODO(undfined): This is starting with the naive approach. Add intelligent
-        # scheduling and possibly asynchronous runner.
-        for spec in expanded_tasks:
-            console.print(f"\n[bold blue]Running {spec}...[/bold blue]")
-            task_result = self._run_task(spec, backend)
-            task_data: dict[str, Any] = {
-                "config": task_result.config,
-                "num_instances": task_result.num_instances,
-                "metrics": task_result.metrics,
-                "duration_seconds": task_result.duration_seconds,
+                "timestamp": datetime.now().isoformat(),
+                "tasks": {},
+                # Store model config details for metrics.json
+                "_model_config": {
+                    "model": model_config.model,
+                    "tokenizer": model_config.tokenizer,
+                    "backend": backend_type.value,
+                    "dtype": model_config.dtype,
+                    "revision": model_config.revision,
+                    "attention_backend": self.attention_backend,
+                },
             }
-            if task_result.primary_metric:
-                task_data["primary_metric"] = task_result.primary_metric
-            results["tasks"][spec] = task_data
 
-            # Write predictions to JSONL
-            if task_result.predictions:
-                self._write_predictions(spec, task_result.predictions)
+            # TODO(undfined): This is starting with the naive approach. Add intelligent
+            # scheduling and possibly asynchronous runner.
+            for spec in expanded_tasks:
+                console.print(f"\n[bold blue]Running {spec}...[/bold blue]")
+                task_result = self._run_task(spec, backend)
+                task_data: dict[str, Any] = {
+                    "config": task_result.config,
+                    "num_instances": task_result.num_instances,
+                    "metrics": task_result.metrics,
+                    "duration_seconds": task_result.duration_seconds,
+                }
+                if task_result.primary_metric:
+                    task_data["primary_metric"] = task_result.primary_metric
+                results["tasks"][spec] = task_data
 
-            # Log metrics (for Beaker job details)
-            if task_result.metrics:
-                logger.info(f"** Task metrics for {spec}: **")
-                for metric, value in task_result.metrics.items():
-                    logger.info(f"  {metric}: {value:.4f}")
-                    console.print(f"  {metric}: {value:.4f}")
+                # Write predictions to JSONL
+                if task_result.predictions:
+                    self._write_predictions(spec, task_result.predictions)
 
-        # Compute suite aggregations
-        suite_aggs = compute_suite_aggregations(self.task_specs, results["tasks"])
-        if suite_aggs:
-            results["suites"] = suite_aggs
+                # Log metrics (for Beaker job details)
+                if task_result.metrics:
+                    logger.info(f"** Task metrics for {spec}: **")
+                    for metric, value in task_result.metrics.items():
+                        logger.info(f"  {metric}: {value:.4f}")
+                        console.print(f"  {metric}: {value:.4f}")
 
-        # Log summary of all scores
-        self._log_summary(results)
-        self._save_results(results)
+            # Compute suite aggregations
+            suite_aggs = compute_suite_aggregations(self.task_specs, results["tasks"])
+            if suite_aggs:
+                results["suites"] = suite_aggs
 
-        # Write metrics.json for Beaker
-        self._write_metrics_json(results)
+            # Log summary of all scores
+            self._log_summary(results)
+            self._save_results(results)
 
-        return results
+            # Write metrics.json for Beaker
+            self._write_metrics_json(results)
+
+            return results
+        finally:
+            # Clean up PyTorch distributed process group to avoid resource leak warning
+            try:
+                import torch.distributed as dist
+
+                if dist.is_initialized():
+                    dist.destroy_process_group()
+            except Exception:
+                pass  # Ignore cleanup errors
 
     def _run_task(self, spec: str, backend: Backend) -> TaskResult:
         """Run a single task and return results."""
