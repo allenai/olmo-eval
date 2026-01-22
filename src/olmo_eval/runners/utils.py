@@ -445,7 +445,7 @@ def run_task_impl(
         # Extract primary metric name from task config if specified
         primary_metric_name = None
         if task.config.primary_metric:
-            primary_metric_name = task.config.primary_metric.value
+            primary_metric_name = task.config.primary_metric.name
 
         # Use existing_params (the actual params used for generation)
         return TaskResult(

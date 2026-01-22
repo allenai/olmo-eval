@@ -217,7 +217,7 @@ def finalize_task(tracker: TaskTracker) -> TaskResult:
     # Extract primary metric name from task config if specified
     primary_metric_name = None
     if tracker.task.config.primary_metric:
-        primary_metric_name = tracker.task.config.primary_metric.value
+        primary_metric_name = tracker.task.config.primary_metric.name
 
     return TaskResult(
         spec=tracker.spec,
