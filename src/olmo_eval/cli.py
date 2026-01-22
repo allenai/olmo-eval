@@ -169,7 +169,7 @@ def _print_runtime_environment() -> None:
     console.print("=" * 60)
     console.print(f"Python:          {sys.version.split()[0]}")
     try:
-        import torch
+        import torch  # type: ignore[import-not-found]
 
         console.print(f"PyTorch:         {torch.__version__}")
         console.print(f"CUDA available:  {torch.cuda.is_available()}")
@@ -188,7 +188,7 @@ def _print_runtime_environment() -> None:
     except ImportError:
         console.print("Transformers:    NOT INSTALLED")
     try:
-        import vllm
+        import vllm  # type: ignore[import-not-found]
 
         console.print(f"vLLM:            {vllm.__version__}")
     except ImportError:

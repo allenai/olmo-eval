@@ -97,11 +97,6 @@ include = ["src/olmo_eval/backends/**"]
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"
 
-[[tool.ty.overrides]]
-include = ["src/olmo_eval/launch/beaker.py", "src/olmo_eval/cli.py"]
-[tool.ty.overrides.rules]
-unresolved-import = "ignore"
-
 [tool.ruff]
 line-length = 100
 target-version = "py312"

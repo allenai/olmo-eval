@@ -81,7 +81,7 @@ jobs:
             uv-${{ runner.os }}-
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --dev --extra beaker
 
       - name: Run type checker
         run: uv run ty check src/
