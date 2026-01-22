@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.core import (
@@ -155,7 +155,7 @@ class Task(ABC):
         """Extract the answer from model output."""
         ...
 
-    def process_doc(self, doc: dict[str, Any]) -> Instance | None:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         """Convert a raw document to an Instance.
 
         Override this method to define how documents are converted to instances.
@@ -165,6 +165,7 @@ class Task(ABC):
 
         Args:
             doc: A raw document dictionary from the dataset.
+            index: The index of the document in the dataset.
 
         Returns:
             An Instance, or None to skip this document.
@@ -196,8 +197,8 @@ class Task(ABC):
         loader = DataLoader()
         source = self.config.get_data_source(split=split)
 
-        for doc in loader.load(source):
-            instance = self.process_doc(doc)
+        for index, doc in enumerate(loader.load(source)):
+            instance = self.process_doc(doc, index)
             if instance is not None:
                 yield instance
 

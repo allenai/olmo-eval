@@ -141,7 +141,7 @@ class DeepMindMathTask(Task):
                 split=split,
             )
 
-    def process_doc(self, doc: dict[str, Any], index: int) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         question = _clean_deepmind_string(doc["question"])
         answer = _clean_deepmind_string(doc["answer"])

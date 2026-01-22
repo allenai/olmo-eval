@@ -1,7 +1,6 @@
 """Tests for olmo_eval.data.backends.s3 module."""
 
-import json
-from io import BytesIO, StringIO
+from io import StringIO
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -326,6 +325,8 @@ class TestS3BackendErrorHandling:
         """Test that missing smart_open raises ImportError."""
         backend = S3Backend()
 
-        with patch.dict("sys.modules", {"smart_open": None}):
-            with pytest.raises(ImportError, match="smart_open is required"):
-                backend._get_smart_open()
+        with (
+            patch.dict("sys.modules", {"smart_open": None}),
+            pytest.raises(ImportError, match="smart_open is required"),
+        ):
+            backend._get_smart_open()

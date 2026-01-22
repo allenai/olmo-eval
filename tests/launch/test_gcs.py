@@ -1,10 +1,7 @@
 """Tests for GCS credential handling."""
 
 import json
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from olmo_eval.launch.gcs import (
     GCSCredentials,
@@ -102,18 +99,18 @@ class TestGetLocalGcsCredentials:
 
     def test_from_env_var_file_not_found(self):
         """Test handling of missing credential file."""
-        with patch.dict(
-            "os.environ", {"GOOGLE_APPLICATION_CREDENTIALS": "/nonexistent/path.json"}
-        ):
+        with patch.dict("os.environ", {"GOOGLE_APPLICATION_CREDENTIALS": "/nonexistent/path.json"}):
             creds = get_local_gcs_credentials()
 
         assert creds is None
 
     def test_no_credentials(self):
         """Test when no credentials are available."""
-        with patch.dict("os.environ", {}, clear=True):
-            with patch("pathlib.Path.exists", return_value=False):
-                creds = get_local_gcs_credentials()
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("pathlib.Path.exists", return_value=False),
+        ):
+            creds = get_local_gcs_credentials()
 
         assert creds is None
 
@@ -132,9 +129,11 @@ class TestGetLocalGcsCredentials:
         creds_file.write_text(json.dumps(key_data))
 
         # Mock Path.home() to return our tmp_path
-        with patch.dict("os.environ", {}, clear=True):
-            with patch("pathlib.Path.home", return_value=tmp_path):
-                creds = get_local_gcs_credentials()
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("pathlib.Path.home", return_value=tmp_path),
+        ):
+            creds = get_local_gcs_credentials()
 
         assert creds is not None
         assert creds.project_id == "gcloud-project"
@@ -160,11 +159,11 @@ class TestGetLocalGcsCredentials:
         }
         gcloud_creds_file.write_text(json.dumps(gcloud_key_data))
 
-        with patch.dict(
-            "os.environ", {"GOOGLE_APPLICATION_CREDENTIALS": str(env_key_file)}
+        with (
+            patch.dict("os.environ", {"GOOGLE_APPLICATION_CREDENTIALS": str(env_key_file)}),
+            patch("pathlib.Path.home", return_value=tmp_path),
         ):
-            with patch("pathlib.Path.home", return_value=tmp_path):
-                creds = get_local_gcs_credentials()
+            creds = get_local_gcs_credentials()
 
         # Should use env var credentials, not gcloud
         assert creds is not None

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterator
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from olmo_eval.data.sources import DataSource
@@ -80,13 +81,14 @@ class LocalBackend:
         """Load a Parquet file."""
         try:
             import pyarrow.parquet as pq
-        except ImportError:
-            raise ImportError("pyarrow is required to load Parquet files: pip install pyarrow")
+        except ImportError as err:
+            raise ImportError(
+                "pyarrow is required to load Parquet files: pip install pyarrow"
+            ) from err
 
         table = pq.read_table(path)
         for batch in table.to_batches():
-            for row in batch.to_pylist():
-                yield row
+            yield from batch.to_pylist()
 
     def _load_csv(self, path: Path) -> Iterator[dict[str, Any]]:
         """Load a CSV file."""
@@ -106,15 +108,13 @@ class LocalBackend:
 
         # If split specified, look for split-specific files first
         if split:
+            from olmo_eval.data.sources import DataSource
+
             for suffix in supported_suffixes:
                 split_file = path / f"{split}{suffix}"
                 if split_file.exists():
                     yield from self.load(
-                        type(
-                            "DataSource",
-                            (),
-                            {"path": str(split_file), "split": split},
-                        )(),
+                        DataSource(path=str(split_file), split=split),
                         streaming=False,
                     )
                     return

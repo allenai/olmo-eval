@@ -48,7 +48,7 @@ class MBPPTask(Task):
                 split=split,
             )
 
-    def process_doc(self, doc: dict[str, Any]) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         # Build prompt from text and function signature
         question = doc["text"].strip() + "\n" + doc["code"].split(":")[0] + ":"
@@ -116,7 +116,7 @@ class MBPPPlusTask(Task):
                 split=split,
             )
 
-    def process_doc(self, doc: dict[str, Any]) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         # Build prompt from text and function signature
         question = doc["prompt"].strip() + doc["code"].split(":")[0] + ":"

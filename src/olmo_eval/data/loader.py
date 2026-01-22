@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 from olmo_eval.data.backends.base import DataBackend
 from olmo_eval.data.backends.gcs import GCSBackend

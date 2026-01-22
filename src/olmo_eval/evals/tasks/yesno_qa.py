@@ -58,7 +58,7 @@ class QasperYesNoTask(Task):
                 split=split,
             )
 
-    def process_doc(self, doc: dict[str, Any]) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         choices = ("Yes", "No")
         # Join evidence passages
@@ -159,7 +159,7 @@ class SciriffYesNoTask(Task):
                 split=split,
             )
 
-    def process_doc(self, doc: dict[str, Any]) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         choices = ("Yes", "No")
         # gold_idx: 0 = Yes, 1 = No

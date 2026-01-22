@@ -6,7 +6,7 @@ import pytest
 import olmo_eval.evals  # noqa: F401
 import olmo_eval.evals.tasks  # noqa: F401
 from olmo_eval.runners import EvalRunner
-from olmo_eval.runners.sequential import ValidationError
+from olmo_eval.runners.synchronous import ValidationError
 
 
 class TestEvalRunnerValidation:

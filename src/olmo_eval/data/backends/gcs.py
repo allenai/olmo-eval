@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any, Iterator
+from collections.abc import Iterator
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:
@@ -49,12 +50,12 @@ class GCSBackend:
         """Lazily initialize the GCS client."""
         if self._gcs_client is None:
             try:
-                from google.cloud import storage
-            except ImportError:
+                from google.cloud import storage  # type: ignore[import-not-found]
+            except ImportError as err:
                 raise ImportError(
                     "google-cloud-storage is required for GCS access: "
                     "pip install google-cloud-storage"
-                )
+                ) from err
 
             self._gcs_client = storage.Client(project=self.project)
         return self._gcs_client
@@ -166,8 +167,7 @@ class GCSBackend:
 
         # Filter for supported file types
         supported_files = [
-            obj for obj in objects
-            if any(obj.endswith(ext) for ext in self.SUPPORTED_EXTENSIONS)
+            obj for obj in objects if any(obj.endswith(ext) for ext in self.SUPPORTED_EXTENSIONS)
         ]
 
         if not supported_files:
@@ -179,7 +179,8 @@ class GCSBackend:
         # If split is specified, try to find split-specific files
         if split:
             split_files = [
-                f for f in supported_files
+                f
+                for f in supported_files
                 if f"/{split}." in f or f"/{split}/" in f or f.endswith(f"/{split}")
             ]
             if split_files:
@@ -203,11 +204,11 @@ class GCSBackend:
     def _get_smart_open(self):
         """Get smart_open configured for GCS."""
         try:
-            from smart_open import open as smart_open
-        except ImportError:
+            from smart_open import open as smart_open  # type: ignore[import-not-found]
+        except ImportError as err:
             raise ImportError(
                 "smart_open is required for GCS access: pip install smart_open[gcs]"
-            )
+            ) from err
 
         # Configure transport params if using custom project
         transport_params = {}
@@ -245,7 +246,8 @@ class GCSBackend:
                     yield from data[key]
                     return
             raise ValueError(
-                f"JSON file must contain array or object with 'data'/'instances'/'examples' key: {path}"
+                f"JSON file must contain array or object with "
+                f"'data'/'instances'/'examples' key: {path}"
             )
         else:
             raise ValueError(f"JSON file must contain array or object: {path}")
@@ -254,10 +256,10 @@ class GCSBackend:
         """Load a Parquet file from GCS."""
         try:
             import pyarrow.parquet as pq
-        except ImportError:
+        except ImportError as err:
             raise ImportError(
                 "pyarrow is required for Parquet access: pip install pyarrow"
-            )
+            ) from err
 
         smart_open, transport_params = self._get_smart_open()
 

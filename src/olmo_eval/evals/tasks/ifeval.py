@@ -234,7 +234,7 @@ class IFEvalTask(Task):
                 split=split,
             )
 
-    def process_doc(self, doc: dict[str, Any]) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         return Instance(
             question=doc["prompt"],

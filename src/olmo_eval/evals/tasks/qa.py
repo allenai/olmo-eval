@@ -56,7 +56,7 @@ class DROPTask(Task):
             return " ".join(str(p) for p in date_parts)
         return ""
 
-    def process_doc(self, doc: dict[str, Any]) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         answer = self._get_primary_answer(doc["answer"])
         question = f"Passage: {doc['passage']}\n{doc['question']}"
@@ -197,7 +197,7 @@ class SQuADTask(Task):
                 split=split,
             )
 
-    def process_doc(self, doc: dict[str, Any]) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         answer = doc["answers"]["text"][0]
         question = f"Title: {doc['title']}\nBackground: {doc['context']}\n{doc['question']}"
@@ -255,7 +255,7 @@ class NaturalQuestionsTask(Task):
                 split=split,
             )
 
-    def process_doc(self, doc: dict[str, Any]) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         answer = doc["answer"][0]
 
@@ -311,7 +311,7 @@ class JeopardyTask(Task):
                 split=split,
             )
 
-    def process_doc(self, doc: dict[str, Any]) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         question = f"Category: {doc['category']}\n{doc['question']}"
 

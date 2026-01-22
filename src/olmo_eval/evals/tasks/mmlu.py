@@ -72,7 +72,7 @@ class MMLUTask(Task):
                 split=split,
             )
 
-    def process_doc(self, doc: dict[str, Any]) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         gold_idx = doc["answer"]
         choices = tuple(doc["choices"])
@@ -147,7 +147,7 @@ class MMLUProTask(Task):
                 split=split,
             )
 
-    def process_doc(self, doc: dict[str, Any]) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         gold_idx = doc["answer_index"]
         choices = tuple(doc["options"])
@@ -226,6 +226,7 @@ def _make_mmlu_pro_config(subset: str | None = None) -> TaskConfig:
 
 # Register all MMLU subsets
 for subset in MMLU_SUBSETS:
+
     def make_config_factory(s: str):
         return lambda: _make_mmlu_config(s)
 

@@ -52,7 +52,7 @@ class BoolQTask(Task):
                 split=split,
             )
 
-    def process_doc(self, doc: dict[str, Any]) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         choices = ("yes", "no")
         # BoolQ label: 1 = yes (True), 0 = no (False)
@@ -144,7 +144,7 @@ class CSQATask(Task):
                 split=split,
             )
 
-    def process_doc(self, doc: dict[str, Any]) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         choices = tuple(doc["choices"]["text"])
         gold_idx = ["A", "B", "C", "D", "E"].index(doc["answerKey"])
@@ -236,7 +236,7 @@ class OpenBookQATask(Task):
                 split=split,
             )
 
-    def process_doc(self, doc: dict[str, Any]) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         choices = tuple(doc["choices"]["text"])
         gold_idx = ["A", "B", "C", "D"].index(doc["answerKey"].strip())
@@ -325,7 +325,7 @@ class PIQATask(Task):
                 split=split,
             )
 
-    def process_doc(self, doc: dict[str, Any], index: int) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         choices = (doc["sol1"], doc["sol2"])
         gold_idx = doc["label"]
@@ -415,7 +415,7 @@ class SocialIQATask(Task):
                 split=split,
             )
 
-    def process_doc(self, doc: dict[str, Any], index: int) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         choices = (doc["answerA"], doc["answerB"], doc["answerC"])
         # Label is 1-indexed in the dataset
@@ -508,7 +508,7 @@ class WinoGrandeTask(Task):
                 split=split,
             )
 
-    def process_doc(self, doc: dict[str, Any], index: int) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         choices = (doc["option1"], doc["option2"])
         # Answer is 1-indexed ("1" or "2")

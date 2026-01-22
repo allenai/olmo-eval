@@ -90,7 +90,7 @@ class MultilingualMBPPTask(Task):
             return text.replace("\r\n", "\n")
         return text
 
-    def process_doc(self, doc: dict[str, Any]) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         text = self._normalize(doc["text"]).strip()
         code = self._normalize(doc["code"]).strip()

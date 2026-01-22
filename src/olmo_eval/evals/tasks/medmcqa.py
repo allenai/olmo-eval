@@ -45,7 +45,7 @@ class MedMCQATask(Task):
                 split=split,
             )
 
-    def process_doc(self, doc: dict[str, Any]) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         choices_raw = [doc["opa"], doc["opb"], doc.get("opc"), doc.get("opd")]
         choices = tuple(c for c in choices_raw if c is not None)

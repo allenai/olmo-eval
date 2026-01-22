@@ -77,7 +77,7 @@ class ARCTask(Task):
                 split=split,
             )
 
-    def process_doc(self, doc: dict[str, Any]) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         answer_key = doc["answerKey"]
         # Handle numeric answer keys (convert 1-based to letter)

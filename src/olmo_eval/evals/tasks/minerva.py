@@ -57,7 +57,7 @@ class MinervaMathTask(Task):
                 split=split,
             )
 
-    def process_doc(self, doc: dict[str, Any]) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         # Extract the answer from the solution
         answers = extract_math_answer(doc["solution"])
@@ -122,7 +122,7 @@ class Math500Task(MinervaMathTask):
                 split=split,
             )
 
-    def process_doc(self, doc: dict[str, Any]) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         answers = extract_math_answer(doc["solution"])
         solution = answers[0] if answers else doc["solution"]

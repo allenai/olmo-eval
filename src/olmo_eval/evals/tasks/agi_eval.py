@@ -63,7 +63,7 @@ class AGIEvalTask(Task):
             return f"{explanation} Therefore, the answer is ({doc['label']})."
         return f"({doc['label']})"
 
-    def process_doc(self, doc: dict[str, Any]) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         passage = doc.get("passage")
         choices = tuple(self._strip_choice_prefix(c) for c in doc.get("options", []))

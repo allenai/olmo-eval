@@ -53,7 +53,8 @@ def get_local_gcs_credentials() -> GCSCredentials | None:
 
     Checks (in order):
     1. GOOGLE_APPLICATION_CREDENTIALS environment variable (path to JSON key)
-    2. gcloud default application credentials (~/.config/gcloud/application_default_credentials.json)
+    2. gcloud default application credentials
+       (~/.config/gcloud/application_default_credentials.json)
 
     Note: Only service account keys are supported. Application Default Credentials
     from 'gcloud auth application-default login' are not supported because Beaker
@@ -79,7 +80,8 @@ def get_local_gcs_credentials() -> GCSCredentials | None:
                     )
                 else:
                     log.warning(
-                        f"Found {creds_path} but it's not a service account key (type={data.get('type')}). "
+                        f"Found {creds_path} but it's not a service account key "
+                        f"(type={data.get('type')}). "
                         "For Beaker jobs, use a service account key file."
                     )
             except Exception as e:
@@ -202,7 +204,7 @@ def ensure_gcs_secrets(
     if credentials is None:
         raise ValueError(
             "No GCS credentials found. Please configure GCS credentials via:\n"
-            "  - GOOGLE_APPLICATION_CREDENTIALS environment variable (path to service account JSON)\n"
+            "  - GOOGLE_APPLICATION_CREDENTIALS env var (path to service account JSON)\n"
             "  - Service account key file\n"
             "\n"
             "Note: Application Default Credentials from 'gcloud auth application-default login'\n"

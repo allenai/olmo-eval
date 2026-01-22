@@ -80,7 +80,7 @@ class BBHTask(Task):
                 split=split,
             )
 
-    def process_doc(self, doc: dict[str, Any], index: int) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         # Extract the answer from the target field
         # Format: "Let's think step by step. ... So the answer is X."

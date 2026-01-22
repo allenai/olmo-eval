@@ -187,7 +187,7 @@ class TestBeakerJobConfig:
             assert bucket.mount and bucket.mount.startswith("/weka/")
 
     def test_default_secrets(self):
-        """Test default secrets are set."""
+        """Test default env_secrets is empty (secrets are added during launch)."""
         config = BeakerJobConfig(
             name="test",
             command=["echo"],
@@ -195,10 +195,8 @@ class TestBeakerJobConfig:
             workspace="ai2/oe-data",
             budget="ai2/oe-base",
         )
-        assert len(config.env_secrets) == 2
-        secret_names = [s.name for s in config.env_secrets]
-        assert "HF_TOKEN" in secret_names
-        assert "WANDB_API_KEY" in secret_names
+        # env_secrets defaults to empty list; secrets are injected during launch
+        assert len(config.env_secrets) == 0
 
 
 class TestBeakerLauncherImport:

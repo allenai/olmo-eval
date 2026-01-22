@@ -68,7 +68,7 @@ class MedQAEnTask(Task):
                 split=split,
             )
 
-    def process_doc(self, doc: dict[str, Any], index: int) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         # Dataset fields: question (str), choices (list of str), answer_idx (int), answer (str)
         choices = tuple(doc["choices"])

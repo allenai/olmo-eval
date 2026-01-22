@@ -1,6 +1,5 @@
 """Tests for the DataLoader service."""
 
-import json
 import tempfile
 from pathlib import Path
 

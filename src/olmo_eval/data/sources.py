@@ -37,6 +37,8 @@ class DataSource:
     subset: str | None = None
     split: str = "test"
     source_type: SourceType | None = None
+    data_files: str | None = None
+    revision: str | None = None
 
     def __post_init__(self) -> None:
         """Auto-detect source type from path if not specified."""
@@ -51,9 +53,11 @@ class DataSource:
             return SourceType.S3
         elif self.path.startswith("gs://"):
             return SourceType.GCS
-        elif self.path.startswith("file://"):
-            return SourceType.LOCAL
-        elif self.path.startswith("/") or self.path.startswith("./"):
+        elif (
+            self.path.startswith("file://")
+            or self.path.startswith("/")
+            or self.path.startswith("./")
+        ):
             return SourceType.LOCAL
         elif "/" in self.path and self.path.count("/") == 1 and not self.path.endswith("/"):
             # Looks like org/repo format (HuggingFace)
