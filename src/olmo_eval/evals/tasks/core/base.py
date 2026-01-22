@@ -57,7 +57,7 @@ class TaskConfig:
     fewshot_seed: int = 42
     limit: int | None = None
     split: Split = Split.TEST
-    primary_metric: MetricName | None = None
+    primary_metric: MetricName | Metric | None = None
     sampling_params: SamplingParams | None = None
 
     def get_data_source(self, split: str | None = None) -> DataSource:

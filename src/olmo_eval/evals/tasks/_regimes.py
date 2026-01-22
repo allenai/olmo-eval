@@ -200,8 +200,6 @@ def register_code_pass_at_k_regimes() -> None:
     # HumanEval tasks
     humaneval_tasks = [
         "humaneval",
-        "humaneval_plus",
-        "humaneval",
         "humanevalplus",
     ]
 
