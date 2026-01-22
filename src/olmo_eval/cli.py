@@ -5,6 +5,8 @@ from typing import Any
 
 import click
 from rich.console import Console
+from rich.panel import Panel
+from rich.pretty import Pretty
 from rich.table import Table
 
 import olmo_eval.evals  # noqa: F401 - triggers suite registration
@@ -919,9 +921,7 @@ def launch(
     if not effective_groups:
         effective_groups = [f"{name}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"]
 
-    console.print(f"[blue]Groups:[/blue] {', '.join(effective_groups)}")
-
-    # Print the image being used (CLI overrides config, config overrides default)
+    # Determine the effective image (CLI overrides config, config overrides default)
     from olmo_eval.core.constants.infrastructure import BEAKER_DEFAULT_IMAGE
 
     if image:
@@ -930,7 +930,6 @@ def launch(
         effective_image = cfg.beaker_image
     else:
         effective_image = BEAKER_DEFAULT_IMAGE
-    console.print(f"[blue]Image:[/blue] {effective_image}")
 
     # Check which groups exist and which need to be created
     from beaker.exceptions import BeakerGroupNotFound
@@ -1053,74 +1052,82 @@ def launch(
                     }
                 )
 
-    # Print experiment matrix summary
-    console.print("\n[bold]Experiment Matrix:[/bold]")
-    console.print(f"  Models: {len(model_configs)}")
-    console.print(f"  Priority levels: {len(tasks_by_priority)}")
+    # Calculate total expanded tasks
     total_experiments = len(experiment_plan)
-    console.print(f"  Total experiments: {total_experiments}")
-
-    # Calculate and display total expanded tasks
     total_expanded_tasks = len(valid_tasks) * len(model_configs)
+
+    # Build consolidated launch configuration summary
+    launch_summary: dict[str, Any] = {
+        "beaker": {
+            "workspace": workspace,
+            "budget": budget,
+            "image": effective_image,
+            "groups": effective_groups,
+            "cluster": cluster,
+        },
+        "models": [
+            {
+                "name": m.name_or_path,
+                **({"alias": m.alias} if m.alias else {}),
+                **({"gpus": m.gpus} if m.gpus else {}),
+                **({"parallelism": m.parallelism} if m.parallelism else {}),
+            }
+            for m in model_configs
+        ],
+        "tasks": original_task_specs,
+        "defaults": {
+            "gpus": gpus,
+            "parallelism": parallelism,
+            "priority": priority,
+            "preemptible": preemptible,
+            "timeout": timeout,
+        },
+    }
+
+    # Add async settings if enabled
+    if use_async or use_async_stream:
+        launch_summary["async"] = {
+            "mode": "stream" if use_async_stream else "parallel",
+            **({"num_workers": num_workers} if num_workers else {}),
+            **({"gpus_per_worker": gpus_per_worker} if gpus_per_worker != 1 else {}),
+        }
+
+    # Print consolidated launch configuration
+    console.print()
+    console.print(Panel(Pretty(launch_summary), title="[bold]Launch Configuration[/bold]", border_style="blue"))
+
+    # Print experiment summary
+    console.print(f"\n[bold]Experiments:[/bold] {total_experiments} experiment(s), {total_expanded_tasks} task(s)")
     if split_models:
-        console.print(f"  Total tasks: {total_expanded_tasks} (distributed across experiments)")
-    else:
-        console.print(f"  Total tasks: {total_expanded_tasks}")
+        console.print("[dim]  Tasks distributed across multiple experiments due to GPU constraints[/dim]")
 
-    matrix_table = Table(title="Experiments to Launch", show_header=True)
-    matrix_table.add_column("Experiment Name", style="cyan")
-    matrix_table.add_column("Model", style="blue")
-    matrix_table.add_column("Priority", style="yellow")
-    matrix_table.add_column("Suites/Tasks", style="white")
-    matrix_table.add_column("Overrides", style="dim")
-    matrix_table.add_column("# Tasks", style="white", justify="right")
-    matrix_table.add_column("GPUs/Model", style="green", justify="right")
-    matrix_table.add_column("Instances", style="magenta", justify="right")
-    matrix_table.add_column("Total GPUs", style="green", justify="right")
-    matrix_table.add_column("Split", style="dim", justify="center")
+    # Simplified experiment table - only show if multiple experiments or verbose
+    if total_experiments > 1:
+        matrix_table = Table(show_header=True, title="Experiment Plan")
+        matrix_table.add_column("Name", style="cyan")
+        matrix_table.add_column("Model", style="blue")
+        matrix_table.add_column("Priority", style="yellow")
+        matrix_table.add_column("Tasks", justify="right")
+        matrix_table.add_column("GPUs", style="green", justify="right")
 
-    for exp in experiment_plan:
-        # Extract base names and overrides from original task specs
-        base_names = []
-        all_overrides: set[str] = set()
-        for spec in exp["original_task_specs"]:
-            # Strip priority suffix first
-            spec_no_priority = spec.rsplit("@", 1)[0] if "@" in spec else spec
-            # Split on :: to get base name and overrides
-            if "::" in spec_no_priority:
-                base, override_str = spec_no_priority.split("::", 1)
-                base_names.append(base)
-                all_overrides.add(override_str)
-            else:
-                base_names.append(spec_no_priority)
+        for exp in experiment_plan:
+            task_count = len(exp["tasks"])
+            total_tasks = exp["total_expanded_tasks"]
+            task_display = (
+                f"{task_count}/{total_tasks}"
+                if exp["split_index"] is not None
+                else str(task_count)
+            )
+            matrix_table.add_row(
+                exp["name"],
+                exp["model_name"],
+                exp["priority"],
+                task_display,
+                str(exp["num_gpus"]),
+            )
 
-        suite_display = ", ".join(base_names)
-        override_display = ", ".join(sorted(all_overrides)) if all_overrides else "-"
+        console.print(matrix_table)
 
-        # Show task count - if split, show subset count of total
-        task_count = len(exp["tasks"])
-        total_tasks = exp["total_expanded_tasks"]
-        if exp["split_index"] is not None:
-            task_display = f"{task_count}/{total_tasks}"
-        else:
-            task_display = str(task_count)
-        split_display = (
-            f"{exp['split_index']}/{exp['total_splits']}" if exp["split_index"] is not None else "-"
-        )
-        matrix_table.add_row(
-            exp["name"],
-            exp["model_name"],
-            exp["priority"],
-            suite_display,
-            override_display,
-            task_display,
-            str(exp["gpus_per_model"]),
-            str(exp["parallelism"]),
-            str(exp["num_gpus"]),
-            split_display,
-        )
-
-    console.print(matrix_table)
     console.print()
 
     # Confirm before launching (skip in dry-run mode)
@@ -1263,10 +1270,23 @@ def launch(
         )
 
         if verbose:
+            from dataclasses import asdict
+
             if len(experiment_plan) > 1:
                 console.print()  # Add spacing between multiple experiments
-            console.print("[bold]Experiment spec:[/bold]")
-            launcher.launch(job_config, dry_run=True)
+            # Convert dataclass to dict for pretty printing, excluding default/empty values
+            config_dict = {
+                k: v
+                for k, v in asdict(job_config).items()
+                if v is not None and v != [] and v != {}
+            }
+            console.print(
+                Panel(
+                    Pretty(config_dict),
+                    title=f"[bold]Experiment: {exp_name}[/bold]",
+                    border_style="cyan",
+                )
+            )
 
         if not dry_run:
             experiment = launcher.launch(job_config)
