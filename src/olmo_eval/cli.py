@@ -58,7 +58,7 @@ class AsyncSettings:
     """Async execution settings."""
 
     mode: str  # "parallel" or "stream"
-    num_workers: int | None = None
+    num_workers: int | str = "auto"  # "auto" means detected at runtime based on GPUs
     gpus_per_worker: int = 1
 
 
@@ -1160,7 +1160,7 @@ def launch(
 
         async_settings = AsyncSettings(
             mode="stream" if use_async_stream else "parallel",
-            num_workers=effective_num_workers,
+            num_workers=effective_num_workers if effective_num_workers is not None else "auto",
             gpus_per_worker=gpus_per_worker,
         )
 
