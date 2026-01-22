@@ -178,7 +178,8 @@ def _make_mt_mbpp_bpb_config(language: str) -> TaskConfig:
     return TaskConfig(
         name=f"mt_mbpp_{language}:bpb",
         data_source=DataSource(path="allenai/multilingual_mbpp", subset=language),
-        formatter=PPLFormatter(leading_space=False),  # No leading space for code (matches oe-eval)
+        # Matches oe-eval: no leading space, always prepend \n\n separator
+        formatter=PPLFormatter(leading_space=False, always_prepend_separator=True),
         scorers=(BitsPerByteScorer(),),
         metrics=(BPBMetric(),),
         primary_metric=BPBMetric(),
@@ -190,7 +191,8 @@ def _make_mt_mbpp_v2fix_bpb_config(language: str) -> TaskConfig:
     return TaskConfig(
         name=f"mt_mbpp_v2fix_{language}:bpb",
         data_source=DataSource(path="allenai/multilingual_mbpp", subset=language),
-        formatter=PPLFormatter(leading_space=False),  # No leading space for code (matches oe-eval)
+        # Matches oe-eval: no leading space, always prepend \n\n separator
+        formatter=PPLFormatter(leading_space=False, always_prepend_separator=True),
         scorers=(BitsPerByteScorer(),),
         metrics=(BPBMetric(),),
         primary_metric=BPBMetric(),

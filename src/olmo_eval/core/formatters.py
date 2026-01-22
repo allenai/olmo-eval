@@ -154,6 +154,10 @@ class PPLFormatter:
 
     fewshot_separator: str = "\n\n"
     leading_space: bool = True  # Whether to add leading space to continuation
+    # Whether to always prepend separator before the current instance's question.
+    # This matches oe-eval's multilingual_mbpp behavior where the prompt always
+    # has "\n\n" before the current doc's text (due to: join(...) + "\n\n" + text).
+    always_prepend_separator: bool = False
 
     def format(
         self,
@@ -192,6 +196,13 @@ class PPLFormatter:
             parts.append(instance.question)
 
         prompt = self.fewshot_separator.join(parts)
+
+        # In oe-eval's multilingual_mbpp, fewshot_context always adds "\n\n" before
+        # the current doc's text: join(fewshot) + "\n\n" + doc_text + ...
+        # This means even with 0-shot, the prompt starts with "\n\n".
+        # The always_prepend_separator option replicates this behavior.
+        if self.always_prepend_separator and prompt:
+            prompt = self.fewshot_separator + prompt
 
         # Optionally add leading space when there's context (standard tokenization)
         # For code tasks like MBPP, this should be disabled
