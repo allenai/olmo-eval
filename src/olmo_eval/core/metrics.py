@@ -69,9 +69,10 @@ class F1Metric:
 class BPBMetric:
     """Mean bits-per-byte of the gold/correct completion.
 
-    For tasks with multiple continuations, this returns the BPB of the
-    correct continuation. For single-continuation tasks (like perplexity),
-    it returns the BPB of that continuation.
+    For tasks with multiple continuations (e.g., multiple choice), this returns
+    the BPB of the correct continuation using `instance.metadata["gold_idx"]`.
+    For single-continuation tasks (like perplexity), it returns the BPB of that
+    continuation.
     """
 
     name: str = "bits_per_byte"
@@ -80,14 +81,40 @@ class BPBMetric:
     def compute(self, responses: Sequence[Response]) -> float:
         if not responses:
             return 0.0
-        scorer_name = _get_scorer_name(self.scorer)
-        total = sum(r.scores.get(scorer_name, 0.0) for r in responses)
+
+        scorer_instance = self.scorer()
+        total = 0.0
+
+        for response in responses:
+            outputs = response.outputs
+            if not outputs:
+                continue
+
+            if len(outputs) > 1:
+                # Multiple outputs: select the gold/correct continuation
+                gold_idx = response.instance.metadata.get("gold_idx")
+                if gold_idx is not None and 0 <= gold_idx < len(outputs):
+                    output = outputs[gold_idx]
+                else:
+                    # Fallback to first output if gold_idx not available
+                    output = outputs[0]
+            else:
+                # Single output: use it directly
+                output = outputs[0]
+
+            total += scorer_instance.score(response.instance, output)
+
         return total / len(responses)
 
 
 @dataclass(frozen=True, slots=True)
 class MeanPerplexityMetric:
-    """Mean perplexity across all responses."""
+    """Mean perplexity of the gold/correct completion.
+
+    For tasks with multiple continuations (e.g., multiple choice), this returns
+    the perplexity of the correct continuation using `instance.metadata["gold_idx"]`.
+    For single-continuation tasks, it returns the perplexity of that continuation.
+    """
 
     name: str = "perplexity"
     scorer: type[Scorer] = PerplexityScorer
@@ -95,6 +122,27 @@ class MeanPerplexityMetric:
     def compute(self, responses: Sequence[Response]) -> float:
         if not responses:
             return 0.0
-        scorer_name = _get_scorer_name(self.scorer)
-        total = sum(r.scores.get(scorer_name, 0.0) for r in responses)
+
+        scorer_instance = self.scorer()
+        total = 0.0
+
+        for response in responses:
+            outputs = response.outputs
+            if not outputs:
+                continue
+
+            if len(outputs) > 1:
+                # Multiple outputs: select the gold/correct continuation
+                gold_idx = response.instance.metadata.get("gold_idx")
+                if gold_idx is not None and 0 <= gold_idx < len(outputs):
+                    output = outputs[gold_idx]
+                else:
+                    # Fallback to first output if gold_idx not available
+                    output = outputs[0]
+            else:
+                # Single output: use it directly
+                output = outputs[0]
+
+            total += scorer_instance.score(response.instance, output)
+
         return total / len(responses)
