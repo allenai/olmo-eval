@@ -1,6 +1,6 @@
 """HumanEval code generation task implementations."""
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from typing import Any
 
 from olmo_eval.core import (
@@ -11,6 +11,7 @@ from olmo_eval.core import (
     LMRequest,
     PPLFormatter,
     RequestType,
+    Response,
     SamplingParams,
 )
 from olmo_eval.data import DataLoader, DataSource
@@ -74,14 +75,31 @@ class HumanEvalTask(Task):
             prompt=instance.question,
         )
 
-    def extract_answer(self, output: LMOutput, instance: Instance) -> str | None:
-        """Extract code from model output."""
-        code = extract_code(output.text)
-        if not code:
-            return None
-        # For Humaneval, we follow the original paper setup by adding the prompt to the generated code completion
-        # as the prompt may provide additional library imports needed for the code execution.
-        return instance.metadata["answer_prefix"] + code
+    def extract_answer(self, output: LMOutput) -> str | None:
+        """Extract code from model output.
+
+        Note: This base implementation just extracts code. The actual answer
+        with prefix is computed in score_responses which has access to the instance.
+        """
+        return extract_code(output.text)
+
+    def score_responses(self, responses: Sequence[Response]) -> Sequence[Response]:
+        """Apply all scorers to extract answers and compute scores."""
+        for response in responses:
+            for output in response.outputs:
+                code = self.extract_answer(output)
+                if code:
+                    # For Humaneval, we follow the original paper setup by adding the prompt
+                    # to the generated code completion as the prompt may provide additional
+                    # library imports needed for the code execution.
+                    output.extracted_answer = response.instance.metadata["answer_prefix"] + code
+                else:
+                    output.extracted_answer = None
+            # Apply each scorer, taking best score across outputs (for multi-sample)
+            for scorer in self.config.scorers:
+                scores = [scorer.score(response.instance, o) for o in response.outputs]
+                response.scores[scorer.name] = max(scores) if scores else 0.0
+        return responses
 
 
 class HumanEvalPlusTask(HumanEvalTask):
