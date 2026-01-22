@@ -56,7 +56,7 @@ class HumanEvalTask(Task):
 
         return Instance(
             question=prompt,
-            gold_answer=doc["canonical_solution"] + "```",
+            gold_answer=doc["canonical_solution"],
             metadata={
                 "id": doc["task_id"],
                 "entry_point": doc["entry_point"],
