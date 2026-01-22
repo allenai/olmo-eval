@@ -182,7 +182,7 @@ def _print_runtime_environment() -> None:
     except ImportError:
         console.print("PyTorch:         NOT INSTALLED")
     try:
-        import transformers
+        import transformers  # type: ignore[import-not-found]
 
         console.print(f"Transformers:    {transformers.__version__}")
     except ImportError:
