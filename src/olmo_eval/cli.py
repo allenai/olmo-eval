@@ -54,12 +54,15 @@ class TaskSummary:
     """Summary of a task configuration for display."""
 
     name: str
+    spec: str | None = None  # Original task spec (e.g., "codex_humaneval:pass@1")
+    variants: list[str] | None = None  # Applied variants/regimes
     formatter: Any = None
     scorers: tuple = ()
     metrics: tuple = ()
     num_fewshot: int = 0
     split: str = "test"
     primary_metric: str | None = None
+    sampling_params: Any = None
 
 
 @dataclass
@@ -1121,21 +1124,28 @@ def launch(
 
     # Fetch actual task configurations for display
     from olmo_eval.evals.tasks import get_task as get_task_instance
+    from olmo_eval.evals.tasks.core.registry import parse_task_spec
 
     task_summaries: list[TaskSummary] = []
     for task_spec in valid_tasks:
         try:
+            # Parse the spec to extract variants/regimes
+            task_name, variants, _overrides = parse_task_spec(task_spec)
+
             task_instance = get_task_instance(task_spec)
             task_cfg = task_instance.config
             task_summaries.append(
                 TaskSummary(
                     name=task_cfg.name,
+                    spec=task_spec if task_spec != task_cfg.name else None,
+                    variants=variants if variants else None,
                     formatter=task_cfg.formatter,
                     scorers=task_cfg.scorers,
                     metrics=task_cfg.metrics,
                     num_fewshot=task_cfg.num_fewshot,
                     split=task_cfg.split.value if hasattr(task_cfg.split, "value") else str(task_cfg.split),
                     primary_metric=str(task_cfg.primary_metric) if task_cfg.primary_metric else None,
+                    sampling_params=task_cfg.sampling_params,
                 )
             )
         except Exception:
