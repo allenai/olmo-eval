@@ -156,6 +156,16 @@ class SyncEvalRunner:
         backend_str = self.backend_override or model_config.backend
         backend_type = BackendType(backend_str)
 
+        # vLLM requires 'spawn' multiprocessing start method
+        if backend_type == BackendType.VLLM:
+            current = os.environ.get("VLLM_WORKER_MULTIPROC_METHOD")
+            if current != "spawn":
+                os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
+                if current:
+                    logger.info(
+                        f"Overriding VLLM_WORKER_MULTIPROC_METHOD from '{current}' to 'spawn'"
+                    )
+
         console.print(f"[bold]Initializing {backend_type.value} backend...[/bold]")
         if model_config.tokenizer:
             console.print(f"[dim]Tokenizer: {model_config.tokenizer}[/dim]")
