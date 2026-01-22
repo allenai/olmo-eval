@@ -1122,25 +1122,25 @@ def launch(
     # Fetch actual task configurations for display
     from olmo_eval.evals.tasks import get_task as get_task_instance
 
-    task_configs: list[TaskSummary] = []
+    task_summaries: list[TaskSummary] = []
     for task_spec in valid_tasks:
         try:
             task_instance = get_task_instance(task_spec)
-            cfg = task_instance.config
-            task_configs.append(
+            task_cfg = task_instance.config
+            task_summaries.append(
                 TaskSummary(
-                    name=cfg.name,
-                    formatter=cfg.formatter,
-                    scorers=cfg.scorers,
-                    metrics=cfg.metrics,
-                    num_fewshot=cfg.num_fewshot,
-                    split=cfg.split.value if hasattr(cfg.split, "value") else str(cfg.split),
-                    primary_metric=str(cfg.primary_metric) if cfg.primary_metric else None,
+                    name=task_cfg.name,
+                    formatter=task_cfg.formatter,
+                    scorers=task_cfg.scorers,
+                    metrics=task_cfg.metrics,
+                    num_fewshot=task_cfg.num_fewshot,
+                    split=task_cfg.split.value if hasattr(task_cfg.split, "value") else str(task_cfg.split),
+                    primary_metric=str(task_cfg.primary_metric) if task_cfg.primary_metric else None,
                 )
             )
         except Exception:
             # Fall back to just the spec name if we can't load the task
-            task_configs.append(TaskSummary(name=task_spec))
+            task_summaries.append(TaskSummary(name=task_spec))
 
     # Build model summaries with resolved backends
     from olmo_eval.core.configs import get_model_config as get_runtime_model_config
@@ -1189,7 +1189,7 @@ def launch(
     launch_config_summary = LaunchSummary(
         beaker=beaker_settings,
         models=model_summaries,
-        tasks=task_configs,
+        tasks=task_summaries,
         async_settings=async_settings,
     )
 
