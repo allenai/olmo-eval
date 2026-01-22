@@ -108,6 +108,37 @@ class HumanEvalPlusTask(HumanEvalTask):
     default_hf_path: str = "evalplus/humanevalplus"
 
 
+class HumanEvalBPBTask(HumanEvalTask):
+    """HumanEval BPB task without code fence prefix.
+
+    For BPB evaluation, we use the raw prompt as context (without ```python prefix)
+    to match oe-eval's default behavior.
+    """
+
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
+        """Convert a dataset document to an Instance for BPB evaluation."""
+        # No code fence prefix for BPB - use raw prompt as context
+        prompt = doc["prompt"]
+        unit_tests = doc["test"] + f"\ncheck({doc['entry_point']})"
+
+        return Instance(
+            question=prompt,
+            gold_answer=doc["canonical_solution"],
+            metadata={
+                "id": doc["task_id"],
+                "entry_point": doc["entry_point"],
+                "answer_prefix": doc["prompt"],
+                "test": unit_tests,
+            },
+        )
+
+
+class HumanEvalPlusBPBTask(HumanEvalBPBTask):
+    """HumanEval+ BPB task without code fence prefix."""
+
+    default_hf_path: str = "evalplus/humanevalplus"
+
+
 def _humaneval_config() -> TaskConfig:
     return TaskConfig(
         name="humaneval",
@@ -173,14 +204,14 @@ class HumanEvalPlus(HumanEvalPlusTask):
 
 
 @register("humaneval:bpb", _humaneval_bpb_config)
-class HumanEvalBPB(HumanEvalTask):
+class HumanEvalBPB(HumanEvalBPBTask):
     """HumanEval BPB evaluation task."""
 
     pass
 
 
 @register("humaneval_plus:bpb", _humaneval_plus_bpb_config)
-class HumanEvalPlusBPB(HumanEvalPlusTask):
+class HumanEvalPlusBPB(HumanEvalPlusBPBTask):
     """HumanEval+ BPB evaluation task."""
 
     pass
