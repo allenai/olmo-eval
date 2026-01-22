@@ -152,6 +152,8 @@ class PPLFormatter:
     - Falls back to gold_text metadata or gold_answer
     """
 
+    fewshot_separator: str = "\n\n"
+
     def format(
         self,
         instance: Instance,
@@ -175,12 +177,22 @@ class PPLFormatter:
         if gold_text is None:
             raise ValueError("PPLFormatter requires a gold answer to be set")
 
-        # Use question as context to avoid first-token logprob issue
-        # vLLM returns None for prompt_logprobs[0] when there's no context
-        prompt = ""
+        # Build prompt with few-shot examples
+        parts: list[str] = []
+        for ex in fewshot or []:
+            example = ex.question or ""
+            if ex.gold_answer:
+                example += " " + ex.gold_answer
+            parts.append(example)
+
+        # Add the current instance question
         if instance.question:
-            prompt = instance.question
-            # Add leading space when there's context (standard tokenization)
+            parts.append(instance.question)
+
+        prompt = self.fewshot_separator.join(parts)
+
+        # Add leading space when there's context (standard tokenization)
+        if prompt:
             gold_text = " " + gold_text
 
         return LMRequest(

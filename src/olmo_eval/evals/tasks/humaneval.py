@@ -109,16 +109,15 @@ class HumanEvalPlusTask(HumanEvalTask):
 
 
 class HumanEvalBPBTask(HumanEvalTask):
-    """HumanEval BPB task without code fence prefix.
+    """HumanEval BPB task with answer prefix for code completion context."""
 
-    For BPB evaluation, we use the raw prompt as context (without ```python prefix)
-    to match oe-eval's default behavior.
-    """
+    # Answer prefix added after the prompt to prime the model for code completion
+    answer_prefix: str = "Here is the completed function:\n\n```python\n"
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance for BPB evaluation."""
-        # No code fence prefix for BPB - use raw prompt as context
-        prompt = doc["prompt"]
+        # Use raw prompt + answer_prefix as context
+        prompt = doc["prompt"] + self.answer_prefix
         unit_tests = doc["test"] + f"\ncheck({doc['entry_point']})"
 
         return Instance(
@@ -132,9 +131,20 @@ class HumanEvalBPBTask(HumanEvalTask):
             },
         )
 
+    def _build_fewshot(self) -> list[Instance]:
+        """Build few-shot examples from the test split."""
+        import random
+
+        all_instances = self._build_fewshot_from_source(split="test")
+        if not all_instances or self.config.num_fewshot == 0:
+            return []
+
+        rng = random.Random(self.config.fewshot_seed)
+        return rng.sample(all_instances, min(self.config.num_fewshot, len(all_instances)))
+
 
 class HumanEvalPlusBPBTask(HumanEvalBPBTask):
-    """HumanEval+ BPB task without code fence prefix."""
+    """HumanEval+ BPB task with answer prefix for code completion context."""
 
     default_hf_path: str = "evalplus/humanevalplus"
 
@@ -175,6 +185,8 @@ def _humaneval_bpb_config() -> TaskConfig:
         scorers=(BitsPerByteScorer(),),
         metrics=(BPBMetric(),),
         primary_metric=BPBMetric(),
+        num_fewshot=3,
+        fewshot_seed=42,
     )
 
 
@@ -186,6 +198,8 @@ def _humaneval_plus_bpb_config() -> TaskConfig:
         scorers=(BitsPerByteScorer(),),
         metrics=(BPBMetric(),),
         primary_metric=BPBMetric(),
+        num_fewshot=3,
+        fewshot_seed=42,
     )
 
 
