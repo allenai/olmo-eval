@@ -1142,17 +1142,27 @@ def launch(
             # Fall back to just the spec name if we can't load the task
             task_configs.append(TaskSummary(name=task_spec))
 
-    # Build model summaries
-    model_summaries = [
-        ModelSummary(
-            name=m.name_or_path,
-            gpus=m.gpus or gpus,
-            parallelism=m.parallelism or parallelism,
-            alias=m.alias,
-            backend=m.backend,
+    # Build model summaries with resolved backends
+    from olmo_eval.core.configs import get_model_config as get_runtime_model_config
+
+    model_summaries: list[ModelSummary] = []
+    for m in model_configs:
+        # Resolve the effective backend (explicit override or from model preset/default)
+        if m.backend:
+            effective_backend = m.backend
+        else:
+            runtime_model_config = get_runtime_model_config(m.name_or_path)
+            effective_backend = runtime_model_config.backend
+
+        model_summaries.append(
+            ModelSummary(
+                name=m.name_or_path,
+                gpus=m.gpus or gpus,
+                parallelism=m.parallelism or parallelism,
+                alias=m.alias,
+                backend=effective_backend,
+            )
         )
-        for m in model_configs
-    ]
 
     # Build beaker settings
     beaker_settings = BeakerSettings(
