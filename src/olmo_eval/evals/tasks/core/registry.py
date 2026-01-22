@@ -209,6 +209,9 @@ def get_task(spec: str, config_overrides: dict[str, Any] | None = None) -> Task:
     Note: Regimes are now treated as variants. When looking up a variant,
     we check both the variants and regimes registries.
 
+    Task names with colons (e.g., "humaneval:bpb") are checked first before
+    parsing as base_task:variant.
+
     Args:
         spec: Task specification (e.g., "arc_easy", "arc_easy:mc:olmes", "gsm8k::temperature=0.6").
         config_overrides: Additional config overrides to apply (highest priority).
@@ -219,7 +222,27 @@ def get_task(spec: str, config_overrides: dict[str, Any] | None = None) -> Task:
     Raises:
         KeyError: If task_name is not registered.
     """
-    task_name, variants, inline_overrides = parse_task_spec(spec)
+    # First, check if the spec (or spec without inline overrides) is a directly registered task
+    main_part, _, override_str = spec.partition("::")
+    inline_overrides = parse_overrides(override_str)
+
+    # Try progressively shorter prefixes to find a registered task with colons in its name
+    # e.g., for "humaneval:bpb:mc", check "humaneval:bpb:mc", then "humaneval:bpb", then "humaneval"
+    parts = main_part.split(":")
+    task_name = None
+    variants: list[str] = []
+
+    for i in range(len(parts), 0, -1):
+        candidate = ":".join(parts[:i])
+        if candidate in _tasks:
+            task_name = candidate
+            variants = parts[i:]
+            break
+
+    if task_name is None:
+        # Fall back to original parsing (first part is task name)
+        task_name = parts[0]
+        variants = parts[1:] if len(parts) > 1 else []
 
     if task_name not in _tasks:
         available = ", ".join(sorted(_tasks.keys()))

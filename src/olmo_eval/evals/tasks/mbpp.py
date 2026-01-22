@@ -6,9 +6,12 @@ from typing import Any
 from datasets import load_dataset
 
 from olmo_eval.core import (
+    BPBMetric,
+    BitsPerByteScorer,
     Instance,
     LMOutput,
     LMRequest,
+    PPLFormatter,
     RequestType,
     SamplingParams,
 )
@@ -141,6 +144,11 @@ class MBPPPlusTask(Task):
         return code
 
 
+# =============================================================================
+# Generative Task Configs (with sampling_params)
+# =============================================================================
+
+
 def _mbpp_config() -> TaskConfig:
     return TaskConfig(
         name="mbpp",
@@ -183,6 +191,46 @@ def _mbppplus_config() -> TaskConfig:
     )
 
 
+# =============================================================================
+# BPB Task Configs (no sampling_params)
+# =============================================================================
+
+
+def _mbpp_bpb_config() -> TaskConfig:
+    return TaskConfig(
+        name="mbpp:bpb",
+        hf_dataset="google-research-datasets/mbpp",
+        formatter=PPLFormatter(),
+        scorers=(BitsPerByteScorer(),),
+        metrics=(BPBMetric(),),
+    )
+
+
+def _mbpp_plus_bpb_config() -> TaskConfig:
+    return TaskConfig(
+        name="mbpp_plus:bpb",
+        hf_dataset="evalplus/mbppplus",
+        formatter=PPLFormatter(),
+        scorers=(BitsPerByteScorer(),),
+        metrics=(BPBMetric(),),
+    )
+
+
+def _mbppplus_bpb_config() -> TaskConfig:
+    return TaskConfig(
+        name="mbppplus:bpb",
+        hf_dataset="evalplus/mbppplus",
+        formatter=PPLFormatter(),
+        scorers=(BitsPerByteScorer(),),
+        metrics=(BPBMetric(),),
+    )
+
+
+# =============================================================================
+# Task Registrations - Generative
+# =============================================================================
+
+
 @register("mbpp", _mbpp_config)
 class MBPP(MBPPTask):
     """MBPP code generation task."""
@@ -199,6 +247,32 @@ class MBPPPlus(MBPPPlusTask):
 
 @register("mbppplus", _mbppplus_config)
 class MBPPPlusAlias(MBPPPlusTask):
-    """Alias for MBPP+ (mbppplus name used by oe-eval)."""
+    """MBPP+ code generation task."""
+
+    pass
+
+
+# =============================================================================
+# Task Registrations - BPB
+# =============================================================================
+
+
+@register("mbpp:bpb", _mbpp_bpb_config)
+class MBPPBPB(MBPPTask):
+    """MBPP BPB evaluation task."""
+
+    pass
+
+
+@register("mbpp_plus:bpb", _mbpp_plus_bpb_config)
+class MBPPPlusBPB(MBPPPlusTask):
+    """MBPP+ BPB evaluation task."""
+
+    pass
+
+
+@register("mbppplus:bpb", _mbppplus_bpb_config)
+class MBPPPlusAliasBPB(MBPPPlusTask):
+    """MBPPPlus BPB evaluation task."""
 
     pass

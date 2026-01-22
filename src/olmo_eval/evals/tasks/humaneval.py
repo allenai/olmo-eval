@@ -6,9 +6,12 @@ from typing import Any
 from datasets import load_dataset
 
 from olmo_eval.core import (
+    BPBMetric,
+    BitsPerByteScorer,
     Instance,
     LMOutput,
     LMRequest,
+    PPLFormatter,
     RequestType,
     SamplingParams,
 )
@@ -84,6 +87,11 @@ class HumanEvalPlusTask(HumanEvalTask):
     hf_path: str = "evalplus/humanevalplus"
 
 
+# =============================================================================
+# Generative Task Configs (with sampling_params)
+# =============================================================================
+
+
 def _humaneval_config() -> TaskConfig:
     return TaskConfig(
         name="humaneval",
@@ -140,6 +148,56 @@ def _codex_humanevalplus_config() -> TaskConfig:
     )
 
 
+# =============================================================================
+# BPB Task Configs (no sampling_params)
+# =============================================================================
+
+
+def _humaneval_bpb_config() -> TaskConfig:
+    return TaskConfig(
+        name="humaneval:bpb",
+        hf_dataset="openai_humaneval",
+        formatter=PPLFormatter(),
+        scorers=(BitsPerByteScorer(),),
+        metrics=(BPBMetric(),),
+    )
+
+
+def _humaneval_plus_bpb_config() -> TaskConfig:
+    return TaskConfig(
+        name="humaneval_plus:bpb",
+        hf_dataset="evalplus/humanevalplus",
+        formatter=PPLFormatter(),
+        scorers=(BitsPerByteScorer(),),
+        metrics=(BPBMetric(),),
+    )
+
+
+def _codex_humaneval_bpb_config() -> TaskConfig:
+    return TaskConfig(
+        name="codex_humaneval:bpb",
+        hf_dataset="openai_humaneval",
+        formatter=PPLFormatter(),
+        scorers=(BitsPerByteScorer(),),
+        metrics=(BPBMetric(),),
+    )
+
+
+def _codex_humanevalplus_bpb_config() -> TaskConfig:
+    return TaskConfig(
+        name="codex_humanevalplus:bpb",
+        hf_dataset="evalplus/humanevalplus",
+        formatter=PPLFormatter(),
+        scorers=(BitsPerByteScorer(),),
+        metrics=(BPBMetric(),),
+    )
+
+
+# =============================================================================
+# Task Registrations - Generative
+# =============================================================================
+
+
 @register("humaneval", _humaneval_config)
 class HumanEval(HumanEvalTask):
     """HumanEval code generation task."""
@@ -156,13 +214,46 @@ class HumanEvalPlus(HumanEvalPlusTask):
 
 @register("codex_humaneval", _codex_humaneval_config)
 class CodexHumanEval(HumanEvalTask):
-    """Alias for HumanEval (codex_humaneval name used by oe-eval)."""
+    """HumanEval code generation task."""
 
     pass
 
 
 @register("codex_humanevalplus", _codex_humanevalplus_config)
 class CodexHumanEvalPlus(HumanEvalPlusTask):
-    """Alias for HumanEval+ (codex_humanevalplus name used by oe-eval)."""
+    """HumanEval+ code generation task."""
+
+    pass
+
+
+# =============================================================================
+# Task Registrations - BPB
+# =============================================================================
+
+
+@register("humaneval:bpb", _humaneval_bpb_config)
+class HumanEvalBPB(HumanEvalTask):
+    """HumanEval BPB evaluation task."""
+
+    pass
+
+
+@register("humaneval_plus:bpb", _humaneval_plus_bpb_config)
+class HumanEvalPlusBPB(HumanEvalPlusTask):
+    """HumanEval+ BPB evaluation task."""
+
+    pass
+
+
+@register("codex_humaneval:bpb", _codex_humaneval_bpb_config)
+class CodexHumanEvalBPB(HumanEvalTask):
+    """CodexHumanEval BPB evaluation task."""
+
+    pass
+
+
+@register("codex_humanevalplus:bpb", _codex_humanevalplus_bpb_config)
+class CodexHumanEvalPlusBPB(HumanEvalPlusTask):
+    """CodexHumanEvalPlus BPB evaluation task."""
 
     pass
