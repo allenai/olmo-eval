@@ -16,8 +16,8 @@ from typing import Any
 from datasets import load_dataset
 
 from olmo_eval.core import (
-    BPBMetric,
     BitsPerByteScorer,
+    BPBMetric,
     Instance,
     LMOutput,
     LMRequest,

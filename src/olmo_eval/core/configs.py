@@ -167,7 +167,9 @@ def get_model_config(name: str, **overrides: Any) -> ModelConfig:
                 tokenizer=filtered_overrides.get("tokenizer", base.tokenizer),
                 backend=filtered_overrides.get("backend", base.backend),
                 revision=filtered_overrides.get("revision", base.revision),
-                trust_remote_code=filtered_overrides.get("trust_remote_code", base.trust_remote_code),
+                trust_remote_code=filtered_overrides.get(
+                    "trust_remote_code", base.trust_remote_code
+                ),
                 dtype=filtered_overrides.get("dtype", base.dtype),
                 max_model_len=effective_max_model_len,
                 extra_args={**base.extra_args, **filtered_overrides.get("extra_args", {})},
@@ -176,5 +178,7 @@ def get_model_config(name: str, **overrides: Any) -> ModelConfig:
 
     # Treat as HuggingFace model path - parse max_model_len if present
     if "max_model_len" in filtered_overrides:
-        filtered_overrides["max_model_len"] = _parse_int_override(filtered_overrides["max_model_len"])
+        filtered_overrides["max_model_len"] = _parse_int_override(
+            filtered_overrides["max_model_len"]
+        )
     return ModelConfig(model=name, **filtered_overrides)

@@ -146,7 +146,14 @@ def parse_overrides(override_str: str) -> dict[str, Any]:
             i = comma_pos if comma_pos != -1 else len(override_str)
 
             # Type coercion
-            if key in {"num_fewshot", "limit", "fewshot_seed", "max_tokens", "top_k", "num_samples"}:
+            if key in {
+                "num_fewshot",
+                "limit",
+                "fewshot_seed",
+                "max_tokens",
+                "top_k",
+                "num_samples",
+            }:
                 value = int(value_str)
             elif key in {"temperature", "top_p"}:
                 value = float(value_str)

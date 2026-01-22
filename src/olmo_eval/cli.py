@@ -1,6 +1,6 @@
 """olmo-eval CLI entry point."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC
 from typing import Any
 
@@ -17,7 +17,6 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR, DEFAULT_M
 from olmo_eval.evals.suites import get_suite, list_suites
 from olmo_eval.evals.tasks import list_regimes, list_tasks, list_variants
 from olmo_eval.evals.tasks.core.registry import parse_overrides
-
 
 # -----------------------------------------------------------------------------
 # Dataclasses for pretty-printing launch configuration
@@ -70,6 +69,7 @@ class LaunchSummary:
     tasks: list[TaskSummary]
     async_settings: AsyncSettings | None = None
 
+
 console = Console()
 
 
@@ -84,7 +84,14 @@ TASKCONFIG_KEYS = {"num_fewshot", "limit", "fewshot_seed"}
 SAMPLING_KEYS = {"temperature", "max_tokens", "top_p", "top_k", "num_samples"}
 
 # Keys that apply to model/backend config
-MODEL_KEYS = {"backend", "attention_backend", "gpus_per_worker", "tokenizer", "max_model_len", "load_format"}
+MODEL_KEYS = {
+    "backend",
+    "attention_backend",
+    "gpus_per_worker",
+    "tokenizer",
+    "max_model_len",
+    "load_format",
+}
 
 
 def parse_model_spec(spec: str) -> tuple[str, dict[str, Any]]:
@@ -1115,7 +1122,9 @@ def launch(
                 scorers=task_cfg.scorers,
                 metrics=task_cfg.metrics,
                 num_fewshot=task_cfg.num_fewshot,
-                split=task_cfg.split.value if hasattr(task_cfg.split, "value") else str(task_cfg.split),
+                split=task_cfg.split.value
+                if hasattr(task_cfg.split, "value")
+                else str(task_cfg.split),
                 primary_metric=str(task_cfg.primary_metric) if task_cfg.primary_metric else None,
                 sampling_params=task_cfg.sampling_params,
                 overrides=inline_overrides if inline_overrides else None,
@@ -1182,9 +1191,14 @@ def launch(
     )
 
     # Print experiment summary
-    console.print(f"\n[bold]Experiments:[/bold] {total_experiments} experiment(s), {total_expanded_tasks} task(s)")
+    console.print(
+        f"\n[bold]Experiments:[/bold] {total_experiments} experiment(s), "
+        f"{total_expanded_tasks} task(s)"
+    )
     if split_models:
-        console.print("[dim]  Tasks distributed across multiple experiments due to GPU constraints[/dim]")
+        console.print(
+            "[dim]  Tasks distributed across multiple experiments due to GPU constraints[/dim]"
+        )
 
     # Simplified experiment table - only show if multiple experiments or verbose
     if total_experiments > 1:
@@ -1199,9 +1213,7 @@ def launch(
             task_count = len(exp["tasks"])
             total_tasks = exp["total_expanded_tasks"]
             task_display = (
-                f"{task_count}/{total_tasks}"
-                if exp["split_index"] is not None
-                else str(task_count)
+                f"{task_count}/{total_tasks}" if exp["split_index"] is not None else str(task_count)
             )
             matrix_table.add_row(
                 exp["name"],
@@ -1271,9 +1283,10 @@ def launch(
         effective_extra_loader_config = model_resources.get("extra_loader_config")
         if effective_extra_loader_config:
             # Serialize extra_loader_config as compact JSON (no spaces) for inline spec
-            model_inline_overrides.append(
-                f"extra_loader_config={json_module.dumps(effective_extra_loader_config, separators=(',', ':'))}"
+            json_config = json_module.dumps(
+                effective_extra_loader_config, separators=(",", ":")
             )
+            model_inline_overrides.append(f"extra_loader_config={json_config}")
 
         if model_inline_overrides:
             model_spec = f"{model_name}::{','.join(model_inline_overrides)}"
