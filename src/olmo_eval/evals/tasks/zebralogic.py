@@ -4,8 +4,6 @@ import json
 from collections.abc import Iterator, Sequence
 from typing import Any
 
-from datasets import load_dataset
-
 from olmo_eval.core import (
     Instance,
     LMOutput,
@@ -15,6 +13,7 @@ from olmo_eval.core import (
     Response,
     Scorer,
 )
+from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
 # Grid sizes categorized by difficulty
@@ -198,29 +197,35 @@ class ZebraLogicTask(Task):
     Part of "ZeroEval" (https://github.com/WildEval/ZeroEval)
     """
 
-    hf_path: str = "allenai/ZebraLogicBench-private"
-    hf_subset: str = "grid_mode"
+    default_hf_path: str = "allenai/ZebraLogicBench-private"
+    default_subset: str = "grid_mode"
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the test split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                name=self.hf_subset,
-                split="test",
-                trust_remote_code=True,
-            )
-            for idx, doc in enumerate(dataset):
-                self._instances_cache.append(self._process_doc(doc, idx))
+            loader = DataLoader()
+            source = self._get_source_for_split("test")
+            for idx, doc in enumerate(loader.load(source)):
+                self._instances_cache.append(self.process_doc(doc, idx))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any], index: int) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                subset=self.default_subset,
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any], index: int) -> Instance:
         """Convert a dataset document to an Instance."""
         size = doc["size"]
         puzzle = doc["puzzle"]
@@ -293,8 +298,7 @@ class ZebraLogicTask(Task):
 def _zebralogic_config() -> TaskConfig:
     return TaskConfig(
         name="zebralogic",
-        hf_dataset="allenai/ZebraLogicBench-private",
-        hf_subsets=("grid_mode",),
+        data_source=DataSource(path="allenai/ZebraLogicBench-private", subset="grid_mode"),
         scorers=(ZebraLogicScorer(),),
         metrics=(
             ZebraLogicMetric(metric_type="puzzle_accuracy"),

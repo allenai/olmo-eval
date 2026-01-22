@@ -3,8 +3,6 @@
 from collections.abc import Iterator
 from typing import Any
 
-from datasets import load_dataset
-
 from olmo_eval.core import (
     AccuracyMetric,
     ExactMatchScorer,
@@ -13,11 +11,8 @@ from olmo_eval.core import (
     LMRequest,
     RequestType,
 )
+from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register
-
-# =============================================================================
-# LAMBADA
-# =============================================================================
 
 
 class LambadaTask(Task):
@@ -42,27 +37,31 @@ class LambadaTask(Task):
     }
     """
 
-    hf_path: str = "EleutherAI/lambada_openai"
-
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the test split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                split="test",
-                trust_remote_code=True,
-            )
-            for idx, doc in enumerate(dataset):
-                self._instances_cache.append(self._process_doc(doc, idx))
+            loader = DataLoader()
+            source = self._get_source_for_split("test")
+            for idx, doc in enumerate(loader.load(source)):
+                self._instances_cache.append(self.process_doc(doc, idx))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any], index: int) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(
+                path="EleutherAI/lambada_openai",
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance.
 
         Splits the passage into context (all but last word) and target (last word).
@@ -75,7 +74,7 @@ class LambadaTask(Task):
         return Instance(
             question=context,
             gold_answer=target,
-            choices=(target,),  # Single choice for loglikelihood
+            choices=(target,),
             metadata={
                 "id": index,
                 "full_text": text,
@@ -91,7 +90,6 @@ class LambadaTask(Task):
         if self.config.formatter is not None:
             return self.config.formatter.format(instance, self.get_fewshot())
 
-        # For loglikelihood, we provide the context and the target continuation
         return LMRequest(
             request_type=RequestType.COMPLETION,
             prompt=instance.question,
@@ -111,7 +109,7 @@ class LambadaTask(Task):
 def _lambada_config() -> TaskConfig:
     return TaskConfig(
         name="lambada",
-        hf_dataset="EleutherAI/lambada_openai",
+        data_source=DataSource(path="EleutherAI/lambada_openai"),
         scorers=(ExactMatchScorer(),),
         metrics=(AccuracyMetric(scorer=ExactMatchScorer),),
     )

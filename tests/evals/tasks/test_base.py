@@ -43,14 +43,13 @@ class TestTaskConfig:
 
     def test_minimal_config(self):
         """Test creating config with minimal required fields."""
-        config = TaskConfig(name="test", hf_dataset="test/dataset")
+        config = TaskConfig(name="test", data_source="test/dataset")
         assert config.name == "test"
-        assert config.hf_dataset == "test/dataset"
+        assert config.data_source == "test/dataset"
 
     def test_default_values(self):
         """Test that default values are set correctly."""
-        config = TaskConfig(name="test", hf_dataset="test/dataset")
-        assert config.hf_subsets is None
+        config = TaskConfig(name="test", data_source="test/dataset")
         assert config.formatter is None
         assert config.scorers == ()
         assert config.metrics == ()
@@ -62,16 +61,17 @@ class TestTaskConfig:
 
     def test_custom_values(self):
         """Test creating config with custom values."""
+        from olmo_eval.data import DataSource
+
         config = TaskConfig(
             name="custom",
-            hf_dataset="test/dataset",
-            hf_subsets=("subset1", "subset2"),
+            data_source=DataSource(path="test/dataset", subset="subset1"),
             num_fewshot=5,
             fewshot_seed=123,
             limit=100,
             split=Split.VALIDATION,
         )
-        assert config.hf_subsets == ("subset1", "subset2")
+        assert config.data_source.subset == "subset1"
         assert config.num_fewshot == 5
         assert config.fewshot_seed == 123
         assert config.limit == 100
@@ -84,7 +84,7 @@ class TestTaskConfig:
 
         config = TaskConfig(
             name="scored",
-            hf_dataset="test/dataset",
+            data_source="test/dataset",
             scorers=(scorer,),
             metrics=(metric,),
         )
@@ -97,13 +97,13 @@ class TestTask:
 
     def test_task_initialization(self):
         """Test task initialization stores config."""
-        config = TaskConfig(name="test", hf_dataset="test/dataset")
+        config = TaskConfig(name="test", data_source="test/dataset")
         task = ConcreteTask(config)
         assert task.config is config
 
     def test_instances_iterator(self):
         """Test that instances returns an iterator."""
-        config = TaskConfig(name="test", hf_dataset="test/dataset")
+        config = TaskConfig(name="test", data_source="test/dataset")
         task = ConcreteTask(config)
 
         instances = list(task.instances)
@@ -112,7 +112,7 @@ class TestTask:
 
     def test_format_request(self):
         """Test format_request produces LMRequest."""
-        config = TaskConfig(name="test", hf_dataset="test/dataset")
+        config = TaskConfig(name="test", data_source="test/dataset")
         task = ConcreteTask(config)
 
         instance = Instance(question="Test question?", gold_answer="answer")
@@ -124,7 +124,7 @@ class TestTask:
 
     def test_extract_answer(self):
         """Test extract_answer extracts from output."""
-        config = TaskConfig(name="test", hf_dataset="test/dataset")
+        config = TaskConfig(name="test", data_source="test/dataset")
         task = ConcreteTask(config)
 
         output = LMOutput(text="  extracted answer  ")
@@ -134,7 +134,7 @@ class TestTask:
 
     def test_get_fewshot_default_empty(self):
         """Test that default get_fewshot returns empty list."""
-        config = TaskConfig(name="test", hf_dataset="test/dataset")
+        config = TaskConfig(name="test", data_source="test/dataset")
         task = ConcreteTask(config)
 
         fewshot = task.get_fewshot()
@@ -142,7 +142,7 @@ class TestTask:
 
     def test_get_fewshot_cached(self):
         """Test that fewshot examples are cached."""
-        config = TaskConfig(name="test", hf_dataset="test/dataset")
+        config = TaskConfig(name="test", data_source="test/dataset")
         task = ConcreteTask(config)
 
         fewshot1 = task.get_fewshot()
@@ -160,7 +160,7 @@ class TestTaskScoring:
 
     def test_score_responses_extracts_answers(self):
         """Test that score_responses extracts answers from outputs."""
-        config = TaskConfig(name="test", hf_dataset="test/dataset")
+        config = TaskConfig(name="test", data_source="test/dataset")
         task = ConcreteTask(config)
 
         instance = Instance(question="What is 2+2?", gold_answer="4")
@@ -181,7 +181,7 @@ class TestTaskScoring:
         scorer = ExactMatchScorer()
         config = TaskConfig(
             name="test",
-            hf_dataset="test/dataset",
+            data_source="test/dataset",
             scorers=(scorer,),
         )
         task = ConcreteTask(config)
@@ -204,7 +204,7 @@ class TestTaskScoring:
         scorer = ExactMatchScorer()
         config = TaskConfig(
             name="test",
-            hf_dataset="test/dataset",
+            data_source="test/dataset",
             scorers=(scorer,),
         )
         task = ConcreteTask(config)
@@ -226,7 +226,7 @@ class TestTaskScoring:
         scorer = ExactMatchScorer()
         config = TaskConfig(
             name="test",
-            hf_dataset="test/dataset",
+            data_source="test/dataset",
             scorers=(scorer,),
         )
         task = ConcreteTask(config)
@@ -261,7 +261,7 @@ class TestTaskMetrics:
         metric = AccuracyMetric(scorer=ExactMatchScorer)
         config = TaskConfig(
             name="test",
-            hf_dataset="test/dataset",
+            data_source="test/dataset",
             scorers=(scorer,),
             metrics=(metric,),
         )
@@ -300,7 +300,7 @@ class TestTaskMetrics:
         metric = AccuracyMetric(scorer=ExactMatchScorer)
         config = TaskConfig(
             name="test",
-            hf_dataset="test/dataset",
+            data_source="test/dataset",
             metrics=(metric,),
         )
         task = ConcreteTask(config)

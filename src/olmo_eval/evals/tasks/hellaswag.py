@@ -4,8 +4,6 @@ import re
 from collections.abc import Iterator
 from typing import Any
 
-from datasets import load_dataset
-
 from olmo_eval.core import (
     AccuracyMetric,
     Instance,
@@ -15,17 +13,15 @@ from olmo_eval.core import (
     MultipleChoiceScorer,
     RequestType,
 )
+from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
 
 def _preprocess(text: str) -> str:
     """Preprocess HellaSwag text by cleaning up formatting artifacts."""
     text = text.strip()
-    # Remove [title] markers
     text = re.sub(r"\.? \[title\]", ". ", text)
-    # Remove other bracketed content
     text = re.sub(r"\[.*?\]", "", text)
-    # Normalize whitespace
     text = text.replace("  ", " ")
     return text
 
@@ -33,32 +29,33 @@ def _preprocess(text: str) -> str:
 class HellaSwagTask(Task):
     """HellaSwag continuation prediction task."""
 
-    hf_path: str = "Rowan/hellaswag"
-
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the validation split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                split="validation",
-                trust_remote_code=True,
-            )
-            for doc in dataset:
-                self._instances_cache.append(self._process_doc(doc))
+            loader = DataLoader()
+            source = self._get_source_for_split("validation")
+            for doc in loader.load(source):
+                self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any]) -> Instance:
-        """Convert a dataset document to an Instance."""
-        # Build context from ctx_a and ctx_b
-        ctx = doc["ctx_a"] + " " + doc["ctx_b"].capitalize()
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(
+                path="Rowan/hellaswag",
+                split=split,
+            )
 
-        # Preprocess choices
+    def process_doc(self, doc: dict[str, Any]) -> Instance:
+        """Convert a dataset document to an Instance."""
+        ctx = doc["ctx_a"] + " " + doc["ctx_b"].capitalize()
         choices = tuple(_preprocess(ending) for ending in doc["endings"])
         gold_idx = int(doc["label"])
 
@@ -79,7 +76,6 @@ class HellaSwagTask(Task):
         if self.config.formatter is not None:
             return self.config.formatter.format(instance, self.get_fewshot())
 
-        # Default: format as continuation task with context + choices
         return LMRequest(
             request_type=RequestType.COMPLETION,
             prompt=instance.question,
@@ -88,8 +84,6 @@ class HellaSwagTask(Task):
 
     def extract_answer(self, output: LMOutput) -> str | None:
         """Extract the answer index from model output."""
-        # For logprob-based evaluation, the answer is determined by the scorer
-        # For generation, try to extract a number
         text = output.text.strip()
         if text.isdigit() and 0 <= int(text) < 4:
             return text
@@ -99,7 +93,7 @@ class HellaSwagTask(Task):
 def _hellaswag_config() -> TaskConfig:
     return TaskConfig(
         name="hellaswag",
-        hf_dataset="Rowan/hellaswag",
+        data_source=DataSource(path="Rowan/hellaswag"),
         formatter=MultipleChoiceFormatter(
             template="{question}",
             include_choices_in_prompt=False,

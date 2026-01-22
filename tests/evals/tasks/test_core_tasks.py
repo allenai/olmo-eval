@@ -42,7 +42,7 @@ class TestBoolQTask:
             "label": True,
         }
 
-        instance = boolq_task._process_doc(doc)
+        instance = boolq_task.process_doc(doc)
 
         assert isinstance(instance, Instance)
         assert "This is a test passage." in instance.question
@@ -60,7 +60,7 @@ class TestBoolQTask:
             "label": False,
         }
 
-        instance = boolq_task._process_doc(doc)
+        instance = boolq_task.process_doc(doc)
 
         assert instance.gold_answer == "B"  # no = B
         assert instance.metadata["gold_idx"] == 1
@@ -82,7 +82,7 @@ class TestBoolQTask:
         """Test BoolQ config."""
         config = _boolq_config()
         assert config.name == "boolq"
-        assert config.hf_dataset == "super_glue"
+        assert config.data_source.path == "super_glue"
 
 
 # =============================================================================
@@ -111,7 +111,7 @@ class TestCSQATask:
             },
         }
 
-        instance = csqa_task._process_doc(doc)
+        instance = csqa_task.process_doc(doc)
 
         assert isinstance(instance, Instance)
         assert instance.question == "Where would you find a dog?"
@@ -137,7 +137,7 @@ class TestCSQATask:
         """Test CSQA config."""
         config = _csqa_config()
         assert config.name == "csqa"
-        assert config.hf_dataset == "commonsense_qa"
+        assert config.data_source.path == "commonsense_qa"
 
 
 # =============================================================================
@@ -166,7 +166,7 @@ class TestOpenBookQATask:
             },
         }
 
-        instance = openbookqa_task._process_doc(doc)
+        instance = openbookqa_task.process_doc(doc)
 
         assert isinstance(instance, Instance)
         assert instance.question == "What happens when ice melts?"
@@ -178,7 +178,7 @@ class TestOpenBookQATask:
         """Test OpenBookQA config."""
         config = _openbookqa_config()
         assert config.name == "openbookqa"
-        assert config.hf_dataset == "openbookqa"
+        assert config.data_source.path == "openbookqa"
 
 
 # =============================================================================
@@ -204,7 +204,7 @@ class TestPIQATask:
             "label": 0,
         }
 
-        instance = piqa_task._process_doc(doc, index=0)
+        instance = piqa_task.process_doc(doc, index=0)
 
         assert isinstance(instance, Instance)
         assert instance.question == "To make coffee"
@@ -221,7 +221,7 @@ class TestPIQATask:
             "label": 1,
         }
 
-        instance = piqa_task._process_doc(doc, index=0)
+        instance = piqa_task.process_doc(doc, index=0)
 
         assert instance.gold_answer == "B"  # label 1 = B
         assert instance.metadata["gold_idx"] == 1
@@ -230,7 +230,7 @@ class TestPIQATask:
         """Test PIQA config."""
         config = _piqa_config()
         assert config.name == "piqa"
-        assert config.hf_dataset == "piqa"
+        assert config.data_source.path == "piqa"
 
 
 # =============================================================================
@@ -258,7 +258,7 @@ class TestSocialIQATask:
             "label": "2",  # 1-indexed, so 2 = B
         }
 
-        instance = socialiqa_task._process_doc(doc, index=0)
+        instance = socialiqa_task.process_doc(doc, index=0)
 
         assert isinstance(instance, Instance)
         assert "Alex helped their friend move." in instance.question
@@ -278,7 +278,7 @@ class TestSocialIQATask:
             "label": "1",
         }
 
-        instance = socialiqa_task._process_doc(doc, index=0)
+        instance = socialiqa_task.process_doc(doc, index=0)
 
         assert instance.gold_answer == "A"
         assert instance.metadata["gold_idx"] == 0
@@ -287,7 +287,7 @@ class TestSocialIQATask:
         """Test SocialIQA config."""
         config = _socialiqa_config()
         assert config.name == "socialiqa"
-        assert config.hf_dataset == "social_i_qa"
+        assert config.data_source.path == "social_i_qa"
 
 
 # =============================================================================
@@ -313,7 +313,7 @@ class TestWinoGrandeTask:
             "answer": "1",  # 1-indexed
         }
 
-        instance = winogrande_task._process_doc(doc, index=0)
+        instance = winogrande_task.process_doc(doc, index=0)
 
         assert isinstance(instance, Instance)
         assert "___" in instance.question  # underscore replaced with ___
@@ -330,7 +330,7 @@ class TestWinoGrandeTask:
             "answer": "1",  # trophy is too big
         }
 
-        instance = winogrande_task._process_doc(doc, index=0)
+        instance = winogrande_task.process_doc(doc, index=0)
 
         assert instance.gold_answer == "A"
 
@@ -350,8 +350,8 @@ class TestWinoGrandeTask:
         """Test WinoGrande config."""
         config = _winogrande_config()
         assert config.name == "winogrande"
-        assert config.hf_dataset == "winogrande"
-        assert config.hf_subsets == ("winogrande_xl",)
+        assert config.data_source.path == "winogrande"
+        assert config.data_source.subset == "winogrande_xl"
 
 
 # =============================================================================

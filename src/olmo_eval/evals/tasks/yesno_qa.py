@@ -3,8 +3,6 @@
 from collections.abc import Iterator
 from typing import Any
 
-from datasets import load_dataset
-
 from olmo_eval.core import (
     AccuracyMetric,
     Instance,
@@ -14,6 +12,7 @@ from olmo_eval.core import (
     MultipleChoiceScorer,
     RequestType,
 )
+from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.extract import extract_mcqa_answer
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
@@ -33,27 +32,33 @@ class QasperYesNoTask(Task):
     It consists of 5,049 questions over 1,585 Natural Language Processing papers.
     """
 
-    hf_path: str = "allenai/qasper-yesno"
+    default_hf_path: str = "allenai/qasper-yesno"
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the train split (default for this dataset)."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                split="train",
-                trust_remote_code=True,
-            )
-            for doc in dataset:
-                self._instances_cache.append(self._process_doc(doc))
+            loader = DataLoader()
+            source = self._get_source_for_split("train")
+            for doc in loader.load(source):
+                self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any]) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any]) -> Instance:
         """Convert a dataset document to an Instance."""
         choices = ("Yes", "No")
         # Join evidence passages
@@ -96,7 +101,7 @@ class QasperYesNoTask(Task):
 def _qasper_yesno_config() -> TaskConfig:
     return TaskConfig(
         name="qasper_yesno",
-        hf_dataset="allenai/qasper-yesno",
+        data_source=DataSource(path="allenai/qasper-yesno"),
         formatter=MultipleChoiceFormatter(
             template="{question}\n\nAnswer:",
         ),
@@ -128,27 +133,33 @@ class SciriffYesNoTask(Task):
     covering five essential scientific literature understanding capabilities.
     """
 
-    hf_path: str = "allenai/sciriff-yesno"
+    default_hf_path: str = "allenai/sciriff-yesno"
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the train split (default for this dataset)."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                split="train",
-                trust_remote_code=True,
-            )
-            for doc in dataset:
-                self._instances_cache.append(self._process_doc(doc))
+            loader = DataLoader()
+            source = self._get_source_for_split("train")
+            for doc in loader.load(source):
+                self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any]) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any]) -> Instance:
         """Convert a dataset document to an Instance."""
         choices = ("Yes", "No")
         # gold_idx: 0 = Yes, 1 = No
@@ -189,7 +200,7 @@ class SciriffYesNoTask(Task):
 def _sciriff_yesno_config() -> TaskConfig:
     return TaskConfig(
         name="sciriff_yesno",
-        hf_dataset="allenai/sciriff-yesno",
+        data_source=DataSource(path="allenai/sciriff-yesno"),
         formatter=MultipleChoiceFormatter(
             template="{question}\n\nAnswer:",
         ),

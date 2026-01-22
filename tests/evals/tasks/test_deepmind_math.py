@@ -148,7 +148,7 @@ class TestDeepMindMathTask:
             "answer": "2",
         }
 
-        instance = algebra_task._process_doc(doc, index=0)
+        instance = algebra_task.process_doc(doc, index=0)
 
         assert isinstance(instance, Instance)
         assert instance.question == "Solve 2*x = 4."
@@ -163,7 +163,7 @@ class TestDeepMindMathTask:
             "answer": "b'1\\n'",
         }
 
-        instance = algebra_task._process_doc(doc, index=0)
+        instance = algebra_task.process_doc(doc, index=0)
 
         assert instance.question == "Solve x = 1."
         assert instance.gold_answer == "1"
@@ -224,8 +224,8 @@ class TestDeepMindMathTask:
         config = _make_deepmind_math_config("algebra__linear_1d")
 
         assert config.name == "deepmind_math_algebra__linear_1d"
-        assert config.hf_dataset == "deepmind/math_dataset"
-        assert config.hf_subsets == ("algebra__linear_1d",)
+        assert config.data_source.path == "deepmind/math_dataset"
+        assert config.data_source.subset == "algebra__linear_1d"
 
 
 # =============================================================================
@@ -271,7 +271,7 @@ class TestDeepMindMathRegistration:
     def test_task_has_correct_hf_path(self):
         """Test that tasks have correct HuggingFace path."""
         task = get_task("deepmind_math_numbers__is_prime")
-        assert task.hf_path == "deepmind/math_dataset"
+        assert task.default_hf_path == "deepmind/math_dataset"
 
 
 # =============================================================================

@@ -3,8 +3,6 @@
 from collections.abc import Iterator
 from typing import Any
 
-from datasets import load_dataset
-
 from olmo_eval.core import (
     AccuracyMetric,
     Instance,
@@ -14,6 +12,7 @@ from olmo_eval.core import (
     MultipleChoiceScorer,
     RequestType,
 )
+from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.extract import extract_mcqa_answer
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
@@ -25,29 +24,35 @@ from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 class BoolQTask(Task):
     """BoolQ yes/no question answering task."""
 
-    hf_path: str = "super_glue"
-    hf_subset: str = "boolq"
+    default_hf_path: str = "super_glue"
+    default_subset: str = "boolq"
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the validation split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                name=self.hf_subset,
-                split="validation",
-                trust_remote_code=True,
-            )
-            for doc in dataset:
-                self._instances_cache.append(self._process_doc(doc))
+            loader = DataLoader()
+            source = self._get_source_for_split("validation")
+            for doc in loader.load(source):
+                self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any]) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                subset=self.default_subset,
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any]) -> Instance:
         """Convert a dataset document to an Instance."""
         choices = ("yes", "no")
         # BoolQ label: 1 = yes (True), 0 = no (False)
@@ -89,8 +94,7 @@ class BoolQTask(Task):
 def _boolq_config() -> TaskConfig:
     return TaskConfig(
         name="boolq",
-        hf_dataset="super_glue",
-        hf_subsets=("boolq",),
+        data_source=DataSource(path="super_glue", subset="boolq"),
         formatter=MultipleChoiceFormatter(
             template="Question: {question}\n\nAnswer:",
         ),
@@ -114,27 +118,33 @@ class BoolQ(BoolQTask):
 class CSQATask(Task):
     """CommonsenseQA multiple choice task."""
 
-    hf_path: str = "commonsense_qa"
+    default_hf_path: str = "commonsense_qa"
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the validation split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                split="validation",
-                trust_remote_code=True,
-            )
-            for doc in dataset:
-                self._instances_cache.append(self._process_doc(doc))
+            loader = DataLoader()
+            source = self._get_source_for_split("validation")
+            for doc in loader.load(source):
+                self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any]) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any]) -> Instance:
         """Convert a dataset document to an Instance."""
         choices = tuple(doc["choices"]["text"])
         gold_idx = ["A", "B", "C", "D", "E"].index(doc["answerKey"])
@@ -174,7 +184,7 @@ class CSQATask(Task):
 def _csqa_config() -> TaskConfig:
     return TaskConfig(
         name="csqa",
-        hf_dataset="commonsense_qa",
+        data_source=DataSource(path="commonsense_qa"),
         formatter=MultipleChoiceFormatter(
             template="Question: {question}\n\nAnswer:",
         ),
@@ -198,29 +208,35 @@ class CSQA(CSQATask):
 class OpenBookQATask(Task):
     """OpenBookQA multiple choice task."""
 
-    hf_path: str = "openbookqa"
-    hf_subset: str = "main"
+    default_hf_path: str = "openbookqa"
+    default_subset: str = "main"
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the test split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                name=self.hf_subset,
-                split="test",
-                trust_remote_code=True,
-            )
-            for doc in dataset:
-                self._instances_cache.append(self._process_doc(doc))
+            loader = DataLoader()
+            source = self._get_source_for_split("test")
+            for doc in loader.load(source):
+                self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any]) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                subset=self.default_subset,
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any]) -> Instance:
         """Convert a dataset document to an Instance."""
         choices = tuple(doc["choices"]["text"])
         gold_idx = ["A", "B", "C", "D"].index(doc["answerKey"].strip())
@@ -259,8 +275,7 @@ class OpenBookQATask(Task):
 def _openbookqa_config() -> TaskConfig:
     return TaskConfig(
         name="openbookqa",
-        hf_dataset="openbookqa",
-        hf_subsets=("main",),
+        data_source=DataSource(path="openbookqa", subset="main"),
         formatter=MultipleChoiceFormatter(
             template="Question: {question}\n\nAnswer:",
         ),
@@ -284,27 +299,33 @@ class OpenBookQA(OpenBookQATask):
 class PIQATask(Task):
     """PIQA (Physical Interaction Question Answering) task."""
 
-    hf_path: str = "piqa"
+    default_hf_path: str = "piqa"
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the validation split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                split="validation",
-                trust_remote_code=True,
-            )
-            for idx, doc in enumerate(dataset):
-                self._instances_cache.append(self._process_doc(doc, idx))
+            loader = DataLoader()
+            source = self._get_source_for_split("validation")
+            for idx, doc in enumerate(loader.load(source)):
+                self._instances_cache.append(self.process_doc(doc, idx))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any], index: int) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any], index: int) -> Instance:
         """Convert a dataset document to an Instance."""
         choices = (doc["sol1"], doc["sol2"])
         gold_idx = doc["label"]
@@ -344,7 +365,7 @@ class PIQATask(Task):
 def _piqa_config() -> TaskConfig:
     return TaskConfig(
         name="piqa",
-        hf_dataset="piqa",
+        data_source=DataSource(path="piqa"),
         formatter=MultipleChoiceFormatter(
             template="Goal: {question}\n\nAnswer:",
         ),
@@ -368,27 +389,33 @@ class PIQA(PIQATask):
 class SocialIQATask(Task):
     """SocialIQA (Social Interaction Question Answering) task."""
 
-    hf_path: str = "social_i_qa"
+    default_hf_path: str = "social_i_qa"
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the validation split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                split="validation",
-                trust_remote_code=True,
-            )
-            for idx, doc in enumerate(dataset):
-                self._instances_cache.append(self._process_doc(doc, idx))
+            loader = DataLoader()
+            source = self._get_source_for_split("validation")
+            for idx, doc in enumerate(loader.load(source)):
+                self._instances_cache.append(self.process_doc(doc, idx))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any], index: int) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any], index: int) -> Instance:
         """Convert a dataset document to an Instance."""
         choices = (doc["answerA"], doc["answerB"], doc["answerC"])
         # Label is 1-indexed in the dataset
@@ -429,7 +456,7 @@ class SocialIQATask(Task):
 def _socialiqa_config() -> TaskConfig:
     return TaskConfig(
         name="socialiqa",
-        hf_dataset="social_i_qa",
+        data_source=DataSource(path="social_i_qa"),
         formatter=MultipleChoiceFormatter(
             template="Question: {question}\n\nAnswer:",
         ),
@@ -453,29 +480,35 @@ class SocialIQA(SocialIQATask):
 class WinoGrandeTask(Task):
     """WinoGrande coreference resolution task."""
 
-    hf_path: str = "winogrande"
-    hf_subset: str = "winogrande_xl"
+    default_hf_path: str = "winogrande"
+    default_subset: str = "winogrande_xl"
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the validation split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                name=self.hf_subset,
-                split="validation",
-                trust_remote_code=True,
-            )
-            for idx, doc in enumerate(dataset):
-                self._instances_cache.append(self._process_doc(doc, idx))
+            loader = DataLoader()
+            source = self._get_source_for_split("validation")
+            for idx, doc in enumerate(loader.load(source)):
+                self._instances_cache.append(self.process_doc(doc, idx))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any], index: int) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                subset=self.default_subset,
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any], index: int) -> Instance:
         """Convert a dataset document to an Instance."""
         choices = (doc["option1"], doc["option2"])
         # Answer is 1-indexed ("1" or "2")
@@ -520,8 +553,7 @@ class WinoGrandeTask(Task):
 def _winogrande_config() -> TaskConfig:
     return TaskConfig(
         name="winogrande",
-        hf_dataset="winogrande",
-        hf_subsets=("winogrande_xl",),
+        data_source=DataSource(path="winogrande", subset="winogrande_xl"),
         formatter=MultipleChoiceFormatter(
             template="Fill in the blank: {question}\n\nAnswer:",
         ),

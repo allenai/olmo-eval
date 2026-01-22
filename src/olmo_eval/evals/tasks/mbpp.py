@@ -3,8 +3,6 @@
 from collections.abc import Iterator
 from typing import Any
 
-from datasets import load_dataset
-
 from olmo_eval.core import (
     BitsPerByteScorer,
     BPBMetric,
@@ -15,6 +13,7 @@ from olmo_eval.core import (
     RequestType,
     SamplingParams,
 )
+from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import MBPP_STOP_SEQUENCES
 from olmo_eval.evals.extract import extract_code
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register, register_variant
@@ -23,27 +22,33 @@ from olmo_eval.evals.tasks.core import Task, TaskConfig, register, register_vari
 class MBPPTask(Task):
     """MBPP (Mostly Basic Python Problems) task."""
 
-    hf_path: str = "google-research-datasets/mbpp"
+    default_hf_path: str = "google-research-datasets/mbpp"
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the test split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                split="test",
-                trust_remote_code=True,
-            )
-            for doc in dataset:
-                self._instances_cache.append(self._process_doc(doc))
+            loader = DataLoader()
+            source = self._get_source_for_split("test")
+            for doc in loader.load(source):
+                self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any]) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any]) -> Instance:
         """Convert a dataset document to an Instance."""
         # Build prompt from text and function signature
         question = doc["text"].strip() + "\n" + doc["code"].split(":")[0] + ":"
@@ -85,27 +90,33 @@ class MBPPTask(Task):
 class MBPPPlusTask(Task):
     """MBPP+ task with additional test cases."""
 
-    hf_path: str = "evalplus/mbppplus"
+    default_hf_path: str = "evalplus/mbppplus"
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the test split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                split="test",
-                trust_remote_code=True,
-            )
-            for doc in dataset:
-                self._instances_cache.append(self._process_doc(doc))
+            loader = DataLoader()
+            source = self._get_source_for_split("test")
+            for doc in loader.load(source):
+                self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any]) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any]) -> Instance:
         """Convert a dataset document to an Instance."""
         # Build prompt from text and function signature
         question = doc["prompt"].strip() + doc["code"].split(":")[0] + ":"
@@ -152,7 +163,7 @@ class MBPPPlusTask(Task):
 def _mbpp_config() -> TaskConfig:
     return TaskConfig(
         name="mbpp",
-        hf_dataset="google-research-datasets/mbpp",
+        data_source=DataSource(path="google-research-datasets/mbpp"),
         scorers=(),
         metrics=(),
         sampling_params=SamplingParams(
@@ -166,7 +177,7 @@ def _mbpp_config() -> TaskConfig:
 def _mbpp_plus_config() -> TaskConfig:
     return TaskConfig(
         name="mbpp_plus",
-        hf_dataset="evalplus/mbppplus",
+        data_source=DataSource(path="evalplus/mbppplus"),
         scorers=(),
         metrics=(),
         sampling_params=SamplingParams(
@@ -180,7 +191,7 @@ def _mbpp_plus_config() -> TaskConfig:
 def _mbppplus_config() -> TaskConfig:
     return TaskConfig(
         name="mbppplus",
-        hf_dataset="evalplus/mbppplus",
+        data_source=DataSource(path="evalplus/mbppplus"),
         scorers=(),
         metrics=(),
         sampling_params=SamplingParams(
@@ -199,7 +210,7 @@ def _mbppplus_config() -> TaskConfig:
 def _mbpp_bpb_config() -> TaskConfig:
     return TaskConfig(
         name="mbpp:bpb",
-        hf_dataset="google-research-datasets/mbpp",
+        data_source=DataSource(path="google-research-datasets/mbpp"),
         formatter=PPLFormatter(),
         scorers=(BitsPerByteScorer(),),
         metrics=(BPBMetric(),),
@@ -210,7 +221,7 @@ def _mbpp_bpb_config() -> TaskConfig:
 def _mbpp_plus_bpb_config() -> TaskConfig:
     return TaskConfig(
         name="mbpp_plus:bpb",
-        hf_dataset="evalplus/mbppplus",
+        data_source=DataSource(path="evalplus/mbppplus"),
         formatter=PPLFormatter(),
         scorers=(BitsPerByteScorer(),),
         metrics=(BPBMetric(),),
@@ -221,7 +232,7 @@ def _mbpp_plus_bpb_config() -> TaskConfig:
 def _mbppplus_bpb_config() -> TaskConfig:
     return TaskConfig(
         name="mbppplus:bpb",
-        hf_dataset="evalplus/mbppplus",
+        data_source=DataSource(path="evalplus/mbppplus"),
         formatter=PPLFormatter(),
         scorers=(BitsPerByteScorer(),),
         metrics=(BPBMetric(),),

@@ -12,7 +12,6 @@ from typing import Any
 
 import numpy as np
 import sympy
-from datasets import load_dataset
 
 from olmo_eval.core import (
     AccuracyMetric,
@@ -22,6 +21,7 @@ from olmo_eval.core import (
     LMRequest,
     RequestType,
 )
+from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.benchmarks import DEEPMIND_MATH_CATEGORIES
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
@@ -113,29 +113,35 @@ def _compare_math_answers(gold: str, prediction: str) -> bool:
 class DeepMindMathTask(Task):
     """Base class for DeepMind Mathematics dataset tasks."""
 
-    hf_path: str = "deepmind/math_dataset"
+    default_hf_path: str = "deepmind/math_dataset"
 
     def __init__(self, config: TaskConfig, category: str) -> None:
         super().__init__(config)
         self.category = category
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the test split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                name=self.category,
-                split="test",
-                trust_remote_code=True,
-            )
-            for idx, doc in enumerate(dataset):
-                self._instances_cache.append(self._process_doc(doc, idx))
+            loader = DataLoader()
+            source = self._get_source_for_split("test")
+            for idx, doc in enumerate(loader.load(source)):
+                self._instances_cache.append(self.process_doc(doc, idx))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any], index: int) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split).with_subset(self.category)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                subset=self.category,
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any], index: int) -> Instance:
         """Convert a dataset document to an Instance."""
         question = _clean_deepmind_string(doc["question"])
         answer = _clean_deepmind_string(doc["answer"])
@@ -186,8 +192,7 @@ def _make_deepmind_math_config(category: str) -> TaskConfig:
     """Create a DeepMind Math task config for a specific category."""
     return TaskConfig(
         name=f"deepmind_math_{category}",
-        hf_dataset="deepmind/math_dataset",
-        hf_subsets=(category,),
+        data_source=DataSource(path="deepmind/math_dataset", subset=category),
         scorers=(ExactMatchScorer(case_sensitive=False),),
         metrics=(AccuracyMetric(scorer=ExactMatchScorer),),
     )

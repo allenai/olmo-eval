@@ -4,8 +4,6 @@ import json
 from collections.abc import Iterator
 from typing import Any
 
-from datasets import load_dataset
-
 from olmo_eval.core import (
     AccuracyMetric,
     ExactMatchScorer,
@@ -14,9 +12,9 @@ from olmo_eval.core import (
     LMRequest,
     RequestType,
 )
+from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
-# Template mappings for PopQA questions
 POPQA_TEMPLATES = {
     22: "What is {}'s occupation?",
     218: "In what city was {} born?",
@@ -48,7 +46,6 @@ class PopQAScorer(ExactMatchScorer):
         pred = str(output.extracted_answer).strip()
         aliases = instance.metadata.get("aliases", [])
 
-        # Check if any alias appears in the prediction
         for alias in aliases:
             if alias in pred or alias.lower() in pred.lower() or alias.capitalize() in pred:
                 return 1.0
@@ -72,29 +69,32 @@ class PopQATask(Task):
     }
     """
 
-    hf_path: str = "akariasai/PopQA"
-
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the test split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                split="test",
-                trust_remote_code=True,
-            )
-            for doc in dataset:
-                self._instances_cache.append(self._process_doc(doc))
+            loader = DataLoader()
+            source = self._get_source_for_split("test")
+            for doc in loader.load(source):
+                self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any]) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(
+                path="akariasai/PopQA",
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any]) -> Instance:
         """Convert a dataset document to an Instance."""
-        # Parse aliases from JSON string
         try:
             aliases = json.loads(doc["possible_answers"])
         except (json.JSONDecodeError, TypeError):
@@ -125,7 +125,6 @@ class PopQATask(Task):
     def extract_answer(self, output: LMOutput) -> str | None:
         """Extract the answer from model output."""
         if output.text:
-            # Take first line, strip whitespace
             answer = output.text.split("\n")[0].strip()
             return answer
         return None
@@ -134,7 +133,7 @@ class PopQATask(Task):
 def _popqa_config() -> TaskConfig:
     return TaskConfig(
         name="popqa",
-        hf_dataset="akariasai/PopQA",
+        data_source=DataSource(path="akariasai/PopQA"),
         scorers=(PopQAScorer(),),
         metrics=(AccuracyMetric(scorer=ExactMatchScorer),),
     )

@@ -13,8 +13,6 @@ Dataset: allenai/multilingual_mbpp
 from collections.abc import Iterator
 from typing import Any
 
-from datasets import load_dataset
-
 from olmo_eval.core import (
     BitsPerByteScorer,
     BPBMetric,
@@ -25,6 +23,7 @@ from olmo_eval.core import (
     RequestType,
     SamplingParams,
 )
+from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
 # Supported languages in multilingual MBPP
@@ -56,27 +55,34 @@ class MultilingualMBPPTask(Task):
     The v2fix version normalizes Windows line endings (\\r\\n -> \\n).
     """
 
-    hf_path: str = "allenai/multilingual_mbpp"
+    default_hf_path: str = "allenai/multilingual_mbpp"
     normalize_line_endings: bool = False  # Set True for v2fix
 
     def __init__(self, config: TaskConfig, language: str) -> None:
         super().__init__(config)
         self.language = language
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the test split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                name=self.language,
-                split="test",
-            )
-            for doc in dataset:
-                self._instances_cache.append(self._process_doc(doc))
+            loader = DataLoader()
+            source = self._get_source_for_split("test")
+            for doc in loader.load(source):
+                self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
+
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split).with_subset(self.language)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                subset=self.language,
+                split=split,
+            )
 
     def _normalize(self, text: str) -> str:
         """Normalize line endings if v2fix mode."""
@@ -84,7 +90,7 @@ class MultilingualMBPPTask(Task):
             return text.replace("\r\n", "\n")
         return text
 
-    def _process_doc(self, doc: dict[str, Any]) -> Instance:
+    def process_doc(self, doc: dict[str, Any]) -> Instance:
         """Convert a dataset document to an Instance."""
         text = self._normalize(doc["text"]).strip()
         code = self._normalize(doc["code"]).strip()
@@ -140,8 +146,7 @@ def _make_mt_mbpp_config(language: str) -> TaskConfig:
     """Create config for mt_mbpp_{language} task."""
     return TaskConfig(
         name=f"mt_mbpp_{language}",
-        hf_dataset="allenai/multilingual_mbpp",
-        hf_subsets=(language,),
+        data_source=DataSource(path="allenai/multilingual_mbpp", subset=language),
         scorers=(),
         metrics=(),
         sampling_params=SamplingParams(
@@ -156,8 +161,7 @@ def _make_mt_mbpp_v2fix_config(language: str) -> TaskConfig:
     """Create config for mt_mbpp_v2fix_{language} task."""
     return TaskConfig(
         name=f"mt_mbpp_v2fix_{language}",
-        hf_dataset="allenai/multilingual_mbpp",
-        hf_subsets=(language,),
+        data_source=DataSource(path="allenai/multilingual_mbpp", subset=language),
         scorers=(),
         metrics=(),
         sampling_params=SamplingParams(
@@ -172,8 +176,7 @@ def _make_mt_mbpp_bpb_config(language: str) -> TaskConfig:
     """Create config for mt_mbpp_{language}:bpb task."""
     return TaskConfig(
         name=f"mt_mbpp_{language}:bpb",
-        hf_dataset="allenai/multilingual_mbpp",
-        hf_subsets=(language,),
+        data_source=DataSource(path="allenai/multilingual_mbpp", subset=language),
         formatter=PPLFormatter(),
         scorers=(BitsPerByteScorer(),),
         metrics=(BPBMetric(),),
@@ -185,8 +188,7 @@ def _make_mt_mbpp_v2fix_bpb_config(language: str) -> TaskConfig:
     """Create config for mt_mbpp_v2fix_{language}:bpb task."""
     return TaskConfig(
         name=f"mt_mbpp_v2fix_{language}:bpb",
-        hf_dataset="allenai/multilingual_mbpp",
-        hf_subsets=(language,),
+        data_source=DataSource(path="allenai/multilingual_mbpp", subset=language),
         formatter=PPLFormatter(),
         scorers=(BitsPerByteScorer(),),
         metrics=(BPBMetric(),),

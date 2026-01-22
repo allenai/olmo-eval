@@ -4,8 +4,6 @@ import re
 from collections.abc import Iterator
 from typing import Any
 
-from datasets import load_dataset
-
 from olmo_eval.core import (
     AccuracyMetric,
     ExactMatchScorer,
@@ -14,6 +12,7 @@ from olmo_eval.core import (
     LMRequest,
     RequestType,
 )
+from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.benchmarks import BBH_TASKS
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
@@ -53,29 +52,35 @@ BBH_ANSWER_REGEX: dict[str, str] = {
 class BBHTask(Task):
     """Base class for BIG-Bench Hard tasks."""
 
-    hf_path: str = "lukaemon/bbh"
+    default_hf_path: str = "lukaemon/bbh"
 
     def __init__(self, config: TaskConfig, subset: str) -> None:
         super().__init__(config)
         self.subset = subset
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the test split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                name=self.subset,
-                split="test",
-                trust_remote_code=True,
-            )
-            for idx, doc in enumerate(dataset):
-                self._instances_cache.append(self._process_doc(doc, idx))
+            loader = DataLoader()
+            source = self._get_source_for_split("test")
+            for idx, doc in enumerate(loader.load(source)):
+                self._instances_cache.append(self.process_doc(doc, idx))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any], index: int) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split).with_subset(self.subset)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                subset=self.subset,
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any], index: int) -> Instance:
         """Convert a dataset document to an Instance."""
         # Extract the answer from the target field
         # Format: "Let's think step by step. ... So the answer is X."
@@ -127,8 +132,7 @@ def _make_bbh_config(subset: str) -> TaskConfig:
     """Create a BBH task config for a specific subset."""
     return TaskConfig(
         name=f"bbh_{subset}",
-        hf_dataset="lukaemon/bbh",
-        hf_subsets=(subset,),
+        data_source=DataSource(path="lukaemon/bbh", subset=subset),
         scorers=(ExactMatchScorer(case_sensitive=False),),
         metrics=(AccuracyMetric(scorer=ExactMatchScorer),),
     )

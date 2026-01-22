@@ -16,8 +16,6 @@ import re
 from collections.abc import Iterator
 from typing import Any
 
-from datasets import load_dataset
-
 from olmo_eval.core import (
     AccuracyMetric,
     ExactMatchScorer,
@@ -26,6 +24,7 @@ from olmo_eval.core import (
     LMRequest,
     RequestType,
 )
+from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
 # =============================================================================
@@ -157,30 +156,36 @@ class OmegaScorer(ExactMatchScorer):
 class OmegaTask(Task):
     """Base class for OMEGA tasks."""
 
-    hf_path: str = ""  # Set by subclasses
-    hf_subset: str = ""  # Set by subclasses
+    default_hf_path: str = ""  # Set by subclasses
+    default_subset: str = ""  # Set by subclasses
     split: str = "test"  # Set by subclasses
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the specified split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                name=self.hf_subset,
-                split=self.split,
-                trust_remote_code=True,
-            )
-            for idx, doc in enumerate(dataset):
-                self._instances_cache.append(self._process_doc(doc, idx))
+            loader = DataLoader()
+            source = self._get_source_for_split(self.split)
+            for idx, doc in enumerate(loader.load(source)):
+                self._instances_cache.append(self.process_doc(doc, idx))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any], index: int) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                subset=self.default_subset if self.default_subset else None,
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any], index: int) -> Instance:
         """Convert a dataset document to an Instance."""
         # Extract question from messages format
         prompt = doc["messages"][0]["content"]
@@ -225,28 +230,14 @@ class OmegaTask(Task):
 class Omega500Task(OmegaTask):
     """OMEGA-500: A subset of 500 problems from OMEGA."""
 
-    hf_path: str = "saumyamalik/omega-500"
+    default_hf_path: str = "saumyamalik/omega-500"
     split: str = "train"
-
-    @property
-    def instances(self) -> Iterator[Instance]:
-        """Yield instances from the train split."""
-        if self._instances_cache is None:
-            self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                split=self.split,
-                trust_remote_code=True,
-            )
-            for idx, doc in enumerate(dataset):
-                self._instances_cache.append(self._process_doc(doc, idx))
-        yield from self._instances_cache
 
 
 def _omega_500_config() -> TaskConfig:
     return TaskConfig(
         name="omega_500",
-        hf_dataset="saumyamalik/omega-500",
+        data_source=DataSource(path="saumyamalik/omega-500"),
         scorers=(OmegaScorer(),),
         metrics=(AccuracyMetric(scorer=ExactMatchScorer),),
     )
@@ -269,8 +260,7 @@ def _make_omega_config(broad_cate: str, sub_cate: str, split: str) -> TaskConfig
     task_name = f"omega_{broad_cate}_{sub_cate}_{split}"
     return TaskConfig(
         name=task_name,
-        hf_dataset=f"allenai/omega-{broad_cate}",
-        hf_subsets=(sub_cate,),
+        data_source=DataSource(path=f"allenai/omega-{broad_cate}", subset=sub_cate),
         scorers=(OmegaScorer(),),
         metrics=(AccuracyMetric(scorer=ExactMatchScorer),),
     )
@@ -280,8 +270,8 @@ def _create_omega_task_class(broad_cate: str, sub_cate: str, split: str) -> type
     """Create a task class for a specific OMEGA configuration."""
 
     class _OmegaSubTask(OmegaTask):
-        hf_path = f"allenai/omega-{broad_cate}"
-        hf_subset = sub_cate
+        default_hf_path = f"allenai/omega-{broad_cate}"
+        default_subset = sub_cate
 
         def __init__(self, config: TaskConfig) -> None:
             super().__init__(config)

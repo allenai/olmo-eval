@@ -83,7 +83,7 @@ class TestARCTaskProcessDoc:
             },
         }
 
-        instance = arc_task._process_doc(doc)
+        instance = arc_task.process_doc(doc)
 
         assert isinstance(instance, Instance)
         assert instance.question == "What is the capital of France?"
@@ -105,7 +105,7 @@ class TestARCTaskProcessDoc:
             },
         }
 
-        instance = arc_task._process_doc(doc)
+        instance = arc_task.process_doc(doc)
 
         assert instance.gold_answer == "C"  # Converted from "3"
         assert instance.metadata["gold_idx"] == 2
@@ -123,7 +123,7 @@ class TestARCTaskProcessDoc:
             },
         }
 
-        instance = arc_task._process_doc(doc)
+        instance = arc_task.process_doc(doc)
 
         assert len(instance.choices) == 3
         assert instance.gold_answer == "A"
@@ -142,11 +142,12 @@ class TestARCTaskFormatRequest:
     @pytest.fixture
     def arc_task_no_formatter(self):
         """Create an ARC task without formatter (uses default behavior)."""
+        from olmo_eval.data import DataSource
+
         config = TaskConfig(
             name="arc_no_formatter",
-            hf_dataset="allenai/ai2_arc",
-            hf_subsets=("ARC-Challenge",),
-            formatter=None,  # No formatter, use default
+            data_source=DataSource(path="allenai/ai2_arc", subset="ARC-Challenge"),
+            formatter=None,
         )
         return ARCChallenge(config)
 
@@ -233,8 +234,9 @@ class TestARCConfigs:
         config = _arc_challenge_config()
 
         assert config.name == "arc_challenge"
-        assert config.hf_dataset == "allenai/ai2_arc"
-        assert config.hf_subsets == ("ARC-Challenge",)
+        assert config.data_source is not None
+        assert config.data_source.path == "allenai/ai2_arc"
+        assert config.data_source.subset == "ARC-Challenge"
         assert config.formatter is not None
         assert len(config.scorers) == 1
         assert len(config.metrics) == 1
@@ -244,8 +246,9 @@ class TestARCConfigs:
         config = _arc_easy_config()
 
         assert config.name == "arc_easy"
-        assert config.hf_dataset == "allenai/ai2_arc"
-        assert config.hf_subsets == ("ARC-Easy",)
+        assert config.data_source is not None
+        assert config.data_source.path == "allenai/ai2_arc"
+        assert config.data_source.subset == "ARC-Easy"
         assert config.formatter is not None
         assert len(config.scorers) == 1
         assert len(config.metrics) == 1
@@ -266,13 +269,21 @@ class TestARCTaskClasses:
         task = ARCEasy(config)
         assert task.dataset_name == "ARC-Easy"
 
-    def test_arc_challenge_hf_path(self):
-        """Test ARCChallenge has correct HF path."""
-        assert ARCChallenge.hf_path == "allenai/ai2_arc"
+    def test_arc_challenge_data_source(self):
+        """Test ARCChallenge resolves correct data source."""
+        config = _arc_challenge_config()
+        task = ARCChallenge(config)
+        source = task._get_source_for_split("test")
+        assert source.path == "allenai/ai2_arc"
+        assert source.subset == "ARC-Challenge"
 
-    def test_arc_easy_hf_path(self):
-        """Test ARCEasy has correct HF path."""
-        assert ARCEasy.hf_path == "allenai/ai2_arc"
+    def test_arc_easy_data_source(self):
+        """Test ARCEasy resolves correct data source."""
+        config = _arc_easy_config()
+        task = ARCEasy(config)
+        source = task._get_source_for_split("test")
+        assert source.path == "allenai/ai2_arc"
+        assert source.subset == "ARC-Easy"
 
 
 class TestARCTaskRegistration:

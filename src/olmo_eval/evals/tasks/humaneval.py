@@ -3,8 +3,6 @@
 from collections.abc import Iterator
 from typing import Any
 
-from datasets import load_dataset
-
 from olmo_eval.core import (
     BitsPerByteScorer,
     BPBMetric,
@@ -15,6 +13,7 @@ from olmo_eval.core import (
     RequestType,
     SamplingParams,
 )
+from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import HUMANEVAL_STOP_SEQUENCES
 from olmo_eval.evals.extract import extract_code
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register, register_variant
@@ -23,32 +22,35 @@ from olmo_eval.evals.tasks.core import Task, TaskConfig, register, register_vari
 class HumanEvalTask(Task):
     """HumanEval code generation task."""
 
-    hf_path: str = "openai_humaneval"
+    default_hf_path: str = "openai_humaneval"
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the test split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                split="test",
-                trust_remote_code=True,
-            )
-            for doc in dataset:
-                self._instances_cache.append(self._process_doc(doc))
+            loader = DataLoader()
+            source = self._get_source_for_split("test")
+            for doc in loader.load(source):
+                self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any]) -> Instance:
-        """Convert a dataset document to an Instance."""
-        # Format prompt with code fence
-        prompt = "```python\n" + doc["prompt"]
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                split=split,
+            )
 
-        # Build test code
+    def process_doc(self, doc: dict[str, Any]) -> Instance:
+        """Convert a dataset document to an Instance."""
+        prompt = "```python\n" + doc["prompt"]
         unit_tests = doc["test"] + f"\ncheck({doc['entry_point']})"
 
         return Instance(
@@ -76,7 +78,6 @@ class HumanEvalTask(Task):
         """Extract code from model output."""
         code = extract_code(output.text)
         if code and "answer_prefix" in (output.metadata or {}):
-            # Prepend the prompt to the generated code
             return output.metadata["answer_prefix"] + code
         return code
 
@@ -84,18 +85,13 @@ class HumanEvalTask(Task):
 class HumanEvalPlusTask(HumanEvalTask):
     """HumanEval+ task with additional test cases."""
 
-    hf_path: str = "evalplus/humanevalplus"
-
-
-# =============================================================================
-# Generative Task Configs (with sampling_params)
-# =============================================================================
+    default_hf_path: str = "evalplus/humanevalplus"
 
 
 def _humaneval_config() -> TaskConfig:
     return TaskConfig(
         name="humaneval",
-        hf_dataset="openai_humaneval",
+        data_source=DataSource(path="openai_humaneval"),
         scorers=(),
         metrics=(),
         sampling_params=SamplingParams(
@@ -109,7 +105,7 @@ def _humaneval_config() -> TaskConfig:
 def _humaneval_plus_config() -> TaskConfig:
     return TaskConfig(
         name="humaneval_plus",
-        hf_dataset="evalplus/humanevalplus",
+        data_source=DataSource(path="evalplus/humanevalplus"),
         scorers=(),
         metrics=(),
         sampling_params=SamplingParams(
@@ -123,7 +119,7 @@ def _humaneval_plus_config() -> TaskConfig:
 def _codex_humaneval_config() -> TaskConfig:
     return TaskConfig(
         name="codex_humaneval",
-        hf_dataset="openai_humaneval",
+        data_source=DataSource(path="openai_humaneval"),
         scorers=(),
         metrics=(),
         sampling_params=SamplingParams(
@@ -137,7 +133,7 @@ def _codex_humaneval_config() -> TaskConfig:
 def _codex_humanevalplus_config() -> TaskConfig:
     return TaskConfig(
         name="codex_humanevalplus",
-        hf_dataset="evalplus/humanevalplus",
+        data_source=DataSource(path="evalplus/humanevalplus"),
         scorers=(),
         metrics=(),
         sampling_params=SamplingParams(
@@ -148,15 +144,10 @@ def _codex_humanevalplus_config() -> TaskConfig:
     )
 
 
-# =============================================================================
-# BPB Task Configs (no sampling_params)
-# =============================================================================
-
-
 def _humaneval_bpb_config() -> TaskConfig:
     return TaskConfig(
         name="humaneval:bpb",
-        hf_dataset="openai_humaneval",
+        data_source=DataSource(path="openai_humaneval"),
         formatter=PPLFormatter(),
         scorers=(BitsPerByteScorer(),),
         metrics=(BPBMetric(),),
@@ -167,7 +158,7 @@ def _humaneval_bpb_config() -> TaskConfig:
 def _humaneval_plus_bpb_config() -> TaskConfig:
     return TaskConfig(
         name="humaneval_plus:bpb",
-        hf_dataset="evalplus/humanevalplus",
+        data_source=DataSource(path="evalplus/humanevalplus"),
         formatter=PPLFormatter(),
         scorers=(BitsPerByteScorer(),),
         metrics=(BPBMetric(),),
@@ -178,7 +169,7 @@ def _humaneval_plus_bpb_config() -> TaskConfig:
 def _codex_humaneval_bpb_config() -> TaskConfig:
     return TaskConfig(
         name="codex_humaneval:bpb",
-        hf_dataset="openai_humaneval",
+        data_source=DataSource(path="openai_humaneval"),
         formatter=PPLFormatter(),
         scorers=(BitsPerByteScorer(),),
         metrics=(BPBMetric(),),
@@ -189,17 +180,12 @@ def _codex_humaneval_bpb_config() -> TaskConfig:
 def _codex_humanevalplus_bpb_config() -> TaskConfig:
     return TaskConfig(
         name="codex_humanevalplus:bpb",
-        hf_dataset="evalplus/humanevalplus",
+        data_source=DataSource(path="evalplus/humanevalplus"),
         formatter=PPLFormatter(),
         scorers=(BitsPerByteScorer(),),
         metrics=(BPBMetric(),),
         primary_metric=BPBMetric(),
     )
-
-
-# =============================================================================
-# Task Registrations - Generative
-# =============================================================================
 
 
 @register("humaneval", _humaneval_config)
@@ -230,11 +216,6 @@ class CodexHumanEvalPlus(HumanEvalPlusTask):
     pass
 
 
-# =============================================================================
-# Task Registrations - BPB
-# =============================================================================
-
-
 @register("humaneval:bpb", _humaneval_bpb_config)
 class HumanEvalBPB(HumanEvalTask):
     """HumanEval BPB evaluation task."""
@@ -262,10 +243,6 @@ class CodexHumanEvalPlusBPB(HumanEvalPlusTask):
 
     pass
 
-
-# =============================================================================
-# BPB Variant Registrations (for stacking with other variants like :3shot)
-# =============================================================================
 
 register_variant(
     "humaneval",

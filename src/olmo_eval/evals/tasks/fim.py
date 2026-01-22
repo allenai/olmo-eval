@@ -19,14 +19,13 @@ HuggingFace: loubnabnl/humaneval_infilling
 from collections.abc import Iterator
 from typing import Any
 
-from datasets import load_dataset
-
 from olmo_eval.core import (
     Instance,
     LMOutput,
     LMRequest,
     RequestType,
 )
+from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import FIM_CONFIGS, SANTACODER_FIM, FIMConfig
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
@@ -41,13 +40,13 @@ class HumanEvalFIMTask(Task):
     prefix and suffix.
 
     Attributes:
-        hf_path: HuggingFace dataset path.
-        hf_subset: Dataset subset name.
+        default_hf_path: HuggingFace dataset path.
+        default_subset: Dataset subset name.
         fim_config: FIM token configuration to use.
     """
 
-    hf_path: str = "loubnabnl/humaneval_infilling"
-    hf_subset: str = "HumanEval-SingleLineInfilling"
+    default_hf_path: str = "loubnabnl/humaneval_infilling"
+    default_subset: str = "HumanEval-SingleLineInfilling"
 
     def __init__(
         self,
@@ -56,24 +55,30 @@ class HumanEvalFIMTask(Task):
     ) -> None:
         super().__init__(config)
         self.fim_config = fim_config or SANTACODER_FIM
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the test split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                name=self.hf_subset,
-                split="test",
-                trust_remote_code=True,
-            )
-            for idx, doc in enumerate(dataset):
-                self._instances_cache.append(self._process_doc(doc, idx))
+            loader = DataLoader()
+            source = self._get_source_for_split("test")
+            for idx, doc in enumerate(loader.load(source)):
+                self._instances_cache.append(self.process_doc(doc, idx))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any], index: int) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                subset=self.default_subset,
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any], index: int) -> Instance:
         """Convert a dataset document to an Instance.
 
         The prompt is formatted as:
@@ -158,7 +163,7 @@ class HumanEvalFIMSingleTask(HumanEvalFIMTask):
     1k rows derived by masking single lines from 164 HumanEval problems.
     """
 
-    hf_subset: str = "HumanEval-SingleLineInfilling"
+    default_subset: str = "HumanEval-SingleLineInfilling"
 
 
 class HumanEvalFIMMultiTask(HumanEvalFIMTask):
@@ -167,7 +172,7 @@ class HumanEvalFIMMultiTask(HumanEvalFIMTask):
     5.8k rows derived by masking multiple lines from 164 HumanEval problems.
     """
 
-    hf_subset: str = "HumanEval-MultiLineInfilling"
+    default_subset: str = "HumanEval-MultiLineInfilling"
 
 
 class HumanEvalFIMRandomTask(HumanEvalFIMTask):
@@ -176,7 +181,7 @@ class HumanEvalFIMRandomTask(HumanEvalFIMTask):
     1.6k rows derived by masking random spans from 164 HumanEval problems.
     """
 
-    hf_subset: str = "HumanEval-RandomSpanInfilling"
+    default_subset: str = "HumanEval-RandomSpanInfilling"
 
 
 # =============================================================================
@@ -187,18 +192,22 @@ class HumanEvalFIMRandomTask(HumanEvalFIMTask):
 def _fim_single_config() -> TaskConfig:
     return TaskConfig(
         name="codex_humanevalfim_single",
-        hf_dataset="loubnabnl/humaneval_infilling",
-        hf_subsets=("HumanEval-SingleLineInfilling",),
-        scorers=(),  # Code execution scorer to be added
-        metrics=(),  # Pass@k metric to be added
+        data_source=DataSource(
+            path="loubnabnl/humaneval_infilling",
+            subset="HumanEval-SingleLineInfilling",
+        ),
+        scorers=(),
+        metrics=(),
     )
 
 
 def _fim_multi_config() -> TaskConfig:
     return TaskConfig(
         name="codex_humanevalfim_multi",
-        hf_dataset="loubnabnl/humaneval_infilling",
-        hf_subsets=("HumanEval-MultiLineInfilling",),
+        data_source=DataSource(
+            path="loubnabnl/humaneval_infilling",
+            subset="HumanEval-MultiLineInfilling",
+        ),
         scorers=(),
         metrics=(),
     )
@@ -207,8 +216,10 @@ def _fim_multi_config() -> TaskConfig:
 def _fim_random_config() -> TaskConfig:
     return TaskConfig(
         name="codex_humanevalfim_random",
-        hf_dataset="loubnabnl/humaneval_infilling",
-        hf_subsets=("HumanEval-RandomSpanInfilling",),
+        data_source=DataSource(
+            path="loubnabnl/humaneval_infilling",
+            subset="HumanEval-RandomSpanInfilling",
+        ),
         scorers=(),
         metrics=(),
     )

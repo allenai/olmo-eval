@@ -3,8 +3,6 @@
 from collections.abc import Iterator
 from typing import Any
 
-from datasets import load_dataset
-
 from olmo_eval.core import (
     F1Metric,
     F1Scorer,
@@ -13,31 +11,38 @@ from olmo_eval.core import (
     LMRequest,
     RequestType,
 )
+from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
 
 class DROPTask(Task):
     """DROP (Discrete Reasoning Over Paragraphs) reading comprehension task."""
 
-    hf_path: str = "EleutherAI/drop"
+    default_hf_path: str = "EleutherAI/drop"
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the validation split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                split="validation",
-                trust_remote_code=True,
-            )
-            for doc in dataset:
-                self._instances_cache.append(self._process_doc(doc))
+            loader = DataLoader()
+            source = self._get_source_for_split("validation")
+            for doc in loader.load(source):
+                self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
+
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                split=split,
+            )
 
     def _get_primary_answer(self, ans: dict[str, Any]) -> str:
         """Extract the primary answer from DROP's answer structure."""
@@ -51,7 +56,7 @@ class DROPTask(Task):
             return " ".join(str(p) for p in date_parts)
         return ""
 
-    def _process_doc(self, doc: dict[str, Any]) -> Instance:
+    def process_doc(self, doc: dict[str, Any]) -> Instance:
         """Convert a dataset document to an Instance."""
         answer = self._get_primary_answer(doc["answer"])
         question = f"Passage: {doc['passage']}\n{doc['question']}"
@@ -83,26 +88,32 @@ class DROPTask(Task):
 class CoQATask(Task):
     """CoQA (Conversational Question Answering) task."""
 
-    hf_path: str = "EleutherAI/coqa"
+    default_hf_path: str = "EleutherAI/coqa"
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the validation split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                split="validation",
-                revision="refs/convert/parquet",
-                trust_remote_code=True,
-            )
-            for doc in dataset:
+            loader = DataLoader()
+            source = self._get_source_for_split("validation")
+            for doc in loader.load(source):
                 self._instances_cache.extend(self._process_doc_to_multi(doc))
         yield from self._instances_cache
+
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                split=split,
+                revision="refs/convert/parquet",
+            )
 
     def _process_doc_to_multi(self, doc: dict[str, Any]) -> list[Instance]:
         """Convert a multi-turn document to multiple Instances."""
@@ -160,27 +171,33 @@ class CoQATask(Task):
 class SQuADTask(Task):
     """SQuAD (Stanford Question Answering Dataset) task."""
 
-    hf_path: str = "rajpurkar/squad"
+    default_hf_path: str = "rajpurkar/squad"
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the validation split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                split="validation",
-                trust_remote_code=True,
-            )
-            for doc in dataset:
-                self._instances_cache.append(self._process_doc(doc))
+            loader = DataLoader()
+            source = self._get_source_for_split("validation")
+            for doc in loader.load(source):
+                self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any]) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any]) -> Instance:
         """Convert a dataset document to an Instance."""
         answer = doc["answers"]["text"][0]
         question = f"Title: {doc['title']}\nBackground: {doc['context']}\n{doc['question']}"
@@ -212,27 +229,33 @@ class SQuADTask(Task):
 class NaturalQuestionsTask(Task):
     """Natural Questions Open dataset task."""
 
-    hf_path: str = "google-research-datasets/nq_open"
+    default_hf_path: str = "google-research-datasets/nq_open"
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the validation split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                split="validation",
-                trust_remote_code=True,
-            )
-            for doc in dataset:
-                self._instances_cache.append(self._process_doc(doc))
+            loader = DataLoader()
+            source = self._get_source_for_split("validation")
+            for doc in loader.load(source):
+                self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any]) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any]) -> Instance:
         """Convert a dataset document to an Instance."""
         answer = doc["answer"][0]
 
@@ -261,28 +284,34 @@ class NaturalQuestionsTask(Task):
 class JeopardyTask(Task):
     """Jeopardy QA task."""
 
-    hf_path: str = "soldni/jeopardy"
+    default_hf_path: str = "soldni/jeopardy"
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the train split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                name="mosaicml_gauntlet",
-                split="train",
-                trust_remote_code=True,
-            )
-            for doc in dataset:
-                self._instances_cache.append(self._process_doc(doc))
+            loader = DataLoader()
+            source = self._get_source_for_split("train")
+            for doc in loader.load(source):
+                self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any]) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                subset="mosaicml_gauntlet",
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any]) -> Instance:
         """Convert a dataset document to an Instance."""
         question = f"Category: {doc['category']}\n{doc['question']}"
 
@@ -316,7 +345,7 @@ class JeopardyTask(Task):
 def _drop_config() -> TaskConfig:
     return TaskConfig(
         name="drop",
-        hf_dataset="EleutherAI/drop",
+        data_source=DataSource(path="EleutherAI/drop"),
         scorers=(F1Scorer(),),
         metrics=(F1Metric(),),
     )
@@ -325,7 +354,7 @@ def _drop_config() -> TaskConfig:
 def _coqa_config() -> TaskConfig:
     return TaskConfig(
         name="coqa",
-        hf_dataset="EleutherAI/coqa",
+        data_source=DataSource(path="EleutherAI/coqa"),
         scorers=(F1Scorer(),),
         metrics=(F1Metric(),),
     )
@@ -334,7 +363,7 @@ def _coqa_config() -> TaskConfig:
 def _squad_config() -> TaskConfig:
     return TaskConfig(
         name="squad",
-        hf_dataset="rajpurkar/squad",
+        data_source=DataSource(path="rajpurkar/squad"),
         scorers=(F1Scorer(),),
         metrics=(F1Metric(),),
     )
@@ -343,7 +372,7 @@ def _squad_config() -> TaskConfig:
 def _naturalqs_config() -> TaskConfig:
     return TaskConfig(
         name="naturalqs",
-        hf_dataset="google-research-datasets/nq_open",
+        data_source=DataSource(path="google-research-datasets/nq_open"),
         scorers=(F1Scorer(),),
         metrics=(F1Metric(),),
     )
@@ -352,7 +381,7 @@ def _naturalqs_config() -> TaskConfig:
 def _jeopardy_config() -> TaskConfig:
     return TaskConfig(
         name="jeopardy",
-        hf_dataset="soldni/jeopardy",
+        data_source=DataSource(path="soldni/jeopardy", subset="mosaicml_gauntlet"),
         scorers=(F1Scorer(),),
         metrics=(F1Metric(),),
     )

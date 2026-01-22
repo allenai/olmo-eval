@@ -4,8 +4,6 @@ import random
 from collections.abc import Iterator
 from typing import Any
 
-from datasets import load_dataset
-
 from olmo_eval.core import (
     AccuracyMetric,
     Instance,
@@ -15,6 +13,7 @@ from olmo_eval.core import (
     MultipleChoiceScorer,
     RequestType,
 )
+from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.extract import extract_mcqa_answer
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
@@ -41,29 +40,35 @@ class LabBenchTask(Task):
     }
     """
 
-    hf_path: str = "futurehouse/lab-bench"
-    hf_subset: str = ""  # Set by subclasses
+    default_hf_path: str = "futurehouse/lab-bench"
+    default_subset: str = ""  # Set by subclasses
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the train split (only split available)."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                name=self.hf_subset,
-                split="train",
-                trust_remote_code=True,
-            )
-            for doc in dataset:
-                self._instances_cache.append(self._process_doc(doc))
+            loader = DataLoader()
+            source = self._get_source_for_split("train")
+            for doc in loader.load(source):
+                self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any]) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                subset=self.default_subset if self.default_subset else None,
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any]) -> Instance:
         """Convert a dataset document to an Instance.
 
         The correct answer (ideal) is appended to distractors, so gold_idx
@@ -154,8 +159,7 @@ class LabBenchMCTask(LabBenchTask):
 def _lab_bench_protocolqa_config() -> TaskConfig:
     return TaskConfig(
         name="lab_bench_protocolqa",
-        hf_dataset="futurehouse/lab-bench",
-        hf_subsets=("ProtocolQA",),
+        data_source=DataSource(path="futurehouse/lab-bench", subset="ProtocolQA"),
         formatter=MultipleChoiceFormatter(
             template="Question: {question}\n\nAnswer:",
         ),
@@ -168,7 +172,7 @@ def _lab_bench_protocolqa_config() -> TaskConfig:
 class LabBenchProtocolQA(LabBenchTask):
     """LAB-Bench ProtocolQA task."""
 
-    hf_subset: str = "ProtocolQA"
+    default_subset: str = "ProtocolQA"
 
 
 # =============================================================================
@@ -179,8 +183,7 @@ class LabBenchProtocolQA(LabBenchTask):
 def _lab_bench_dbqa_config() -> TaskConfig:
     return TaskConfig(
         name="lab_bench_dbqa",
-        hf_dataset="futurehouse/lab-bench",
-        hf_subsets=("DbQA",),
+        data_source=DataSource(path="futurehouse/lab-bench", subset="DbQA"),
         formatter=MultipleChoiceFormatter(
             template="Question: {question}\n\nAnswer:",
         ),
@@ -193,4 +196,4 @@ def _lab_bench_dbqa_config() -> TaskConfig:
 class LabBenchDbQA(LabBenchTask):
     """LAB-Bench DbQA task."""
 
-    hf_subset: str = "DbQA"
+    default_subset: str = "DbQA"

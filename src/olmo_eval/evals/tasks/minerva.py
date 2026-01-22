@@ -3,8 +3,6 @@
 from collections.abc import Iterator
 from typing import Any
 
-from datasets import load_dataset
-
 from olmo_eval.core import (
     AccuracyMetric,
     ExactMatchScorer,
@@ -13,6 +11,7 @@ from olmo_eval.core import (
     LMRequest,
     RequestType,
 )
+from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.extract import extract_math_answer
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
@@ -30,29 +29,35 @@ MINERVA_SUBSETS = (
 class MinervaMathTask(Task):
     """Minerva Math task (Hendrycks MATH dataset)."""
 
-    hf_path: str = "EleutherAI/hendrycks_math"
+    default_hf_path: str = "EleutherAI/hendrycks_math"
 
     def __init__(self, config: TaskConfig, subset: str) -> None:
         super().__init__(config)
         self.subset = subset
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the test split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                name=self.subset,
-                split="test",
-                trust_remote_code=True,
-            )
-            for doc in dataset:
-                self._instances_cache.append(self._process_doc(doc))
+            loader = DataLoader()
+            source = self._get_source_for_split("test")
+            for doc in loader.load(source):
+                self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any]) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split).with_subset(self.subset)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                subset=self.subset,
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any]) -> Instance:
         """Convert a dataset document to an Instance."""
         # Extract the answer from the solution
         answers = extract_math_answer(doc["solution"])
@@ -90,28 +95,34 @@ class MinervaMathTask(Task):
 class Math500Task(MinervaMathTask):
     """MATH-500 task (subset of MATH dataset)."""
 
-    hf_path: str = "HuggingFaceH4/MATH-500"
+    default_hf_path: str = "HuggingFaceH4/MATH-500"
 
     def __init__(self, config: TaskConfig) -> None:
         # Math500 doesn't have subsets
         Task.__init__(self, config)
-        self._instances_cache = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the test split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                split="test",
-                trust_remote_code=True,
-            )
-            for doc in dataset:
-                self._instances_cache.append(self._process_doc(doc))
+            loader = DataLoader()
+            source = self._get_source_for_split("test")
+            for doc in loader.load(source):
+                self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any]) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any]) -> Instance:
         """Convert a dataset document to an Instance."""
         answers = extract_math_answer(doc["solution"])
         solution = answers[0] if answers else doc["solution"]
@@ -130,8 +141,7 @@ class Math500Task(MinervaMathTask):
 def _make_minerva_config(subset: str) -> TaskConfig:
     return TaskConfig(
         name=f"minerva_math_{subset}",
-        hf_dataset="EleutherAI/hendrycks_math",
-        hf_subsets=(subset,),
+        data_source=DataSource(path="EleutherAI/hendrycks_math", subset=subset),
         scorers=(ExactMatchScorer(),),
         metrics=(AccuracyMetric(scorer=ExactMatchScorer),),
     )
@@ -140,7 +150,7 @@ def _make_minerva_config(subset: str) -> TaskConfig:
 def _math500_config() -> TaskConfig:
     return TaskConfig(
         name="math500",
-        hf_dataset="HuggingFaceH4/MATH-500",
+        data_source=DataSource(path="HuggingFaceH4/MATH-500"),
         scorers=(ExactMatchScorer(),),
         metrics=(AccuracyMetric(scorer=ExactMatchScorer),),
     )
@@ -174,7 +184,7 @@ def _minerva_math_500_config() -> TaskConfig:
     """Alias config for minerva_math_500 (same as math500)."""
     return TaskConfig(
         name="minerva_math_500",
-        hf_dataset="HuggingFaceH4/MATH-500",
+        data_source=DataSource(path="HuggingFaceH4/MATH-500"),
         scorers=(ExactMatchScorer(),),
         metrics=(AccuracyMetric(scorer=ExactMatchScorer),),
     )

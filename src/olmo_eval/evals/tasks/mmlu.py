@@ -3,8 +3,6 @@
 from collections.abc import Iterator
 from typing import Any
 
-from datasets import load_dataset
-
 from olmo_eval.core import (
     AccuracyMetric,
     Instance,
@@ -14,6 +12,7 @@ from olmo_eval.core import (
     MultipleChoiceScorer,
     RequestType,
 )
+from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.extract import extract_mcqa_answer
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
@@ -45,29 +44,35 @@ MMLU_PRO_SUBSETS = (
 class MMLUTask(Task):
     """MMLU (Massive Multitask Language Understanding) task."""
 
-    hf_path: str = "cais/mmlu"
+    default_hf_path: str = "cais/mmlu"
 
     def __init__(self, config: TaskConfig, subset: str) -> None:
         super().__init__(config)
         self.subset = subset
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the test split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                name=self.subset,
-                split="test",
-                trust_remote_code=True,
-            )
-            for doc in dataset:
-                self._instances_cache.append(self._process_doc(doc))
+            loader = DataLoader()
+            source = self._get_source_for_split("test")
+            for doc in loader.load(source):
+                self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any]) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split).with_subset(self.subset)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                subset=self.subset,
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any]) -> Instance:
         """Convert a dataset document to an Instance."""
         gold_idx = doc["answer"]
         choices = tuple(doc["choices"])
@@ -89,7 +94,6 @@ class MMLUTask(Task):
         if self.config.formatter is not None:
             return self.config.formatter.format(instance, self.get_fewshot())
 
-        # Default: format as multiple choice question
         choices_text = "\n".join(
             f"{chr(ord('A') + i)}. {choice}" for i, choice in enumerate(instance.choices or [])
         )
@@ -106,43 +110,44 @@ class MMLUTask(Task):
 
     def _build_fewshot(self) -> list[Instance]:
         """Build few-shot examples from the dev split."""
-        dataset = load_dataset(
-            self.hf_path,
-            name=self.subset,
-            split="dev",
-            trust_remote_code=True,
-        )
-        return [self._process_doc(doc) for doc in dataset]
+        loader = DataLoader()
+        source = self._get_source_for_split("dev")
+        return [self.process_doc(doc) for doc in loader.load(source)]
 
 
 class MMLUProTask(Task):
     """MMLU-Pro task with 10 answer choices."""
 
-    hf_path: str = "TIGER-Lab/MMLU-Pro"
+    default_hf_path: str = "TIGER-Lab/MMLU-Pro"
 
     def __init__(self, config: TaskConfig, subset: str | None = None) -> None:
         super().__init__(config)
         self.subset = subset
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the test split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                split="test",
-                trust_remote_code=True,
-            )
-            for doc in dataset:
-                # Filter by subset if specified
+            loader = DataLoader()
+            source = self._get_source_for_split("test")
+            for doc in loader.load(source):
                 if self.subset is not None and doc.get("category") != self.subset:
                     continue
-                self._instances_cache.append(self._process_doc(doc))
+                self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any]) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any]) -> Instance:
         """Convert a dataset document to an Instance."""
         gold_idx = doc["answer_index"]
         choices = tuple(doc["options"])
@@ -166,7 +171,6 @@ class MMLUProTask(Task):
         if self.config.formatter is not None:
             return self.config.formatter.format(instance, self.get_fewshot())
 
-        # MMLU-Pro has up to 10 choices (A-J)
         num_choices = len(instance.choices or [])
         choices_text = "\n".join(
             f"{chr(ord('A') + i)}. {choice}" for i, choice in enumerate(instance.choices or [])
@@ -185,24 +189,20 @@ class MMLUProTask(Task):
 
     def _build_fewshot(self) -> list[Instance]:
         """Build few-shot examples from the validation split."""
-        dataset = load_dataset(
-            self.hf_path,
-            split="validation",
-            trust_remote_code=True,
-        )
+        loader = DataLoader()
+        source = self._get_source_for_split("validation")
         instances = []
-        for doc in dataset:
+        for doc in loader.load(source):
             if self.subset is not None and doc.get("category") != self.subset:
                 continue
-            instances.append(self._process_doc(doc))
+            instances.append(self.process_doc(doc))
         return instances
 
 
 def _make_mmlu_config(subset: str) -> TaskConfig:
     return TaskConfig(
         name=f"mmlu_{subset}",
-        hf_dataset="cais/mmlu",
-        hf_subsets=(subset,),
+        data_source=DataSource(path="cais/mmlu", subset=subset),
         formatter=MultipleChoiceFormatter(
             template="Question: {question}\n\nAnswer:",
         ),
@@ -215,8 +215,7 @@ def _make_mmlu_pro_config(subset: str | None = None) -> TaskConfig:
     name = f"mmlu_pro_{subset}" if subset else "mmlu_pro"
     return TaskConfig(
         name=name,
-        hf_dataset="TIGER-Lab/MMLU-Pro",
-        hf_subsets=(subset,) if subset else None,
+        data_source=DataSource(path="TIGER-Lab/MMLU-Pro"),
         formatter=MultipleChoiceFormatter(
             template="Question: {question}\n\nAnswer:",
         ),
@@ -227,7 +226,6 @@ def _make_mmlu_pro_config(subset: str | None = None) -> TaskConfig:
 
 # Register all MMLU subsets
 for subset in MMLU_SUBSETS:
-    # Create a factory function that captures the subset
     def make_config_factory(s: str):
         return lambda: _make_mmlu_config(s)
 

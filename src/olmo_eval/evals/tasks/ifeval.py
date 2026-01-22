@@ -4,8 +4,6 @@ import re
 from collections.abc import Iterator, Sequence
 from typing import Any
 
-from datasets import load_dataset
-
 from olmo_eval.core import (
     Instance,
     LMOutput,
@@ -15,9 +13,9 @@ from olmo_eval.core import (
     Response,
     Scorer,
 )
+from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
-# Import instruction checkers from the ifeval library if available
 try:
     from instruction_following_eval import instructions_registry  # type: ignore[import-not-found]
 
@@ -46,21 +44,10 @@ class IFEvalScorer(Scorer):
         instruction_kwargs: dict,
         response: str,
     ) -> bool:
-        """Check if a single instruction is followed.
-
-        Args:
-            instruction_id: The type of instruction (e.g., "length_constraints:number_words")
-            instruction_kwargs: Arguments for the instruction checker
-            response: The model's response text
-
-        Returns:
-            True if the instruction is followed, False otherwise
-        """
+        """Check if a single instruction is followed."""
         if not IFEVAL_AVAILABLE:
-            # Fallback: basic checks for common instruction types
             return self._basic_instruction_check(instruction_id, instruction_kwargs, response)
 
-        # Use the official ifeval library
         try:
             assert instructions_registry is not None
             checker_cls = instructions_registry.INSTRUCTION_DICT[instruction_id]
@@ -69,7 +56,6 @@ class IFEvalScorer(Scorer):
             if self.strictness == "strict":
                 return checker.check_following(response)
             else:
-                # Loose mode allows minor relaxations
                 return checker.check_following(response) or self._check_loose(checker, response)
         except Exception:
             return False
@@ -83,7 +69,6 @@ class IFEvalScorer(Scorer):
         """Basic fallback checks when ifeval library is not available."""
         response_lower = response.lower()
 
-        # Word count checks
         if "number_words" in instruction_id:
             word_count = len(response.split())
             relation = instruction_kwargs.get("relation", "at least")
@@ -96,7 +81,6 @@ class IFEvalScorer(Scorer):
             }
             return relation_checks.get(relation, word_count >= num_words)
 
-        # Keyword checks
         if "keywords" in instruction_id:
             keywords = instruction_kwargs.get("keywords", [])
             if "inclusion" in instruction_id:
@@ -104,7 +88,6 @@ class IFEvalScorer(Scorer):
             elif "exclusion" in instruction_id or "forbidden" in instruction_id:
                 return not any(kw.lower() in response_lower for kw in keywords)
 
-        # Format checks
         if "json_format" in instruction_id:
             try:
                 import json
@@ -119,12 +102,10 @@ class IFEvalScorer(Scorer):
             bullet_count = len(re.findall(r"^\s*[\*\-•]\s", response, re.MULTILINE))
             return bullet_count >= num_bullets
 
-        # Default: assume instruction is followed
         return True
 
     def _check_loose(self, checker: Any, response: str) -> bool:
         """Apply loose checking with relaxations."""
-        # Remove common prefixes/suffixes that models add
         cleaned = response.strip()
         prefixes = [
             "Sure, ",
@@ -165,20 +146,16 @@ class IFEvalScorer(Scorer):
         if not instruction_ids:
             return 1.0
 
-        # Check each instruction
         results = []
         for inst_id, kwargs in zip(instruction_ids, instruction_kwargs, strict=True):
             results.append(self._check_instruction(inst_id, kwargs, response))
 
-        # Store detailed results in metadata
         output.metadata = output.metadata or {}
         output.metadata["instruction_results"] = results
         output.metadata["instructions_followed"] = sum(results)
         output.metadata["total_instructions"] = len(results)
 
-        # Prompt-level: all instructions must be followed
         prompt_acc = 1.0 if all(results) else 0.0
-        # Instruction-level: proportion of instructions followed
         inst_acc = sum(results) / len(results) if results else 1.0
 
         output.metadata["prompt_level_acc"] = prompt_acc
@@ -233,31 +210,35 @@ class IFEvalTask(Task):
     Homepage: https://github.com/google-research/google-research/tree/master/instruction_following_eval
     """
 
-    hf_path: str = "HuggingFaceH4/ifeval"
-
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the train split (the only split with labels)."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                split="train",
-                trust_remote_code=True,
-            )
-            for doc in dataset:
-                self._instances_cache.append(self._process_doc(doc))
+            loader = DataLoader()
+            source = self._get_source_for_split("train")
+            for doc in loader.load(source):
+                self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any]) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(
+                path="HuggingFaceH4/ifeval",
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any]) -> Instance:
         """Convert a dataset document to an Instance."""
         return Instance(
             question=doc["prompt"],
-            gold_answer=None,  # No gold answer, we check instruction following
+            gold_answer=None,
             metadata={
                 "key": doc.get("key"),
                 "instruction_id_list": doc.get("instruction_id_list", []),
@@ -283,7 +264,7 @@ class IFEvalTask(Task):
 def _ifeval_config() -> TaskConfig:
     return TaskConfig(
         name="ifeval",
-        hf_dataset="HuggingFaceH4/ifeval",
+        data_source=DataSource(path="HuggingFaceH4/ifeval"),
         scorers=(IFEvalScorer(strictness="loose"),),
         metrics=(
             IFEvalMetric(level="prompt", strictness="loose"),

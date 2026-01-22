@@ -29,7 +29,7 @@ class TestBBHTask:
             ),
         }
 
-        instance = bbh_boolean_task._process_doc(doc, index=0)
+        instance = bbh_boolean_task.process_doc(doc, index=0)
 
         assert isinstance(instance, Instance)
         assert instance.question == doc["input"]
@@ -45,7 +45,7 @@ class TestBBHTask:
             "target": "Some answer without the pattern",
         }
 
-        instance = bbh_boolean_task._process_doc(doc, index=1)
+        instance = bbh_boolean_task.process_doc(doc, index=1)
 
         assert instance.gold_answer == "Some answer without the pattern"
 
@@ -87,8 +87,8 @@ class TestBBHTask:
         config = _make_bbh_config("boolean_expressions")
 
         assert config.name == "bbh_boolean_expressions"
-        assert config.hf_dataset == "lukaemon/bbh"
-        assert config.hf_subsets == ("boolean_expressions",)
+        assert config.data_source.path == "lukaemon/bbh"
+        assert config.data_source.subset == "boolean_expressions"
 
 
 # =============================================================================
@@ -213,7 +213,7 @@ class TestBBHRegistration:
     def test_task_has_correct_hf_path(self):
         """Test that tasks have correct HuggingFace path."""
         task = get_task("bbh_navigate")
-        assert task.hf_path == "lukaemon/bbh"
+        assert task.default_hf_path == "lukaemon/bbh"
 
 
 # =============================================================================

@@ -87,7 +87,7 @@ class TestBasicSkillsTask:
             "wrong_answers": ["3", "5", "6"],
         }
 
-        instance = arithmetic_task._process_doc(doc)
+        instance = arithmetic_task.process_doc(doc)
 
         assert isinstance(instance, Instance)
         assert instance.question == "What is 2 + 2?"
@@ -127,8 +127,8 @@ class TestBasicSkillsTask:
         config = _make_basic_skills_config("arithmetic")
 
         assert config.name == "basic_skills_arithmetic"
-        assert config.hf_dataset == "allenai/basic-skills"
-        assert config.hf_subsets == ("arithmetic",)
+        assert config.data_source.path == "allenai/basic-skills"
+        assert config.data_source.subset == "arithmetic"
 
 
 # =============================================================================
@@ -192,7 +192,7 @@ class TestBasicSkillsRegistration:
     def test_task_has_correct_hf_path(self):
         """Test that tasks have correct HuggingFace path."""
         task = get_task("basic_skills_arithmetic")
-        assert task.hf_path == "allenai/basic-skills"
+        assert task.default_hf_path == "allenai/basic-skills"
 
 
 # =============================================================================

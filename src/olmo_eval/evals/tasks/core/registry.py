@@ -34,7 +34,7 @@ def register(
     """Register a task class with a name and config factory.
 
     Usage:
-        @register("mmlu", lambda: TaskConfig(name="mmlu", hf_dataset="cais/mmlu"))
+        @register("mmlu", lambda: TaskConfig(name="mmlu", data_source=DataSource(path="cais/mmlu")))
         class MMLUTask(Task):
             ...
     """

@@ -4,8 +4,6 @@ import re
 from collections.abc import Iterator
 from typing import Any
 
-from datasets import load_dataset
-
 from olmo_eval.core import (
     AccuracyMetric,
     Instance,
@@ -15,6 +13,7 @@ from olmo_eval.core import (
     MultipleChoiceScorer,
     RequestType,
 )
+from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
 # Answer extraction regex for multiple choice (A, B, C, D with optional parens)
@@ -30,32 +29,55 @@ def _extract_mcqa_answer(text: str) -> str | None:
 
 
 class ARCTask(Task):
-    """Base class for ARC tasks."""
+    """Base class for ARC tasks.
 
-    hf_path: str = "allenai/ai2_arc"
+    Uses the unified DataLoader to load from HuggingFace, local files, S3, or GCS.
+    By default loads from all splits (train, validation, test) for the full dataset.
+    """
 
     def __init__(self, config: TaskConfig, dataset_name: str) -> None:
         super().__init__(config)
         self.dataset_name = dataset_name
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
-        """Yield instances from all dataset splits."""
+        """Yield instances from all dataset splits.
+
+        Uses the unified DataLoader to load from the configured data_source.
+        Loads from train, validation, and test splits for full dataset coverage.
+        """
         if self._instances_cache is None:
             self._instances_cache = []
+            loader = DataLoader()
+
+            # Load from all splits
             for split in ("train", "validation", "test"):
-                dataset = load_dataset(
-                    self.hf_path,
-                    name=self.dataset_name,
-                    split=split,
-                    trust_remote_code=True,
-                )
-                for doc in dataset:
-                    self._instances_cache.append(self._process_doc(doc))
+                source = self._get_source_for_split(split)
+                for doc in loader.load(source):
+                    instance = self.process_doc(doc)
+                    if instance is not None:
+                        self._instances_cache.append(instance)
+
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any]) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get the data source for a specific split.
+
+        If config has a data_source configured, uses that with the specified split.
+        Otherwise falls back to the default HuggingFace path with dataset_name.
+        """
+        try:
+            # Try to use the configured data source
+            return self.config.get_data_source(split=split).with_subset(self.dataset_name)
+        except ValueError:
+            # Fall back to default HuggingFace source
+            return DataSource(
+                path="allenai/ai2_arc",
+                subset=self.dataset_name,
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any]) -> Instance:
         """Convert a dataset document to an Instance."""
         answer_key = doc["answerKey"]
         # Handle numeric answer keys (convert 1-based to letter)
@@ -100,8 +122,10 @@ class ARCTask(Task):
 def _arc_challenge_config() -> TaskConfig:
     return TaskConfig(
         name="arc_challenge",
-        hf_dataset="allenai/ai2_arc",
-        hf_subsets=("ARC-Challenge",),
+        data_source=DataSource(
+            path="allenai/ai2_arc",
+            subset="ARC-Challenge",
+        ),
         formatter=MultipleChoiceFormatter(
             template="Question: {question}\n\nAnswer:",
         ),
@@ -113,8 +137,10 @@ def _arc_challenge_config() -> TaskConfig:
 def _arc_easy_config() -> TaskConfig:
     return TaskConfig(
         name="arc_easy",
-        hf_dataset="allenai/ai2_arc",
-        hf_subsets=("ARC-Easy",),
+        data_source=DataSource(
+            path="allenai/ai2_arc",
+            subset="ARC-Easy",
+        ),
         formatter=MultipleChoiceFormatter(
             template="Question: {question}\n\nAnswer:",
         ),

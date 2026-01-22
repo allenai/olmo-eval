@@ -4,8 +4,6 @@ import random
 from collections.abc import Iterator
 from typing import Any
 
-from datasets import load_dataset
-
 from olmo_eval.core import (
     AccuracyMetric,
     Instance,
@@ -15,6 +13,7 @@ from olmo_eval.core import (
     MultipleChoiceScorer,
     RequestType,
 )
+from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.extract import extract_mcqa_answer
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
@@ -37,27 +36,33 @@ class SciQTask(Task):
     Homepage: https://allenai.org/data/sciq
     """
 
-    hf_path: str = "sciq"
+    default_hf_path: str = "sciq"
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the validation split."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset(
-                self.hf_path,
-                split="validation",
-                trust_remote_code=True,
-            )
-            for idx, doc in enumerate(dataset):
-                self._instances_cache.append(self._process_doc(doc, idx))
+            loader = DataLoader()
+            source = self._get_source_for_split("validation")
+            for idx, doc in enumerate(loader.load(source)):
+                self._instances_cache.append(self.process_doc(doc, idx))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any], index: int) -> Instance:
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(
+                path=self.default_hf_path,
+                split=split,
+            )
+
+    def process_doc(self, doc: dict[str, Any], index: int) -> Instance:
         """Convert a dataset document to an Instance.
 
         Note: The correct answer is always at index 3 (last position) in the
@@ -162,7 +167,7 @@ class SciQMCTask(SciQTask):
 def _sciq_config() -> TaskConfig:
     return TaskConfig(
         name="sciq",
-        hf_dataset="sciq",
+        data_source=DataSource(path="sciq"),
         formatter=MultipleChoiceFormatter(
             template="Question: {question}\n\nAnswer:",
         ),

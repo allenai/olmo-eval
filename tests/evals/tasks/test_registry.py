@@ -60,7 +60,7 @@ class TestRegister:
     def test_register_task(self):
         """Test basic task registration."""
 
-        @register("test_task", lambda: TaskConfig(name="test_task", hf_dataset="test/dataset"))
+        @register("test_task", lambda: TaskConfig(name="test_task", data_source="test/dataset"))
         class TestTask(DummyTask):
             pass
 
@@ -69,20 +69,20 @@ class TestRegister:
     def test_register_duplicate_raises(self):
         """Test that registering duplicate task names raises an error."""
 
-        @register("duplicate", lambda: TaskConfig(name="duplicate", hf_dataset="test/dataset"))
+        @register("duplicate", lambda: TaskConfig(name="duplicate", data_source="test/dataset"))
         class FirstTask(DummyTask):
             pass
 
         with pytest.raises(ValueError, match="already registered"):
 
-            @register("duplicate", lambda: TaskConfig(name="duplicate", hf_dataset="test/dataset"))
+            @register("duplicate", lambda: TaskConfig(name="duplicate", data_source="test/dataset"))
             class SecondTask(DummyTask):
                 pass
 
     def test_register_preserves_class(self):
         """Test that @register returns the original class."""
 
-        @register("preserved", lambda: TaskConfig(name="preserved", hf_dataset="test/dataset"))
+        @register("preserved", lambda: TaskConfig(name="preserved", data_source="test/dataset"))
         class PreservedTask(DummyTask):
             pass
 
@@ -96,7 +96,7 @@ class TestRegisterRegime:
     def test_register_regime(self):
         """Test registering a regime for an existing task."""
 
-        @register("base_task", lambda: TaskConfig(name="base_task", hf_dataset="test/dataset"))
+        @register("base_task", lambda: TaskConfig(name="base_task", data_source="test/dataset"))
         class BaseTask(DummyTask):
             pass
 
@@ -114,7 +114,7 @@ class TestRegisterRegime:
         """Test registering multiple regimes for one task."""
 
         @register(
-            "multi_regime", lambda: TaskConfig(name="multi_regime", hf_dataset="test/dataset")
+            "multi_regime", lambda: TaskConfig(name="multi_regime", data_source="test/dataset")
         )
         class MultiRegimeTask(DummyTask):
             pass
@@ -135,7 +135,7 @@ class TestGetTask:
 
         @register(
             "simple_task",
-            lambda: TaskConfig(name="simple_task", hf_dataset="test/dataset", num_fewshot=0),
+            lambda: TaskConfig(name="simple_task", data_source="test/dataset", num_fewshot=0),
         )
         class SimpleTask(DummyTask):
             pass
@@ -154,7 +154,7 @@ class TestGetTask:
 
         @register(
             "regime_task",
-            lambda: TaskConfig(name="regime_task", hf_dataset="test/dataset", num_fewshot=0),
+            lambda: TaskConfig(name="regime_task", data_source="test/dataset", num_fewshot=0),
         )
         class RegimeTask(DummyTask):
             pass
@@ -179,7 +179,7 @@ class TestGetTask:
 
         @register(
             "fallback_task",
-            lambda: TaskConfig(name="fallback_task", hf_dataset="test/dataset", num_fewshot=3),
+            lambda: TaskConfig(name="fallback_task", data_source="test/dataset", num_fewshot=3),
         )
         class FallbackTask(DummyTask):
             pass
@@ -199,15 +199,15 @@ class TestListTasks:
     def test_list_tasks_returns_sorted(self):
         """Test that list_tasks returns sorted names."""
 
-        @register("zebra", lambda: TaskConfig(name="zebra", hf_dataset="test/dataset"))
+        @register("zebra", lambda: TaskConfig(name="zebra", data_source="test/dataset"))
         class ZebraTask(DummyTask):
             pass
 
-        @register("alpha", lambda: TaskConfig(name="alpha", hf_dataset="test/dataset"))
+        @register("alpha", lambda: TaskConfig(name="alpha", data_source="test/dataset"))
         class AlphaTask(DummyTask):
             pass
 
-        @register("middle", lambda: TaskConfig(name="middle", hf_dataset="test/dataset"))
+        @register("middle", lambda: TaskConfig(name="middle", data_source="test/dataset"))
         class MiddleTask(DummyTask):
             pass
 
@@ -221,11 +221,11 @@ class TestListRegimes:
     def test_list_regimes_all(self):
         """Test listing all regimes."""
 
-        @register("task_a", lambda: TaskConfig(name="task_a", hf_dataset="test/dataset"))
+        @register("task_a", lambda: TaskConfig(name="task_a", data_source="test/dataset"))
         class TaskA(DummyTask):
             pass
 
-        @register("task_b", lambda: TaskConfig(name="task_b", hf_dataset="test/dataset"))
+        @register("task_b", lambda: TaskConfig(name="task_b", data_source="test/dataset"))
         class TaskB(DummyTask):
             pass
 
@@ -242,7 +242,7 @@ class TestListRegimes:
     def test_list_regimes_filtered(self):
         """Test listing regimes for specific task."""
 
-        @register("filtered", lambda: TaskConfig(name="filtered", hf_dataset="test/dataset"))
+        @register("filtered", lambda: TaskConfig(name="filtered", data_source="test/dataset"))
         class FilteredTask(DummyTask):
             pass
 
@@ -257,7 +257,7 @@ class TestListRegimes:
     def test_list_regimes_no_regimes(self):
         """Test listing regimes for task with none registered."""
 
-        @register("no_regimes", lambda: TaskConfig(name="no_regimes", hf_dataset="test/dataset"))
+        @register("no_regimes", lambda: TaskConfig(name="no_regimes", data_source="test/dataset"))
         class NoRegimesTask(DummyTask):
             pass
 
@@ -271,7 +271,7 @@ class TestClearRegistry:
     def test_clear_registry(self):
         """Test that clear_registry removes all entries."""
 
-        @register("to_clear", lambda: TaskConfig(name="to_clear", hf_dataset="test/dataset"))
+        @register("to_clear", lambda: TaskConfig(name="to_clear", data_source="test/dataset"))
         class ToClearTask(DummyTask):
             pass
 

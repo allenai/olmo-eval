@@ -100,7 +100,7 @@ class TestHumanEvalFIMTask:
             "test": "def check(add):\n    assert add(1, 2) == 3",
         }
 
-        instance = fim_single_task._process_doc(doc, index=0)
+        instance = fim_single_task.process_doc(doc, index=0)
 
         assert isinstance(instance, Instance)
         # Check that FIM tokens are in the prompt
@@ -173,20 +173,20 @@ class TestFIMTaskConfigs:
         """Test FIM single task config."""
         config = _fim_single_config()
         assert config.name == "codex_humanevalfim_single"
-        assert config.hf_dataset == "loubnabnl/humaneval_infilling"
-        assert config.hf_subsets == ("HumanEval-SingleLineInfilling",)
+        assert config.data_source.path == "loubnabnl/humaneval_infilling"
+        assert config.data_source.subset == "HumanEval-SingleLineInfilling"
 
     def test_fim_multi_config(self):
         """Test FIM multi task config."""
         config = _fim_multi_config()
         assert config.name == "codex_humanevalfim_multi"
-        assert config.hf_subsets == ("HumanEval-MultiLineInfilling",)
+        assert config.data_source.subset == "HumanEval-MultiLineInfilling"
 
     def test_fim_random_config(self):
         """Test FIM random task config."""
         config = _fim_random_config()
         assert config.name == "codex_humanevalfim_random"
-        assert config.hf_subsets == ("HumanEval-RandomSpanInfilling",)
+        assert config.data_source.subset == "HumanEval-RandomSpanInfilling"
 
 
 # =============================================================================
@@ -216,26 +216,26 @@ class TestFIMTaskRegistration:
         task = get_task("codex_humanevalfim_single")
         assert task is not None
         assert isinstance(task, HumanEvalFIMSingle)
-        assert task.hf_subset == "HumanEval-SingleLineInfilling"
+        assert task.default_subset == "HumanEval-SingleLineInfilling"
 
     def test_get_fim_multi(self):
         """Test getting FIM multi task."""
         task = get_task("codex_humanevalfim_multi")
         assert task is not None
         assert isinstance(task, HumanEvalFIMMulti)
-        assert task.hf_subset == "HumanEval-MultiLineInfilling"
+        assert task.default_subset == "HumanEval-MultiLineInfilling"
 
     def test_get_fim_random(self):
         """Test getting FIM random task."""
         task = get_task("codex_humanevalfim_random")
         assert task is not None
         assert isinstance(task, HumanEvalFIMRandom)
-        assert task.hf_subset == "HumanEval-RandomSpanInfilling"
+        assert task.default_subset == "HumanEval-RandomSpanInfilling"
 
     def test_task_has_correct_hf_path(self):
         """Test that tasks have correct HuggingFace path."""
         task = get_task("codex_humanevalfim_single")
-        assert task.hf_path == "loubnabnl/humaneval_infilling"
+        assert task.default_hf_path == "loubnabnl/humaneval_infilling"
 
 
 # =============================================================================
@@ -295,7 +295,7 @@ class TestFIMPromptFormatting:
             "test": "",
         }
 
-        instance = task._process_doc(doc, 0)
+        instance = task.process_doc(doc, 0)
 
         expected = "<fim-prefix>PREFIX<fim-suffix>SUFFIX<fim-middle>"
         assert instance.question == expected
@@ -312,7 +312,7 @@ class TestFIMPromptFormatting:
             "test": "",
         }
 
-        instance = task._process_doc(doc, 0)
+        instance = task.process_doc(doc, 0)
         prompt = instance.question
 
         # Verify structure
