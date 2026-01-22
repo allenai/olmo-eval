@@ -141,7 +141,7 @@ class TestSuiteAggregations:
         result = compute_suite_aggregations(["core:mc::temperature=0.6"], task_results)
 
         assert "core:mc::temperature=0.6" in result
-        assert result["core:mc::temperature=0.6"]["metrics"]["accuracy"] == 0.80
+        assert result["core:mc::temperature=0.6"]["metrics"]["accuracy"] == pytest.approx(0.80)
         assert result["core:mc::temperature=0.6"]["num_tasks"] == len(expanded_tasks)
 
     def test_suite_aggregation_with_priority(self):
@@ -160,7 +160,7 @@ class TestSuiteAggregations:
         result = compute_suite_aggregations(["core:mc@high"], task_results)
 
         assert "core:mc@high" in result
-        assert result["core:mc@high"]["metrics"]["accuracy"] == 0.85
+        assert result["core:mc@high"]["metrics"]["accuracy"] == pytest.approx(0.85)
 
     def test_suite_aggregation_with_overrides_and_priority(self):
         """Test suite aggregation with both overrides and priority."""
