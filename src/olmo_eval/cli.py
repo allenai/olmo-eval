@@ -1148,12 +1148,11 @@ def launch(
     # Build async settings if enabled
     async_settings = None
     if use_async or use_async_stream:
-        # Resolve effective num_workers from CLI or first model's config
+        # Resolve effective num_workers from CLI or first model's launch config
         effective_num_workers = num_workers
-        if effective_num_workers is None and model_configs:
+        if effective_num_workers is None and cfg is not None and model_configs:
             first_model = model_configs[0]
-            first_model_config = get_runtime_model_config(first_model.name_or_path)
-            model_resources = first_model_config.get_model_resources(first_model.gpus or gpus)
+            model_resources = cfg.get_model_resources(first_model)
             effective_num_workers = model_resources.get("num_workers")
 
         async_settings = AsyncSettings(
