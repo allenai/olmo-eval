@@ -1,7 +1,7 @@
 """Metric protocols and implementations."""
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Protocol
 
 from .scorers import (
@@ -16,7 +16,6 @@ from .types import Response
 
 def _get_scorer_name(scorer: type[Scorer]) -> str:
     """Extract the default name from a scorer class."""
-    # Get the default value from the dataclass field
     for f in scorer.__dataclass_fields__.values():
         if f.name == "name":
             return f.default
@@ -42,15 +41,12 @@ class AccuracyMetric:
 
     name: str = "accuracy"
     scorer: type[Scorer] = ExactMatchScorer
-    _scorer_name: str = field(init=False, default="")
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "_scorer_name", _get_scorer_name(self.scorer))
 
     def compute(self, responses: Sequence[Response]) -> float:
         if not responses:
             return 0.0
-        total = sum(r.scores.get(self._scorer_name, 0.0) for r in responses)
+        scorer_name = _get_scorer_name(self.scorer)
+        total = sum(r.scores.get(scorer_name, 0.0) for r in responses)
         return total / len(responses)
 
 
@@ -60,15 +56,12 @@ class F1Metric:
 
     name: str = "f1"
     scorer: type[Scorer] = F1Scorer
-    _scorer_name: str = field(init=False, default="")
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "_scorer_name", _get_scorer_name(self.scorer))
 
     def compute(self, responses: Sequence[Response]) -> float:
         if not responses:
             return 0.0
-        total = sum(r.scores.get(self._scorer_name, 0.0) for r in responses)
+        scorer_name = _get_scorer_name(self.scorer)
+        total = sum(r.scores.get(scorer_name, 0.0) for r in responses)
         return total / len(responses)
 
 
@@ -83,15 +76,12 @@ class BPBMetric:
 
     name: str = "bits_per_byte"
     scorer: type[Scorer] = BitsPerByteScorer
-    _scorer_name: str = field(init=False, default="")
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "_scorer_name", _get_scorer_name(self.scorer))
 
     def compute(self, responses: Sequence[Response]) -> float:
         if not responses:
             return 0.0
-        total = sum(r.scores.get(self._scorer_name, 0.0) for r in responses)
+        scorer_name = _get_scorer_name(self.scorer)
+        total = sum(r.scores.get(scorer_name, 0.0) for r in responses)
         return total / len(responses)
 
 
@@ -101,13 +91,10 @@ class MeanPerplexityMetric:
 
     name: str = "perplexity"
     scorer: type[Scorer] = PerplexityScorer
-    _scorer_name: str = field(init=False, default="")
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "_scorer_name", _get_scorer_name(self.scorer))
 
     def compute(self, responses: Sequence[Response]) -> float:
         if not responses:
             return 0.0
-        total = sum(r.scores.get(self._scorer_name, 0.0) for r in responses)
+        scorer_name = _get_scorer_name(self.scorer)
+        total = sum(r.scores.get(scorer_name, 0.0) for r in responses)
         return total / len(responses)

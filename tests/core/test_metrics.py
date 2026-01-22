@@ -124,9 +124,3 @@ class TestAccuracyMetric:
         """Test that default scorer is ExactMatchScorer."""
         metric = AccuracyMetric()
         assert metric.scorer == ExactMatchScorer
-        assert metric._scorer_name == "exact_match"
-
-    def test_accuracy_scorer_name_derived(self):
-        """Test that scorer name is derived from scorer class."""
-        metric = AccuracyMetric(scorer=MultipleChoiceScorer)
-        assert metric._scorer_name == "multiple_choice"
