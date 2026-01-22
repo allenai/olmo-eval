@@ -115,11 +115,7 @@ _MT_MBPP_V2FIX_BPB_NESTED = Suite(
 OLMO3_BASE_EASY_CODE_BPB = register(
     Suite(
         name="olmo3:base_easy:code:bpb",
-        tasks=(
-            "humaneval:3shot:bpb",
-            "mbpp:3shot:bpb",
-            # _MT_MBPP_V2FIX_BPB_NESTED, HF IS HAVING ISSUES
-        ),
+        tasks=("humaneval:3shot:bpb", "mbpp:3shot:bpb", _MT_MBPP_V2FIX_BPB_NESTED),
         aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
         description="OLMo3 base_easy code BPB suite (average of averages)",
     )
