@@ -246,23 +246,37 @@ class SyncEvalRunner:
             return results
         finally:
             # Clean up backend and PyTorch distributed process group
+            # See: https://github.com/vllm-project/vllm/issues/1908
             import gc
 
-            # For vLLM backend, explicitly shut down the engine
+            # For vLLM backend, use the recommended cleanup sequence
             if hasattr(backend, "llm"):
+                try:
+                    from vllm.distributed.parallel_state import destroy_model_parallel
+
+                    destroy_model_parallel()
+                except ImportError:
+                    pass
+
                 llm = backend.llm
-                # vLLM 0.6+ has shutdown methods on the engine
+                # Delete internal worker to release GPU memory
                 if hasattr(llm, "llm_engine"):
                     engine = llm.llm_engine
-                    if hasattr(engine, "shutdown"):
-                        engine.shutdown()
-                    elif hasattr(engine, "model_executor") and hasattr(
-                        engine.model_executor, "shutdown"
-                    ):
-                        engine.model_executor.shutdown()
+                    if hasattr(engine, "model_executor"):
+                        if hasattr(engine.model_executor, "driver_worker"):
+                            del engine.model_executor.driver_worker
+                        if hasattr(engine.model_executor, "shutdown"):
+                            engine.model_executor.shutdown()
 
             del backend
             gc.collect()
+
+            try:
+                import torch
+
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
 
             try:
                 import torch.distributed as dist

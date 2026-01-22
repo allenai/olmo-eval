@@ -547,14 +547,12 @@ class BeakerLauncher:
         # Install olmo-eval from gantry-cloned source with optional backend groups
         # Generate constraints from pre-installed CUDA packages to prevent uv from changing them
         constraints = "/tmp/cuda-constraints.txt"
-        steps.append(f"uv pip freeze -q | grep -E '^(torch|nvidia-)' > {constraints}")
+        steps.append(f"uv pip freeze | grep -E '^(torch|nvidia-)' > {constraints}")
         if backends:
             extras = ",".join(backends)
-            steps.append(
-                f"cd /gantry-runtime && uv pip install -q -e '.[{extras}]' -c {constraints}"
-            )
+            steps.append(f"cd /gantry-runtime && uv pip install -e '.[{extras}]' -c {constraints}")
         else:
-            steps.append(f"cd /gantry-runtime && uv pip install -q -e . -c {constraints}")
+            steps.append(f"cd /gantry-runtime && uv pip install -e . -c {constraints}")
 
         # Run the actual command (use shlex.join to properly quote special characters)
         import shlex
