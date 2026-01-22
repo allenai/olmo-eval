@@ -160,6 +160,7 @@ def _humaneval_bpb_config() -> TaskConfig:
         formatter=PPLFormatter(),
         scorers=(BitsPerByteScorer(),),
         metrics=(BPBMetric(),),
+        primary_metric=BPBMetric(),
     )
 
 
@@ -170,6 +171,7 @@ def _humaneval_plus_bpb_config() -> TaskConfig:
         formatter=PPLFormatter(),
         scorers=(BitsPerByteScorer(),),
         metrics=(BPBMetric(),),
+        primary_metric=BPBMetric(),
     )
 
 
@@ -180,6 +182,7 @@ def _codex_humaneval_bpb_config() -> TaskConfig:
         formatter=PPLFormatter(),
         scorers=(BitsPerByteScorer(),),
         metrics=(BPBMetric(),),
+        primary_metric=BPBMetric(),
     )
 
 
@@ -190,6 +193,7 @@ def _codex_humanevalplus_bpb_config() -> TaskConfig:
         formatter=PPLFormatter(),
         scorers=(BitsPerByteScorer(),),
         metrics=(BPBMetric(),),
+        primary_metric=BPBMetric(),
     )
 
 

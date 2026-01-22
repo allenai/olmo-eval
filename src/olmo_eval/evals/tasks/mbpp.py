@@ -203,6 +203,7 @@ def _mbpp_bpb_config() -> TaskConfig:
         formatter=PPLFormatter(),
         scorers=(BitsPerByteScorer(),),
         metrics=(BPBMetric(),),
+        primary_metric=BPBMetric(),
     )
 
 
@@ -213,6 +214,7 @@ def _mbpp_plus_bpb_config() -> TaskConfig:
         formatter=PPLFormatter(),
         scorers=(BitsPerByteScorer(),),
         metrics=(BPBMetric(),),
+        primary_metric=BPBMetric(),
     )
 
 
@@ -223,6 +225,7 @@ def _mbppplus_bpb_config() -> TaskConfig:
         formatter=PPLFormatter(),
         scorers=(BitsPerByteScorer(),),
         metrics=(BPBMetric(),),
+        primary_metric=BPBMetric(),
     )
 
 

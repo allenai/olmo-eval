@@ -16,10 +16,14 @@ from typing import Any
 from datasets import load_dataset
 
 from olmo_eval.core import (
+    BPBMetric,
+    BitsPerByteScorer,
     Instance,
     LMOutput,
     LMRequest,
+    PPLFormatter,
     RequestType,
+    SamplingParams,
 )
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
@@ -138,8 +142,13 @@ def _make_mt_mbpp_config(language: str) -> TaskConfig:
         name=f"mt_mbpp_{language}",
         hf_dataset="allenai/multilingual_mbpp",
         hf_subsets=(language,),
-        scorers=(),  # Code execution scorer to be added
-        metrics=(),  # Pass@k metric to be added
+        scorers=(),
+        metrics=(),
+        sampling_params=SamplingParams(
+            max_tokens=1024,
+            temperature=0.0,
+            stop_sequences=("\n\n",),
+        ),
     )
 
 
@@ -151,6 +160,37 @@ def _make_mt_mbpp_v2fix_config(language: str) -> TaskConfig:
         hf_subsets=(language,),
         scorers=(),
         metrics=(),
+        sampling_params=SamplingParams(
+            max_tokens=1024,
+            temperature=0.0,
+            stop_sequences=("\n\n",),
+        ),
+    )
+
+
+def _make_mt_mbpp_bpb_config(language: str) -> TaskConfig:
+    """Create config for mt_mbpp_{language}:bpb task."""
+    return TaskConfig(
+        name=f"mt_mbpp_{language}:bpb",
+        hf_dataset="allenai/multilingual_mbpp",
+        hf_subsets=(language,),
+        formatter=PPLFormatter(),
+        scorers=(BitsPerByteScorer(),),
+        metrics=(BPBMetric(),),
+        primary_metric=BPBMetric(),
+    )
+
+
+def _make_mt_mbpp_v2fix_bpb_config(language: str) -> TaskConfig:
+    """Create config for mt_mbpp_v2fix_{language}:bpb task."""
+    return TaskConfig(
+        name=f"mt_mbpp_v2fix_{language}:bpb",
+        hf_dataset="allenai/multilingual_mbpp",
+        hf_subsets=(language,),
+        formatter=PPLFormatter(),
+        scorers=(BitsPerByteScorer(),),
+        metrics=(BPBMetric(),),
+        primary_metric=BPBMetric(),
     )
 
 
@@ -187,6 +227,44 @@ for _lang in MULTILINGUAL_MBPP_LANGUAGES:
 
     register(f"mt_mbpp_v2fix_{_lang}", _make_v2fix_config_factory(_lang))(
         _make_v2fix_class_factory(_lang)
+    )
+
+
+# Register all mt_mbpp_{language}:bpb tasks
+for _lang in MULTILINGUAL_MBPP_LANGUAGES:
+
+    def _make_bpb_config_factory(lang: str):
+        return lambda: _make_mt_mbpp_bpb_config(lang)
+
+    def _make_bpb_class_factory(lang: str):
+        class _MultilingualMBPPBPB(MultilingualMBPPTask):
+            def __init__(self, config: TaskConfig) -> None:
+                super().__init__(config, language=lang)
+
+        _MultilingualMBPPBPB.__name__ = f"MultilingualMBPPBPB_{lang.title()}"
+        return _MultilingualMBPPBPB
+
+    register(f"mt_mbpp_{_lang}:bpb", _make_bpb_config_factory(_lang))(
+        _make_bpb_class_factory(_lang)
+    )
+
+
+# Register all mt_mbpp_v2fix_{language}:bpb tasks
+for _lang in MULTILINGUAL_MBPP_LANGUAGES:
+
+    def _make_v2fix_bpb_config_factory(lang: str):
+        return lambda: _make_mt_mbpp_v2fix_bpb_config(lang)
+
+    def _make_v2fix_bpb_class_factory(lang: str):
+        class _MultilingualMBPPV2FixBPB(MultilingualMBPPV2FixTask):
+            def __init__(self, config: TaskConfig) -> None:
+                super().__init__(config, language=lang)
+
+        _MultilingualMBPPV2FixBPB.__name__ = f"MultilingualMBPPV2FixBPB_{lang.title()}"
+        return _MultilingualMBPPV2FixBPB
+
+    register(f"mt_mbpp_v2fix_{_lang}:bpb", _make_v2fix_bpb_config_factory(_lang))(
+        _make_v2fix_bpb_class_factory(_lang)
     )
 
 
