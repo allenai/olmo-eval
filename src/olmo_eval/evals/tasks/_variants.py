@@ -9,10 +9,7 @@ multiple choice format.
 """
 
 from olmo_eval.core import (
-    BitsPerByteScorer,
-    BPBMetric,
     MCQAChatFormatter,
-    PPLFormatter,
     SamplingParams,
 )
 
@@ -113,18 +110,6 @@ def register_all_mc_variants() -> None:
         register_variant(task_name, "mc")
 
 
-def register_bpb_variants() -> None:
-    """Register :bpb variant for ALL registered tasks."""
-    for task_name in list(_tasks.keys()):
-        register_variant(
-            task_name,
-            "bpb",
-            formatter=PPLFormatter(),
-            scorers=(BitsPerByteScorer(),),
-            metrics=(BPBMetric(),),
-        )
-
-
 def register_rc_variants() -> None:
     """Register :rc variant for ALL registered tasks.
 
@@ -191,7 +176,6 @@ def register_cot_variants() -> None:
 def register_all_variants() -> None:
     """Register all common variants for all tasks."""
     register_all_mc_variants()
-    register_bpb_variants()
     register_rc_variants()
     register_3shot_variants()
     register_cot_variants()

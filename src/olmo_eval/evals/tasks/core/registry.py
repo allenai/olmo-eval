@@ -258,6 +258,14 @@ def get_task(spec: str, config_overrides: dict[str, Any] | None = None) -> Task:
         # Then check regimes registry (regimes are now accessed as variants)
         elif task_name in _regimes and variant in _regimes[task_name]:
             config = replace(config, **_regimes[task_name][variant])
+        else:
+            available_variants = list(_variants.get(task_name, {}).keys())
+            available_regimes = list(_regimes.get(task_name, {}).keys())
+            available = sorted(set(available_variants + available_regimes))
+            raise KeyError(
+                f"Unknown variant '{variant}' for task '{task_name}'. "
+                f"Available: {', '.join(available) if available else 'none'}"
+            )
 
     # Apply inline overrides from spec (e.g., ::temperature=0.6)
     if inline_overrides:

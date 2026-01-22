@@ -174,12 +174,8 @@ class TestGetTask:
         with pytest.raises(KeyError, match="Unknown task"):
             get_task("nonexistent_task")
 
-    def test_get_task_with_unknown_regime_uses_base(self):
-        """Test that unknown regime/variant falls back to base config.
-
-        Note: Regimes are now accessed as variants using single colon syntax.
-        Unknown variants are silently ignored (no override applied).
-        """
+    def test_get_task_with_unknown_regime_raises(self):
+        """Test that unknown regime/variant raises KeyError."""
 
         @register(
             "fallback_task",
@@ -188,9 +184,9 @@ class TestGetTask:
         class FallbackTask(DummyTask):
             pass
 
-        # Unknown variant/regime should use base config
-        task = get_task("fallback_task:unknown_regime")
-        assert task.config.num_fewshot == 3
+        # Unknown variant/regime should raise KeyError
+        with pytest.raises(KeyError, match="Unknown variant 'unknown_regime'"):
+            get_task("fallback_task:unknown_regime")
 
 
 class TestListTasks:
