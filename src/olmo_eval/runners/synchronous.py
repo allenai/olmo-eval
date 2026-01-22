@@ -167,8 +167,6 @@ class SyncEvalRunner:
                     )
 
         console.print(f"[bold]Initializing {backend_type.value} backend...[/bold]")
-        if model_config.tokenizer:
-            console.print(f"[dim]Tokenizer: {model_config.tokenizer}[/dim]")
         extra_kwargs = dict(model_config.extra_args)
         if self.attention_backend:
             extra_kwargs["attention_backend"] = self.attention_backend
@@ -247,7 +245,25 @@ class SyncEvalRunner:
 
             return results
         finally:
-            # Clean up PyTorch distributed process group to avoid resource leak warning
+            # Clean up backend and PyTorch distributed process group
+            import gc
+
+            # For vLLM backend, explicitly shut down the engine
+            if hasattr(backend, "llm"):
+                llm = backend.llm
+                # vLLM 0.6+ has shutdown methods on the engine
+                if hasattr(llm, "llm_engine"):
+                    engine = llm.llm_engine
+                    if hasattr(engine, "shutdown"):
+                        engine.shutdown()
+                    elif hasattr(engine, "model_executor") and hasattr(
+                        engine.model_executor, "shutdown"
+                    ):
+                        engine.model_executor.shutdown()
+
+            del backend
+            gc.collect()
+
             try:
                 import torch.distributed as dist
 
