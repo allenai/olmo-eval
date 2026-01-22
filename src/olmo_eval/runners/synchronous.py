@@ -204,8 +204,6 @@ class SyncEvalRunner:
             },
         }
 
-        # TODO(undfined): This is starting with the naive approach. Add intelligent
-        # scheduling and possibly asynchronous runner.
         for spec in expanded_tasks:
             console.print(f"\n[bold blue]Running {spec}...[/bold blue]")
             task_result = self._run_task(spec, backend)
