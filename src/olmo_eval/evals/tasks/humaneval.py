@@ -109,15 +109,15 @@ class HumanEvalPlusTask(HumanEvalTask):
 
 
 class HumanEvalBPBTask(HumanEvalTask):
-    """HumanEval BPB task with answer prefix for code completion context."""
+    """HumanEval BPB task with prompt suffix for code completion context."""
 
-    # Answer prefix added after the prompt to prime the model for code completion
-    answer_prefix: str = "Here is the completed function:\n\n```python\n"
+    # Suffix added to the prompt to prime the model for code completion
+    prompt_suffix: str = "Here is the completed function:\n\n```python\n"
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance for BPB evaluation."""
-        # Use raw prompt + answer_prefix as context
-        prompt = doc["prompt"] + self.answer_prefix
+        # Use raw prompt + prompt_suffix as context
+        prompt = doc["prompt"] + self.prompt_suffix
         unit_tests = doc["test"] + f"\ncheck({doc['entry_point']})"
 
         return Instance(
@@ -144,7 +144,54 @@ class HumanEvalBPBTask(HumanEvalTask):
 
 
 class HumanEvalPlusBPBTask(HumanEvalBPBTask):
-    """HumanEval+ BPB task with answer prefix for code completion context."""
+    """HumanEval+ BPB task with prompt suffix for code completion context."""
+
+    default_hf_path: str = "evalplus/humanevalplus"
+
+
+class HumanEvalInloopBPBTask(HumanEvalTask):
+    """HumanEval BPB task matching oe-eval's inloop_bpb variant.
+
+    Key differences from HumanEvalBPBTask:
+    - No prompt_suffix (just doc["prompt"] as context)
+    - Few-shot examples use space before answer (matching oe-eval's doc_to_target)
+    """
+
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
+        """Convert a dataset document to an Instance for BPB evaluation.
+
+        Uses raw prompt as context (no prompt_suffix), matching oe-eval's
+        inloop_bpb variant where answer_prefix="".
+        """
+        # Just the function signature/docstring as context (no prompt_suffix)
+        prompt = doc["prompt"]
+        unit_tests = doc["test"] + f"\ncheck({doc['entry_point']})"
+
+        return Instance(
+            question=prompt,
+            gold_answer=doc["canonical_solution"],
+            metadata={
+                "id": doc["task_id"],
+                "entry_point": doc["entry_point"],
+                "answer_prefix": doc["prompt"],
+                "test": unit_tests,
+            },
+        )
+
+    def _build_fewshot(self) -> list[Instance]:
+        """Build few-shot examples from the test split."""
+        import random
+
+        all_instances = self._build_fewshot_from_source(split="test")
+        if not all_instances or self.config.num_fewshot == 0:
+            return []
+
+        rng = random.Random(self.config.fewshot_seed)
+        return rng.sample(all_instances, min(self.config.num_fewshot, len(all_instances)))
+
+
+class HumanEvalPlusInloopBPBTask(HumanEvalInloopBPBTask):
+    """HumanEval+ BPB task matching oe-eval's inloop_bpb variant."""
 
     default_hf_path: str = "evalplus/humanevalplus"
 
@@ -203,6 +250,41 @@ def _humaneval_plus_bpb_config() -> TaskConfig:
     )
 
 
+def _humaneval_inloop_bpb_config() -> TaskConfig:
+    """Config matching oe-eval's codex_humaneval with inloop_bpb variant.
+
+    Key differences from standard BPB config:
+    - No prompt_suffix in prompt (handled by HumanEvalInloopBPBTask)
+    - PPLFormatter.answer_prefix=" " to add space before answer in few-shot examples
+      (matching oe-eval's doc_to_target which returns " " + canonical_solution)
+    """
+    return TaskConfig(
+        name="humaneval:inloop_bpb",
+        data_source=DataSource(path="openai_humaneval"),
+        # answer_prefix=" " matches oe-eval's doc_to_target behavior
+        formatter=PPLFormatter(answer_prefix=" "),
+        scorers=(BitsPerByteScorer(),),
+        metrics=(BPBMetric(),),
+        primary_metric=BPBMetric(),
+        num_fewshot=3,
+        fewshot_seed=42,
+    )
+
+
+def _humaneval_plus_inloop_bpb_config() -> TaskConfig:
+    """Config matching oe-eval's codex_humaneval with inloop_bpb variant for HumanEval+."""
+    return TaskConfig(
+        name="humaneval_plus:inloop_bpb",
+        data_source=DataSource(path="evalplus/humanevalplus"),
+        formatter=PPLFormatter(answer_prefix=" "),
+        scorers=(BitsPerByteScorer(),),
+        metrics=(BPBMetric(),),
+        primary_metric=BPBMetric(),
+        num_fewshot=3,
+        fewshot_seed=42,
+    )
+
+
 @register("humaneval", _humaneval_config)
 class HumanEval(HumanEvalTask):
     """HumanEval code generation task."""
@@ -227,6 +309,20 @@ class HumanEvalBPB(HumanEvalBPBTask):
 @register("humaneval_plus:bpb", _humaneval_plus_bpb_config)
 class HumanEvalPlusBPB(HumanEvalPlusBPBTask):
     """HumanEval+ BPB evaluation task."""
+
+    pass
+
+
+@register("humaneval:inloop_bpb", _humaneval_inloop_bpb_config)
+class HumanEvalInloopBPB(HumanEvalInloopBPBTask):
+    """HumanEval BPB evaluation task matching oe-eval's inloop_bpb variant."""
+
+    pass
+
+
+@register("humaneval_plus:inloop_bpb", _humaneval_plus_inloop_bpb_config)
+class HumanEvalPlusInloopBPB(HumanEvalPlusInloopBPBTask):
+    """HumanEval+ BPB evaluation task matching oe-eval's inloop_bpb variant."""
 
     pass
 

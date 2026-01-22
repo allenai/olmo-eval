@@ -158,6 +158,10 @@ class PPLFormatter:
     # This matches oe-eval's multilingual_mbpp behavior where the prompt always
     # has "\n\n" before the current doc's text (due to: join(...) + "\n\n" + text).
     always_prepend_separator: bool = False
+    # Prefix to add before gold_answer when building few-shot examples.
+    # In oe-eval, doc_to_target often returns " " + answer, so we can replicate
+    # this with answer_prefix=" ".
+    answer_prefix: str = ""
 
     def format(
         self,
@@ -187,8 +191,8 @@ class PPLFormatter:
         for ex in fewshot or []:
             example = ex.question or ""
             if ex.gold_answer:
-                # Concatenate directly without space (matches oe-eval)
-                example += ex.gold_answer
+                # Concatenate with optional prefix (oe-eval uses " " for humaneval)
+                example += self.answer_prefix + ex.gold_answer
             parts.append(example)
 
         # Add the current instance question
