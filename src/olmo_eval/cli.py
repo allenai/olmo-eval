@@ -57,11 +57,18 @@ class RunnerConfig:
     """Runner configuration for display."""
 
     runner: type  # The runner class
-    num_workers: int | str | None = None  # Only for async runners
-    gpus_per_worker: int | None = None  # Only for async runners
+    output_dir: str | None = None
+    attention_backend: str | None = None
+    # Async-only settings
+    num_workers: int | str | None = None
+    gpus_per_worker: int | None = None
 
     def __repr__(self) -> str:
         parts = [f"runner={self.runner.__name__}"]
+        if self.output_dir is not None:
+            parts.append(f"output_dir={self.output_dir!r}")
+        if self.attention_backend is not None:
+            parts.append(f"attention_backend={self.attention_backend!r}")
         if self.num_workers is not None:
             parts.append(f"num_workers={self.num_workers!r}")
         if self.gpus_per_worker is not None:
@@ -1168,6 +1175,13 @@ def launch(
     # Build runner config
     from olmo_eval.runners import AsyncEvalRunner, StreamingEvalRunner, SyncEvalRunner
 
+    # Resolve effective attention_backend from first model's config if available
+    effective_attention_backend = None
+    if cfg is not None and model_configs:
+        first_model = model_configs[0]
+        model_resources = cfg.get_model_resources(first_model)
+        effective_attention_backend = model_resources.get("attention_backend")
+
     if use_async_stream:
         # Resolve effective num_workers from CLI or first model's launch config
         effective_num_workers = num_workers
@@ -1178,6 +1192,8 @@ def launch(
 
         runner_config = RunnerConfig(
             runner=StreamingEvalRunner,
+            output_dir=BEAKER_RESULT_DIR,
+            attention_backend=effective_attention_backend,
             num_workers=effective_num_workers if effective_num_workers is not None else "auto",
             gpus_per_worker=gpus_per_worker,
         )
@@ -1191,11 +1207,17 @@ def launch(
 
         runner_config = RunnerConfig(
             runner=AsyncEvalRunner,
+            output_dir=BEAKER_RESULT_DIR,
+            attention_backend=effective_attention_backend,
             num_workers=effective_num_workers if effective_num_workers is not None else "auto",
             gpus_per_worker=gpus_per_worker,
         )
     else:
-        runner_config = RunnerConfig(runner=SyncEvalRunner)
+        runner_config = RunnerConfig(
+            runner=SyncEvalRunner,
+            output_dir=BEAKER_RESULT_DIR,
+            attention_backend=effective_attention_backend,
+        )
 
     # Build the complete launch summary dataclass
     launch_config_summary = LaunchSummary(
