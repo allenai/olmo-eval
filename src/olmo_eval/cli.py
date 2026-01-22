@@ -49,6 +49,7 @@ class TaskSummary:
     split: str = "test"
     primary_metric: str | None = None
     sampling_params: Any = None
+    overrides: dict[str, Any] | None = None  # Inline overrides from spec (::key=value)
 
 
 @dataclass
@@ -1100,8 +1101,8 @@ def launch(
     task_summaries: list[TaskSummary] = []
     for task_spec in valid_tasks:
         try:
-            # Parse the spec to extract variants/regimes
-            task_name, variants, _overrides = parse_task_spec(task_spec)
+            # Parse the spec to extract variants/regimes and inline overrides
+            task_name, variants, inline_overrides = parse_task_spec(task_spec)
 
             task_instance = get_task_instance(task_spec)
             task_cfg = task_instance.config
@@ -1117,6 +1118,7 @@ def launch(
                     split=task_cfg.split.value if hasattr(task_cfg.split, "value") else str(task_cfg.split),
                     primary_metric=str(task_cfg.primary_metric) if task_cfg.primary_metric else None,
                     sampling_params=task_cfg.sampling_params,
+                    overrides=inline_overrides if inline_overrides else None,
                 )
             )
         except Exception:
