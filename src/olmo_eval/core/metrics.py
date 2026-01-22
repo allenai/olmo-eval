@@ -1,5 +1,6 @@
 """Metric protocols and implementations."""
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
@@ -67,12 +68,16 @@ class F1Metric:
 
 @dataclass(frozen=True, slots=True)
 class BPBMetric:
-    """Mean bits-per-byte of the gold/correct completion.
+    """Aggregate bits-per-byte of the gold/correct completion.
 
-    For tasks with multiple continuations (e.g., multiple choice), this returns
-    the BPB of the correct continuation using `instance.metadata["gold_idx"]`.
-    For single-continuation tasks (like perplexity), it returns the BPB of that
-    continuation.
+    Computes BPB by summing total logprobs and total bytes across all responses,
+    then computing: -total_logprobs / (total_bytes * log(2))
+
+    This byte-weighted approach means longer texts contribute proportionally more
+    to the final metric, matching the standard aggregate BPB calculation.
+
+    For tasks with multiple continuations (e.g., multiple choice), this uses
+    the correct continuation via `instance.metadata["gold_idx"]`.
     """
 
     name: str = "bits_per_byte"
@@ -82,8 +87,8 @@ class BPBMetric:
         if not responses:
             return 0.0
 
-        scorer_instance = self.scorer()
-        total = 0.0
+        total_logprobs = 0.0
+        total_bytes = 0
 
         for response in responses:
             outputs = response.outputs
@@ -102,9 +107,24 @@ class BPBMetric:
                 # Single output: use it directly
                 output = outputs[0]
 
-            total += scorer_instance.score(response.instance, output)
+            if output.logprobs is None:
+                continue
 
-        return total / len(responses)
+            logprobs = [tok["logprob"] for tok in output.logprobs if "logprob" in tok]
+            if not logprobs:
+                continue
+
+            num_bytes = len(output.text.encode("utf-8"))
+            if num_bytes == 0:
+                continue
+
+            total_logprobs += sum(logprobs)
+            total_bytes += num_bytes
+
+        if total_bytes == 0:
+            return 0.0
+
+        return -total_logprobs / (total_bytes * math.log(2))
 
 
 @dataclass(frozen=True, slots=True)
