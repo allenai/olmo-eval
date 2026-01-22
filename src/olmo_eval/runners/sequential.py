@@ -40,7 +40,7 @@ class ValidationError(Exception):
 
 
 # Keys that apply to TaskConfig
-TASKCONFIG_KEYS = {"num_fewshot", "limit", "fewshot_seed", "add_leading_space"}
+TASKCONFIG_KEYS = {"num_fewshot", "limit", "fewshot_seed"}
 
 # Keys that apply to SamplingParams
 SAMPLING_KEYS = {"temperature", "max_tokens", "top_p", "top_k", "num_samples"}

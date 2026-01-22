@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from olmo_eval.core import (
@@ -35,7 +35,6 @@ class TaskConfig:
     split: Split = Split.TEST
     primary_metric: MetricName | None = None
     sampling_params: SamplingParams | None = None
-    formatter_overrides: dict[str, Any] = field(default_factory=dict)
 
 
 class Task(ABC):

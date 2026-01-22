@@ -329,21 +329,3 @@ class TestPPLFormatter:
         # Fewshot is ignored - only question used as prompt
         assert request.prompt == "Test?"
         assert request.continuations == (" answer",)
-
-    def test_ppl_formatter_add_leading_space_default(self):
-        """PPLFormatter adds leading space by default (backward compatible)."""
-        formatter = PPLFormatter()
-        instance = Instance(question="Context", gold_answer="answer")
-
-        request = formatter.format(instance)
-
-        assert request.continuations[0] == " answer"
-
-    def test_ppl_formatter_disable_leading_space(self):
-        """PPLFormatter can disable leading space."""
-        formatter = PPLFormatter(add_leading_space=False)
-        instance = Instance(question="Context", gold_answer="answer")
-
-        request = formatter.format(instance)
-
-        assert request.continuations[0] == "answer"
