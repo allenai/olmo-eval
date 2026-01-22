@@ -74,14 +74,14 @@ class HumanEvalTask(Task):
             prompt=instance.question,
         )
 
-    def extract_answer(self, output: LMOutput) -> str | None:
+    def extract_answer(self, output: LMOutput, instance: Instance) -> str | None:
         """Extract code from model output."""
         code = extract_code(output.text)
         if not code:
             return None
         # For Humaneval, we follow the original paper setup by adding the prompt to the generated code completion
         # as the prompt may provide additional library imports needed for the code execution.
-        return output.metadata["answer_prefix"] + code
+        return instance.metadata["answer_prefix"] + code
 
 
 class HumanEvalPlusTask(HumanEvalTask):
