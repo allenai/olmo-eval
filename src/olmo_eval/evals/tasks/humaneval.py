@@ -55,7 +55,7 @@ class HumanEvalTask(Task):
 
         return Instance(
             question=prompt,
-            gold_answer=doc["canonical_solution"],
+            gold_answer=doc["canonical_solution"] + "```",
             metadata={
                 "id": doc["task_id"],
                 "entry_point": doc["entry_point"],
@@ -77,9 +77,11 @@ class HumanEvalTask(Task):
     def extract_answer(self, output: LMOutput) -> str | None:
         """Extract code from model output."""
         code = extract_code(output.text)
-        if code and "answer_prefix" in (output.metadata or {}):
-            return output.metadata["answer_prefix"] + code
-        return code
+        if not code:
+            return None
+        # For Humaneval, we follow the original paper setup by adding the prompt to the generated code completion
+        # as the prompt may provide additional library imports needed for the code execution.
+        return output.metadata["answer_prefix"] + code
 
 
 class HumanEvalPlusTask(HumanEvalTask):
@@ -105,34 +107,6 @@ def _humaneval_config() -> TaskConfig:
 def _humaneval_plus_config() -> TaskConfig:
     return TaskConfig(
         name="humaneval_plus",
-        data_source=DataSource(path="evalplus/humanevalplus"),
-        scorers=(),
-        metrics=(),
-        sampling_params=SamplingParams(
-            max_tokens=1024,
-            temperature=0.0,
-            stop_sequences=HUMANEVAL_STOP_SEQUENCES,
-        ),
-    )
-
-
-def _codex_humaneval_config() -> TaskConfig:
-    return TaskConfig(
-        name="codex_humaneval",
-        data_source=DataSource(path="openai_humaneval"),
-        scorers=(),
-        metrics=(),
-        sampling_params=SamplingParams(
-            max_tokens=1024,
-            temperature=0.0,
-            stop_sequences=HUMANEVAL_STOP_SEQUENCES,
-        ),
-    )
-
-
-def _codex_humanevalplus_config() -> TaskConfig:
-    return TaskConfig(
-        name="codex_humanevalplus",
         data_source=DataSource(path="evalplus/humanevalplus"),
         scorers=(),
         metrics=(),
