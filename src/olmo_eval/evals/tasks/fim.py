@@ -191,7 +191,7 @@ class HumanEvalFIMRandomTask(HumanEvalFIMTask):
 
 def _fim_single_config() -> TaskConfig:
     return TaskConfig(
-        name="codex_humanevalfim_single",
+        name="humanevalfim_single",
         data_source=DataSource(
             path="loubnabnl/humaneval_infilling",
             subset="HumanEval-SingleLineInfilling",
@@ -203,7 +203,7 @@ def _fim_single_config() -> TaskConfig:
 
 def _fim_multi_config() -> TaskConfig:
     return TaskConfig(
-        name="codex_humanevalfim_multi",
+        name="humanevalfim_multi",
         data_source=DataSource(
             path="loubnabnl/humaneval_infilling",
             subset="HumanEval-MultiLineInfilling",
@@ -215,7 +215,7 @@ def _fim_multi_config() -> TaskConfig:
 
 def _fim_random_config() -> TaskConfig:
     return TaskConfig(
-        name="codex_humanevalfim_random",
+        name="humanevalfim_random",
         data_source=DataSource(
             path="loubnabnl/humaneval_infilling",
             subset="HumanEval-RandomSpanInfilling",
@@ -230,21 +230,21 @@ def _fim_random_config() -> TaskConfig:
 # =============================================================================
 
 
-@register("codex_humanevalfim_single", _fim_single_config)
+@register("humanevalfim_single", _fim_single_config)
 class HumanEvalFIMSingle(HumanEvalFIMSingleTask):
     """HumanEval FIM single-line infilling task."""
 
     pass
 
 
-@register("codex_humanevalfim_multi", _fim_multi_config)
+@register("humanevalfim_multi", _fim_multi_config)
 class HumanEvalFIMMulti(HumanEvalFIMMultiTask):
     """HumanEval FIM multi-line infilling task."""
 
     pass
 
 
-@register("codex_humanevalfim_random", _fim_random_config)
+@register("humanevalfim_random", _fim_random_config)
 class HumanEvalFIMRandom(HumanEvalFIMRandomTask):
     """HumanEval FIM random span infilling task."""
 

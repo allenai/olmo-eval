@@ -40,7 +40,7 @@ class TaskSummary:
     """Summary of a task configuration for display."""
 
     name: str
-    spec: str | None = None  # Original task spec (e.g., "codex_humaneval:pass@1")
+    spec: str | None = None  # Original task spec (e.g., "humaneval:pass@1")
     variants: list[str] | None = None  # Applied variants/regimes
     formatter: Any = None
     scorers: tuple = ()
@@ -728,6 +728,11 @@ def suite_info(suite_name: str) -> None:
     default=None,
     help="Inject AWS credentials for S3 model access. Auto-detected from s3:// model paths.",
 )
+@click.option(
+    "--gcs-credentials/--no-gcs-credentials",
+    default=None,
+    help="Inject GCS credentials for gs:// model access. Auto-detected from gs:// model paths.",
+)
 def launch(
     config: str | None,
     name: str | None,
@@ -753,6 +758,7 @@ def launch(
     dry_run: bool,
     follow: bool,
     aws_credentials: bool | None,
+    gcs_credentials: bool | None,
 ) -> None:
     """Launch an evaluation job on Beaker.
 
@@ -967,6 +973,41 @@ def launch(
 
         console.print()
         console.print(s3_table)
+        console.print()
+
+    # Auto-detect GCS model paths for GCS credential injection
+    from olmo_eval.launch.gcs import get_local_gcs_credentials, is_gcs_path
+
+    gcs_models = [m.name_or_path for m in model_configs if is_gcs_path(m.name_or_path)]
+    inject_gcs_credentials = gcs_credentials
+    if inject_gcs_credentials is None:
+        # Auto-detect: check if any model path is GCS
+        inject_gcs_credentials = bool(gcs_models)
+
+    if inject_gcs_credentials:
+        local_gcs_creds = get_local_gcs_credentials()
+        beaker_user = launcher.beaker.user_name
+
+        gcs_table = Table(title="GCS Access Configuration", show_header=False, box=None)
+        gcs_table.add_column("Key", style="blue")
+        gcs_table.add_column("Value")
+
+        if local_gcs_creds:
+            gcs_table.add_row("Credentials", "[green]found[/green] (service account)")
+            if local_gcs_creds.client_email:
+                gcs_table.add_row("Service account", local_gcs_creds.client_email)
+            if local_gcs_creds.project_id:
+                gcs_table.add_row("Project", local_gcs_creds.project_id)
+            gcs_table.add_row("Beaker user", beaker_user)
+            gcs_table.add_row("Beaker secret", f"{beaker_user}_GOOGLE_CREDENTIALS")
+        else:
+            gcs_table.add_row(
+                "Credentials",
+                "[yellow]not found[/yellow] - job may fail if GCS access is required",
+            )
+
+        console.print()
+        console.print(gcs_table)
         console.print()
 
     # Get workspace object for beaker API calls that require it
@@ -1349,9 +1390,7 @@ def launch(
         effective_extra_loader_config = model_resources.get("extra_loader_config")
         if effective_extra_loader_config:
             # Serialize extra_loader_config as compact JSON (no spaces) for inline spec
-            json_config = json_module.dumps(
-                effective_extra_loader_config, separators=(",", ":")
-            )
+            json_config = json_module.dumps(effective_extra_loader_config, separators=(",", ":"))
             model_inline_overrides.append(f"extra_loader_config={json_config}")
 
         if model_inline_overrides:
@@ -1414,7 +1453,9 @@ def launch(
             effective_backends = [backend_group] if backend_group else []
 
         # Convert common secrets to BeakerEnvSecret objects
-        env_secrets = [BeakerEnvSecret(env_var, secret_name) for env_var, secret_name in common_secrets]
+        env_secrets = [
+            BeakerEnvSecret(env_var, secret_name) for env_var, secret_name in common_secrets
+        ]
 
         job_config = BeakerJobConfig(
             name=exp_name,
@@ -1432,6 +1473,7 @@ def launch(
             groups=effective_groups,
             beaker_image=effective_image,
             inject_aws_credentials=inject_aws_credentials,
+            inject_gcs_credentials=inject_gcs_credentials,
             env_secrets=env_secrets,
         )
         job_configs.append(job_config)

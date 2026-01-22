@@ -125,8 +125,8 @@ FIM_CONFIGS: dict[str, FIMConfig] = {
 # =============================================================================
 
 ALL_CODEX_TASKS: tuple[str, ...] = (
-    "codex_humaneval:temp0.8",
-    "codex_humanevalplus:temp0.8",
+    "humaneval:temp0.8",
+    "humanevalplus:temp0.8",
     "mbpp::none",
     "mbppplus::none",
     "bigcodebench::none",
@@ -135,23 +135,23 @@ ALL_CODEX_TASKS: tuple[str, ...] = (
 """Standard code generation benchmark tasks."""
 
 STARCODER_CODEX_TASKS: tuple[str, ...] = (
-    "codex_humaneval::starcoder_pass@1",
-    "codex_humaneval::starcoder_pass@10",
+    "humaneval::starcoder_pass@1",
+    "humaneval::starcoder_pass@10",
     "mbpp::starcoder_pass@1",
     "mbpp::starcoder_pass@10",
 )
 """StarCoder-specific code generation tasks with pass@k metrics."""
 
 STARCODER_PASS_AT_1_TASKS: tuple[str, ...] = (
-    "codex_humaneval::starcoder_pass@1",
+    "humaneval::starcoder_pass@1",
     "mbpp::starcoder_pass@1",
 )
 """StarCoder tasks evaluated with pass@1 metric only."""
 
 FIM_TASKS: tuple[str, ...] = (
-    "codex_humanevalfim_single",
-    "codex_humanevalfim_multi",
-    "codex_humanevalfim_random",
+    "humanevalfim_single",
+    "humanevalfim_multi",
+    "humanevalfim_random",
 )
 """Fill-in-the-middle code completion tasks."""
 

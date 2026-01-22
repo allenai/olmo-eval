@@ -166,28 +166,6 @@ def _humaneval_plus_bpb_config() -> TaskConfig:
     )
 
 
-def _codex_humaneval_bpb_config() -> TaskConfig:
-    return TaskConfig(
-        name="codex_humaneval:bpb",
-        data_source=DataSource(path="openai_humaneval"),
-        formatter=PPLFormatter(),
-        scorers=(BitsPerByteScorer(),),
-        metrics=(BPBMetric(),),
-        primary_metric=BPBMetric(),
-    )
-
-
-def _codex_humanevalplus_bpb_config() -> TaskConfig:
-    return TaskConfig(
-        name="codex_humanevalplus:bpb",
-        data_source=DataSource(path="evalplus/humanevalplus"),
-        formatter=PPLFormatter(),
-        scorers=(BitsPerByteScorer(),),
-        metrics=(BPBMetric(),),
-        primary_metric=BPBMetric(),
-    )
-
-
 @register("humaneval", _humaneval_config)
 class HumanEval(HumanEvalTask):
     """HumanEval code generation task."""
@@ -197,20 +175,6 @@ class HumanEval(HumanEvalTask):
 
 @register("humaneval_plus", _humaneval_plus_config)
 class HumanEvalPlus(HumanEvalPlusTask):
-    """HumanEval+ code generation task."""
-
-    pass
-
-
-@register("codex_humaneval", _codex_humaneval_config)
-class CodexHumanEval(HumanEvalTask):
-    """HumanEval code generation task."""
-
-    pass
-
-
-@register("codex_humanevalplus", _codex_humanevalplus_config)
-class CodexHumanEvalPlus(HumanEvalPlusTask):
     """HumanEval+ code generation task."""
 
     pass
@@ -230,20 +194,6 @@ class HumanEvalPlusBPB(HumanEvalPlusTask):
     pass
 
 
-@register("codex_humaneval:bpb", _codex_humaneval_bpb_config)
-class CodexHumanEvalBPB(HumanEvalTask):
-    """CodexHumanEval BPB evaluation task."""
-
-    pass
-
-
-@register("codex_humanevalplus:bpb", _codex_humanevalplus_bpb_config)
-class CodexHumanEvalPlusBPB(HumanEvalPlusTask):
-    """CodexHumanEvalPlus BPB evaluation task."""
-
-    pass
-
-
 register_variant(
     "humaneval",
     "bpb",
@@ -255,24 +205,6 @@ register_variant(
 
 register_variant(
     "humaneval_plus",
-    "bpb",
-    formatter=PPLFormatter(),
-    scorers=(BitsPerByteScorer(),),
-    metrics=(BPBMetric(),),
-    primary_metric=BPBMetric(),
-)
-
-register_variant(
-    "codex_humaneval",
-    "bpb",
-    formatter=PPLFormatter(),
-    scorers=(BitsPerByteScorer(),),
-    metrics=(BPBMetric(),),
-    primary_metric=BPBMetric(),
-)
-
-register_variant(
-    "codex_humanevalplus",
     "bpb",
     formatter=PPLFormatter(),
     scorers=(BitsPerByteScorer(),),

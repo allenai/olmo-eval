@@ -87,7 +87,7 @@ class TestHumanEvalFIMTask:
     @pytest.fixture
     def fim_single_task(self):
         """Create a FIM single task for testing."""
-        return get_task("codex_humanevalfim_single")
+        return get_task("humanevalfim_single")
 
     def test_process_doc(self, fim_single_task):
         """Test processing a FIM document."""
@@ -172,20 +172,20 @@ class TestFIMTaskConfigs:
     def test_fim_single_config(self):
         """Test FIM single task config."""
         config = _fim_single_config()
-        assert config.name == "codex_humanevalfim_single"
+        assert config.name == "humanevalfim_single"
         assert config.data_source.path == "loubnabnl/humaneval_infilling"
         assert config.data_source.subset == "HumanEval-SingleLineInfilling"
 
     def test_fim_multi_config(self):
         """Test FIM multi task config."""
         config = _fim_multi_config()
-        assert config.name == "codex_humanevalfim_multi"
+        assert config.name == "humanevalfim_multi"
         assert config.data_source.subset == "HumanEval-MultiLineInfilling"
 
     def test_fim_random_config(self):
         """Test FIM random task config."""
         config = _fim_random_config()
-        assert config.name == "codex_humanevalfim_random"
+        assert config.name == "humanevalfim_random"
         assert config.data_source.subset == "HumanEval-RandomSpanInfilling"
 
 
@@ -207,34 +207,34 @@ class TestFIMTaskRegistration:
     def test_all_fim_tasks_registered(self):
         """Test that all 3 FIM tasks are registered."""
         all_tasks = list_tasks()
-        assert "codex_humanevalfim_single" in all_tasks
-        assert "codex_humanevalfim_multi" in all_tasks
-        assert "codex_humanevalfim_random" in all_tasks
+        assert "humanevalfim_single" in all_tasks
+        assert "humanevalfim_multi" in all_tasks
+        assert "humanevalfim_random" in all_tasks
 
     def test_get_fim_single(self):
         """Test getting FIM single task."""
-        task = get_task("codex_humanevalfim_single")
+        task = get_task("humanevalfim_single")
         assert task is not None
         assert isinstance(task, HumanEvalFIMSingle)
         assert task.default_subset == "HumanEval-SingleLineInfilling"
 
     def test_get_fim_multi(self):
         """Test getting FIM multi task."""
-        task = get_task("codex_humanevalfim_multi")
+        task = get_task("humanevalfim_multi")
         assert task is not None
         assert isinstance(task, HumanEvalFIMMulti)
         assert task.default_subset == "HumanEval-MultiLineInfilling"
 
     def test_get_fim_random(self):
         """Test getting FIM random task."""
-        task = get_task("codex_humanevalfim_random")
+        task = get_task("humanevalfim_random")
         assert task is not None
         assert isinstance(task, HumanEvalFIMRandom)
         assert task.default_subset == "HumanEval-RandomSpanInfilling"
 
     def test_task_has_correct_hf_path(self):
         """Test that tasks have correct HuggingFace path."""
-        task = get_task("codex_humanevalfim_single")
+        task = get_task("humanevalfim_single")
         assert task.default_hf_path == "loubnabnl/humaneval_infilling"
 
 
@@ -285,7 +285,7 @@ class TestFIMPromptFormatting:
 
     def test_santacoder_prompt_format(self):
         """Test prompt formatting with SantaCoder tokens."""
-        task = get_task("codex_humanevalfim_single")
+        task = get_task("humanevalfim_single")
         doc = {
             "task_id": "test",
             "prompt": "PREFIX",
@@ -302,7 +302,7 @@ class TestFIMPromptFormatting:
 
     def test_prompt_contains_all_fim_tokens(self):
         """Test that generated prompt contains all FIM tokens."""
-        task = get_task("codex_humanevalfim_single")
+        task = get_task("humanevalfim_single")
         doc = {
             "task_id": "test",
             "prompt": "def foo():\n    ",

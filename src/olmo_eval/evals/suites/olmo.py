@@ -69,7 +69,7 @@ OLMO3_DEV_1B_MATH_BPB = make_suite(
 
 OLMO3_DEV_1B_CODE_BPB = make_suite(
     "olmo3:dev:1b:code:bpb",
-    ("codex_humaneval:3shot:bpb::none", "mbpp:3shot:bpb::none", MT_MBPP_V2FIX),
+    ("humaneval:3shot:bpb::none", "mbpp:3shot:bpb::none", MT_MBPP_V2FIX),
     aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
     description="OLMo3 1B code development tasks (BPB)",
 )
@@ -213,7 +213,7 @@ OLMO3_DEV_7B_CODE_GEN_V2 = make_suite(
     "olmo3:dev:7b:code_gen:v2",
     (
         "bigcodebench:3shot::olmo3:v2",
-        "codex_humaneval:3shot::olmo3:n32:v2",
+        "humaneval:3shot::olmo3:n32:v2",
         "deepseek_leetcode::olmo3:n32:v2",
         "ds1000:3shot::olmo3:v2",
         "mbpp:3shot::olmo3:n32:v2",
@@ -228,7 +228,7 @@ OLMO3_DEV_7B_CODE_GEN_V2_FAST = make_suite(
     "olmo3:dev:7b:code_gen:v2:fast",
     (
         "bigcodebench:3shot::olmo3:v2",
-        "codex_humaneval:3shot::olmo3:n32:v2",
+        "humaneval:3shot::olmo3:n32:v2",
         "ds1000:3shot::olmo3:v2",
         "mbpp:3shot::olmo3:n32:v2",
     ),
@@ -315,7 +315,7 @@ OLMO3_DEV_7B_CODE_GEN_MINI_PASS_AT_16 = make_suite(
     "olmo3:dev:7b:code_gen_mini:v2:n32:pass_at_16",
     (
         "deepseek_leetcode::olmo3:n32:v2:pass_at_16",
-        "codex_humaneval:3shot::olmo3:n32:v2:pass_at_16",
+        "humaneval:3shot::olmo3:n32:v2:pass_at_16",
         "mbpp:3shot::olmo3:n32:v2:pass_at_16",
         MULTIPL_E_HE_N32_V2_PASS_AT_16,
         MULTIPL_E_MBPP_N32_V2_PASS_AT_16,
@@ -339,7 +339,7 @@ OLMO3_DEV_MIDTRAIN_V1 = make_suite(
         "minerva_math_500::hamish_zs_reasoning",
         "aime::hamish_zs_reasoning",
         OMEGA_0SHOT_CHAT,
-        "codex_humanevalplus:0-shot-chat::tulu-thinker",
+        "humanevalplus:0-shot-chat::tulu-thinker",
         "mbppplus:0-shot-chat::tulu-thinker",
         "livecodebench_codegeneration::tulu-thinker",
         BBH_COT_THINKER,
@@ -364,7 +364,7 @@ OLMO3_DEV_MIDTRAIN_V2 = make_suite(
         "aime:2025::olmo3:midtrain",
         "omega_500::olmo3:midtrain",
         OMEGA_MIDTRAIN,
-        # "codex_humanevalplus::olmo3:midtrain", TODO(undfined): Enable once we add code execution
+        # "humanevalplus::olmo3:midtrain", TODO(undfined): Enable once we add code execution
         # "mbppplus::olmo3:midtrain",
         # "livecodebench_codegeneration::olmo3:midtrain",
         # BBH_COT_MIDTRAIN,
@@ -460,7 +460,7 @@ OLMO3_DEV_1B_MAIN = make_suite(
         MT_MBPP_V2FIX,
         MMLU_RC,
         MMLU_BPB,
-        "codex_humaneval:3shot:bpb::none",
+        "humaneval:3shot:bpb::none",
         "mbpp:3shot:bpb::none",
         MINERVA_BPB,
     ),
@@ -488,7 +488,7 @@ OLMO3_DEV_7B_MAIN_V2 = make_suite(
         MINERVA_N4_V2,
         "minerva_math_500::olmo3:n32:v2",
         "minerva_math_500::olmo3:n32:v2:pass_at_16",
-        "codex_humaneval:3shot::olmo3:n32:v2",
+        "humaneval:3shot::olmo3:n32:v2",
         "mbpp:3shot::olmo3:n32:v2",
         MULTIPL_E_HE_N32_V2,
         MULTIPL_E_MBPP_N32_V2,
@@ -513,7 +513,7 @@ OLMO3_DEV_7B_MAIN_V2_FAST = make_suite(
         "gsm8k::olmo3:n8:v2",
         GSM_SYMB_N8_V2,
         MINERVA_N4_V2,
-        "codex_humaneval:3shot::olmo3:n32:v2",
+        "humaneval:3shot::olmo3:n32:v2",
         "mbpp:3shot::olmo3:n32:v2",
         OLMO3_DEV_1B_CODE_BPB,  # TODO(undfined): Temporary inclusion to cover code for now
     ),

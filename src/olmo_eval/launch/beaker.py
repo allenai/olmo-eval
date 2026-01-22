@@ -427,6 +427,9 @@ class BeakerJobConfig:
     # AWS S3 access - when True, injects user's AWS credentials as env secrets
     inject_aws_credentials: bool = False
 
+    # GCS access - when True, injects user's GCS credentials as env secret
+    inject_gcs_credentials: bool = False
+
 
 def resolve_clusters(cluster: str | list[str]) -> list[str]:
     """Resolve cluster aliases to full cluster names.
@@ -597,6 +600,14 @@ class BeakerLauncher:
             env_secrets.extend(aws_secrets)
             log.info("Injecting AWS credentials for S3 access")
 
+        # Inject GCS credentials if requested
+        google_credentials_secret: str | None = None
+        if config.inject_gcs_credentials:
+            from olmo_eval.launch.gcs import ensure_gcs_secrets
+
+            google_credentials_secret = ensure_gcs_secrets(config.workspace)
+            log.info("Injecting GCS credentials for GCS access")
+
         # Build env vars as tuples: (name, value)
         env_vars: list[tuple[str, str]] = list(config.env_vars.items())
 
@@ -632,6 +643,7 @@ class BeakerLauncher:
                 weka=weka_mounts if weka_mounts else None,
                 env_vars=env_vars if env_vars else None,
                 env_secrets=env_secrets if env_secrets else None,
+                google_credentials_secret=google_credentials_secret,
                 mounts=mounts,
                 results=config.result_path,
                 no_python=True,  # Use pre-built image, skip Python setup
@@ -659,6 +671,7 @@ class BeakerLauncher:
             weka=weka_mounts if weka_mounts else None,
             env_vars=env_vars if env_vars else None,
             env_secrets=env_secrets if env_secrets else None,
+            google_credentials_secret=google_credentials_secret,
             mounts=mounts,
             results=config.result_path,
             no_python=True,  # Use pre-built image, skip Python setup
