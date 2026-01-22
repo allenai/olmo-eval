@@ -1,5 +1,6 @@
 """olmo-eval CLI entry point."""
 
+from dataclasses import dataclass, field
 from datetime import UTC
 from typing import Any
 
@@ -16,6 +17,68 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR, DEFAULT_M
 from olmo_eval.evals.suites import get_suite, list_suites
 from olmo_eval.evals.tasks import list_regimes, list_tasks, list_variants
 from olmo_eval.evals.tasks.core.registry import parse_overrides
+
+
+# -----------------------------------------------------------------------------
+# Dataclasses for pretty-printing launch configuration
+# -----------------------------------------------------------------------------
+
+
+@dataclass
+class BeakerSettings:
+    """Beaker-specific settings for the launch."""
+
+    workspace: str
+    budget: str
+    cluster: str
+    image: str
+    groups: list[str]
+    priority: str = "normal"
+    preemptible: bool = True
+    timeout: str = "24h"
+
+
+@dataclass
+class ModelSummary:
+    """Summary of a model configuration."""
+
+    name: str
+    gpus: int = 1
+    parallelism: int = 1
+    alias: str | None = None
+    backend: str | None = None
+
+
+@dataclass
+class TaskSummary:
+    """Summary of a task configuration for display."""
+
+    name: str
+    formatter: Any = None
+    scorers: tuple = ()
+    metrics: tuple = ()
+    num_fewshot: int = 0
+    split: str = "test"
+    primary_metric: str | None = None
+
+
+@dataclass
+class AsyncSettings:
+    """Async execution settings."""
+
+    mode: str  # "parallel" or "stream"
+    num_workers: int | None = None
+    gpus_per_worker: int = 1
+
+
+@dataclass
+class LaunchConfig:
+    """Complete launch configuration for pretty-printing."""
+
+    beaker: BeakerSettings
+    models: list[ModelSummary]
+    tasks: list[TaskSummary]
+    async_settings: AsyncSettings | None = None
 
 console = Console()
 
@@ -1056,45 +1119,83 @@ def launch(
     total_experiments = len(experiment_plan)
     total_expanded_tasks = len(valid_tasks) * len(model_configs)
 
-    # Build consolidated launch configuration summary
-    launch_summary: dict[str, Any] = {
-        "beaker": {
-            "workspace": workspace,
-            "budget": budget,
-            "image": effective_image,
-            "groups": effective_groups,
-            "cluster": cluster,
-        },
-        "models": [
-            {
-                "name": m.name_or_path,
-                **({"alias": m.alias} if m.alias else {}),
-                **({"gpus": m.gpus} if m.gpus else {}),
-                **({"parallelism": m.parallelism} if m.parallelism else {}),
-            }
-            for m in model_configs
-        ],
-        "tasks": original_task_specs,
-        "defaults": {
-            "gpus": gpus,
-            "parallelism": parallelism,
-            "priority": priority,
-            "preemptible": preemptible,
-            "timeout": timeout,
-        },
-    }
+    # Fetch actual task configurations for display
+    from olmo_eval.evals.tasks import get_task as get_task_instance
 
-    # Add async settings if enabled
+    task_configs: list[TaskSummary] = []
+    for task_spec in valid_tasks[:10]:  # Limit to first 10 for display
+        try:
+            task_instance = get_task_instance(task_spec)
+            cfg = task_instance.config
+            task_configs.append(
+                TaskSummary(
+                    name=cfg.name,
+                    formatter=cfg.formatter,
+                    scorers=cfg.scorers,
+                    metrics=cfg.metrics,
+                    num_fewshot=cfg.num_fewshot,
+                    split=cfg.split.value if hasattr(cfg.split, "value") else str(cfg.split),
+                    primary_metric=str(cfg.primary_metric) if cfg.primary_metric else None,
+                )
+            )
+        except Exception:
+            # Fall back to just the spec name if we can't load the task
+            task_configs.append(TaskSummary(name=task_spec))
+
+    if len(valid_tasks) > 10:
+        # Add a placeholder for remaining tasks
+        task_configs.append(TaskSummary(name=f"... and {len(valid_tasks) - 10} more tasks"))
+
+    # Build model summaries
+    model_summaries = [
+        ModelSummary(
+            name=m.name_or_path,
+            gpus=m.gpus or gpus,
+            parallelism=m.parallelism or parallelism,
+            alias=m.alias,
+            backend=m.backend,
+        )
+        for m in model_configs
+    ]
+
+    # Build beaker settings
+    beaker_settings = BeakerSettings(
+        workspace=workspace,
+        budget=budget,
+        cluster=cluster,
+        image=effective_image,
+        groups=effective_groups,
+        priority=priority,
+        preemptible=preemptible,
+        timeout=timeout,
+    )
+
+    # Build async settings if enabled
+    async_settings = None
     if use_async or use_async_stream:
-        launch_summary["async"] = {
-            "mode": "stream" if use_async_stream else "parallel",
-            **({"num_workers": num_workers} if num_workers else {}),
-            **({"gpus_per_worker": gpus_per_worker} if gpus_per_worker != 1 else {}),
-        }
+        async_settings = AsyncSettings(
+            mode="stream" if use_async_stream else "parallel",
+            num_workers=num_workers,
+            gpus_per_worker=gpus_per_worker,
+        )
 
-    # Print consolidated launch configuration
+    # Build the complete launch config dataclass
+    launch_config_summary = LaunchConfig(
+        beaker=beaker_settings,
+        models=model_summaries,
+        tasks=task_configs,
+        async_settings=async_settings,
+    )
+
+    # Print consolidated launch configuration using rich repr
     console.print()
-    console.print(Panel(Pretty(launch_summary), title="[bold]Launch Configuration[/bold]", border_style="blue"))
+    console.print(
+        Panel(
+            Pretty(launch_config_summary, expand_all=True),
+            title="[bold]Launch Configuration[/bold]",
+            border_style="blue",
+        )
+    )
 
     # Print experiment summary
     console.print(f"\n[bold]Experiments:[/bold] {total_experiments} experiment(s), {total_expanded_tasks} task(s)")
@@ -1270,19 +1371,12 @@ def launch(
         )
 
         if verbose:
-            from dataclasses import asdict
-
             if len(experiment_plan) > 1:
                 console.print()  # Add spacing between multiple experiments
-            # Convert dataclass to dict for pretty printing, excluding default/empty values
-            config_dict = {
-                k: v
-                for k, v in asdict(job_config).items()
-                if v is not None and v != [] and v != {}
-            }
+            # Pretty print the BeakerJobConfig dataclass directly
             console.print(
                 Panel(
-                    Pretty(config_dict),
+                    Pretty(job_config, expand_all=True),
                     title=f"[bold]Experiment: {exp_name}[/bold]",
                     border_style="cyan",
                 )
