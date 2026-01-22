@@ -794,6 +794,7 @@ def launch(
 
     try:
         from olmo_eval.launch import (
+            BeakerEnvSecret,
             BeakerJobConfig,
             BeakerLauncher,
             LaunchConfig,
@@ -1236,12 +1237,6 @@ def launch(
         )
     )
 
-    # Print secrets info
-    beaker_user = launcher.beaker.user_name
-    console.print(
-        f"\n[bold]Beaker Secrets:[/bold] {beaker_user}_HF_TOKEN, {beaker_user}_WANDB_API_KEY"
-    )
-
     # Print experiment summary
     console.print(
         f"\n[bold]Experiments:[/bold] {total_experiments} experiment(s), "
@@ -1399,6 +1394,13 @@ def launch(
             backend_group = BACKEND_OPTIONAL_GROUPS.get(runtime_backend)
             effective_backends = [backend_group] if backend_group else []
 
+        # Build user-prefixed env secrets
+        beaker_username = launcher.beaker.user_name
+        env_secrets = [
+            BeakerEnvSecret("HF_TOKEN", f"{beaker_username}_HF_TOKEN"),
+            BeakerEnvSecret("WANDB_API_KEY", f"{beaker_username}_WANDB_API_KEY"),
+        ]
+
         job_config = BeakerJobConfig(
             name=exp_name,
             command=command,
@@ -1415,6 +1417,7 @@ def launch(
             groups=effective_groups,
             beaker_image=effective_image,
             inject_aws_credentials=inject_aws_credentials,
+            env_secrets=env_secrets,
         )
         job_configs.append(job_config)
 

@@ -585,13 +585,6 @@ class BeakerLauncher:
             (secret.name, secret.secret) for secret in config.env_secrets
         ]
 
-        # Inject user-prefixed common secrets (HF_TOKEN, WANDB_API_KEY)
-        beaker_username = self.client.user_name
-        env_secrets.extend([
-            ("HF_TOKEN", f"{beaker_username}_HF_TOKEN"),
-            ("WANDB_API_KEY", f"{beaker_username}_WANDB_API_KEY"),
-        ])
-
         # Inject AWS credentials if requested
         if config.inject_aws_credentials:
             from olmo_eval.launch.aws import ensure_aws_secrets
