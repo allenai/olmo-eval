@@ -1101,30 +1101,26 @@ def launch(
 
     task_summaries: list[TaskSummary] = []
     for task_spec in valid_tasks:
-        try:
-            # Parse the spec to extract variants/regimes and inline overrides
-            task_name, variants, inline_overrides = parse_task_spec(task_spec)
+        # Parse the spec to extract variants/regimes and inline overrides
+        task_name, variants, inline_overrides = parse_task_spec(task_spec)
 
-            task_instance = get_task_instance(task_spec)
-            task_cfg = task_instance.config
-            task_summaries.append(
-                TaskSummary(
-                    name=task_cfg.name,
-                    spec=task_spec if task_spec != task_cfg.name else None,
-                    variants=variants if variants else None,
-                    formatter=task_cfg.formatter,
-                    scorers=task_cfg.scorers,
-                    metrics=task_cfg.metrics,
-                    num_fewshot=task_cfg.num_fewshot,
-                    split=task_cfg.split.value if hasattr(task_cfg.split, "value") else str(task_cfg.split),
-                    primary_metric=str(task_cfg.primary_metric) if task_cfg.primary_metric else None,
-                    sampling_params=task_cfg.sampling_params,
-                    overrides=inline_overrides if inline_overrides else None,
-                )
+        task_instance = get_task_instance(task_spec)
+        task_cfg = task_instance.config
+        task_summaries.append(
+            TaskSummary(
+                name=task_cfg.name,
+                spec=task_spec if task_spec != task_cfg.name else None,
+                variants=variants if variants else None,
+                formatter=task_cfg.formatter,
+                scorers=task_cfg.scorers,
+                metrics=task_cfg.metrics,
+                num_fewshot=task_cfg.num_fewshot,
+                split=task_cfg.split.value if hasattr(task_cfg.split, "value") else str(task_cfg.split),
+                primary_metric=str(task_cfg.primary_metric) if task_cfg.primary_metric else None,
+                sampling_params=task_cfg.sampling_params,
+                overrides=inline_overrides if inline_overrides else None,
             )
-        except Exception:
-            # Fall back to just the spec name if we can't load the task
-            task_summaries.append(TaskSummary(name=task_spec))
+        )
 
     # Build model summaries with resolved backends
     from olmo_eval.core.configs import get_model_config as get_runtime_model_config

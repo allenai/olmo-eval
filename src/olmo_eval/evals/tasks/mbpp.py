@@ -17,7 +17,7 @@ from olmo_eval.core import (
 )
 from olmo_eval.evals.constants.code import MBPP_STOP_SEQUENCES
 from olmo_eval.evals.extract import extract_code
-from olmo_eval.evals.tasks.core import Task, TaskConfig, register
+from olmo_eval.evals.tasks.core import Task, TaskConfig, register, register_variant
 
 
 class MBPPTask(Task):
@@ -279,3 +279,35 @@ class MBPPPlusAliasBPB(MBPPPlusTask):
     """MBPPPlus BPB evaluation task."""
 
     pass
+
+
+# =============================================================================
+# BPB Variant Registrations (for stacking with other variants like :3shot)
+# =============================================================================
+
+register_variant(
+    "mbpp",
+    "bpb",
+    formatter=PPLFormatter(),
+    scorers=(BitsPerByteScorer(),),
+    metrics=(BPBMetric(),),
+    primary_metric=BPBMetric(),
+)
+
+register_variant(
+    "mbpp_plus",
+    "bpb",
+    formatter=PPLFormatter(),
+    scorers=(BitsPerByteScorer(),),
+    metrics=(BPBMetric(),),
+    primary_metric=BPBMetric(),
+)
+
+register_variant(
+    "mbppplus",
+    "bpb",
+    formatter=PPLFormatter(),
+    scorers=(BitsPerByteScorer(),),
+    metrics=(BPBMetric(),),
+    primary_metric=BPBMetric(),
+)

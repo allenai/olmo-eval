@@ -17,7 +17,7 @@ from olmo_eval.core import (
 )
 from olmo_eval.evals.constants.code import HUMANEVAL_STOP_SEQUENCES
 from olmo_eval.evals.extract import extract_code
-from olmo_eval.evals.tasks.core import Task, TaskConfig, register
+from olmo_eval.evals.tasks.core import Task, TaskConfig, register, register_variant
 
 
 class HumanEvalTask(Task):
@@ -261,3 +261,44 @@ class CodexHumanEvalPlusBPB(HumanEvalPlusTask):
     """CodexHumanEvalPlus BPB evaluation task."""
 
     pass
+
+
+# =============================================================================
+# BPB Variant Registrations (for stacking with other variants like :3shot)
+# =============================================================================
+
+register_variant(
+    "humaneval",
+    "bpb",
+    formatter=PPLFormatter(),
+    scorers=(BitsPerByteScorer(),),
+    metrics=(BPBMetric(),),
+    primary_metric=BPBMetric(),
+)
+
+register_variant(
+    "humaneval_plus",
+    "bpb",
+    formatter=PPLFormatter(),
+    scorers=(BitsPerByteScorer(),),
+    metrics=(BPBMetric(),),
+    primary_metric=BPBMetric(),
+)
+
+register_variant(
+    "codex_humaneval",
+    "bpb",
+    formatter=PPLFormatter(),
+    scorers=(BitsPerByteScorer(),),
+    metrics=(BPBMetric(),),
+    primary_metric=BPBMetric(),
+)
+
+register_variant(
+    "codex_humanevalplus",
+    "bpb",
+    formatter=PPLFormatter(),
+    scorers=(BitsPerByteScorer(),),
+    metrics=(BPBMetric(),),
+    primary_metric=BPBMetric(),
+)
