@@ -56,9 +56,17 @@ class TaskSummary:
 class RunnerConfig:
     """Runner configuration for display."""
 
-    runner: str  # "EvalRunner", "AsyncEvalRunner", or "StreamingEvalRunner"
-    num_workers: int | str | None = None  # None for sequential, "auto" or int for async
-    gpus_per_worker: int | None = None  # None for sequential
+    runner: type  # The runner class
+    num_workers: int | str | None = None  # Only for async runners
+    gpus_per_worker: int | None = None  # Only for async runners
+
+    def __repr__(self) -> str:
+        parts = [f"runner={self.runner.__name__}"]
+        if self.num_workers is not None:
+            parts.append(f"num_workers={self.num_workers!r}")
+        if self.gpus_per_worker is not None:
+            parts.append(f"gpus_per_worker={self.gpus_per_worker}")
+        return f"RunnerConfig({', '.join(parts)})"
 
 
 @dataclass
@@ -295,7 +303,7 @@ def run(
     """
     import logging
 
-    from olmo_eval.runners.sequential import EvalRunner, ValidationError
+    from olmo_eval.runners.synchronous import SyncEvalRunner, ValidationError
 
     # Configure logging for Beaker job visibility
     logging.basicConfig(
@@ -424,7 +432,7 @@ def run(
 
     # Choose runner based on --async or --async-stream flag
     if use_async_stream:
-        from olmo_eval.runners.parallel import StreamingEvalRunner
+        from olmo_eval.runners.asynchronous import StreamingEvalRunner
 
         console.print("[bold cyan]Using StreamingEvalRunner[/bold cyan]")
         console.print(f"[bold]Models:[/bold] {len(model_names)}")
@@ -444,7 +452,7 @@ def run(
             model_overrides=per_model_overrides,
         )
     elif use_async:
-        from olmo_eval.runners.parallel import AsyncEvalRunner
+        from olmo_eval.runners.asynchronous import AsyncEvalRunner
 
         console.print("[bold cyan]Using AsyncEvalRunner[/bold cyan]")
         console.print(f"[bold]Models:[/bold] {len(model_names)}")
@@ -480,7 +488,7 @@ def run(
                 "attention_backend", attention_backend
             )
 
-            runner = EvalRunner(
+            runner = SyncEvalRunner(
                 model_name=model_name,
                 task_specs=task_specs,
                 output_dir=output_dir,
@@ -1158,6 +1166,8 @@ def launch(
         )
 
     # Build runner config
+    from olmo_eval.runners import AsyncEvalRunner, StreamingEvalRunner, SyncEvalRunner
+
     if use_async_stream:
         # Resolve effective num_workers from CLI or first model's launch config
         effective_num_workers = num_workers
@@ -1167,7 +1177,7 @@ def launch(
             effective_num_workers = model_resources.get("num_workers")
 
         runner_config = RunnerConfig(
-            runner="StreamingEvalRunner",
+            runner=StreamingEvalRunner,
             num_workers=effective_num_workers if effective_num_workers is not None else "auto",
             gpus_per_worker=gpus_per_worker,
         )
@@ -1180,12 +1190,12 @@ def launch(
             effective_num_workers = model_resources.get("num_workers")
 
         runner_config = RunnerConfig(
-            runner="AsyncEvalRunner",
+            runner=AsyncEvalRunner,
             num_workers=effective_num_workers if effective_num_workers is not None else "auto",
             gpus_per_worker=gpus_per_worker,
         )
     else:
-        runner_config = RunnerConfig(runner="EvalRunner")
+        runner_config = RunnerConfig(runner=SyncEvalRunner)
 
     # Build the complete launch summary dataclass
     launch_config_summary = LaunchSummary(

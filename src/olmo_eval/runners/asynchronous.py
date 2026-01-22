@@ -29,7 +29,7 @@ from olmo_eval.core import (
 )
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.evals.tasks import Task, get_task
-from olmo_eval.runners.sequential import ValidationError
+from olmo_eval.runners.synchronous import ValidationError
 from olmo_eval.runners.utils import (
     TaskResult,
     build_predictions,

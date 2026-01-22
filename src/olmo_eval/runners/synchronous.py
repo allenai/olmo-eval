@@ -47,8 +47,8 @@ SAMPLING_KEYS = {"temperature", "max_tokens", "top_p", "top_k", "num_samples"}
 
 
 @dataclass
-class EvalRunner:
-    """Orchestrates evaluation runs across tasks."""
+class SyncEvalRunner:
+    """Orchestrates synchronous evaluation runs across tasks."""
 
     model_name: str
     task_specs: list[str]
