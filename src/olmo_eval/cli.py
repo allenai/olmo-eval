@@ -33,6 +33,7 @@ class ModelSummary:
     parallelism: int = 1
     alias: str | None = None
     backend: str | None = None
+    overrides: dict[str, Any] | None = None  # Inline overrides from spec (::key=value)
 
 
 @dataclass
@@ -1130,20 +1131,24 @@ def launch(
 
     model_summaries: list[ModelSummary] = []
     for m in model_configs:
+        # Parse the model spec to extract base name and inline overrides
+        model_base_name, model_inline_overrides = parse_model_spec(m.name_or_path)
+
         # Resolve the effective backend (explicit override or from model preset/default)
         if m.backend:
             effective_backend = m.backend
         else:
-            runtime_model_config = get_runtime_model_config(m.name_or_path)
+            runtime_model_config = get_runtime_model_config(model_base_name)
             effective_backend = runtime_model_config.backend
 
         model_summaries.append(
             ModelSummary(
-                name=m.name_or_path,
+                name=model_base_name,
                 gpus=m.gpus or gpus,
                 parallelism=m.parallelism or parallelism,
                 alias=m.alias,
                 backend=effective_backend,
+                overrides=model_inline_overrides if model_inline_overrides else None,
             )
         )
 
