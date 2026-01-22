@@ -72,8 +72,8 @@ class AsyncSettings:
 
 
 @dataclass
-class LaunchConfig:
-    """Complete launch configuration for pretty-printing."""
+class LaunchSummary:
+    """Complete launch configuration summary for pretty-printing."""
 
     beaker: BeakerSettings
     models: list[ModelSummary]
@@ -1179,8 +1179,8 @@ def launch(
             gpus_per_worker=gpus_per_worker,
         )
 
-    # Build the complete launch config dataclass
-    launch_config_summary = LaunchConfig(
+    # Build the complete launch summary dataclass
+    launch_config_summary = LaunchSummary(
         beaker=beaker_settings,
         models=model_summaries,
         tasks=task_configs,
