@@ -1123,7 +1123,7 @@ def launch(
     from olmo_eval.evals.tasks import get_task as get_task_instance
 
     task_configs: list[TaskSummary] = []
-    for task_spec in valid_tasks[:10]:  # Limit to first 10 for display
+    for task_spec in valid_tasks:
         try:
             task_instance = get_task_instance(task_spec)
             cfg = task_instance.config
@@ -1141,10 +1141,6 @@ def launch(
         except Exception:
             # Fall back to just the spec name if we can't load the task
             task_configs.append(TaskSummary(name=task_spec))
-
-    if len(valid_tasks) > 10:
-        # Add a placeholder for remaining tasks
-        task_configs.append(TaskSummary(name=f"... and {len(valid_tasks) - 10} more tasks"))
 
     # Build model summaries
     model_summaries = [
