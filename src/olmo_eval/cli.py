@@ -1237,12 +1237,10 @@ def launch(
 
     console.print()
 
-    # Confirm before launching (skip in dry-run mode)
-    if not dry_run and not click.confirm("Proceed with launch?", default=True):
-        console.print("[yellow]Launch cancelled[/yellow]")
-        raise SystemExit(0)
+    # Build all BeakerJobConfig objects first (before confirmation)
+    # so we can display them in the summary
+    job_configs: list[BeakerJobConfig] = []
 
-    # Launch experiments from the plan
     for exp in experiment_plan:
         model_cfg = exp["model_cfg"]
         model_name = exp["model_name"]
@@ -1375,19 +1373,25 @@ def launch(
             beaker_image=effective_image,
             inject_aws_credentials=inject_aws_credentials,
         )
+        job_configs.append(job_config)
 
-        if verbose:
-            if len(experiment_plan) > 1:
-                console.print()  # Add spacing between multiple experiments
-            # Pretty print the BeakerJobConfig dataclass directly
-            console.print(
-                Panel(
-                    Pretty(job_config, expand_all=True),
-                    title=f"[bold]Experiment: {exp_name}[/bold]",
-                    border_style="cyan",
-                )
+    # Display all BeakerJobConfig objects
+    for job_config in job_configs:
+        console.print(
+            Panel(
+                Pretty(job_config, expand_all=True),
+                title=f"[bold]BeakerJobConfig: {job_config.name}[/bold]",
+                border_style="cyan",
             )
+        )
 
+    # Confirm before launching (skip in dry-run mode)
+    if not dry_run and not click.confirm("Proceed with launch?", default=True):
+        console.print("[yellow]Launch cancelled[/yellow]")
+        raise SystemExit(0)
+
+    # Launch experiments
+    for job_config in job_configs:
         if not dry_run:
             experiment = launcher.launch(job_config)
             if experiment:
