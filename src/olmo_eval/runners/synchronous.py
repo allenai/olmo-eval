@@ -187,104 +187,62 @@ class SyncEvalRunner:
             **extra_kwargs,
         )
 
-        try:
-            expanded_tasks = expand_tasks(self.task_specs)
-            results: dict[str, Any] = {
+        expanded_tasks = expand_tasks(self.task_specs)
+        results: dict[str, Any] = {
+            "model": model_config.model,
+            "backend": backend_type.value,
+            "timestamp": datetime.now().isoformat(),
+            "tasks": {},
+            # Store model config details for metrics.json
+            "_model_config": {
                 "model": model_config.model,
+                "tokenizer": model_config.tokenizer,
                 "backend": backend_type.value,
-                "timestamp": datetime.now().isoformat(),
-                "tasks": {},
-                # Store model config details for metrics.json
-                "_model_config": {
-                    "model": model_config.model,
-                    "tokenizer": model_config.tokenizer,
-                    "backend": backend_type.value,
-                    "dtype": model_config.dtype,
-                    "revision": model_config.revision,
-                    "attention_backend": self.attention_backend,
-                },
+                "dtype": model_config.dtype,
+                "revision": model_config.revision,
+                "attention_backend": self.attention_backend,
+            },
+        }
+
+        # TODO(undfined): This is starting with the naive approach. Add intelligent
+        # scheduling and possibly asynchronous runner.
+        for spec in expanded_tasks:
+            console.print(f"\n[bold blue]Running {spec}...[/bold blue]")
+            task_result = self._run_task(spec, backend)
+            task_data: dict[str, Any] = {
+                "config": task_result.config,
+                "num_instances": task_result.num_instances,
+                "metrics": task_result.metrics,
+                "duration_seconds": task_result.duration_seconds,
             }
+            if task_result.primary_metric:
+                task_data["primary_metric"] = task_result.primary_metric
+            results["tasks"][spec] = task_data
 
-            # TODO(undfined): This is starting with the naive approach. Add intelligent
-            # scheduling and possibly asynchronous runner.
-            for spec in expanded_tasks:
-                console.print(f"\n[bold blue]Running {spec}...[/bold blue]")
-                task_result = self._run_task(spec, backend)
-                task_data: dict[str, Any] = {
-                    "config": task_result.config,
-                    "num_instances": task_result.num_instances,
-                    "metrics": task_result.metrics,
-                    "duration_seconds": task_result.duration_seconds,
-                }
-                if task_result.primary_metric:
-                    task_data["primary_metric"] = task_result.primary_metric
-                results["tasks"][spec] = task_data
+            # Write predictions to JSONL
+            if task_result.predictions:
+                self._write_predictions(spec, task_result.predictions)
 
-                # Write predictions to JSONL
-                if task_result.predictions:
-                    self._write_predictions(spec, task_result.predictions)
+            # Log metrics (for Beaker job details)
+            if task_result.metrics:
+                logger.info(f"** Task metrics for {spec}: **")
+                for metric, value in task_result.metrics.items():
+                    logger.info(f"  {metric}: {value:.4f}")
+                    console.print(f"  {metric}: {value:.4f}")
 
-                # Log metrics (for Beaker job details)
-                if task_result.metrics:
-                    logger.info(f"** Task metrics for {spec}: **")
-                    for metric, value in task_result.metrics.items():
-                        logger.info(f"  {metric}: {value:.4f}")
-                        console.print(f"  {metric}: {value:.4f}")
+        # Compute suite aggregations
+        suite_aggs = compute_suite_aggregations(self.task_specs, results["tasks"])
+        if suite_aggs:
+            results["suites"] = suite_aggs
 
-            # Compute suite aggregations
-            suite_aggs = compute_suite_aggregations(self.task_specs, results["tasks"])
-            if suite_aggs:
-                results["suites"] = suite_aggs
+        # Log summary of all scores
+        self._log_summary(results)
+        self._save_results(results)
 
-            # Log summary of all scores
-            self._log_summary(results)
-            self._save_results(results)
+        # Write metrics.json for Beaker
+        self._write_metrics_json(results)
 
-            # Write metrics.json for Beaker
-            self._write_metrics_json(results)
-
-            return results
-        finally:
-            # Clean up backend and PyTorch distributed process group
-            # See: https://github.com/vllm-project/vllm/issues/1908
-            import gc
-
-            # For vLLM backend, use the recommended cleanup sequence
-            if hasattr(backend, "llm"):
-                try:
-                    from vllm.distributed.parallel_state import destroy_model_parallel
-
-                    destroy_model_parallel()
-                except ImportError:
-                    pass
-
-                llm = backend.llm
-                # Delete internal worker to release GPU memory
-                if hasattr(llm, "llm_engine"):
-                    engine = llm.llm_engine
-                    if hasattr(engine, "model_executor"):
-                        if hasattr(engine.model_executor, "driver_worker"):
-                            del engine.model_executor.driver_worker
-                        if hasattr(engine.model_executor, "shutdown"):
-                            engine.model_executor.shutdown()
-
-            del backend
-            gc.collect()
-
-            try:
-                import torch
-
-                torch.cuda.empty_cache()
-            except Exception:
-                pass
-
-            try:
-                import torch.distributed as dist
-
-                if dist.is_initialized():
-                    dist.destroy_process_group()
-            except Exception:
-                pass  # Ignore cleanup errors
+        return results
 
     def _run_task(self, spec: str, backend: Backend) -> TaskResult:
         """Run a single task and return results."""
