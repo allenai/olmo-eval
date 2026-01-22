@@ -401,12 +401,18 @@ class BeakerJobConfig:
     weka_buckets: list[BeakerWekaBucket] = field(
         default_factory=lambda: [
             BeakerWekaBucket("oe-training-default"),
+            BeakerWekaBucket("oe-eval-default"),
         ]
     )
     nfs: bool = False
 
-    # Environment
-    env_vars: dict[str, str] = field(default_factory=dict)
+    # Environment - defaults include HuggingFace cache on Weka
+    env_vars: dict[str, str] = field(
+        default_factory=lambda: {
+            "HF_HOME": "/weka/oe-eval-default/oyvindt/hf-cache",
+            "HF_HUB_CACHE": "/weka/oe-eval-default/oyvindt/hf-cache",
+        }
+    )
     env_secrets: list[BeakerEnvSecret] = field(default_factory=list)
 
     # Result path
