@@ -153,6 +153,7 @@ class PPLFormatter:
     """
 
     fewshot_separator: str = "\n\n"
+    leading_space: bool = True  # Whether to add leading space to continuation
 
     def format(
         self,
@@ -182,7 +183,8 @@ class PPLFormatter:
         for ex in fewshot or []:
             example = ex.question or ""
             if ex.gold_answer:
-                example += " " + ex.gold_answer
+                # Concatenate directly without space (matches oe-eval)
+                example += ex.gold_answer
             parts.append(example)
 
         # Add the current instance question
@@ -191,8 +193,9 @@ class PPLFormatter:
 
         prompt = self.fewshot_separator.join(parts)
 
-        # Add leading space when there's context (standard tokenization)
-        if prompt:
+        # Optionally add leading space when there's context (standard tokenization)
+        # For code tasks like MBPP, this should be disabled
+        if self.leading_space and prompt and not gold_text.startswith(("\n", " ")):
             gold_text = " " + gold_text
 
         return LMRequest(

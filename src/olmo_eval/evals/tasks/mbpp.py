@@ -211,7 +211,7 @@ def _mbpp_bpb_config() -> TaskConfig:
     return TaskConfig(
         name="mbpp:bpb",
         data_source=DataSource(path="google-research-datasets/mbpp"),
-        formatter=PPLFormatter(),
+        formatter=PPLFormatter(leading_space=False),  # No leading space for code (matches oe-eval)
         scorers=(BitsPerByteScorer(),),
         metrics=(BPBMetric(),),
         primary_metric=BPBMetric(),
@@ -222,7 +222,7 @@ def _mbpp_plus_bpb_config() -> TaskConfig:
     return TaskConfig(
         name="mbpp_plus:bpb",
         data_source=DataSource(path="evalplus/mbppplus"),
-        formatter=PPLFormatter(),
+        formatter=PPLFormatter(leading_space=False),  # No leading space for code (matches oe-eval)
         scorers=(BitsPerByteScorer(),),
         metrics=(BPBMetric(),),
         primary_metric=BPBMetric(),
@@ -233,7 +233,7 @@ def _mbppplus_bpb_config() -> TaskConfig:
     return TaskConfig(
         name="mbppplus:bpb",
         data_source=DataSource(path="evalplus/mbppplus"),
-        formatter=PPLFormatter(),
+        formatter=PPLFormatter(leading_space=False),  # No leading space for code (matches oe-eval)
         scorers=(BitsPerByteScorer(),),
         metrics=(BPBMetric(),),
         primary_metric=BPBMetric(),
@@ -299,7 +299,7 @@ class MBPPPlusAliasBPB(MBPPPlusTask):
 register_variant(
     "mbpp",
     "bpb",
-    formatter=PPLFormatter(),
+    formatter=PPLFormatter(leading_space=False),  # No leading space for code (matches oe-eval)
     scorers=(BitsPerByteScorer(),),
     metrics=(BPBMetric(),),
     primary_metric=BPBMetric(),
@@ -308,7 +308,7 @@ register_variant(
 register_variant(
     "mbpp_plus",
     "bpb",
-    formatter=PPLFormatter(),
+    formatter=PPLFormatter(leading_space=False),  # No leading space for code (matches oe-eval)
     scorers=(BitsPerByteScorer(),),
     metrics=(BPBMetric(),),
     primary_metric=BPBMetric(),
@@ -317,7 +317,7 @@ register_variant(
 register_variant(
     "mbppplus",
     "bpb",
-    formatter=PPLFormatter(),
+    formatter=PPLFormatter(leading_space=False),  # No leading space for code (matches oe-eval)
     scorers=(BitsPerByteScorer(),),
     metrics=(BPBMetric(),),
     primary_metric=BPBMetric(),

@@ -95,10 +95,11 @@ class MultilingualMBPPTask(Task):
         text = self._normalize(doc["text"]).strip()
         code = self._normalize(doc["code"]).strip()
 
-        # Build prompt: task description + code fence start
+        # Build prompt: task description + code fence start (matches oe-eval fewshot_context)
+        # In oe-eval, the prompt ends with the code fence opening
         question = text + f"\n```{self.language}\n"
 
-        # Gold answer is the code with closing fence
+        # Gold answer is just the code with closing fence (matches oe-eval choices[0])
         gold_answer = code + "\n```"
 
         return Instance(
@@ -177,7 +178,7 @@ def _make_mt_mbpp_bpb_config(language: str) -> TaskConfig:
     return TaskConfig(
         name=f"mt_mbpp_{language}:bpb",
         data_source=DataSource(path="allenai/multilingual_mbpp", subset=language),
-        formatter=PPLFormatter(),
+        formatter=PPLFormatter(leading_space=False),  # No leading space for code (matches oe-eval)
         scorers=(BitsPerByteScorer(),),
         metrics=(BPBMetric(),),
         primary_metric=BPBMetric(),
@@ -189,7 +190,7 @@ def _make_mt_mbpp_v2fix_bpb_config(language: str) -> TaskConfig:
     return TaskConfig(
         name=f"mt_mbpp_v2fix_{language}:bpb",
         data_source=DataSource(path="allenai/multilingual_mbpp", subset=language),
-        formatter=PPLFormatter(),
+        formatter=PPLFormatter(leading_space=False),  # No leading space for code (matches oe-eval)
         scorers=(BitsPerByteScorer(),),
         metrics=(BPBMetric(),),
         primary_metric=BPBMetric(),
