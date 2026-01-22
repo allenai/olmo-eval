@@ -405,14 +405,9 @@ class BeakerJobConfig:
     )
     nfs: bool = False
 
-    # Environment - defaults include HF and WandB tokens
+    # Environment
     env_vars: dict[str, str] = field(default_factory=dict)
-    env_secrets: list[BeakerEnvSecret] = field(
-        default_factory=lambda: [
-            BeakerEnvSecret("HF_TOKEN", "HF_TOKEN"),
-            BeakerEnvSecret("WANDB_API_KEY", "WANDB_API_KEY"),
-        ]
-    )
+    env_secrets: list[BeakerEnvSecret] = field(default_factory=list)
 
     # Result path
     result_path: str = "/results"
@@ -589,6 +584,13 @@ class BeakerLauncher:
         env_secrets: list[tuple[str, str]] = [
             (secret.name, secret.secret) for secret in config.env_secrets
         ]
+
+        # Inject user-prefixed common secrets (HF_TOKEN, WANDB_API_KEY)
+        beaker_username = self.client.user_name
+        env_secrets.extend([
+            ("HF_TOKEN", f"{beaker_username}_HF_TOKEN"),
+            ("WANDB_API_KEY", f"{beaker_username}_WANDB_API_KEY"),
+        ])
 
         # Inject AWS credentials if requested
         if config.inject_aws_credentials:

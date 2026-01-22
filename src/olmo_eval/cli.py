@@ -1236,6 +1236,12 @@ def launch(
         )
     )
 
+    # Print secrets info
+    beaker_user = launcher.beaker.user_name
+    console.print(
+        f"\n[bold]Beaker Secrets:[/bold] {beaker_user}_HF_TOKEN, {beaker_user}_WANDB_API_KEY"
+    )
+
     # Print experiment summary
     console.print(
         f"\n[bold]Experiments:[/bold] {total_experiments} experiment(s), "

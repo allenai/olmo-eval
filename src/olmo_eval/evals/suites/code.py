@@ -112,10 +112,6 @@ _MT_MBPP_V2FIX_BPB_NESTED = Suite(
 
 # OLMo3 base_easy code BPB suite (average of averages)
 # Each child (task or nested suite) gets equal weight:
-# - codex_humaneval:3shot:bpb -> 1 value
-# - mbpp:3shot:bpb -> 1 value
-# - mt_mbpp_v2fix:bpb -> average of 17 languages = 1 value
-# Final: average of 3 values
 OLMO3_BASE_EASY_CODE_BPB = register(
     Suite(
         name="olmo3:base_easy:code:bpb",
@@ -125,6 +121,6 @@ OLMO3_BASE_EASY_CODE_BPB = register(
             _MT_MBPP_V2FIX_BPB_NESTED,
         ),
         aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
-        description="OLMo3 base_easy code BPB (average of averages: humaneval, mbpp, mt_mbpp)",
+        description="OLMo3 base_easy code BPB suite (average of averages)",
     )
 )
