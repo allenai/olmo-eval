@@ -179,12 +179,13 @@ olmo-eval run --async-stream --num-workers 2 --gpus-per-worker 4 -m llama3.1-70b
 Tasks live in `olmo_eval/evals/tasks/` and are registered with the `@register` decorator. Regimes are named configuration presets that override task settings:
 
 ```python
+from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks import Task, TaskConfig, register, register_regime
 
 # Register the base task
 @register("arc_challenge", lambda: TaskConfig(
     name="arc_challenge",
-    hf_dataset="allenai/ai2_arc",
+    data_source=DataSource(path="allenai/ai2_arc", subset="ARC-Challenge"),
     num_fewshot=0,
 ))
 class ARCChallenge(Task): ...
@@ -197,8 +198,8 @@ register_regime(
     fewshot_seed=42,
 )
 
-# Usage: task_name::regime_name
-olmo-eval run -m model -t arc_challenge::olmes
+# Usage: task_name:regime_name
+olmo-eval run -m model -t arc_challenge:olmes
 ```
 
 Regimes allow you to define reusable evaluation configurations (e.g., few-shot settings, prompts) that can be applied to any task.
@@ -245,8 +246,6 @@ Here's a complete, minimal task implementation:
 from collections.abc import Iterator
 from typing import Any
 
-from datasets import load_dataset
-
 from olmo_eval.core import (
     AccuracyMetric,
     Instance,
@@ -256,28 +255,38 @@ from olmo_eval.core import (
     MultipleChoiceScorer,
     RequestType,
 )
+from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
 
 class MyTask(Task):
     """Base class for my task."""
 
+    default_hf_path: str = "my-org/my-dataset"
+
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        self._instances_cache: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
         """Load and yield instances from the dataset."""
         if self._instances_cache is None:
             self._instances_cache = []
-            dataset = load_dataset("my-hf-dataset", split="test")
-            for doc in dataset:
-                self._instances_cache.append(self._process_doc(doc))
+            loader = DataLoader()
+            source = self._get_source_for_split("test")
+            for doc in loader.load(source):
+                self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
 
-    def _process_doc(self, doc: dict[str, Any]) -> Instance:
-        """Convert a HuggingFace doc to an Instance."""
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split."""
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            return DataSource(path=self.default_hf_path, split=split)
+
+    def process_doc(self, doc: dict[str, Any]) -> Instance:
+        """Convert a dataset document to an Instance."""
         return Instance(
             question=doc["question"],
             gold_answer=doc["answer"],
@@ -300,7 +309,7 @@ class MyTask(Task):
 def _my_task_config() -> TaskConfig:
     return TaskConfig(
         name="my_task",
-        hf_dataset="my-hf-dataset",
+        data_source=DataSource(path="my-org/my-dataset"),
         formatter=MultipleChoiceFormatter(template="Q: {question}\n\nA:"),
         scorers=(MultipleChoiceScorer(),),
         metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
@@ -318,6 +327,7 @@ class MyTaskImpl(MyTask):
 | Method | Required | Purpose |
 |--------|----------|---------|
 | `instances` | Yes | Property that yields `Instance` objects from the dataset |
+| `process_doc(doc)` | Yes | Converts a raw document dict into an `Instance` |
 | `format_request(instance)` | Yes | Converts an `Instance` into an `LMRequest` for the model |
 | `extract_answer(output)` | Yes | Extracts the answer string from `LMOutput` |
 | `_build_fewshot()` | No | Override to customize few-shot example loading |
@@ -329,8 +339,8 @@ class MyTaskImpl(MyTask):
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `name` | `str` | Required | Task identifier used in CLI |
-| `hf_dataset` | `str` | Required | HuggingFace dataset path |
-| `hf_subsets` | `tuple[str, ...]` | `None` | Dataset subsets/configs |
+| `data_source` | `DataSource \| str` | `None` | Dataset source (HuggingFace, S3, GCS, or local path) |
+| `fewshot_source` | `DataSource \| str` | `None` | Optional separate source for few-shot examples |
 | `formatter` | `Formatter` | `None` | Request formatter |
 | `scorers` | `tuple[Scorer, ...]` | `()` | Answer scorers |
 | `metrics` | `tuple[Metric, ...]` | `()` | Evaluation metrics |
@@ -338,6 +348,32 @@ class MyTaskImpl(MyTask):
 | `fewshot_seed` | `int` | `42` | Random seed for few-shot |
 | `limit` | `int \| None` | `None` | Max instances to evaluate |
 | `split` | `Split` | `Split.TEST` | Dataset split to use |
+
+### Data Sources
+
+Tasks can load data from multiple sources using `DataSource`:
+
+```python
+from olmo_eval.data import DataSource
+
+# HuggingFace datasets
+DataSource(path="cais/mmlu", subset="abstract_algebra")
+
+# Local JSONL files
+DataSource(path="/path/to/dataset.jsonl")
+
+# S3
+DataSource(path="s3://my-bucket/datasets/data.jsonl")
+
+# GCS
+DataSource(path="gs://my-bucket/datasets/data.parquet")
+
+# URI strings are also supported in TaskConfig
+TaskConfig(
+    name="my_task",
+    data_source="hf://cais/mmlu?subset=abstract_algebra",
+)
+```
 
 ### Common Patterns
 
@@ -361,7 +397,6 @@ class MMLUTask(Task):
     def __init__(self, config: TaskConfig, subset: str) -> None:
         super().__init__(config)
         self.subset = subset
-        # Load dataset with self.subset as the config name
 
 # Register each subset
 @register("mmlu_anatomy", _mmlu_anatomy_config)
