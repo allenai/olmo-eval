@@ -694,7 +694,6 @@ def suite_info(suite_name: str) -> None:
 @click.option("--num-workers", "-W", type=int, help="Number of workers for async mode")
 @click.option("--gpus-per-worker", type=int, default=1, help="GPUs per worker for async mode")
 @click.option("--dry-run", "-d", is_flag=True, help="Print spec without launching")
-@click.option("--verbose", "-v", is_flag=True, help="Print experiment spec before launching")
 @click.option(
     "--follow/--no-follow",
     default=True,
@@ -728,7 +727,6 @@ def launch(
     num_workers: int | None,
     gpus_per_worker: int,
     dry_run: bool,
-    verbose: bool,
     follow: bool,
     aws_credentials: bool | None,
 ) -> None:
@@ -928,11 +926,6 @@ def launch(
         s3_table.add_column("Key", style="blue")
         s3_table.add_column("Value")
 
-        if s3_models:
-            s3_table.add_row("S3 models", ", ".join(s3_models))
-        else:
-            s3_table.add_row("S3 models", "[dim]none (explicitly enabled)[/dim]")
-
         if local_creds:
             cred_type = "temporary" if local_creds.session_token else "long-term"
             s3_table.add_row("Credentials", f"[green]found[/green] ({cred_type})")
@@ -995,13 +988,6 @@ def launch(
             existing_groups.append(grp)
         except BeakerGroupNotFound:
             missing_groups.append(grp)
-
-    # Show existing groups
-    for grp in existing_groups:
-        qualified_name = f"{launcher.beaker.user_name}/{grp}" if "/" not in grp else grp
-        beaker_group = launcher.beaker.group.get(qualified_name)
-        group_url = launcher.get_group_url(beaker_group)
-        console.print(f"[blue]  {grp}:[/blue] {group_url} [dim](exists)[/dim]")
 
     if dry_run:
         # In dry-run mode, just inform about groups that would be created
@@ -1162,9 +1148,17 @@ def launch(
     # Build async settings if enabled
     async_settings = None
     if use_async or use_async_stream:
+        # Resolve effective num_workers from CLI or first model's config
+        effective_num_workers = num_workers
+        if effective_num_workers is None and model_configs:
+            first_model = model_configs[0]
+            first_model_config = get_runtime_model_config(first_model.name_or_path)
+            model_resources = first_model_config.get_model_resources(first_model.gpus or gpus)
+            effective_num_workers = model_resources.get("num_workers")
+
         async_settings = AsyncSettings(
             mode="stream" if use_async_stream else "parallel",
-            num_workers=num_workers,
+            num_workers=effective_num_workers,
             gpus_per_worker=gpus_per_worker,
         )
 
