@@ -2,6 +2,53 @@ from dataclasses import dataclass
 from typing import Any
 
 # =============================================================================
+# Stop Sequences for Code Generation
+# =============================================================================
+
+# HumanEval/MBPP stop sequences - signals end of function definition
+HUMANEVAL_STOP_SEQUENCES: tuple[str, ...] = (
+    "\nclass",
+    "\ndef",
+    "\nif __name__",
+    "\nprint(",
+    "\n#",
+    "\n```",
+    "<|eot_id|>",
+    "<|endoftext|>",
+    "<|im_end|>",
+)
+"""Stop sequences for HumanEval and similar code generation tasks."""
+
+MBPP_STOP_SEQUENCES: tuple[str, ...] = (
+    "\nclass",
+    "\ndef",
+    "\nif __name__",
+    "\nassert",
+    "\nprint(",
+    "\n#",
+    "\n```",
+    "<|eot_id|>",
+    "<|endoftext|>",
+    "<|im_end|>",
+)
+"""Stop sequences for MBPP code generation tasks."""
+
+# Generic code stop sequences for any Python code generation
+CODE_STOP_SEQUENCES: tuple[str, ...] = (
+    "\nclass",
+    "\ndef",
+    "\nif __name__",
+    "\n#",
+    "\n```",
+    "<|eot_id|>",
+    "<|endoftext|>",
+    "<|im_end|>",
+    "</s>",
+)
+"""Generic stop sequences for Python code generation."""
+
+
+# =============================================================================
 # FIM (Fill-in-the-Middle) Token Configurations
 # =============================================================================
 

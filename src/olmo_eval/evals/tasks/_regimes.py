@@ -8,6 +8,9 @@ Regimes are applied after variants, allowing combinations like:
     arc_challenge:mc::olmes  (multiple-choice variant with olmes regime)
 """
 
+from olmo_eval.core import SamplingParams
+from olmo_eval.evals.constants.code import HUMANEVAL_STOP_SEQUENCES, MBPP_STOP_SEQUENCES
+
 from .core.registry import _tasks, register_regime
 
 
@@ -186,6 +189,84 @@ def register_olmo3_v2_regimes() -> None:
         )
 
 
+def register_code_pass_at_k_regimes() -> None:
+    """Register pass@k regimes for code generation tasks.
+
+    These regimes configure sampling parameters for pass@k evaluation:
+    - Temperature sampling (0.8) for diversity
+    - Multiple samples (configurable k)
+    - Appropriate stop sequences
+    """
+    # HumanEval tasks
+    humaneval_tasks = [
+        "humaneval",
+        "humaneval_plus",
+        "codex_humaneval",
+        "codex_humanevalplus",
+    ]
+
+    for task_name in humaneval_tasks:
+        if task_name in _tasks:
+            # pass@1 with temperature 0.8, 16 samples
+            register_regime(
+                task_name,
+                "pass@1",
+                num_fewshot=0,
+                sampling_params=SamplingParams(
+                    max_tokens=1024,
+                    temperature=0.8,
+                    top_p=0.95,
+                    num_samples=16,
+                    stop_sequences=HUMANEVAL_STOP_SEQUENCES,
+                ),
+            )
+            # pass@10 with 32 samples
+            register_regime(
+                task_name,
+                "pass@10",
+                num_fewshot=0,
+                sampling_params=SamplingParams(
+                    max_tokens=1024,
+                    temperature=0.8,
+                    top_p=0.95,
+                    num_samples=32,
+                    stop_sequences=HUMANEVAL_STOP_SEQUENCES,
+                ),
+            )
+
+    # MBPP tasks
+    mbpp_tasks = ["mbpp", "mbpp_plus", "mbppplus"]
+
+    for task_name in mbpp_tasks:
+        if task_name in _tasks:
+            # pass@1 with temperature 0.8, 16 samples
+            register_regime(
+                task_name,
+                "pass@1",
+                num_fewshot=0,
+                sampling_params=SamplingParams(
+                    max_tokens=1024,
+                    temperature=0.8,
+                    top_p=0.95,
+                    num_samples=16,
+                    stop_sequences=MBPP_STOP_SEQUENCES,
+                ),
+            )
+            # pass@10 with 32 samples
+            register_regime(
+                task_name,
+                "pass@10",
+                num_fewshot=0,
+                sampling_params=SamplingParams(
+                    max_tokens=1024,
+                    temperature=0.8,
+                    top_p=0.95,
+                    num_samples=32,
+                    stop_sequences=MBPP_STOP_SEQUENCES,
+                ),
+            )
+
+
 def register_all_regimes() -> None:
     """Register all common regimes."""
     register_olmes_regimes()
@@ -199,6 +280,7 @@ def register_all_regimes() -> None:
     register_none_regime()
     register_olmo3_n32_v2_regimes()
     register_olmo3_v2_regimes()
+    register_code_pass_at_k_regimes()
 
 
 # Auto-register all regimes when this module is imported

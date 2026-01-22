@@ -10,6 +10,12 @@ from olmo_eval.core import (
     LMOutput,
     LMRequest,
     RequestType,
+    SamplingParams,
+)
+from olmo_eval.evals.constants.code import (
+    CODE_STOP_SEQUENCES,
+    HUMANEVAL_STOP_SEQUENCES,
+    MBPP_STOP_SEQUENCES,
 )
 from olmo_eval.evals.extract import extract_code
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register
@@ -211,6 +217,22 @@ class MBPPPlusTask(Task):
 # (code execution). The configs below use placeholder scorers/metrics.
 # Full code execution support would require a CodeExecutionScorer.
 
+# Default sampling params for code generation (greedy, single sample)
+DEFAULT_CODE_SAMPLING = SamplingParams(
+    max_tokens=1024,
+    temperature=0.0,
+    stop_sequences=CODE_STOP_SEQUENCES,
+)
+
+# Sampling params for pass@k evaluation (temperature sampling, multiple samples)
+PASS_AT_K_SAMPLING = SamplingParams(
+    max_tokens=1024,
+    temperature=0.8,
+    top_p=0.95,
+    num_samples=16,
+    stop_sequences=CODE_STOP_SEQUENCES,
+)
+
 
 def _humaneval_config() -> TaskConfig:
     return TaskConfig(
@@ -218,6 +240,11 @@ def _humaneval_config() -> TaskConfig:
         hf_dataset="openai_humaneval",
         scorers=(),  # Code execution scorer to be added
         metrics=(),  # Pass@k metric to be added
+        sampling_params=SamplingParams(
+            max_tokens=1024,
+            temperature=0.0,
+            stop_sequences=HUMANEVAL_STOP_SEQUENCES,
+        ),
     )
 
 
@@ -227,6 +254,11 @@ def _humaneval_plus_config() -> TaskConfig:
         hf_dataset="evalplus/humanevalplus",
         scorers=(),
         metrics=(),
+        sampling_params=SamplingParams(
+            max_tokens=1024,
+            temperature=0.0,
+            stop_sequences=HUMANEVAL_STOP_SEQUENCES,
+        ),
     )
 
 
@@ -236,6 +268,11 @@ def _mbpp_config() -> TaskConfig:
         hf_dataset="google-research-datasets/mbpp",
         scorers=(),
         metrics=(),
+        sampling_params=SamplingParams(
+            max_tokens=1024,
+            temperature=0.0,
+            stop_sequences=MBPP_STOP_SEQUENCES,
+        ),
     )
 
 
@@ -245,6 +282,11 @@ def _mbpp_plus_config() -> TaskConfig:
         hf_dataset="evalplus/mbppplus",
         scorers=(),
         metrics=(),
+        sampling_params=SamplingParams(
+            max_tokens=1024,
+            temperature=0.0,
+            stop_sequences=MBPP_STOP_SEQUENCES,
+        ),
     )
 
 
@@ -285,11 +327,58 @@ def _codex_humaneval_config() -> TaskConfig:
         hf_dataset="openai_humaneval",
         scorers=(),
         metrics=(),
+        sampling_params=SamplingParams(
+            max_tokens=1024,
+            temperature=0.0,
+            stop_sequences=HUMANEVAL_STOP_SEQUENCES,
+        ),
     )
 
 
 @register("codex_humaneval", _codex_humaneval_config)
 class CodexHumanEval(HumanEvalTask):
     """Alias for HumanEval (codex_humaneval name used by oe-eval)."""
+
+    pass
+
+
+def _codex_humanevalplus_config() -> TaskConfig:
+    return TaskConfig(
+        name="codex_humanevalplus",
+        hf_dataset="evalplus/humanevalplus",
+        scorers=(),
+        metrics=(),
+        sampling_params=SamplingParams(
+            max_tokens=1024,
+            temperature=0.0,
+            stop_sequences=HUMANEVAL_STOP_SEQUENCES,
+        ),
+    )
+
+
+@register("codex_humanevalplus", _codex_humanevalplus_config)
+class CodexHumanEvalPlus(HumanEvalPlusTask):
+    """Alias for HumanEval+ (codex_humanevalplus name used by oe-eval)."""
+
+    pass
+
+
+def _mbppplus_config() -> TaskConfig:
+    return TaskConfig(
+        name="mbppplus",
+        hf_dataset="evalplus/mbppplus",
+        scorers=(),
+        metrics=(),
+        sampling_params=SamplingParams(
+            max_tokens=1024,
+            temperature=0.0,
+            stop_sequences=MBPP_STOP_SEQUENCES,
+        ),
+    )
+
+
+@register("mbppplus", _mbppplus_config)
+class MBPPPlusAlias(MBPPPlusTask):
+    """Alias for MBPP+ (mbppplus name used by oe-eval)."""
 
     pass
