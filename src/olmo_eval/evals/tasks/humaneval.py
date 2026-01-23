@@ -313,16 +313,23 @@ class HumanEvalPlusBPB(HumanEvalPlusBPBTask):
     pass
 
 
-@register("humaneval:inloop_bpb", _humaneval_inloop_bpb_config)
+# Register with underscore naming to avoid variant parsing issues
+@register("humaneval_inloop_bpb", _humaneval_inloop_bpb_config)
 class HumanEvalInloopBPB(HumanEvalInloopBPBTask):
-    """HumanEval BPB evaluation task matching oe-eval's inloop_bpb variant."""
+    """HumanEval BPB evaluation task matching oe-eval's inloop_bpb variant.
+
+    Use as: humaneval_inloop_bpb or humaneval_inloop_bpb:3shot
+    """
 
     pass
 
 
-@register("humaneval_plus:inloop_bpb", _humaneval_plus_inloop_bpb_config)
+@register("humaneval_plus_inloop_bpb", _humaneval_plus_inloop_bpb_config)
 class HumanEvalPlusInloopBPB(HumanEvalPlusInloopBPBTask):
-    """HumanEval+ BPB evaluation task matching oe-eval's inloop_bpb variant."""
+    """HumanEval+ BPB evaluation task matching oe-eval's inloop_bpb variant.
+
+    Use as: humaneval_plus_inloop_bpb or humaneval_plus_inloop_bpb:3shot
+    """
 
     pass
 
@@ -344,3 +351,4 @@ register_variant(
     metrics=(BPBMetric(),),
     primary_metric=BPBMetric(),
 )
+
