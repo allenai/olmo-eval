@@ -98,11 +98,19 @@ class VLLMBackend(Backend):
         return self._max_length
 
     def _encode_pair(self, context: str, continuation: str) -> tuple[list[int], list[int]]:
-        """Encode context and continuation separately (robust to non-additive tokenization)."""
+        """Encode context and continuation separately (robust to non-additive tokenization).
+
+        Respects the tokenizer's add_bos_token setting to match lm_eval behavior.
+        """
         tokenizer = self.llm.get_tokenizer()
-        whole_enc = tokenizer.encode(context + continuation, add_special_tokens=False)
-        context_enc = tokenizer.encode(context, add_special_tokens=False)
-        continuation_enc = whole_enc[len(context_enc) :]
+
+        # Match lm_eval behavior: respect tokenizer's add_bos_token setting
+        add_bos = getattr(tokenizer, 'add_bos_token', False)
+
+        whole_enc = tokenizer.encode(context + continuation, add_special_tokens=add_bos)
+        context_enc = tokenizer.encode(context, add_special_tokens=add_bos)
+        continuation_enc = whole_enc[len(context_enc):]
+
         return context_enc, continuation_enc
 
     def _build_sampling_params(self, params: SamplingParams) -> Any:
