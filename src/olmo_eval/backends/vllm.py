@@ -201,6 +201,7 @@ class VLLMBackend(Backend):
         # Parse results back to per-request structure
         output_iter = iter(outputs)
         meta_iter = iter(request_meta)
+        tokens_iter = iter(token_inputs)
         results = []
 
         for request in requests:
@@ -210,6 +211,7 @@ class VLLMBackend(Backend):
             for continuation in continuations:
                 output = next(output_iter)
                 ctxlen, num_tokens_all, overflow = next(meta_iter)
+                inp = next(tokens_iter)
 
                 logprob_entries = []
                 total = 0.0
@@ -218,14 +220,17 @@ class VLLMBackend(Backend):
                 prompt_logprobs = output.prompt_logprobs or []
                 # Skip the first ctxlen positions (context tokens)
                 cont_logprobs = prompt_logprobs[ctxlen:] if ctxlen < len(prompt_logprobs) else []
+                # Get continuation token IDs from the actual input
+                cont_tokens = inp[ctxlen:]
 
-                for token_probs in cont_logprobs:
+                for token_id, token_probs in zip(cont_tokens, cont_logprobs):
                     if not token_probs:
                         continue
 
-                    # Get the actual token (first key in the dict from prompt)
-                    token_id = next(iter(token_probs))
-                    lp_obj = token_probs[token_id]
+                    # Look up logprob for the actual continuation token (not first key in dict)
+                    lp_obj = token_probs.get(token_id)
+                    if lp_obj is None:
+                        continue
                     logprob_val = _coerce_logprob_to_num(lp_obj)
 
                     token_str = _get_token_string(lp_obj, token_id, tokenizer)
