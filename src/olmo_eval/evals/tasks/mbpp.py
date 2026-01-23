@@ -22,7 +22,7 @@ from olmo_eval.evals.tasks.core import Task, TaskConfig, register, register_vari
 class MBPPTask(Task):
     """MBPP (Mostly Basic Python Problems) task."""
 
-    default_hf_path: str = "google-research-datasets/mbpp"
+    default_source: str = "google-research-datasets/mbpp"
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
@@ -44,7 +44,7 @@ class MBPPTask(Task):
             return self.config.get_data_source(split=split)
         except ValueError:
             return DataSource(
-                path=self.default_hf_path,
+                path=self.default_source,
                 split=split,
             )
 
@@ -102,7 +102,7 @@ class MBPPTask(Task):
 class MBPPPlusTask(Task):
     """MBPP+ task with additional test cases."""
 
-    default_hf_path: str = "evalplus/mbppplus"
+    default_source: str = "evalplus/mbppplus"
     fewshot_split: str = "test"  # MBPP+ doesn't have a dedicated prompt split
 
     def __init__(self, config: TaskConfig) -> None:
@@ -125,7 +125,7 @@ class MBPPPlusTask(Task):
             return self.config.get_data_source(split=split)
         except ValueError:
             return DataSource(
-                path=self.default_hf_path,
+                path=self.default_source,
                 split=split,
             )
 

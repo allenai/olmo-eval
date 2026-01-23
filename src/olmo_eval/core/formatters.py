@@ -176,9 +176,11 @@ class PPLFormatter:
             gold_idx = instance.metadata["gold_idx"]
             if 0 <= gold_idx < len(instance.choices):
                 gold_text = instance.choices[gold_idx]
+
         # Fallback to gold_text from metadata if available
         if gold_text is None and "gold_text" in instance.metadata:
             gold_text = instance.metadata["gold_text"]
+
         # Final fallback to gold_answer
         if gold_text is None:
             gold_text = instance.gold_answer

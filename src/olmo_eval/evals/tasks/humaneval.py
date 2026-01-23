@@ -23,7 +23,7 @@ from olmo_eval.evals.tasks.core import Task, TaskConfig, register, register_vari
 class HumanEvalTask(Task):
     """HumanEval code generation task."""
 
-    default_hf_path: str = "openai_humaneval"
+    default_source: str = "openai_humaneval"
     fewshot_split: str = "test"  # HumanEval only has a test split
 
     def __init__(self, config: TaskConfig) -> None:
@@ -46,13 +46,12 @@ class HumanEvalTask(Task):
             return self.config.get_data_source(split=split)
         except ValueError:
             return DataSource(
-                path=self.default_hf_path,
+                path=self.default_source,
                 split=split,
             )
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
-        # prompt = "```python\n" + doc["prompt"]
         prompt = doc["prompt"]
         unit_tests = doc["test"] + f"\ncheck({doc['entry_point']})"
 
@@ -107,7 +106,7 @@ class HumanEvalTask(Task):
 class HumanEvalPlusTask(HumanEvalTask):
     """HumanEval+ task with additional test cases."""
 
-    default_hf_path: str = "evalplus/humanevalplus"
+    default_source: str = "evalplus/humanevalplus"
 
 
 class HumanEvalInloopBPBTask(HumanEvalTask):
@@ -143,7 +142,7 @@ class HumanEvalInloopBPBTask(HumanEvalTask):
 class HumanEvalPlusInloopBPBTask(HumanEvalInloopBPBTask):
     """HumanEval+ BPB task matching oe-eval's inloop_bpb variant."""
 
-    default_hf_path: str = "evalplus/humanevalplus"
+    default_source: str = "evalplus/humanevalplus"
 
 
 # =============================================================================
@@ -179,42 +178,6 @@ def _humaneval_plus_config() -> TaskConfig:
     )
 
 
-def _humaneval_inloop_bpb_config() -> TaskConfig:
-    """Config matching oe-eval's codex_humaneval with inloop_bpb variant.
-
-    Key differences from standard BPB config:
-    - No prompt_suffix in prompt (handled by HumanEvalInloopBPBTask)
-    - PPLFormatter.answer_prefix=" " to add space before answer in few-shot examples
-      (matching oe-eval's doc_to_target which returns " " + canonical_solution)
-    - fewshot_seed=1234 to match oe-eval's default
-    """
-    return TaskConfig(
-        name="humaneval_inloop_bpb",
-        data_source=DataSource(path="openai_humaneval"),
-        # answer_prefix=" " matches oe-eval's doc_to_target behavior
-        formatter=PPLFormatter(answer_prefix=" "),
-        scorers=(BitsPerByteScorer(),),
-        metrics=(BPBMetric(),),
-        primary_metric=BPBMetric(),
-        num_fewshot=3,
-        fewshot_seed=1234,
-    )
-
-
-def _humaneval_plus_inloop_bpb_config() -> TaskConfig:
-    """Config matching oe-eval's codex_humaneval with inloop_bpb variant for HumanEval+."""
-    return TaskConfig(
-        name="humaneval_plus_inloop_bpb",
-        data_source=DataSource(path="evalplus/humanevalplus"),
-        formatter=PPLFormatter(answer_prefix=" "),
-        scorers=(BitsPerByteScorer(),),
-        metrics=(BPBMetric(),),
-        primary_metric=BPBMetric(),
-        num_fewshot=3,
-        fewshot_seed=1234,
-    )
-
-
 # =============================================================================
 # Task Registrations
 # =============================================================================
@@ -230,27 +193,6 @@ class HumanEval(HumanEvalTask):
 @register("humaneval_plus", _humaneval_plus_config)
 class HumanEvalPlus(HumanEvalPlusTask):
     """HumanEval+ code generation task."""
-
-    pass
-
-
-# Register with underscore naming to avoid variant parsing issues
-@register("humaneval_inloop_bpb", _humaneval_inloop_bpb_config)
-class HumanEvalInloopBPB(HumanEvalInloopBPBTask):
-    """HumanEval BPB evaluation task matching oe-eval's inloop_bpb variant.
-
-    Use as: humaneval_inloop_bpb or humaneval_inloop_bpb:3shot
-    """
-
-    pass
-
-
-@register("humaneval_plus_inloop_bpb", _humaneval_plus_inloop_bpb_config)
-class HumanEvalPlusInloopBPB(HumanEvalPlusInloopBPBTask):
-    """HumanEval+ BPB evaluation task matching oe-eval's inloop_bpb variant.
-
-    Use as: humaneval_plus_inloop_bpb or humaneval_plus_inloop_bpb:3shot
-    """
 
     pass
 

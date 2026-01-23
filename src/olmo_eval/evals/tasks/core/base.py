@@ -129,6 +129,9 @@ class Task(ABC):
         ...         yield from self._load_instances()
     """
 
+    # Default data source path (can be overridden by subclasses)
+    default_source: str | None = None
+
     def __init__(self, config: TaskConfig) -> None:
         self.config = config
         self._fewshot_cache: list[Instance] | None = None
@@ -284,11 +287,15 @@ class Task(ABC):
         return all_instances
 
     def _get_source_for_split(self, split: str) -> DataSource:
-        """Get data source for a specific split.
+        """Get data source for a specific split."""
+        from olmo_eval.data import DataSource
 
-        Subclasses should override this to provide custom source resolution.
-        """
-        return self.config.get_data_source(split=split)
+        try:
+            return self.config.get_data_source(split=split)
+        except ValueError:
+            if self.default_source is not None:
+                return DataSource(path=self.default_source, split=split)
+            raise
 
     def score_responses(self, responses: Sequence[Response]) -> Sequence[Response]:
         """Apply all scorers to extract answers and compute scores."""

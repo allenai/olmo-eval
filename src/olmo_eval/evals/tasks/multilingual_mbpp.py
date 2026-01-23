@@ -55,7 +55,7 @@ class MultilingualMBPPTask(Task):
     The v2fix version normalizes Windows line endings (\\r\\n -> \\n).
     """
 
-    default_hf_path: str = "allenai/multilingual_mbpp"
+    default_source: str = "allenai/multilingual_mbpp"
     normalize_line_endings: bool = False  # Set True for v2fix
 
     def __init__(self, config: TaskConfig, language: str) -> None:
@@ -79,7 +79,7 @@ class MultilingualMBPPTask(Task):
             return self.config.get_data_source(split=split).with_subset(self.language)
         except ValueError:
             return DataSource(
-                path=self.default_hf_path,
+                path=self.default_source,
                 subset=self.language,
                 split=split,
             )

@@ -262,7 +262,7 @@ from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 class MyTask(Task):
     """Base class for my task."""
 
-    default_hf_path: str = "my-org/my-dataset"
+    default_source: str = "my-org/my-dataset"
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
@@ -283,7 +283,7 @@ class MyTask(Task):
         try:
             return self.config.get_data_source(split=split)
         except ValueError:
-            return DataSource(path=self.default_hf_path, split=split)
+            return DataSource(path=self.default_source, split=split)
 
     def process_doc(self, doc: dict[str, Any]) -> Instance:
         """Convert a dataset document to an Instance."""
