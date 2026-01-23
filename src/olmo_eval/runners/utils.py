@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
@@ -365,48 +366,55 @@ def build_predictions(scored: Sequence[Response]) -> list[dict]:
     """
     predictions = []
     for idx, resp in enumerate(scored):
-        # Build doc from instance
-        doc: dict[str, Any] = {"query": resp.instance.question}
-        if resp.instance.choices:
-            doc["choices"] = list(resp.instance.choices)
-        if resp.instance.gold_answer is not None:
-            # Use gold_idx from metadata if available, otherwise use gold_answer
-            doc["gold"] = resp.instance.metadata.get("gold_idx", resp.instance.gold_answer)
-
         # Build model_output from LMOutput objects
         model_output = []
         for out in resp.outputs:
-            out_data: dict[str, Any] = {"text": out.text}
-            if out.logprobs:
-                out_data["sum_logprob"] = sum(t.get("logprob", 0) for t in out.logprobs)
-                out_data["num_tokens"] = len(out.logprobs)
-            out_data["num_bytes"] = len(out.text.encode("utf-8"))
+            # Get values from metadata (set by backend) or compute from logprobs
+            meta = out.metadata or {}
+            num_bytes = len(out.text.encode("utf-8"))
+            num_chars = len(out.text)
+
+            # Use metadata values if available (from vLLM backend), else compute
+            if "sum_logits" in meta:
+                sum_logits = meta["sum_logits"]
+                num_tokens = meta.get("num_tokens", len(out.logprobs) if out.logprobs else 0)
+            elif out.logprobs:
+                sum_logits = sum(t.get("logprob", 0) for t in out.logprobs)
+                num_tokens = len(out.logprobs)
+            else:
+                sum_logits = 0.0
+                num_tokens = 0
+
+            out_data: dict[str, Any] = {
+                "sum_logits": sum_logits,
+                "num_tokens": num_tokens,
+                "num_tokens_all": meta.get("num_tokens_all", num_tokens),
+                "is_greedy": meta.get("is_greedy", False),
+            }
+
+            # Compute derived metrics (matching oe-eval format)
+            if num_tokens > 0:
+                out_data["logits_per_token"] = sum_logits / num_tokens
+            if num_chars > 0:
+                out_data["logits_per_char"] = sum_logits / num_chars
+            if num_bytes > 0:
+                out_data["bits_per_byte"] = -sum_logits / (num_bytes * math.log(2))
+
+            out_data["num_chars"] = num_chars
+
             model_output.append(out_data)
 
-        # Build prediction with context from the actual formatted request
+        # Get label from metadata or gold_answer
+        label = resp.instance.metadata.get("gold_idx", resp.instance.gold_answer)
+
+        # Build prediction (doc and context available in requests.jsonl)
         prediction: dict[str, Any] = {
             "doc_id": idx,
             "native_id": resp.instance.metadata.get("id", f"doc_{idx}"),
-            "doc": doc,
             "model_output": model_output,
-            "scores": dict(resp.scores),
+            "metrics": dict(resp.scores),
+            "label": label,
         }
-
-        # Include the actual context sent to the model (includes few-shot examples)
-        if resp.request:
-            if resp.request.prompt:
-                # For completion/loglikelihood requests, include the full prompt context
-                prediction["context"] = resp.request.prompt
-            if resp.request.continuations:
-                # For BPB/loglikelihood, include what we're measuring perplexity over
-                prediction["continuation"] = (
-                    resp.request.continuations[0]
-                    if len(resp.request.continuations) == 1
-                    else list(resp.request.continuations)
-                )
-            if resp.request.messages:
-                # For chat requests, include the messages
-                prediction["messages"] = [dict(m) for m in resp.request.messages]
 
         predictions.append(prediction)
 
