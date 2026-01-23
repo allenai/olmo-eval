@@ -1,4 +1,4 @@
-"""Answer extraction utilities for code tasks."""
+"""Answer extraction utilities tasks."""
 
 from .code import extract_code
 
