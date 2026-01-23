@@ -259,7 +259,7 @@ class HumanEvalPlusInloopBPB(HumanEvalPlusInloopBPBTask):
 register_variant(
     "humaneval",
     "bpb",
-    formatter=PPLFormatter(),
+    formatter=PPLFormatter(answer_prefix=" "),
     scorers=(BitsPerByteScorer(),),
     metrics=(BPBMetric(),),
     primary_metric=BPBMetric(),
@@ -268,7 +268,7 @@ register_variant(
 register_variant(
     "humaneval_plus",
     "bpb",
-    formatter=PPLFormatter(),
+    formatter=PPLFormatter(answer_prefix=" "),
     scorers=(BitsPerByteScorer(),),
     metrics=(BPBMetric(),),
     primary_metric=BPBMetric(),
