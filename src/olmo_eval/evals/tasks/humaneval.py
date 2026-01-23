@@ -179,15 +179,30 @@ class HumanEvalInloopBPBTask(HumanEvalTask):
         )
 
     def _build_fewshot(self) -> list[Instance]:
-        """Build few-shot examples from the test split."""
+        """Build few-shot examples from the test split.
+
+        Note: oe-eval samples from the "test" split for humaneval few-shot examples.
+        """
+        import logging
         import random
 
+        logger = logging.getLogger(__name__)
+
+        if self.config.num_fewshot == 0:
+            logger.debug("num_fewshot is 0, returning empty list")
+            return []
+
         all_instances = self._build_fewshot_from_source(split="test")
-        if not all_instances or self.config.num_fewshot == 0:
+        logger.debug(f"Loaded {len(all_instances)} instances for few-shot from test split")
+
+        if not all_instances:
+            logger.warning("No instances loaded for few-shot examples")
             return []
 
         rng = random.Random(self.config.fewshot_seed)
-        return rng.sample(all_instances, min(self.config.num_fewshot, len(all_instances)))
+        fewshot = rng.sample(all_instances, min(self.config.num_fewshot, len(all_instances)))
+        logger.debug(f"Selected {len(fewshot)} few-shot examples")
+        return fewshot
 
 
 class HumanEvalPlusInloopBPBTask(HumanEvalInloopBPBTask):
@@ -259,7 +274,7 @@ def _humaneval_inloop_bpb_config() -> TaskConfig:
       (matching oe-eval's doc_to_target which returns " " + canonical_solution)
     """
     return TaskConfig(
-        name="humaneval:inloop_bpb",
+        name="humaneval_inloop_bpb",
         data_source=DataSource(path="openai_humaneval"),
         # answer_prefix=" " matches oe-eval's doc_to_target behavior
         formatter=PPLFormatter(answer_prefix=" "),
@@ -274,7 +289,7 @@ def _humaneval_inloop_bpb_config() -> TaskConfig:
 def _humaneval_plus_inloop_bpb_config() -> TaskConfig:
     """Config matching oe-eval's codex_humaneval with inloop_bpb variant for HumanEval+."""
     return TaskConfig(
-        name="humaneval_plus:inloop_bpb",
+        name="humaneval_plus_inloop_bpb",
         data_source=DataSource(path="evalplus/humanevalplus"),
         formatter=PPLFormatter(answer_prefix=" "),
         scorers=(BitsPerByteScorer(),),
