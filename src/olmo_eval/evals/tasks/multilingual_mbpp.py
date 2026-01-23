@@ -186,8 +186,6 @@ def _make_mt_mbpp_v2fix_config(language: str) -> TaskConfig:
     )
 
 
-
-
 # Register all mt_mbpp_{language} tasks
 for _lang in MULTILINGUAL_MBPP_LANGUAGES:
 

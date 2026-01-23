@@ -29,6 +29,27 @@ def _coerce_logprob_to_num(logprob: Any) -> float:
     return getattr(logprob, "logprob", logprob)
 
 
+def _convert_logprobs(vllm_logprobs: list | None, tokenizer: Any = None) -> list[dict] | None:
+    """Convert vLLM logprobs format to standard format.
+
+    Works with both old (float) and new (Logprob object) vLLM versions.
+    """
+    if vllm_logprobs is None:
+        return None
+
+    result = []
+    for token_logprobs in vllm_logprobs:
+        if not token_logprobs:
+            continue
+        # vLLM returns dict of {token_id: LogprobInfo}, take first (chosen) token
+        token_id, logprob_obj = next(iter(token_logprobs.items()))
+        token_str = _get_token_string(logprob_obj, token_id, tokenizer)
+        logprob_val = _coerce_logprob_to_num(logprob_obj)
+        result.append({"token": token_str, "logprob": logprob_val})
+
+    return result
+
+
 class VLLMBackend(Backend):
     """Backend using vLLM for high-throughput inference."""
 
@@ -106,22 +127,6 @@ class VLLMBackend(Backend):
 
         return VLLMSamplingParams(**kwargs)
 
-    def _convert_logprobs(self, vllm_logprobs: list | None) -> list[dict] | None:
-        """Convert vLLM logprobs format to standard format."""
-        if vllm_logprobs is None:
-            return None
-
-        result = []
-        for token_logprobs in vllm_logprobs:
-            if not token_logprobs:
-                continue
-            # vLLM returns dict of {token_id: LogprobInfo}, take first (chosen) token
-            token_id, logprob_obj = next(iter(token_logprobs.items()))
-            token_str = _get_token_string(logprob_obj, token_id)
-            result.append({"token": token_str, "logprob": logprob_obj.logprob})
-
-        return result
-
     def generate(
         self,
         requests: list[LMRequest],
@@ -137,7 +142,7 @@ class VLLMBackend(Backend):
             [
                 LMOutput(
                     text=completion.text,
-                    logprobs=self._convert_logprobs(completion.logprobs),
+                    logprobs=_convert_logprobs(completion.logprobs),
                 )
                 for completion in output.outputs
             ]
@@ -212,7 +217,9 @@ class VLLMBackend(Backend):
 
                 prompt_logprobs = output.prompt_logprobs or []
                 # Skip the first ctxlen positions (context tokens) - logprobs start at position 1
-                cont_logprobs = prompt_logprobs[ctxlen + 1 :] if ctxlen < len(prompt_logprobs) else []
+                cont_logprobs = (
+                    prompt_logprobs[ctxlen + 1 :] if ctxlen < len(prompt_logprobs) else []
+                )
 
                 for token_probs in cont_logprobs:
                     if not token_probs:
@@ -397,7 +404,7 @@ class AsyncVLLMBackend:
                     outputs = [
                         LMOutput(
                             text=completion.text,
-                            logprobs=self._convert_logprobs(completion.logprobs),
+                            logprobs=_convert_logprobs(completion.logprobs),
                         )
                         for completion in output.outputs
                     ]
@@ -417,21 +424,6 @@ class AsyncVLLMBackend:
                 request_id, outputs = result
                 self._pending_requests.pop(request_id, None)
                 yield request_id, outputs
-
-    def _convert_logprobs(self, vllm_logprobs: list | None) -> list[dict] | None:
-        """Convert vLLM logprobs format to standard format."""
-        if vllm_logprobs is None:
-            return None
-
-        result = []
-        for token_logprobs in vllm_logprobs:
-            if not token_logprobs:
-                continue
-            token_id, logprob_obj = next(iter(token_logprobs.items()))
-            token_str = _get_token_string(logprob_obj, token_id)
-            result.append({"token": token_str, "logprob": logprob_obj.logprob})
-
-        return result
 
     async def shutdown(self) -> None:
         """Shutdown the engine gracefully."""

@@ -399,7 +399,11 @@ def build_predictions(scored: Sequence[Response]) -> list[dict]:
                 prediction["context"] = resp.request.prompt
             if resp.request.continuations:
                 # For BPB/loglikelihood, include what we're measuring perplexity over
-                prediction["continuation"] = resp.request.continuations[0] if len(resp.request.continuations) == 1 else list(resp.request.continuations)
+                prediction["continuation"] = (
+                    resp.request.continuations[0]
+                    if len(resp.request.continuations) == 1
+                    else list(resp.request.continuations)
+                )
             if resp.request.messages:
                 # For chat requests, include the messages
                 prediction["messages"] = [dict(m) for m in resp.request.messages]
@@ -453,7 +457,7 @@ def build_requests(
 
     request_list = []
 
-    for idx, (instance, request) in enumerate(zip(instances, requests)):
+    for idx, (instance, request) in enumerate(zip(instances, requests, strict=True)):
         # Build doc from instance
         doc: dict[str, Any] = {
             "query": instance.question,
@@ -608,9 +612,7 @@ def run_task_impl(
 
         # Build requests in oe-eval compatible format (for debugging what model saw)
         # We do this early since we know the requests upfront - no need to wait for generation
-        request_objects = build_requests(
-            instances, requests, task.config.name, existing_params
-        )
+        request_objects = build_requests(instances, requests, task.config.name, existing_params)
 
         # Call the requests callback early (before generation) if provided
         # This allows writing requests.jsonl without waiting for generation to complete

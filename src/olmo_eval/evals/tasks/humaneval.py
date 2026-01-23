@@ -102,6 +102,7 @@ class HumanEvalTask(Task):
                 response.scores[scorer.name] = max(scores) if scores else 0.0
         return responses
 
+
 class HumanEvalPlusTask(HumanEvalTask):
     """HumanEval+ task with additional test cases."""
 
@@ -136,6 +137,7 @@ class HumanEvalInloopBPBTask(HumanEvalTask):
                 "test": unit_tests,
             },
         )
+
 
 class HumanEvalPlusInloopBPBTask(HumanEvalInloopBPBTask):
     """HumanEval+ BPB task matching oe-eval's inloop_bpb variant."""

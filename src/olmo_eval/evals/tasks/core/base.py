@@ -21,7 +21,7 @@ from olmo_eval.core import (
 )
 
 if TYPE_CHECKING:
-    from olmo_eval.data import DataLoader, DataSource
+    from olmo_eval.data import DataSource
 
 
 @dataclass
