@@ -191,7 +191,7 @@ class VLLMBackend(Backend):
                 ctxlen = max(0, ctxlen)  # Ensure non-negative
 
                 token_inputs.append(inp)
-                request_meta.append((ctxlen, len(continuation_enc), overflow))
+                request_meta.append((ctxlen, len(inp), overflow))
 
         # Call vLLM with token IDs instead of strings
         # Pass as list of dicts with prompt_token_ids key
