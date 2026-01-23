@@ -115,6 +115,31 @@ class ResultItem:
 # -----------------------------------------------------------------------------
 
 
+def build_requests_from_items(
+    items: list[QueueItem],
+    task_name: str,
+) -> list[dict]:
+    """Build request objects from QueueItems for early writing.
+
+    Args:
+        items: List of QueueItems with instance and request data
+        task_name: Name of the task
+
+    Returns:
+        List of request dicts suitable for JSONL output
+    """
+    from olmo_eval.runners.utils import build_requests
+
+    if not items:
+        return []
+
+    instances = [item.instance for item in items]
+    requests = [item.request for item in items]
+    sampling_params = items[0].sampling_params if items else None
+
+    return build_requests(instances, requests, task_name, sampling_params)
+
+
 def prepare_task_items(
     spec: str,
     model_name: str,
@@ -927,6 +952,10 @@ class AsyncEvalRunner:
                     console.print(f"  [red]- {model_name}:{spec}: ERROR - {tracker.error}[/red]")
                 else:
                     console.print(f"  - {model_name}:{spec}: {len(items)} instances")
+                    # Write requests early - we know them upfront before generation
+                    if items and tracker.task:
+                        request_objects = build_requests_from_items(items, tracker.task.config.name)
+                        self._write_requests(model_name, spec, request_objects)
 
         total_instances = sum(len(items) for items in model_items.values())
         console.print(f"[bold]Total instances:[/bold] {total_instances}")
@@ -1102,11 +1131,8 @@ class AsyncEvalRunner:
                         self._write_predictions(
                             tracker.model_name, task_result.spec, task_result.predictions
                         )
-                    # Write requests to JSONL (oe-eval compatible format)
-                    if task_result.requests:
-                        self._write_requests(
-                            tracker.model_name, task_result.spec, task_result.requests
-                        )
+                    # Note: Requests are written early during task preparation,
+                    # so we don't need to write them again here
 
         # Wait for all workers
         for worker in workers:
@@ -1568,6 +1594,10 @@ class StreamingEvalRunner:
                     console.print(f"  [red]- {model_name}:{spec}: ERROR - {tracker.error}[/red]")
                 else:
                     console.print(f"  - {model_name}:{spec}: {len(items)} instances")
+                    # Write requests early - we know them upfront before generation
+                    if items and tracker.task:
+                        request_objects = build_requests_from_items(items, tracker.task.config.name)
+                        self._write_requests(model_name, spec, request_objects)
 
         total_instances = sum(len(items) for items in model_items.values())
         console.print(f"[bold]Total instances:[/bold] {total_instances}")
@@ -1730,11 +1760,8 @@ class StreamingEvalRunner:
                         self._write_predictions(
                             tracker.model_name, task_result.spec, task_result.predictions
                         )
-                    # Write requests to JSONL (oe-eval compatible format)
-                    if task_result.requests:
-                        self._write_requests(
-                            tracker.model_name, task_result.spec, task_result.requests
-                        )
+                    # Note: Requests are written early during task preparation,
+                    # so we don't need to write them again here
 
         # Wait for workers
         for worker in workers:

@@ -223,9 +223,8 @@ class SyncEvalRunner:
             if task_result.predictions:
                 self._write_predictions(spec, task_result.predictions)
 
-            # Write requests to JSONL (oe-eval compatible format)
-            if task_result.requests:
-                self._write_requests(spec, task_result.requests)
+            # Note: Requests are written early via the requests_callback in _run_task,
+            # so we don't need to write them again here
 
             # Log metrics (for Beaker job details)
             if task_result.metrics:
@@ -270,12 +269,14 @@ class SyncEvalRunner:
                 sampling_overrides[key] = value
 
         # Use shared task execution logic
+        # Pass callback to write requests early (before generation completes)
         result = run_task_impl(
             spec=spec,
             backend=backend,
             overrides=overrides or None,
             progress_callback=lambda msg: console.print(f"  {msg}"),
             sampling_overrides=sampling_overrides or None,
+            requests_callback=lambda reqs: self._write_requests(spec, reqs),
         )
 
         # Check for errors

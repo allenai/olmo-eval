@@ -494,6 +494,7 @@ def run_task_impl(
     progress_callback: Callable[[str], None] | None = None,
     temperature: float | None = None,
     sampling_overrides: dict[str, Any] | None = None,
+    requests_callback: Callable[[list[dict]], None] | None = None,
 ) -> TaskResult:
     """Execute a single task and return results.
 
@@ -506,6 +507,9 @@ def run_task_impl(
         progress_callback: Optional callback for progress messages
         temperature: Optional temperature for sampling (deprecated, use sampling_overrides)
         sampling_overrides: Optional overrides for sampling params (temperature, max_tokens, etc.)
+        requests_callback: Optional callback to receive requests early (before generation).
+            Called with the list of request dicts immediately after they're built.
+            Use this to write requests.jsonl before waiting for generation to complete.
 
     Returns:
         TaskResult with metrics and metadata
@@ -554,6 +558,17 @@ def run_task_impl(
         # Format requests
         requests = [task.format_request(inst) for inst in instances]
 
+        # Build requests in oe-eval compatible format (for debugging what model saw)
+        # We do this early since we know the requests upfront - no need to wait for generation
+        request_objects = build_requests(
+            instances, requests, task.config.name, existing_params
+        )
+
+        # Call the requests callback early (before generation) if provided
+        # This allows writing requests.jsonl without waiting for generation to complete
+        if requests_callback:
+            requests_callback(request_objects)
+
         # Generate outputs - use logprobs for LOGLIKELIHOOD requests
         from olmo_eval.core import RequestType
 
@@ -574,11 +589,6 @@ def run_task_impl(
 
         # Build predictions for per-instance inspection
         predictions = build_predictions(scored)
-
-        # Build requests in oe-eval compatible format (for debugging what model saw)
-        request_objects = build_requests(
-            instances, requests, task.config.name, existing_params
-        )
 
         duration = time.time() - start_time
 
