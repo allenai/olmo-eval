@@ -121,48 +121,6 @@ FIM_CONFIGS: dict[str, FIMConfig] = {
 
 
 # =============================================================================
-# Code Generation Tasks
-# =============================================================================
-
-ALL_CODEX_TASKS: tuple[str, ...] = (
-    "humaneval:temp0.8",
-    "humanevalplus:temp0.8",
-    "mbpp::none",
-    "mbpp_plus::none",
-    "bigcodebench::none",
-    "bigcodebench_hard::none",
-)
-"""Standard code generation benchmark tasks."""
-
-STARCODER_CODEX_TASKS: tuple[str, ...] = (
-    "humaneval::starcoder_pass@1",
-    "humaneval::starcoder_pass@10",
-    "mbpp::starcoder_pass@1",
-    "mbpp::starcoder_pass@10",
-)
-"""StarCoder-specific code generation tasks with pass@k metrics."""
-
-STARCODER_PASS_AT_1_TASKS: tuple[str, ...] = (
-    "humaneval::starcoder_pass@1",
-    "mbpp::starcoder_pass@1",
-)
-"""StarCoder tasks evaluated with pass@1 metric only."""
-
-FIM_TASKS: tuple[str, ...] = (
-    "humanevalfim_single",
-    "humanevalfim_multi",
-    "humanevalfim_random",
-)
-"""Fill-in-the-middle code completion tasks."""
-
-CRUX_EVAL_TASKS: tuple[str, ...] = (
-    "cruxeval_input:pass@5",
-    "cruxeval_output:pass@5",
-)
-"""CRUXEval code understanding tasks."""
-
-
-# =============================================================================
 # Multilingual Code Tasks
 # =============================================================================
 
@@ -207,22 +165,3 @@ MULTILINGUAL_MBPP_TASKS_V2: tuple[str, ...] = (
     "mt_mbpp_v2fix_typescript",
 )
 """Multilingual MBPP v2 tasks with bug fixes."""
-
-MULTIPL_E_HE_TASKS: tuple[str, ...] = (
-    "multipl_e_humaneval:cpp::olmo3",
-    "multipl_e_humaneval:java::olmo3",
-    "multipl_e_humaneval:js::olmo3",
-    "multipl_e_humaneval:php::olmo3",
-    "multipl_e_humaneval:rs::olmo3",
-    "multipl_e_humaneval:sh::olmo3",
-)
-"""MultiPL-E HumanEval multilingual code generation tasks."""
-
-MULTIPL_E_MBPP_TASKS: tuple[str, ...] = (
-    "multipl_e_mbpp:cpp::olmo3",
-    "multipl_e_mbpp:java::olmo3",
-    "multipl_e_mbpp:js::olmo3",
-    "multipl_e_mbpp:php::olmo3",
-    "multipl_e_mbpp:rs::olmo3",
-)
-"""MultiPL-E MBPP multilingual code generation tasks."""
