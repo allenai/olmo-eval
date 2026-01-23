@@ -100,15 +100,19 @@ class VLLMBackend(Backend):
     def _encode_pair(self, context: str, continuation: str) -> tuple[list[int], list[int]]:
         """Encode context and continuation separately (robust to non-additive tokenization).
 
-        Respects the tokenizer's add_bos_token setting to match lm_eval behavior.
+        Matches lm_eval behavior: trailing spaces from context are moved to continuation
+        before tokenization to ensure consistent token boundaries.
         """
         tokenizer = self.llm.get_tokenizer()
 
-        # Match lm_eval behavior: respect tokenizer's add_bos_token setting
-        add_bos = getattr(tokenizer, 'add_bos_token', False)
+        # Match lm_eval behavior: move trailing spaces from context to continuation
+        n_spaces = len(context) - len(context.rstrip())
+        if n_spaces > 0:
+            continuation = context[-n_spaces:] + continuation
+            context = context[:-n_spaces]
 
-        whole_enc = tokenizer.encode(context + continuation, add_special_tokens=add_bos)
-        context_enc = tokenizer.encode(context, add_special_tokens=add_bos)
+        whole_enc = tokenizer.encode(context + continuation, add_special_tokens=False)
+        context_enc = tokenizer.encode(context, add_special_tokens=False)
         continuation_enc = whole_enc[len(context_enc):]
 
         return context_enc, continuation_enc
