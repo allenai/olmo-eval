@@ -188,20 +188,6 @@ def _mbpp_plus_config() -> TaskConfig:
     )
 
 
-def _mbppplus_config() -> TaskConfig:
-    return TaskConfig(
-        name="mbppplus",
-        data_source=DataSource(path="evalplus/mbppplus"),
-        scorers=(),
-        metrics=(),
-        sampling_params=SamplingParams(
-            max_tokens=1024,
-            temperature=0.0,
-            stop_sequences=MBPP_STOP_SEQUENCES,
-        ),
-    )
-
-
 # =============================================================================
 # BPB Task Configs (no sampling_params)
 # =============================================================================
@@ -229,17 +215,6 @@ def _mbpp_plus_bpb_config() -> TaskConfig:
     )
 
 
-def _mbppplus_bpb_config() -> TaskConfig:
-    return TaskConfig(
-        name="mbppplus:bpb",
-        data_source=DataSource(path="evalplus/mbppplus"),
-        formatter=PPLFormatter(leading_space=False),  # No leading space for code (matches oe-eval)
-        scorers=(BitsPerByteScorer(),),
-        metrics=(BPBMetric(),),
-        primary_metric=BPBMetric(),
-    )
-
-
 # =============================================================================
 # Task Registrations - Generative
 # =============================================================================
@@ -254,13 +229,6 @@ class MBPP(MBPPTask):
 
 @register("mbpp_plus", _mbpp_plus_config)
 class MBPPPlus(MBPPPlusTask):
-    """MBPP+ code generation task."""
-
-    pass
-
-
-@register("mbppplus", _mbppplus_config)
-class MBPPPlusAlias(MBPPPlusTask):
     """MBPP+ code generation task."""
 
     pass
@@ -281,13 +249,6 @@ class MBPPBPB(MBPPTask):
 @register("mbpp_plus:bpb", _mbpp_plus_bpb_config)
 class MBPPPlusBPB(MBPPPlusTask):
     """MBPP+ BPB evaluation task."""
-
-    pass
-
-
-@register("mbppplus:bpb", _mbppplus_bpb_config)
-class MBPPPlusAliasBPB(MBPPPlusTask):
-    """MBPPPlus BPB evaluation task."""
 
     pass
 
@@ -314,11 +275,15 @@ register_variant(
     primary_metric=BPBMetric(),
 )
 
+# 3shot variants for composing with other variants (e.g., mbpp:3shot:bpb)
 register_variant(
-    "mbppplus",
-    "bpb",
-    formatter=PPLFormatter(leading_space=False),  # No leading space for code (matches oe-eval)
-    scorers=(BitsPerByteScorer(),),
-    metrics=(BPBMetric(),),
-    primary_metric=BPBMetric(),
+    "mbpp",
+    "3shot",
+    num_fewshot=3,
+)
+
+register_variant(
+    "mbpp_plus",
+    "3shot",
+    num_fewshot=3,
 )

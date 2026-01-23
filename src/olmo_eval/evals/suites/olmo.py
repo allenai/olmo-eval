@@ -340,7 +340,7 @@ OLMO3_DEV_MIDTRAIN_V1 = make_suite(
         "aime::hamish_zs_reasoning",
         OMEGA_0SHOT_CHAT,
         "humanevalplus:0-shot-chat::tulu-thinker",
-        "mbppplus:0-shot-chat::tulu-thinker",
+        "mbpp_plus:0-shot-chat::tulu-thinker",
         "livecodebench_codegeneration::tulu-thinker",
         BBH_COT_THINKER,
         "zebralogic::hamish_zs_reasoning",
@@ -365,7 +365,7 @@ OLMO3_DEV_MIDTRAIN_V2 = make_suite(
         "omega_500::olmo3:midtrain",
         OMEGA_MIDTRAIN,
         # "humanevalplus::olmo3:midtrain", TODO(undfined): Enable once we add code execution
-        # "mbppplus::olmo3:midtrain",
+        # "mbpp_plus::olmo3:midtrain",
         # "livecodebench_codegeneration::olmo3:midtrain",
         # BBH_COT_MIDTRAIN,
         "gpqa::olmo3:midtrain",

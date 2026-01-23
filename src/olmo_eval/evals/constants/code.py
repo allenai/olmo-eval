@@ -128,7 +128,7 @@ ALL_CODEX_TASKS: tuple[str, ...] = (
     "humaneval:temp0.8",
     "humanevalplus:temp0.8",
     "mbpp::none",
-    "mbppplus::none",
+    "mbpp_plus::none",
     "bigcodebench::none",
     "bigcodebench_hard::none",
 )

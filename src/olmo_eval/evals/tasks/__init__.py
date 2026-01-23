@@ -53,8 +53,3 @@ def _discover_and_load_tasks() -> None:
 
 # Auto-discover and load all task modules
 _discover_and_load_tasks()
-
-# Register common variants after all tasks are registered
-# Register common regimes after all tasks and variants are registered
-from . import _regimes as _regimes  # noqa: F401, E402
-from . import _variants as _variants  # noqa: F401, E402

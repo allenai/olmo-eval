@@ -371,3 +371,22 @@ register_variant(
     primary_metric=BPBMetric(),
 )
 
+register_variant(
+    "humaneval_inloop_bpb",
+    "3shot",
+    num_fewshot=3,
+)
+
+# 3shot variants for composing with other variants (e.g., humaneval:3shot:bpb)
+register_variant(
+    "humaneval",
+    "3shot",
+    num_fewshot=3,
+)
+
+register_variant(
+    "humaneval_plus",
+    "3shot",
+    num_fewshot=3,
+)
+
