@@ -318,14 +318,14 @@ class TestPPLFormatter:
         with pytest.raises(ValueError, match="PPLFormatter requires a gold answer"):
             formatter.format(instance)
 
-    def test_ppl_formatter_ignores_fewshot(self):
-        """PPLFormatter ignores fewshot examples."""
+    def test_ppl_formatter_includes_fewshot(self):
+        """PPLFormatter includes fewshot examples in the prompt."""
         formatter = PPLFormatter()
         instance = Instance(question="Test?", gold_answer="answer")
         fewshot = [Instance(question="Example?", gold_answer="example")]
 
         request = formatter.format(instance, fewshot)
 
-        # Fewshot is ignored - only question used as prompt
-        assert request.prompt == "Test?"
+        # Fewshot examples are included in prompt, joined by separator
+        assert request.prompt == "Example?example\n\nTest?"
         assert request.continuations == (" answer",)

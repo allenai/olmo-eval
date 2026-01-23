@@ -246,9 +246,12 @@ def convert_runner_results(
         s3_metrics_key = None
         s3_predictions_key = None
         if s3_location:
+            from olmo_eval.runners.utils import PREDICTIONS_SUFFIX, sanitize_spec_for_filename
+
             base = s3_location.rstrip("/")
-            s3_metrics_key = f"{base}/task-{task_idx:03d}-{spec}-metrics.json"
-            s3_predictions_key = f"{base}/task-{task_idx:03d}-{spec}-predictions.jsonl"
+            sanitized_spec = sanitize_spec_for_filename(spec)
+            s3_metrics_key = f"{base}/task-{task_idx:03d}-{sanitized_spec}-metrics.json"
+            s3_predictions_key = f"{base}/task-{task_idx:03d}-{sanitized_spec}{PREDICTIONS_SUFFIX}"
 
         # Extract primary metric info
         metrics = task_data.get("metrics", {})

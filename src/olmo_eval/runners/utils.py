@@ -15,18 +15,53 @@ from olmo_eval.evals.tasks import get_task
 
 # Re-export build_predictions for parallel runner
 __all__ = [
+    "PREDICTIONS_SUFFIX",
+    "REQUESTS_SUFFIX",
     "TaskResult",
     "build_predictions",
     "build_requests",
     "compute_suite_aggregations",
     "get_primary_metric",
     "run_task_impl",
+    "sanitize_spec_for_filename",
     "serialize_sampling_params",
     "write_predictions_jsonl",
     "write_requests_jsonl",
 ]
 
 logger = logging.getLogger(__name__)
+
+# Filename suffixes for output files (consistent across all runners and storage backends)
+PREDICTIONS_SUFFIX = "-predictions.jsonl"
+REQUESTS_SUFFIX = "-requests.jsonl"
+
+
+def sanitize_spec_for_filename(spec: str) -> str:
+    """Sanitize a task spec string to be safe for use in filenames.
+
+    Replaces characters that are not allowed or problematic in filenames:
+    - ':' -> '_' (used in task variants like arc_challenge:bpb)
+    - '/' -> '_' (could appear in model names or paths)
+    - '\\' -> '_' (Windows path separator)
+    - ' ' -> '_' (spaces)
+
+    Args:
+        spec: Task specification string (e.g., "arc_challenge:bpb::olmes")
+
+    Returns:
+        Sanitized string safe for use in filenames (e.g., "arc_challenge_bpb__olmes")
+
+    Examples:
+        >>> sanitize_spec_for_filename("arc_challenge:bpb")
+        'arc_challenge_bpb'
+        >>> sanitize_spec_for_filename("mmlu/history")
+        'mmlu_history'
+        >>> sanitize_spec_for_filename("task::key=value")
+        'task__key=value'
+    """
+    # Replace problematic characters with underscores
+    result = spec.replace(":", "_").replace("/", "_").replace("\\", "_").replace(" ", "_")
+    return result
 
 
 def serialize_sampling_params(params: SamplingParams | None) -> dict[str, Any] | None:
@@ -656,13 +691,12 @@ def write_predictions_jsonl(
         model_name: Optional model name for multi-model runs (adds subdirectory)
     """
     if model_name:
-        pred_dir = os.path.join(output_dir, "predictions", model_name.replace("/", "_"))
+        pred_dir = os.path.join(output_dir, "predictions", sanitize_spec_for_filename(model_name))
     else:
         pred_dir = os.path.join(output_dir, "predictions")
     os.makedirs(pred_dir, exist_ok=True)
 
-    # Sanitize spec for filename: arc_challenge:bpb::olmes -> arc_challenge_bpb__olmes
-    filename = spec.replace(":", "_").replace("/", "_") + ".jsonl"
+    filename = sanitize_spec_for_filename(spec) + PREDICTIONS_SUFFIX
     filepath = os.path.join(pred_dir, filename)
 
     with open(filepath, "w") as f:
@@ -690,13 +724,12 @@ def write_requests_jsonl(
         model_name: Optional model name for multi-model runs (adds subdirectory)
     """
     if model_name:
-        req_dir = os.path.join(output_dir, "requests", model_name.replace("/", "_"))
+        req_dir = os.path.join(output_dir, "requests", sanitize_spec_for_filename(model_name))
     else:
         req_dir = os.path.join(output_dir, "requests")
     os.makedirs(req_dir, exist_ok=True)
 
-    # Sanitize spec for filename: arc_challenge:bpb::olmes -> arc_challenge_bpb__olmes
-    filename = spec.replace(":", "_").replace("/", "_") + "-requests.jsonl"
+    filename = sanitize_spec_for_filename(spec) + REQUESTS_SUFFIX
     filepath = os.path.join(req_dir, filename)
 
     with open(filepath, "w") as f:
