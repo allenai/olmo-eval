@@ -24,7 +24,7 @@ from olmo_eval.core import (
     SamplingParams,
 )
 from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.tasks.core import Task, TaskConfig, register
+from olmo_eval.evals.tasks.core import Task, TaskConfig, register, register_variant
 
 # Supported languages in multilingual MBPP
 MULTILINGUAL_MBPP_LANGUAGES: tuple[str, ...] = (
@@ -131,6 +131,19 @@ class MultilingualMBPPTask(Task):
             text = text.split("```")[0]
         return text.strip() if text else None
 
+    def _build_fewshot(self) -> list[Instance]:
+        """Build few-shot examples from the prompt split.
+
+        Multilingual MBPP uses the same structure as MBPP with a 'prompt' split
+        containing examples for few-shot prompting.
+        Falls back to 'train' split if 'prompt' is not available.
+        """
+        return self._build_fewshot_from_source(
+            split="prompt",
+            sample=True,
+            fallback_splits=["train"],
+        )
+
 
 class MultilingualMBPPV2FixTask(MultilingualMBPPTask):
     """Multilingual MBPP with Windows line ending fixes."""
@@ -173,30 +186,6 @@ def _make_mt_mbpp_v2fix_config(language: str) -> TaskConfig:
     )
 
 
-def _make_mt_mbpp_bpb_config(language: str) -> TaskConfig:
-    """Create config for mt_mbpp_{language}:bpb task."""
-    return TaskConfig(
-        name=f"mt_mbpp_{language}:bpb",
-        data_source=DataSource(path="allenai/multilingual_mbpp", subset=language),
-        # Matches oe-eval: no leading space, always prepend \n\n separator
-        formatter=PPLFormatter(leading_space=False, always_prepend_separator=True),
-        scorers=(BitsPerByteScorer(),),
-        metrics=(BPBMetric(),),
-        primary_metric=BPBMetric(),
-    )
-
-
-def _make_mt_mbpp_v2fix_bpb_config(language: str) -> TaskConfig:
-    """Create config for mt_mbpp_v2fix_{language}:bpb task."""
-    return TaskConfig(
-        name=f"mt_mbpp_v2fix_{language}:bpb",
-        data_source=DataSource(path="allenai/multilingual_mbpp", subset=language),
-        # Matches oe-eval: no leading space, always prepend \n\n separator
-        formatter=PPLFormatter(leading_space=False, always_prepend_separator=True),
-        scorers=(BitsPerByteScorer(),),
-        metrics=(BPBMetric(),),
-        primary_metric=BPBMetric(),
-    )
 
 
 # Register all mt_mbpp_{language} tasks
@@ -235,41 +224,49 @@ for _lang in MULTILINGUAL_MBPP_LANGUAGES:
     )
 
 
-# Register all mt_mbpp_{language}:bpb tasks
+# =============================================================================
+# Variant Registrations
+# =============================================================================
+
+# Register bpb and 3shot variants for all mt_mbpp_{language} tasks
 for _lang in MULTILINGUAL_MBPP_LANGUAGES:
+    # BPB variant - use mt_mbpp_{language}:bpb
+    register_variant(
+        f"mt_mbpp_{_lang}",
+        "bpb",
+        # Matches oe-eval: no leading space, always prepend \n\n separator
+        formatter=PPLFormatter(leading_space=False, always_prepend_separator=True),
+        scorers=(BitsPerByteScorer(),),
+        metrics=(BPBMetric(),),
+        primary_metric=BPBMetric(),
+    )
 
-    def _make_bpb_config_factory(lang: str):
-        return lambda: _make_mt_mbpp_bpb_config(lang)
-
-    def _make_bpb_class_factory(lang: str):
-        class _MultilingualMBPPBPB(MultilingualMBPPTask):
-            def __init__(self, config: TaskConfig) -> None:
-                super().__init__(config, language=lang)
-
-        _MultilingualMBPPBPB.__name__ = f"MultilingualMBPPBPB_{lang.title()}"
-        return _MultilingualMBPPBPB
-
-    register(f"mt_mbpp_{_lang}:bpb", _make_bpb_config_factory(_lang))(
-        _make_bpb_class_factory(_lang)
+    # 3shot variant - composable with bpb (e.g., mt_mbpp_{language}:3shot:bpb)
+    register_variant(
+        f"mt_mbpp_{_lang}",
+        "3shot",
+        num_fewshot=3,
     )
 
 
-# Register all mt_mbpp_v2fix_{language}:bpb tasks
+# Register bpb and 3shot variants for all mt_mbpp_v2fix_{language} tasks
 for _lang in MULTILINGUAL_MBPP_LANGUAGES:
+    # BPB variant - use mt_mbpp_v2fix_{language}:bpb
+    register_variant(
+        f"mt_mbpp_v2fix_{_lang}",
+        "bpb",
+        # Matches oe-eval: no leading space, always prepend \n\n separator
+        formatter=PPLFormatter(leading_space=False, always_prepend_separator=True),
+        scorers=(BitsPerByteScorer(),),
+        metrics=(BPBMetric(),),
+        primary_metric=BPBMetric(),
+    )
 
-    def _make_v2fix_bpb_config_factory(lang: str):
-        return lambda: _make_mt_mbpp_v2fix_bpb_config(lang)
-
-    def _make_v2fix_bpb_class_factory(lang: str):
-        class _MultilingualMBPPV2FixBPB(MultilingualMBPPV2FixTask):
-            def __init__(self, config: TaskConfig) -> None:
-                super().__init__(config, language=lang)
-
-        _MultilingualMBPPV2FixBPB.__name__ = f"MultilingualMBPPV2FixBPB_{lang.title()}"
-        return _MultilingualMBPPV2FixBPB
-
-    register(f"mt_mbpp_v2fix_{_lang}:bpb", _make_v2fix_bpb_config_factory(_lang))(
-        _make_v2fix_bpb_class_factory(_lang)
+    # 3shot variant - composable with bpb (e.g., mt_mbpp_v2fix_{language}:3shot:bpb)
+    register_variant(
+        f"mt_mbpp_v2fix_{_lang}",
+        "3shot",
+        num_fewshot=3,
     )
 
 
