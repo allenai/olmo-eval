@@ -22,18 +22,18 @@ class TestExpandTasks:
 
     def test_expand_suite(self):
         """Test expanding a suite to its tasks."""
-        result = expand_tasks(["core:mc"])
+        result = expand_tasks(["mt_mbpp_v2fix"])
 
-        # core:mc should expand to multiple tasks
+        # mt_mbpp_v2fix should expand to multiple tasks (17 languages)
         assert len(result) > 1
         assert all(isinstance(t, str) for t in result)
 
     def test_expand_mixed_tasks_and_suites(self):
         """Test expanding mix of tasks and suites."""
-        result = expand_tasks(["arc_challenge", "core:mc"])
+        result = expand_tasks(["humaneval", "mt_mbpp_v2fix"])
 
-        # Should have arc_challenge plus all core:mc tasks
-        assert "arc_challenge" in result
+        # Should have humaneval plus all mt_mbpp_v2fix tasks
+        assert "humaneval" in result
         assert len(result) > 2
 
     def test_expand_empty_list(self):
@@ -51,7 +51,7 @@ class TestExpandTasks:
 
     def test_expand_suite_with_overrides(self):
         """Test expanding a suite with inline overrides."""
-        result = expand_tasks(["core:mc::temperature=0.6"])
+        result = expand_tasks(["mt_mbpp_v2fix::temperature=0.6"])
 
         # All expanded tasks should have the override suffix
         assert len(result) > 1
@@ -59,7 +59,7 @@ class TestExpandTasks:
 
     def test_expand_suite_with_priority(self):
         """Test expanding a suite with priority suffix."""
-        result = expand_tasks(["core:mc@high"])
+        result = expand_tasks(["mt_mbpp_v2fix@high"])
 
         # All expanded tasks should have the priority suffix
         assert len(result) > 1
@@ -67,7 +67,7 @@ class TestExpandTasks:
 
     def test_expand_suite_with_overrides_and_priority(self):
         """Test expanding a suite with both overrides and priority."""
-        result = expand_tasks(["core:mc::temperature=0@urgent"])
+        result = expand_tasks(["mt_mbpp_v2fix::temperature=0@urgent"])
 
         # All expanded tasks should have both suffixes in correct order
         assert len(result) > 1
@@ -85,13 +85,13 @@ class TestExpandTasks:
         """Test mix of tasks and suites with various suffixes."""
         result = expand_tasks(
             [
-                "arc_challenge::limit=10",
-                "core:mc::temperature=0@high",
+                "humaneval::limit=10",
+                "mt_mbpp_v2fix::temperature=0@high",
             ]
         )
 
         # First task should be unchanged
-        assert result[0] == "arc_challenge::limit=10"
+        assert result[0] == "humaneval::limit=10"
         # Rest should be expanded suite tasks with overrides and priority
         for task in result[1:]:
             assert "::temperature=0" in task

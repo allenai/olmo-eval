@@ -16,7 +16,7 @@ class TestEvalRunnerValidation:
         """Test validation passes for valid task."""
         runner = EvalRunner(
             model_name="llama3.1-8b",
-            task_specs=["arc_challenge"],
+            task_specs=["humaneval"],
         )
         # Should not raise
         runner.validate()
@@ -25,7 +25,7 @@ class TestEvalRunnerValidation:
         """Test validation passes for valid suite."""
         runner = EvalRunner(
             model_name="llama3.1-8b",
-            task_specs=["core:mc"],
+            task_specs=["mt_mbpp_v2fix"],
         )
         # Should not raise
         runner.validate()
@@ -34,7 +34,7 @@ class TestEvalRunnerValidation:
         """Test validation passes for multiple valid specs."""
         runner = EvalRunner(
             model_name="llama3.1-8b",
-            task_specs=["arc_challenge", "arc_easy", "core:mc"],
+            task_specs=["humaneval", "mbpp", "mt_mbpp_v2fix"],
         )
         # Should not raise
         runner.validate()
@@ -64,7 +64,7 @@ class TestEvalRunnerValidation:
         """
         runner = EvalRunner(
             model_name="llama3.1-8b",
-            task_specs=["arc_challenge:nonexistent_regime"],
+            task_specs=["humaneval:nonexistent_regime"],
         )
         with pytest.raises(ValidationError, match="Unknown variant/regime"):
             runner.validate()
@@ -73,7 +73,7 @@ class TestEvalRunnerValidation:
         """Test validation collects all errors."""
         runner = EvalRunner(
             model_name="llama3.1-8b",
-            task_specs=["bad_task1", "bad_task2", "arc_challenge"],
+            task_specs=["bad_task1", "bad_task2", "humaneval"],
         )
         with pytest.raises(ValidationError) as exc_info:
             runner.validate()
@@ -86,7 +86,7 @@ class TestEvalRunnerValidation:
         """Test validation fails if any spec is invalid."""
         runner = EvalRunner(
             model_name="llama3.1-8b",
-            task_specs=["arc_challenge", "nonexistent", "core:mc"],
+            task_specs=["humaneval", "nonexistent", "mt_mbpp_v2fix"],
         )
         with pytest.raises(ValidationError, match="nonexistent"):
             runner.validate()
@@ -106,12 +106,12 @@ class TestSuiteAggregations:
 
     def test_suite_aggregation_basic(self):
         """Test basic suite aggregation without overrides."""
-        # Create mock task results that match expanded core:mc tasks
-        # Get actual tasks in core:mc suite
+        # Create mock task results that match expanded mt_mbpp_v2fix tasks
+        # Get actual tasks in mt_mbpp_v2fix suite
         from olmo_eval.evals.suites import get_suite
         from olmo_eval.runners.utils import compute_suite_aggregations
 
-        suite = get_suite("core:mc")
+        suite = get_suite("mt_mbpp_v2fix")
         expanded_tasks = suite.expand()
 
         # Create mock results for each task
@@ -119,18 +119,18 @@ class TestSuiteAggregations:
         for task in expanded_tasks:
             task_results[task] = {"metrics": {"accuracy": 0.75}}
 
-        result = compute_suite_aggregations(["core:mc"], task_results)
+        result = compute_suite_aggregations(["mt_mbpp_v2fix"], task_results)
 
-        assert "core:mc" in result
-        assert result["core:mc"]["metrics"]["accuracy"] == 0.75
-        assert result["core:mc"]["num_tasks"] == len(expanded_tasks)
+        assert "mt_mbpp_v2fix" in result
+        assert result["mt_mbpp_v2fix"]["metrics"]["accuracy"] == 0.75
+        assert result["mt_mbpp_v2fix"]["num_tasks"] == len(expanded_tasks)
 
     def test_suite_aggregation_with_overrides(self):
         """Test suite aggregation with inline overrides."""
         from olmo_eval.evals.suites import get_suite
         from olmo_eval.runners.utils import compute_suite_aggregations
 
-        suite = get_suite("core:mc")
+        suite = get_suite("mt_mbpp_v2fix")
         expanded_tasks = suite.expand()
 
         # Create mock results with override suffix (as would happen in real run)
@@ -138,18 +138,20 @@ class TestSuiteAggregations:
         for task in expanded_tasks:
             task_results[f"{task}::temperature=0.6"] = {"metrics": {"accuracy": 0.80}}
 
-        result = compute_suite_aggregations(["core:mc::temperature=0.6"], task_results)
+        result = compute_suite_aggregations(["mt_mbpp_v2fix::temperature=0.6"], task_results)
 
-        assert "core:mc::temperature=0.6" in result
-        assert result["core:mc::temperature=0.6"]["metrics"]["accuracy"] == pytest.approx(0.80)
-        assert result["core:mc::temperature=0.6"]["num_tasks"] == len(expanded_tasks)
+        assert "mt_mbpp_v2fix::temperature=0.6" in result
+        assert result["mt_mbpp_v2fix::temperature=0.6"]["metrics"]["accuracy"] == pytest.approx(
+            0.80
+        )
+        assert result["mt_mbpp_v2fix::temperature=0.6"]["num_tasks"] == len(expanded_tasks)
 
     def test_suite_aggregation_with_priority(self):
         """Test suite aggregation with priority suffix."""
         from olmo_eval.evals.suites import get_suite
         from olmo_eval.runners.utils import compute_suite_aggregations
 
-        suite = get_suite("core:mc")
+        suite = get_suite("mt_mbpp_v2fix")
         expanded_tasks = suite.expand()
 
         # Create mock results with priority suffix
@@ -157,17 +159,17 @@ class TestSuiteAggregations:
         for task in expanded_tasks:
             task_results[f"{task}@high"] = {"metrics": {"accuracy": 0.85}}
 
-        result = compute_suite_aggregations(["core:mc@high"], task_results)
+        result = compute_suite_aggregations(["mt_mbpp_v2fix@high"], task_results)
 
-        assert "core:mc@high" in result
-        assert result["core:mc@high"]["metrics"]["accuracy"] == pytest.approx(0.85)
+        assert "mt_mbpp_v2fix@high" in result
+        assert result["mt_mbpp_v2fix@high"]["metrics"]["accuracy"] == pytest.approx(0.85)
 
     def test_suite_aggregation_with_overrides_and_priority(self):
         """Test suite aggregation with both overrides and priority."""
         from olmo_eval.evals.suites import get_suite
         from olmo_eval.runners.utils import compute_suite_aggregations
 
-        suite = get_suite("core:mc")
+        suite = get_suite("mt_mbpp_v2fix")
         expanded_tasks = suite.expand()
 
         # Create mock results with both suffixes (order: ::overrides@priority)
@@ -175,20 +177,22 @@ class TestSuiteAggregations:
         for task in expanded_tasks:
             task_results[f"{task}::temperature=0@urgent"] = {"metrics": {"accuracy": 0.90}}
 
-        result = compute_suite_aggregations(["core:mc::temperature=0@urgent"], task_results)
+        result = compute_suite_aggregations(["mt_mbpp_v2fix::temperature=0@urgent"], task_results)
 
-        assert "core:mc::temperature=0@urgent" in result
-        assert result["core:mc::temperature=0@urgent"]["metrics"]["accuracy"] == pytest.approx(0.90)
+        assert "mt_mbpp_v2fix::temperature=0@urgent" in result
+        assert result["mt_mbpp_v2fix::temperature=0@urgent"]["metrics"][
+            "accuracy"
+        ] == pytest.approx(0.90)
 
     def test_suite_aggregation_non_suite_ignored(self):
         """Test that non-suite specs are ignored."""
         from olmo_eval.runners.utils import compute_suite_aggregations
 
-        task_results = {"arc_challenge": {"metrics": {"accuracy": 0.75}}}
+        task_results = {"humaneval": {"metrics": {"accuracy": 0.75}}}
 
-        result = compute_suite_aggregations(["arc_challenge"], task_results)
+        result = compute_suite_aggregations(["humaneval"], task_results)
 
-        # arc_challenge is a task, not a suite
+        # humaneval is a task, not a suite
         assert result == {}
 
     def test_suite_aggregation_average_of_averages(self):

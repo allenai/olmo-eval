@@ -113,7 +113,7 @@ class VLLMBackend(Backend):
 
         whole_enc = tokenizer.encode(context + continuation, add_special_tokens=False)
         context_enc = tokenizer.encode(context, add_special_tokens=False)
-        continuation_enc = whole_enc[len(context_enc):]
+        continuation_enc = whole_enc[len(context_enc) :]
 
         return context_enc, continuation_enc
 
@@ -235,7 +235,7 @@ class VLLMBackend(Backend):
                 # Get continuation token IDs from the actual input
                 cont_tokens = inp[ctxlen:]
 
-                for token_id, token_probs in zip(cont_tokens, cont_logprobs):
+                for token_id, token_probs in zip(cont_tokens, cont_logprobs, strict=True):
                     if not token_probs:
                         continue
 

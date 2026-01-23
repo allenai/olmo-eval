@@ -4,7 +4,6 @@ from olmo_eval.evals.constants.code import (
     CODE_STOP_SEQUENCES,
     DEEPSEEK_CODER_FIM,
     FIM_CONFIGS,
-    FIMConfig,
     HUMANEVAL_STOP_SEQUENCES,
     MBPP_STOP_SEQUENCES,
     MULTILINGUAL_MBPP_TASKS,
@@ -12,6 +11,7 @@ from olmo_eval.evals.constants.code import (
     OLMO_FIM,
     SANTACODER_FIM,
     STARCODER_FIM,
+    FIMConfig,
 )
 
 __all__ = [

@@ -315,20 +315,20 @@ class TestIntegration:
         """Test getting an actual registered suite."""
         import olmo_eval.evals.suites  # noqa: F401
 
-        # core:mc should be registered by core_tasks.py
-        if suite_exists("core:mc"):
-            suite = get_suite("core:mc")
+        # mt_mbpp_v2fix should be registered by code.py
+        if suite_exists("mt_mbpp_v2fix"):
+            suite = get_suite("mt_mbpp_v2fix")
             assert isinstance(suite, Suite)
-            assert suite.name == "core:mc"
+            assert suite.name == "mt_mbpp_v2fix"
 
     def test_search_actual_suites(self):
         """Test searching actual registered suites."""
         import olmo_eval.evals.suites  # noqa: F401
 
-        # Search for mmlu suites
-        mmlu_suites = search_suites("mmlu")
-        assert len(mmlu_suites) > 0
-        assert all("mmlu" in name for name in mmlu_suites)
+        # Search for mbpp suites
+        mbpp_suites = search_suites("mbpp")
+        assert len(mbpp_suites) > 0
+        assert all("mbpp" in name for name in mbpp_suites)
 
     def test_nested_suite_expansion(self):
         """Test that nested suites expand correctly."""
