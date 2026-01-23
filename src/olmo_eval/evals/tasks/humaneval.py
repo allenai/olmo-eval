@@ -108,58 +108,10 @@ class HumanEvalPlusTask(HumanEvalTask):
     default_hf_path: str = "evalplus/humanevalplus"
 
 
-class HumanEvalBPBTask(HumanEvalTask):
-    """HumanEval BPB task with prompt suffix for code completion context."""
-
-    # Suffix added to the prompt to prime the model for code completion
-    prompt_suffix: str = "Here is the completed function:\n\n```python\n"
-
-    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
-        """Convert a dataset document to an Instance for BPB evaluation."""
-        # Use raw prompt + prompt_suffix as context
-        prompt = doc["prompt"] + self.prompt_suffix
-        unit_tests = doc["test"] + f"\ncheck({doc['entry_point']})"
-
-        return Instance(
-            question=prompt,
-            gold_answer=doc["canonical_solution"],
-            metadata={
-                "id": doc["task_id"],
-                "entry_point": doc["entry_point"],
-                "answer_prefix": doc["prompt"],
-                "test": unit_tests,
-            },
-        )
-
-    def _build_fewshot(self) -> list[Instance]:
-        """Build few-shot examples from the test split."""
-        import random
-
-        if self.config.num_fewshot == 0:
-            return []
-
-        # Load instances directly using the task's data loading infrastructure
-        loader = DataLoader()
-        source = self._get_source_for_split("test")
-        all_instances = [self.process_doc(doc) for doc in loader.load(source)]
-
-        if not all_instances:
-            return []
-
-        rng = random.Random(self.config.fewshot_seed)
-        return rng.sample(all_instances, min(self.config.num_fewshot, len(all_instances)))
-
-
-class HumanEvalPlusBPBTask(HumanEvalBPBTask):
-    """HumanEval+ BPB task with prompt suffix for code completion context."""
-
-    default_hf_path: str = "evalplus/humanevalplus"
-
-
 class HumanEvalInloopBPBTask(HumanEvalTask):
     """HumanEval BPB task matching oe-eval's inloop_bpb variant.
 
-    Key differences from HumanEvalBPBTask:
+    Key differences from base HumanEvalTask:
     - No prompt_suffix (just doc["prompt"] as context)
     - Few-shot examples use space before answer (matching oe-eval's doc_to_target)
     """
@@ -215,6 +167,11 @@ class HumanEvalPlusInloopBPBTask(HumanEvalInloopBPBTask):
     default_hf_path: str = "evalplus/humanevalplus"
 
 
+# =============================================================================
+# Task Configs
+# =============================================================================
+
+
 def _humaneval_config() -> TaskConfig:
     return TaskConfig(
         name="humaneval",
@@ -240,32 +197,6 @@ def _humaneval_plus_config() -> TaskConfig:
             temperature=0.0,
             stop_sequences=HUMANEVAL_STOP_SEQUENCES,
         ),
-    )
-
-
-def _humaneval_bpb_config() -> TaskConfig:
-    return TaskConfig(
-        name="humaneval:bpb",
-        data_source=DataSource(path="openai_humaneval"),
-        formatter=PPLFormatter(),
-        scorers=(BitsPerByteScorer(),),
-        metrics=(BPBMetric(),),
-        primary_metric=BPBMetric(),
-        num_fewshot=3,
-        fewshot_seed=42,
-    )
-
-
-def _humaneval_plus_bpb_config() -> TaskConfig:
-    return TaskConfig(
-        name="humaneval_plus:bpb",
-        data_source=DataSource(path="evalplus/humanevalplus"),
-        formatter=PPLFormatter(),
-        scorers=(BitsPerByteScorer(),),
-        metrics=(BPBMetric(),),
-        primary_metric=BPBMetric(),
-        num_fewshot=3,
-        fewshot_seed=42,
     )
 
 
@@ -304,6 +235,11 @@ def _humaneval_plus_inloop_bpb_config() -> TaskConfig:
     )
 
 
+# =============================================================================
+# Task Registrations
+# =============================================================================
+
+
 @register("humaneval", _humaneval_config)
 class HumanEval(HumanEvalTask):
     """HumanEval code generation task."""
@@ -314,20 +250,6 @@ class HumanEval(HumanEvalTask):
 @register("humaneval_plus", _humaneval_plus_config)
 class HumanEvalPlus(HumanEvalPlusTask):
     """HumanEval+ code generation task."""
-
-    pass
-
-
-@register("humaneval:bpb", _humaneval_bpb_config)
-class HumanEvalBPB(HumanEvalBPBTask):
-    """HumanEval BPB evaluation task."""
-
-    pass
-
-
-@register("humaneval_plus:bpb", _humaneval_plus_bpb_config)
-class HumanEvalPlusBPB(HumanEvalPlusBPBTask):
-    """HumanEval+ BPB evaluation task."""
 
     pass
 
@@ -353,6 +275,11 @@ class HumanEvalPlusInloopBPB(HumanEvalPlusInloopBPBTask):
     pass
 
 
+# =============================================================================
+# Variant Registrations
+# =============================================================================
+
+# BPB variant - use humaneval:bpb or humaneval_plus:bpb
 register_variant(
     "humaneval",
     "bpb",
@@ -371,13 +298,14 @@ register_variant(
     primary_metric=BPBMetric(),
 )
 
+# 3shot variant for inloop_bpb task
 register_variant(
     "humaneval_inloop_bpb",
     "3shot",
     num_fewshot=3,
 )
 
-# 3shot variants for composing with other variants (e.g., humaneval:3shot:bpb)
+# 3shot variants - composable with bpb (e.g., humaneval:3shot:bpb)
 register_variant(
     "humaneval",
     "3shot",
@@ -389,4 +317,3 @@ register_variant(
     "3shot",
     num_fewshot=3,
 )
-
