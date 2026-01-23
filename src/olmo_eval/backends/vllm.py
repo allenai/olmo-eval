@@ -189,10 +189,9 @@ class VLLMBackend(Backend):
                 request_meta.append((ctxlen, len(continuation_enc), overflow))
 
         # Call vLLM with token IDs instead of strings
-        outputs: list[RequestOutput] = self.llm.generate(
-            prompt_token_ids=token_inputs,
-            sampling_params=vllm_params,
-        )
+        # Pass as list of dicts with prompt_token_ids key
+        prompts = [{"prompt_token_ids": tokens} for tokens in token_inputs]
+        outputs: list[RequestOutput] = self.llm.generate(prompts, vllm_params)
 
         # Parse results back to per-request structure
         output_iter = iter(outputs)
