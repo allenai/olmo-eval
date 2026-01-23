@@ -183,6 +183,7 @@ def _humaneval_inloop_bpb_config() -> TaskConfig:
     - No prompt_suffix in prompt (handled by HumanEvalInloopBPBTask)
     - PPLFormatter.answer_prefix=" " to add space before answer in few-shot examples
       (matching oe-eval's doc_to_target which returns " " + canonical_solution)
+    - fewshot_seed=1234 to match oe-eval's default
     """
     return TaskConfig(
         name="humaneval_inloop_bpb",
@@ -193,7 +194,7 @@ def _humaneval_inloop_bpb_config() -> TaskConfig:
         metrics=(BPBMetric(),),
         primary_metric=BPBMetric(),
         num_fewshot=3,
-        fewshot_seed=42,
+        fewshot_seed=1234,
     )
 
 
@@ -207,7 +208,7 @@ def _humaneval_plus_inloop_bpb_config() -> TaskConfig:
         metrics=(BPBMetric(),),
         primary_metric=BPBMetric(),
         num_fewshot=3,
-        fewshot_seed=42,
+        fewshot_seed=1234,
     )
 
 
@@ -256,10 +257,12 @@ class HumanEvalPlusInloopBPB(HumanEvalPlusInloopBPBTask):
 # =============================================================================
 
 # BPB variant - use humaneval:bpb or humaneval_plus:bpb
+# Uses leading_space=True and answer_prefix=" " to match oe-eval's doc_to_target
+# which returns " " + canonical_solution (space before answer)
 register_variant(
     "humaneval",
     "bpb",
-    formatter=PPLFormatter(leading_space=False),
+    formatter=PPLFormatter(leading_space=True, answer_prefix=" "),
     scorers=(BitsPerByteScorer(),),
     metrics=(BPBMetric(),),
     primary_metric=BPBMetric(),
@@ -268,7 +271,7 @@ register_variant(
 register_variant(
     "humaneval_plus",
     "bpb",
-    formatter=PPLFormatter(leading_space=False),
+    formatter=PPLFormatter(leading_space=True, answer_prefix=" "),
     scorers=(BitsPerByteScorer(),),
     metrics=(BPBMetric(),),
     primary_metric=BPBMetric(),
@@ -279,17 +282,21 @@ register_variant(
     "humaneval_inloop_bpb",
     "3shot",
     num_fewshot=3,
+    fewshot_seed=1234,
 )
 
 # 3shot variants - composable with bpb (e.g., humaneval:3shot:bpb)
+# Uses fewshot_seed=1234 to match oe-eval's default
 register_variant(
     "humaneval",
     "3shot",
     num_fewshot=3,
+    fewshot_seed=1234,
 )
 
 register_variant(
     "humaneval_plus",
     "3shot",
     num_fewshot=3,
+    fewshot_seed=1234,
 )
