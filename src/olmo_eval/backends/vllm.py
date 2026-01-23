@@ -216,10 +216,8 @@ class VLLMBackend(Backend):
                 is_greedy = True
 
                 prompt_logprobs = output.prompt_logprobs or []
-                # Skip the first ctxlen positions (context tokens) - logprobs start at position 1
-                cont_logprobs = (
-                    prompt_logprobs[ctxlen + 1 :] if ctxlen < len(prompt_logprobs) else []
-                )
+                # Skip the first ctxlen positions (context tokens)
+                cont_logprobs = prompt_logprobs[ctxlen:] if ctxlen < len(prompt_logprobs) else []
 
                 for token_probs in cont_logprobs:
                     if not token_probs:
