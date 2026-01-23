@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import os
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
@@ -14,11 +17,16 @@ from olmo_eval.evals.tasks import get_task
 __all__ = [
     "TaskResult",
     "build_predictions",
+    "build_requests",
     "compute_suite_aggregations",
     "get_primary_metric",
     "run_task_impl",
     "serialize_sampling_params",
+    "write_predictions_jsonl",
+    "write_requests_jsonl",
 ]
+
+logger = logging.getLogger(__name__)
 
 
 def serialize_sampling_params(params: SamplingParams | None) -> dict[str, Any] | None:
@@ -307,6 +315,7 @@ class TaskResult:
     error: str | None = None
     duration_seconds: float = 0.0
     predictions: list[dict] | None = None
+    requests: list[dict] | None = None  # oe-eval compatible request objects
     primary_metric: str | None = None  # Preferred metric name from task config
 
 
@@ -350,6 +359,132 @@ def build_predictions(scored: Sequence[Response]) -> list[dict]:
         )
 
     return predictions
+
+
+def build_requests(
+    instances: Sequence[Any],
+    requests: Sequence[Any],
+    task_name: str,
+    sampling_params: SamplingParams | None = None,
+) -> list[dict]:
+    """Build per-instance request objects in oe-eval compatible format.
+
+    This produces the same format as oe-eval's *-requests.jsonl files, which
+    shows exactly what the model saw during evaluation.
+
+    Args:
+        instances: Sequence of Instance objects
+        requests: Sequence of LMRequest objects (parallel to instances)
+        task_name: Name of the task
+        sampling_params: Optional sampling parameters
+
+    Returns:
+        List of request dicts suitable for JSONL output with oe-eval compatible schema:
+        {
+            "request_type": "loglikelihood" | "generate_until" | ...,
+            "doc": {
+                "query": "...",  # The instance question
+                "choices": [...],  # For BPB/MC tasks
+                # Plus original metadata
+            },
+            "request": {
+                "context": "...",  # Full prompt (few-shot + current)
+                "continuation": "...",  # For loglikelihood: the text being scored
+                "perplexity_context": "...",  # Usually same as context
+                "stop_sequences": [...],
+                "generation_kwargs": {...}
+            },
+            "idx": 0,
+            "task_name": "...",
+            "doc_id": 0,
+            "native_id": "...",
+            "label": ...
+        }
+    """
+    from olmo_eval.core import RequestType
+
+    request_list = []
+
+    for idx, (instance, request) in enumerate(zip(instances, requests)):
+        # Build doc from instance
+        doc: dict[str, Any] = {
+            "query": instance.question,
+            **instance.metadata,
+        }
+
+        # Add choices for BPB and MC tasks
+        if instance.choices:
+            doc["choices"] = list(instance.choices)
+        elif request.continuations:
+            # For BPB tasks without explicit choices, use continuations
+            doc["choices"] = list(request.continuations)
+
+        # Build request object based on request type
+        request_dict: dict[str, Any] = {}
+
+        if request.request_type == RequestType.LOGLIKELIHOOD:
+            # oe-eval's GenerateUntilAndLoglikelihoodRequest format
+            request_dict["context"] = request.prompt
+            request_dict["perplexity_context"] = request.prompt
+            if request.continuations:
+                request_dict["continuation"] = request.continuations[0]
+        elif request.request_type == RequestType.COMPLETION:
+            # oe-eval's GenerateUntilRequest format
+            request_dict["context"] = request.prompt
+            if request.continuations:
+                request_dict["continuation"] = request.continuations[0]
+        elif request.request_type == RequestType.CHAT:
+            # Chat format - context is the messages
+            request_dict["context"] = list(request.messages)
+
+        # Add generation kwargs
+        if sampling_params:
+            request_dict["stop_sequences"] = (
+                list(sampling_params.stop_sequences) if sampling_params.stop_sequences else []
+            )
+            request_dict["generation_kwargs"] = {
+                "max_gen_toks": sampling_params.max_tokens,
+                "do_sample": sampling_params.temperature > 0,
+                "temperature": sampling_params.temperature,
+            }
+            if sampling_params.top_p is not None:
+                request_dict["generation_kwargs"]["top_p"] = sampling_params.top_p
+        else:
+            request_dict["stop_sequences"] = []
+            request_dict["generation_kwargs"] = {}
+
+        # Determine request type string (oe-eval naming)
+        if request.request_type == RequestType.LOGLIKELIHOOD:
+            request_type_str = "loglikelihood"
+        elif request.request_type == RequestType.COMPLETION:
+            if request.continuations:
+                request_type_str = "generate_until_and_loglikelihood"
+            else:
+                request_type_str = "generate_until"
+        elif request.request_type == RequestType.CHAT:
+            request_type_str = "generate_until"
+        else:
+            request_type_str = "unknown"
+
+        # Determine label (ground truth)
+        label = instance.metadata.get("gold_idx")
+        if label is None and instance.gold_answer is not None:
+            label = instance.gold_answer
+
+        request_list.append(
+            {
+                "request_type": request_type_str,
+                "doc": doc,
+                "request": request_dict,
+                "idx": 0,  # For multi-sample, this would vary
+                "task_name": task_name,
+                "doc_id": idx,
+                "native_id": instance.metadata.get("id", f"doc_{idx}"),
+                "label": label,
+            }
+        )
+
+    return request_list
 
 
 def run_task_impl(
@@ -440,6 +575,11 @@ def run_task_impl(
         # Build predictions for per-instance inspection
         predictions = build_predictions(scored)
 
+        # Build requests in oe-eval compatible format (for debugging what model saw)
+        request_objects = build_requests(
+            instances, requests, task.config.name, existing_params
+        )
+
         duration = time.time() - start_time
 
         # Extract primary metric name from task config if specified
@@ -462,6 +602,7 @@ def run_task_impl(
             metrics=metrics,
             duration_seconds=duration,
             predictions=predictions,
+            requests=request_objects,
             primary_metric=primary_metric_name,
         )
 
@@ -475,3 +616,68 @@ def run_task_impl(
             error=str(e),
             duration_seconds=duration,
         )
+
+
+def write_predictions_jsonl(
+    output_dir: str,
+    spec: str,
+    predictions: list[dict],
+    model_name: str | None = None,
+) -> None:
+    """Write per-instance predictions to JSONL.
+
+    Args:
+        output_dir: Base output directory
+        spec: Task specification string (used for filename)
+        predictions: List of prediction dicts to write
+        model_name: Optional model name for multi-model runs (adds subdirectory)
+    """
+    if model_name:
+        pred_dir = os.path.join(output_dir, "predictions", model_name.replace("/", "_"))
+    else:
+        pred_dir = os.path.join(output_dir, "predictions")
+    os.makedirs(pred_dir, exist_ok=True)
+
+    # Sanitize spec for filename: arc_challenge:bpb::olmes -> arc_challenge_bpb__olmes
+    filename = spec.replace(":", "_").replace("/", "_") + ".jsonl"
+    filepath = os.path.join(pred_dir, filename)
+
+    with open(filepath, "w") as f:
+        for pred in predictions:
+            f.write(json.dumps(pred) + "\n")
+
+    logger.info(f"Predictions written to {filepath}")
+
+
+def write_requests_jsonl(
+    output_dir: str,
+    spec: str,
+    requests: list[dict],
+    model_name: str | None = None,
+) -> None:
+    """Write per-instance requests to JSONL (oe-eval compatible format).
+
+    This file shows exactly what the model saw during evaluation, useful for
+    debugging and comparison with oe-eval outputs.
+
+    Args:
+        output_dir: Base output directory
+        spec: Task specification string (used for filename)
+        requests: List of request dicts to write
+        model_name: Optional model name for multi-model runs (adds subdirectory)
+    """
+    if model_name:
+        req_dir = os.path.join(output_dir, "requests", model_name.replace("/", "_"))
+    else:
+        req_dir = os.path.join(output_dir, "requests")
+    os.makedirs(req_dir, exist_ok=True)
+
+    # Sanitize spec for filename: arc_challenge:bpb::olmes -> arc_challenge_bpb__olmes
+    filename = spec.replace(":", "_").replace("/", "_") + "-requests.jsonl"
+    filepath = os.path.join(req_dir, filename)
+
+    with open(filepath, "w") as f:
+        for req in requests:
+            f.write(json.dumps(req) + "\n")
+
+    logger.info(f"Requests written to {filepath}")

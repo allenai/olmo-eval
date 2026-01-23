@@ -24,6 +24,8 @@ from olmo_eval.runners.utils import (
     compute_suite_aggregations,
     get_primary_metric,
     run_task_impl,
+    write_predictions_jsonl,
+    write_requests_jsonl,
 )
 
 if TYPE_CHECKING:
@@ -221,6 +223,10 @@ class SyncEvalRunner:
             if task_result.predictions:
                 self._write_predictions(spec, task_result.predictions)
 
+            # Write requests to JSONL (oe-eval compatible format)
+            if task_result.requests:
+                self._write_requests(spec, task_result.requests)
+
             # Log metrics (for Beaker job details)
             if task_result.metrics:
                 logger.info(f"** Task metrics for {spec}: **")
@@ -381,21 +387,9 @@ class SyncEvalRunner:
         console.print(f"[green]Metrics written to {metrics_file}[/green]")
 
     def _write_predictions(self, spec: str, predictions: list[dict]) -> None:
-        """Write per-instance predictions to JSONL.
+        """Write per-instance predictions to JSONL."""
+        write_predictions_jsonl(self.output_dir, spec, predictions)
 
-        Args:
-            spec: Task specification string (used for filename)
-            predictions: List of prediction dicts to write
-        """
-        pred_dir = os.path.join(self.output_dir, "predictions")
-        os.makedirs(pred_dir, exist_ok=True)
-
-        # Sanitize spec for filename: arc_challenge:bpb::olmes -> arc_challenge_bpb__olmes
-        filename = spec.replace(":", "_").replace("/", "_") + ".jsonl"
-        filepath = os.path.join(pred_dir, filename)
-
-        with open(filepath, "w") as f:
-            for pred in predictions:
-                f.write(json.dumps(pred) + "\n")
-
-        logger.info(f"Predictions written to {filepath}")
+    def _write_requests(self, spec: str, requests: list[dict]) -> None:
+        """Write per-instance requests to JSONL (oe-eval compatible format)."""
+        write_requests_jsonl(self.output_dir, spec, requests)
