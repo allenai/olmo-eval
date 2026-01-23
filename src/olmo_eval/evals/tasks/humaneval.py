@@ -24,6 +24,7 @@ class HumanEvalTask(Task):
     """HumanEval code generation task."""
 
     default_hf_path: str = "openai_humaneval"
+    fewshot_split: str = "test"  # HumanEval only has a test split
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
@@ -101,7 +102,6 @@ class HumanEvalTask(Task):
                 response.scores[scorer.name] = max(scores) if scores else 0.0
         return responses
 
-
 class HumanEvalPlusTask(HumanEvalTask):
     """HumanEval+ task with additional test cases."""
 
@@ -136,30 +136,6 @@ class HumanEvalInloopBPBTask(HumanEvalTask):
                 "test": unit_tests,
             },
         )
-
-    def _build_fewshot(self) -> list[Instance]:
-        """Build few-shot examples from the test split.
-
-        Note: oe-eval samples from the "test" split for humaneval few-shot examples.
-        Uses the task's own data loading to ensure correct document processing.
-        """
-        import random
-
-        if self.config.num_fewshot == 0:
-            return []
-
-        # Load instances directly using the task's data loading infrastructure
-        # to ensure process_doc is called correctly for HumanEval documents
-        loader = DataLoader()
-        source = self._get_source_for_split("test")
-        all_instances = [self.process_doc(doc) for doc in loader.load(source)]
-
-        if not all_instances:
-            return []
-
-        rng = random.Random(self.config.fewshot_seed)
-        return rng.sample(all_instances, min(self.config.num_fewshot, len(all_instances)))
-
 
 class HumanEvalPlusInloopBPBTask(HumanEvalInloopBPBTask):
     """HumanEval+ BPB task matching oe-eval's inloop_bpb variant."""

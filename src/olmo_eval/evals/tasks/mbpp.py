@@ -86,11 +86,24 @@ class MBPPTask(Task):
             return output.metadata["answer_prefix"] + code
         return code
 
+    def _build_fewshot(self) -> list[Instance]:
+        """Build few-shot examples from the prompt split.
+
+        MBPP has a dedicated 'prompt' split with 10 examples for few-shot prompting.
+        Falls back to 'train' split if 'prompt' is not available.
+        """
+        return self._build_fewshot_from_source(
+            split="prompt",
+            sample=True,
+            fallback_splits=["train"],
+        )
+
 
 class MBPPPlusTask(Task):
     """MBPP+ task with additional test cases."""
 
     default_hf_path: str = "evalplus/mbppplus"
+    fewshot_split: str = "test"  # MBPP+ doesn't have a dedicated prompt split
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)

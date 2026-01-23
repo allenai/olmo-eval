@@ -348,15 +348,28 @@ def build_predictions(scored: Sequence[Response]) -> list[dict]:
             out_data["num_bytes"] = len(out.text.encode("utf-8"))
             model_output.append(out_data)
 
-        predictions.append(
-            {
-                "doc_id": idx,
-                "native_id": resp.instance.metadata.get("id", f"doc_{idx}"),
-                "doc": doc,
-                "model_output": model_output,
-                "scores": dict(resp.scores),
-            }
-        )
+        # Build prediction with context from the actual formatted request
+        prediction: dict[str, Any] = {
+            "doc_id": idx,
+            "native_id": resp.instance.metadata.get("id", f"doc_{idx}"),
+            "doc": doc,
+            "model_output": model_output,
+            "scores": dict(resp.scores),
+        }
+
+        # Include the actual context sent to the model (includes few-shot examples)
+        if resp.request:
+            if resp.request.prompt:
+                # For completion/loglikelihood requests, include the full prompt context
+                prediction["context"] = resp.request.prompt
+            if resp.request.continuations:
+                # For BPB/loglikelihood, include what we're measuring perplexity over
+                prediction["continuation"] = resp.request.continuations[0] if len(resp.request.continuations) == 1 else list(resp.request.continuations)
+            if resp.request.messages:
+                # For chat requests, include the messages
+                prediction["messages"] = [dict(m) for m in resp.request.messages]
+
+        predictions.append(prediction)
 
     return predictions
 

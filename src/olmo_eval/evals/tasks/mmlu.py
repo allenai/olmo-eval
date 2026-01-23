@@ -45,6 +45,8 @@ class MMLUTask(Task):
     """MMLU (Massive Multitask Language Understanding) task."""
 
     default_hf_path: str = "cais/mmlu"
+    fewshot_split: str = "dev"
+    fewshot_sample: bool = False  # MMLU uses all dev examples for few-shot
 
     def __init__(self, config: TaskConfig, subset: str) -> None:
         super().__init__(config)
@@ -107,12 +109,6 @@ class MMLUTask(Task):
     def extract_answer(self, output: LMOutput) -> str | None:
         """Extract the answer letter from model output."""
         return extract_mcqa_answer(output.text, [r"[A-D]"])
-
-    def _build_fewshot(self) -> list[Instance]:
-        """Build few-shot examples from the dev split."""
-        loader = DataLoader()
-        source = self._get_source_for_split("dev")
-        return [self.process_doc(doc) for doc in loader.load(source)]
 
 
 class MMLUProTask(Task):

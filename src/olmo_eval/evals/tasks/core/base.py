@@ -21,7 +21,7 @@ from olmo_eval.core import (
 )
 
 if TYPE_CHECKING:
-    from olmo_eval.data import DataSource
+    from olmo_eval.data import DataLoader, DataSource
 
 
 @dataclass
@@ -223,36 +223,72 @@ class Task(ABC):
             self._fewshot_cache = self._build_fewshot()
         return self._fewshot_cache
 
-    def _build_fewshot(self) -> list[Instance]:
-        """Build few-shot examples. Override for custom behavior."""
-        return []
+    # Class attributes for fewshot configuration (can be overridden by subclasses)
+    fewshot_split: str = "dev"
+    fewshot_sample: bool = True
 
-    def _build_fewshot_from_source(self, split: str = "dev") -> list[Instance]:
+    def _build_fewshot(self) -> list[Instance]:
+        """Build few-shot examples. Override fewshot_split/fewshot_sample for custom behavior."""
+        return self._build_fewshot_from_source(
+            split=self.fewshot_split,
+            sample=self.fewshot_sample,
+        )
+
+    def _build_fewshot_from_source(
+        self,
+        split: str = "dev",
+        sample: bool = True,
+        fallback_splits: list[str] | None = None,
+    ) -> list[Instance]:
         """Build few-shot examples using the unified data loader.
 
-        Helper method that loads few-shot examples from the configured
-        fewshot_source or falls back to the main data source with a
-        different split.
-
         Args:
-            split: The split to use for few-shot examples.
+            split: Primary split to use for few-shot examples.
+            sample: If True, randomly sample num_fewshot examples. If False, return all.
+            fallback_splits: Optional list of splits to try if primary split fails/empty.
 
         Returns:
             List of Instance objects for few-shot prompting.
         """
+        import random
+
         from olmo_eval.data import DataLoader
 
-        source = self.config.get_fewshot_source(split=split)
-        if source is None:
+        if sample and self.config.num_fewshot == 0:
             return []
 
+        splits_to_try = [split] + (fallback_splits or [])
+        all_instances: list[Instance] = []
+
         loader = DataLoader()
-        instances = []
-        for doc in loader.load(source):
-            instance = self.process_doc(doc)
-            if instance is not None:
-                instances.append(instance)
-        return instances
+        for try_split in splits_to_try:
+            try:
+                source = self._get_source_for_split(try_split)
+                all_instances = [
+                    inst
+                    for doc in loader.load(source)
+                    if (inst := self.process_doc(doc)) is not None
+                ]
+                if all_instances:
+                    break
+            except Exception:
+                continue
+
+        if not all_instances:
+            return []
+
+        if sample and self.config.num_fewshot:
+            rng = random.Random(self.config.fewshot_seed)
+            return rng.sample(all_instances, min(self.config.num_fewshot, len(all_instances)))
+
+        return all_instances
+
+    def _get_source_for_split(self, split: str) -> DataSource:
+        """Get data source for a specific split.
+
+        Subclasses should override this to provide custom source resolution.
+        """
+        return self.config.get_data_source(split=split)
 
     def score_responses(self, responses: Sequence[Response]) -> Sequence[Response]:
         """Apply all scorers to extract answers and compute scores."""
