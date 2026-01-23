@@ -109,42 +109,6 @@ class HumanEvalPlusTask(HumanEvalTask):
     default_source: str = "evalplus/humanevalplus"
 
 
-class HumanEvalInloopBPBTask(HumanEvalTask):
-    """HumanEval BPB task matching oe-eval's inloop_bpb variant.
-
-    Key differences from base HumanEvalTask:
-    - No prompt_suffix (just doc["prompt"] as context)
-    - Few-shot examples use space before answer (matching oe-eval's doc_to_target)
-    """
-
-    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
-        """Convert a dataset document to an Instance for BPB evaluation.
-
-        Uses raw prompt as context (no prompt_suffix), matching oe-eval's
-        inloop_bpb variant where answer_prefix="".
-        """
-        # Just the function signature/docstring as context (no prompt_suffix)
-        prompt = doc["prompt"]
-        unit_tests = doc["test"] + f"\ncheck({doc['entry_point']})"
-
-        return Instance(
-            question=prompt,
-            gold_answer=doc["canonical_solution"],
-            metadata={
-                "id": doc["task_id"],
-                "entry_point": doc["entry_point"],
-                "answer_prefix": doc["prompt"],
-                "test": unit_tests,
-            },
-        )
-
-
-class HumanEvalPlusInloopBPBTask(HumanEvalInloopBPBTask):
-    """HumanEval+ BPB task matching oe-eval's inloop_bpb variant."""
-
-    default_source: str = "evalplus/humanevalplus"
-
-
 # =============================================================================
 # Task Configs
 # =============================================================================
@@ -220,14 +184,6 @@ register_variant(
     scorers=(BitsPerByteScorer(),),
     metrics=(BPBMetric(),),
     primary_metric=BPBMetric(),
-)
-
-# 3shot variant for inloop_bpb task
-register_variant(
-    "humaneval_inloop_bpb",
-    "3shot",
-    num_fewshot=3,
-    fewshot_seed=1234,
 )
 
 # 3shot variants - composable with bpb (e.g., humaneval:3shot:bpb)
