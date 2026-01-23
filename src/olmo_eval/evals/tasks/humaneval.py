@@ -135,8 +135,15 @@ class HumanEvalBPBTask(HumanEvalTask):
         """Build few-shot examples from the test split."""
         import random
 
-        all_instances = self._build_fewshot_from_source(split="test")
-        if not all_instances or self.config.num_fewshot == 0:
+        if self.config.num_fewshot == 0:
+            return []
+
+        # Load instances directly using the task's data loading infrastructure
+        loader = DataLoader()
+        source = self._get_source_for_split("test")
+        all_instances = [self.process_doc(doc) for doc in loader.load(source)]
+
+        if not all_instances:
             return []
 
         rng = random.Random(self.config.fewshot_seed)
@@ -182,27 +189,24 @@ class HumanEvalInloopBPBTask(HumanEvalTask):
         """Build few-shot examples from the test split.
 
         Note: oe-eval samples from the "test" split for humaneval few-shot examples.
+        Uses the task's own data loading to ensure correct document processing.
         """
-        import logging
         import random
 
-        logger = logging.getLogger(__name__)
-
         if self.config.num_fewshot == 0:
-            logger.debug("num_fewshot is 0, returning empty list")
             return []
 
-        all_instances = self._build_fewshot_from_source(split="test")
-        logger.debug(f"Loaded {len(all_instances)} instances for few-shot from test split")
+        # Load instances directly using the task's data loading infrastructure
+        # to ensure process_doc is called correctly for HumanEval documents
+        loader = DataLoader()
+        source = self._get_source_for_split("test")
+        all_instances = [self.process_doc(doc) for doc in loader.load(source)]
 
         if not all_instances:
-            logger.warning("No instances loaded for few-shot examples")
             return []
 
         rng = random.Random(self.config.fewshot_seed)
-        fewshot = rng.sample(all_instances, min(self.config.num_fewshot, len(all_instances)))
-        logger.debug(f"Selected {len(fewshot)} few-shot examples")
-        return fewshot
+        return rng.sample(all_instances, min(self.config.num_fewshot, len(all_instances)))
 
 
 class HumanEvalPlusInloopBPBTask(HumanEvalInloopBPBTask):
