@@ -52,7 +52,8 @@ class HumanEvalTask(Task):
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
-        prompt = "```python\n" + doc["prompt"]
+        # prompt = "```python\n" + doc["prompt"]
+        prompt = doc["prompt"]
         unit_tests = doc["test"] + f"\ncheck({doc['entry_point']})"
 
         return Instance(
