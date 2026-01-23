@@ -24,6 +24,11 @@ def _get_token_string(logprob_obj: Any, token_id: int, tokenizer: Any = None) ->
     return str(token_id)
 
 
+def _coerce_logprob_to_num(logprob: Any) -> float:
+    """Handle both old (float) and new (Logprob object) vLLM versions."""
+    return getattr(logprob, "logprob", logprob)
+
+
 class VLLMBackend(Backend):
     """Backend using vLLM for high-throughput inference."""
 
@@ -63,6 +68,21 @@ class VLLMBackend(Backend):
             engine_kwargs.setdefault("tokenizer", tokenizer)
 
         self.llm: LLM = LLM(model=model_name, **engine_kwargs)
+
+    @property
+    def max_length(self) -> int:
+        """Get the maximum model context length."""
+        if not hasattr(self, "_max_length"):
+            self._max_length = self.llm.llm_engine.model_config.max_model_len
+        return self._max_length
+
+    def _encode_pair(self, context: str, continuation: str) -> tuple[list[int], list[int]]:
+        """Encode context and continuation separately (robust to non-additive tokenization)."""
+        tokenizer = self.llm.get_tokenizer()
+        whole_enc = tokenizer.encode(context + continuation, add_special_tokens=False)
+        context_enc = tokenizer.encode(context, add_special_tokens=False)
+        continuation_enc = whole_enc[len(context_enc) :]
+        return context_enc, continuation_enc
 
     def _build_sampling_params(self, params: SamplingParams) -> Any:
         """Convert SamplingParams to vLLM SamplingParams."""
@@ -136,49 +156,99 @@ class VLLMBackend(Backend):
             temperature=0.0,
         )
 
-        # Build full prompts for all continuations
-        full_prompts = [
-            request.prompt + continuation
-            for request in requests
-            for continuation in (request.continuations or ())
-        ]
-
-        outputs: list[RequestOutput] = self.llm.generate(full_prompts, vllm_params)
-        output_iter = iter(outputs)
         tokenizer = self.llm.get_tokenizer()
+        max_len = self.max_length
 
-        # Parse results back to per-request structure
-        results = []
+        # Build token sequences for all continuations
+        token_inputs: list[list[int]] = []
+        request_meta: list[tuple[int, int, int]] = []  # (ctxlen, num_tokens_all, overflow)
+
         for request in requests:
             continuations = request.continuations or ()
-            ctx_len = len(tokenizer.encode(request.prompt, add_special_tokens=False))
+            for continuation in continuations:
+                # Handle empty context: use BOS token as context
+                if request.prompt == "":
+                    bos_id = tokenizer.bos_token_id
+                    if bos_id is None:
+                        bos_id = tokenizer.eos_token_id
+                    context_enc = [bos_id] if bos_id is not None else []
+                    continuation_enc = tokenizer.encode(continuation, add_special_tokens=False)
+                else:
+                    context_enc, continuation_enc = self._encode_pair(request.prompt, continuation)
+
+                # Calculate overflow and left-truncate to max_length - 1
+                full_len = len(context_enc) + len(continuation_enc)
+                overflow = full_len - (max_len - 1)
+                inp = (context_enc + continuation_enc)[-(max_len - 1) :]
+
+                # Adjust ctxlen based on overflow
+                ctxlen = len(context_enc) - max(0, overflow)
+                ctxlen = max(0, ctxlen)  # Ensure non-negative
+
+                token_inputs.append(inp)
+                request_meta.append((ctxlen, len(continuation_enc), overflow))
+
+        # Call vLLM with token IDs instead of strings
+        outputs: list[RequestOutput] = self.llm.generate(
+            prompt_token_ids=token_inputs,
+            sampling_params=vllm_params,
+        )
+
+        # Parse results back to per-request structure
+        output_iter = iter(outputs)
+        meta_iter = iter(request_meta)
+        results = []
+
+        for request in requests:
+            continuations = request.continuations or ()
             request_outputs = []
 
             for continuation in continuations:
                 output = next(output_iter)
-                full_tokens = tokenizer.encode(
-                    request.prompt + continuation, add_special_tokens=False
-                )
-                cont_tokens = full_tokens[ctx_len:]
+                ctxlen, num_tokens_all, overflow = next(meta_iter)
 
                 logprob_entries = []
                 total = 0.0
+                is_greedy = True
 
                 prompt_logprobs = output.prompt_logprobs or []
-                cont_logprobs = prompt_logprobs[ctx_len:]
+                # Skip the first ctxlen positions (context tokens) - logprobs start at position 1
+                cont_logprobs = prompt_logprobs[ctxlen + 1 :] if ctxlen < len(prompt_logprobs) else []
 
-                for token_id, token_probs in zip(cont_tokens, cont_logprobs, strict=False):
-                    if token_probs and token_id in token_probs:
-                        lp_obj = token_probs[token_id]
-                        token_str = _get_token_string(lp_obj, token_id, tokenizer)
-                        logprob_entries.append({"token": token_str, "logprob": lp_obj.logprob})
-                        total += lp_obj.logprob
+                for token_probs in cont_logprobs:
+                    if not token_probs:
+                        continue
 
+                    # Get the actual token (first key in the dict from prompt)
+                    token_id = next(iter(token_probs))
+                    lp_obj = token_probs[token_id]
+                    logprob_val = _coerce_logprob_to_num(lp_obj)
+
+                    token_str = _get_token_string(lp_obj, token_id, tokenizer)
+                    logprob_entries.append({"token": token_str, "logprob": logprob_val})
+                    total += logprob_val
+
+                    # Check if this token is the argmax (greedy choice)
+                    if is_greedy:
+                        max_token_id = max(
+                            token_probs.keys(),
+                            key=lambda tid: _coerce_logprob_to_num(token_probs[tid]),
+                        )
+                        if max_token_id != token_id:
+                            is_greedy = False
+
+                num_tokens = len(logprob_entries)
                 request_outputs.append(
                     LMOutput(
                         text=continuation,
                         logprobs=logprob_entries,
-                        metadata={"total_logprob": total},
+                        metadata={
+                            "total_logprob": total,
+                            "sum_logits": total,  # Alias for compatibility
+                            "num_tokens": num_tokens,
+                            "num_tokens_all": num_tokens_all,
+                            "is_greedy": is_greedy,
+                        },
                     )
                 )
 

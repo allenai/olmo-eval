@@ -178,6 +178,14 @@ class TestVLLMBackendLogprobs:
             assert output.logprobs is not None
             assert "total_logprob" in output.metadata
             assert isinstance(output.metadata["total_logprob"], float)
+            # Verify new metadata fields
+            assert "sum_logits" in output.metadata
+            assert "num_tokens" in output.metadata
+            assert "num_tokens_all" in output.metadata
+            assert "is_greedy" in output.metadata
+            assert isinstance(output.metadata["num_tokens"], int)
+            assert isinstance(output.metadata["num_tokens_all"], int)
+            assert isinstance(output.metadata["is_greedy"], bool)
 
     def test_logprobs_multiple_requests(self, vllm_backend):
         """Test logprobs for multiple requests."""
@@ -316,6 +324,26 @@ class TestVLLMBackendEdgeCases:
 
         assert len(results) == 1
         assert len(results[0]) == 0
+
+    def test_logprobs_empty_context(self, vllm_backend):
+        """Test logprobs with empty context (BOS token handling)."""
+        requests = [
+            LMRequest(
+                request_type=RequestType.COMPLETION,
+                prompt="",
+                continuations=("Hello world",),
+            )
+        ]
+
+        results = vllm_backend.logprobs(requests)
+
+        assert len(results) == 1
+        assert len(results[0]) == 1
+        output = results[0][0]
+        assert output.logprobs is not None
+        assert len(output.logprobs) > 0
+        assert "total_logprob" in output.metadata
+        assert output.metadata["num_tokens"] > 0
 
 
 class TestVLLMBackendWithTasks:
