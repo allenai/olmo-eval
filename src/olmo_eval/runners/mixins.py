@@ -177,7 +177,7 @@ class RunnerResultsMixin:
                 msg = f"Results saved to {backend_name} (experiment_id: {experiment_id})"
                 console.print(f"[green]{msg}[/green]")
         else:
-            logger.info("No storage backend configured - results logged above only")
+            logger.info("No storage backend configured; skipping results save.")
 
     def _log_summary(self, results: dict[str, Any], multi_model: bool = False) -> None:
         """Log summary of all task scores.

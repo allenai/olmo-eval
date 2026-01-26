@@ -4,15 +4,15 @@ from datetime import datetime
 
 import pytest
 
-from olmo_eval.storage.base import EvalResult, TaskResult
+from olmo_eval.core.types import EvalResult, StoredTaskResult
 
 
-class TestTaskResult:
-    """Tests for TaskResult dataclass."""
+class TestStoredTaskResult:
+    """Tests for StoredTaskResult dataclass."""
 
     def test_to_dict_minimal(self):
         """Test to_dict with only required fields."""
-        result = TaskResult(
+        result = StoredTaskResult(
             task_name="mmlu",
             metrics={"accuracy": 0.75},
         )
@@ -24,7 +24,7 @@ class TestTaskResult:
 
     def test_to_dict_full(self):
         """Test to_dict with all fields."""
-        result = TaskResult(
+        result = StoredTaskResult(
             task_name="mmlu",
             metrics={"accuracy": 0.75, "f1": 0.72},
             num_instances=1000,
@@ -52,7 +52,7 @@ class TestTaskResult:
             "task_name": "gsm8k",
             "metrics": {"exact_match": 0.58},
         }
-        result = TaskResult.from_dict(data)
+        result = StoredTaskResult.from_dict(data)
         assert result.task_name == "gsm8k"
         assert result.metrics == {"exact_match": 0.58}
         assert result.num_instances is None
@@ -72,7 +72,7 @@ class TestTaskResult:
             "s3_metrics_key": "s3://bucket/arc-metrics.json",
             "s3_predictions_key": "s3://bucket/arc-predictions.jsonl",
         }
-        result = TaskResult.from_dict(data)
+        result = StoredTaskResult.from_dict(data)
         assert result.task_name == "arc_challenge"
         assert result.metrics == {"accuracy": 0.52}
         assert result.num_instances == 500
@@ -84,7 +84,7 @@ class TestTaskResult:
 
     def test_roundtrip(self):
         """Test to_dict/from_dict roundtrip."""
-        original = TaskResult(
+        original = StoredTaskResult(
             task_name="hellaswag",
             metrics={"accuracy": 0.79},
             num_instances=10042,
@@ -92,7 +92,7 @@ class TestTaskResult:
             primary_metric="accuracy",
             primary_score=0.79,
         )
-        restored = TaskResult.from_dict(original.to_dict())
+        restored = StoredTaskResult.from_dict(original.to_dict())
         assert restored == original
 
 
@@ -103,8 +103,8 @@ class TestEvalResult:
     def sample_tasks(self):
         """Create sample task results."""
         return [
-            TaskResult(task_name="mmlu", metrics={"accuracy": 0.65}),
-            TaskResult(task_name="gsm8k", metrics={"exact_match": 0.58}),
+            StoredTaskResult(task_name="mmlu", metrics={"accuracy": 0.65}),
+            StoredTaskResult(task_name="gsm8k", metrics={"exact_match": 0.58}),
         ]
 
     @pytest.fixture

@@ -102,7 +102,7 @@ class TestQueryHelpers:
     @pytest.mark.integration
     def test_get_model_task_instances(self, postgres_backend):
         """Test getting instances for a model and task."""
-        from olmo_eval.storage import EvalResult, TaskResult
+        from olmo_eval.core import EvalResult, StoredTaskResult
         from olmo_eval.storage.db.queries import QueryHelper
 
         exp = EvalResult(
@@ -110,7 +110,7 @@ class TestQueryHelpers:
             model_name="test-model",
             backend_name="vllm",
             timestamp=datetime.now(),
-            tasks=[TaskResult(task_name="test", metrics={"accuracy": 0.7})],
+            tasks=[StoredTaskResult(task_name="test", metrics={"accuracy": 0.7})],
             config={"model": "test"},
             author="test-user",
         )
@@ -135,7 +135,7 @@ class TestQueryHelpers:
     @pytest.mark.integration
     def test_get_model_task_instances_multiple_tasks(self, postgres_backend):
         """Test getting instances for a model across multiple tasks."""
-        from olmo_eval.storage import EvalResult, TaskResult
+        from olmo_eval.core import EvalResult, StoredTaskResult
         from olmo_eval.storage.db.queries import QueryHelper
 
         exp = EvalResult(
@@ -144,9 +144,9 @@ class TestQueryHelpers:
             backend_name="vllm",
             timestamp=datetime.now(),
             tasks=[
-                TaskResult(task_name="task1", metrics={"accuracy": 0.7}),
-                TaskResult(task_name="task2", metrics={"accuracy": 0.8}),
-                TaskResult(task_name="task3", metrics={"accuracy": 0.6}),
+                StoredTaskResult(task_name="task1", metrics={"accuracy": 0.7}),
+                StoredTaskResult(task_name="task2", metrics={"accuracy": 0.8}),
+                StoredTaskResult(task_name="task3", metrics={"accuracy": 0.6}),
             ],
             config={"model": "test"},
             author="test-user",
@@ -196,7 +196,7 @@ class TestQueryHelpers:
     @pytest.mark.integration
     def test_get_instances_by_model_name(self, postgres_backend):
         """Test querying instances by human-readable model_name instead of model_id."""
-        from olmo_eval.storage import EvalResult, TaskResult
+        from olmo_eval.core import EvalResult, StoredTaskResult
         from olmo_eval.storage.db.queries import QueryHelper
 
         # Create evaluation with specific model name
@@ -205,7 +205,7 @@ class TestQueryHelpers:
             model_name="llama3.1-8b-instruct",
             backend_name="vllm",
             timestamp=datetime.now(),
-            tasks=[TaskResult(task_name="mmlu", metrics={"accuracy": 0.75})],
+            tasks=[StoredTaskResult(task_name="mmlu", metrics={"accuracy": 0.75})],
             config={"model": "llama3.1-8b", "mode": "instruct"},
             author="test-user",
         )
@@ -246,7 +246,7 @@ class TestUserIsolation:
     @pytest.mark.integration
     def test_concurrent_users_same_model_share_model_id(self, postgres_backend):
         """Test that same model config produces same model_id, but experiments are isolated."""
-        from olmo_eval.storage import EvalResult, TaskResult, compute_model_id
+        from olmo_eval.core import EvalResult, StoredTaskResult, compute_model_id
         from olmo_eval.storage.db.repository import InstancePredictionRepository
 
         # Same config, tasks, and model - only difference is author and experiment_id
@@ -258,7 +258,7 @@ class TestUserIsolation:
             model_name="llama3.1-8b",
             backend_name="vllm",
             timestamp=datetime.now(),
-            tasks=[TaskResult(task_name="mmlu", metrics={"accuracy": 0.65})],
+            tasks=[StoredTaskResult(task_name="mmlu", metrics={"accuracy": 0.65})],
             config=config,
             author="alice@example.com",
         )
@@ -274,7 +274,7 @@ class TestUserIsolation:
             model_name="llama3.1-8b",
             backend_name="vllm",
             timestamp=datetime.now(),
-            tasks=[TaskResult(task_name="mmlu", metrics={"accuracy": 0.70})],
+            tasks=[StoredTaskResult(task_name="mmlu", metrics={"accuracy": 0.70})],
             config=config,
             author="bob@example.com",
         )

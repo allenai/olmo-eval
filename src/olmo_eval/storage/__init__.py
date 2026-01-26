@@ -1,17 +1,13 @@
 """Storage backends for evaluation results."""
 
 from olmo_eval.storage.base import (
-    EvalResult,
     StorageBackend,
-    TaskResult,
     compute_model_id,
     convert_runner_results,
 )
 
 __all__ = [
-    "EvalResult",
     "StorageBackend",
-    "TaskResult",
     "compute_model_id",
     "convert_runner_results",
     "get_backend",

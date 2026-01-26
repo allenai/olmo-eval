@@ -268,7 +268,7 @@ def sample_eval_result():
     """Create a sample EvalResult for storage testing."""
     from datetime import datetime
 
-    from olmo_eval.storage import EvalResult, TaskResult
+    from olmo_eval.core import EvalResult, StoredTaskResult
 
     return EvalResult(
         experiment_id="test-integration-001",
@@ -276,7 +276,7 @@ def sample_eval_result():
         backend_name="vllm",
         timestamp=datetime(2024, 1, 15, 10, 30, 0),
         tasks=[
-            TaskResult(
+            StoredTaskResult(
                 task_name="mmlu",
                 metrics={"accuracy": 0.65},
                 num_instances=100,
@@ -284,7 +284,7 @@ def sample_eval_result():
                 primary_metric="accuracy",
                 primary_score=0.65,
             ),
-            TaskResult(
+            StoredTaskResult(
                 task_name="gsm8k",
                 metrics={"exact_match": 0.58},
                 num_instances=50,
@@ -310,7 +310,7 @@ def multiple_eval_results():
     """Create multiple EvalResults for query testing."""
     from datetime import datetime
 
-    from olmo_eval.storage import EvalResult, TaskResult
+    from olmo_eval.core import EvalResult, StoredTaskResult
 
     results = []
     models = ["llama3.1-8b", "llama3.1-70b", "olmo-2-7b"]
@@ -329,7 +329,7 @@ def multiple_eval_results():
                     backend_name="vllm",
                     timestamp=datetime(2024, 1, 15, 10 + i, j, 0),
                     tasks=[
-                        TaskResult(
+                        StoredTaskResult(
                             task_name=task_name,
                             metrics=metrics,
                             primary_metric=primary_metric,

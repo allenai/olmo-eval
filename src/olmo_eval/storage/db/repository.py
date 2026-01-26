@@ -12,8 +12,8 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from olmo_eval.storage.base import EvalResult, compute_model_id
-from olmo_eval.storage.base import TaskResult as TaskResultData
+from olmo_eval.core.types import EvalResult, StoredTaskResult
+from olmo_eval.storage.base import compute_model_id
 from olmo_eval.storage.db.models import Experiment, InstancePrediction, TaskResult
 
 
@@ -208,7 +208,7 @@ class ExperimentRepository:
             EvalResult dataclass.
         """
         tasks = [
-            TaskResultData(
+            StoredTaskResult(
                 task_name=task.task_name,
                 metrics=task.metrics,
                 num_instances=task.num_instances,

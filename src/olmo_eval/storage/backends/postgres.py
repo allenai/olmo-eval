@@ -6,7 +6,8 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from olmo_eval.storage.base import EvalResult, StorageBackend, compute_model_id
+from olmo_eval.core.types import EvalResult
+from olmo_eval.storage.base import StorageBackend, compute_model_id
 from olmo_eval.storage.db.repository import ExperimentRepository, InstancePredictionRepository
 from olmo_eval.storage.db.session import DatabaseSession
 

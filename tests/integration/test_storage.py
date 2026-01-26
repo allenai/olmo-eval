@@ -102,14 +102,14 @@ class TestPostgresBackend:
         postgres_backend.save(sample_eval_result)
 
         # Modify and save again
-        from olmo_eval.storage import EvalResult, TaskResult
+        from olmo_eval.core import EvalResult, StoredTaskResult
 
         updated = EvalResult(
             experiment_id=sample_eval_result.experiment_id,
             model_name="updated-model",
             backend_name="hf",
             timestamp=sample_eval_result.timestamp,
-            tasks=[TaskResult(task_name="new_task", metrics={"score": 0.99})],
+            tasks=[StoredTaskResult(task_name="new_task", metrics={"score": 0.99})],
         )
         postgres_backend.save(updated)
 
@@ -123,7 +123,7 @@ class TestPostgresBackend:
         """Test that same model config produces same model_id across different experiments."""
         from datetime import datetime
 
-        from olmo_eval.storage import EvalResult, TaskResult, compute_model_id
+        from olmo_eval.core import EvalResult, StoredTaskResult, compute_model_id
 
         # Same config, different authors
         config = {"model": "llama3.1-8b", "temperature": 0.7}
@@ -134,7 +134,7 @@ class TestPostgresBackend:
             backend_name="vllm",
             timestamp=datetime(2024, 1, 15, 10, 0, 0),
             tasks=[
-                TaskResult(
+                StoredTaskResult(
                     task_name="mmlu",
                     metrics={"accuracy": 0.65},
                     primary_metric="accuracy",
@@ -151,7 +151,7 @@ class TestPostgresBackend:
             backend_name="vllm",
             timestamp=datetime(2024, 1, 15, 10, 5, 0),
             tasks=[
-                TaskResult(
+                StoredTaskResult(
                     task_name="mmlu",
                     metrics={"accuracy": 0.66},
                     primary_metric="accuracy",

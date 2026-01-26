@@ -28,6 +28,7 @@ from .scorers import (
     Scorer,
 )
 from .types import (
+    EvalResult,
     Instance,
     LMOutput,
     LMRequest,
@@ -37,6 +38,7 @@ from .types import (
     Result,
     SamplingParams,
     Split,
+    StoredTaskResult,
 )
 
 __all__ = [
@@ -51,6 +53,7 @@ __all__ = [
     "expand_tasks",
     "get_model_config",
     # Datatypes
+    "EvalResult",
     "Instance",
     "LMRequest",
     "LMOutput",
@@ -58,6 +61,7 @@ __all__ = [
     "Result",
     "RequestType",
     "SamplingParams",
+    "StoredTaskResult",
     # Formatters
     "Formatter",
     "ChatFormatter",

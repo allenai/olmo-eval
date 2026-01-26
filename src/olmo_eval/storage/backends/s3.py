@@ -8,7 +8,7 @@ from typing import Any
 import boto3
 from botocore.exceptions import ClientError
 
-from olmo_eval.storage.base import EvalResult
+from olmo_eval.core.types import EvalResult
 
 
 class S3Backend:
