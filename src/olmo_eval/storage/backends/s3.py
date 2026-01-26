@@ -22,14 +22,14 @@ class S3Backend:
 
     def __init__(
         self,
-        region: str | None = None,
+        region: str | None = "us-east-1",
         endpoint_url: str | None = None,
     ):
         """Initialize the S3 backend.
 
         Args:
-            region: AWS region (optional).
-            endpoint_url: Custom endpoint URL (for LocalStack/MinIO).
+            region: AWS region (default "us-east-1").
+            endpoint_url: Custom endpoint URL.
         """
         self.region = region
         self.endpoint_url = endpoint_url
@@ -42,26 +42,39 @@ class S3Backend:
 
         self._s3 = boto3.client("s3", **kwargs)
 
-    def save(self, bucket: str, key: str, result: EvalResult) -> str:
+    def save(self, bucket: str, key: str, result: EvalResult, *, overwrite: bool = False) -> str:
         """Save an evaluation result to S3.
 
         Args:
             bucket: S3 bucket name.
             key: Full S3 key path for the result.
             result: EvalResult to save.
+            overwrite: If True, overwrite existing object. Default is False.
 
         Returns:
             The S3 URI of the saved result (s3://bucket/key).
+
+        Raises:
+            FileExistsError: If the object already exists and overwrite is False.
         """
         data = asdict(result)
         data["timestamp"] = result.timestamp.isoformat()
 
-        self._s3.put_object(
-            Bucket=bucket,
-            Key=key,
-            Body=json.dumps(data, indent=2).encode("utf-8"),
-            ContentType="application/json",
-        )
+        put_kwargs: dict[str, Any] = {
+            "Bucket": bucket,
+            "Key": key,
+            "Body": json.dumps(data, indent=2).encode("utf-8"),
+            "ContentType": "application/json",
+        }
+        if not overwrite:
+            put_kwargs["IfNoneMatch"] = "*"
+
+        try:
+            self._s3.put_object(**put_kwargs)
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "PreconditionFailed":
+                raise FileExistsError(f"Object already exists: s3://{bucket}/{key}") from e
+            raise
 
         return f"s3://{bucket}/{key}"
 

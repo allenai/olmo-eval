@@ -114,11 +114,11 @@ class PostgresBackend(StorageBackend):
             logger.debug(f"Saved experiment {experiment_id} with {num_instances} instances")
             return experiment_id
 
-    def get_experiment(self, experiment_id: str) -> EvalResult | None:
+    def get(self, experiment_id: str) -> EvalResult | None:
         """Retrieve an evaluation result by experiment_id.
 
         Args:
-            experiment_id: The unique identifier of the result (experiment_id).
+            experiment_id: The unique identifier of the result.
 
         Returns:
             EvalResult if found, None otherwise.

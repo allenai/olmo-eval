@@ -150,7 +150,6 @@ class StoredTaskResult:
     s3_predictions_key: str | None = None
 
 
-
 @dataclass
 class EvalResult:
     """Complete result for an evaluation run.
