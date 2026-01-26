@@ -21,6 +21,7 @@ class PostgresBackend(StorageBackend):
     evaluation data (completions, predictions, detailed metrics).
     """
 
+    # TODO(undfined): Get these from environment/config
     def __init__(
         self,
         host: str = "localhost",
