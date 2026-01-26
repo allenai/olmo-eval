@@ -389,7 +389,7 @@ class AsyncRunnerMixin(RunnerResultsMixin):
 
     def validate(self) -> None:
         """Validate configuration."""
-        from olmo_eval.runners.synchronous import ValidationError
+        from olmo_eval.runners.constants import ValidationError
 
         if not self.model_names:
             raise ValidationError("model_names is required")

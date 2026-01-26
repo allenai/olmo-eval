@@ -92,12 +92,6 @@ console = Console()
 # Spec parsing for inline overrides
 # -----------------------------------------------------------------------------
 
-# Keys that apply to TaskConfig
-TASKCONFIG_KEYS = {"num_fewshot", "limit", "fewshot_seed"}
-
-# Keys that apply to SamplingParams
-SAMPLING_KEYS = {"temperature", "max_tokens", "top_p", "top_k", "num_samples"}
-
 # Keys that apply to model/backend config
 MODEL_KEYS = {
     "backend",
@@ -310,7 +304,7 @@ def run(
     """
     import logging
 
-    from olmo_eval.runners.synchronous import SyncEvalRunner, ValidationError
+    from olmo_eval.runners import SyncEvalRunner, ValidationError
 
     # Configure logging for Beaker job visibility
     logging.basicConfig(

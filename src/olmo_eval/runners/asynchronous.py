@@ -27,6 +27,7 @@ from olmo_eval.core import (
 )
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.evals.tasks import Task, get_task
+from olmo_eval.runners.constants import SAMPLING_KEYS, TASKCONFIG_KEYS
 from olmo_eval.runners.mixins import AsyncRunnerMixin
 from olmo_eval.runners.utils import (
     TaskResult,
@@ -42,13 +43,6 @@ if TYPE_CHECKING:
 
 console = Console()
 logger = logging.getLogger(__name__)
-
-
-# Keys that apply to TaskConfig
-TASKCONFIG_KEYS = {"num_fewshot", "limit", "fewshot_seed"}
-
-# Keys that apply to SamplingParams
-SAMPLING_KEYS = {"temperature", "max_tokens", "top_p", "top_k", "num_samples"}
 
 
 # -----------------------------------------------------------------------------

@@ -14,6 +14,7 @@ from rich.table import Table
 from olmo_eval.backends import Backend, BackendType, create_backend
 from olmo_eval.core import expand_tasks, get_model_config
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
+from olmo_eval.runners.constants import SAMPLING_KEYS, TASKCONFIG_KEYS, ValidationError
 from olmo_eval.runners.mixins import RunnerResultsMixin
 from olmo_eval.runners.utils import (
     TaskResult,
@@ -28,19 +29,6 @@ if TYPE_CHECKING:
 
 console = Console()
 logger = logging.getLogger(__name__)
-
-
-class ValidationError(Exception):
-    """Raised when validation of runner inputs fails."""
-
-    pass
-
-
-# Keys that apply to TaskConfig
-TASKCONFIG_KEYS = {"num_fewshot", "limit", "fewshot_seed"}
-
-# Keys that apply to SamplingParams
-SAMPLING_KEYS = {"temperature", "max_tokens", "top_p", "top_k", "num_samples"}
 
 
 @dataclass

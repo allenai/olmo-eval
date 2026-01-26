@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any
+from typing import Any, ClassVar
 
 
 class Split(str, Enum):
@@ -62,6 +62,15 @@ class LMRequest:
 @dataclass(frozen=True, slots=True)
 class SamplingParams:
     """Parameters for language model sampling."""
+
+    #: Fields that can be overridden via inline task specs (e.g., task::temperature=0.5)
+    OVERRIDE_KEYS: ClassVar[set[str]] = {
+        "temperature",
+        "max_tokens",
+        "top_p",
+        "top_k",
+        "num_samples",
+    }
 
     max_tokens: int = 512
     temperature: float = 0.0
