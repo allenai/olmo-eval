@@ -798,12 +798,9 @@ class AsyncEvalRunner(AsyncRunnerMixin):
         if errors:
             raise ValidationError("\n".join(errors))
 
-    def print_config(self) -> None:
-        """Print configuration."""
-        super().print_config(
-            mode_name="Async Mode",
-            mode_description="Async (All-at-once)",
-        )
+    # Configuration for print_config display
+    _mode_name: str = "Async Mode"
+    _mode_description: str = "Async (All-at-once)"
 
     async def run_async(self) -> dict[str, Any]:
         """Execute evaluations using instance-level queuing with multi-model support.
@@ -1272,12 +1269,9 @@ class StreamingEvalRunner(AsyncRunnerMixin):
         if errors:
             raise ValidationError("\n".join(errors))
 
-    def print_config(self) -> None:
-        """Print configuration."""
-        super().print_config(
-            mode_name="Streaming Mode",
-            mode_description="Streaming (AsyncLLMEngine)",
-        )
+    # Configuration for print_config display
+    _mode_name: str = "Streaming Mode"
+    _mode_description: str = "Streaming (AsyncLLMEngine)"
 
     async def run_async(self) -> dict[str, Any]:
         """Execute evaluations using streaming continuous batching.

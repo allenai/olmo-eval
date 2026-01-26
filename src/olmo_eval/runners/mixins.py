@@ -248,7 +248,7 @@ class RunnerResultsMixin:
 
 
 class AsyncRunnerMixin(RunnerResultsMixin):
-    """Additional shared functionality for async runners (AsyncEvalRunner and StreamingEvalRunner)."""
+    """Additional shared functionality for async runners."""
 
     model_names: list[str]
     task_specs: list[str]
@@ -257,24 +257,23 @@ class AsyncRunnerMixin(RunnerResultsMixin):
     num_shots_override: int | None
     limit_override: int | None
 
-    def print_config(self, mode_name: str = "Async", mode_description: str = "Async") -> None:
-        """Print configuration.
+    # Subclasses should override these for print_config display
+    _mode_name: str = "Async"
+    _mode_description: str = "Async"
 
-        Args:
-            mode_name: Name for the table title (e.g., "Async Mode", "Streaming Mode")
-            mode_description: Description for the mode row (e.g., "Async (All-at-once)")
-        """
+    def print_config(self) -> None:
+        """Print configuration."""
         from rich.table import Table
 
         from olmo_eval.core import expand_tasks
 
-        table = Table(title=f"Run Configuration ({mode_name})")
+        table = Table(title=f"Run Configuration ({self._mode_name})")
         table.add_column("Setting", style="cyan")
         table.add_column("Value", style="white")
 
         models_str = ", ".join(self.model_names)
         table.add_row("Models", models_str)
-        table.add_row("Mode", mode_description)
+        table.add_row("Mode", self._mode_description)
         table.add_row("Output Dir", self.output_dir)
         table.add_row("Workers", str(self.num_workers or "auto-detect"))
         table.add_row("GPUs per Worker", str(self.gpus_per_worker))
