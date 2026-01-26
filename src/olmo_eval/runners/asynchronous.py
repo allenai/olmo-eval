@@ -800,34 +800,10 @@ class AsyncEvalRunner(AsyncRunnerMixin):
 
     def print_config(self) -> None:
         """Print configuration."""
-        from rich.table import Table
-
-        table = Table(title="Run Configuration (Async Mode)")
-        table.add_column("Setting", style="cyan")
-        table.add_column("Value", style="white")
-
-        # Show all models
-        models_str = ", ".join(self.model_names)
-        table.add_row("Models", models_str)
-        table.add_row("Mode", "Async (All-at-once)")
-        table.add_row("Output Dir", self.output_dir)
-        table.add_row("Workers", str(self.num_workers or "auto-detect"))
-        table.add_row("GPUs per Worker", str(self.gpus_per_worker))
-
-        if self.num_shots_override is not None:
-            table.add_row("Num Shots Override", str(self.num_shots_override))
-        if self.limit_override is not None:
-            table.add_row("Limit Override", str(self.limit_override))
-
-        console.print(table)
-
-        expanded = expand_tasks(self.task_specs)
-        total_pairs = len(self.model_names) * len(expanded)
-        console.print(f"\n[bold]Models:[/bold] {len(self.model_names)}")
-        console.print(f"[bold]Tasks:[/bold] {len(expanded)}")
-        console.print(f"[bold]Total (model, task) pairs:[/bold] {total_pairs}")
-        for spec in expanded:
-            console.print(f"  - {spec}")
+        super().print_config(
+            mode_name="Async Mode",
+            mode_description="Async (All-at-once)",
+        )
 
     async def run_async(self) -> dict[str, Any]:
         """Execute evaluations using instance-level queuing with multi-model support.
@@ -1298,33 +1274,10 @@ class StreamingEvalRunner(AsyncRunnerMixin):
 
     def print_config(self) -> None:
         """Print configuration."""
-        from rich.table import Table
-
-        table = Table(title="Run Configuration (Streaming Mode)")
-        table.add_column("Setting", style="cyan")
-        table.add_column("Value", style="white")
-
-        models_str = ", ".join(self.model_names)
-        table.add_row("Models", models_str)
-        table.add_row("Mode", "Streaming (AsyncLLMEngine)")
-        table.add_row("Output Dir", self.output_dir)
-        table.add_row("Workers", str(self.num_workers or "auto-detect"))
-        table.add_row("GPUs per Worker", str(self.gpus_per_worker))
-
-        if self.num_shots_override is not None:
-            table.add_row("Num Shots Override", str(self.num_shots_override))
-        if self.limit_override is not None:
-            table.add_row("Limit Override", str(self.limit_override))
-
-        console.print(table)
-
-        expanded = expand_tasks(self.task_specs)
-        total_pairs = len(self.model_names) * len(expanded)
-        console.print(f"\n[bold]Models:[/bold] {len(self.model_names)}")
-        console.print(f"[bold]Tasks:[/bold] {len(expanded)}")
-        console.print(f"[bold]Total (model, task) pairs:[/bold] {total_pairs}")
-        for spec in expanded:
-            console.print(f"  - {spec}")
+        super().print_config(
+            mode_name="Streaming Mode",
+            mode_description="Streaming (AsyncLLMEngine)",
+        )
 
     async def run_async(self) -> dict[str, Any]:
         """Execute evaluations using streaming continuous batching.

@@ -250,8 +250,49 @@ class RunnerResultsMixin:
 class AsyncRunnerMixin(RunnerResultsMixin):
     """Additional shared functionality for async runners (AsyncEvalRunner and StreamingEvalRunner)."""
 
+    model_names: list[str]
+    task_specs: list[str]
     num_workers: int | None
     gpus_per_worker: int
+    num_shots_override: int | None
+    limit_override: int | None
+
+    def print_config(self, mode_name: str = "Async", mode_description: str = "Async") -> None:
+        """Print configuration.
+
+        Args:
+            mode_name: Name for the table title (e.g., "Async Mode", "Streaming Mode")
+            mode_description: Description for the mode row (e.g., "Async (All-at-once)")
+        """
+        from rich.table import Table
+
+        from olmo_eval.core import expand_tasks
+
+        table = Table(title=f"Run Configuration ({mode_name})")
+        table.add_column("Setting", style="cyan")
+        table.add_column("Value", style="white")
+
+        models_str = ", ".join(self.model_names)
+        table.add_row("Models", models_str)
+        table.add_row("Mode", mode_description)
+        table.add_row("Output Dir", self.output_dir)
+        table.add_row("Workers", str(self.num_workers or "auto-detect"))
+        table.add_row("GPUs per Worker", str(self.gpus_per_worker))
+
+        if self.num_shots_override is not None:
+            table.add_row("Num Shots Override", str(self.num_shots_override))
+        if self.limit_override is not None:
+            table.add_row("Limit Override", str(self.limit_override))
+
+        console.print(table)
+
+        expanded = expand_tasks(self.task_specs)
+        total_pairs = len(self.model_names) * len(expanded)
+        console.print(f"\n[bold]Models:[/bold] {len(self.model_names)}")
+        console.print(f"[bold]Tasks:[/bold] {len(expanded)}")
+        console.print(f"[bold]Total (model, task) pairs:[/bold] {total_pairs}")
+        for spec in expanded:
+            console.print(f"  - {spec}")
 
     def _get_num_workers(self) -> int:
         """Get number of workers based on available GPUs."""
