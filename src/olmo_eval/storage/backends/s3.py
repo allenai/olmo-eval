@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
+from datetime import datetime
 from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
 
-from olmo_eval.core.types import EvalResult
+from olmo_eval.core.types import EvalResult, StoredTaskResult
 
 
 class S3Backend:
@@ -51,10 +53,13 @@ class S3Backend:
         Returns:
             The S3 URI of the saved result (s3://bucket/key).
         """
+        data = asdict(result)
+        data["timestamp"] = result.timestamp.isoformat()
+
         self._s3.put_object(
             Bucket=bucket,
             Key=key,
-            Body=json.dumps(result.to_dict(), indent=2).encode("utf-8"),
+            Body=json.dumps(data, indent=2).encode("utf-8"),
             ContentType="application/json",
         )
 
@@ -73,7 +78,23 @@ class S3Backend:
         try:
             response = self._s3.get_object(Bucket=bucket, Key=key)
             data = json.loads(response["Body"].read().decode("utf-8"))
-            return EvalResult.from_dict(data)
+            return EvalResult(
+                experiment_id=data["experiment_id"],
+                model_name=data["model_name"],
+                backend_name=data["backend_name"],
+                timestamp=datetime.fromisoformat(data["timestamp"]),
+                tasks=[StoredTaskResult(**t) for t in data.get("tasks", [])],
+                experiment_name=data.get("experiment_name"),
+                workspace=data.get("workspace"),
+                author=data.get("author"),
+                tags=data.get("tags"),
+                git_ref=data.get("git_ref"),
+                model_hash=data.get("model_hash"),
+                revision=data.get("revision"),
+                s3_location=data.get("s3_location"),
+                config=data.get("config"),
+                metadata=data.get("metadata"),
+            )
         except ClientError as e:
             if e.response["Error"]["Code"] == "NoSuchKey":
                 return None

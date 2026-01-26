@@ -1,9 +1,38 @@
 """Core data types and enums for evaluation."""
 
+import hashlib
+import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
 from typing import Any, ClassVar
+
+
+def compute_model_hash(config: dict[str, Any] | None) -> str | None:
+    """Compute a deterministic hash from a model configuration dict.
+
+    The model hash is used to identify unique model configurations
+    across experiments. The same config always produces the same hash,
+    allowing multiple experiments (from different users or runs) to be
+    associated with the same model configuration.
+
+    Args:
+        config: Model configuration dictionary.
+
+    Returns:
+        16-character hex string hash of the config, or None if config is None.
+
+    Example:
+        >>> config = {"model": "llama3.1-8b", "temperature": 0.7}
+        >>> model_hash = compute_model_hash(config)
+        >>> len(model_hash)
+        16
+    """
+    if not config:
+        return None
+
+    config_str = json.dumps(config, sort_keys=True)
+    return hashlib.sha256(config_str.encode()).hexdigest()[:16]
 
 
 class Split(str, Enum):
@@ -102,27 +131,6 @@ class Response:
     scores: dict[str, float] = field(default_factory=dict)
 
 
-@dataclass(frozen=True, slots=True)
-class Result:
-    """Result of a completed evaluation task."""
-
-    experiment_id: str
-    experiment_name: str
-    workspace: str
-    created: str
-    author_name: str
-    tags: str
-    git_ref: str
-    model_hash: str
-    model_name: str
-    revision: str
-    regimes: str
-    task_hash: str
-    task_name: str
-    primary_metric: str
-    primary_score: str
-
-
 @dataclass
 class StoredTaskResult:
     """Result for a single task within an evaluation.
@@ -141,39 +149,6 @@ class StoredTaskResult:
     s3_metrics_key: str | None = None
     s3_predictions_key: str | None = None
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for serialization."""
-        result: dict[str, Any] = {
-            "task_name": self.task_name,
-            "metrics": self.metrics,
-        }
-        if self.num_instances is not None:
-            result["num_instances"] = self.num_instances
-        if self.task_hash is not None:
-            result["task_hash"] = self.task_hash
-        if self.primary_metric is not None:
-            result["primary_metric"] = self.primary_metric
-        if self.primary_score is not None:
-            result["primary_score"] = self.primary_score
-        if self.s3_metrics_key is not None:
-            result["s3_metrics_key"] = self.s3_metrics_key
-        if self.s3_predictions_key is not None:
-            result["s3_predictions_key"] = self.s3_predictions_key
-        return result
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "StoredTaskResult":
-        """Create from dictionary."""
-        return cls(
-            task_name=data["task_name"],
-            metrics=data["metrics"],
-            num_instances=data.get("num_instances"),
-            task_hash=data.get("task_hash"),
-            primary_metric=data.get("primary_metric"),
-            primary_score=data.get("primary_score"),
-            s3_metrics_key=data.get("s3_metrics_key"),
-            s3_predictions_key=data.get("s3_predictions_key"),
-        )
 
 
 @dataclass
@@ -210,54 +185,7 @@ class EvalResult:
     config: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for serialization."""
-        result: dict[str, Any] = {
-            "experiment_id": self.experiment_id,
-            "model_name": self.model_name,
-            "backend_name": self.backend_name,
-            "timestamp": self.timestamp.isoformat(),
-            "tasks": [t.to_dict() for t in self.tasks],
-        }
-        if self.experiment_name is not None:
-            result["experiment_name"] = self.experiment_name
-        if self.workspace is not None:
-            result["workspace"] = self.workspace
-        if self.author is not None:
-            result["author"] = self.author
-        if self.tags is not None:
-            result["tags"] = self.tags
-        if self.git_ref is not None:
-            result["git_ref"] = self.git_ref
-        if self.model_hash is not None:
-            result["model_hash"] = self.model_hash
-        if self.revision is not None:
-            result["revision"] = self.revision
-        if self.s3_location is not None:
-            result["s3_location"] = self.s3_location
-        if self.config is not None:
-            result["config"] = self.config
-        if self.metadata is not None:
-            result["metadata"] = self.metadata
-        return result
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "EvalResult":
-        """Create from dictionary."""
-        return cls(
-            experiment_id=data["experiment_id"],
-            model_name=data["model_name"],
-            backend_name=data["backend_name"],
-            timestamp=datetime.fromisoformat(data["timestamp"]),
-            tasks=[StoredTaskResult.from_dict(t) for t in data.get("tasks", [])],
-            experiment_name=data.get("experiment_name"),
-            workspace=data.get("workspace"),
-            author=data.get("author"),
-            tags=data.get("tags"),
-            git_ref=data.get("git_ref"),
-            model_hash=data.get("model_hash"),
-            revision=data.get("revision"),
-            s3_location=data.get("s3_location"),
-            config=data.get("config"),
-            metadata=data.get("metadata"),
-        )
+    def __post_init__(self) -> None:
+        """Compute model_hash from config if not provided."""
+        if self.model_hash is None and self.config is not None:
+            self.model_hash = compute_model_hash(self.config)

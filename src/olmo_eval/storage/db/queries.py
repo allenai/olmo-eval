@@ -41,7 +41,7 @@ class QueryHelper:
         experiments = self.experiment_repo.query(
             model_name=model_name,
             model_hash=model_hash,
-            limit=1,
+            latest=True,
         )
 
         if not experiments:
@@ -92,15 +92,13 @@ class QueryHelper:
 
         # If model_name is provided, look up the corresponding model_hashes
         if model_name and not model_hash:
-            from olmo_eval.storage.base import compute_model_hash
-
             experiments = self.experiment_repo.query(model_name=model_name, limit=1000)
             if not experiments:
                 return []
 
             # Get unique model_hashes from experiments with this model_name
-            model_hashes = list({compute_model_hash(exp.config) for exp in experiments})
-            model_hashes = [mh for mh in model_hashes if mh is not None]
+            model_hashes = [exp.model_hash for exp in experiments if exp.model_hash is not None]
+            model_hashes = list(set(model_hashes))
             if not model_hashes:
                 return []
 

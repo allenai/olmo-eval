@@ -35,10 +35,10 @@ from .types import (
     MetricName,
     RequestType,
     Response,
-    Result,
     SamplingParams,
     Split,
     StoredTaskResult,
+    compute_model_hash,
 )
 
 __all__ = [
@@ -58,10 +58,11 @@ __all__ = [
     "LMRequest",
     "LMOutput",
     "Response",
-    "Result",
     "RequestType",
     "SamplingParams",
     "StoredTaskResult",
+    # Utilities
+    "compute_model_hash",
     # Formatters
     "Formatter",
     "ChatFormatter",

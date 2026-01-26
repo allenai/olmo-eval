@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any
 
-from olmo_eval.core.types import EvalResult, StoredTaskResult
+from olmo_eval.core.types import EvalResult, StoredTaskResult, compute_model_hash
 
 __all__ = [
     "StorageBackend",
-    "compute_model_hash",
+    "compute_model_hash",  # Re-exported from core for convenience
     "convert_runner_results",
 ]
 
@@ -78,33 +76,6 @@ class StorageBackend(ABC):
             True if deleted, False if not found.
         """
         ...
-
-
-def compute_model_hash(config: dict[str, Any] | None) -> str | None:
-    """Compute a deterministic hash from a model configuration dict.
-
-    The model hash is used to identify unique model configurations
-    across experiments. The same config always produces the same hash,
-    allowing multiple experiments (from different users or runs) to be
-    associated with the same model configuration.
-
-    Args:
-        config: Model configuration dictionary.
-
-    Returns:
-        16-character hex string hash of the config, or None if config is None.
-
-    Example:
-        >>> config = {"model": "llama3.1-8b", "temperature": 0.7}
-        >>> model_hash = compute_model_hash(config)
-        >>> len(model_hash)
-        16
-    """
-    if not config:
-        return None
-
-    config_str = json.dumps(config, sort_keys=True)
-    return hashlib.sha256(config_str.encode()).hexdigest()[:16]
 
 
 def convert_runner_results(

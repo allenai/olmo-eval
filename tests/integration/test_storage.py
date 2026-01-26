@@ -97,28 +97,6 @@ class TestPostgresBackend:
         assert len(results) == 5
 
     @pytest.mark.integration
-    def test_upsert_behavior(self, postgres_backend, sample_eval_result):
-        """Test that saving the same experiment_id updates the record."""
-        postgres_backend.save(sample_eval_result)
-
-        # Modify and save again
-        from olmo_eval.core import EvalResult, StoredTaskResult
-
-        updated = EvalResult(
-            experiment_id=sample_eval_result.experiment_id,
-            model_name="updated-model",
-            backend_name="hf",
-            timestamp=sample_eval_result.timestamp,
-            tasks=[StoredTaskResult(task_name="new_task", metrics={"score": 0.99})],
-        )
-        postgres_backend.save(updated)
-
-        retrieved = postgres_backend.get(sample_eval_result.experiment_id)
-        assert retrieved.model_name == "updated-model"
-        assert len(retrieved.tasks) == 1
-        assert retrieved.tasks[0].task_name == "new_task"
-
-    @pytest.mark.integration
     def test_same_model_different_experiments(self, postgres_backend):
         """Test that same model config produces same model_hash across different experiments."""
         from datetime import datetime

@@ -56,10 +56,9 @@ cd tests/integration && docker compose down -v
 - ✅ Save/retrieve experiments
 - ✅ Save experiments with instance predictions
 - ✅ Query by model, task, time range, workspace
+- ✅ Query with `latest=True` to get most recent result
 - ✅ Delete with cascade
-- ✅ Upsert behavior
 - ✅ Pagination
-- ✅ Backward compatibility
 
 ### Repository Layer
 - ✅ ExperimentRepository CRUD operations

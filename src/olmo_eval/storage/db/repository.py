@@ -13,7 +13,6 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from olmo_eval.core.types import EvalResult, StoredTaskResult
-from olmo_eval.storage.base import compute_model_hash
 from olmo_eval.storage.db.models import Experiment, InstancePrediction, TaskResult
 
 
@@ -37,61 +36,28 @@ class ExperimentRepository:
         Returns:
             The experiment_id of the saved evaluation.
         """
-        experiment_id = eval_result.experiment_id
-
-        # Check if experiment already exists
-        existing = self.session.get(Experiment, experiment_id)
-
-        model_hash = compute_model_hash(eval_result.config)
-
-        if existing:
-            # Update existing experiment
-            existing.model_name = eval_result.model_name
-            existing.model_hash = model_hash
-            existing.backend_name = eval_result.backend_name
-            existing.timestamp = eval_result.timestamp
-            existing.experiment_name = eval_result.experiment_name
-            existing.workspace = eval_result.workspace
-            existing.author = eval_result.author
-            existing.tags = eval_result.tags
-            existing.git_ref = eval_result.git_ref
-            existing.revision = eval_result.revision
-            existing.s3_location = eval_result.s3_location
-            existing.config = eval_result.config
-            existing.metadata_ = eval_result.metadata
-
-            # Delete existing task results and instance predictions (will be replaced)
-            self.session.execute(
-                delete(TaskResult).where(TaskResult.experiment_id == experiment_id)
-            )
-            self.session.execute(
-                delete(InstancePrediction).where(InstancePrediction.experiment_id == experiment_id)
-            )
-            experiment = existing
-        else:
-            # Create new experiment
-            experiment = Experiment(
-                experiment_id=experiment_id,
-                model_name=eval_result.model_name,
-                model_hash=model_hash,
-                backend_name=eval_result.backend_name,
-                timestamp=eval_result.timestamp,
-                experiment_name=eval_result.experiment_name,
-                workspace=eval_result.workspace,
-                author=eval_result.author,
-                tags=eval_result.tags,
-                git_ref=eval_result.git_ref,
-                revision=eval_result.revision,
-                s3_location=eval_result.s3_location,
-                config=eval_result.config,
-                metadata_=eval_result.metadata,
-            )
-            self.session.add(experiment)
+        experiment = Experiment(
+            experiment_id=eval_result.experiment_id,
+            model_name=eval_result.model_name,
+            model_hash=eval_result.model_hash,
+            backend_name=eval_result.backend_name,
+            timestamp=eval_result.timestamp,
+            experiment_name=eval_result.experiment_name,
+            workspace=eval_result.workspace,
+            author=eval_result.author,
+            tags=eval_result.tags,
+            git_ref=eval_result.git_ref,
+            revision=eval_result.revision,
+            s3_location=eval_result.s3_location,
+            config=eval_result.config,
+            metadata_=eval_result.metadata,
+        )
+        self.session.add(experiment)
 
         # Add task results
         for task_data in eval_result.tasks:
             task_result = TaskResult(
-                experiment_id=experiment_id,
+                experiment_id=eval_result.experiment_id,
                 task_name=task_data.task_name,
                 task_hash=task_data.task_hash,
                 metrics=task_data.metrics,
@@ -104,7 +70,7 @@ class ExperimentRepository:
             self.session.add(task_result)
 
         self.session.flush()  # Ensure database constraints are checked
-        return experiment_id
+        return eval_result.experiment_id
 
     def get(self, experiment_id: str) -> EvalResult | None:
         """Retrieve an evaluation experiment by ID.
@@ -142,6 +108,7 @@ class ExperimentRepository:
         task_name: str | None = None,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
+        latest: bool = False,
         limit: int = 100,
         offset: int = 0,
     ) -> list[EvalResult]:
@@ -153,6 +120,7 @@ class ExperimentRepository:
             task_name: Filter by task name (experiments containing this task).
             start_time: Filter by timestamp >= start_time.
             end_time: Filter by timestamp <= end_time.
+            latest: If True, return only the most recent result (limit=1).
             limit: Maximum number of results to return.
             offset: Number of results to skip (for pagination).
 
@@ -187,8 +155,11 @@ class ExperimentRepository:
         # Order by timestamp descending (most recent first)
         stmt = stmt.order_by(Experiment.timestamp.desc())
 
-        # Apply pagination
-        stmt = stmt.limit(limit).offset(offset)
+        # Apply pagination (latest overrides limit)
+        effective_limit = 1 if latest else limit
+        stmt = stmt.limit(effective_limit)
+        if not latest:
+            stmt = stmt.offset(offset)
 
         # Execute query
         experiments = self.session.execute(stmt).scalars().all()

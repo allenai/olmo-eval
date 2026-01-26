@@ -140,7 +140,6 @@ class InstancePrediction(Base):
         index=True,
     )
 
-    # Denormalized field for fast queries (from experiments table)
     model_hash: Mapped[str | None] = mapped_column(String(64), index=True)
 
     # Task identification
@@ -172,7 +171,7 @@ class InstancePrediction(Base):
 
 
 # ==============================================================================
-# INDEXES FOR EFFICIENT QUERIES
+# INDEXES
 # ==============================================================================
 
 # Task Results Indexes
