@@ -17,16 +17,8 @@ logger = logging.getLogger(__name__)
 class PostgresBackend(StorageBackend):
     """PostgreSQL-based storage backend for evaluation results.
 
-    Uses SQLAlchemy ORM with three main tables:
-        - experiments: Main experiment metadata with S3 reference
-        - task_results: Task-level aggregated metrics
-        - instance_predictions: Instance-level predictions for pairwise comparison
-
     The database stores queryable metadata while S3 stores the full
     evaluation data (completions, predictions, detailed metrics).
-
-    This is a facade over the modular SQLAlchemy components (session, repository, models)
-    to maintain backward compatibility with the original PostgresBackend interface.
     """
 
     def __init__(
@@ -122,7 +114,7 @@ class PostgresBackend(StorageBackend):
             logger.debug(f"Saved experiment {experiment_id} with {num_instances} instances")
             return experiment_id
 
-    def get(self, experiment_id: str) -> EvalResult | None:
+    def get_experiment(self, experiment_id: str) -> EvalResult | None:
         """Retrieve an evaluation result by experiment_id.
 
         Args:
