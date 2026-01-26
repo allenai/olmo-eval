@@ -4,6 +4,7 @@ from olmo_eval.storage.base import (
     EvalResult,
     StorageBackend,
     TaskResult,
+    compute_model_id,
     convert_runner_results,
 )
 
@@ -11,6 +12,7 @@ __all__ = [
     "EvalResult",
     "StorageBackend",
     "TaskResult",
+    "compute_model_id",
     "convert_runner_results",
     "get_backend",
 ]
@@ -19,7 +21,7 @@ __all__ = [
 def get_backend(
     backend_type: str,
     **kwargs,
-) -> StorageBackend:
+):
     """Create a storage backend by type.
 
     Args:
@@ -28,6 +30,8 @@ def get_backend(
 
     Returns:
         A configured storage backend instance.
+        - "postgres": PostgresBackend
+        - "s3": S3Backend
 
     Raises:
         ValueError: If backend_type is not recognized.
@@ -35,7 +39,7 @@ def get_backend(
     """
     if backend_type == "s3":
         try:
-            from olmo_eval.storage.s3 import S3Backend
+            from olmo_eval.storage.backends.s3 import S3Backend
         except ImportError as e:
             raise ImportError(
                 "S3 backend requires boto3. Install with: pip install olmo-eval-internal[s3]"
@@ -43,7 +47,7 @@ def get_backend(
         return S3Backend(**kwargs)
     elif backend_type == "postgres":
         try:
-            from olmo_eval.storage.postgres import PostgresBackend
+            from olmo_eval.storage.backends.postgres import PostgresBackend
         except ImportError as e:
             raise ImportError(
                 "Postgres backend requires psycopg. "

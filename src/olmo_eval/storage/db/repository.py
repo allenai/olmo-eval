@@ -12,9 +12,9 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from olmo_eval.storage.base import EvalResult
+from olmo_eval.storage.base import EvalResult, compute_model_id
 from olmo_eval.storage.base import TaskResult as TaskResultData
-from olmo_eval.storage.models import Experiment, InstancePrediction, TaskResult
+from olmo_eval.storage.db.models import Experiment, InstancePrediction, TaskResult
 
 
 class ExperimentRepository:
@@ -29,9 +29,7 @@ class ExperimentRepository:
         self.session = session
 
     def save(self, eval_result: EvalResult) -> str:
-        """Save or update an evaluation experiment.
-
-        Uses upsert logic: if experiment_id exists, updates it; otherwise inserts new.
+        """Save a new evaluation experiment.
 
         Args:
             eval_result: EvalResult dataclass containing experiment data.
@@ -44,14 +42,7 @@ class ExperimentRepository:
         # Check if experiment already exists
         existing = self.session.get(Experiment, experiment_id)
 
-        # Compute model_id (hash of model config) if config available
-        model_id = None
-        if eval_result.config:
-            import hashlib
-            import json
-
-            config_str = json.dumps(eval_result.config, sort_keys=True)
-            model_id = hashlib.sha256(config_str.encode()).hexdigest()[:16]
+        model_id = compute_model_id(eval_result.config)
 
         if existing:
             # Update existing experiment

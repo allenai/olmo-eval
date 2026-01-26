@@ -6,10 +6,9 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from olmo_eval.storage.base import EvalResult, StorageBackend
-from olmo_eval.storage.models import Base
-from olmo_eval.storage.repository import ExperimentRepository, InstancePredictionRepository
-from olmo_eval.storage.session import DatabaseSession
+from olmo_eval.storage.base import EvalResult, StorageBackend, compute_model_id
+from olmo_eval.storage.db.repository import ExperimentRepository, InstancePredictionRepository
+from olmo_eval.storage.db.session import DatabaseSession
 
 logger = logging.getLogger(__name__)
 
@@ -65,33 +64,6 @@ class PostgresBackend(StorageBackend):
             max_overflow=max_overflow,
             echo=echo,
         )
-        self._initialized = False
-
-    def initialize(self) -> None:
-        """Create the database schema using SQLAlchemy models.
-
-        Note: In production, you should use Alembic migrations instead:
-            alembic upgrade head
-        """
-        if self._initialized:
-            logger.warning("Database already initialized")
-            return
-
-        self.db.initialize()
-
-        # Create all tables from models
-        Base.metadata.create_all(self.db.engine)
-        self._initialized = True
-
-        logger.info(f"Database schema initialized for {self.db.database}")
-
-    def cleanup(self) -> None:
-        """Drop all tables (for testing).
-
-        WARNING: This will delete all data in the database!
-        """
-        Base.metadata.drop_all(self.db.engine)
-        logger.info(f"Database schema dropped for {self.db.database}")
 
     def save(self, result: EvalResult) -> str:
         """Save an evaluation result to PostgreSQL.
@@ -135,14 +107,7 @@ class PostgresBackend(StorageBackend):
             # Save instance predictions
             inst_repo = InstancePredictionRepository(session)
 
-            # Compute model_id for denormalization
-            model_id = None
-            if result.config:
-                import hashlib
-                import json
-
-                config_str = json.dumps(result.config, sort_keys=True)
-                model_id = hashlib.sha256(config_str.encode()).hexdigest()[:16]
+            model_id = compute_model_id(result.config)
 
             for task_name, instances in instances_by_task.items():
                 inst_repo.save_instances(

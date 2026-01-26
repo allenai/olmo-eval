@@ -9,11 +9,11 @@ import pytest
 class TestCreatePostgresEngine:
     """Tests for create_postgres_engine function."""
 
-    @patch("olmo_eval.storage.session.event")
-    @patch("olmo_eval.storage.session.create_engine")
+    @patch("olmo_eval.storage.db.session.event")
+    @patch("olmo_eval.storage.db.session.create_engine")
     def test_create_engine_default_params(self, mock_create_engine, mock_event):
         """Test creating engine with default parameters."""
-        from olmo_eval.storage.session import create_postgres_engine
+        from olmo_eval.storage.db.session import create_postgres_engine
 
         create_postgres_engine()
 
@@ -28,11 +28,11 @@ class TestCreatePostgresEngine:
         assert call_args[1]["max_overflow"] == 10
         assert call_args[1]["pool_timeout"] == 30.0
 
-    @patch("olmo_eval.storage.session.event")
-    @patch("olmo_eval.storage.session.create_engine")
+    @patch("olmo_eval.storage.db.session.event")
+    @patch("olmo_eval.storage.db.session.create_engine")
     def test_create_engine_custom_params(self, mock_create_engine, mock_event):
         """Test creating engine with custom parameters."""
-        from olmo_eval.storage.session import create_postgres_engine
+        from olmo_eval.storage.db.session import create_postgres_engine
 
         create_postgres_engine(
             host="db.example.com",
@@ -52,11 +52,11 @@ class TestCreatePostgresEngine:
         assert call_args[1]["pool_size"] == 10
         assert call_args[1]["max_overflow"] == 20
 
-    @patch("olmo_eval.storage.session.event")
-    @patch("olmo_eval.storage.session.create_engine")
+    @patch("olmo_eval.storage.db.session.event")
+    @patch("olmo_eval.storage.db.session.create_engine")
     def test_create_engine_password_from_env(self, mock_create_engine, mock_event):
         """Test that password can be loaded from environment variable."""
-        from olmo_eval.storage.session import create_postgres_engine
+        from olmo_eval.storage.db.session import create_postgres_engine
 
         with patch.dict(os.environ, {"TEST_PG_PASSWORD": "secret_password"}):
             create_postgres_engine(password_env="TEST_PG_PASSWORD")
@@ -64,24 +64,24 @@ class TestCreatePostgresEngine:
             call_args = mock_create_engine.call_args
             assert "secret_password" in call_args[0][0]
 
-    @patch("olmo_eval.storage.session.event")
-    @patch("olmo_eval.storage.session.create_engine")
+    @patch("olmo_eval.storage.db.session.event")
+    @patch("olmo_eval.storage.db.session.create_engine")
     def test_create_engine_echo_mode(self, mock_create_engine, mock_event):
         """Test creating engine with echo mode enabled."""
-        from olmo_eval.storage.session import create_postgres_engine
+        from olmo_eval.storage.db.session import create_postgres_engine
 
         create_postgres_engine(echo=True)
 
         call_args = mock_create_engine.call_args
         assert call_args[1]["echo"] is True
 
-    @patch("olmo_eval.storage.session.event")
-    @patch("olmo_eval.storage.session.create_engine")
+    @patch("olmo_eval.storage.db.session.event")
+    @patch("olmo_eval.storage.db.session.create_engine")
     def test_create_engine_null_pool(self, mock_create_engine, mock_event):
         """Test creating engine with NullPool."""
         from sqlalchemy.pool import NullPool
 
-        from olmo_eval.storage.session import create_postgres_engine
+        from olmo_eval.storage.db.session import create_postgres_engine
 
         create_postgres_engine(poolclass=NullPool)
 
@@ -94,7 +94,7 @@ class TestDatabaseSession:
 
     def test_init(self):
         """Test DatabaseSession initialization."""
-        from olmo_eval.storage.session import DatabaseSession
+        from olmo_eval.storage.db.session import DatabaseSession
 
         db = DatabaseSession(
             host="localhost",
@@ -110,11 +110,11 @@ class TestDatabaseSession:
         assert db._engine is None
         assert db._session_factory is None
 
-    @patch("olmo_eval.storage.session.create_postgres_engine")
-    @patch("olmo_eval.storage.session.create_session_factory")
+    @patch("olmo_eval.storage.db.session.create_postgres_engine")
+    @patch("olmo_eval.storage.db.session.create_session_factory")
     def test_initialize(self, mock_session_factory, mock_engine):
         """Test DatabaseSession initialize method."""
-        from olmo_eval.storage.session import DatabaseSession
+        from olmo_eval.storage.db.session import DatabaseSession
 
         db = DatabaseSession()
         db.initialize()
@@ -124,11 +124,11 @@ class TestDatabaseSession:
         assert db._engine is not None
         assert db._session_factory is not None
 
-    @patch("olmo_eval.storage.session.create_postgres_engine")
-    @patch("olmo_eval.storage.session.create_session_factory")
+    @patch("olmo_eval.storage.db.session.create_postgres_engine")
+    @patch("olmo_eval.storage.db.session.create_session_factory")
     def test_initialize_twice_warning(self, mock_session_factory, mock_engine):
         """Test that initializing twice logs a warning."""
-        from olmo_eval.storage.session import DatabaseSession
+        from olmo_eval.storage.db.session import DatabaseSession
 
         db = DatabaseSession()
         db.initialize()
@@ -139,7 +139,7 @@ class TestDatabaseSession:
 
     def test_engine_property_not_initialized(self):
         """Test that accessing engine before initialization raises error."""
-        from olmo_eval.storage.session import DatabaseSession
+        from olmo_eval.storage.db.session import DatabaseSession
 
         db = DatabaseSession()
 
@@ -148,18 +148,18 @@ class TestDatabaseSession:
 
     def test_session_factory_property_not_initialized(self):
         """Test that accessing session_factory before initialization raises error."""
-        from olmo_eval.storage.session import DatabaseSession
+        from olmo_eval.storage.db.session import DatabaseSession
 
         db = DatabaseSession()
 
         with pytest.raises(RuntimeError, match="not initialized"):
             _ = db.session_factory
 
-    @patch("olmo_eval.storage.session.create_postgres_engine")
-    @patch("olmo_eval.storage.session.create_session_factory")
+    @patch("olmo_eval.storage.db.session.create_postgres_engine")
+    @patch("olmo_eval.storage.db.session.create_session_factory")
     def test_engine_property(self, mock_session_factory, mock_engine):
         """Test engine property after initialization."""
-        from olmo_eval.storage.session import DatabaseSession
+        from olmo_eval.storage.db.session import DatabaseSession
 
         mock_engine.return_value = MagicMock()
 
@@ -169,11 +169,11 @@ class TestDatabaseSession:
         engine = db.engine
         assert engine is not None
 
-    @patch("olmo_eval.storage.session.create_postgres_engine")
-    @patch("olmo_eval.storage.session.create_session_factory")
+    @patch("olmo_eval.storage.db.session.create_postgres_engine")
+    @patch("olmo_eval.storage.db.session.create_session_factory")
     def test_session_context_manager(self, mock_session_factory, mock_engine):
         """Test session context manager."""
-        from olmo_eval.storage.session import DatabaseSession
+        from olmo_eval.storage.db.session import DatabaseSession
 
         mock_session = MagicMock()
         mock_session_factory.return_value = MagicMock(return_value=mock_session)
@@ -188,11 +188,11 @@ class TestDatabaseSession:
         mock_session.commit.assert_called_once()
         mock_session.close.assert_called_once()
 
-    @patch("olmo_eval.storage.session.create_postgres_engine")
-    @patch("olmo_eval.storage.session.create_session_factory")
+    @patch("olmo_eval.storage.db.session.create_postgres_engine")
+    @patch("olmo_eval.storage.db.session.create_session_factory")
     def test_dispose(self, mock_session_factory, mock_engine):
         """Test dispose method."""
-        from olmo_eval.storage.session import DatabaseSession
+        from olmo_eval.storage.db.session import DatabaseSession
 
         mock_engine_instance = MagicMock()
         mock_engine.return_value = mock_engine_instance
@@ -211,7 +211,7 @@ class TestGetSession:
 
     def test_get_session_commits_on_success(self):
         """Test that get_session commits on successful exit."""
-        from olmo_eval.storage.session import get_session
+        from olmo_eval.storage.db.session import get_session
 
         mock_session = MagicMock()
         mock_factory = MagicMock(return_value=mock_session)
@@ -225,7 +225,7 @@ class TestGetSession:
 
     def test_get_session_rolls_back_on_exception(self):
         """Test that get_session rolls back on exception."""
-        from olmo_eval.storage.session import get_session
+        from olmo_eval.storage.db.session import get_session
 
         mock_session = MagicMock()
         mock_factory = MagicMock(return_value=mock_session)
@@ -243,7 +243,7 @@ class TestGetTransaction:
 
     def test_get_transaction_commits_on_success(self):
         """Test that get_transaction commits on successful exit."""
-        from olmo_eval.storage.session import get_transaction
+        from olmo_eval.storage.db.session import get_transaction
 
         mock_session = MagicMock()
 
@@ -255,7 +255,7 @@ class TestGetTransaction:
 
     def test_get_transaction_rolls_back_on_exception(self):
         """Test that get_transaction rolls back on exception."""
-        from olmo_eval.storage.session import get_transaction
+        from olmo_eval.storage.db.session import get_transaction
 
         mock_session = MagicMock()
 

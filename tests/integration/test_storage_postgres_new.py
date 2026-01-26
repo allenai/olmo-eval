@@ -7,6 +7,8 @@ from datetime import datetime
 
 import pytest
 
+from olmo_eval.storage.base import compute_model_id
+
 
 class TestPostgresBackendWithInstances:
     """Integration tests for PostgresBackend with instance predictions."""
@@ -49,7 +51,7 @@ class TestPostgresBackendWithInstances:
     @pytest.mark.integration
     def test_query_instances_by_model(self, postgres_backend, sample_eval_result):
         """Test querying instance predictions by model_id."""
-        from olmo_eval.storage.repository import InstancePredictionRepository
+        from olmo_eval.storage.db.repository import InstancePredictionRepository
 
         # Add model_id to config for testing
         sample_eval_result.config = {"model": "test-model"}
@@ -84,7 +86,7 @@ class TestQueryHelpers:
     @pytest.mark.integration
     def test_get_model_task_metrics(self, postgres_backend, sample_eval_result):
         """Test getting metrics for a specific model."""
-        from olmo_eval.storage.queries import QueryHelper
+        from olmo_eval.storage.db.queries import QueryHelper
 
         postgres_backend.save(sample_eval_result)
 
@@ -101,7 +103,7 @@ class TestQueryHelpers:
     def test_get_model_task_instances(self, postgres_backend):
         """Test getting instances for a model and task."""
         from olmo_eval.storage import EvalResult, TaskResult
-        from olmo_eval.storage.queries import QueryHelper
+        from olmo_eval.storage.db.queries import QueryHelper
 
         exp = EvalResult(
             experiment_id="test-exp",
@@ -110,6 +112,7 @@ class TestQueryHelpers:
             timestamp=datetime.now(),
             tasks=[TaskResult(task_name="test", metrics={"accuracy": 0.7})],
             config={"model": "test"},
+            author="test-user",
         )
 
         instances = [
@@ -119,15 +122,11 @@ class TestQueryHelpers:
 
         postgres_backend.save_with_instances(exp, {"test": instances})
 
-        # Get model_id
-        import hashlib
-        import json
-
-        model_id = hashlib.sha256(json.dumps(exp.config, sort_keys=True).encode()).hexdigest()[:16]
+        model_id = compute_model_id(exp.config)
 
         with postgres_backend.db.session() as session:
             helper = QueryHelper(session)
-            results = helper.get_model_task_instances(model_id=model_id, task_name="test")
+            results = helper.get_model_task_instances(task_name="test", model_id=model_id)
 
         assert len(results) == 2
         assert results[0]["native_id"] == "doc_0"
@@ -137,7 +136,7 @@ class TestQueryHelpers:
     def test_get_model_task_instances_multiple_tasks(self, postgres_backend):
         """Test getting instances for a model across multiple tasks."""
         from olmo_eval.storage import EvalResult, TaskResult
-        from olmo_eval.storage.queries import QueryHelper
+        from olmo_eval.storage.db.queries import QueryHelper
 
         exp = EvalResult(
             experiment_id="test-exp-multi",
@@ -150,6 +149,7 @@ class TestQueryHelpers:
                 TaskResult(task_name="task3", metrics={"accuracy": 0.6}),
             ],
             config={"model": "test"},
+            author="test-user",
         )
 
         instances_task1 = [
@@ -168,17 +168,13 @@ class TestQueryHelpers:
             exp, {"task1": instances_task1, "task2": instances_task2, "task3": instances_task3}
         )
 
-        # Get model_id
-        import hashlib
-        import json
-
-        model_id = hashlib.sha256(json.dumps(exp.config, sort_keys=True).encode()).hexdigest()[:16]
+        model_id = compute_model_id(exp.config)
 
         # Test querying multiple tasks
         with postgres_backend.db.session() as session:
             helper = QueryHelper(session)
             results = helper.get_model_task_instances(
-                model_id=model_id, task_name=["task1", "task2"]
+                task_name=["task1", "task2"], model_id=model_id
             )
 
         assert len(results) == 4  # 2 from task1 + 2 from task2
@@ -192,10 +188,134 @@ class TestQueryHelpers:
         # Test querying single task still works
         with postgres_backend.db.session() as session:
             helper = QueryHelper(session)
-            results = helper.get_model_task_instances(model_id=model_id, task_name="task3")
+            results = helper.get_model_task_instances(task_name="task3", model_id=model_id)
 
         assert len(results) == 1
         assert results[0]["native_id"] == "task3_doc_0"
+
+    @pytest.mark.integration
+    def test_get_instances_by_model_name(self, postgres_backend):
+        """Test querying instances by human-readable model_name instead of model_id."""
+        from olmo_eval.storage import EvalResult, TaskResult
+        from olmo_eval.storage.db.queries import QueryHelper
+
+        # Create evaluation with specific model name
+        exp = EvalResult(
+            experiment_id="test-by-name",
+            model_name="llama3.1-8b-instruct",
+            backend_name="vllm",
+            timestamp=datetime.now(),
+            tasks=[TaskResult(task_name="mmlu", metrics={"accuracy": 0.75})],
+            config={"model": "llama3.1-8b", "mode": "instruct"},
+            author="test-user",
+        )
+
+        instances = [
+            {"native_id": "doc_0", "doc_id": 0, "instance_metrics": {"acc": 1.0}},
+            {"native_id": "doc_1", "doc_id": 1, "instance_metrics": {"acc": 0.5}},
+            {"native_id": "doc_2", "doc_id": 2, "instance_metrics": {"acc": 0.75}},
+        ]
+
+        postgres_backend.save_with_instances(exp, {"mmlu": instances})
+
+        # Query by model_name instead of model_id (more user-friendly!)
+        with postgres_backend.db.session() as session:
+            helper = QueryHelper(session)
+            results = helper.get_model_task_instances(
+                task_name="mmlu", model_name="llama3.1-8b-instruct"
+            )
+
+        assert len(results) == 3
+        assert results[0]["native_id"] == "doc_0"
+        assert results[1]["native_id"] == "doc_1"
+        assert results[2]["native_id"] == "doc_2"
+
+        # Query by non-existent model name returns empty
+        with postgres_backend.db.session() as session:
+            helper = QueryHelper(session)
+            results = helper.get_model_task_instances(
+                task_name="mmlu", model_name="non-existent-model"
+            )
+
+        assert len(results) == 0
+
+
+class TestUserIsolation:
+    """Tests to verify user results are isolated by experiment_id."""
+
+    @pytest.mark.integration
+    def test_concurrent_users_same_model_share_model_id(self, postgres_backend):
+        """Test that same model config produces same model_id, but experiments are isolated."""
+        from olmo_eval.storage import EvalResult, TaskResult, compute_model_id
+        from olmo_eval.storage.db.repository import InstancePredictionRepository
+
+        # Same config, tasks, and model - only difference is author and experiment_id
+        config = {"model": "llama3.1-8b", "temperature": 0.7}
+
+        # User 1's evaluation
+        eval_user1 = EvalResult(
+            experiment_id="user1-run-123",
+            model_name="llama3.1-8b",
+            backend_name="vllm",
+            timestamp=datetime.now(),
+            tasks=[TaskResult(task_name="mmlu", metrics={"accuracy": 0.65})],
+            config=config,
+            author="alice@example.com",
+        )
+
+        instances_user1 = [
+            {"native_id": "mmlu_0", "doc_id": 0, "instance_metrics": {"acc": 1.0}},
+            {"native_id": "mmlu_1", "doc_id": 1, "instance_metrics": {"acc": 0.5}},
+        ]
+
+        # User 2's evaluation - same model, config, task
+        eval_user2 = EvalResult(
+            experiment_id="user2-run-456",
+            model_name="llama3.1-8b",
+            backend_name="vllm",
+            timestamp=datetime.now(),
+            tasks=[TaskResult(task_name="mmlu", metrics={"accuracy": 0.70})],
+            config=config,
+            author="bob@example.com",
+        )
+
+        instances_user2 = [
+            {"native_id": "mmlu_0", "doc_id": 0, "instance_metrics": {"acc": 0.8}},
+            {"native_id": "mmlu_1", "doc_id": 1, "instance_metrics": {"acc": 0.6}},
+        ]
+
+        # Both users save their results
+        postgres_backend.save_with_instances(eval_user1, {"mmlu": instances_user1})
+        postgres_backend.save_with_instances(eval_user2, {"mmlu": instances_user2})
+
+        # Same config = same model_id (this is correct!)
+        model_id = compute_model_id(config)
+
+        # Query instances by experiment_id - this is how users are isolated
+        with postgres_backend.db.session() as session:
+            repo = InstancePredictionRepository(session)
+
+            # User 1's instances via experiment_id
+            user1_instances = repo.get_instances(experiment_id="user1-run-123")
+            assert len(user1_instances) == 2
+            assert any(inst["instance_metrics"]["acc"] == 1.0 for inst in user1_instances)
+            assert any(inst["instance_metrics"]["acc"] == 0.5 for inst in user1_instances)
+
+            # User 2's instances via experiment_id
+            user2_instances = repo.get_instances(experiment_id="user2-run-456")
+            assert len(user2_instances) == 2
+            assert any(inst["instance_metrics"]["acc"] == 0.8 for inst in user2_instances)
+            assert any(inst["instance_metrics"]["acc"] == 0.6 for inst in user2_instances)
+
+            # Both share the same model_id (as they should)
+            assert all(inst["model_id"] == model_id for inst in user1_instances)
+            assert all(inst["model_id"] == model_id for inst in user2_instances)
+
+            # But querying by model_id returns ALL instances for that model (from all experiments)
+            all_model_instances = repo.get_instances(model_id=model_id, task_name="mmlu")
+            assert len(all_model_instances) == 4  # 2 from user1 + 2 from user2
+
+            # This is useful for comparing results across different experiments of the same model
 
 
 class TestBackwardCompatibility:
@@ -245,7 +365,7 @@ class TestBackwardCompatibility:
         assert retrieved is None
 
         # Verify instances are also gone (cascade delete)
-        from olmo_eval.storage.repository import InstancePredictionRepository
+        from olmo_eval.storage.db.repository import InstancePredictionRepository
 
         with postgres_backend.db.session() as session:
             repo = InstancePredictionRepository(session)

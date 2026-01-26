@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -209,6 +211,33 @@ class StorageBackend(ABC):
             True if deleted, False if not found.
         """
         ...
+
+
+def compute_model_id(config: dict[str, Any] | None) -> str | None:
+    """Compute a deterministic model ID from a configuration dict.
+
+    The model ID is a hash of the config dict, used to identify
+    unique model configurations across experiments. The same config
+    always produces the same model_id, allowing multiple experiments
+    (from different users or runs) to be associated with the same model.
+
+    Args:
+        config: Model configuration dictionary.
+
+    Returns:
+        16-character hex string hash of the config, or None if config is None.
+
+    Example:
+        >>> config = {"model": "llama3.1-8b", "temperature": 0.7}
+        >>> model_id = compute_model_id(config)
+        >>> len(model_id)
+        16
+    """
+    if not config:
+        return None
+
+    config_str = json.dumps(config, sort_keys=True)
+    return hashlib.sha256(config_str.encode()).hexdigest()[:16]
 
 
 def convert_runner_results(

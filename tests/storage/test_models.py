@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from olmo_eval.storage.models import Base, Experiment, InstancePrediction, TaskResult
+from olmo_eval.storage.db.models import Base, Experiment, InstancePrediction, TaskResult
 
 
 class TestExperimentModel:
