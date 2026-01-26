@@ -190,4 +190,5 @@ Index(
 
 # Experiment Indexes
 Index("idx_experiments_model_hash", Experiment.model_hash)
-Index("idx_experiments_model_workspace", Experiment.model_name, Experiment.workspace)
+Index("idx_experiments_model_name", Experiment.model_name)
+Index("idx_experiments_model_name_ts", Experiment.model_name, Experiment.timestamp.desc())

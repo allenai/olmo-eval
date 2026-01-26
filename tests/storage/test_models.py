@@ -224,7 +224,8 @@ class TestTableMetadata:
 
         # Experiment indexes
         assert "idx_experiments_model_hash" in index_names
-        assert "idx_experiments_model_workspace" in index_names
+        assert "idx_experiments_model_name" in index_names
+        assert "idx_experiments_model_name_ts" in index_names
 
         # TaskResult indexes
         assert "idx_task_results_exp_task" in index_names
