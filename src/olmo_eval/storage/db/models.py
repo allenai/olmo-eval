@@ -1,11 +1,4 @@
-"""SQLAlchemy ORM models for evaluation storage.
-
-Schema designed to support:
-- Experiment-level tracking (experiment_id, model_hash)
-- Task-level aggregated metrics
-- Instance-level predictions for pairwise statistical comparisons
-- Efficient queries for dashboard and pairwise analysis (denormalized model_hash/workspace)
-"""
+"""SQLAlchemy ORM models for evaluation storage."""
 
 from __future__ import annotations
 
