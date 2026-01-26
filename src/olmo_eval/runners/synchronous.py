@@ -308,13 +308,14 @@ class SyncEvalRunner:
         if self.storages:
             from olmo_eval.storage.base import convert_runner_results
 
-            run_id = str(uuid.uuid4())
-            eval_result = convert_runner_results(results, run_id)
+            experiment_id = str(uuid.uuid4())
+            eval_result = convert_runner_results(results, experiment_id)
             for storage in self.storages:
                 storage.save(eval_result)
                 backend_name = type(storage).__name__
-                logger.info(f"Results saved to {backend_name} (run_id: {run_id})")
-                console.print(f"[green]Results saved to {backend_name} (run_id: {run_id})[/green]")
+                logger.info(f"Results saved to {backend_name} (experiment_id: {experiment_id})")
+                msg = f"Results saved to {backend_name} (experiment_id: {experiment_id})"
+                console.print(f"[green]{msg}[/green]")
         else:
             logger.info("No storage backend configured - results logged above only")
 

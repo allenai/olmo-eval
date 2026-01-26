@@ -69,13 +69,13 @@ class EvalResult:
     the full evaluation data (completions, metrics, predictions) is stored.
 
     Fields align with the evaluation tracking schema:
-    - Core identifiers: run_id, model_name, backend_name
+    - Core identifiers: experiment_id, model_name, backend_name
     - Experiment info: experiment_name, workspace, author, tags
     - Version tracking: git_ref, model_hash, revision
     - S3 reference: s3_location points to base path with all task results
     """
 
-    run_id: str
+    experiment_id: str
     model_name: str
     backend_name: str
     timestamp: datetime
@@ -98,7 +98,7 @@ class EvalResult:
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         result: dict[str, Any] = {
-            "run_id": self.run_id,
+            "experiment_id": self.experiment_id,
             "model_name": self.model_name,
             "backend_name": self.backend_name,
             "timestamp": self.timestamp.isoformat(),
@@ -130,7 +130,7 @@ class EvalResult:
     def from_dict(cls, data: dict[str, Any]) -> EvalResult:
         """Create from dictionary."""
         return cls(
-            run_id=data["run_id"],
+            experiment_id=data["experiment_id"],
             model_name=data["model_name"],
             backend_name=data["backend_name"],
             timestamp=datetime.fromisoformat(data["timestamp"]),
@@ -159,16 +159,16 @@ class StorageBackend(ABC):
             result: The evaluation result to save.
 
         Returns:
-            The run_id of the saved result.
+            The experiment_id of the saved result.
         """
         ...
 
     @abstractmethod
-    def get(self, run_id: str) -> EvalResult | None:
-        """Retrieve an evaluation result by run_id.
+    def get(self, experiment_id: str) -> EvalResult | None:
+        """Retrieve an evaluation result by experiment_id.
 
         Args:
-            run_id: The unique identifier of the result.
+            experiment_id: The unique identifier of the result.
 
         Returns:
             The evaluation result if found, None otherwise.
@@ -199,11 +199,11 @@ class StorageBackend(ABC):
         ...
 
     @abstractmethod
-    def delete(self, run_id: str) -> bool:
+    def delete(self, experiment_id: str) -> bool:
         """Delete an evaluation result.
 
         Args:
-            run_id: The unique identifier of the result to delete.
+            experiment_id: The unique identifier of the result to delete.
 
         Returns:
             True if deleted, False if not found.
@@ -213,7 +213,7 @@ class StorageBackend(ABC):
 
 def convert_runner_results(
     results: dict[str, Any],
-    run_id: str,
+    experiment_id: str,
     s3_location: str | None = None,
     experiment_name: str | None = None,
     workspace: str | None = None,
@@ -227,7 +227,7 @@ def convert_runner_results(
 
     Args:
         results: The results dict from EvalRunner.run()
-        run_id: Unique identifier for this run.
+        experiment_id: Unique identifier for this run.
         s3_location: Base S3 path where task results are stored.
         experiment_name: Descriptive name for the experiment.
         workspace: Beaker workspace name.
@@ -272,7 +272,7 @@ def convert_runner_results(
         )
 
     return EvalResult(
-        run_id=run_id,
+        experiment_id=experiment_id,
         model_name=results["model"],
         backend_name=results["backend"],
         timestamp=datetime.fromisoformat(results["timestamp"]),

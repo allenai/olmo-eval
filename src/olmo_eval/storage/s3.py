@@ -17,7 +17,7 @@ class S3Backend(StorageBackend):
     """S3-based storage backend that saves results as JSON files in S3.
 
     Results are organized as:
-        s3://{bucket}/{prefix}{model_slug}/{date}/{run_id}.json
+        s3://{bucket}/{prefix}{model_slug}/{date}/{experiment_id}.json
 
     An index is maintained per model:
         s3://{bucket}/{prefix}_index/{model_slug}.json
@@ -83,7 +83,7 @@ class S3Backend(StorageBackend):
         """Get the S3 key for a result."""
         model_slug = self._model_slug(result.model_name)
         date_str = result.timestamp.strftime("%Y-%m-%d")
-        return f"{self.prefix}{model_slug}/{date_str}/{result.run_id}.json"
+        return f"{self.prefix}{model_slug}/{date_str}/{result.experiment_id}.json"
 
     def _index_key(self, model_slug: str) -> str:
         """Get the S3 key for a model's index file."""
@@ -133,7 +133,7 @@ class S3Backend(StorageBackend):
         # Update index with queryable fields
         model_slug = self._model_slug(result.model_name)
         index = self._load_model_index(model_slug)
-        index[result.run_id] = {
+        index[result.experiment_id] = {
             "key": key,
             "model_name": result.model_name,
             "backend_name": result.backend_name,
@@ -148,10 +148,10 @@ class S3Backend(StorageBackend):
         }
         self._save_model_index(model_slug, index)
 
-        return result.run_id
+        return result.experiment_id
 
-    def get(self, run_id: str) -> EvalResult | None:
-        """Retrieve an evaluation result by run_id."""
+    def get(self, experiment_id: str) -> EvalResult | None:
+        """Retrieve an evaluation result by experiment_id."""
         # Search all model indexes
         paginator = self._s3.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=self.bucket, Prefix=f"{self.prefix}_index/"):
@@ -160,8 +160,8 @@ class S3Backend(StorageBackend):
                 model_slug = index_key.split("/")[-1].replace(".json", "")
                 index = self._load_model_index(model_slug)
 
-                if run_id in index:
-                    key = index[run_id]["key"]
+                if experiment_id in index:
+                    key = index[experiment_id]["key"]
                     try:
                         response = self._s3.get_object(Bucket=self.bucket, Key=key)
                         data = json.loads(response["Body"].read().decode("utf-8"))
@@ -197,7 +197,7 @@ class S3Backend(StorageBackend):
         for model_slug in model_slugs:
             index = self._load_model_index(model_slug)
 
-            for _run_id, entry in index.items():
+            for _experiment_id, entry in index.items():
                 # Apply filters
                 if model_name and entry["model_name"] != model_name:
                     continue
@@ -229,7 +229,7 @@ class S3Backend(StorageBackend):
         results.sort(key=lambda r: r.timestamp, reverse=True)
         return results[:limit]
 
-    def delete(self, run_id: str) -> bool:
+    def delete(self, experiment_id: str) -> bool:
         """Delete an evaluation result from S3."""
         # Search all model indexes
         paginator = self._s3.get_paginator("list_objects_v2")
@@ -238,15 +238,15 @@ class S3Backend(StorageBackend):
                 model_slug = obj["Key"].split("/")[-1].replace(".json", "")
                 index = self._load_model_index(model_slug)
 
-                if run_id in index:
-                    key = index[run_id]["key"]
+                if experiment_id in index:
+                    key = index[experiment_id]["key"]
 
                     # Delete the object
                     with contextlib.suppress(ClientError):
                         self._s3.delete_object(Bucket=self.bucket, Key=key)
 
                     # Update index
-                    del index[run_id]
+                    del index[experiment_id]
                     self._save_model_index(model_slug, index)
                     return True
 

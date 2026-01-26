@@ -198,6 +198,7 @@ def postgres_backend(storage_docker_services):
     Creates tables before yielding, drops them after.
     """
     pytest.importorskip("psycopg")
+    pytest.importorskip("sqlalchemy")
 
     from olmo_eval.storage.postgres import PostgresBackend
 
@@ -207,11 +208,14 @@ def postgres_backend(storage_docker_services):
         database="olmo_eval_test",
         user="test",
         password="test",
+        pool_size=2,  # Small pool for testing
+        echo=False,  # Set to True for SQL debugging
     )
 
     backend.initialize()
     yield backend
     backend.cleanup()
+    backend.dispose()
 
 
 @pytest.fixture
@@ -244,7 +248,7 @@ def sample_eval_result():
     from olmo_eval.storage import EvalResult, TaskResult
 
     return EvalResult(
-        run_id="test-integration-001",
+        experiment_id="test-integration-001",
         model_name="llama3.1-8b",
         backend_name="vllm",
         timestamp=datetime(2024, 1, 15, 10, 30, 0),
@@ -297,7 +301,7 @@ def multiple_eval_results():
         for j, (task_name, metrics, primary_metric, primary_score) in enumerate(tasks_data):
             results.append(
                 EvalResult(
-                    run_id=f"run-{i}-{j}",
+                    experiment_id=f"run-{i}-{j}",
                     model_name=model,
                     backend_name="vllm",
                     timestamp=datetime(2024, 1, 15, 10 + i, j, 0),

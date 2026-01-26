@@ -64,6 +64,8 @@ s3 = [
 ]
 postgres = [
     "psycopg[binary]>=3.1.0",
+    "sqlalchemy>=2.0.46",
+    "alembic>=1.18.1",
 ]
 storage = [
     "olmo-eval-internal[s3,postgres]",

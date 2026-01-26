@@ -115,14 +115,14 @@ class TestEvalResult:
     def test_to_dict_minimal(self, sample_tasks, sample_timestamp):
         """Test to_dict with only required fields."""
         result = EvalResult(
-            run_id="abc123",
+            experiment_id="abc123",
             model_name="llama3.1-8b",
             backend_name="vllm",
             timestamp=sample_timestamp,
             tasks=sample_tasks,
         )
         d = result.to_dict()
-        assert d["run_id"] == "abc123"
+        assert d["experiment_id"] == "abc123"
         assert d["model_name"] == "llama3.1-8b"
         assert d["backend_name"] == "vllm"
         assert d["timestamp"] == "2024-01-15T10:30:00"
@@ -135,7 +135,7 @@ class TestEvalResult:
     def test_to_dict_full(self, sample_tasks, sample_timestamp):
         """Test to_dict with all fields."""
         result = EvalResult(
-            run_id="def456",
+            experiment_id="def456",
             model_name="olmo-2-7b",
             backend_name="hf",
             timestamp=sample_timestamp,
@@ -166,7 +166,7 @@ class TestEvalResult:
     def test_from_dict_minimal(self, sample_timestamp):
         """Test from_dict with only required fields."""
         data = {
-            "run_id": "xyz789",
+            "experiment_id": "xyz789",
             "model_name": "gpt-4",
             "backend_name": "litellm",
             "timestamp": "2024-01-15T10:30:00",
@@ -175,7 +175,7 @@ class TestEvalResult:
             ],
         }
         result = EvalResult.from_dict(data)
-        assert result.run_id == "xyz789"
+        assert result.experiment_id == "xyz789"
         assert result.model_name == "gpt-4"
         assert result.backend_name == "litellm"
         assert result.timestamp == sample_timestamp
@@ -188,7 +188,7 @@ class TestEvalResult:
     def test_from_dict_full(self, sample_timestamp):
         """Test from_dict with all fields."""
         data = {
-            "run_id": "full-test",
+            "experiment_id": "full-test",
             "model_name": "claude-3",
             "backend_name": "litellm",
             "timestamp": "2024-01-15T10:30:00",
@@ -221,7 +221,7 @@ class TestEvalResult:
     def test_roundtrip(self, sample_tasks, sample_timestamp):
         """Test to_dict/from_dict roundtrip."""
         original = EvalResult(
-            run_id="roundtrip-test",
+            experiment_id="roundtrip-test",
             model_name="test-model",
             backend_name="mock",
             timestamp=sample_timestamp,
@@ -238,7 +238,7 @@ class TestEvalResult:
             metadata={"info": "test"},
         )
         restored = EvalResult.from_dict(original.to_dict())
-        assert restored.run_id == original.run_id
+        assert restored.experiment_id == original.experiment_id
         assert restored.model_name == original.model_name
         assert restored.backend_name == original.backend_name
         assert restored.timestamp == original.timestamp
@@ -257,7 +257,7 @@ class TestEvalResult:
     def test_empty_tasks(self, sample_timestamp):
         """Test with empty tasks list."""
         result = EvalResult(
-            run_id="empty-tasks",
+            experiment_id="empty-tasks",
             model_name="test",
             backend_name="mock",
             timestamp=sample_timestamp,

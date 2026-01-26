@@ -2,72 +2,31 @@
 
 from __future__ import annotations
 
-import json
+import logging
 from datetime import datetime
 from typing import Any
 
-import psycopg
-from psycopg.rows import dict_row
+from olmo_eval.storage.base import EvalResult, StorageBackend
+from olmo_eval.storage.models import Base
+from olmo_eval.storage.repository import ExperimentRepository, InstancePredictionRepository
+from olmo_eval.storage.session import DatabaseSession
 
-from olmo_eval.storage.base import EvalResult, StorageBackend, TaskResult
+logger = logging.getLogger(__name__)
 
 
 class PostgresBackend(StorageBackend):
     """PostgreSQL-based storage backend for evaluation results.
 
-    Uses two tables:
-        - eval_runs: Main evaluation run metadata with S3 reference
-        - task_results: Individual task results with metrics and S3 keys
+    Uses SQLAlchemy ORM with three main tables:
+        - experiments: Main experiment metadata with S3 reference
+        - task_results: Task-level aggregated metrics
+        - instance_predictions: Instance-level predictions for pairwise comparison
 
     The database stores queryable metadata while S3 stores the full
     evaluation data (completions, predictions, detailed metrics).
-    """
 
-    SCHEMA = """
-    CREATE TABLE IF NOT EXISTS eval_runs (
-        run_id VARCHAR(64) PRIMARY KEY,
-        model_name VARCHAR(255) NOT NULL,
-        backend_name VARCHAR(50) NOT NULL,
-        timestamp TIMESTAMPTZ NOT NULL,
-        -- Experiment metadata
-        experiment_name VARCHAR(255),
-        workspace VARCHAR(100),
-        author VARCHAR(100),
-        tags TEXT[],
-        -- Version tracking
-        git_ref VARCHAR(100),
-        model_hash VARCHAR(64),
-        revision VARCHAR(255),
-        -- S3 reference for full evaluation data
-        s3_location VARCHAR(512),
-        -- Flexible storage
-        config JSONB,
-        metadata JSONB,
-        created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS task_results (
-        id SERIAL PRIMARY KEY,
-        run_id VARCHAR(64) REFERENCES eval_runs(run_id) ON DELETE CASCADE,
-        task_name VARCHAR(255) NOT NULL,
-        task_hash VARCHAR(64),
-        metrics JSONB NOT NULL,
-        num_instances INTEGER,
-        primary_metric VARCHAR(100),
-        primary_score DOUBLE PRECISION,
-        -- S3 keys for detailed task data
-        s3_metrics_key VARCHAR(512),
-        s3_predictions_key VARCHAR(512)
-    );
-
-    -- Indexes for common query patterns
-    CREATE INDEX IF NOT EXISTS idx_eval_runs_model ON eval_runs(model_name);
-    CREATE INDEX IF NOT EXISTS idx_eval_runs_timestamp ON eval_runs(timestamp);
-    CREATE INDEX IF NOT EXISTS idx_eval_runs_workspace ON eval_runs(workspace);
-    CREATE INDEX IF NOT EXISTS idx_eval_runs_author ON eval_runs(author);
-    CREATE INDEX IF NOT EXISTS idx_task_results_task ON task_results(task_name);
-    CREATE INDEX IF NOT EXISTS idx_task_results_run ON task_results(run_id);
-    CREATE INDEX IF NOT EXISTS idx_task_results_primary_score ON task_results(primary_score);
+    This is a facade over the modular SQLAlchemy components (session, repository, models)
+    to maintain backward compatibility with the original PostgresBackend interface.
     """
 
     def __init__(
@@ -78,6 +37,9 @@ class PostgresBackend(StorageBackend):
         user: str = "postgres",
         password: str = "",
         password_env: str | None = None,
+        pool_size: int = 5,
+        max_overflow: int = 10,
+        echo: bool = False,
     ):
         """Initialize the PostgreSQL backend.
 
@@ -88,155 +50,124 @@ class PostgresBackend(StorageBackend):
             user: Database user.
             password: Database password.
             password_env: Environment variable containing password (takes precedence).
+            pool_size: Connection pool size.
+            max_overflow: Maximum overflow connections.
+            echo: Whether to echo SQL statements (for debugging).
         """
-        import os
-
-        self.host = host
-        self.port = port
-        self.database = database
-        self.user = user
-        self.password = os.environ.get(password_env, password) if password_env else password
-
-        self._conninfo = (
-            f"host={host} port={port} dbname={database} user={user} password={self.password}"
+        self.db = DatabaseSession(
+            host=host,
+            port=port,
+            database=database,
+            user=user,
+            password=password,
+            password_env=password_env,
+            pool_size=pool_size,
+            max_overflow=max_overflow,
+            echo=echo,
         )
-
-    def _get_connection(self) -> psycopg.Connection:
-        """Create a new database connection."""
-        return psycopg.connect(self._conninfo, row_factory=dict_row)  # type: ignore[arg-type]
+        self._initialized = False
 
     def initialize(self) -> None:
-        """Create the database schema."""
-        with self._get_connection() as conn:
-            conn.execute(self.SCHEMA)
-            conn.commit()
+        """Create the database schema using SQLAlchemy models.
+
+        Note: In production, you should use Alembic migrations instead:
+            alembic upgrade head
+        """
+        if self._initialized:
+            logger.warning("Database already initialized")
+            return
+
+        self.db.initialize()
+
+        # Create all tables from models
+        Base.metadata.create_all(self.db.engine)
+        self._initialized = True
+
+        logger.info(f"Database schema initialized for {self.db.database}")
 
     def cleanup(self) -> None:
-        """Drop all tables (for testing)."""
-        with self._get_connection() as conn:
-            conn.execute("DROP TABLE IF EXISTS task_results CASCADE")
-            conn.execute("DROP TABLE IF EXISTS eval_runs CASCADE")
-            conn.commit()
+        """Drop all tables (for testing).
+
+        WARNING: This will delete all data in the database!
+        """
+        Base.metadata.drop_all(self.db.engine)
+        logger.info(f"Database schema dropped for {self.db.database}")
 
     def save(self, result: EvalResult) -> str:
-        """Save an evaluation result to PostgreSQL."""
-        with self._get_connection() as conn:
-            # Insert eval_run
-            conn.execute(
-                """
-                INSERT INTO eval_runs
-                    (run_id, model_name, backend_name, timestamp,
-                     experiment_name, workspace, author, tags,
-                     git_ref, model_hash, revision, s3_location,
-                     config, metadata)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (run_id) DO UPDATE SET
-                    model_name = EXCLUDED.model_name,
-                    backend_name = EXCLUDED.backend_name,
-                    timestamp = EXCLUDED.timestamp,
-                    experiment_name = EXCLUDED.experiment_name,
-                    workspace = EXCLUDED.workspace,
-                    author = EXCLUDED.author,
-                    tags = EXCLUDED.tags,
-                    git_ref = EXCLUDED.git_ref,
-                    model_hash = EXCLUDED.model_hash,
-                    revision = EXCLUDED.revision,
-                    s3_location = EXCLUDED.s3_location,
-                    config = EXCLUDED.config,
-                    metadata = EXCLUDED.metadata
-                """,
-                (
-                    result.run_id,
-                    result.model_name,
-                    result.backend_name,
-                    result.timestamp,
-                    result.experiment_name,
-                    result.workspace,
-                    result.author,
-                    result.tags,
-                    result.git_ref,
-                    result.model_hash,
-                    result.revision,
-                    result.s3_location,
-                    json.dumps(result.config) if result.config else None,
-                    json.dumps(result.metadata) if result.metadata else None,
-                ),
-            )
+        """Save an evaluation result to PostgreSQL.
 
-            # Delete existing task results for this run (for upsert behavior)
-            conn.execute("DELETE FROM task_results WHERE run_id = %s", (result.run_id,))
+        Args:
+            result: EvalResult dataclass containing run data.
 
-            # Insert task results
-            for task in result.tasks:
-                conn.execute(
-                    """
-                    INSERT INTO task_results
-                        (run_id, task_name, task_hash, metrics, num_instances,
-                         primary_metric, primary_score, s3_metrics_key, s3_predictions_key)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (
-                        result.run_id,
-                        task.task_name,
-                        task.task_hash,
-                        json.dumps(task.metrics),
-                        task.num_instances,
-                        task.primary_metric,
-                        task.primary_score,
-                        task.s3_metrics_key,
-                        task.s3_predictions_key,
-                    ),
+        Returns:
+            The experiment_id (experiment_id) of the saved evaluation.
+        """
+        with self.db.session() as session:
+            repo = ExperimentRepository(session)
+            experiment_id = repo.save(result)
+            logger.debug(f"Saved experiment {experiment_id}")
+            return experiment_id
+
+    def save_with_instances(
+        self,
+        result: EvalResult,
+        instances_by_task: dict[str, list[dict[str, Any]]],
+    ) -> str:
+        """Save an evaluation result with instance-level predictions.
+
+        Args:
+            result: EvalResult dataclass containing run data.
+            instances_by_task: Dict mapping task_name -> list of instance dicts.
+                Each instance dict should have:
+                - native_id: Original dataset ID
+                - doc_id: Sequential ID
+                - instance_metrics: Dict of metric names to values
+                - s3_prediction_key: Optional S3 key
+
+        Returns:
+            The experiment_id (experiment_id) of the saved evaluation.
+        """
+        with self.db.session() as session:
+            # Save experiment and task results
+            exp_repo = ExperimentRepository(session)
+            experiment_id = exp_repo.save(result)
+
+            # Save instance predictions
+            inst_repo = InstancePredictionRepository(session)
+
+            # Compute model_id for denormalization
+            model_id = None
+            if result.config:
+                import hashlib
+                import json
+
+                config_str = json.dumps(result.config, sort_keys=True)
+                model_id = hashlib.sha256(config_str.encode()).hexdigest()[:16]
+
+            for task_name, instances in instances_by_task.items():
+                inst_repo.save_instances(
+                    experiment_id=experiment_id,
+                    task_name=task_name,
+                    instances=instances,
+                    model_id=model_id,
                 )
 
-            conn.commit()
+            num_instances = sum(len(v) for v in instances_by_task.values())
+            logger.debug(f"Saved experiment {experiment_id} with {num_instances} instances")
+            return experiment_id
 
-        return result.run_id
+    def get(self, experiment_id: str) -> EvalResult | None:
+        """Retrieve an evaluation result by experiment_id.
 
-    def get(self, run_id: str) -> EvalResult | None:
-        """Retrieve an evaluation result by run_id."""
-        with self._get_connection() as conn:
-            # Get eval_run
-            row = conn.execute("SELECT * FROM eval_runs WHERE run_id = %s", (run_id,)).fetchone()
+        Args:
+            experiment_id: The unique identifier of the result (experiment_id).
 
-            if not row:
-                return None
-
-            # Get task results
-            task_rows = conn.execute(
-                "SELECT * FROM task_results WHERE run_id = %s", (run_id,)
-            ).fetchall()
-
-            tasks = [
-                TaskResult(
-                    task_name=tr["task_name"],  # type: ignore[index]
-                    metrics=tr["metrics"],  # type: ignore[index]
-                    num_instances=tr["num_instances"],  # type: ignore[index]
-                    task_hash=tr["task_hash"],  # type: ignore[index]
-                    primary_metric=tr["primary_metric"],  # type: ignore[index]
-                    primary_score=tr["primary_score"],  # type: ignore[index]
-                    s3_metrics_key=tr["s3_metrics_key"],  # type: ignore[index]
-                    s3_predictions_key=tr["s3_predictions_key"],  # type: ignore[index]
-                )
-                for tr in task_rows
-            ]
-
-            return EvalResult(
-                run_id=str(row["run_id"]),
-                model_name=row["model_name"],
-                backend_name=row["backend_name"],
-                timestamp=row["timestamp"],
-                tasks=tasks,
-                experiment_name=row["experiment_name"],
-                workspace=row["workspace"],
-                author=row["author"],
-                tags=row["tags"],
-                git_ref=row["git_ref"],
-                model_hash=row["model_hash"],
-                revision=row["revision"],
-                s3_location=row["s3_location"],
-                config=row["config"],
-                metadata=row["metadata"],
-            )
+        Returns:
+            EvalResult if found, None otherwise.
+        """
+        with self.db.session() as session:
+            repo = ExperimentRepository(session)
+            return repo.get(experiment_id)
 
     def query(
         self,
@@ -246,55 +177,41 @@ class PostgresBackend(StorageBackend):
         end_time: datetime | None = None,
         limit: int = 100,
     ) -> list[EvalResult]:
-        """Query evaluation results by filters."""
-        conditions = []
-        params: list[Any] = []
+        """Query evaluation results by filters.
 
-        if model_name:
-            conditions.append("e.model_name = %s")
-            params.append(model_name)
+        Args:
+            model_name: Filter by model name.
+            task_name: Filter by task name (results containing this task).
+            start_time: Filter by timestamp >= start_time.
+            end_time: Filter by timestamp <= end_time.
+            limit: Maximum number of results to return.
 
-        if task_name:
-            conditions.append(
-                "EXISTS (SELECT 1 FROM task_results t "
-                "WHERE t.run_id = e.run_id AND t.task_name = %s)"
-            )
-            params.append(task_name)
-
-        if start_time:
-            conditions.append("e.timestamp >= %s")
-            params.append(start_time)
-
-        if end_time:
-            conditions.append("e.timestamp <= %s")
-            params.append(end_time)
-
-        where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
-        params.append(limit)
-
-        query = f"""
-            SELECT e.run_id
-            FROM eval_runs e
-            {where_clause}
-            ORDER BY e.timestamp DESC
-            LIMIT %s
+        Returns:
+            List of matching evaluation results.
         """
+        with self.db.session() as session:
+            repo = ExperimentRepository(session)
+            return repo.query(
+                model_name=model_name,
+                task_name=task_name,
+                start_time=start_time,
+                end_time=end_time,
+                limit=limit,
+            )
 
-        results = []
-        with self._get_connection() as conn:
-            rows = conn.execute(query, params).fetchall()  # type: ignore[arg-type]
+    def delete(self, experiment_id: str) -> bool:
+        """Delete an evaluation result.
 
-            for row in rows:
-                result = self.get(str(row["run_id"]))
-                if result:
-                    results.append(result)
+        Args:
+            experiment_id: The unique identifier of the result to delete.
 
-        return results
+        Returns:
+            True if deleted, False if not found.
+        """
+        with self.db.session() as session:
+            repo = ExperimentRepository(session)
+            return repo.delete(experiment_id)
 
-    def delete(self, run_id: str) -> bool:
-        """Delete an evaluation result."""
-        with self._get_connection() as conn:
-            # CASCADE will delete task_results
-            result = conn.execute("DELETE FROM eval_runs WHERE run_id = %s", (run_id,))
-            conn.commit()
-            return result.rowcount > 0
+    def dispose(self) -> None:
+        """Dispose of the database engine and close all connections."""
+        self.db.dispose()

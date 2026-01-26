@@ -15,12 +15,12 @@ class TestPostgresBackend:
     @pytest.mark.integration
     def test_save_and_get(self, postgres_backend, sample_eval_result):
         """Test saving and retrieving a result."""
-        run_id = postgres_backend.save(sample_eval_result)
-        assert run_id == sample_eval_result.run_id
+        experiment_id = postgres_backend.save(sample_eval_result)
+        assert experiment_id == sample_eval_result.experiment_id
 
-        retrieved = postgres_backend.get(run_id)
+        retrieved = postgres_backend.get(experiment_id)
         assert retrieved is not None
-        assert retrieved.run_id == sample_eval_result.run_id
+        assert retrieved.experiment_id == sample_eval_result.experiment_id
         assert retrieved.model_name == sample_eval_result.model_name
         assert retrieved.backend_name == sample_eval_result.backend_name
         assert len(retrieved.tasks) == 2
@@ -36,11 +36,11 @@ class TestPostgresBackend:
         """Test deleting a result."""
         postgres_backend.save(sample_eval_result)
 
-        deleted = postgres_backend.delete(sample_eval_result.run_id)
+        deleted = postgres_backend.delete(sample_eval_result.experiment_id)
         assert deleted is True
 
         # Verify it's gone
-        retrieved = postgres_backend.get(sample_eval_result.run_id)
+        retrieved = postgres_backend.get(sample_eval_result.experiment_id)
         assert retrieved is None
 
     @pytest.mark.integration
@@ -98,14 +98,14 @@ class TestPostgresBackend:
 
     @pytest.mark.integration
     def test_upsert_behavior(self, postgres_backend, sample_eval_result):
-        """Test that saving the same run_id updates the record."""
+        """Test that saving the same experiment_id updates the record."""
         postgres_backend.save(sample_eval_result)
 
         # Modify and save again
         from olmo_eval.storage import EvalResult, TaskResult
 
         updated = EvalResult(
-            run_id=sample_eval_result.run_id,
+            experiment_id=sample_eval_result.experiment_id,
             model_name="updated-model",
             backend_name="hf",
             timestamp=sample_eval_result.timestamp,
@@ -113,7 +113,7 @@ class TestPostgresBackend:
         )
         postgres_backend.save(updated)
 
-        retrieved = postgres_backend.get(sample_eval_result.run_id)
+        retrieved = postgres_backend.get(sample_eval_result.experiment_id)
         assert retrieved.model_name == "updated-model"
         assert len(retrieved.tasks) == 1
         assert retrieved.tasks[0].task_name == "new_task"
@@ -125,12 +125,12 @@ class TestS3Backend:
     @pytest.mark.integration
     def test_save_and_get(self, s3_backend, sample_eval_result):
         """Test saving and retrieving a result."""
-        run_id = s3_backend.save(sample_eval_result)
-        assert run_id == sample_eval_result.run_id
+        experiment_id = s3_backend.save(sample_eval_result)
+        assert experiment_id == sample_eval_result.experiment_id
 
-        retrieved = s3_backend.get(run_id)
+        retrieved = s3_backend.get(experiment_id)
         assert retrieved is not None
-        assert retrieved.run_id == sample_eval_result.run_id
+        assert retrieved.experiment_id == sample_eval_result.experiment_id
         assert retrieved.model_name == sample_eval_result.model_name
         assert len(retrieved.tasks) == 2
 
@@ -145,11 +145,11 @@ class TestS3Backend:
         """Test deleting a result."""
         s3_backend.save(sample_eval_result)
 
-        deleted = s3_backend.delete(sample_eval_result.run_id)
+        deleted = s3_backend.delete(sample_eval_result.experiment_id)
         assert deleted is True
 
         # Verify it's gone
-        retrieved = s3_backend.get(sample_eval_result.run_id)
+        retrieved = s3_backend.get(sample_eval_result.experiment_id)
         assert retrieved is None
 
     @pytest.mark.integration
@@ -195,7 +195,7 @@ class TestS3Backend:
         # Save results for different models
         for i, model in enumerate(["model-a", "model-b", "model-c"]):
             result = EvalResult(
-                run_id=f"run-{i}",
+                experiment_id=f"run-{i}",
                 model_name=model,
                 backend_name="vllm",
                 timestamp=datetime(2024, 1, 15, 10, 0, 0),
