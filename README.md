@@ -170,7 +170,7 @@ olmo-eval run --async-stream --num-workers 2 --gpus-per-worker 4 -m llama3.1-70b
 
 **Key Differences:**
 - **Async**: Workers collect all instances first, then batch process. Works with any backend.
-- **Streaming**: Requests flow continuously through vLLM's async engine. Maximum throughput, earliest completion. vLLM only.
+- **Streaming**: Requests flow continuously through vLLM's async engine. Only supported for generative tasks. vLLM only.
 
 ## Key Concepts
 
