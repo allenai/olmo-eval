@@ -14,9 +14,6 @@ from rich.table import Table
 from olmo_eval.backends import Backend, BackendType, create_backend
 from olmo_eval.core import expand_tasks, get_model_config
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
-from olmo_eval.evals.suites import suite_exists
-from olmo_eval.evals.tasks import list_regimes, list_tasks, list_variants
-from olmo_eval.evals.tasks.core.registry import parse_task_spec
 from olmo_eval.runners.mixins import RunnerResultsMixin
 from olmo_eval.runners.utils import (
     TaskResult,
@@ -74,45 +71,7 @@ class SyncEvalRunner(RunnerResultsMixin):
         Raises:
             ValidationError: If any task specs are invalid.
         """
-        errors: list[str] = []
-
-        # Validate task specs
-        available_tasks = set(list_tasks())
-        regimes_by_task = list_regimes()
-        variants_by_task = list_variants()
-
-        for spec in self.task_specs:
-            # Check if it's a suite
-            if suite_exists(spec):
-                continue
-
-            # Parse task_name[:variant1[:variant2...]][::key=value,...] format
-            # Note: regimes are now treated as variants
-            task_name, variants, _overrides = parse_task_spec(spec)
-
-            if task_name not in available_tasks:
-                errors.append(f"Unknown task or suite: '{spec}'")
-                continue
-
-            # Validate each variant/regime exists (check both registries)
-            task_variants = set(variants_by_task.get(task_name, []))
-            task_regimes = set(regimes_by_task.get(task_name, []))
-            all_valid_variants = task_variants | task_regimes
-
-            for variant in variants:
-                if variant not in all_valid_variants:
-                    available_list = sorted(all_valid_variants)
-                    if available_list:
-                        errors.append(
-                            f"Unknown variant/regime '{variant}' for task '{task_name}'. "
-                            f"Available: {', '.join(available_list)}"
-                        )
-                    else:
-                        errors.append(
-                            f"Unknown variant/regime '{variant}' for task '{task_name}'. "
-                            f"This task has no registered variants or regimes."
-                        )
-
+        errors = self._validate_task_specs()
         if errors:
             raise ValidationError("\n".join(errors))
 

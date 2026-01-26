@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import uuid
+from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
@@ -19,11 +20,148 @@ console = Console()
 logger = logging.getLogger(__name__)
 
 
+# -----------------------------------------------------------------------------
+# Dataclasses for metrics.json output
+# -----------------------------------------------------------------------------
+
+
+@dataclass
+class ModelConfig:
+    """Configuration for a single model."""
+
+    model: str
+    backend: str
+    dtype: str = "auto"
+    tokenizer: str | None = None
+    revision: str | None = None
+    attention_backend: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dict, excluding None values."""
+        result: dict[str, Any] = {
+            "model": self.model,
+            "backend": self.backend,
+            "dtype": self.dtype,
+        }
+        if self.tokenizer:
+            result["tokenizer"] = self.tokenizer
+        if self.revision:
+            result["revision"] = self.revision
+        if self.attention_backend:
+            result["attention_backend"] = self.attention_backend
+        return result
+
+
+@dataclass
+class TaskMetricsEntry:
+    """A task entry in the metrics output."""
+
+    task: str
+    metrics: dict[str, float]
+    num_instances: int
+    model: str | None = None  # Only set for multi-model format
+    primary_metric: str | None = None
+    config: dict[str, Any] | None = None
+    duration_seconds: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dict, excluding None values."""
+        result: dict[str, Any] = {
+            "task": self.task,
+            "metrics": self.metrics,
+            "num_instances": self.num_instances,
+        }
+        if self.model is not None:
+            result["model"] = self.model
+        if self.primary_metric is not None:
+            result["primary_metric"] = self.primary_metric
+        if self.config is not None:
+            result["config"] = self.config
+        if self.duration_seconds is not None:
+            result["duration_seconds"] = self.duration_seconds
+        return result
+
+
+@dataclass
+class ScoreSummary:
+    """Summary entry with metric name and score."""
+
+    metric: str
+    score: float
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dict."""
+        return {"metric": self.metric, "score": self.score}
+
+
+@dataclass
+class MetricsOutput:
+    """Top-level metrics.json output structure."""
+
+    timestamp: str
+    config: dict[str, Any]  # ModelConfig.to_dict() or {"models": {name: config}}
+    tasks: list[dict[str, Any]]  # List of TaskMetricsEntry.to_dict()
+    summary: dict[str, Any]  # task_name -> ScoreSummary or model -> task -> ScoreSummary
+    errors: list[dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dict for JSON serialization."""
+        return asdict(self)
+
+
 class RunnerResultsMixin:
     """Shared results-writing functionality for runners."""
 
     output_dir: str
     storages: list[StorageBackend]
+    task_specs: list[str]
+
+    def _validate_task_specs(self) -> list[str]:
+        """Validate task specs and return list of errors.
+
+        Returns:
+            List of error messages (empty if all specs are valid).
+        """
+        from olmo_eval.evals.suites import suite_exists
+        from olmo_eval.evals.tasks import list_regimes, list_tasks, list_variants
+        from olmo_eval.evals.tasks.core.registry import parse_task_spec
+
+        errors: list[str] = []
+        available_tasks = set(list_tasks())
+        regimes_by_task = list_regimes()
+        variants_by_task = list_variants()
+
+        for spec in self.task_specs:
+            if suite_exists(spec):
+                continue
+
+            # Parse task_name[:variant1[:variant2...]][::key=value,...] format
+            task_name, variants, _overrides = parse_task_spec(spec)
+
+            if task_name not in available_tasks:
+                errors.append(f"Unknown task or suite: '{spec}'")
+                continue
+
+            # Validate each variant/regime exists (check both registries)
+            task_variants = set(variants_by_task.get(task_name, []))
+            task_regimes = set(regimes_by_task.get(task_name, []))
+            all_valid_variants = task_variants | task_regimes
+
+            for variant in variants:
+                if variant not in all_valid_variants:
+                    available_list = sorted(all_valid_variants)
+                    if available_list:
+                        errors.append(
+                            f"Unknown variant/regime '{variant}' for task '{task_name}'. "
+                            f"Available: {', '.join(available_list)}"
+                        )
+                    else:
+                        errors.append(
+                            f"Unknown variant/regime '{variant}' for task '{task_name}'. "
+                            f"This task has no registered variants or regimes."
+                        )
+
+        return errors
 
     def _save_results(self, results: dict[str, Any]) -> None:
         """Save results to all configured storage backends."""
@@ -85,7 +223,7 @@ class RunnerResultsMixin:
                     logger.info(f"  {suite_name}: {score:.4f} ({metric_name})")
 
     def _write_metrics_json(self, results: dict[str, Any], multi_model: bool = False) -> None:
-        """Write metrics.json for Beaker display.
+        """Write metrics.json
 
         Args:
             results: Results dictionary
@@ -101,113 +239,96 @@ class RunnerResultsMixin:
 
         os.makedirs(self.output_dir, exist_ok=True)
         with open(metrics_file, "w") as f:
-            json.dump(metrics_output, f, indent=2)
+            json.dump(metrics_output.to_dict(), f, indent=2)
 
         logger.info(f"Metrics written to {metrics_file}")
         console.print(f"[green]Metrics written to {metrics_file}[/green]")
 
-    def _build_single_model_metrics(self, results: dict[str, Any]) -> dict[str, Any]:
+    def _build_single_model_metrics(self, results: dict[str, Any]) -> MetricsOutput:
         """Build metrics output for single-model format."""
-        # Build config section from stored model config
+        # Build config from stored model config
         model_cfg = results.get("_model_config", {})
-        config: dict[str, Any] = {
-            "model": model_cfg.get("model", results.get("model", "")),
-            "backend": model_cfg.get("backend", results.get("backend", "")),
-            "dtype": model_cfg.get("dtype", "auto"),
-        }
-        # Only include optional fields if they have values
-        if model_cfg.get("tokenizer"):
-            config["tokenizer"] = model_cfg["tokenizer"]
-        if model_cfg.get("revision"):
-            config["revision"] = model_cfg["revision"]
-        if model_cfg.get("attention_backend"):
-            config["attention_backend"] = model_cfg["attention_backend"]
+        config = ModelConfig(
+            model=model_cfg.get("model", results.get("model", "")),
+            backend=model_cfg.get("backend", results.get("backend", "")),
+            dtype=model_cfg.get("dtype", "auto"),
+            tokenizer=model_cfg.get("tokenizer"),
+            revision=model_cfg.get("revision"),
+            attention_backend=model_cfg.get("attention_backend"),
+        )
 
-        # Build enhanced task entries
-        tasks_list = []
+        # Build task entries
+        tasks_list: list[TaskMetricsEntry] = []
         for task_name, task_data in results.get("tasks", {}).items():
-            task_entry: dict[str, Any] = {
-                "task": task_name,
-                "metrics": task_data.get("metrics", {}),
-                "num_instances": task_data.get("num_instances", 0),
-            }
-            if task_data.get("primary_metric"):
-                task_entry["primary_metric"] = task_data["primary_metric"]
-            if task_data.get("config"):
-                task_entry["config"] = task_data["config"]
-            if task_data.get("duration_seconds"):
-                task_entry["duration_seconds"] = task_data["duration_seconds"]
-            tasks_list.append(task_entry)
+            entry = TaskMetricsEntry(
+                task=task_name,
+                metrics=task_data.get("metrics", {}),
+                num_instances=task_data.get("num_instances", 0),
+                primary_metric=task_data.get("primary_metric"),
+                config=task_data.get("config"),
+                duration_seconds=task_data.get("duration_seconds"),
+            )
+            tasks_list.append(entry)
 
         # Build summary with primary metric for each task
-        summary: dict[str, dict[str, Any]] = {}
+        summary: dict[str, ScoreSummary] = {}
         for task_name, task_data in results.get("tasks", {}).items():
             metrics = task_data.get("metrics", {})
             preferred = task_data.get("primary_metric")
             primary = get_primary_metric(metrics, preferred)
             if primary:
                 metric_name, score = primary
-                summary[task_name] = {"metric": metric_name, "score": score}
+                summary[task_name] = ScoreSummary(metric=metric_name, score=score)
 
-        # Add suite summaries to summary (without separate suites list)
+        # Add suite summaries
         if "suites" in results:
             for suite_name, suite_data in results["suites"].items():
                 metrics = suite_data.get("metrics", {})
                 primary = get_primary_metric(metrics)
                 if primary:
                     metric_name, score = primary
-                    summary[suite_name] = {"metric": metric_name, "score": score}
+                    summary[suite_name] = ScoreSummary(metric=metric_name, score=score)
 
-        return {
-            "timestamp": results.get("timestamp", ""),
-            "config": config,
-            "tasks": tasks_list,
-            "summary": summary,
-            "errors": results.get("errors", []),
-        }
+        return MetricsOutput(
+            timestamp=results.get("timestamp", ""),
+            config=config.to_dict(),
+            tasks=[t.to_dict() for t in tasks_list],
+            summary={k: v.to_dict() for k, v in summary.items()},
+            errors=results.get("errors", []),
+        )
 
-    def _build_multi_model_metrics(self, results: dict[str, Any]) -> dict[str, Any]:
+    def _build_multi_model_metrics(self, results: dict[str, Any]) -> MetricsOutput:
         """Build metrics output for multi-model format."""
-        # Build config section with per-model details
-        models_config: dict[str, dict[str, Any]] = {}
+        # Build config for each model
+        models_config: dict[str, ModelConfig] = {}
         for model_name, model_data in results.get("models", {}).items():
             model_cfg = model_data.get("_model_config", {})
-            cfg: dict[str, Any] = {
-                "model": model_cfg.get("model", model_data.get("model", "")),
-                "backend": model_cfg.get("backend", model_data.get("backend", "")),
-                "dtype": model_cfg.get("dtype", "auto"),
-            }
-            # Only include optional fields if they have values
-            if model_cfg.get("tokenizer"):
-                cfg["tokenizer"] = model_cfg["tokenizer"]
-            if model_cfg.get("revision"):
-                cfg["revision"] = model_cfg["revision"]
-            if model_cfg.get("attention_backend"):
-                cfg["attention_backend"] = model_cfg["attention_backend"]
-            models_config[model_name] = cfg
+            models_config[model_name] = ModelConfig(
+                model=model_cfg.get("model", model_data.get("model", "")),
+                backend=model_cfg.get("backend", model_data.get("backend", "")),
+                dtype=model_cfg.get("dtype", "auto"),
+                tokenizer=model_cfg.get("tokenizer"),
+                revision=model_cfg.get("revision"),
+                attention_backend=model_cfg.get("attention_backend"),
+            )
 
-        config: dict[str, Any] = {"models": models_config}
-
-        # Build enhanced task entries - flatten (model, task) pairs
-        tasks_list = []
+        # Build task entries - flatten (model, task) pairs
+        tasks_list: list[TaskMetricsEntry] = []
         for model_name, model_data in results.get("models", {}).items():
             for task_name, task_data in model_data.get("tasks", {}).items():
-                task_entry: dict[str, Any] = {
-                    "model": model_name,
-                    "task": task_name,
-                    "metrics": task_data.get("metrics", {}),
-                    "num_instances": task_data.get("num_instances", 0),
-                }
-                if task_data.get("primary_metric"):
-                    task_entry["primary_metric"] = task_data["primary_metric"]
-                if task_data.get("config"):
-                    task_entry["config"] = task_data["config"]
-                if task_data.get("duration_seconds"):
-                    task_entry["duration_seconds"] = task_data["duration_seconds"]
-                tasks_list.append(task_entry)
+                entry = TaskMetricsEntry(
+                    task=task_name,
+                    model=model_name,
+                    metrics=task_data.get("metrics", {}),
+                    num_instances=task_data.get("num_instances", 0),
+                    primary_metric=task_data.get("primary_metric"),
+                    config=task_data.get("config"),
+                    duration_seconds=task_data.get("duration_seconds"),
+                )
+                tasks_list.append(entry)
 
         # Build summary with primary metric for each (model, task) pair
-        summary: dict[str, dict[str, dict[str, Any]]] = {}
+        summary: dict[str, dict[str, ScoreSummary]] = {}
         for model_name, model_data in results.get("models", {}).items():
             summary[model_name] = {}
             for task_name, task_data in model_data.get("tasks", {}).items():
@@ -216,7 +337,7 @@ class RunnerResultsMixin:
                 primary = get_primary_metric(metrics, preferred)
                 if primary:
                     metric_name, score = primary
-                    summary[model_name][task_name] = {"metric": metric_name, "score": score}
+                    summary[model_name][task_name] = ScoreSummary(metric=metric_name, score=score)
 
             # Add suite summaries to this model's summary
             if "suites" in model_data:
@@ -225,15 +346,20 @@ class RunnerResultsMixin:
                     primary = get_primary_metric(metrics)
                     if primary:
                         metric_name, score = primary
-                        summary[model_name][suite_name] = {"metric": metric_name, "score": score}
+                        summary[model_name][suite_name] = ScoreSummary(
+                            metric=metric_name, score=score
+                        )
 
-        return {
-            "timestamp": results.get("timestamp", ""),
-            "config": config,
-            "tasks": tasks_list,
-            "summary": summary,
-            "errors": results.get("errors", []),
-        }
+        return MetricsOutput(
+            timestamp=results.get("timestamp", ""),
+            config={"models": {k: v.to_dict() for k, v in models_config.items()}},
+            tasks=[t.to_dict() for t in tasks_list],
+            summary={
+                model: {task: s.to_dict() for task, s in tasks.items()}
+                for model, tasks in summary.items()
+            },
+            errors=results.get("errors", []),
+        )
 
     def _report_task_completion(self, model_name: str, result: TaskResult) -> None:
         """Report when a (model, task) pair completes."""
@@ -263,9 +389,6 @@ class AsyncRunnerMixin(RunnerResultsMixin):
 
     def validate(self) -> None:
         """Validate configuration."""
-        from olmo_eval.evals.suites import suite_exists
-        from olmo_eval.evals.tasks import list_regimes, list_tasks, list_variants
-        from olmo_eval.evals.tasks.core.registry import parse_task_spec
         from olmo_eval.runners.synchronous import ValidationError
 
         if not self.model_names:
@@ -274,43 +397,8 @@ class AsyncRunnerMixin(RunnerResultsMixin):
         if not self.task_specs:
             raise ValidationError("task_specs is required")
 
-        # Validate task specs
-        errors: list[str] = []
-        available_tasks = set(list_tasks())
-        regimes_by_task = list_regimes()
-        variants_by_task = list_variants()
-
-        for spec in self.task_specs:
-            if suite_exists(spec):
-                continue
-
-            # Parse task_name[:variant1[:variant2...]][::key=value,...] format
-            # Note: regimes are now treated as variants
-            task_name, variants, _overrides = parse_task_spec(spec)
-
-            if task_name not in available_tasks:
-                errors.append(f"Unknown task or suite: '{spec}'")
-                continue
-
-            # Validate each variant/regime exists (check both registries)
-            task_variants = set(variants_by_task.get(task_name, []))
-            task_regimes = set(regimes_by_task.get(task_name, []))
-            all_valid_variants = task_variants | task_regimes
-
-            for variant in variants:
-                if variant not in all_valid_variants:
-                    available_list = sorted(all_valid_variants)
-                    if available_list:
-                        errors.append(
-                            f"Unknown variant/regime '{variant}' for task '{task_name}'. "
-                            f"Available: {', '.join(available_list)}"
-                        )
-                    else:
-                        errors.append(
-                            f"Unknown variant/regime '{variant}' for task '{task_name}'. "
-                            f"This task has no registered variants or regimes."
-                        )
-
+        # Validate task specs using shared helper
+        errors = self._validate_task_specs()
         if errors:
             raise ValidationError("\n".join(errors))
 
