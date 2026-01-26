@@ -1,0 +1,345 @@
+"""Run command for olmo-eval CLI."""
+
+from typing import Any
+
+import click
+
+from olmo_eval.cli.utils import (
+    console,
+    parse_model_spec,
+    parse_task_spec_with_overrides,
+    print_runtime_environment,
+)
+from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
+
+
+@click.command()
+@click.option(
+    "--model",
+    "-m",
+    "models",
+    multiple=True,
+    required=True,
+    help="Model name or preset. Can specify multiple times for multi-model runs.",
+)
+@click.option("--task", "-t", multiple=True, required=True, help="Task spec or suite")
+@click.option("--config", "-c", type=click.Path(exists=True), help="YAML config file")
+@click.option("--output-dir", "-o", default=BEAKER_RESULT_DIR, help="Output directory")
+@click.option("--num-shots", type=int, help="Override num_fewshot for all tasks")
+@click.option("--limit", type=int, help="Override instance limit for all tasks")
+@click.option("--temperature", type=float, help="Override temperature for all tasks")
+@click.option("--backend", type=click.Choice(["hf", "vllm", "litellm"]), help="Override backend")
+@click.option(
+    "--storage-backend",
+    "-s",
+    "storage_backends",
+    type=click.Choice(["s3", "postgres"]),
+    multiple=True,
+    help="Storage backend(s) for results. Can be specified multiple times.",
+)
+@click.option(
+    "--storage-config",
+    type=click.Path(exists=True),
+    help="YAML config file for storage backend",
+)
+@click.option("--dry-run", is_flag=True, help="Print config and exit without running")
+@click.option(
+    "--async",
+    "use_async",
+    is_flag=True,
+    help="Use async runner for parallel task execution",
+)
+@click.option(
+    "--async-stream",
+    "use_async_stream",
+    is_flag=True,
+    help="Use streaming async runner with vLLM's AsyncLLMEngine for true continuous batching",
+)
+@click.option(
+    "--num-workers",
+    type=int,
+    default=None,
+    help="Number of workers for async mode (default: auto-detect from GPUs)",
+)
+@click.option(
+    "--gpus-per-worker",
+    type=int,
+    default=1,
+    help="Number of GPUs each worker uses (default: 1)",
+)
+@click.option(
+    "--attention-backend",
+    type=click.Choice(["FLASHINFER", "FLASH_ATTN"], case_sensitive=False),
+    default=None,
+    help="vLLM attention backend (e.g., FLASHINFER for better performance on supported GPUs)",
+)
+@click.option(
+    "--parallelism",
+    "-P",
+    type=int,
+    default=1,
+    help="Number of model instances to run in parallel (passed from launch command)",
+)
+def run(
+    models: tuple[str, ...],
+    task: tuple[str, ...],
+    config: str | None,
+    output_dir: str,
+    num_shots: int | None,
+    limit: int | None,
+    temperature: float | None,
+    backend: str | None,
+    storage_backends: tuple[str, ...],
+    storage_config: str | None,
+    dry_run: bool,
+    use_async: bool,
+    use_async_stream: bool,
+    num_workers: int | None,
+    gpus_per_worker: int,
+    attention_backend: str | None,
+    parallelism: int,
+) -> None:
+    """Run evaluation on specified tasks.
+
+    Supports multiple models: use -m multiple times for multi-model runs.
+    With --async, runs all (model, task) pairs with per-model workers.
+    With --async-stream, uses vLLM's AsyncLLMEngine for true continuous batching.
+    Without --async or --async-stream, runs sequentially for each model.
+
+    Inline overrides can be specified in -m and -t flags:
+        -m model::backend=vllm,tokenizer=allenai/dolma2-tokenizer
+        -t task:olmes::temperature=0.6,num_fewshot=5
+    """
+    import logging
+
+    from olmo_eval.runners import SyncEvalRunner, ValidationError
+
+    # Configure logging for Beaker job visibility
+    logging.basicConfig(
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        level=logging.INFO,
+    )
+
+    # Suppress noisy HuggingFace warnings
+    import os
+
+    os.environ.setdefault("HF_DATASETS_DISABLE_PROGRESS_BAR", "1")
+    os.environ.setdefault("DATASETS_VERBOSITY", "error")
+    logging.getLogger("datasets").setLevel(logging.ERROR)
+
+    # Print runtime environment summary
+    print_runtime_environment()
+
+    # Parse model specs to extract inline overrides
+    parsed_models: list[tuple[str, dict[str, Any]]] = [parse_model_spec(m) for m in models]
+
+    # Parse task specs to extract inline overrides
+    task_overrides: dict[str, dict[str, Any]] = {}
+    task_specs: list[str] = []
+    for t in task:
+        spec_without_overrides, overrides = parse_task_spec_with_overrides(t)
+        task_specs.append(spec_without_overrides)
+        if overrides:
+            task_overrides[spec_without_overrides] = overrides
+
+    # Extract model-level overrides
+    first_model_name, first_model_overrides = parsed_models[0] if parsed_models else ("", {})
+
+    # Model overrides can specify backend/attention_backend
+    if not backend and "backend" in first_model_overrides:
+        backend = first_model_overrides["backend"]
+    if not attention_backend and "attention_backend" in first_model_overrides:
+        attention_backend = first_model_overrides["attention_backend"]
+
+    # Warning for num-workers without async
+    if num_workers is not None and not use_async and not use_async_stream:
+        console.print(
+            "[yellow]Warning:[/yellow] --num-workers has no effect without "
+            "--async or --async-stream"
+        )
+
+    if gpus_per_worker != 1 and not use_async and not use_async_stream:
+        console.print(
+            "[yellow]Warning:[/yellow] --gpus-per-worker has no effect without "
+            "--async or --async-stream"
+        )
+
+    # Warning for conflicting flags
+    if use_async and use_async_stream:
+        console.print(
+            "[yellow]Warning:[/yellow] Both --async and --async-stream specified. "
+            "Using --async-stream."
+        )
+        use_async = False
+
+    # Warning for backend override with async-stream
+    if use_async_stream and backend and backend != "vllm":
+        console.print(
+            f"[yellow]Warning:[/yellow] --async-stream only supports vLLM backend, "
+            f"ignoring --backend={backend}"
+        )
+
+    # Set up storage backends if specified
+    storages: list = []
+    if storage_backends:
+        from olmo_eval.storage import get_backend
+
+        # Load storage config if provided
+        storage_cfg = None
+        if storage_config:
+            from omegaconf import DictConfig, OmegaConf
+
+            cfg = OmegaConf.load(storage_config)
+            if isinstance(cfg, DictConfig):
+                storage_cfg = cfg
+            else:
+                console.print("[red]Error:[/red] Storage config must be a YAML dict, not a list")
+                raise SystemExit(1)
+
+        for backend_name in storage_backends:
+            # Get backend-specific config section
+            storage_kwargs: dict = {}
+            if storage_cfg:
+                backend_cfg = storage_cfg.get(backend_name, {})
+                storage_kwargs = OmegaConf.to_container(backend_cfg, resolve=True) or {}  # type: ignore
+
+            try:
+                storage = get_backend(backend_name, **storage_kwargs)
+                storages.append(storage)
+                console.print(f"[green]Initialized {backend_name} storage backend[/green]")
+            except ImportError as e:
+                console.print(f"[red]Storage backend error:[/red] {e}")
+                raise SystemExit(1) from None
+            except Exception as e:
+                console.print(
+                    f"[red]Failed to initialize {backend_name} storage backend:[/red] {e}"
+                )
+                raise SystemExit(1) from None
+
+    # Check for incompatible task types with --async-stream
+    if use_async_stream:
+        bpb_tasks = [t for t in task_specs if ":bpb" in t]
+        if bpb_tasks:
+            console.print(
+                "\n[bold red]Error:[/bold red] The following :bpb tasks cannot run "
+                "with --async-stream:\n"
+                f"  {', '.join(bpb_tasks)}\n\n"
+                "[yellow]BPB (bits-per-byte) tasks use loglikelihood scoring which "
+                "requires\n"
+                "prompt_logprobs - a feature not supported by the streaming vLLM "
+                "backend.[/yellow]\n\n"
+                "Use [bold]--async[/bold] or the default sequential mode instead:\n"
+                f"  olmo-eval run -m <model> -t {' -t '.join(bpb_tasks)} --async\n"
+            )
+            raise SystemExit(1)
+
+    # Extract model names and build per-model overrides dict
+    model_names = [name for name, _overrides in parsed_models]
+    per_model_overrides = {name: overrides for name, overrides in parsed_models if overrides}
+
+    # Choose runner based on --async or --async-stream flag
+    if use_async_stream:
+        from olmo_eval.runners.asynchronous import StreamingEvalRunner
+
+        console.print("[bold cyan]Using StreamingEvalRunner[/bold cyan]")
+        console.print(f"[bold]Models:[/bold] {len(model_names)}")
+
+        runner = StreamingEvalRunner(
+            model_names=model_names,
+            task_specs=task_specs,
+            output_dir=output_dir,
+            num_shots_override=num_shots,
+            limit_override=limit,
+            temperature=temperature,
+            storages=storages,
+            num_workers=num_workers,
+            gpus_per_worker=gpus_per_worker,
+            attention_backend=attention_backend.upper() if attention_backend else None,
+            task_overrides=task_overrides,
+            model_overrides=per_model_overrides,
+        )
+    elif use_async:
+        from olmo_eval.runners.asynchronous import AsyncEvalRunner
+
+        console.print("[bold cyan]Using AsyncEvalRunner[/bold cyan]")
+        console.print(f"[bold]Models:[/bold] {len(model_names)}")
+
+        runner = AsyncEvalRunner(
+            model_names=model_names,
+            task_specs=task_specs,
+            output_dir=output_dir,
+            num_shots_override=num_shots,
+            limit_override=limit,
+            temperature=temperature,
+            backend_override=backend,
+            storages=storages,
+            num_workers=num_workers,
+            gpus_per_worker=gpus_per_worker,
+            attention_backend=attention_backend.upper() if attention_backend else None,
+            task_overrides=task_overrides,
+            model_overrides=per_model_overrides,
+        )
+    else:
+        # Sequential runner - run each model in sequence
+        if len(model_names) > 1:
+            console.print(f"[bold cyan]Running {len(model_names)} models sequentially[/bold cyan]")
+
+        # For sequential mode with multiple models, run each model separately
+        for i, (model_name, model_overrides) in enumerate(parsed_models):
+            if len(model_names) > 1:
+                console.print(f"\n[bold]Model {i + 1}/{len(model_names)}:[/bold] {model_name}")
+
+            # Apply per-model backend overrides
+            effective_backend = model_overrides.get("backend", backend)
+            effective_attention_backend = model_overrides.get(
+                "attention_backend", attention_backend
+            )
+
+            runner = SyncEvalRunner(
+                model_name=model_name,
+                task_specs=task_specs,
+                output_dir=output_dir,
+                num_shots_override=num_shots,
+                limit_override=limit,
+                temperature=temperature,
+                backend_override=effective_backend,
+                storages=storages,
+                attention_backend=effective_attention_backend.upper()
+                if effective_attention_backend
+                else None,
+                task_overrides=task_overrides,
+                model_overrides=model_overrides,
+            )
+
+            try:
+                runner.validate()
+            except ValidationError as e:
+                console.print(f"[red]Validation error:[/red]\n{e}")
+                raise SystemExit(1) from None
+
+            if dry_run:
+                runner.print_config()
+            else:
+                try:
+                    runner.run()
+                except Exception as e:
+                    console.print(f"\n[bold red]Evaluation failed:[/bold red] {e}")
+                    raise SystemExit(1) from None
+
+        return  # Exit early since we handled everything in the loop
+
+    # Validate inputs before running (applies to both dry-run and actual runs)
+    try:
+        runner.validate()
+    except ValidationError as e:
+        console.print(f"[red]Validation error:[/red]\n{e}")
+        raise SystemExit(1) from None
+
+    if dry_run:
+        runner.print_config()
+    else:
+        try:
+            runner.run()
+        except Exception as e:
+            console.print(f"\n[bold red]Evaluation failed:[/bold red] {e}")
+            raise SystemExit(1) from None

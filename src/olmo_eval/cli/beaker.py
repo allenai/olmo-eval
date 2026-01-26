@@ -1,645 +1,30 @@
-"""olmo-eval CLI entry point."""
+"""Beaker commands for olmo-eval CLI."""
 
-from dataclasses import dataclass
 from datetime import UTC
-from typing import Any
 
 import click
-from rich.console import Console
 from rich.panel import Panel
 from rich.pretty import Pretty
 from rich.table import Table
 
-import olmo_eval.evals  # noqa: F401 - triggers suite registration
-import olmo_eval.evals.tasks  # noqa: F401 - triggers task registration
-from olmo_eval.core import get_model_presets
+from olmo_eval.cli.utils import (
+    LaunchSummary,
+    ModelSummary,
+    RunnerConfig,
+    TaskSummary,
+    console,
+    parse_model_spec,
+)
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR, DEFAULT_MAX_GPUS_PER_NODE
-from olmo_eval.evals.suites import get_suite, list_suites
-from olmo_eval.evals.tasks import list_regimes, list_tasks, list_variants
-from olmo_eval.evals.tasks.core.registry import parse_overrides
-
-# -----------------------------------------------------------------------------
-# Dataclasses for pretty-printing launch configuration
-# -----------------------------------------------------------------------------
-
-
-@dataclass
-class ModelSummary:
-    """Summary of a model configuration."""
-
-    name: str
-    gpus: int = 1
-    parallelism: int = 1
-    alias: str | None = None
-    backend: str | None = None
-    overrides: dict[str, Any] | None = None  # Inline overrides from spec (::key=value)
-
-
-@dataclass
-class TaskSummary:
-    """Summary of a task configuration for display."""
-
-    name: str
-    spec: str | None = None  # Original task spec (e.g., "humaneval:pass@1")
-    variants: list[str] | None = None  # Applied variants/regimes
-    formatter: Any = None
-    scorers: tuple = ()
-    metrics: tuple = ()
-    num_fewshot: int = 0
-    split: str = "test"
-    primary_metric: str | None = None
-    sampling_params: Any = None
-    overrides: dict[str, Any] | None = None  # Inline overrides from spec (::key=value)
-
-
-@dataclass
-class RunnerConfig:
-    """Runner configuration for display."""
-
-    runner: type  # The runner class
-    output_dir: str | None = None
-    attention_backend: str | None = None
-    # Async-only settings
-    num_workers: int | str | None = None
-    gpus_per_worker: int | None = None
-
-    def __repr__(self) -> str:
-        parts = [f"runner={self.runner.__name__}"]
-        if self.output_dir is not None:
-            parts.append(f"output_dir={self.output_dir!r}")
-        if self.attention_backend is not None:
-            parts.append(f"attention_backend={self.attention_backend!r}")
-        if self.num_workers is not None:
-            parts.append(f"num_workers={self.num_workers!r}")
-        if self.gpus_per_worker is not None:
-            parts.append(f"gpus_per_worker={self.gpus_per_worker}")
-        return f"RunnerConfig({', '.join(parts)})"
-
-
-@dataclass
-class LaunchSummary:
-    """Complete launch configuration summary for pretty-printing."""
-
-    models: list[ModelSummary]
-    tasks: list[TaskSummary]
-    runner: RunnerConfig
-
-
-console = Console()
-
-
-# -----------------------------------------------------------------------------
-# Spec parsing for inline overrides
-# -----------------------------------------------------------------------------
-
-# Keys that apply to model/backend config
-MODEL_KEYS = {
-    "backend",
-    "attention_backend",
-    "gpus_per_worker",
-    "tokenizer",
-    "max_model_len",
-    "load_format",
-}
-
-
-def parse_model_spec(spec: str) -> tuple[str, dict[str, Any]]:
-    """Parse model spec into (model_name, overrides).
-
-    Format: model[::key=value,...]
-
-    Args:
-        spec: Model specification string.
-
-    Returns:
-        Tuple of (model_name, overrides dict).
-
-    Examples:
-        >>> parse_model_spec("allenai/OLMo-7B")
-        ("allenai/OLMo-7B", {})
-        >>> parse_model_spec("allenai/OLMo-7B::backend=vllm")
-        ("allenai/OLMo-7B", {"backend": "vllm"})
-        >>> parse_model_spec("allenai/OLMo-7B::backend=vllm,attention_backend=FLASHINFER")
-        ("allenai/OLMo-7B", {"backend": "vllm", "attention_backend": "FLASHINFER"})
-    """
-    main_part, _, override_str = spec.partition("::")
-    overrides = parse_overrides(override_str) if override_str else {}
-    return main_part, overrides
-
-
-def parse_task_spec_with_overrides(spec: str) -> tuple[str, dict[str, Any]]:
-    """Parse task spec with inline overrides.
-
-    Format: task[:variant...][::key=value,...]
-
-    This extracts the overrides separately so they can be passed to the runner,
-    while the task spec (without overrides) is used for task lookup.
-
-    Args:
-        spec: Task specification string.
-
-    Returns:
-        Tuple of (task_spec_without_overrides, overrides dict).
-
-    Examples:
-        >>> parse_task_spec_with_overrides("arc_easy:olmes")
-        ("arc_easy:olmes", {})
-        >>> parse_task_spec_with_overrides("gsm8k:olmes::temperature=0.6")
-        ("gsm8k:olmes", {"temperature": 0.6})
-        >>> parse_task_spec_with_overrides("gsm8k::temperature=0.6,max_tokens=512")
-        ("gsm8k", {"temperature": 0.6, "max_tokens": 512})
-    """
-    spec_part, _, override_str = spec.partition("::")
-    overrides = parse_overrides(override_str) if override_str else {}
-    return spec_part, overrides
-
-
-def _print_runtime_environment() -> None:
-    """Print runtime environment summary for debugging."""
-    import sys
-
-    console.print("\n" + "=" * 60)
-    console.print("RUNTIME ENVIRONMENT SUMMARY")
-    console.print("=" * 60)
-    console.print(f"Python:          {sys.version.split()[0]}")
-    try:
-        import torch  # type: ignore[import-not-found]
-
-        console.print(f"PyTorch:         {torch.__version__}")
-        console.print(f"CUDA available:  {torch.cuda.is_available()}")
-        if torch.cuda.is_available():
-            console.print(f"CUDA version:    {torch.version.cuda}")
-            console.print(f"cuDNN version:   {torch.backends.cudnn.version()}")
-            console.print(f"GPU count:       {torch.cuda.device_count()}")
-            for i in range(torch.cuda.device_count()):
-                console.print(f"  GPU {i}:         {torch.cuda.get_device_name(i)}")
-    except ImportError:
-        console.print("PyTorch:         NOT INSTALLED")
-    try:
-        import transformers
-
-        console.print(f"Transformers:    {transformers.__version__}")
-    except ImportError:
-        console.print("Transformers:    NOT INSTALLED")
-    try:
-        import vllm  # type: ignore[import-not-found]
-
-        console.print(f"vLLM:            {vllm.__version__}")
-    except ImportError:
-        console.print("vLLM:            NOT INSTALLED")
-    console.print("=" * 60 + "\n")
 
 
 @click.group()
-def main() -> None:
-    """olmo-eval command line interface."""
-    pass
-
-
-@main.group()
 def beaker() -> None:
     """Beaker job management commands.
 
     Commands for launching, monitoring, and managing evaluation jobs on Beaker.
     """
     pass
-
-
-@main.command()
-@click.option(
-    "--model",
-    "-m",
-    "models",
-    multiple=True,
-    required=True,
-    help="Model name or preset. Can specify multiple times for multi-model runs.",
-)
-@click.option("--task", "-t", multiple=True, required=True, help="Task spec or suite")
-@click.option("--config", "-c", type=click.Path(exists=True), help="YAML config file")
-@click.option("--output-dir", "-o", default=BEAKER_RESULT_DIR, help="Output directory")
-@click.option("--num-shots", type=int, help="Override num_fewshot for all tasks")
-@click.option("--limit", type=int, help="Override instance limit for all tasks")
-@click.option("--temperature", type=float, help="Override temperature for all tasks")
-@click.option("--backend", type=click.Choice(["hf", "vllm", "litellm"]), help="Override backend")
-@click.option(
-    "--storage-backend",
-    "-s",
-    "storage_backends",
-    type=click.Choice(["s3", "postgres"]),
-    multiple=True,
-    help="Storage backend(s) for results. Can be specified multiple times.",
-)
-@click.option(
-    "--storage-config",
-    type=click.Path(exists=True),
-    help="YAML config file for storage backend",
-)
-@click.option("--dry-run", is_flag=True, help="Print config and exit without running")
-@click.option(
-    "--async",
-    "use_async",
-    is_flag=True,
-    help="Use async runner for parallel task execution",
-)
-@click.option(
-    "--async-stream",
-    "use_async_stream",
-    is_flag=True,
-    help="Use streaming async runner with vLLM's AsyncLLMEngine for true continuous batching",
-)
-@click.option(
-    "--num-workers",
-    type=int,
-    default=None,
-    help="Number of workers for async mode (default: auto-detect from GPUs)",
-)
-@click.option(
-    "--gpus-per-worker",
-    type=int,
-    default=1,
-    help="Number of GPUs each worker uses (default: 1)",
-)
-@click.option(
-    "--attention-backend",
-    type=click.Choice(["FLASHINFER", "FLASH_ATTN"], case_sensitive=False),
-    default=None,
-    help="vLLM attention backend (e.g., FLASHINFER for better performance on supported GPUs)",
-)
-@click.option(
-    "--parallelism",
-    "-P",
-    type=int,
-    default=1,
-    help="Number of model instances to run in parallel (passed from launch command)",
-)
-def run(
-    models: tuple[str, ...],
-    task: tuple[str, ...],
-    config: str | None,
-    output_dir: str,
-    num_shots: int | None,
-    limit: int | None,
-    temperature: float | None,
-    backend: str | None,
-    storage_backends: tuple[str, ...],
-    storage_config: str | None,
-    dry_run: bool,
-    use_async: bool,
-    use_async_stream: bool,
-    num_workers: int | None,
-    gpus_per_worker: int,
-    attention_backend: str | None,
-    parallelism: int,
-) -> None:
-    """Run evaluation on specified tasks.
-
-    Supports multiple models: use -m multiple times for multi-model runs.
-    With --async, runs all (model, task) pairs with per-model workers.
-    With --async-stream, uses vLLM's AsyncLLMEngine for true continuous batching.
-    Without --async or --async-stream, runs sequentially for each model.
-
-    Inline overrides can be specified in -m and -t flags:
-        -m model::backend=vllm,tokenizer=allenai/dolma2-tokenizer
-        -t task:olmes::temperature=0.6,num_fewshot=5
-    """
-    import logging
-
-    from olmo_eval.runners import SyncEvalRunner, ValidationError
-
-    # Configure logging for Beaker job visibility
-    logging.basicConfig(
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        level=logging.INFO,
-    )
-
-    # Suppress noisy HuggingFace warnings
-    import os
-
-    os.environ.setdefault("HF_DATASETS_DISABLE_PROGRESS_BAR", "1")
-    os.environ.setdefault("DATASETS_VERBOSITY", "error")
-    logging.getLogger("datasets").setLevel(logging.ERROR)
-
-    # Print runtime environment summary
-    _print_runtime_environment()
-
-    # Parse model specs to extract inline overrides
-    parsed_models: list[tuple[str, dict[str, Any]]] = [parse_model_spec(m) for m in models]
-
-    # Parse task specs to extract inline overrides
-    # Store as dict mapping task_spec -> overrides
-    task_overrides: dict[str, dict[str, Any]] = {}
-    task_specs: list[str] = []
-    for t in task:
-        spec_without_overrides, overrides = parse_task_spec_with_overrides(t)
-        task_specs.append(spec_without_overrides)
-        if overrides:
-            task_overrides[spec_without_overrides] = overrides
-
-    # Extract model-level overrides (use first model's overrides for global settings)
-    # In multi-model async mode, each model could have different settings
-    first_model_name, first_model_overrides = parsed_models[0] if parsed_models else ("", {})
-
-    # Model overrides can specify backend/attention_backend
-    if not backend and "backend" in first_model_overrides:
-        backend = first_model_overrides["backend"]
-    if not attention_backend and "attention_backend" in first_model_overrides:
-        attention_backend = first_model_overrides["attention_backend"]
-
-    # Warning for num-workers without async
-    if num_workers is not None and not use_async and not use_async_stream:
-        console.print(
-            "[yellow]Warning:[/yellow] --num-workers has no effect without "
-            "--async or --async-stream"
-        )
-
-    if gpus_per_worker != 1 and not use_async and not use_async_stream:
-        console.print(
-            "[yellow]Warning:[/yellow] --gpus-per-worker has no effect without "
-            "--async or --async-stream"
-        )
-
-    # Warning for conflicting flags
-    if use_async and use_async_stream:
-        console.print(
-            "[yellow]Warning:[/yellow] Both --async and --async-stream specified. "
-            "Using --async-stream."
-        )
-        use_async = False
-
-    # Warning for backend override with async-stream
-    if use_async_stream and backend and backend != "vllm":
-        console.print(
-            f"[yellow]Warning:[/yellow] --async-stream only supports vLLM backend, "
-            f"ignoring --backend={backend}"
-        )
-
-    # Set up storage backends if specified
-    storages: list = []
-    if storage_backends:
-        from olmo_eval.storage import get_backend
-
-        # Load storage config if provided
-        storage_cfg = None
-        if storage_config:
-            from omegaconf import DictConfig, OmegaConf
-
-            cfg = OmegaConf.load(storage_config)
-            if isinstance(cfg, DictConfig):
-                storage_cfg = cfg
-            else:
-                console.print("[red]Error:[/red] Storage config must be a YAML dict, not a list")
-                raise SystemExit(1)
-
-        for backend_name in storage_backends:
-            # Get backend-specific config section
-            storage_kwargs: dict = {}
-            if storage_cfg:
-                backend_cfg = storage_cfg.get(backend_name, {})
-                storage_kwargs = OmegaConf.to_container(backend_cfg, resolve=True) or {}  # type: ignore
-
-            try:
-                storage = get_backend(backend_name, **storage_kwargs)
-                storages.append(storage)
-                console.print(f"[green]Initialized {backend_name} storage backend[/green]")
-            except ImportError as e:
-                console.print(f"[red]Storage backend error:[/red] {e}")
-                raise SystemExit(1) from None
-            except Exception as e:
-                console.print(
-                    f"[red]Failed to initialize {backend_name} storage backend:[/red] {e}"
-                )
-                raise SystemExit(1) from None
-
-    # Check for incompatible task types with --async-stream
-    if use_async_stream:
-        bpb_tasks = [t for t in task_specs if ":bpb" in t]
-        if bpb_tasks:
-            console.print(
-                "\n[bold red]Error:[/bold red] The following :bpb tasks cannot run "
-                "with --async-stream:\n"
-                f"  {', '.join(bpb_tasks)}\n\n"
-                "[yellow]BPB (bits-per-byte) tasks use loglikelihood scoring which "
-                "requires\n"
-                "prompt_logprobs - a feature not supported by the streaming vLLM "
-                "backend.[/yellow]\n\n"
-                "Use [bold]--async[/bold] or the default sequential mode instead:\n"
-                f"  olmo-eval run -m <model> -t {' -t '.join(bpb_tasks)} --async\n"
-            )
-            raise SystemExit(1)
-
-    # Extract model names and build per-model overrides dict
-    model_names = [name for name, _overrides in parsed_models]
-    per_model_overrides = {name: overrides for name, overrides in parsed_models if overrides}
-
-    # Choose runner based on --async or --async-stream flag
-    if use_async_stream:
-        from olmo_eval.runners.asynchronous import StreamingEvalRunner
-
-        console.print("[bold cyan]Using StreamingEvalRunner[/bold cyan]")
-        console.print(f"[bold]Models:[/bold] {len(model_names)}")
-
-        runner = StreamingEvalRunner(
-            model_names=model_names,
-            task_specs=task_specs,
-            output_dir=output_dir,
-            num_shots_override=num_shots,
-            limit_override=limit,
-            temperature=temperature,
-            storages=storages,
-            num_workers=num_workers,
-            gpus_per_worker=gpus_per_worker,
-            attention_backend=attention_backend.upper() if attention_backend else None,
-            task_overrides=task_overrides,
-            model_overrides=per_model_overrides,
-        )
-    elif use_async:
-        from olmo_eval.runners.asynchronous import AsyncEvalRunner
-
-        console.print("[bold cyan]Using AsyncEvalRunner[/bold cyan]")
-        console.print(f"[bold]Models:[/bold] {len(model_names)}")
-
-        runner = AsyncEvalRunner(
-            model_names=model_names,
-            task_specs=task_specs,
-            output_dir=output_dir,
-            num_shots_override=num_shots,
-            limit_override=limit,
-            temperature=temperature,
-            backend_override=backend,
-            storages=storages,
-            num_workers=num_workers,
-            gpus_per_worker=gpus_per_worker,
-            attention_backend=attention_backend.upper() if attention_backend else None,
-            task_overrides=task_overrides,
-            model_overrides=per_model_overrides,
-        )
-    else:
-        # Sequential runner - run each model in sequence
-        if len(model_names) > 1:
-            console.print(f"[bold cyan]Running {len(model_names)} models sequentially[/bold cyan]")
-
-        # For sequential mode with multiple models, run each model separately
-        for i, (model_name, model_overrides) in enumerate(parsed_models):
-            if len(model_names) > 1:
-                console.print(f"\n[bold]Model {i + 1}/{len(model_names)}:[/bold] {model_name}")
-
-            # Apply per-model backend overrides
-            effective_backend = model_overrides.get("backend", backend)
-            effective_attention_backend = model_overrides.get(
-                "attention_backend", attention_backend
-            )
-
-            runner = SyncEvalRunner(
-                model_name=model_name,
-                task_specs=task_specs,
-                output_dir=output_dir,
-                num_shots_override=num_shots,
-                limit_override=limit,
-                temperature=temperature,
-                backend_override=effective_backend,
-                storages=storages,
-                attention_backend=effective_attention_backend.upper()
-                if effective_attention_backend
-                else None,
-                task_overrides=task_overrides,
-                model_overrides=model_overrides,
-            )
-
-            try:
-                runner.validate()
-            except ValidationError as e:
-                console.print(f"[red]Validation error:[/red]\n{e}")
-                raise SystemExit(1) from None
-
-            if dry_run:
-                runner.print_config()
-            else:
-                try:
-                    runner.run()
-                except Exception as e:
-                    console.print(f"\n[bold red]Evaluation failed:[/bold red] {e}")
-                    raise SystemExit(1) from None
-
-        return  # Exit early since we handled everything in the loop
-
-    # Validate inputs before running (applies to both dry-run and actual runs)
-    try:
-        runner.validate()
-    except ValidationError as e:
-        console.print(f"[red]Validation error:[/red]\n{e}")
-        raise SystemExit(1) from None
-
-    if dry_run:
-        runner.print_config()
-    else:
-        try:
-            runner.run()
-        except Exception as e:
-            console.print(f"\n[bold red]Evaluation failed:[/bold red] {e}")
-            raise SystemExit(1) from None
-
-
-@main.command()
-@click.option("--filter", "-f", default="", help="Filter by name substring")
-def tasks(filter: str) -> None:
-    """List all available tasks in the registry."""
-    task_names = list_tasks()
-    variants = list_variants()
-    regimes = list_regimes()
-
-    if not task_names:
-        console.print("[dim]No tasks registered.[/dim]")
-        return
-
-    table = Table(title="Available Tasks")
-    table.add_column("Task", style="cyan")
-    table.add_column("Variants", style="green")
-    table.add_column("Regimes", style="dim")
-
-    for name in task_names:
-        if filter.lower() in name.lower():
-            task_variants = variants.get(name, [])
-            task_regimes = regimes.get(name, [])
-            variant_str = ", ".join(task_variants) if task_variants else "-"
-            regime_str = ", ".join(task_regimes) if task_regimes else "-"
-            table.add_row(name, variant_str, regime_str)
-
-    console.print(table)
-
-
-@main.command()
-@click.option("--filter", "-f", default="", help="Filter by name substring")
-def models(filter: str) -> None:
-    """List available model presets."""
-    table = Table(title="Model Presets")
-    table.add_column("Name", style="cyan")
-    table.add_column("Model", style="dim")
-
-    for name, cfg in sorted(get_model_presets().items()):
-        if filter.lower() in name.lower():
-            table.add_row(name, cfg.model)
-
-    console.print(table)
-
-
-@main.command()
-@click.option("--filter", "-f", default="", help="Filter by name substring")
-def suites(filter: str) -> None:
-    """List available task suites (task groups)."""
-    table = Table(title="Task Suites")
-    table.add_column("Suite", style="cyan")
-    table.add_column("Tasks", style="dim")
-    table.add_column("Aggregation", style="yellow")
-
-    for name in list_suites():
-        if filter.lower() in name.lower():
-            suite = get_suite(name)
-            task_count = len(suite.expanded_tasks)
-            table.add_row(name, f"{task_count} tasks", suite.aggregation.value)
-
-    console.print(table)
-
-
-@main.command(name="suite-info")
-@click.argument("suite_name")
-def suite_info(suite_name: str) -> None:
-    """Show tasks and regimes in a suite.
-
-    SUITE_NAME is the name of the suite to inspect.
-
-    Example: olmo-eval suite-info core
-    """
-    try:
-        suite = get_suite(suite_name)
-    except KeyError:
-        console.print(f"[red]Error:[/red] Suite '{suite_name}' not found")
-        console.print(f"\n[dim]Available suites: {', '.join(list_suites())}[/dim]")
-        raise SystemExit(1) from None
-
-    # Header with suite info
-    console.print(f"\n[bold cyan]Suite:[/bold cyan] {suite.name}")
-    if suite.description:
-        console.print(f"[dim]{suite.description}[/dim]")
-    console.print(f"[bold]Aggregation:[/bold] {suite.aggregation.value}")
-    console.print()
-
-    # Table of tasks
-    table = Table(title=f"Tasks in '{suite_name}'")
-    table.add_column("#", style="dim", justify="right")
-    table.add_column("Task", style="cyan")
-    table.add_column("Regime", style="yellow")
-
-    for idx, task_spec in enumerate(suite.expanded_tasks, 1):
-        # Parse task::regime format
-        if "::" in task_spec:
-            task_name, regime = task_spec.split("::", 1)
-        else:
-            task_name = task_spec
-            regime = "(default)"
-        table.add_row(str(idx), task_name, regime)
-
-    console.print(table)
-    console.print(f"\n[dim]Total: {len(suite.expanded_tasks)} tasks[/dim]")
 
 
 @beaker.command()
@@ -899,10 +284,9 @@ def launch(
     original_task_specs = list(task)  # Preserve original suite/task names
 
     # Group by priority WITHOUT expanding first - this keeps suites as single units
-    # so suite aggregation works correctly in the runner
     try:
         tasks_by_priority = validate_priority_configuration(
-            tasks=original_task_specs,  # Pass original specs, NOT expanded
+            tasks=original_task_specs,
             cli_priority=cli_priority,
             default_priority=priority,
         )
@@ -940,7 +324,6 @@ def launch(
     s3_models = [m.name_or_path for m in model_configs if is_s3_path(m.name_or_path)]
     inject_aws_credentials = aws_credentials
     if inject_aws_credentials is None:
-        # Auto-detect: check if any model path is S3
         inject_aws_credentials = bool(s3_models)
 
     if inject_aws_credentials:
@@ -975,7 +358,6 @@ def launch(
     gcs_models = [m.name_or_path for m in model_configs if is_gcs_path(m.name_or_path)]
     inject_gcs_credentials = gcs_credentials
     if inject_gcs_credentials is None:
-        # Auto-detect: check if any model path is GCS
         inject_gcs_credentials = bool(gcs_models)
 
     if inject_gcs_credentials:
@@ -1011,12 +393,10 @@ def launch(
         console.print("[yellow]Dry run mode - not submitting[/yellow]")
 
     # Build list of groups from CLI and config
-    # Auto-generate one group name if none specified
     from datetime import datetime
 
-    effective_groups: list[str] = list(group)  # CLI groups
+    effective_groups: list[str] = list(group)
     if cfg is not None and cfg.groups:
-        # Add config groups (CLI groups take precedence, so they're first)
         for g in cfg.groups:
             if g not in effective_groups:
                 effective_groups.append(g)
@@ -1025,7 +405,7 @@ def launch(
     if not effective_groups:
         effective_groups = [f"{name}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"]
 
-    # Determine the effective image (CLI overrides config, config overrides default)
+    # Determine the effective image
     from olmo_eval.core.constants.infrastructure import BEAKER_DEFAULT_IMAGE
 
     if image:
@@ -1050,14 +430,12 @@ def launch(
             missing_groups.append(grp)
 
     if dry_run:
-        # In dry-run mode, just inform about groups that would be created
         if missing_groups:
             console.print(
                 f"[yellow]Note:[/yellow] The following groups would be created: "
                 f"{', '.join(missing_groups)}"
             )
     else:
-        # In real mode, prompt to create missing groups
         if missing_groups:
             console.print(
                 f"\n[yellow]The following groups do not exist:[/yellow] {', '.join(missing_groups)}"
@@ -1066,7 +444,6 @@ def launch(
                 console.print("[red]Aborted.[/red] Cannot launch without required groups.")
                 raise SystemExit(1)
 
-            # Create the missing groups
             for grp in missing_groups:
                 try:
                     beaker_group = launcher.beaker.group.create(
@@ -1084,7 +461,7 @@ def launch(
 
     # Build experiment plan with parallelism and splitting
     experiment_plan: list[dict] = []
-    split_models: list[str] = []  # Track models that require splitting
+    split_models: list[str] = []
 
     for m_cfg in model_configs:
         m_name = m_cfg.name_or_path
@@ -1110,11 +487,8 @@ def launch(
             if multiple_models:
                 base_name = f"{base_name}-{short_m}"
             if multiple_priorities:
-                # Use priority level for experiment naming when multiple priorities
                 base_name = f"{base_name}-{t_priority}"
 
-            # t_list contains unexpanded specs (suites stay as single units)
-            # Splits are based on number of specs, keeping suites together for aggregation
             splits = calculate_experiment_splits(
                 tasks=t_list,
                 gpus_per_model=m_gpus,
@@ -1126,10 +500,8 @@ def launch(
                 split_models.append(m_name)
 
             total_splits = len(splits)
-            # Use expanded count for display (actual number of tasks that will run)
             total_expanded = expanded_counts_by_priority[t_priority]
             for i, split in enumerate(splits):
-                # Add zero-padded suffix for splits
                 exp_name = f"{base_name}-{i + 1:03d}" if total_splits > 1 else base_name
 
                 experiment_plan.append(
@@ -1139,8 +511,8 @@ def launch(
                         "model_cfg": m_cfg,
                         "priority": t_priority,
                         "tasks": split["tasks"],
-                        "original_task_specs": original_task_specs,  # Original suite/task names
-                        "total_expanded_tasks": total_expanded,  # Total tasks in this priority
+                        "original_task_specs": original_task_specs,
+                        "total_expanded_tasks": total_expanded,
                         "gpus_per_model": m_gpus,
                         "num_gpus": split["num_gpus"],
                         "parallelism": split["parallelism"],
@@ -1159,7 +531,6 @@ def launch(
 
     task_summaries: list[TaskSummary] = []
     for task_spec in valid_tasks:
-        # Parse the spec to extract variants/regimes and inline overrides
         task_name, variants, inline_overrides = parse_task_spec(task_spec)
 
         task_instance = get_task_instance(task_spec)
@@ -1187,10 +558,8 @@ def launch(
 
     model_summaries: list[ModelSummary] = []
     for m in model_configs:
-        # Parse the model spec to extract base name and inline overrides
         model_base_name, model_inline_overrides = parse_model_spec(m.name_or_path)
 
-        # Resolve the effective backend (explicit override or from model preset/default)
         if m.backend:
             effective_backend = m.backend
         else:
@@ -1211,7 +580,6 @@ def launch(
     # Build runner config
     from olmo_eval.runners import AsyncEvalRunner, StreamingEvalRunner, SyncEvalRunner
 
-    # Resolve effective attention_backend from first model's config if available
     effective_attention_backend = None
     if cfg is not None and model_configs:
         first_model = model_configs[0]
@@ -1219,7 +587,6 @@ def launch(
         effective_attention_backend = model_resources.get("attention_backend")
 
     if use_async_stream:
-        # Resolve effective num_workers from CLI or first model's launch config
         effective_num_workers = num_workers
         if effective_num_workers is None and cfg is not None and model_configs:
             first_model = model_configs[0]
@@ -1234,7 +601,6 @@ def launch(
             gpus_per_worker=gpus_per_worker,
         )
     elif use_async:
-        # Resolve effective num_workers from CLI or first model's launch config
         effective_num_workers = num_workers
         if effective_num_workers is None and cfg is not None and model_configs:
             first_model = model_configs[0]
@@ -1282,7 +648,7 @@ def launch(
             "[dim]  Tasks distributed across multiple experiments due to GPU constraints[/dim]"
         )
 
-    # Simplified experiment table - only show if multiple experiments or verbose
+    # Simplified experiment table - only show if multiple experiments
     if total_experiments > 1:
         matrix_table = Table(show_header=True, title="Experiment Plan")
         matrix_table.add_column("Name", style="cyan")
@@ -1318,18 +684,15 @@ def launch(
 
     beaker_username = launcher.beaker.user_name
     if dry_run:
-        # In dry-run mode, just show what secrets would be used
         common_secrets: list[tuple[str, str]] = []
         if get_local_hf_token():
             common_secrets.append(("HF_TOKEN", f"{beaker_username}_HF_TOKEN"))
         if get_local_wandb_api_key():
             common_secrets.append(("WANDB_API_KEY", f"{beaker_username}_WANDB_API_KEY"))
     else:
-        # Ensure secrets exist in Beaker (writes them if missing)
         common_secrets = ensure_common_secrets(workspace=workspace)
 
-    # Build all BeakerJobConfig objects first (before confirmation)
-    # so we can display them in the summary
+    # Build all BeakerJobConfig objects first
     job_configs: list[BeakerJobConfig] = []
 
     for exp in experiment_plan:
@@ -1341,11 +704,10 @@ def launch(
         exp_parallelism = exp["parallelism"]
         effective_priority = exp["priority"]
 
-        # Get effective resources for this model (per-model overrides merged with defaults)
+        # Get effective resources for this model
         if cfg is not None:
             model_resources = cfg.get_model_resources(model_cfg)
         else:
-            # No config file - use ModelConfig values or defaults
             m_para = model_cfg.parallelism
             model_resources = {
                 "gpus": model_cfg.gpus if model_cfg.gpus is not None else gpus,
@@ -1360,7 +722,6 @@ def launch(
             }
 
         # CLI args always override per-model config
-        # Cast values from model_resources dict to expected types
         effective_cluster: str = (
             cli_cluster if cli_cluster is not None else str(model_resources["cluster"])
         )
@@ -1383,7 +744,6 @@ def launch(
 
         effective_extra_loader_config = model_resources.get("extra_loader_config")
         if effective_extra_loader_config:
-            # Serialize extra_loader_config as compact JSON (no spaces) for inline spec
             json_config = json_module.dumps(effective_extra_loader_config, separators=(",", ":"))
             model_inline_overrides.append(f"extra_loader_config={json_config}")
 
@@ -1395,11 +755,11 @@ def launch(
         for t in task_list:
             command.extend(["-t", t])
 
-        # Add parallelism if > 1 (so the run command knows to run multiple instances)
+        # Add parallelism if > 1
         if exp_parallelism > 1:
             command.extend(["--parallelism", str(exp_parallelism)])
 
-        # Add async flags if enabled (CLI flags override config)
+        # Add async flags if enabled
         effective_use_async = use_async or model_resources.get("use_async", False)
         effective_use_async_stream = use_async_stream or model_resources.get(
             "use_async_stream", False
@@ -1411,7 +771,6 @@ def launch(
             gpus_per_worker if gpus_per_worker != 1 else model_resources.get("gpus_per_worker", 1)
         )
 
-        # --async-stream takes precedence over --async
         if effective_use_async_stream:
             command.append("--async-stream")
             if effective_num_workers is not None:
@@ -1426,15 +785,13 @@ def launch(
                 command.extend(["--gpus-per-worker", str(effective_gpus_per_worker)])
 
         # Determine the backend this model will use at runtime
-        # First check for explicit backend override in config, then get from model config
         from olmo_eval.core.configs import get_model_config as get_runtime_model_config
         from olmo_eval.core.constants.infrastructure import BACKEND_OPTIONAL_GROUPS
 
-        config_backend = model_resources.get("backend")  # Explicit override from launch config
+        config_backend = model_resources.get("backend")
         if config_backend:
             runtime_backend: str = str(config_backend)
         else:
-            # Get the backend from model config (preset or default)
             runtime_model_config = get_runtime_model_config(model_name)
             runtime_backend = runtime_model_config.backend
 
@@ -1442,7 +799,6 @@ def launch(
         if backends:
             effective_backends = list(backends)
         else:
-            # Get the optional group name for this backend
             backend_group = BACKEND_OPTIONAL_GROUPS.get(runtime_backend)
             effective_backends = [backend_group] if backend_group else []
 
@@ -1482,7 +838,7 @@ def launch(
             )
         )
 
-    # Confirm before launching (skip in dry-run mode)
+    # Confirm before launching
     if not dry_run and not click.confirm("Proceed with launch?", default=True):
         console.print("[yellow]Launch cancelled[/yellow]")
         raise SystemExit(0)
@@ -1497,20 +853,16 @@ def launch(
 
     # Summary and follow logic for launched experiments
     if launched_experiments and not dry_run:
-        # Only show summary count for multiple experiments
         if len(launched_experiments) > 1:
             console.print(f"\n[bold]Launched {len(launched_experiments)} experiment(s)[/bold]")
 
-        # Follow experiment(s) if requested
         if follow:
             if len(launched_experiments) == 1:
-                # Single experiment: follow it
                 import sys
 
                 exit_code = launcher.follow_experiment(launched_experiments[0])
                 sys.exit(exit_code)
             else:
-                # Multiple experiments: don't follow, show URLs for watch command
                 console.print(
                     "\n[bold]Multiple experiments launched. "
                     "Use 'olmo-eval beaker watch -e <id>' to follow:[/bold]"
@@ -1545,17 +897,7 @@ def results(
     wait: bool,
     poll_interval: int,
 ) -> None:
-    """[DEPRECATED] Use 'olmo-eval beaker group info' instead.
-
-    This command is deprecated. Please use:
-
-        olmo-eval beaker group info <group_name> [options]
-
-    Examples:
-
-        olmo-eval beaker group info my-group
-        olmo-eval beaker group info my-group --wait --format csv > results.csv
-    """
+    """[DEPRECATED] Use 'olmo-eval beaker group info' instead."""
     console.print(
         "[yellow]Warning:[/yellow] 'olmo-eval beaker results' is deprecated.\n"
         f"Use: olmo-eval beaker group info {group}"
@@ -1563,7 +905,6 @@ def results(
         + (f" --format {output_format}" if output_format != "table" else "")
         + "\n"
     )
-    # Delegate to group_info
     ctx.invoke(
         group_info,
         group_name=group,
@@ -1588,22 +929,7 @@ def results(
     help="Only show recent logs (last 10 seconds). Useful for attaching to running experiments.",
 )
 def watch(experiment: str, tail: bool) -> None:
-    """Watch an experiment's logs in real-time.
-
-    Streams logs from a Beaker experiment until it completes. Shows startup
-    events (pulling image, scheduling) followed by live log output.
-
-    Use --tail/-t to show only recent logs when attaching to an already-running
-    experiment.
-
-    Examples:
-
-        # Watch an experiment from the start
-        olmo-eval beaker watch -e 01abc123
-
-        # Attach to a running experiment (show recent logs only)
-        olmo-eval beaker watch -e 01abc123 --tail
-    """
+    """Watch an experiment's logs in real-time."""
     import sys
 
     try:
@@ -1627,11 +953,7 @@ def watch(experiment: str, tail: bool) -> None:
 
 @beaker.group()
 def group() -> None:
-    """Manage Beaker groups.
-
-    Commands for viewing group status, getting detailed task info,
-    and bulk operations like canceling all experiments.
-    """
+    """Manage Beaker groups."""
     pass
 
 
@@ -1656,22 +978,7 @@ def group() -> None:
 def group_info(
     group_name: str, output_format: str, verbose: bool, wait: bool, poll_interval: int
 ) -> None:
-    """Get detailed info about a Beaker group.
-
-    Shows status of all experiments and tasks in the group.
-    Use --wait to block until all experiments complete.
-
-    Examples:
-
-        olmo-eval beaker group info my-experiment-group
-
-        olmo-eval beaker group info my-experiment-group --verbose
-
-        olmo-eval beaker group info my-experiment-group --format json
-
-        # Wait for completion and export as CSV
-        olmo-eval beaker group info my-experiment-group --wait --format csv > results.csv
-    """
+    """Get detailed info about a Beaker group."""
     import json as json_module
 
     try:
@@ -1685,7 +992,6 @@ def group_info(
 
     launcher = BeakerLauncher()
 
-    # Try to get the group
     try:
         from beaker.exceptions import BeakerGroupNotFound
 
@@ -1697,7 +1003,6 @@ def group_info(
         console.print(f"[red]Error:[/red] {e}")
         raise SystemExit(1) from None
 
-    # Wait for completion if requested
     if wait:
         import time
 
@@ -1719,13 +1024,11 @@ def group_info(
 
         console.print("[green]All experiments completed.[/green]\n")
 
-    # Get status summary
     status = launcher.get_group_status(beaker_group)
     experiments = launcher.get_group_experiments(beaker_group)
     group_url = launcher.get_group_url(beaker_group)
 
     if output_format == "csv":
-        # Export raw metrics CSV from Beaker
         try:
             csv_data = launcher.export_group_metrics(beaker_group)
             click.echo(csv_data)
@@ -1733,14 +1036,12 @@ def group_info(
             from beaker import BeakerWorkloadStatus
 
             console.print(f"[yellow]Warning:[/yellow] Could not export metrics: {e}")
-            # Fall back to basic experiment info
             click.echo("experiment_id,name,status")
             for exp in experiments:
                 workload = launcher.beaker.workload.get(exp.id)
                 click.echo(f"{exp.id},{exp.name},{BeakerWorkloadStatus(workload.status).name}")
 
     elif output_format == "json":
-        # Build detailed experiment data
         from beaker import BeakerWorkloadStatus
 
         exp_data = []
@@ -1754,22 +1055,14 @@ def group_info(
                 "url": launcher.experiment_url(exp),
             }
 
-            # Add task-level details if verbose
             if verbose:
                 try:
                     task_list = []
                     for task in exp.tasks:
-                        # Convert status int to BeakerWorkloadStatus enum
                         task_status = (
                             BeakerWorkloadStatus(task.status).name if task.status else "unknown"
                         )
-                        task_list.append(
-                            {
-                                "id": task.id,
-                                "name": task.name,
-                                "status": task_status,
-                            }
-                        )
+                        task_list.append({"id": task.id, "name": task.name, "status": task_status})
                     exp_info["tasks"] = task_list
                 except Exception:
                     pass
@@ -1786,13 +1079,11 @@ def group_info(
         }
         click.echo(json_module.dumps(data, indent=2))
     else:
-        # Table format
         console.print(f"\n[bold]Group:[/bold] {group_name}")
         console.print(f"[bold]ID:[/bold] {beaker_group.id}")
         console.print(f"[bold]URL:[/bold] {group_url}")
         console.print()
 
-        # Status summary
         total = sum(status.values())
         console.print(
             f"[bold]Status Summary:[/bold] {total} experiment(s)\n"
@@ -1825,11 +1116,9 @@ def group_info(
                 }.get(status_str.lower(), f"[dim]{status_str}[/dim]")
 
                 if verbose:
-                    # Get task-level details
                     try:
                         task_info = []
                         for task in exp.tasks:
-                            # Convert status int to BeakerWorkloadStatus enum
                             task_status = (
                                 BeakerWorkloadStatus(task.status).name if task.status else "unknown"
                             )
@@ -1838,18 +1127,9 @@ def group_info(
                     except Exception:
                         task_str = "-"
 
-                    table.add_row(
-                        exp.name,
-                        status_style,
-                        task_str,
-                        launcher.experiment_url(exp),
-                    )
+                    table.add_row(exp.name, status_style, task_str, launcher.experiment_url(exp))
                 else:
-                    table.add_row(
-                        exp.name,
-                        status_style,
-                        launcher.experiment_url(exp),
-                    )
+                    table.add_row(exp.name, status_style, launcher.experiment_url(exp))
 
             console.print(table)
         else:
@@ -1860,16 +1140,7 @@ def group_info(
 @click.argument("group_name")
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
 def group_cancel(group_name: str, yes: bool) -> None:
-    """Cancel all active experiments in a Beaker group.
-
-    Stops all running and pending experiments. Completed experiments are skipped.
-
-    Examples:
-
-        olmo-eval beaker group cancel my-experiment-group
-
-        olmo-eval beaker group cancel my-experiment-group --yes
-    """
+    """Cancel all active experiments in a Beaker group."""
     try:
         from olmo_eval.launch import BeakerLauncher
     except ImportError:
@@ -1881,7 +1152,6 @@ def group_cancel(group_name: str, yes: bool) -> None:
 
     launcher = BeakerLauncher()
 
-    # Try to get the group
     try:
         from beaker.exceptions import BeakerGroupNotFound
 
@@ -1893,7 +1163,6 @@ def group_cancel(group_name: str, yes: bool) -> None:
         console.print(f"[red]Error:[/red] {e}")
         raise SystemExit(1) from None
 
-    # Get current status to show what will be affected
     status = launcher.get_group_status(beaker_group)
     active_count = status.get("running", 0) + status.get("pending", 0)
 
@@ -1906,7 +1175,6 @@ def group_cancel(group_name: str, yes: bool) -> None:
         )
         return
 
-    # Confirm cancellation
     console.print(f"[bold]Group:[/bold] {group_name}")
     console.print(
         f"[bold]Active experiments:[/bold] {active_count} "
@@ -1917,11 +1185,9 @@ def group_cancel(group_name: str, yes: bool) -> None:
         console.print("[dim]Cancelled.[/dim]")
         return
 
-    # Perform cancellation
     console.print(f"\n[yellow]Canceling {active_count} experiment(s)...[/yellow]")
     result = launcher.cancel_group(beaker_group)
 
-    # Show results
     console.print(
         f"\n[bold]Results:[/bold]\n"
         f"  [green]✓ {result.get('canceled', 0)} canceled[/green]\n"
@@ -1937,19 +1203,7 @@ def group_cancel(group_name: str, yes: bool) -> None:
 @click.option("--search", "-s", help="Search by name or description")
 @click.option("--mine/--all", default=True, help="Show only my groups (default) or all groups")
 def group_list(workspace: str, limit: int, search: str | None, mine: bool) -> None:
-    """List Beaker groups.
-
-    Shows recent groups with their status summaries. By default, only shows
-    groups created by the current user. Use --all to show all groups.
-
-    Examples:
-
-        olmo-eval beaker group list -w ai2/oe-data
-
-        olmo-eval beaker group list -w ai2/oe-data --all
-
-        olmo-eval beaker group list -w ai2/oe-data --search "benchmark" --limit 10
-    """
+    """List Beaker groups."""
     try:
         from olmo_eval.launch import BeakerLauncher
     except ImportError:
@@ -1960,11 +1214,8 @@ def group_list(workspace: str, limit: int, search: str | None, mine: bool) -> No
         raise SystemExit(1) from None
 
     launcher = BeakerLauncher()
-
-    # Get workspace object for beaker API calls that require it
     workspace_obj = launcher.beaker.workspace.get(workspace) if workspace else None
 
-    # Get current user ID for filtering
     current_user_id = None
     if mine:
         try:
@@ -1975,7 +1226,6 @@ def group_list(workspace: str, limit: int, search: str | None, mine: bool) -> No
             )
 
     try:
-        # Fetch more than limit if filtering by user, since we filter client-side
         fetch_limit = limit * 5 if mine and current_user_id else limit
         all_groups = list(
             launcher.beaker.group.list(
@@ -1985,7 +1235,6 @@ def group_list(workspace: str, limit: int, search: str | None, mine: bool) -> No
             )
         )
 
-        # Filter to current user's groups if requested
         if mine and current_user_id:
             groups = [g for g in all_groups if g.author_id == current_user_id][:limit]
         else:
@@ -1998,11 +1247,9 @@ def group_list(workspace: str, limit: int, search: str | None, mine: bool) -> No
         console.print("[dim]No groups found.[/dim]")
         return
 
-    # Cache workspace lookups
     workspace_names: dict[str, str] = {}
 
-    # Status value mappings (from BeakerWorkloadStatus)
-    RUNNING_STATUSES = {1, 2, 3, 4, 5, 6, 10}  # submitted, queued, initializing, running, etc.
+    RUNNING_STATUSES = {1, 2, 3, 4, 5, 6, 10}
     SUCCEEDED_STATUS = 8
     FAILED_STATUS = 9
 
@@ -2015,14 +1262,11 @@ def group_list(workspace: str, limit: int, search: str | None, mine: bool) -> No
 
     for grp in groups:
         try:
-            # Get experiment info from task metrics
             task_metrics = list(launcher.beaker.group.list_task_metrics(grp))
 
-            # Count unique experiments and their statuses
-            experiments: dict[str, int] = {}  # exp_id -> worst status
+            experiments: dict[str, int] = {}
             for tm in task_metrics:
                 exp_id = tm.experiment_id
-                # Keep the worst status (failed > running > succeeded)
                 if exp_id not in experiments:
                     experiments[exp_id] = tm.task_status
                 elif tm.task_status == FAILED_STATUS:
@@ -2042,7 +1286,6 @@ def group_list(workspace: str, limit: int, search: str | None, mine: bool) -> No
             else:
                 status_str = "[dim]empty[/dim]"
 
-            # Format creation time from protobuf Timestamp
             created_str = "-"
             if grp.created and grp.created.seconds:
                 from datetime import datetime
@@ -2050,7 +1293,6 @@ def group_list(workspace: str, limit: int, search: str | None, mine: bool) -> No
                 created_dt = datetime.fromtimestamp(grp.created.seconds, tz=UTC)
                 created_str = created_dt.strftime("%Y-%m-%d %H:%M")
 
-            # Get workspace name (with caching)
             workspace_name = "-"
             if grp.workspace_id:
                 if grp.workspace_id not in workspace_names:
@@ -2061,18 +1303,8 @@ def group_list(workspace: str, limit: int, search: str | None, mine: bool) -> No
                         workspace_names[grp.workspace_id] = grp.workspace_id
                 workspace_name = workspace_names[grp.workspace_id]
 
-            table.add_row(
-                grp.name,
-                workspace_name,
-                str(exp_count),
-                status_str,
-                created_str,
-            )
+            table.add_row(grp.name, workspace_name, str(exp_count), status_str, created_str)
         except Exception:
             table.add_row(grp.name, "-", "?", "[dim]error[/dim]", "-")
 
     console.print(table)
-
-
-if __name__ == "__main__":
-    main()
