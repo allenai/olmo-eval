@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import multiprocessing as mp
 import os
 import random
 import time
-import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -29,12 +27,12 @@ from olmo_eval.core import (
 )
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.evals.tasks import Task, get_task
+from olmo_eval.runners.mixins import AsyncRunnerMixin
 from olmo_eval.runners.synchronous import ValidationError
 from olmo_eval.runners.utils import (
     TaskResult,
     build_predictions,
     compute_suite_aggregations,
-    get_primary_metric,
     serialize_sampling_params,
     write_predictions_jsonl,
     write_requests_jsonl,
@@ -716,7 +714,7 @@ async def _streaming_worker_async(
 
 
 @dataclass
-class AsyncEvalRunner:
+class AsyncEvalRunner(AsyncRunnerMixin):
     """Async evaluation runner with instance-level queuing.
 
     Uses per-model queues where instances from all tasks are mixed together,
@@ -830,31 +828,6 @@ class AsyncEvalRunner:
         console.print(f"[bold]Total (model, task) pairs:[/bold] {total_pairs}")
         for spec in expanded:
             console.print(f"  - {spec}")
-
-    def _get_num_workers(self) -> int:
-        """Get number of workers based on available GPUs."""
-        if self.num_workers is not None:
-            return self.num_workers
-
-        # Auto-detect GPUs
-        try:
-            import torch  # type: ignore[import-not-found]
-
-            num_gpus = torch.cuda.device_count()
-            if num_gpus == 0:
-                return 1  # Fallback to single worker for CPU
-            return max(1, num_gpus // self.gpus_per_worker)
-        except ImportError:
-            return 1  # Fallback to single worker if torch unavailable
-
-    def _get_total_gpus(self) -> int:
-        """Get total number of available GPUs."""
-        try:
-            import torch  # type: ignore[import-not-found]
-
-            return torch.cuda.device_count()
-        except ImportError:
-            return 0
 
     async def run_async(self) -> dict[str, Any]:
         """Execute evaluations using instance-level queuing with multi-model support.
@@ -1208,144 +1181,19 @@ class AsyncEvalRunner:
                 model_results["suites"] = suite_aggs
 
         # Log summary of all scores
-        self._log_summary(results_dict)
+        self._log_summary(results_dict, multi_model=True)
 
         # Save results
         self._save_results(results_dict)
 
         # Write metrics.json for Beaker
-        self._write_metrics_json(results_dict)
+        self._write_metrics_json(results_dict, multi_model=True)
 
         return results_dict
-
-    def _report_task_completion(self, model_name: str, result: TaskResult) -> None:
-        """Report when a (model, task) pair completes."""
-        label = f"{model_name}:{result.spec}"
-        if result.error:
-            console.print(f"  [red]x[/red] {label} (ERROR: {result.error})")
-        else:
-            console.print(
-                f"  [green]v[/green] {label} ({result.num_instances} instances, "
-                f"{result.duration_seconds:.1f}s)"
-            )
 
     def run(self) -> dict[str, Any]:
         """Sync wrapper for async execution."""
         return asyncio.run(self.run_async())
-
-    def _log_summary(self, results: dict[str, Any]) -> None:
-        """Log summary of all task scores."""
-        logger.info("Summary of primary scores:")
-        for model_name, model_data in results.get("models", {}).items():
-            logger.info(f"  {model_name}:")
-            for task_name, task_data in model_data.get("tasks", {}).items():
-                metrics = task_data.get("metrics", {})
-                preferred = task_data.get("primary_metric")
-                primary = get_primary_metric(metrics, preferred)
-                if primary:
-                    metric_name, score = primary
-                    logger.info(f"    {task_name}: {score:.4f} ({metric_name})")
-
-            for suite_name, suite_data in model_data.get("suites", {}).items():
-                metrics = suite_data.get("metrics", {})
-                primary = get_primary_metric(metrics)
-                if primary:
-                    metric_name, score = primary
-                    logger.info(f"    {suite_name}: {score:.4f} ({metric_name})")
-
-    def _save_results(self, results: dict[str, Any]) -> None:
-        """Save results to all configured storage backends."""
-        if self.storages:
-            from olmo_eval.storage.base import convert_runner_results
-
-            experiment_id = str(uuid.uuid4())
-            eval_result = convert_runner_results(results, experiment_id)
-            for storage in self.storages:
-                storage.save(eval_result)
-                backend_name = type(storage).__name__
-                logger.info(f"Results saved to {backend_name} (experiment_id: {experiment_id})")
-                msg = f"Results saved to {backend_name} (experiment_id: {experiment_id})"
-                console.print(f"[green]{msg}[/green]")
-        else:
-            logger.info("No storage backend configured - results logged above only")
-
-    def _write_metrics_json(self, results: dict[str, Any]) -> None:
-        """Write metrics.json for Beaker display."""
-        metrics_file = os.path.join(self.output_dir, "metrics.json")
-
-        # Build config section with per-model details
-        models_config: dict[str, dict[str, Any]] = {}
-        for model_name, model_data in results.get("models", {}).items():
-            model_cfg = model_data.get("_model_config", {})
-            cfg: dict[str, Any] = {
-                "model": model_cfg.get("model", model_data.get("model", "")),
-                "backend": model_cfg.get("backend", model_data.get("backend", "")),
-                "dtype": model_cfg.get("dtype", "auto"),
-            }
-            # Only include optional fields if they have values
-            if model_cfg.get("tokenizer"):
-                cfg["tokenizer"] = model_cfg["tokenizer"]
-            if model_cfg.get("revision"):
-                cfg["revision"] = model_cfg["revision"]
-            if model_cfg.get("attention_backend"):
-                cfg["attention_backend"] = model_cfg["attention_backend"]
-            models_config[model_name] = cfg
-
-        config: dict[str, Any] = {"models": models_config}
-
-        # Build enhanced task entries - flatten (model, task) pairs
-        tasks_list = []
-        for model_name, model_data in results.get("models", {}).items():
-            for task_name, task_data in model_data.get("tasks", {}).items():
-                task_entry: dict[str, Any] = {
-                    "model": model_name,
-                    "task": task_name,
-                    "metrics": task_data.get("metrics", {}),
-                    "num_instances": task_data.get("num_instances", 0),
-                }
-                if task_data.get("primary_metric"):
-                    task_entry["primary_metric"] = task_data["primary_metric"]
-                if task_data.get("config"):
-                    task_entry["config"] = task_data["config"]
-                if task_data.get("duration_seconds"):
-                    task_entry["duration_seconds"] = task_data["duration_seconds"]
-                tasks_list.append(task_entry)
-
-        # Build summary with primary metric for each (model, task) pair
-        summary: dict[str, dict[str, dict[str, Any]]] = {}
-        for model_name, model_data in results.get("models", {}).items():
-            summary[model_name] = {}
-            for task_name, task_data in model_data.get("tasks", {}).items():
-                metrics = task_data.get("metrics", {})
-                preferred = task_data.get("primary_metric")
-                primary = get_primary_metric(metrics, preferred)
-                if primary:
-                    metric_name, score = primary
-                    summary[model_name][task_name] = {"metric": metric_name, "score": score}
-
-            # Add suite summaries to this model's summary
-            if "suites" in model_data:
-                for suite_name, suite_data in model_data["suites"].items():
-                    metrics = suite_data.get("metrics", {})
-                    primary = get_primary_metric(metrics)
-                    if primary:
-                        metric_name, score = primary
-                        summary[model_name][suite_name] = {"metric": metric_name, "score": score}
-
-        metrics_output = {
-            "timestamp": results.get("timestamp", ""),
-            "config": config,
-            "tasks": tasks_list,
-            "summary": summary,
-            "errors": results.get("errors", []),
-        }
-
-        os.makedirs(self.output_dir, exist_ok=True)
-        with open(metrics_file, "w") as f:
-            json.dump(metrics_output, f, indent=2)
-
-        logger.info(f"Metrics written to {metrics_file}")
-        console.print(f"[green]Metrics written to {metrics_file}[/green]")
 
     def _write_predictions(self, model_name: str, spec: str, predictions: list[dict]) -> None:
         """Write per-instance predictions to JSONL."""
@@ -1362,7 +1210,7 @@ class AsyncEvalRunner:
 
 
 @dataclass
-class StreamingEvalRunner:
+class StreamingEvalRunner(AsyncRunnerMixin):
     """Streaming evaluation runner with true continuous batching.
 
     Uses vLLM's AsyncLLMEngine for true streaming where:
@@ -1477,30 +1325,6 @@ class StreamingEvalRunner:
         console.print(f"[bold]Total (model, task) pairs:[/bold] {total_pairs}")
         for spec in expanded:
             console.print(f"  - {spec}")
-
-    def _get_num_workers(self) -> int:
-        """Get number of workers based on available GPUs."""
-        if self.num_workers is not None:
-            return self.num_workers
-
-        try:
-            import torch  # type: ignore[import-not-found]
-
-            num_gpus = torch.cuda.device_count()
-            if num_gpus == 0:
-                return 1
-            return max(1, num_gpus // self.gpus_per_worker)
-        except ImportError:
-            return 1
-
-    def _get_total_gpus(self) -> int:
-        """Get total number of available GPUs."""
-        try:
-            import torch  # type: ignore[import-not-found]
-
-            return torch.cuda.device_count()
-        except ImportError:
-            return 0
 
     async def run_async(self) -> dict[str, Any]:
         """Execute evaluations using streaming continuous batching.
@@ -1836,140 +1660,15 @@ class StreamingEvalRunner:
             if suite_aggs:
                 model_results["suites"] = suite_aggs
 
-        self._log_summary(results_dict)
+        self._log_summary(results_dict, multi_model=True)
         self._save_results(results_dict)
-        self._write_metrics_json(results_dict)
+        self._write_metrics_json(results_dict, multi_model=True)
 
         return results_dict
-
-    def _report_task_completion(self, model_name: str, result: TaskResult) -> None:
-        """Report when a (model, task) pair completes."""
-        label = f"{model_name}:{result.spec}"
-        if result.error:
-            console.print(f"  [red]x[/red] {label} (ERROR: {result.error})")
-        else:
-            console.print(
-                f"  [green]v[/green] {label} ({result.num_instances} instances, "
-                f"{result.duration_seconds:.1f}s)"
-            )
 
     def run(self) -> dict[str, Any]:
         """Sync wrapper for async execution."""
         return asyncio.run(self.run_async())
-
-    def _log_summary(self, results: dict[str, Any]) -> None:
-        """Log summary of all task scores."""
-        logger.info("Summary of primary scores:")
-        for model_name, model_data in results.get("models", {}).items():
-            logger.info(f"  {model_name}:")
-            for task_name, task_data in model_data.get("tasks", {}).items():
-                metrics = task_data.get("metrics", {})
-                preferred = task_data.get("primary_metric")
-                primary = get_primary_metric(metrics, preferred)
-                if primary:
-                    metric_name, score = primary
-                    logger.info(f"    {task_name}: {score:.4f} ({metric_name})")
-
-            for suite_name, suite_data in model_data.get("suites", {}).items():
-                metrics = suite_data.get("metrics", {})
-                primary = get_primary_metric(metrics)
-                if primary:
-                    metric_name, score = primary
-                    logger.info(f"    {suite_name}: {score:.4f} ({metric_name})")
-
-    def _save_results(self, results: dict[str, Any]) -> None:
-        """Save results to all configured storage backends."""
-        if self.storages:
-            from olmo_eval.storage.base import convert_runner_results
-
-            experiment_id = str(uuid.uuid4())
-            eval_result = convert_runner_results(results, experiment_id)
-            for storage in self.storages:
-                storage.save(eval_result)
-                backend_name = type(storage).__name__
-                logger.info(f"Results saved to {backend_name} (experiment_id: {experiment_id})")
-                msg = f"Results saved to {backend_name} (experiment_id: {experiment_id})"
-                console.print(f"[green]{msg}[/green]")
-        else:
-            logger.info("No storage backend configured - results logged above only")
-
-    def _write_metrics_json(self, results: dict[str, Any]) -> None:
-        """Write metrics.json for Beaker display."""
-        metrics_file = os.path.join(self.output_dir, "metrics.json")
-
-        # Build config section with per-model details
-        models_config: dict[str, dict[str, Any]] = {}
-        for model_name, model_data in results.get("models", {}).items():
-            model_cfg = model_data.get("_model_config", {})
-            cfg: dict[str, Any] = {
-                "model": model_cfg.get("model", model_data.get("model", "")),
-                "backend": model_cfg.get("backend", model_data.get("backend", "")),
-                "dtype": model_cfg.get("dtype", "auto"),
-            }
-            # Only include optional fields if they have values
-            if model_cfg.get("tokenizer"):
-                cfg["tokenizer"] = model_cfg["tokenizer"]
-            if model_cfg.get("revision"):
-                cfg["revision"] = model_cfg["revision"]
-            if model_cfg.get("attention_backend"):
-                cfg["attention_backend"] = model_cfg["attention_backend"]
-            models_config[model_name] = cfg
-
-        config: dict[str, Any] = {"models": models_config}
-
-        # Build enhanced task entries - flatten (model, task) pairs
-        tasks_list = []
-        for model_name, model_data in results.get("models", {}).items():
-            for task_name, task_data in model_data.get("tasks", {}).items():
-                task_entry: dict[str, Any] = {
-                    "model": model_name,
-                    "task": task_name,
-                    "metrics": task_data.get("metrics", {}),
-                    "num_instances": task_data.get("num_instances", 0),
-                }
-                if task_data.get("primary_metric"):
-                    task_entry["primary_metric"] = task_data["primary_metric"]
-                if task_data.get("config"):
-                    task_entry["config"] = task_data["config"]
-                if task_data.get("duration_seconds"):
-                    task_entry["duration_seconds"] = task_data["duration_seconds"]
-                tasks_list.append(task_entry)
-
-        # Build summary with primary metric for each (model, task) pair
-        summary: dict[str, dict[str, dict[str, Any]]] = {}
-        for model_name, model_data in results.get("models", {}).items():
-            summary[model_name] = {}
-            for task_name, task_data in model_data.get("tasks", {}).items():
-                metrics = task_data.get("metrics", {})
-                preferred = task_data.get("primary_metric")
-                primary = get_primary_metric(metrics, preferred)
-                if primary:
-                    metric_name, score = primary
-                    summary[model_name][task_name] = {"metric": metric_name, "score": score}
-
-            # Add suite summaries to this model's summary
-            if "suites" in model_data:
-                for suite_name, suite_data in model_data["suites"].items():
-                    metrics = suite_data.get("metrics", {})
-                    primary = get_primary_metric(metrics)
-                    if primary:
-                        metric_name, score = primary
-                        summary[model_name][suite_name] = {"metric": metric_name, "score": score}
-
-        metrics_output = {
-            "timestamp": results.get("timestamp", ""),
-            "config": config,
-            "tasks": tasks_list,
-            "summary": summary,
-            "errors": results.get("errors", []),
-        }
-
-        os.makedirs(self.output_dir, exist_ok=True)
-        with open(metrics_file, "w") as f:
-            json.dump(metrics_output, f, indent=2)
-
-        logger.info(f"Metrics written to {metrics_file}")
-        console.print(f"[green]Metrics written to {metrics_file}[/green]")
 
     def _write_predictions(self, model_name: str, spec: str, predictions: list[dict]) -> None:
         """Write per-instance predictions to JSONL."""

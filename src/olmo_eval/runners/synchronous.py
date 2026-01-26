@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -19,10 +17,10 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.evals.suites import suite_exists
 from olmo_eval.evals.tasks import list_regimes, list_tasks, list_variants
 from olmo_eval.evals.tasks.core.registry import parse_task_spec
+from olmo_eval.runners.mixins import RunnerResultsMixin
 from olmo_eval.runners.utils import (
     TaskResult,
     compute_suite_aggregations,
-    get_primary_metric,
     run_task_impl,
     write_predictions_jsonl,
     write_requests_jsonl,
@@ -49,7 +47,7 @@ SAMPLING_KEYS = {"temperature", "max_tokens", "top_p", "top_k", "num_samples"}
 
 
 @dataclass
-class SyncEvalRunner:
+class SyncEvalRunner(RunnerResultsMixin):
     """Orchestrates synchronous evaluation runs across tasks."""
 
     model_name: str
@@ -284,109 +282,6 @@ class SyncEvalRunner:
             raise RuntimeError(f"Task {spec} failed: {result.error}")
 
         return result
-
-    def _log_summary(self, results: dict[str, Any]) -> None:
-        """Log summary of all task scores."""
-        logger.info("Summary of primary scores:")
-        for task_name, task_data in results["tasks"].items():
-            metrics = task_data.get("metrics", {})
-            preferred = task_data.get("primary_metric")
-            primary = get_primary_metric(metrics, preferred)
-            if primary:
-                metric_name, score = primary
-                logger.info(f"  {task_name}: {score:.4f} ({metric_name})")
-
-        for suite_name, suite_data in results.get("suites", {}).items():
-            metrics = suite_data.get("metrics", {})
-            primary = get_primary_metric(metrics)
-            if primary:
-                metric_name, score = primary
-                logger.info(f"  {suite_name}: {score:.4f} ({metric_name})")
-
-    def _save_results(self, results: dict[str, Any]) -> None:
-        """Save results to all configured storage backends."""
-        if self.storages:
-            from olmo_eval.storage.base import convert_runner_results
-
-            experiment_id = str(uuid.uuid4())
-            eval_result = convert_runner_results(results, experiment_id)
-            for storage in self.storages:
-                storage.save(eval_result)
-                backend_name = type(storage).__name__
-                logger.info(f"Results saved to {backend_name} (experiment_id: {experiment_id})")
-                msg = f"Results saved to {backend_name} (experiment_id: {experiment_id})"
-                console.print(f"[green]{msg}[/green]")
-        else:
-            logger.info("No storage backend configured - results logged above only")
-
-    def _write_metrics_json(self, results: dict[str, Any]) -> None:
-        """Write metrics.json for Beaker display."""
-        metrics_file = os.path.join(self.output_dir, "metrics.json")
-
-        # Build config section from stored model config
-        model_cfg = results.get("_model_config", {})
-        config: dict[str, Any] = {
-            "model": model_cfg.get("model", results.get("model", "")),
-            "backend": model_cfg.get("backend", results.get("backend", "")),
-            "dtype": model_cfg.get("dtype", "auto"),
-        }
-        # Only include optional fields if they have values
-        if model_cfg.get("tokenizer"):
-            config["tokenizer"] = model_cfg["tokenizer"]
-        if model_cfg.get("revision"):
-            config["revision"] = model_cfg["revision"]
-        if model_cfg.get("attention_backend"):
-            config["attention_backend"] = model_cfg["attention_backend"]
-
-        # Build enhanced task entries
-        tasks_list = []
-        for task_name, task_data in results.get("tasks", {}).items():
-            task_entry: dict[str, Any] = {
-                "task": task_name,
-                "metrics": task_data.get("metrics", {}),
-                "num_instances": task_data.get("num_instances", 0),
-            }
-            if task_data.get("primary_metric"):
-                task_entry["primary_metric"] = task_data["primary_metric"]
-            if task_data.get("config"):
-                task_entry["config"] = task_data["config"]
-            if task_data.get("duration_seconds"):
-                task_entry["duration_seconds"] = task_data["duration_seconds"]
-            tasks_list.append(task_entry)
-
-        # Build summary with primary metric for each task
-        summary: dict[str, dict[str, Any]] = {}
-        for task_name, task_data in results.get("tasks", {}).items():
-            metrics = task_data.get("metrics", {})
-            preferred = task_data.get("primary_metric")
-            primary = get_primary_metric(metrics, preferred)
-            if primary:
-                metric_name, score = primary
-                summary[task_name] = {"metric": metric_name, "score": score}
-
-        # Add suite summaries to summary (without separate suites list)
-        if "suites" in results:
-            for suite_name, suite_data in results["suites"].items():
-                metrics = suite_data.get("metrics", {})
-                primary = get_primary_metric(metrics)
-                if primary:
-                    metric_name, score = primary
-                    summary[suite_name] = {"metric": metric_name, "score": score}
-
-        metrics_output = {
-            "timestamp": results.get("timestamp", ""),
-            "config": config,
-            "tasks": tasks_list,
-            "summary": summary,
-            "errors": results.get("errors", []),
-        }
-
-        os.makedirs(self.output_dir, exist_ok=True)
-        with open(metrics_file, "w") as f:
-            json.dump(metrics_output, f, indent=2)
-
-        logger.info(f"Metrics written to {metrics_file}")
-        console.print(f"[green]Metrics written to {metrics_file}[/green]")
 
     def _write_predictions(self, spec: str, predictions: list[dict]) -> None:
         """Write per-instance predictions to JSONL."""
