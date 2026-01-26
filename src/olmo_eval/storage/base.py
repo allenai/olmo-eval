@@ -12,7 +12,7 @@ from olmo_eval.core.types import EvalResult, StoredTaskResult
 
 __all__ = [
     "StorageBackend",
-    "compute_model_id",
+    "compute_model_hash",
     "convert_runner_results",
 ]
 
@@ -80,13 +80,13 @@ class StorageBackend(ABC):
         ...
 
 
-def compute_model_id(config: dict[str, Any] | None) -> str | None:
-    """Compute a deterministic model ID from a configuration dict.
+def compute_model_hash(config: dict[str, Any] | None) -> str | None:
+    """Compute a deterministic hash from a model configuration dict.
 
-    The model ID is a hash of the config dict, used to identify
-    unique model configurations across experiments. The same config
-    always produces the same model_id, allowing multiple experiments
-    (from different users or runs) to be associated with the same model.
+    The model hash is used to identify unique model configurations
+    across experiments. The same config always produces the same hash,
+    allowing multiple experiments (from different users or runs) to be
+    associated with the same model configuration.
 
     Args:
         config: Model configuration dictionary.
@@ -96,8 +96,8 @@ def compute_model_id(config: dict[str, Any] | None) -> str | None:
 
     Example:
         >>> config = {"model": "llama3.1-8b", "temperature": 0.7}
-        >>> model_id = compute_model_id(config)
-        >>> len(model_id)
+        >>> model_hash = compute_model_hash(config)
+        >>> len(model_hash)
         16
     """
     if not config:

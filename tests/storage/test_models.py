@@ -19,7 +19,7 @@ class TestExperimentModel:
         assert exp.experiment_id == "test-001"
         assert exp.model_name == "llama3.1-8b"
         assert exp.backend_name == "vllm"
-        assert exp.model_id is None
+        assert exp.model_hash is None
         assert exp.workspace is None
 
     def test_create_full_experiment(self):
@@ -27,7 +27,7 @@ class TestExperimentModel:
         exp = Experiment(
             experiment_id="test-002",
             model_name="olmo-2-7b",
-            model_id="model-abc123",
+            model_hash="model-abc123",
             backend_name="hf",
             timestamp=datetime(2024, 1, 15, 11, 0, 0),
             experiment_name="benchmark-run",
@@ -35,14 +35,13 @@ class TestExperimentModel:
             author="test-user",
             tags=["benchmark", "release"],
             git_ref="abc123",
-            model_hash="hash456",
             revision="main",
             s3_location="s3://bucket/results/",
             config={"batch_size": 32},
             metadata_={"version": "1.0"},
         )
         assert exp.experiment_id == "test-002"
-        assert exp.model_id == "model-abc123"
+        assert exp.model_hash == "model-abc123"
         assert exp.workspace == "ai2/olmo"
         assert exp.tags == ["benchmark", "release"]
         assert exp.config == {"batch_size": 32}
@@ -124,20 +123,20 @@ class TestInstancePredictionModel:
         assert inst.native_id == "doc_123"
         assert inst.doc_id == 0
         assert inst.instance_metrics == {"acc": 1.0}
-        assert inst.model_id is None
+        assert inst.model_hash is None
 
     def test_create_full_instance_prediction(self):
         """Test creating an instance prediction with all fields."""
         inst = InstancePrediction(
             experiment_id="exp-002",
-            model_id="model-abc",
+            model_hash="model-abc",
             task_name="gsm8k",
             native_id="gsm8k_456",
             doc_id=5,
             instance_metrics={"exact_match": 0.0, "f1": 0.3},
             s3_prediction_key="s3://bucket/predictions/exp-002/gsm8k/pred_5.json",
         )
-        assert inst.model_id == "model-abc"
+        assert inst.model_hash == "model-abc"
         assert inst.instance_metrics == {"exact_match": 0.0, "f1": 0.3}
         assert inst.s3_prediction_key == "s3://bucket/predictions/exp-002/gsm8k/pred_5.json"
 
@@ -224,7 +223,7 @@ class TestTableMetadata:
         index_names = [idx.name for table in Base.metadata.tables.values() for idx in table.indexes]
 
         # Experiment indexes
-        assert "idx_experiments_model_id" in index_names
+        assert "idx_experiments_model_hash" in index_names
         assert "idx_experiments_model_workspace" in index_names
 
         # TaskResult indexes

@@ -1,10 +1,10 @@
 """SQLAlchemy ORM models for evaluation storage.
 
 Schema designed to support:
-- Experiment-level tracking (experiment_id, model_id)
+- Experiment-level tracking (experiment_id, model_hash)
 - Task-level aggregated metrics
 - Instance-level predictions for pairwise statistical comparisons
-- Efficient queries for dashboard and pairwise analysis (denormalized model_id/workspace)
+- Efficient queries for dashboard and pairwise analysis (denormalized model_hash/workspace)
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ class Experiment(Base):
 
     # Model identification
     model_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    model_id: Mapped[str | None] = mapped_column(String(64), index=True)  # Hash of model config
+    model_hash: Mapped[str | None] = mapped_column(String(64), index=True)  # Hash of model config
     backend_name: Mapped[str] = mapped_column(String(50), nullable=False)
 
     # Timestamp
@@ -49,7 +49,6 @@ class Experiment(Base):
 
     # Version tracking
     git_ref: Mapped[str | None] = mapped_column(String(100))
-    model_hash: Mapped[str | None] = mapped_column(String(64))
     revision: Mapped[str | None] = mapped_column(String(255))
 
     # S3 reference for full evaluation data
@@ -142,7 +141,7 @@ class InstancePrediction(Base):
     )
 
     # Denormalized field for fast queries (from experiments table)
-    model_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    model_hash: Mapped[str | None] = mapped_column(String(64), index=True)
 
     # Task identification
     task_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
@@ -183,7 +182,7 @@ Index("idx_task_results_score_desc", TaskResult.primary_score.desc())
 # Instance Predictions Indexes
 Index(
     "idx_instance_model_task",
-    InstancePrediction.model_id,
+    InstancePrediction.model_hash,
     InstancePrediction.task_name,
 )
 Index(
@@ -198,5 +197,5 @@ Index(
 )
 
 # Experiment Indexes
-Index("idx_experiments_model_id", Experiment.model_id)
+Index("idx_experiments_model_hash", Experiment.model_hash)
 Index("idx_experiments_model_workspace", Experiment.model_name, Experiment.workspace)

@@ -25,14 +25,14 @@ class QueryHelper:
     def get_model_task_metrics(
         self,
         model_name: str | None = None,
-        model_id: str | None = None,
+        model_hash: str | None = None,
         tasks: list[str] | None = None,
     ) -> dict[str, float | None]:
         """Get task metrics for a model.
 
         Args:
             model_name: Model name filter.
-            model_id: Model ID filter.
+            model_hash: Model hash filter.
             tasks: Optional list of tasks to include.
 
         Returns:
@@ -40,7 +40,7 @@ class QueryHelper:
         """
         experiments = self.experiment_repo.query(
             model_name=model_name,
-            model_id=model_id,
+            model_hash=model_hash,
             limit=1,
         )
 
@@ -61,20 +61,20 @@ class QueryHelper:
         self,
         task_name: str | list[str],
         model_name: str | None = None,
-        model_id: str | None = None,
+        model_hash: str | None = None,
         experiment_id: str | None = None,
         limit: int | None = None,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         """Get instance predictions for a model and task(s).
 
-        Supports querying by human-readable model_name or computed model_id.
-        If model_name is provided, finds all model_ids for experiments with that name.
+        Supports querying by human-readable model_name or computed model_hash.
+        If model_name is provided, finds all model_hashes for experiments with that name.
 
         Args:
             task_name: Task name (single string) or task names (list) to query.
             model_name: Human-readable model name (e.g., "llama3.1-8b").
-            model_id: Computed model ID hash (alternative to model_name).
+            model_hash: Computed model hash (alternative to model_name).
             experiment_id: Specific experiment ID to filter by.
             limit: Optional maximum number of instances.
             offset: Number of instances to skip.
@@ -83,30 +83,32 @@ class QueryHelper:
             List of instance dicts with metrics and metadata.
 
         Raises:
-            ValueError: If neither model_name nor model_id nor experiment_id is provided.
+            ValueError: If neither model_name nor model_hash nor experiment_id is provided.
         """
-        if not model_name and not model_id and not experiment_id:
-            raise ValueError("Must provide at least one of: model_name, model_id, or experiment_id")
+        if not model_name and not model_hash and not experiment_id:
+            raise ValueError(
+                "Must provide at least one of: model_name, model_hash, or experiment_id"
+            )
 
-        # If model_name is provided, look up the corresponding model_ids
-        if model_name and not model_id:
-            from olmo_eval.storage.base import compute_model_id
+        # If model_name is provided, look up the corresponding model_hashes
+        if model_name and not model_hash:
+            from olmo_eval.storage.base import compute_model_hash
 
             experiments = self.experiment_repo.query(model_name=model_name, limit=1000)
             if not experiments:
                 return []
 
-            # Get unique model_ids from experiments with this model_name
-            model_ids = list({compute_model_id(exp.config) for exp in experiments})
-            model_ids = [mid for mid in model_ids if mid is not None]
-            if not model_ids:
+            # Get unique model_hashes from experiments with this model_name
+            model_hashes = list({compute_model_hash(exp.config) for exp in experiments})
+            model_hashes = [mh for mh in model_hashes if mh is not None]
+            if not model_hashes:
                 return []
 
-            # Query instances for all matching model_ids
+            # Query instances for all matching model_hashes
             all_instances = []
-            for mid in model_ids:
+            for mh in model_hashes:
                 instances = self.instance_repo.get_instances(
-                    model_id=mid,
+                    model_hash=mh,
                     task_name=task_name,
                     experiment_id=experiment_id,
                     limit=limit,
@@ -120,9 +122,9 @@ class QueryHelper:
 
             return all_instances
 
-        # Direct query by model_id or experiment_id
+        # Direct query by model_hash or experiment_id
         return self.instance_repo.get_instances(
-            model_id=model_id,
+            model_hash=model_hash,
             task_name=task_name,
             experiment_id=experiment_id,
             limit=limit,

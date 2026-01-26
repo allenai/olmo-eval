@@ -168,7 +168,7 @@ class TestInstancePredictionRepository:
                 experiment_id=sample_eval_result.experiment_id,
                 task_name="mmlu",
                 instances=instances,
-                model_id="test-model-id",
+                model_hash="test-model-id",
             )
 
         # Verify instances were saved
@@ -180,7 +180,7 @@ class TestInstancePredictionRepository:
 
     @pytest.mark.integration
     def test_get_instances_by_model(self, postgres_backend, sample_eval_result):
-        """Test retrieving instances by model_id."""
+        """Test retrieving instances by model_hash."""
         from olmo_eval.storage.db.repository import InstancePredictionRepository
 
         postgres_backend.save(sample_eval_result)
@@ -193,16 +193,16 @@ class TestInstancePredictionRepository:
                 experiment_id=sample_eval_result.experiment_id,
                 task_name="mmlu",
                 instances=instances,
-                model_id="model-123",
+                model_hash="model-123",
             )
 
-        # Query by model_id
+        # Query by model_hash
         with postgres_backend.db.session() as session:
             repo = InstancePredictionRepository(session)
-            results = repo.get_instances(model_id="model-123", task_name="mmlu")
+            results = repo.get_instances(model_hash="model-123", task_name="mmlu")
 
         assert len(results) == 1
-        assert results[0]["model_id"] == "model-123"
+        assert results[0]["model_hash"] == "model-123"
 
     @pytest.mark.integration
     def test_get_instances_pagination(self, postgres_backend, sample_eval_result):

@@ -13,7 +13,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from olmo_eval.core.types import EvalResult, StoredTaskResult
-from olmo_eval.storage.base import compute_model_id
+from olmo_eval.storage.base import compute_model_hash
 from olmo_eval.storage.db.models import Experiment, InstancePrediction, TaskResult
 
 
@@ -42,12 +42,12 @@ class ExperimentRepository:
         # Check if experiment already exists
         existing = self.session.get(Experiment, experiment_id)
 
-        model_id = compute_model_id(eval_result.config)
+        model_hash = compute_model_hash(eval_result.config)
 
         if existing:
             # Update existing experiment
             existing.model_name = eval_result.model_name
-            existing.model_id = model_id
+            existing.model_hash = model_hash
             existing.backend_name = eval_result.backend_name
             existing.timestamp = eval_result.timestamp
             existing.experiment_name = eval_result.experiment_name
@@ -55,7 +55,6 @@ class ExperimentRepository:
             existing.author = eval_result.author
             existing.tags = eval_result.tags
             existing.git_ref = eval_result.git_ref
-            existing.model_hash = eval_result.model_hash
             existing.revision = eval_result.revision
             existing.s3_location = eval_result.s3_location
             existing.config = eval_result.config
@@ -74,7 +73,7 @@ class ExperimentRepository:
             experiment = Experiment(
                 experiment_id=experiment_id,
                 model_name=eval_result.model_name,
-                model_id=model_id,
+                model_hash=model_hash,
                 backend_name=eval_result.backend_name,
                 timestamp=eval_result.timestamp,
                 experiment_name=eval_result.experiment_name,
@@ -82,7 +81,6 @@ class ExperimentRepository:
                 author=eval_result.author,
                 tags=eval_result.tags,
                 git_ref=eval_result.git_ref,
-                model_hash=eval_result.model_hash,
                 revision=eval_result.revision,
                 s3_location=eval_result.s3_location,
                 config=eval_result.config,
@@ -140,7 +138,7 @@ class ExperimentRepository:
     def query(
         self,
         model_name: str | None = None,
-        model_id: str | None = None,
+        model_hash: str | None = None,
         task_name: str | None = None,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
@@ -151,7 +149,7 @@ class ExperimentRepository:
 
         Args:
             model_name: Filter by model name (exact match).
-            model_id: Filter by model ID (hash of model config).
+            model_hash: Filter by model hash (hash of model config).
             task_name: Filter by task name (experiments containing this task).
             start_time: Filter by timestamp >= start_time.
             end_time: Filter by timestamp <= end_time.
@@ -167,8 +165,8 @@ class ExperimentRepository:
         if model_name:
             stmt = stmt.where(Experiment.model_name == model_name)
 
-        if model_id:
-            stmt = stmt.where(Experiment.model_id == model_id)
+        if model_hash:
+            stmt = stmt.where(Experiment.model_hash == model_hash)
 
         if start_time:
             stmt = stmt.where(Experiment.timestamp >= start_time)
@@ -256,7 +254,7 @@ class InstancePredictionRepository:
         experiment_id: str,
         task_name: str,
         instances: list[dict[str, Any]],
-        model_id: str | None = None,
+        model_hash: str | None = None,
     ) -> None:
         """Save instance predictions for an experiment's task.
 
@@ -268,12 +266,12 @@ class InstancePredictionRepository:
                 - doc_id: Sequential ID
                 - instance_metrics: Dict of metric names to values
                 - s3_prediction_key: Optional S3 key for full prediction
-            model_id: Optional model ID (denormalized).
+            model_hash: Optional model hash (denormalized).
         """
         for inst_data in instances:
             instance = InstancePrediction(
                 experiment_id=experiment_id,
-                model_id=model_id,
+                model_hash=model_hash,
                 task_name=task_name,
                 native_id=inst_data["native_id"],
                 doc_id=inst_data["doc_id"],
@@ -284,7 +282,7 @@ class InstancePredictionRepository:
 
     def get_instances(
         self,
-        model_id: str | None = None,
+        model_hash: str | None = None,
         task_name: str | list[str] | None = None,
         experiment_id: str | None = None,
         limit: int | None = None,
@@ -293,7 +291,7 @@ class InstancePredictionRepository:
         """Get instance predictions with filters.
 
         Args:
-            model_id: Filter by model ID.
+            model_hash: Filter by model hash.
             task_name: Filter by task name (single string) or task names (list).
             experiment_id: Filter by specific experiment.
             limit: Optional maximum number of results.
@@ -304,8 +302,8 @@ class InstancePredictionRepository:
         """
         stmt = select(InstancePrediction)
 
-        if model_id:
-            stmt = stmt.where(InstancePrediction.model_id == model_id)
+        if model_hash:
+            stmt = stmt.where(InstancePrediction.model_hash == model_hash)
 
         if task_name:
             if isinstance(task_name, list):
@@ -341,7 +339,7 @@ class InstancePredictionRepository:
         return {
             "id": instance.id,
             "experiment_id": instance.experiment_id,
-            "model_id": instance.model_id,
+            "model_hash": instance.model_hash,
             "task_name": instance.task_name,
             "native_id": instance.native_id,
             "doc_id": instance.doc_id,

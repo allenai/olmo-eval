@@ -2,13 +2,13 @@
 
 from olmo_eval.storage.base import (
     StorageBackend,
-    compute_model_id,
+    compute_model_hash,
     convert_runner_results,
 )
 
 __all__ = [
     "StorageBackend",
-    "compute_model_id",
+    "compute_model_hash",
     "convert_runner_results",
     "get_backend",
 ]

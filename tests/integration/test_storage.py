@@ -120,10 +120,11 @@ class TestPostgresBackend:
 
     @pytest.mark.integration
     def test_same_model_different_experiments(self, postgres_backend):
-        """Test that same model config produces same model_id across different experiments."""
+        """Test that same model config produces same model_hash across different experiments."""
         from datetime import datetime
 
-        from olmo_eval.core import EvalResult, StoredTaskResult, compute_model_id
+        from olmo_eval.core import EvalResult, StoredTaskResult
+        from olmo_eval.storage import compute_model_hash
 
         # Same config, different authors
         config = {"model": "llama3.1-8b", "temperature": 0.7}
@@ -176,11 +177,11 @@ class TestPostgresBackend:
             assert exp1 is not None
             assert exp2 is not None
 
-            # Same config should give same model_id
-            expected_model_id = compute_model_id(config)
-            assert exp1.model_id == expected_model_id
-            assert exp2.model_id == expected_model_id
-            assert exp1.model_id == exp2.model_id  # Same model!
+            # Same config should give same model_hash
+            expected_model_hash = compute_model_hash(config)
+            assert exp1.model_hash == expected_model_hash
+            assert exp2.model_hash == expected_model_hash
+            assert exp1.model_hash == exp2.model_hash  # Same model!
 
             # But different experiments
             assert exp1.experiment_id != exp2.experiment_id

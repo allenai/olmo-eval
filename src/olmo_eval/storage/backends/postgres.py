@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from olmo_eval.core.types import EvalResult
-from olmo_eval.storage.base import StorageBackend, compute_model_id
+from olmo_eval.storage.base import StorageBackend, compute_model_hash
 from olmo_eval.storage.db.repository import ExperimentRepository, InstancePredictionRepository
 from olmo_eval.storage.db.session import DatabaseSession
 
@@ -108,14 +108,14 @@ class PostgresBackend(StorageBackend):
             # Save instance predictions
             inst_repo = InstancePredictionRepository(session)
 
-            model_id = compute_model_id(result.config)
+            model_hash = compute_model_hash(result.config)
 
             for task_name, instances in instances_by_task.items():
                 inst_repo.save_instances(
                     experiment_id=experiment_id,
                     task_name=task_name,
                     instances=instances,
-                    model_id=model_id,
+                    model_hash=model_hash,
                 )
 
             num_instances = sum(len(v) for v in instances_by_task.values())
