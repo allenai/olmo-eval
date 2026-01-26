@@ -98,13 +98,6 @@ def format_timestamp(ts: datetime | None) -> str:
     return ts.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def truncate_id(experiment_id: str, length: int = 12) -> str:
-    """Truncate an experiment ID for display."""
-    if len(experiment_id) <= length:
-        return experiment_id
-    return experiment_id[:length] + "..."
-
-
 def print_experiments_table(experiments: list[Any]) -> None:
     """Print a table of experiments."""
     table = Table(title="Evaluation Results")
@@ -116,7 +109,7 @@ def print_experiments_table(experiments: list[Any]) -> None:
 
     for exp in experiments:
         table.add_row(
-            truncate_id(exp.experiment_id),
+            exp.experiment_id,
             exp.model_name,
             exp.backend_name or "-",
             format_timestamp(exp.timestamp),
@@ -126,11 +119,11 @@ def print_experiments_table(experiments: list[Any]) -> None:
     console.print(table)
 
 
-def print_experiment_detail(experiment: Any, show_full_id: bool = True) -> None:
+def print_experiment_detail(experiment: Any) -> None:
     """Print detailed information about an experiment."""
     # Header panel with metadata
     lines = [
-        f"[bold]Experiment ID:[/bold] {experiment.experiment_id if show_full_id else truncate_id(experiment.experiment_id)}",
+        f"[bold]Experiment ID:[/bold] {experiment.experiment_id}",
         f"[bold]Model:[/bold] {experiment.model_name}",
         f"[bold]Backend:[/bold] {experiment.backend_name or '-'}",
         f"[bold]Timestamp:[/bold] {format_timestamp(experiment.timestamp)}",
@@ -160,7 +153,6 @@ def print_task_results_table(tasks: list[Any], task_filter: tuple[str, ...] | No
     table.add_column("Task", style="cyan")
     table.add_column("Primary Metric", style="dim")
     table.add_column("Score", justify="right", style="green")
-    table.add_column("Instances", justify="right")
 
     for task in tasks:
         # Apply filter if provided
@@ -168,13 +160,11 @@ def print_task_results_table(tasks: list[Any], task_filter: tuple[str, ...] | No
             continue
 
         score_str = f"{task.primary_score:.4f}" if task.primary_score is not None else "-"
-        instances_str = str(task.num_instances) if task.num_instances is not None else "-"
 
         table.add_row(
             task.task_name,
             task.primary_metric or "-",
             score_str,
-            instances_str,
         )
 
     console.print(table)
@@ -377,51 +367,24 @@ def get(
 @click.option(
     "--model",
     "-m",
-    "model_name",
-    help="Filter by model name.",
+    "model_names",
+    multiple=True,
+    help="Model name(s) to query (can specify multiple).",
 )
 @click.option(
     "--model-hash",
-    help="Filter by model config hash.",
-)
-@click.option(
-    "--experiment-name",
-    help="Filter by experiment name.",
+    "-h",
+    "model_hashes",
+    multiple=True,
+    help="Model hash(es) to query (can specify multiple).",
 )
 @click.option(
     "--task",
     "-t",
     "task_names",
     multiple=True,
-    help="Filter by task name (can specify multiple).",
-)
-@click.option(
-    "--after",
-    type=click.DateTime(),
-    help="Filter timestamp >= value (ISO format).",
-)
-@click.option(
-    "--before",
-    type=click.DateTime(),
-    help="Filter timestamp <= value (ISO format).",
-)
-@click.option(
-    "--latest",
-    is_flag=True,
-    help="Return only the most recent result.",
-)
-@click.option(
-    "--limit",
-    "-n",
-    default=20,
-    type=int,
-    help="Maximum results to return.",
-)
-@click.option(
-    "--offset",
-    default=0,
-    type=int,
-    help="Skip first N results.",
+    required=True,
+    help="Task name(s) to display (can specify multiple).",
 )
 @click.option(
     "--format",
@@ -433,15 +396,9 @@ def get(
 )
 @db_options
 def query(
-    model_name: str | None,
-    model_hash: str | None,
-    experiment_name: str | None,
+    model_names: tuple[str, ...],
+    model_hashes: tuple[str, ...],
     task_names: tuple[str, ...],
-    after: datetime | None,
-    before: datetime | None,
-    latest: bool,
-    limit: int,
-    offset: int,
     output_format: str,
     db_host: str,
     db_port: int,
@@ -449,19 +406,18 @@ def query(
     db_user: str,
     db_password_env: str,
 ) -> None:
-    """Query evaluation results with filters.
+    """Query evaluation results across models and tasks.
 
-    At least one filter (--model, --model-hash, --experiment-name, or --task) is required.
+    Displays a table with models/hashes as rows and task scores as columns.
+    Uses the most recent experiment for each model.
 
     Examples:
-        olmo-eval results query --model llama3.1-8b --latest
-        olmo-eval results query --model llama3.1-8b --task mmlu --after 2024-01-01
+        olmo-eval results query -m llama3.1-8b -m qwen2.5-72b -t mmlu -t gsm8k
+        olmo-eval results query -h abc123 -h def456 -t mmlu -t gsm8k
+        olmo-eval results query -m olmo-2-13b -t suite:core -t suite:overall
     """
-    # Validate that at least one filter is provided
-    if not any([model_name, model_hash, experiment_name, task_names]):
-        raise click.UsageError(
-            "At least one of --model, --model-hash, --experiment-name, or --task is required"
-        )
+    if not model_names and not model_hashes:
+        raise click.UsageError("At least one --model or --model-hash is required")
 
     db = get_database_session(db_host, db_port, db_name, db_user, db_password_env)
 
@@ -471,51 +427,105 @@ def query(
         with db.session() as session:
             repo = ExperimentRepository(session)
 
-            # Query with filters
-            # Note: ExperimentRepository.query doesn't support experiment_name directly,
-            # so we filter it in code if needed
-            task_name = task_names[0] if len(task_names) == 1 else None  # Repo only supports single task
+            # Each row: (display_label, scores_dict, model_name, model_hash)
+            rows: list[tuple[str, dict[str, float | None], str, str | None]] = []
+            # Collect task hashes for column headers
+            task_hashes: dict[str, str | None] = {task: None for task in task_names}
 
-            experiments = repo.query(
-                model_name=model_name,
-                model_hash=model_hash,
-                task_name=task_name,
-                start_time=after,
-                end_time=before,
-                latest=latest,
-                limit=limit,
-                offset=offset,
-            )
+            def collect_task_hashes(exp: Any) -> None:
+                for t in exp.tasks:
+                    if t.task_name in task_hashes and t.task_hash and not task_hashes[t.task_name]:
+                        task_hashes[t.task_name] = t.task_hash
 
-            # Additional filtering for experiment_name (not supported in repo)
-            if experiment_name:
-                experiments = [e for e in experiments if e.experiment_name == experiment_name]
+            # Query by model names - find all distinct configs for each model
+            for model_name in model_names:
+                experiments = repo.query(model_name=model_name, limit=1000)
+                if not experiments:
+                    console.print(f"[yellow]Warning:[/yellow] No experiments found for model '{model_name}'")
+                    rows.append((model_name, {task: None for task in task_names}, model_name, None))
+                else:
+                    latest_by_hash: dict[str | None, Any] = {}
+                    for exp in experiments:
+                        h = exp.model_hash
+                        if h not in latest_by_hash:
+                            latest_by_hash[h] = exp
+                        collect_task_hashes(exp)
+                    for exp in latest_by_hash.values():
+                        task_scores = {t.task_name: t.primary_score for t in exp.tasks}
+                        scores = {task: task_scores.get(task) for task in task_names}
+                        rows.append((model_name, scores, exp.model_name, exp.model_hash))
 
-            # Additional filtering for multiple tasks
-            if len(task_names) > 1:
-                filtered = []
-                for exp in experiments:
-                    exp_tasks = {t.task_name for t in exp.tasks}
-                    if all(tn in exp_tasks for tn in task_names):
-                        filtered.append(exp)
-                experiments = filtered
+            # Query by model hashes
+            for model_hash in model_hashes:
+                experiments = repo.query(model_hash=model_hash, latest=True)
+                if not experiments:
+                    console.print(f"[yellow]Warning:[/yellow] No experiments found for hash '{model_hash}'")
+                    rows.append((model_hash, {task: None for task in task_names}, "", model_hash))
+                else:
+                    exp = experiments[0]
+                    collect_task_hashes(exp)
+                    task_scores = {t.task_name: t.primary_score for t in exp.tasks}
+                    scores = {task: task_scores.get(task) for task in task_names}
+                    rows.append((model_hash, scores, exp.model_name, exp.model_hash))
 
-            if not experiments:
-                console.print("[dim]No results found matching filters.[/dim]")
+            if not rows:
+                console.print("[dim]No results found.[/dim]")
                 return
 
             # Handle output formats
             if output_format == "json":
-                print(experiments_to_json(experiments))
+                # JSON: use model_name as key, include hash in value
+                data = {}
+                for _, scores, model_name, model_hash in rows:
+                    key = model_name or model_hash or "unknown"
+                    data[key] = {"model_hash": model_hash, "scores": scores}
+                print(json.dumps(data, indent=2))
                 return
 
             if output_format == "csv":
-                experiments_to_csv(experiments)
+                writer = csv.writer(sys.stdout)
+                writer.writerow(["model", "model_hash"] + list(task_names))
+                for _, scores, model_name, model_hash in rows:
+                    row = [model_name, model_hash or ""]
+                    for task in task_names:
+                        score = scores.get(task)
+                        row.append(f"{score:.4f}" if score is not None else "")
+                    writer.writerow(row)
                 return
 
-            # Table format
-            print_experiments_table(experiments)
-            console.print(f"\n[dim]Showing {len(experiments)} result(s)[/dim]")
+            max_name_len = max((len(r[2]) for r in rows if r[2]), default=0)
+            max_task_len = max(len(t) for t in task_names)
+
+            table = Table(title="Results")
+            table.add_column("Model", style="cyan", no_wrap=True)
+
+            for task in task_names:
+                task_hash = task_hashes.get(task)
+                if task_hash:
+                    padded_task = task.ljust(max_task_len)
+                    col_name = f"{padded_task} [dim]{task_hash[-4:]}[/dim]"
+                else:
+                    col_name = task
+                table.add_column(col_name, justify="right", style="green")
+
+            for _, scores, model_name, model_hash in rows:
+                if model_name and model_hash:
+                    padded_name = model_name.ljust(max_name_len)
+                    display = f"{padded_name} [dim]{model_hash[-4:]}[/dim]"
+                elif model_name:
+                    display = model_name
+                elif model_hash:
+                    display = f"[dim]{model_hash[-4:]}[/dim]"
+                else:
+                    display = "-"
+
+                row = [display]
+                for task in task_names:
+                    score = scores.get(task)
+                    row.append(f"{score:.4f}" if score is not None else "-")
+                table.add_row(*row)
+
+            console.print(table)
     finally:
         db.dispose()
 

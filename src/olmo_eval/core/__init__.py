@@ -39,6 +39,7 @@ from .types import (
     Split,
     StoredTaskResult,
     compute_model_hash,
+    compute_task_hash,
 )
 
 __all__ = [
@@ -63,6 +64,7 @@ __all__ = [
     "StoredTaskResult",
     # Utilities
     "compute_model_hash",
+    "compute_task_hash",
     # Formatters
     "Formatter",
     "ChatFormatter",

@@ -35,6 +35,22 @@ def compute_model_hash(config: dict[str, Any] | None) -> str | None:
     return hashlib.sha256(config_str.encode()).hexdigest()[:16]
 
 
+def compute_task_hash(config: dict[str, Any] | None) -> str | None:
+    """Compute a deterministic hash from a task configuration dict.
+
+    Args:
+        config: Task configuration dictionary.
+
+    Returns:
+        16-character hex string hash of the config, or None if config is None.
+    """
+    if not config:
+        return None
+
+    config_str = json.dumps(config, sort_keys=True)
+    return hashlib.sha256(config_str.encode()).hexdigest()[:16]
+
+
 class Split(str, Enum):
     """Dataset split identifiers."""
 
