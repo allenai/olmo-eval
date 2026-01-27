@@ -36,15 +36,6 @@ Repository = "https://github.com/allenai/olmo-eval"
 Issues = "https://github.com/allenai/olmo-eval/issues"
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=9.0.0",
-    "pytest-cov>=6.0.0",
-    "ruff>=0.14.0",
-    "ty>=0.0.10",
-    # Storage backend dependencies for integration tests
-    "boto3>=1.34.0",
-    "psycopg[binary]>=3.1.0",
-]
 hf = [
     "transformers~=4.57.3",
 ]
@@ -87,8 +78,7 @@ dev = [
     "pytest-cov>=6.0.0",
     "ruff>=0.14.0",
     "ty>=0.0.10",
-    "boto3>=1.34.0",
-    "psycopg[binary]>=3.1.0",
+    "olmo-eval-internal[storage]",
 ]
 
 # ty file-based overrides for optional dependencies
