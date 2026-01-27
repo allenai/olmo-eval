@@ -76,6 +76,37 @@ def sanitize_model_name(model_name: str) -> str:
     return model_name.replace("/", "_")
 
 
+def build_s3_prefix(
+    base_prefix: str,
+    group: str,
+    model_name: str,
+    model_hash: str | None,
+    experiment_id: str,
+) -> str:
+    """Build the S3 prefix for an experiment.
+
+    Path structure: {prefix}/{group}/{model_name}_{hash_last_6}/{experiment_id}
+
+    Args:
+        base_prefix: Base prefix, e.g., "olmo-eval".
+        group: Experiment group, e.g., "baseline", "ablation-lr".
+        model_name: Model name or path (will be sanitized).
+        model_hash: Model configuration hash.
+        experiment_id: Unique experiment identifier.
+
+    Returns:
+        S3 prefix string (without bucket or s3:// prefix).
+    """
+    sanitized_model = sanitize_model_name(model_name)
+    hash_suffix = model_hash[-6:] if model_hash else "000000"
+    return "/".join([
+        base_prefix.rstrip("/"),
+        group,
+        f"{sanitized_model}_{hash_suffix}",
+        experiment_id,
+    ])
+
+
 # -----------------------------------------------------------------------------
 # Dataclasses for metrics.json output
 # -----------------------------------------------------------------------------
@@ -273,14 +304,13 @@ class RunnerResultsMixin:
 
         # Build S3 prefix:
         # {prefix}/{group}/{sanitized_model_name}_{hash_last_6}/{experiment_id}
-        sanitized_model = sanitize_model_name(model_name)
-        hash_suffix = model_hash[-6:] if model_hash else "000000"
-        prefix = "/".join([
-            s3_config.prefix.rstrip("/"),
-            s3_config.group,
-            f"{sanitized_model}_{hash_suffix}",
-            experiment_id,
-        ])
+        prefix = build_s3_prefix(
+            base_prefix=s3_config.prefix,
+            group=s3_config.group,
+            model_name=model_name,
+            model_hash=model_hash,
+            experiment_id=experiment_id,
+        )
 
         # Create S3 client
         client_kwargs: dict[str, Any] = {"region_name": s3_config.region}

@@ -474,10 +474,11 @@ def query(
 
             # Handle output formats
             if output_format == "json":
-                # JSON: use model_name as key, include hash in value
+                # JSON: use model_name + hash suffix as key to handle multiple configs
                 data = {}
                 for _, scores, model_name, model_hash in rows:
-                    key = model_name or model_hash or "unknown"
+                    hash_suffix = model_hash[-6:] if model_hash else ""
+                    key = f"{model_name} {hash_suffix}" if hash_suffix else (model_name or "unknown")
                     data[key] = {"model_hash": model_hash, "scores": scores}
                 print(json.dumps(data, indent=2))
                 return
