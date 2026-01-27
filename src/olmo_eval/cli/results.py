@@ -542,7 +542,7 @@ def get_deprecated(
 )
 @click.option(
     "--model-hash",
-    "-H",
+    "-M",
     "model_hashes",
     multiple=True,
     help="Model hash(es) to query (can specify multiple).",
@@ -556,6 +556,7 @@ def get_deprecated(
 )
 @click.option(
     "--task-hash",
+    "-T",
     help="Task hash to filter by (exact match).",
 )
 @click.option(
