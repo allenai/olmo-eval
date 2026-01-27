@@ -64,7 +64,7 @@ def create_postgres_engine(
         password = os.environ.get(password_env, password)
 
     # Build connection URL (postgresql+psycopg = psycopg3 driver)
-    connection_url = f"postgresql+psycopg://{user}:{password}@{host}:{port}/{database}?connect_timeout={connect_timeout}&sslmode=prefer"
+    connection_url = f"postgresql+psycopg://{user}:{password}@{host}:{port}/{database}?connect_timeout={connect_timeout}&sslmode=disable"
 
     # Determine pooling strategy
     # For testing or single-threaded use, NullPool is simpler
