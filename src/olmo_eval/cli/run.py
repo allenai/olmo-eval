@@ -97,32 +97,32 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
     "--db-host",
     envvar="PGHOST",
     default="localhost",
-    help="PostgreSQL host (env: PGHOST, default: localhost)",
+    help="PostgreSQL host",
 )
 @click.option(
     "--db-port",
     type=int,
     envvar="PGPORT",
     default=5432,
-    help="PostgreSQL port (env: PGPORT, default: 5432)",
+    help="PostgreSQL port",
 )
 @click.option(
     "--db-name",
     envvar="PGDATABASE",
     default="olmo_eval",
-    help="PostgreSQL database name (env: PGDATABASE, default: olmo_eval)",
+    help="PostgreSQL database name",
 )
 @click.option(
     "--db-user",
     envvar="PGUSER",
     default="postgres",
-    help="PostgreSQL user (env: PGUSER, default: postgres)",
+    help="PostgreSQL user",
 )
 @click.option(
     "--db-password",
     envvar="PGPASSWORD",
     default="postgres",
-    help="PostgreSQL password (env: PGPASSWORD, default: postgres)",
+    help="PostgreSQL password",
 )
 def run(
     models: tuple[str, ...],
@@ -248,7 +248,9 @@ def run(
             )
             storage.initialize()
             storages.append(storage)
-            console.print(f"[green]Connected to postgres storage:[/green] {db_host}:{db_port}/{db_name}")
+            console.print(
+                f"[green]Connected to postgres storage:[/green] {db_host}:{db_port}/{db_name}"
+            )
         except ImportError as e:
             console.print(f"[red]Storage backend error:[/red] {e}")
             raise SystemExit(1) from None
