@@ -158,12 +158,12 @@ def compute_task_hash(config: dict) -> str:
         config: Task configuration dictionary
 
     Returns:
-        SHA256 hash of the JSON-serialized config
+        16-character hex string hash of the config
     """
     import hashlib
 
     config_str = json.dumps(config, sort_keys=True)
-    return hashlib.sha256(config_str.encode()).hexdigest()
+    return hashlib.sha256(config_str.encode()).hexdigest()[:16]
 
 
 def get_primary_metric(
