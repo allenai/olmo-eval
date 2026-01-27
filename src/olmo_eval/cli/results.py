@@ -313,6 +313,9 @@ def _download_s3_files(
 ) -> None:
     """Download files from S3 for an experiment.
 
+    Uses the actual S3 paths stored in the database (s3_metrics_key, s3_predictions_key)
+    rather than constructing paths from conventions.
+
     Args:
         experiment: The experiment ORM object.
         task_filter: Task names to filter (empty means all).
@@ -324,20 +327,6 @@ def _download_s3_files(
         s3_region: AWS region.
     """
     import boto3
-
-    if not experiment.s3_location:
-        console.print("[yellow]Warning:[/yellow] Experiment has no S3 location set")
-        return
-
-    # Parse S3 location: s3://bucket/prefix/...
-    s3_location = experiment.s3_location
-    if not s3_location.startswith("s3://"):
-        console.print(f"[red]Error:[/red] Invalid S3 location: {s3_location}")
-        return
-
-    s3_path = s3_location[5:]  # Remove 's3://'
-    bucket, *prefix_parts = s3_path.split("/")
-    base_prefix = "/".join(prefix_parts)
 
     # Create output directory
     output_path = Path(output_dir)
@@ -352,49 +341,67 @@ def _download_s3_files(
 
     downloaded_files: list[str] = []
 
-    # Path structure: {base_prefix}/{task}_{hash}/predictions.jsonl, requests.jsonl
-    # metrics.json is at {base_prefix}/metrics.json
-    #
-    # Files are downloaded preserving the S3 directory structure under output_dir
+    def parse_s3_uri(s3_uri: str) -> tuple[str, str] | None:
+        """Parse s3://bucket/key into (bucket, key)."""
+        if not s3_uri or not s3_uri.startswith("s3://"):
+            return None
+        path = s3_uri[5:]  # Remove 's3://'
+        parts = path.split("/", 1)
+        if len(parts) != 2:
+            return None
+        return parts[0], parts[1]
 
-    def download_file(s3_key: str) -> str | None:
-        """Download a file preserving directory structure."""
-        local_file = output_path / s3_key
+    def download_file(s3_uri: str, label: str) -> str | None:
+        """Download a file from S3 URI."""
+        parsed = parse_s3_uri(s3_uri)
+        if not parsed:
+            console.print(f"[yellow]Warning:[/yellow] Invalid S3 URI for {label}: {s3_uri}")
+            return None
+
+        bucket, key = parsed
+        # Use just the filename for local path to avoid deeply nested directories
+        filename = Path(key).name
+        local_file = output_path / experiment.experiment_id / filename
         local_file.parent.mkdir(parents=True, exist_ok=True)
+
         try:
-            s3_client.download_file(bucket, s3_key, str(local_file))
+            s3_client.download_file(bucket, key, str(local_file))
             console.print(f"[green]Downloaded:[/green] {local_file}")
             return str(local_file)
         except Exception as e:
-            console.print(f"[yellow]Warning:[/yellow] Failed to download {s3_key}: {e}")
+            console.print(f"[yellow]Warning:[/yellow] Failed to download {s3_uri}: {e}")
             return None
 
-    # Download metrics.json (at experiment root)
-    if download_metrics:
-        metrics_key = f"{base_prefix}/metrics.json"
-        if result := download_file(metrics_key):
-            downloaded_files.append(result)
+    # Download metrics.json from experiment's s3_location
+    if download_metrics and experiment.s3_location:
+        parsed = parse_s3_uri(experiment.s3_location.rstrip("/") + "/metrics.json")
+        if parsed:
+            bucket, key = parsed
+            local_file = output_path / experiment.experiment_id / "metrics.json"
+            local_file.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                s3_client.download_file(bucket, key, str(local_file))
+                console.print(f"[green]Downloaded:[/green] {local_file}")
+                downloaded_files.append(str(local_file))
+            except Exception as e:
+                console.print(f"[yellow]Warning:[/yellow] Failed to download metrics.json: {e}")
 
-    # Download predictions and requests files for each task
-    if download_predictions or download_requests:
-        tasks_to_download = experiment.tasks
-        if task_filter:
-            tasks_to_download = [t for t in tasks_to_download if t.task_name in task_filter]
+    # Download predictions files using paths stored in database
+    tasks_to_download = experiment.tasks
+    if task_filter:
+        tasks_to_download = [t for t in tasks_to_download if t.task_name in task_filter]
 
-        for task in tasks_to_download:
-            task_name = task.task_name
-            task_hash_suffix = task.task_hash[-6:] if task.task_hash else ""
-            task_dir = f"{task_name}_{task_hash_suffix}"
+    for task in tasks_to_download:
+        if download_predictions and task.s3_predictions_key:
+            if result := download_file(task.s3_predictions_key, f"{task.task_name} predictions"):
+                downloaded_files.append(result)
 
-            if download_predictions:
-                pred_key = f"{base_prefix}/{task_dir}/predictions.jsonl"
-                if result := download_file(pred_key):
-                    downloaded_files.append(result)
-
-            if download_requests:
-                req_key = f"{base_prefix}/{task_dir}/requests.jsonl"
-                if result := download_file(req_key):
-                    downloaded_files.append(result)
+        # For requests, derive from predictions path (same directory, different filename)
+        if download_requests and task.s3_predictions_key:
+            # Replace predictions filename with requests filename
+            requests_uri = task.s3_predictions_key.replace("predictions.jsonl", "requests.jsonl")
+            if result := download_file(requests_uri, f"{task.task_name} requests"):
+                downloaded_files.append(result)
 
     if not downloaded_files:
         console.print("[yellow]No files were downloaded.[/yellow]")
