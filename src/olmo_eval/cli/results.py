@@ -197,7 +197,6 @@ def print_task_results_table(tasks: list[Any], task_filter: tuple[str, ...] | No
 def print_instances_table(instances: list[dict[str, Any]]) -> None:
     """Print a table of instance predictions."""
     table = Table(title="Instance Predictions")
-    table.add_column("Doc", justify="right", style="dim")
     table.add_column("Native ID", style="cyan")
     table.add_column("Task")
     table.add_column("Metrics")
@@ -213,7 +212,6 @@ def print_instances_table(instances: list[dict[str, Any]]) -> None:
             metrics_str = "-"
 
         table.add_row(
-            str(inst.get("doc_id", "-")),
             str(inst.get("native_id", "-")),
             inst.get("task_name", "-"),
             metrics_str,
@@ -280,16 +278,14 @@ def instances_to_json(instances: list[dict[str, Any]]) -> str:
 def instances_to_csv(instances: list[dict[str, Any]]) -> None:
     """Write instances to stdout as CSV."""
     writer = csv.writer(sys.stdout)
-    writer.writerow(["doc_id", "native_id", "task_name", "experiment_id", "model_hash", "metrics"])
+    writer.writerow(["native_id", "task_name", "task_hash", "metrics"])
     for inst in instances:
         metrics_str = json.dumps(inst.get("instance_metrics", {}))
         writer.writerow(
             [
-                inst.get("doc_id", ""),
                 inst.get("native_id", ""),
                 inst.get("task_name", ""),
-                inst.get("experiment_id", ""),
-                inst.get("model_hash", ""),
+                inst.get("task_hash", ""),
                 metrics_str,
             ]
         )
@@ -407,41 +403,16 @@ def _download_s3_files(
         console.print("[yellow]No files were downloaded.[/yellow]")
 
 
-@results.command()
+@results.command(name="get", hidden=True)
 @click.argument("experiment_id")
-@click.option(
-    "--instances/--no-instances",
-    default=False,
-    help="Include instance-level predictions.",
-)
-@click.option(
-    "--task",
-    "-t",
-    "task_filter",
-    multiple=True,
-    help="Filter tasks to display (can specify multiple).",
-)
-@click.option(
-    "--limit",
-    "-n",
-    default=100,
-    type=int,
-    help="Limit instances when --instances is used.",
-)
-@click.option(
-    "--format",
-    "-f",
-    "output_format",
-    type=click.Choice(["table", "json", "csv"]),
-    default="table",
-    help="Output format.",
-)
+@click.option("--task", "-t", "task_filter", multiple=True)
+@click.option("--format", "-f", "output_format", type=click.Choice(["table", "json", "csv"]), default="table")
 @db_options
-def get(
+@click.pass_context
+def get_deprecated(
+    ctx: click.Context,
     experiment_id: str,
-    instances: bool,
     task_filter: tuple[str, ...],
-    limit: int,
     output_format: str,
     db_host: str,
     db_port: int,
@@ -449,64 +420,41 @@ def get(
     db_user: str,
     db_password: str,
 ) -> None:
-    """Get results for a specific experiment.
-
-    EXPERIMENT_ID is the unique identifier of the experiment.
-
-    Examples:
-        olmo-eval results get exp_llama31_8b_001
-        olmo-eval results get exp_llama31_8b_001 --task mmlu --task gsm8k
-    """
-    db = get_database_session(db_host, db_port, db_name, db_user, db_password)
-
-    try:
-        from olmo_eval.storage.db.repository import (
-            ExperimentRepository,
-            InstancePredictionRepository,
-        )
-
-        with db.session() as session:
-            repo = ExperimentRepository(session)
-            experiment = repo.get(experiment_id)
-
-            if experiment is None:
-                console.print(f"[red]Error:[/red] Experiment '{experiment_id}' not found")
-                raise SystemExit(1)
-
-            # Handle output formats
-            if output_format == "json":
-                print(experiments_to_json([experiment]))
-                return
-
-            if output_format == "csv":
-                experiments_to_csv([experiment])
-                return
-
-            # Table format
-            print_experiment_detail(experiment)
-            console.print()
-            print_task_results_table(experiment.tasks, task_filter if task_filter else None)
-
-            # Optionally show instances
-            if instances:
-                instance_repo = InstancePredictionRepository(session)
-                task_names = list(task_filter) if task_filter else None
-                instance_data = instance_repo.get_instances(
-                    experiment_id=experiment_id,
-                    task_name=task_names,
-                    limit=limit,
-                )
-
-                if instance_data:
-                    console.print()
-                    print_instances_table(instance_data)
-                else:
-                    console.print("\n[dim]No instance predictions found.[/dim]")
-    finally:
-        db.dispose()
+    """[DEPRECATED] Use 'olmo-eval results query --experiment <id>' instead."""
+    console.print(
+        "[yellow]Warning:[/yellow] 'olmo-eval results get' is deprecated.\n"
+        f"Use: olmo-eval results query --experiment {experiment_id}"
+        + (f" --task {' --task '.join(task_filter)}" if task_filter else "")
+        + (f" --format {output_format}" if output_format != "table" else "")
+        + "\n"
+    )
+    ctx.invoke(
+        query,
+        experiment_ids=(experiment_id,),
+        model_names=(),
+        model_hashes=(),
+        task_names=task_filter,
+        task_hash=None,
+        instances=False,
+        limit=100,
+        offset=0,
+        output_format=output_format,
+        db_host=db_host,
+        db_port=db_port,
+        db_name=db_name,
+        db_user=db_user,
+        db_password=db_password,
+    )
 
 
 @results.command()
+@click.option(
+    "--experiment",
+    "-e",
+    "experiment_ids",
+    multiple=True,
+    help="Experiment ID(s) to query (can specify multiple).",
+)
 @click.option(
     "--model",
     "-m",
@@ -516,7 +464,7 @@ def get(
 )
 @click.option(
     "--model-hash",
-    "-h",
+    "-H",
     "model_hashes",
     multiple=True,
     help="Model hash(es) to query (can specify multiple).",
@@ -526,253 +474,29 @@ def get(
     "-t",
     "task_names",
     multiple=True,
-    required=True,
-    help="Task name(s) to display (can specify multiple).",
+    help="Task name(s) to filter (can specify multiple).",
 )
 @click.option(
-    "--metrics",
-    is_flag=True,
+    "--task-hash",
+    help="Task hash to filter by (exact match).",
+)
+@click.option(
+    "--instances/--no-instances",
     default=False,
-    help="Download metrics.json from S3 for matched experiments.",
-)
-@click.option(
-    "--predictions",
-    is_flag=True,
-    default=False,
-    help="Download predictions files from S3 for matched experiments.",
-)
-@click.option(
-    "--requests",
-    is_flag=True,
-    default=False,
-    help="Download requests files from S3 for matched experiments.",
-)
-@click.option(
-    "--output-dir",
-    "-o",
-    default=".",
-    type=click.Path(),
-    help="Directory to save downloaded files (default: current directory).",
-)
-@click.option(
-    "--format",
-    "-f",
-    "output_format",
-    type=click.Choice(["table", "json", "csv"]),
-    default="table",
-    help="Output format.",
-)
-@s3_options
-@db_options
-def query(
-    model_names: tuple[str, ...],
-    model_hashes: tuple[str, ...],
-    task_names: tuple[str, ...],
-    metrics: bool,
-    predictions: bool,
-    requests: bool,
-    output_dir: str,
-    output_format: str,
-    db_host: str,
-    db_port: int,
-    db_name: str,
-    db_user: str,
-    db_password: str,
-    s3_endpoint_url: str | None,
-    s3_region: str,
-) -> None:
-    """Query evaluation results across models and tasks.
-
-    Displays a table with models/hashes as rows and task scores as columns.
-    Uses the most recent experiment for each model.
-
-    Use --metrics, --predictions, or --requests to download S3 data for matched experiments.
-
-    Examples:
-        olmo-eval results query -m llama3.1-8b -m qwen2.5-72b -t mmlu -t gsm8k
-        olmo-eval results query -h abc123 -h def456 -t mmlu -t gsm8k
-        olmo-eval results query -m olmo-2-13b -t mmlu --metrics --predictions -o ./downloads
-    """
-    if not model_names and not model_hashes:
-        raise click.UsageError("At least one --model or --model-hash is required")
-
-    db = get_database_session(db_host, db_port, db_name, db_user, db_password)
-
-    try:
-        from olmo_eval.storage.db.repository import ExperimentRepository
-
-        with db.session() as session:
-            repo = ExperimentRepository(session)
-
-            # Each row: (display_label, scores_dict, model_name, model_hash, experiment)
-            rows: list[tuple[str, dict[str, float | None], str, str | None, Any]] = []
-            # Collect task hashes for column headers
-            task_hashes: dict[str, str | None] = {task: None for task in task_names}
-
-            def collect_task_hashes(exp: Any) -> None:
-                for t in exp.tasks:
-                    if t.task_name in task_hashes and t.task_hash and not task_hashes[t.task_name]:
-                        task_hashes[t.task_name] = t.task_hash
-
-            # Query by model names - find all distinct configs for each model
-            for model_name in model_names:
-                experiments = repo.query(model_name=model_name, limit=1000)
-                if not experiments:
-                    console.print(
-                        f"[yellow]Warning:[/yellow] No experiments found for model '{model_name}'"
-                    )
-                    rows.append(
-                        (model_name, {task: None for task in task_names}, model_name, None, None)
-                    )
-                else:
-                    latest_by_hash: dict[str | None, Any] = {}
-                    for exp in experiments:
-                        h = exp.model_hash
-                        if h not in latest_by_hash:
-                            latest_by_hash[h] = exp
-                        collect_task_hashes(exp)
-                    for exp in latest_by_hash.values():
-                        task_scores = {t.task_name: t.primary_score for t in exp.tasks}
-                        scores = {task: task_scores.get(task) for task in task_names}
-                        rows.append((model_name, scores, exp.model_name, exp.model_hash, exp))
-
-            # Query by model hashes
-            for model_hash in model_hashes:
-                experiments = repo.query(model_hash=model_hash, latest=True)
-                if not experiments:
-                    console.print(
-                        f"[yellow]Warning:[/yellow] No experiments found for hash '{model_hash}'"
-                    )
-                    rows.append(
-                        (model_hash, {task: None for task in task_names}, "", model_hash, None)
-                    )
-                else:
-                    exp = experiments[0]
-                    collect_task_hashes(exp)
-                    task_scores = {t.task_name: t.primary_score for t in exp.tasks}
-                    scores = {task: task_scores.get(task) for task in task_names}
-                    rows.append((model_hash, scores, exp.model_name, exp.model_hash, exp))
-
-            if not rows:
-                console.print("[dim]No results found.[/dim]")
-                return
-
-            # Handle output formats
-            if output_format == "json":
-                # JSON: use model_name + hash suffix as key to handle multiple configs
-                data = {}
-                for _, scores, model_name, model_hash, _ in rows:
-                    hash_suffix = model_hash[-6:] if model_hash else ""
-                    key = (
-                        f"{model_name} {hash_suffix}" if hash_suffix else (model_name or "unknown")
-                    )
-                    data[key] = {"model_hash": model_hash, "scores": scores}
-                print(json.dumps(data, indent=2))
-                return
-
-            if output_format == "csv":
-                writer = csv.writer(sys.stdout)
-                writer.writerow(["model", "model_hash"] + list(task_names))
-                for _, scores, model_name, model_hash, _ in rows:
-                    row = [model_name, model_hash or ""]
-                    for task in task_names:
-                        score = scores.get(task)
-                        row.append(f"{score:.4f}" if score is not None else "")
-                    writer.writerow(row)
-                return
-
-            max_name_len = max((len(r[2]) for r in rows if r[2]), default=0)
-            max_task_len = max(len(t) for t in task_names)
-
-            table = Table(title="Results")
-            table.add_column("Model", style="cyan", no_wrap=True)
-
-            for task in task_names:
-                task_hash = task_hashes.get(task)
-                if task_hash:
-                    padded_task = task.ljust(max_task_len)
-                    col_name = f"{padded_task} [dim]{task_hash[-6:]}[/dim]"
-                else:
-                    col_name = task
-                table.add_column(col_name, justify="right", style="green")
-
-            for _, scores, model_name, model_hash, _ in rows:
-                if model_name and model_hash:
-                    padded_name = model_name.ljust(max_name_len)
-                    display = f"{padded_name} [dim]{model_hash[-6:]}[/dim]"
-                elif model_name:
-                    display = model_name
-                elif model_hash:
-                    display = f"[dim]{model_hash[-6:]}[/dim]"
-                else:
-                    display = "-"
-
-                row = [display]
-                for task in task_names:
-                    score = scores.get(task)
-                    row.append(f"{score:.4f}" if score is not None else "-")
-                table.add_row(*row)
-
-            console.print(table)
-
-            # Handle S3 downloads if any download flags are set
-            if metrics or predictions or requests:
-                console.print()  # Add spacing
-                experiments_to_download = [exp for _, _, _, _, exp in rows if exp is not None]
-                for experiment in experiments_to_download:
-                    console.print(
-                        f"[bold]Downloading files for {experiment.experiment_id}...[/bold]"
-                    )
-                    _download_s3_files(
-                        experiment=experiment,
-                        task_filter=task_names,
-                        download_metrics=metrics,
-                        download_predictions=predictions,
-                        download_requests=requests,
-                        output_dir=output_dir,
-                        s3_endpoint_url=s3_endpoint_url,
-                        s3_region=s3_region,
-                    )
-    finally:
-        db.dispose()
-
-
-@results.command()
-@click.option(
-    "--experiment",
-    "-e",
-    "experiment_id",
-    help="Filter by experiment ID.",
-)
-@click.option(
-    "--model",
-    "-m",
-    "model_name",
-    help="Filter by model name.",
-)
-@click.option(
-    "--model-hash",
-    help="Filter by model config hash.",
-)
-@click.option(
-    "--task",
-    "-t",
-    "task_name",
-    required=True,
-    help="Task name (required).",
+    help="Output instance-level predictions instead of experiment summaries.",
 )
 @click.option(
     "--limit",
     "-n",
     default=100,
     type=int,
-    help="Maximum instances to return.",
+    help="Maximum results to return (applies to instances).",
 )
 @click.option(
     "--offset",
     default=0,
     type=int,
-    help="Skip first N instances.",
+    help="Skip first N results (applies to instances).",
 )
 @click.option(
     "--format",
@@ -783,11 +507,13 @@ def query(
     help="Output format.",
 )
 @db_options
-def instances(
-    experiment_id: str | None,
-    model_name: str | None,
-    model_hash: str | None,
-    task_name: str,
+def query(
+    experiment_ids: tuple[str, ...],
+    model_names: tuple[str, ...],
+    model_hashes: tuple[str, ...],
+    task_names: tuple[str, ...],
+    task_hash: str | None,
+    instances: bool,
     limit: int,
     offset: int,
     output_format: str,
@@ -797,50 +523,162 @@ def instances(
     db_user: str,
     db_password: str,
 ) -> None:
-    """Get instance-level predictions.
+    """Query evaluation results with flexible filters.
 
-    At least one of --experiment, --model, or --model-hash is required along with --task.
+    Filter by experiment, model, model-hash, task, or task-hash.
+    Use --instances to get instance-level predictions instead of experiment summaries.
 
     Examples:
-        olmo-eval results instances --task mmlu --model llama3.1-8b
-        olmo-eval results instances --task mmlu --experiment abc123
+        # Get experiment by ID
+        olmo-eval results query --experiment exp_001
+
+        # Compare models on tasks
+        olmo-eval results query -m llama3.1-8b -m qwen2.5-72b -t mmlu -t gsm8k
+
+        # Get instances for a task
+        olmo-eval results query --task mmlu --instances --format csv
+
+        # Get instances by experiment
+        olmo-eval results query --experiment exp_001 --task mmlu --instances
     """
-    # Validate that at least one identifier is provided
-    if not any([experiment_id, model_name, model_hash]):
-        raise click.UsageError("At least one of --experiment, --model, or --model-hash is required")
+    # Validate at least one filter is provided
+    if not any([experiment_ids, model_names, model_hashes, task_names, task_hash]):
+        raise click.UsageError(
+            "At least one filter is required: --experiment, --model, --model-hash, --task, or --task-hash"
+        )
 
     db = get_database_session(db_host, db_port, db_name, db_user, db_password)
 
     try:
         from olmo_eval.storage.db.queries import QueryHelper
+        from olmo_eval.storage.db.repository import ExperimentRepository
 
         with db.session() as session:
             helper = QueryHelper(session)
+            repo = ExperimentRepository(session)
 
-            instance_data = helper.get_model_task_instances(
-                task_name=task_name,
-                model_name=model_name,
-                model_hash=model_hash,
-                experiment_id=experiment_id,
-                limit=limit,
-                offset=offset,
-            )
+            # Handle --instances mode: output instance-level predictions
+            if instances:
+                task_name_filter = list(task_names) if task_names else None
 
-            if not instance_data:
-                console.print("[dim]No instances found matching filters.[/dim]")
+                # Determine which query method to use based on filters
+                if experiment_ids:
+                    # Query instances by experiment ID(s)
+                    instance_data: list[dict[str, Any]] = []
+                    for exp_id in experiment_ids:
+                        instance_data.extend(
+                            helper.get_instances_by_experiment_id(
+                                experiment_id=exp_id,
+                                task_name=task_name_filter,
+                                limit=limit,
+                                offset=offset,
+                            )
+                        )
+                elif task_hash:
+                    # Query instances by task hash
+                    instance_data = helper.instance_repo.get_instances_by_task(
+                        task_hash=task_hash,
+                        task_name=task_name_filter,
+                        limit=limit,
+                        offset=offset,
+                    )
+                elif task_names and not model_names and not model_hashes:
+                    # Query instances by task name only
+                    instance_data = helper.instance_repo.get_instances_by_task(
+                        task_name=task_name_filter,
+                        limit=limit,
+                        offset=offset,
+                    )
+                elif model_names or model_hashes:
+                    # Query instances by model
+                    if not task_names:
+                        raise click.UsageError("--task is required when querying instances by model")
+                    instance_data = helper.get_instances_by_model(
+                        task_name=task_name_filter[0] if len(task_name_filter) == 1 else task_name_filter,
+                        model_name=model_names[0] if model_names else None,
+                        model_hash=model_hashes[0] if model_hashes else None,
+                        limit=limit,
+                        offset=offset,
+                    )
+                else:
+                    instance_data = []
+
+                if not instance_data:
+                    console.print("[dim]No instances found matching filters.[/dim]")
+                    return
+
+                # Output instances
+                if output_format == "json":
+                    print(instances_to_json(instance_data))
+                elif output_format == "csv":
+                    instances_to_csv(instance_data)
+                else:
+                    console.print(
+                        "[dim]Instance data is too large for table output. "
+                        "Use --format json or --format csv.[/dim]"
+                    )
+                    console.print(f"[dim]Found {len(instance_data)} instance(s)[/dim]")
                 return
+
+            # Non-instances mode: output experiments/task results
+            all_experiments: list[Any] = []
+
+            # Query by experiment IDs
+            for exp_id in experiment_ids:
+                exps = helper.get_by_experiment_id(exp_id)
+                if not exps:
+                    console.print(f"[yellow]Warning:[/yellow] No experiments found for ID '{exp_id}'")
+                all_experiments.extend(exps)
+
+            # Query by model names
+            for model_name in model_names:
+                exps = repo.query(model_name=model_name, limit=1000)
+                if not exps:
+                    console.print(f"[yellow]Warning:[/yellow] No experiments found for model '{model_name}'")
+                all_experiments.extend(exps)
+
+            # Query by model hashes
+            for mhash in model_hashes:
+                exps = repo.query(model_hash=mhash, latest=True)
+                if not exps:
+                    console.print(f"[yellow]Warning:[/yellow] No experiments found for hash '{mhash}'")
+                all_experiments.extend(exps)
+
+            # If only task filter provided (no experiment/model filters), query by task
+            if task_names and not experiment_ids and not model_names and not model_hashes:
+                for tname in task_names:
+                    exps = repo.query(task_name=tname, limit=100)
+                    all_experiments.extend(exps)
+
+            if not all_experiments:
+                console.print("[dim]No results found.[/dim]")
+                return
+
+            # Filter tasks if task_names specified
+            task_filter = set(task_names) if task_names else None
 
             # Handle output formats
             if output_format == "json":
-                print(instances_to_json(instance_data))
+                print(experiments_to_json(all_experiments))
                 return
 
             if output_format == "csv":
-                instances_to_csv(instance_data)
+                experiments_to_csv(all_experiments)
                 return
 
-            # Table format
-            print_instances_table(instance_data)
-            console.print(f"\n[dim]Showing {len(instance_data)} instance(s)[/dim]")
+            # Table format - show experiment details
+            if len(all_experiments) > 1:
+                console.print(f"[bold]Found {len(all_experiments)} experiment(s)[/bold]\n")
+
+            for i, experiment in enumerate(all_experiments):
+                if len(all_experiments) > 1:
+                    console.print(f"[bold cyan]--- Experiment {i + 1}/{len(all_experiments)} ---[/bold cyan]")
+
+                print_experiment_detail(experiment)
+                console.print()
+                print_task_results_table(experiment.tasks, task_filter)
+
+                if i < len(all_experiments) - 1:
+                    console.print()
     finally:
         db.dispose()

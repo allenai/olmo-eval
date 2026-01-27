@@ -21,21 +21,16 @@ class TestPostgresBackendWithInstances:
             "mmlu": [
                 {
                     "native_id": "mmlu_doc_0",
-                    "doc_id": 0,
                     "instance_metrics": {"acc": 1.0, "f1": 1.0},
-                    "s3_prediction_key": "s3://bucket/mmlu_pred_0.json",
                 },
                 {
                     "native_id": "mmlu_doc_1",
-                    "doc_id": 1,
                     "instance_metrics": {"acc": 0.0, "f1": 0.5},
-                    "s3_prediction_key": "s3://bucket/mmlu_pred_1.json",
                 },
             ],
             "gsm8k": [
                 {
                     "native_id": "gsm8k_doc_0",
-                    "doc_id": 0,
                     "instance_metrics": {"exact_match": 1.0},
                 },
             ],
@@ -43,28 +38,25 @@ class TestPostgresBackendWithInstances:
 
         with postgres_backend.db.session() as session:
             helper = QueryHelper(session)
-            experiment_id = helper.save_with_instances(sample_eval_result, instances_by_task)
+            experiment_pk = helper.save_with_instances(sample_eval_result, instances_by_task)
 
-        assert experiment_id == sample_eval_result.experiment_id
+        # experiment_pk is now an int
+        assert isinstance(experiment_pk, int)
 
         # Verify experiment was saved
-        retrieved = postgres_backend.get(experiment_id)
+        retrieved = postgres_backend.get(sample_eval_result.experiment_id)
         assert retrieved is not None
         assert len(retrieved.tasks) == 2
 
     @pytest.mark.integration
-    def test_query_instances_by_model(self, postgres_backend, sample_eval_result):
-        """Test querying instance predictions by model_hash."""
+    def test_query_instances_by_experiment(self, postgres_backend, sample_eval_result):
+        """Test querying instance predictions by experiment_pk."""
         from olmo_eval.storage.db.repository import InstancePredictionRepository
-
-        # Add model_hash to config for testing
-        sample_eval_result.model_config = {"model": "test-model"}
 
         instances_by_task = {
             "mmlu": [
                 {
                     "native_id": "doc_0",
-                    "doc_id": 0,
                     "instance_metrics": {"acc": 1.0},
                 }
             ]
@@ -72,14 +64,12 @@ class TestPostgresBackendWithInstances:
 
         with postgres_backend.db.session() as session:
             helper = QueryHelper(session)
-            helper.save_with_instances(sample_eval_result, instances_by_task)
+            experiment_pk = helper.save_with_instances(sample_eval_result, instances_by_task)
 
-        # Query instances
+        # Query instances by experiment_pk
         with postgres_backend.db.session() as session:
             repo = InstancePredictionRepository(session)
-            instances = repo.get_instances(
-                experiment_id=sample_eval_result.experiment_id, task_name="mmlu"
-            )
+            instances = repo.get_instances(experiment_pk=experiment_pk, task_name="mmlu")
 
         assert len(instances) == 1
         assert instances[0]["native_id"] == "doc_0"
@@ -107,7 +97,7 @@ class TestQueryHelpers:
 
     @pytest.mark.integration
     def test_get_model_task_instances(self, postgres_backend):
-        """Test getting instances for a model and task."""
+        """Test getting instances for a task."""
         from olmo_eval.core import EvalResult, StoredTaskResult
         from olmo_eval.storage.db.queries import QueryHelper
 
@@ -119,22 +109,24 @@ class TestQueryHelpers:
             tasks=[StoredTaskResult(task_name="test", metrics={"accuracy": 0.7}, task_hash="test-hash")],
             model_config={"model": "test"},
             author="test-user",
+            experiment_name="test-exp",
+            workspace="test",
+            git_ref="abc123",
+            revision="main",
         )
 
         instances = [
-            {"native_id": "doc_0", "doc_id": 0, "instance_metrics": {"acc": 1.0}},
-            {"native_id": "doc_1", "doc_id": 1, "instance_metrics": {"acc": 0.5}},
+            {"native_id": "doc_0", "instance_metrics": {"acc": 1.0}},
+            {"native_id": "doc_1", "instance_metrics": {"acc": 0.5}},
         ]
 
-        model_hash = compute_model_hash(exp.model_config)
+        with postgres_backend.db.session() as session:
+            helper = QueryHelper(session)
+            experiment_pk = helper.save_with_instances(exp, {"test": instances})
 
         with postgres_backend.db.session() as session:
             helper = QueryHelper(session)
-            helper.save_with_instances(exp, {"test": instances})
-
-        with postgres_backend.db.session() as session:
-            helper = QueryHelper(session)
-            results = helper.get_model_task_instances(task_name="test", model_hash=model_hash)
+            results = helper.get_model_task_instances(task_name="test", experiment_pk=experiment_pk)
 
         assert len(results) == 2
         assert results[0]["native_id"] == "doc_0"
@@ -142,7 +134,7 @@ class TestQueryHelpers:
 
     @pytest.mark.integration
     def test_get_model_task_instances_multiple_tasks(self, postgres_backend):
-        """Test getting instances for a model across multiple tasks."""
+        """Test getting instances for multiple tasks."""
         from olmo_eval.core import EvalResult, StoredTaskResult
         from olmo_eval.storage.db.queries import QueryHelper
 
@@ -158,25 +150,27 @@ class TestQueryHelpers:
             ],
             model_config={"model": "test"},
             author="test-user",
+            experiment_name="test-exp",
+            workspace="test",
+            git_ref="abc123",
+            revision="main",
         )
 
         instances_task1 = [
-            {"native_id": "task1_doc_0", "doc_id": 0, "instance_metrics": {"acc": 1.0}},
-            {"native_id": "task1_doc_1", "doc_id": 1, "instance_metrics": {"acc": 0.5}},
+            {"native_id": "task1_doc_0", "instance_metrics": {"acc": 1.0}},
+            {"native_id": "task1_doc_1", "instance_metrics": {"acc": 0.5}},
         ]
         instances_task2 = [
-            {"native_id": "task2_doc_0", "doc_id": 0, "instance_metrics": {"acc": 0.8}},
-            {"native_id": "task2_doc_1", "doc_id": 1, "instance_metrics": {"acc": 0.9}},
+            {"native_id": "task2_doc_0", "instance_metrics": {"acc": 0.8}},
+            {"native_id": "task2_doc_1", "instance_metrics": {"acc": 0.9}},
         ]
         instances_task3 = [
-            {"native_id": "task3_doc_0", "doc_id": 0, "instance_metrics": {"acc": 0.6}},
+            {"native_id": "task3_doc_0", "instance_metrics": {"acc": 0.6}},
         ]
-
-        model_hash = compute_model_hash(exp.model_config)
 
         with postgres_backend.db.session() as session:
             helper = QueryHelper(session)
-            helper.save_with_instances(
+            experiment_pk = helper.save_with_instances(
                 exp, {"task1": instances_task1, "task2": instances_task2, "task3": instances_task3}
             )
 
@@ -184,7 +178,7 @@ class TestQueryHelpers:
         with postgres_backend.db.session() as session:
             helper = QueryHelper(session)
             results = helper.get_model_task_instances(
-                task_name=["task1", "task2"], model_hash=model_hash
+                task_name=["task1", "task2"], experiment_pk=experiment_pk
             )
 
         assert len(results) == 4  # 2 from task1 + 2 from task2
@@ -198,66 +192,18 @@ class TestQueryHelpers:
         # Test querying single task still works
         with postgres_backend.db.session() as session:
             helper = QueryHelper(session)
-            results = helper.get_model_task_instances(task_name="task3", model_hash=model_hash)
+            results = helper.get_model_task_instances(task_name="task3", experiment_pk=experiment_pk)
 
         assert len(results) == 1
         assert results[0]["native_id"] == "task3_doc_0"
 
-    @pytest.mark.integration
-    def test_get_instances_by_model_name(self, postgres_backend):
-        """Test querying instances by human-readable model_name instead of model_hash."""
-        from olmo_eval.core import EvalResult, StoredTaskResult
-        from olmo_eval.storage.db.queries import QueryHelper
-
-        # Create evaluation with specific model name
-        exp = EvalResult(
-            experiment_id="test-by-name",
-            model_name="llama3.1-8b-instruct",
-            backend_name="vllm",
-            timestamp=datetime.now(),
-            tasks=[StoredTaskResult(task_name="mmlu", metrics={"accuracy": 0.75}, task_hash="mmlu-hash")],
-            model_config={"model": "llama3.1-8b", "mode": "instruct"},
-            author="test-user",
-        )
-
-        instances = [
-            {"native_id": "doc_0", "doc_id": 0, "instance_metrics": {"acc": 1.0}},
-            {"native_id": "doc_1", "doc_id": 1, "instance_metrics": {"acc": 0.5}},
-            {"native_id": "doc_2", "doc_id": 2, "instance_metrics": {"acc": 0.75}},
-        ]
-
-        with postgres_backend.db.session() as session:
-            helper = QueryHelper(session)
-            helper.save_with_instances(exp, {"mmlu": instances})
-
-        # Query by model_name instead of model_hash (more user-friendly!)
-        with postgres_backend.db.session() as session:
-            helper = QueryHelper(session)
-            results = helper.get_model_task_instances(
-                task_name="mmlu", model_name="llama3.1-8b-instruct"
-            )
-
-        assert len(results) == 3
-        assert results[0]["native_id"] == "doc_0"
-        assert results[1]["native_id"] == "doc_1"
-        assert results[2]["native_id"] == "doc_2"
-
-        # Query by non-existent model name returns empty
-        with postgres_backend.db.session() as session:
-            helper = QueryHelper(session)
-            results = helper.get_model_task_instances(
-                task_name="mmlu", model_name="non-existent-model"
-            )
-
-        assert len(results) == 0
-
 
 class TestUserIsolation:
-    """Tests to verify user results are isolated by experiment_id."""
+    """Tests to verify user results are isolated by experiment."""
 
     @pytest.mark.integration
-    def test_concurrent_users_same_model_share_model_hash(self, postgres_backend):
-        """Test that same model config produces same model_hash, but experiments are isolated."""
+    def test_concurrent_users_same_model_different_experiments(self, postgres_backend):
+        """Test that same model config from different users creates separate experiments."""
         from olmo_eval.core import EvalResult, StoredTaskResult
         from olmo_eval.storage import compute_model_hash
         from olmo_eval.storage.db.repository import InstancePredictionRepository
@@ -271,14 +217,18 @@ class TestUserIsolation:
             model_name="llama3.1-8b",
             backend_name="vllm",
             timestamp=datetime.now(),
-            tasks=[StoredTaskResult(task_name="mmlu", metrics={"accuracy": 0.65}, task_hash="mmlu-hash-user")],
+            tasks=[StoredTaskResult(task_name="mmlu", metrics={"accuracy": 0.65}, task_hash="mmlu-hash-user1")],
             model_config=config,
             author="alice@example.com",
+            experiment_name="test",
+            workspace="test",
+            git_ref="abc123",
+            revision="main",
         )
 
         instances_user1 = [
-            {"native_id": "mmlu_0", "doc_id": 0, "instance_metrics": {"acc": 1.0}},
-            {"native_id": "mmlu_1", "doc_id": 1, "instance_metrics": {"acc": 0.5}},
+            {"native_id": "mmlu_0", "instance_metrics": {"acc": 1.0}},
+            {"native_id": "mmlu_1", "instance_metrics": {"acc": 0.5}},
         ]
 
         # User 2's evaluation - same model, config, task
@@ -290,47 +240,49 @@ class TestUserIsolation:
             tasks=[StoredTaskResult(task_name="mmlu", metrics={"accuracy": 0.70}, task_hash="mmlu-hash-user2")],
             model_config=config,
             author="bob@example.com",
+            experiment_name="test",
+            workspace="test",
+            git_ref="abc123",
+            revision="main",
         )
 
         instances_user2 = [
-            {"native_id": "mmlu_0", "doc_id": 0, "instance_metrics": {"acc": 0.8}},
-            {"native_id": "mmlu_1", "doc_id": 1, "instance_metrics": {"acc": 0.6}},
+            {"native_id": "mmlu_0", "instance_metrics": {"acc": 0.8}},
+            {"native_id": "mmlu_1", "instance_metrics": {"acc": 0.6}},
         ]
 
         # Both users save their results
         with postgres_backend.db.session() as session:
             helper = QueryHelper(session)
-            helper.save_with_instances(eval_user1, {"mmlu": instances_user1})
-            helper.save_with_instances(eval_user2, {"mmlu": instances_user2})
+            exp_pk_1 = helper.save_with_instances(eval_user1, {"mmlu": instances_user1})
+            exp_pk_2 = helper.save_with_instances(eval_user2, {"mmlu": instances_user2})
 
-        # Same config = same model_hash (this is correct!)
+        # Same config = same model_hash
         model_hash = compute_model_hash(config)
 
-        # Query instances by experiment_id - this is how users are isolated
+        # Query instances by experiment_pk - this is how users are isolated
         with postgres_backend.db.session() as session:
             repo = InstancePredictionRepository(session)
 
-            # User 1's instances via experiment_id
-            user1_instances = repo.get_instances(experiment_id="user1-run-123")
+            # User 1's instances via experiment_pk
+            user1_instances = repo.get_instances(experiment_pk=exp_pk_1)
             assert len(user1_instances) == 2
             assert any(inst["instance_metrics"]["acc"] == 1.0 for inst in user1_instances)
             assert any(inst["instance_metrics"]["acc"] == 0.5 for inst in user1_instances)
 
-            # User 2's instances via experiment_id
-            user2_instances = repo.get_instances(experiment_id="user2-run-456")
+            # User 2's instances via experiment_pk
+            user2_instances = repo.get_instances(experiment_pk=exp_pk_2)
             assert len(user2_instances) == 2
             assert any(inst["instance_metrics"]["acc"] == 0.8 for inst in user2_instances)
             assert any(inst["instance_metrics"]["acc"] == 0.6 for inst in user2_instances)
 
-            # Both share the same model_hash (as they should)
-            assert all(inst["model_hash"] == model_hash for inst in user1_instances)
-            assert all(inst["model_hash"] == model_hash for inst in user2_instances)
+        # Query all instances for mmlu task (from all experiments)
+        with postgres_backend.db.session() as session:
+            repo = InstancePredictionRepository(session)
+            all_mmlu_instances = repo.get_instances(task_name="mmlu")
 
-            # But querying by model_hash returns ALL instances for that model (from all experiments)
-            all_model_instances = repo.get_instances(model_hash=model_hash, task_name="mmlu")
-            assert len(all_model_instances) == 4  # 2 from user1 + 2 from user2
-
-            # This is useful for comparing results across different experiments of the same model
+        # Should get instances from both users
+        assert len(all_mmlu_instances) == 4  # 2 from user1 + 2 from user2
 
 
 class TestBackwardCompatibility:
@@ -366,14 +318,14 @@ class TestBackwardCompatibility:
     def test_delete_cascades_to_instances(self, postgres_backend, sample_eval_result):
         """Test that deleting an experiment cascades to instance predictions."""
         instances = {
-            "mmlu": [{"native_id": "doc_0", "doc_id": 0, "instance_metrics": {"acc": 1.0}}]
+            "mmlu": [{"native_id": "doc_0", "instance_metrics": {"acc": 1.0}}]
         }
 
         with postgres_backend.db.session() as session:
             helper = QueryHelper(session)
-            helper.save_with_instances(sample_eval_result, instances)
+            experiment_pk = helper.save_with_instances(sample_eval_result, instances)
 
-        # Delete experiment
+        # Delete experiment by experiment_id
         deleted = postgres_backend.delete(sample_eval_result.experiment_id)
         assert deleted is True
 
@@ -386,6 +338,6 @@ class TestBackwardCompatibility:
 
         with postgres_backend.db.session() as session:
             repo = InstancePredictionRepository(session)
-            instances = repo.get_instances(experiment_id=sample_eval_result.experiment_id)
+            instances = repo.get_instances(experiment_pk=experiment_pk)
 
         assert len(instances) == 0

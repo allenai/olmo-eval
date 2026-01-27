@@ -27,19 +27,20 @@ class ExperimentRepository:
         """
         self.session = session
 
-    def save(self, eval_result: EvalResult) -> str:
+    def save(self, eval_result: EvalResult) -> int:
         """Save a new evaluation experiment.
 
         Args:
             eval_result: EvalResult dataclass containing experiment data.
 
         Returns:
-            The experiment_id of the saved evaluation.
+            The auto-increment id (PK) of the saved experiment.
         """
         experiment = Experiment(
             experiment_id=eval_result.experiment_id,
             model_name=eval_result.model_name,
             model_hash=eval_result.model_hash,
+            model_config=eval_result.model_config,
             backend_name=eval_result.backend_name,
             timestamp=eval_result.timestamp,
             experiment_name=eval_result.experiment_name,
@@ -49,57 +50,90 @@ class ExperimentRepository:
             git_ref=eval_result.git_ref,
             revision=eval_result.revision,
             s3_location=eval_result.s3_location,
-            model_config=eval_result.model_config,
             metadata_=eval_result.metadata,
         )
         self.session.add(experiment)
+        self.session.flush()  # Get the auto-generated id
 
-        # Add task results
+        # Add task results using experiment.id as FK
         for task_data in eval_result.tasks:
             task_result = TaskResult(
-                experiment_id=eval_result.experiment_id,
+                experiment_pk=experiment.id,
+                model_hash=eval_result.model_hash,
                 task_name=task_data.task_name,
                 task_hash=task_data.task_hash,
+                task_config=task_data.task_config,
                 metrics=task_data.metrics,
                 num_instances=task_data.num_instances,
                 primary_metric=task_data.primary_metric,
                 primary_score=task_data.primary_score,
                 s3_metrics_key=task_data.s3_metrics_key,
                 s3_predictions_key=task_data.s3_predictions_key,
+                s3_requests_key=task_data.s3_requests_key,
             )
             self.session.add(task_result)
 
-        self.session.flush()  # Ensure database constraints are checked
-        return eval_result.experiment_id
+        self.session.flush()
+        return experiment.id
 
-    def get(self, experiment_id: str) -> EvalResult | None:
-        """Retrieve an evaluation experiment by ID.
+    def get(self, experiment_pk: int) -> EvalResult | None:
+        """Retrieve an evaluation experiment by its primary key (id).
 
         Args:
-            experiment_id: Unique identifier of the evaluation experiment.
+            experiment_pk: Auto-increment primary key of the experiment.
 
         Returns:
             EvalResult if found, None otherwise.
         """
-        experiment = self.session.get(Experiment, experiment_id)
+        experiment = self.session.get(Experiment, experiment_pk)
         if not experiment:
             return None
 
         return self._to_eval_result(experiment)
 
-    def delete(self, experiment_id: str) -> bool:
+    def get_by_experiment_id(self, experiment_id: str) -> list[EvalResult]:
+        """Retrieve all experiments with a given experiment_id.
+
+        Note: Multiple experiments can share the same experiment_id when
+        running multiple models in a single launch.
+
+        Args:
+            experiment_id: Experiment ID.
+
+        Returns:
+            List of EvalResult objects (may be empty, one, or many).
+        """
+        stmt = select(Experiment).where(Experiment.experiment_id == experiment_id)
+        experiments = self.session.execute(stmt).scalars().all()
+        return [self._to_eval_result(exp) for exp in experiments]
+
+    def delete(self, experiment_pk: int) -> bool:
         """Delete an evaluation experiment and its task results and instance predictions.
 
         Args:
-            experiment_id: Unique identifier of the evaluation experiment.
+            experiment_pk: Auto-increment primary key of the experiment.
 
         Returns:
             True if deleted, False if not found.
         """
         result = self.session.execute(
-            delete(Experiment).where(Experiment.experiment_id == experiment_id)
+            delete(Experiment).where(Experiment.id == experiment_pk)
         )
         return result.rowcount > 0  # type: ignore[union-attr]
+
+    def delete_by_experiment_id(self, experiment_id: str) -> int:
+        """Delete all experiments with a given experiment_id.
+
+        Args:
+            experiment_id: Experiment ID.
+
+        Returns:
+            Number of experiments deleted.
+        """
+        result = self.session.execute(
+            delete(Experiment).where(Experiment.experiment_id == experiment_id)
+        )
+        return result.rowcount  # type: ignore[union-attr]
 
     def query(
         self,
@@ -143,12 +177,12 @@ class ExperimentRepository:
             stmt = stmt.where(Experiment.timestamp <= end_time)
 
         if task_name:
-            # Subquery to find experiment_ids that have this task
+            # Subquery to find experiment ids that have this task
             from sqlalchemy import exists
 
             stmt = stmt.where(
                 exists()
-                .where(TaskResult.experiment_id == Experiment.experiment_id)
+                .where(TaskResult.experiment_pk == Experiment.id)
                 .where(TaskResult.task_name == task_name)
             )
 
@@ -181,11 +215,13 @@ class ExperimentRepository:
                 task_name=task.task_name,
                 metrics=task.metrics,
                 task_hash=task.task_hash,
+                task_config=task.task_config,
                 num_instances=task.num_instances,
                 primary_metric=task.primary_metric,
                 primary_score=task.primary_score,
                 s3_metrics_key=task.s3_metrics_key,
                 s3_predictions_key=task.s3_predictions_key,
+                s3_requests_key=task.s3_requests_key,
             )
             for task in experiment.task_results
         ]
@@ -222,52 +258,42 @@ class InstancePredictionRepository:
 
     def save_instances(
         self,
-        experiment_id: str,
-        task_name: str,
-        instances: list[dict[str, Any]],
-        model_hash: str,
+        experiment_pk: int,
         task_hash: str,
+        instances: list[dict[str, Any]],
     ) -> None:
         """Save instance predictions for an experiment's task.
 
         Args:
-            experiment_id: Experiment identifier.
-            task_name: Task name.
+            experiment_pk: Experiment primary key (id).
+            task_hash: Task configuration hash.
             instances: List of instance dicts with keys:
                 - native_id: Original dataset ID
-                - doc_id: Sequential ID
                 - instance_metrics: Dict of metric names to values
-                - s3_prediction_key: Optional S3 key for full prediction
-            model_hash: Model configuration hash.
-            task_hash: Task configuration hash.
         """
         for inst_data in instances:
             instance = InstancePrediction(
-                experiment_id=experiment_id,
-                model_hash=model_hash,
+                experiment_pk=experiment_pk,
                 task_hash=task_hash,
-                task_name=task_name,
                 native_id=inst_data["native_id"],
-                doc_id=inst_data["doc_id"],
                 instance_metrics=inst_data["instance_metrics"],
-                s3_prediction_key=inst_data.get("s3_prediction_key"),
             )
             self.session.add(instance)
 
     def get_instances(
         self,
-        model_hash: str | None = None,
+        experiment_pk: int | None = None,
+        task_hash: str | None = None,
         task_name: str | list[str] | None = None,
-        experiment_id: str | None = None,
         limit: int | None = None,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         """Get instance predictions with filters.
 
         Args:
-            model_hash: Filter by model hash.
-            task_name: Filter by task name (single string) or task names (list).
-            experiment_id: Filter by specific experiment.
+            experiment_pk: Filter by experiment primary key.
+            task_hash: Filter by task hash.
+            task_name: Filter by task name (requires JOIN to task_results).
             limit: Optional maximum number of results.
             offset: Number of results to skip.
 
@@ -276,17 +302,23 @@ class InstancePredictionRepository:
         """
         stmt = select(InstancePrediction)
 
-        if model_hash:
-            stmt = stmt.where(InstancePrediction.model_hash == model_hash)
+        if experiment_pk:
+            stmt = stmt.where(InstancePrediction.experiment_pk == experiment_pk)
+
+        if task_hash:
+            stmt = stmt.where(InstancePrediction.task_hash == task_hash)
 
         if task_name:
+            # JOIN to task_results to filter by task_name
+            stmt = stmt.join(
+                TaskResult,
+                (TaskResult.experiment_pk == InstancePrediction.experiment_pk)
+                & (TaskResult.task_hash == InstancePrediction.task_hash),
+            )
             if isinstance(task_name, list):
-                stmt = stmt.where(InstancePrediction.task_name.in_(task_name))
+                stmt = stmt.where(TaskResult.task_name.in_(task_name))
             else:
-                stmt = stmt.where(InstancePrediction.task_name == task_name)
-
-        if experiment_id:
-            stmt = stmt.where(InstancePrediction.experiment_id == experiment_id)
+                stmt = stmt.where(TaskResult.task_name == task_name)
 
         stmt = stmt.order_by(InstancePrediction.id)
 
@@ -300,6 +332,203 @@ class InstancePredictionRepository:
 
         return [self._to_instance_dict(inst) for inst in instances]
 
+    def get_instances_by_experiment_id(
+        self,
+        experiment_id: str,
+        task_name: str | list[str] | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Get instance predictions by experiment_id (string).
+
+        Convenience method for CLI that works with experiment_id strings.
+
+        Args:
+            experiment_id: Filter by experiment_id (string).
+            task_name: Filter by task name.
+            limit: Optional maximum number of results.
+            offset: Number of results to skip.
+
+        Returns:
+            List of instance dicts with enriched data (task_name included).
+        """
+        from olmo_eval.storage.db.models import Experiment
+
+        # Build query with JOINs to get task_name
+        stmt = (
+            select(InstancePrediction, TaskResult.task_name)
+            .join(Experiment, Experiment.id == InstancePrediction.experiment_pk)
+            .join(
+                TaskResult,
+                (TaskResult.experiment_pk == InstancePrediction.experiment_pk)
+                & (TaskResult.task_hash == InstancePrediction.task_hash),
+            )
+            .where(Experiment.experiment_id == experiment_id)
+        )
+
+        if task_name:
+            if isinstance(task_name, list):
+                stmt = stmt.where(TaskResult.task_name.in_(task_name))
+            else:
+                stmt = stmt.where(TaskResult.task_name == task_name)
+
+        stmt = stmt.order_by(InstancePrediction.id)
+
+        if limit:
+            stmt = stmt.limit(limit)
+
+        if offset:
+            stmt = stmt.offset(offset)
+
+        results = self.session.execute(stmt).all()
+
+        return [
+            {
+                "id": inst.id,
+                "experiment_pk": inst.experiment_pk,
+                "task_hash": inst.task_hash,
+                "task_name": task_name_val,
+                "native_id": inst.native_id,
+                "instance_metrics": inst.instance_metrics,
+            }
+            for inst, task_name_val in results
+        ]
+
+    def get_instances_by_model(
+        self,
+        model_name: str | None = None,
+        model_hash: str | None = None,
+        task_name: str | list[str] | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Get instance predictions by model name or hash.
+
+        Convenience method for CLI that works with model identifiers.
+
+        Args:
+            model_name: Filter by model name.
+            model_hash: Filter by model hash.
+            task_name: Filter by task name.
+            limit: Optional maximum number of results.
+            offset: Number of results to skip.
+
+        Returns:
+            List of instance dicts with enriched data (task_name, model_hash included).
+        """
+        from olmo_eval.storage.db.models import Experiment
+
+        if not model_name and not model_hash:
+            raise ValueError("Either model_name or model_hash is required")
+
+        # Build query with JOINs to get task_name and model_hash
+        stmt = (
+            select(InstancePrediction, TaskResult.task_name, Experiment.model_hash)
+            .join(Experiment, Experiment.id == InstancePrediction.experiment_pk)
+            .join(
+                TaskResult,
+                (TaskResult.experiment_pk == InstancePrediction.experiment_pk)
+                & (TaskResult.task_hash == InstancePrediction.task_hash),
+            )
+        )
+
+        if model_name:
+            stmt = stmt.where(Experiment.model_name == model_name)
+
+        if model_hash:
+            stmt = stmt.where(Experiment.model_hash == model_hash)
+
+        if task_name:
+            if isinstance(task_name, list):
+                stmt = stmt.where(TaskResult.task_name.in_(task_name))
+            else:
+                stmt = stmt.where(TaskResult.task_name == task_name)
+
+        stmt = stmt.order_by(InstancePrediction.id)
+
+        if limit:
+            stmt = stmt.limit(limit)
+
+        if offset:
+            stmt = stmt.offset(offset)
+
+        results = self.session.execute(stmt).all()
+
+        return [
+            {
+                "id": inst.id,
+                "experiment_pk": inst.experiment_pk,
+                "task_hash": inst.task_hash,
+                "task_name": task_name_val,
+                "model_hash": model_hash_val,
+                "native_id": inst.native_id,
+                "instance_metrics": inst.instance_metrics,
+            }
+            for inst, task_name_val, model_hash_val in results
+        ]
+
+    def get_instances_by_task(
+        self,
+        task_name: str | list[str] | None = None,
+        task_hash: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Get instance predictions by task name or hash.
+
+        Args:
+            task_name: Filter by task name(s).
+            task_hash: Filter by task hash (exact match).
+            limit: Optional maximum number of results.
+            offset: Number of results to skip.
+
+        Returns:
+            List of instance dicts with task_name included.
+        """
+        if not task_name and not task_hash:
+            raise ValueError("Either task_name or task_hash is required")
+
+        # Build query with JOIN to get task_name
+        stmt = (
+            select(InstancePrediction, TaskResult.task_name)
+            .join(
+                TaskResult,
+                (TaskResult.experiment_pk == InstancePrediction.experiment_pk)
+                & (TaskResult.task_hash == InstancePrediction.task_hash),
+            )
+        )
+
+        if task_hash:
+            stmt = stmt.where(InstancePrediction.task_hash == task_hash)
+
+        if task_name:
+            if isinstance(task_name, list):
+                stmt = stmt.where(TaskResult.task_name.in_(task_name))
+            else:
+                stmt = stmt.where(TaskResult.task_name == task_name)
+
+        stmt = stmt.order_by(InstancePrediction.id)
+
+        if limit:
+            stmt = stmt.limit(limit)
+
+        if offset:
+            stmt = stmt.offset(offset)
+
+        results = self.session.execute(stmt).all()
+
+        return [
+            {
+                "id": inst.id,
+                "experiment_pk": inst.experiment_pk,
+                "task_hash": inst.task_hash,
+                "task_name": task_name_val,
+                "native_id": inst.native_id,
+                "instance_metrics": inst.instance_metrics,
+            }
+            for inst, task_name_val in results
+        ]
+
     @staticmethod
     def _to_instance_dict(instance: InstancePrediction) -> dict[str, Any]:
         """Convert ORM model to dict.
@@ -312,12 +541,8 @@ class InstancePredictionRepository:
         """
         return {
             "id": instance.id,
-            "experiment_id": instance.experiment_id,
-            "model_hash": instance.model_hash,
+            "experiment_pk": instance.experiment_pk,
             "task_hash": instance.task_hash,
-            "task_name": instance.task_name,
             "native_id": instance.native_id,
-            "doc_id": instance.doc_id,
             "instance_metrics": instance.instance_metrics,
-            "s3_prediction_key": instance.s3_prediction_key,
         }

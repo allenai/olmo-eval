@@ -158,12 +158,14 @@ class StoredTaskResult:
     task_name: str
     metrics: dict[str, float]
     task_hash: str
+    task_config: dict[str, Any] | None = None
     num_instances: int | None = None
     primary_metric: str | None = None
     primary_score: float | None = None
     # Storage references for detailed data
     s3_metrics_key: str | None = None
     s3_predictions_key: str | None = None
+    s3_requests_key: str | None = None
 
 
 @dataclass
@@ -178,6 +180,9 @@ class EvalResult:
     - Experiment info: experiment_name, workspace, author, tags
     - Version tracking: git_ref, model_hash, revision
     - Storage reference: s3_location points to base path with all task results
+
+    Note: experiment_id can be shared across multiple models in a single
+    experiment launch.
     """
 
     experiment_id: str

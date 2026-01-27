@@ -123,6 +123,10 @@ class TestPostgresBackend:
             ],
             model_config=config,
             author="user1",
+            experiment_name="test",
+            workspace="test",
+            git_ref="abc123",
+            revision="main",
         )
 
         eval2 = EvalResult(
@@ -141,6 +145,10 @@ class TestPostgresBackend:
             ],
             model_config=config,
             author="user2",
+            experiment_name="test",
+            workspace="test",
+            git_ref="abc123",
+            revision="main",
         )
 
         # Save both evaluations
@@ -149,10 +157,15 @@ class TestPostgresBackend:
 
         # Query database directly to check the relationship
         with postgres_backend.db.session() as session:
+            from sqlalchemy import select
+
             from olmo_eval.storage.db.models import Experiment
 
-            exp1 = session.get(Experiment, "eval-user1")
-            exp2 = session.get(Experiment, "eval-user2")
+            stmt = select(Experiment).where(Experiment.experiment_id == "eval-user1")
+            exp1 = session.execute(stmt).scalar_one_or_none()
+
+            stmt = select(Experiment).where(Experiment.experiment_id == "eval-user2")
+            exp2 = session.execute(stmt).scalar_one_or_none()
 
             assert exp1 is not None
             assert exp2 is not None
@@ -170,3 +183,70 @@ class TestPostgresBackend:
             # And different results
             assert exp1.task_results[0].primary_score == 0.65
             assert exp2.task_results[0].primary_score == 0.66
+
+    @pytest.mark.integration
+    def test_get_all_returns_multiple_experiments(self, postgres_backend):
+        """Test that get_all() returns all experiments with shared experiment_id."""
+        from olmo_eval.core import EvalResult, StoredTaskResult
+
+        # Create two experiments with the same experiment_id (simulating multi-model launch)
+        shared_experiment_id = "beaker-multi-model-run"
+
+        eval1 = EvalResult(
+            experiment_id=shared_experiment_id,
+            model_name="llama3.1-8b",
+            backend_name="vllm",
+            timestamp=datetime(2024, 1, 15, 10, 0, 0),
+            tasks=[
+                StoredTaskResult(
+                    task_name="mmlu",
+                    metrics={"accuracy": 0.65},
+                    task_hash="mmlu-hash-1",
+                    primary_metric="accuracy",
+                    primary_score=0.65,
+                )
+            ],
+            model_config={"model": "llama3.1-8b"},
+            author="user",
+            experiment_name="test",
+            workspace="test",
+            git_ref="abc123",
+            revision="main",
+        )
+
+        eval2 = EvalResult(
+            experiment_id=shared_experiment_id,
+            model_name="llama3.1-70b",
+            backend_name="vllm",
+            timestamp=datetime(2024, 1, 15, 10, 0, 0),
+            tasks=[
+                StoredTaskResult(
+                    task_name="mmlu",
+                    metrics={"accuracy": 0.75},
+                    task_hash="mmlu-hash-2",
+                    primary_metric="accuracy",
+                    primary_score=0.75,
+                )
+            ],
+            model_config={"model": "llama3.1-70b"},
+            author="user",
+            experiment_name="test",
+            workspace="test",
+            git_ref="abc123",
+            revision="main",
+        )
+
+        # Save both with same experiment_id
+        postgres_backend.save(eval1)
+        postgres_backend.save(eval2)
+
+        # get() returns only the first one
+        first_result = postgres_backend.get(shared_experiment_id)
+        assert first_result is not None
+
+        # get_all() returns all experiments with that ID
+        all_results = postgres_backend.get_all(shared_experiment_id)
+        assert len(all_results) == 2
+        model_names = {r.model_name for r in all_results}
+        assert "llama3.1-8b" in model_names
+        assert "llama3.1-70b" in model_names

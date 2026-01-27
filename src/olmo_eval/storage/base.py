@@ -118,13 +118,19 @@ def convert_runner_results(
         # Build S3 keys for this task if s3_location is provided
         s3_metrics_key = None
         s3_predictions_key = None
+        s3_requests_key = None
         if s3_location:
-            from olmo_eval.runners.utils import PREDICTIONS_SUFFIX, sanitize_spec_for_filename
+            from olmo_eval.runners.utils import (
+                PREDICTIONS_SUFFIX,
+                REQUESTS_SUFFIX,
+                sanitize_spec_for_filename,
+            )
 
             base = s3_location.rstrip("/")
             sanitized_spec = sanitize_spec_for_filename(spec)
             s3_metrics_key = f"{base}/task-{task_idx:03d}-{sanitized_spec}-metrics.json"
             s3_predictions_key = f"{base}/task-{task_idx:03d}-{sanitized_spec}{PREDICTIONS_SUFFIX}"
+            s3_requests_key = f"{base}/task-{task_idx:03d}-{sanitized_spec}{REQUESTS_SUFFIX}"
 
         # Extract primary metric info
         metrics = task_data.get("metrics", {})
@@ -136,16 +142,21 @@ def convert_runner_results(
         if not task_hash:
             raise ValueError(f"task_hash is required for task '{spec}'")
 
+        # Get task config if available
+        task_config = task_data.get("config")
+
         tasks.append(
             StoredTaskResult(
                 task_name=spec,
                 metrics=metrics,
                 task_hash=task_hash,
+                task_config=task_config,
                 num_instances=task_data.get("num_instances"),
                 primary_metric=primary_metric,
                 primary_score=primary_score,
                 s3_metrics_key=s3_metrics_key,
                 s3_predictions_key=s3_predictions_key,
+                s3_requests_key=s3_requests_key,
             )
         )
 

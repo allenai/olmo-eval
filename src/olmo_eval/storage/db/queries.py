@@ -7,7 +7,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from olmo_eval.core.types import EvalResult, compute_model_hash
+from olmo_eval.core.types import EvalResult
 from olmo_eval.storage.db.repository import ExperimentRepository, InstancePredictionRepository
 
 
@@ -24,14 +24,14 @@ class QueryHelper:
         self.experiment_repo = ExperimentRepository(session)
         self.instance_repo = InstancePredictionRepository(session)
 
-    def save(self, result: EvalResult) -> str:
+    def save(self, result: EvalResult) -> int:
         """Save an evaluation result.
 
         Args:
             result: EvalResult dataclass containing run data.
 
         Returns:
-            The experiment_id of the saved evaluation.
+            The auto-increment id (PK) of the saved experiment.
         """
         return self.experiment_repo.save(result)
 
@@ -39,7 +39,7 @@ class QueryHelper:
         self,
         result: EvalResult,
         instances_by_task: dict[str, list[dict[str, Any]]],
-    ) -> str:
+    ) -> int:
         """Save an evaluation result with instance-level predictions.
 
         Args:
@@ -47,20 +47,13 @@ class QueryHelper:
             instances_by_task: Dict mapping task_name -> list of instance dicts.
                 Each instance dict should have:
                 - native_id: Original dataset ID
-                - doc_id: Sequential ID
                 - instance_metrics: Dict of metric names to values
-                - s3_prediction_key: Optional S3 key
 
         Returns:
-            The experiment_id of the saved evaluation.
+            The auto-increment id (PK) of the saved experiment.
         """
-        # Save experiment and task results
-        experiment_id = self.experiment_repo.save(result)
-
-        # Compute model_hash - required for instance predictions
-        model_hash = compute_model_hash(result.model_config)
-        if not model_hash:
-            raise ValueError("model_config is required to compute model_hash for instance predictions")
+        # Save experiment and task results, get the experiment PK
+        experiment_pk = self.experiment_repo.save(result)
 
         # Build task_hash lookup from result.tasks
         task_hash_lookup: dict[str, str] = {}
@@ -73,25 +66,37 @@ class QueryHelper:
             if not task_hash:
                 raise ValueError(f"task_hash is required for task '{task_name}' instance predictions")
             self.instance_repo.save_instances(
-                experiment_id=experiment_id,
-                task_name=task_name,
-                instances=instances,
-                model_hash=model_hash,
+                experiment_pk=experiment_pk,
                 task_hash=task_hash,
+                instances=instances,
             )
 
-        return experiment_id
+        return experiment_pk
 
-    def get(self, experiment_id: str) -> EvalResult | None:
-        """Retrieve an evaluation result by experiment_id.
+    def get(self, experiment_pk: int) -> EvalResult | None:
+        """Retrieve an evaluation result by experiment primary key.
 
         Args:
-            experiment_id: The unique identifier of the result.
+            experiment_pk: The auto-increment primary key of the experiment.
 
         Returns:
             EvalResult if found, None otherwise.
         """
-        return self.experiment_repo.get(experiment_id)
+        return self.experiment_repo.get(experiment_pk)
+
+    def get_by_experiment_id(self, experiment_id: str) -> list[EvalResult]:
+        """Retrieve all experiments with a given experiment_id.
+
+        Note: Multiple experiments can share the same experiment_id when
+        running multiple models in a single launch.
+
+        Args:
+            experiment_id: Experiment ID.
+
+        Returns:
+            List of EvalResult objects (may be empty, one, or many).
+        """
+        return self.experiment_repo.get_by_experiment_id(experiment_id)
 
     def query(
         self,
@@ -130,16 +135,27 @@ class QueryHelper:
             offset=offset,
         )
 
-    def delete(self, experiment_id: str) -> bool:
-        """Delete an evaluation result.
+    def delete(self, experiment_pk: int) -> bool:
+        """Delete an evaluation result by primary key.
 
         Args:
-            experiment_id: The unique identifier of the result to delete.
+            experiment_pk: The auto-increment primary key of the experiment.
 
         Returns:
             True if deleted, False if not found.
         """
-        return self.experiment_repo.delete(experiment_id)
+        return self.experiment_repo.delete(experiment_pk)
+
+    def delete_by_experiment_id(self, experiment_id: str) -> int:
+        """Delete all experiments with a given experiment_id.
+
+        Args:
+            experiment_id: Experiment ID.
+
+        Returns:
+            Number of experiments deleted.
+        """
+        return self.experiment_repo.delete_by_experiment_id(experiment_id)
 
     def get_model_task_metrics(
         self,
@@ -179,71 +195,105 @@ class QueryHelper:
     def get_model_task_instances(
         self,
         task_name: str | list[str],
-        model_name: str | None = None,
-        model_hash: str | None = None,
-        experiment_id: str | None = None,
+        experiment_pk: int | None = None,
+        task_hash: str | None = None,
         limit: int | None = None,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        """Get instance predictions for a model and task(s).
-
-        Supports querying by human-readable model_name or computed model_hash.
-        If model_name is provided, finds all model_hashes for experiments with that name.
+        """Get instance predictions for a task.
 
         Args:
             task_name: Task name (single string) or task names (list) to query.
-            model_name: Human-readable model name (e.g., "llama3.1-8b").
-            model_hash: Computed model hash (alternative to model_name).
-            experiment_id: Specific experiment ID to filter by.
+            experiment_pk: Specific experiment PK to filter by.
+            task_hash: Task hash to filter by.
             limit: Optional maximum number of instances.
             offset: Number of instances to skip.
 
         Returns:
             List of instance dicts with metrics and metadata.
-
-        Raises:
-            ValueError: If neither model_name nor model_hash nor experiment_id is provided.
         """
-        if not model_name and not model_hash and not experiment_id:
-            raise ValueError(
-                "Must provide at least one of: model_name, model_hash, or experiment_id"
-            )
-
-        # If model_name is provided, look up the corresponding model_hashes
-        if model_name and not model_hash:
-            experiments = self.experiment_repo.query(model_name=model_name, limit=1000)
-            if not experiments:
-                return []
-
-            # Get unique model_hashes from experiments with this model_name
-            model_hashes = [exp.model_hash for exp in experiments if exp.model_hash is not None]
-            model_hashes = list(set(model_hashes))
-            if not model_hashes:
-                return []
-
-            # Query instances for all matching model_hashes
-            all_instances = []
-            for mh in model_hashes:
-                instances = self.instance_repo.get_instances(
-                    model_hash=mh,
-                    task_name=task_name,
-                    experiment_id=experiment_id,
-                    limit=limit,
-                    offset=offset,
-                )
-                all_instances.extend(instances)
-
-            # Apply limit/offset to combined results if needed
-            if limit:
-                all_instances = all_instances[:limit]
-
-            return all_instances
-
-        # Direct query by model_hash or experiment_id
         return self.instance_repo.get_instances(
+            experiment_pk=experiment_pk,
+            task_hash=task_hash,
+            task_name=task_name,
+            limit=limit,
+            offset=offset,
+        )
+
+    def get_instances_by_experiment_id(
+        self,
+        experiment_id: str,
+        task_name: str | list[str] | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Get instance predictions by experiment_id (string).
+
+        Args:
+            experiment_id: Experiment ID (string) to filter by.
+            task_name: Optional task name filter.
+            limit: Optional maximum number of instances.
+            offset: Number of instances to skip.
+
+        Returns:
+            List of instance dicts with task_name included.
+        """
+        return self.instance_repo.get_instances_by_experiment_id(
+            experiment_id=experiment_id,
+            task_name=task_name,
+            limit=limit,
+            offset=offset,
+        )
+
+    def get_instances_by_model(
+        self,
+        task_name: str | list[str],
+        model_name: str | None = None,
+        model_hash: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Get instance predictions by model name or hash.
+
+        Args:
+            task_name: Task name (required).
+            model_name: Model name to filter by.
+            model_hash: Model hash to filter by.
+            limit: Optional maximum number of instances.
+            offset: Number of instances to skip.
+
+        Returns:
+            List of instance dicts with task_name and model_hash included.
+        """
+        return self.instance_repo.get_instances_by_model(
+            model_name=model_name,
             model_hash=model_hash,
             task_name=task_name,
-            experiment_id=experiment_id,
+            limit=limit,
+            offset=offset,
+        )
+
+    def get_instances_by_task(
+        self,
+        task_name: str | list[str] | None = None,
+        task_hash: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Get instance predictions by task name or hash.
+
+        Args:
+            task_name: Task name(s) to filter by.
+            task_hash: Task hash to filter by (exact match).
+            limit: Optional maximum number of instances.
+            offset: Number of instances to skip.
+
+        Returns:
+            List of instance dicts with task_name included.
+        """
+        return self.instance_repo.get_instances_by_task(
+            task_name=task_name,
+            task_hash=task_hash,
             limit=limit,
             offset=offset,
         )

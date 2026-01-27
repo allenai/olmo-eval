@@ -15,25 +15,28 @@ class TestExperimentRepository:
 
         with postgres_backend.db.session() as session:
             repo = ExperimentRepository(session)
-            experiment_id = repo.save(sample_eval_result)
+            experiment_pk = repo.save(sample_eval_result)
 
-        assert experiment_id == sample_eval_result.experiment_id
+        # experiment_pk is now an int (auto-increment PK)
+        assert isinstance(experiment_pk, int)
 
-        # Verify it was saved
-        retrieved = postgres_backend.get(experiment_id)
+        # Verify it was saved (using backend's get which uses experiment_id)
+        retrieved = postgres_backend.get(sample_eval_result.experiment_id)
         assert retrieved is not None
         assert retrieved.model_name == sample_eval_result.model_name
 
     @pytest.mark.integration
-    def test_get_experiment(self, postgres_backend, sample_eval_result):
-        """Test retrieving an experiment."""
+    def test_get_experiment_by_pk(self, postgres_backend, sample_eval_result):
+        """Test retrieving an experiment by primary key."""
         from olmo_eval.storage.db.repository import ExperimentRepository
-
-        postgres_backend.save(sample_eval_result)
 
         with postgres_backend.db.session() as session:
             repo = ExperimentRepository(session)
-            result = repo.get(sample_eval_result.experiment_id)
+            experiment_pk = repo.save(sample_eval_result)
+
+        with postgres_backend.db.session() as session:
+            repo = ExperimentRepository(session)
+            result = repo.get(experiment_pk)
 
         assert result is not None
         assert result.experiment_id == sample_eval_result.experiment_id
@@ -41,24 +44,61 @@ class TestExperimentRepository:
         assert len(result.tasks) == 2
 
     @pytest.mark.integration
-    def test_delete_experiment(self, postgres_backend, sample_eval_result):
-        """Test deleting an experiment."""
+    def test_get_experiment_by_experiment_id(self, postgres_backend, sample_eval_result):
+        """Test retrieving experiments by experiment_id."""
         from olmo_eval.storage.db.repository import ExperimentRepository
 
         postgres_backend.save(sample_eval_result)
 
         with postgres_backend.db.session() as session:
             repo = ExperimentRepository(session)
-            deleted = repo.delete(sample_eval_result.experiment_id)
+            results = repo.get_by_experiment_id(sample_eval_result.experiment_id)
+
+        assert len(results) == 1
+        assert results[0].experiment_id == sample_eval_result.experiment_id
+        assert results[0].model_name == sample_eval_result.model_name
+
+    @pytest.mark.integration
+    def test_delete_experiment(self, postgres_backend, sample_eval_result):
+        """Test deleting an experiment by primary key."""
+        from olmo_eval.storage.db.repository import ExperimentRepository
+
+        with postgres_backend.db.session() as session:
+            repo = ExperimentRepository(session)
+            experiment_pk = repo.save(sample_eval_result)
+
+        with postgres_backend.db.session() as session:
+            repo = ExperimentRepository(session)
+            deleted = repo.delete(experiment_pk)
 
         assert deleted is True
 
         # Verify deletion
         with postgres_backend.db.session() as session:
             repo = ExperimentRepository(session)
-            result = repo.get(sample_eval_result.experiment_id)
+            result = repo.get(experiment_pk)
 
         assert result is None
+
+    @pytest.mark.integration
+    def test_delete_by_experiment_id(self, postgres_backend, sample_eval_result):
+        """Test deleting all experiments with an experiment_id."""
+        from olmo_eval.storage.db.repository import ExperimentRepository
+
+        postgres_backend.save(sample_eval_result)
+
+        with postgres_backend.db.session() as session:
+            repo = ExperimentRepository(session)
+            deleted_count = repo.delete_by_experiment_id(sample_eval_result.experiment_id)
+
+        assert deleted_count == 1
+
+        # Verify deletion
+        with postgres_backend.db.session() as session:
+            repo = ExperimentRepository(session)
+            results = repo.get_by_experiment_id(sample_eval_result.experiment_id)
+
+        assert len(results) == 0
 
     @pytest.mark.integration
     def test_query_by_model_name(self, postgres_backend, multiple_eval_results):
@@ -132,7 +172,7 @@ class TestExperimentRepository:
         assert len(page1) <= 5
         assert len(page2) <= 5
 
-        # Verify no overlap
+        # Verify no overlap (using experiment_id since that's what we have)
         page1_ids = {r.experiment_id for r in page1}
         page2_ids = {r.experiment_id for r in page2}
         assert len(page1_ids & page2_ids) == 0
@@ -144,96 +184,98 @@ class TestInstancePredictionRepository:
     @pytest.mark.integration
     def test_save_instances(self, postgres_backend, sample_eval_result):
         """Test saving instance predictions."""
-        from olmo_eval.storage.db.repository import InstancePredictionRepository
+        from olmo_eval.storage.db.repository import ExperimentRepository, InstancePredictionRepository
 
-        postgres_backend.save(sample_eval_result)
+        with postgres_backend.db.session() as session:
+            exp_repo = ExperimentRepository(session)
+            experiment_pk = exp_repo.save(sample_eval_result)
 
         instances = [
             {
                 "native_id": "doc_0",
-                "doc_id": 0,
                 "instance_metrics": {"acc": 1.0},
-                "s3_prediction_key": "s3://bucket/pred_0.json",
             },
             {
                 "native_id": "doc_1",
-                "doc_id": 1,
                 "instance_metrics": {"acc": 0.5},
             },
         ]
 
+        # Get task_hash from sample_eval_result
+        task_hash = sample_eval_result.tasks[0].task_hash
+
         with postgres_backend.db.session() as session:
             repo = InstancePredictionRepository(session)
             repo.save_instances(
-                experiment_id=sample_eval_result.experiment_id,
-                task_name="mmlu",
+                experiment_pk=experiment_pk,
+                task_hash=task_hash,
                 instances=instances,
-                model_hash="test-model-id",
             )
 
         # Verify instances were saved
         with postgres_backend.db.session() as session:
             repo = InstancePredictionRepository(session)
-            saved = repo.get_instances(experiment_id=sample_eval_result.experiment_id)
+            saved = repo.get_instances(experiment_pk=experiment_pk)
 
         assert len(saved) == 2
 
     @pytest.mark.integration
-    def test_get_instances_by_model(self, postgres_backend, sample_eval_result):
-        """Test retrieving instances by model_hash."""
-        from olmo_eval.storage.db.repository import InstancePredictionRepository
+    def test_get_instances_by_task_name(self, postgres_backend, sample_eval_result):
+        """Test retrieving instances by task name (via JOIN)."""
+        from olmo_eval.storage.db.repository import ExperimentRepository, InstancePredictionRepository
 
-        postgres_backend.save(sample_eval_result)
+        with postgres_backend.db.session() as session:
+            exp_repo = ExperimentRepository(session)
+            experiment_pk = exp_repo.save(sample_eval_result)
 
-        instances = [{"native_id": "doc_0", "doc_id": 0, "instance_metrics": {"acc": 1.0}}]
+        instances = [{"native_id": "doc_0", "instance_metrics": {"acc": 1.0}}]
+        task_hash = sample_eval_result.tasks[0].task_hash  # mmlu
 
         with postgres_backend.db.session() as session:
             repo = InstancePredictionRepository(session)
             repo.save_instances(
-                experiment_id=sample_eval_result.experiment_id,
-                task_name="mmlu",
+                experiment_pk=experiment_pk,
+                task_hash=task_hash,
                 instances=instances,
-                model_hash="model-123",
             )
 
-        # Query by model_hash
+        # Query by task_name (uses JOIN to task_results)
         with postgres_backend.db.session() as session:
             repo = InstancePredictionRepository(session)
-            results = repo.get_instances(model_hash="model-123", task_name="mmlu")
+            results = repo.get_instances(task_name="mmlu")
 
         assert len(results) == 1
-        assert results[0]["model_hash"] == "model-123"
+        assert results[0]["task_hash"] == task_hash
 
     @pytest.mark.integration
     def test_get_instances_pagination(self, postgres_backend, sample_eval_result):
         """Test instance pagination."""
-        from olmo_eval.storage.db.repository import InstancePredictionRepository
+        from olmo_eval.storage.db.repository import ExperimentRepository, InstancePredictionRepository
 
-        postgres_backend.save(sample_eval_result)
+        with postgres_backend.db.session() as session:
+            exp_repo = ExperimentRepository(session)
+            experiment_pk = exp_repo.save(sample_eval_result)
 
         # Save 10 instances
         instances = [
-            {"native_id": f"doc_{i}", "doc_id": i, "instance_metrics": {"acc": 0.5}}
+            {"native_id": f"doc_{i}", "instance_metrics": {"acc": 0.5}}
             for i in range(10)
         ]
+        task_hash = sample_eval_result.tasks[0].task_hash
 
         with postgres_backend.db.session() as session:
             repo = InstancePredictionRepository(session)
             repo.save_instances(
-                experiment_id=sample_eval_result.experiment_id,
-                task_name="test",
+                experiment_pk=experiment_pk,
+                task_hash=task_hash,
                 instances=instances,
             )
 
         # Get with pagination
         with postgres_backend.db.session() as session:
             repo = InstancePredictionRepository(session)
-            page1 = repo.get_instances(
-                experiment_id=sample_eval_result.experiment_id, limit=5, offset=0
-            )
-            page2 = repo.get_instances(
-                experiment_id=sample_eval_result.experiment_id, limit=5, offset=5
-            )
+            page1 = repo.get_instances(experiment_pk=experiment_pk, limit=5, offset=0)
+            page2 = repo.get_instances(experiment_pk=experiment_pk, limit=5, offset=5)
 
         assert len(page1) == 5
         assert len(page2) == 5
