@@ -122,27 +122,6 @@ def format_timestamp(ts: datetime | None) -> str:
     return ts.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def print_experiments_table(experiments: list[Any]) -> None:
-    """Print a table of experiments."""
-    table = Table(title="Evaluation Results")
-    table.add_column("Experiment ID", style="cyan")
-    table.add_column("Model", style="green")
-    table.add_column("Backend", style="dim")
-    table.add_column("Timestamp")
-    table.add_column("Tasks", justify="right")
-
-    for exp in experiments:
-        table.add_row(
-            exp.experiment_id,
-            exp.model_name,
-            exp.backend_name or "-",
-            format_timestamp(exp.timestamp),
-            str(len(exp.tasks)),
-        )
-
-    console.print(table)
-
-
 def print_experiment_detail(experiment: Any) -> None:
     """Print detailed information about an experiment."""
     # Header panel with metadata
@@ -194,28 +173,71 @@ def print_task_results_table(tasks: list[Any], task_filter: tuple[str, ...] | No
     console.print(table)
 
 
-def print_instances_table(instances: list[dict[str, Any]]) -> None:
-    """Print a table of instance predictions."""
-    table = Table(title="Instance Predictions")
-    table.add_column("Native ID", style="cyan")
-    table.add_column("Task")
-    table.add_column("Metrics")
+def _build_model_task_scores(
+    experiments: list[Any], task_filter: set[str] | None = None
+) -> tuple[list[str], dict[str, dict[str, float | None]]]:
+    """Build model-task score mapping from experiments.
 
-    for inst in instances:
-        # Format metrics as key: value pairs
-        metrics = inst.get("instance_metrics", {})
-        if metrics:
-            metrics_str = ", ".join(
-                f"{k}: {v:.3f}" if isinstance(v, float) else f"{k}: {v}" for k, v in metrics.items()
-            )
-        else:
-            metrics_str = "-"
+    Args:
+        experiments: List of experiment results.
+        task_filter: Optional set of task names to include.
 
-        table.add_row(
-            str(inst.get("native_id", "-")),
-            inst.get("task_name", "-"),
-            metrics_str,
-        )
+    Returns:
+        Tuple of (sorted_tasks, model_scores) where model_scores maps
+        model_key -> task_name -> score.
+    """
+    all_tasks: set[str] = set()
+    model_scores: dict[str, dict[str, float | None]] = {}
+
+    for exp in experiments:
+        model_key = exp.model_name
+        if exp.model_hash:
+            model_key += f" ({exp.model_hash[:8]})"
+
+        if model_key not in model_scores:
+            model_scores[model_key] = {}
+
+        for task in exp.tasks:
+            if task_filter and task.task_name not in task_filter:
+                continue
+            all_tasks.add(task.task_name)
+            # Keep the latest score if we see duplicates
+            model_scores[model_key][task.task_name] = task.primary_score
+
+    return sorted(all_tasks), model_scores
+
+
+def print_task_comparison_matrix(experiments: list[Any], task_filter: set[str] | None = None) -> None:
+    """Print a comparison matrix with models as rows and tasks as columns.
+
+    Args:
+        experiments: List of experiment results.
+        task_filter: Optional set of task names to include.
+    """
+    sorted_tasks, model_scores = _build_model_task_scores(experiments, task_filter)
+
+    if not sorted_tasks:
+        console.print("[dim]No matching tasks found.[/dim]")
+        return
+
+    # Create the comparison table
+    table = Table(title="Model-Task Comparison")
+    table.add_column("Model", style="cyan")
+
+    for task_name in sorted_tasks:
+        table.add_column(task_name, justify="right")
+
+    # Add rows for each model
+    for model_key in sorted(model_scores.keys()):
+        scores = model_scores[model_key]
+        row = [model_key]
+        for task_name in sorted_tasks:
+            score = scores.get(task_name)
+            if score is not None:
+                row.append(f"{score:.4f}")
+            else:
+                row.append("-")
+        table.add_row(*row)
 
     console.print(table)
 
@@ -268,6 +290,62 @@ def experiments_to_csv(experiments: list[Any]) -> None:
                 len(exp.tasks),
             ]
         )
+
+
+def task_comparison_to_csv(experiments: list[Any], task_filter: set[str] | None = None) -> None:
+    """Write task comparison matrix to stdout as CSV.
+
+    Args:
+        experiments: List of experiment results.
+        task_filter: Optional set of task names to include.
+    """
+    sorted_tasks, model_scores = _build_model_task_scores(experiments, task_filter)
+
+    if not sorted_tasks:
+        return
+
+    writer = csv.writer(sys.stdout)
+
+    # Header row
+    writer.writerow(["model"] + sorted_tasks)
+
+    # Data rows
+    for model_key in sorted(model_scores.keys()):
+        scores = model_scores[model_key]
+        row = [model_key]
+        for task_name in sorted_tasks:
+            score = scores.get(task_name)
+            row.append(f"{score:.4f}" if score is not None else "")
+        writer.writerow(row)
+
+
+def task_comparison_to_json(experiments: list[Any], task_filter: set[str] | None = None) -> str:
+    """Convert task comparison to JSON string.
+
+    Args:
+        experiments: List of experiment results.
+        task_filter: Optional set of task names to include.
+
+    Returns:
+        JSON string with model-task scores.
+    """
+    sorted_tasks, model_scores = _build_model_task_scores(experiments, task_filter)
+
+    # Build JSON-friendly output with model_hash included
+    output: dict[str, Any] = {}
+    for exp in experiments:
+        model_key = exp.model_name
+        if exp.model_hash:
+            model_key += f" ({exp.model_hash[:8]})"
+
+        if model_key not in output:
+            output[model_key] = {
+                "model_name": exp.model_name,
+                "model_hash": exp.model_hash,
+                "scores": model_scores.get(model_key, {}),
+            }
+
+    return json.dumps(output, indent=2)
 
 
 def instances_to_json(instances: list[dict[str, Any]]) -> str:
@@ -644,8 +722,13 @@ def query(
                     console.print(f"[yellow]Warning:[/yellow] No experiments found for hash '{mhash}'")
                 all_experiments.extend(exps)
 
-            # If only task filter provided (no experiment/model filters), query by task
-            if task_names and not experiment_ids and not model_names and not model_hashes:
+            # Determine if this is a comparison query (no experiment filter)
+            # Show matrix for task-only, model-only, or model+task queries
+            # Only show experiment details when querying by experiment ID
+            comparison_query = not experiment_ids
+
+            # If only task filter provided (no model filters), query by task
+            if task_names and not model_names and not model_hashes:
                 for tname in task_names:
                     exps = repo.query(task_name=tname, limit=100)
                     all_experiments.extend(exps)
@@ -658,27 +741,41 @@ def query(
             task_filter = set(task_names) if task_names else None
 
             # Handle output formats
-            if output_format == "json":
-                print(experiments_to_json(all_experiments))
-                return
+            if comparison_query:
+                # Comparison query (task-only or model-only): use comparison matrix format
+                if output_format == "json":
+                    print(task_comparison_to_json(all_experiments, task_filter))
+                    return
+                if output_format == "csv":
+                    task_comparison_to_csv(all_experiments, task_filter)
+                    return
+            else:
+                # Experiment query: use standard experiment format
+                if output_format == "json":
+                    print(experiments_to_json(all_experiments))
+                    return
+                if output_format == "csv":
+                    experiments_to_csv(all_experiments)
+                    return
 
-            if output_format == "csv":
-                experiments_to_csv(all_experiments)
-                return
-
-            # Table format - show experiment details
-            if len(all_experiments) > 1:
-                console.print(f"[bold]Found {len(all_experiments)} experiment(s)[/bold]\n")
-
-            for i, experiment in enumerate(all_experiments):
+            # Table format
+            if comparison_query:
+                # Comparison query: show matrix (models as rows, tasks as columns)
+                print_task_comparison_matrix(all_experiments, task_filter)
+            else:
+                # Experiment/model query: show experiment details
                 if len(all_experiments) > 1:
-                    console.print(f"[bold cyan]--- Experiment {i + 1}/{len(all_experiments)} ---[/bold cyan]")
+                    console.print(f"[bold]Found {len(all_experiments)} experiment(s)[/bold]\n")
 
-                print_experiment_detail(experiment)
-                console.print()
-                print_task_results_table(experiment.tasks, task_filter)
+                for i, experiment in enumerate(all_experiments):
+                    if len(all_experiments) > 1:
+                        console.print(f"[bold cyan]--- Experiment {i + 1}/{len(all_experiments)} ---[/bold cyan]")
 
-                if i < len(all_experiments) - 1:
+                    print_experiment_detail(experiment)
                     console.print()
+                    print_task_results_table(experiment.tasks, task_filter)
+
+                    if i < len(all_experiments) - 1:
+                        console.print()
     finally:
         db.dispose()
