@@ -30,17 +30,9 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 @click.option("--temperature", type=float, help="Override temperature for all tasks")
 @click.option("--backend", type=click.Choice(["hf", "vllm", "litellm"]), help="Override backend")
 @click.option(
-    "--storage-backend",
-    "-s",
-    "storage_backends",
-    type=click.Choice(["s3", "postgres"]),
-    multiple=True,
-    help="Storage backend(s) for results. Can be specified multiple times.",
-)
-@click.option(
-    "--storage-config",
-    type=click.Path(exists=True),
-    help="YAML config file for storage backend",
+    "--store",
+    is_flag=True,
+    help="Persist results to the configured database",
 )
 @click.option("--dry-run", is_flag=True, help="Print config and exit without running")
 @click.option(
@@ -141,8 +133,7 @@ def run(
     limit: int | None,
     temperature: float | None,
     backend: str | None,
-    storage_backends: tuple[str, ...],
-    storage_config: str | None,
+    store: bool,
     dry_run: bool,
     use_async: bool,
     use_async_stream: bool,
@@ -241,52 +232,28 @@ def run(
             f"ignoring --backend={backend}"
         )
 
-    # Set up storage backends if specified
+    # Set up storage backend if enabled
     storages: list = []
-    if storage_backends:
+    if store:
         from olmo_eval.storage import get_backend
 
-        # Load storage config if provided
-        storage_cfg = None
-        if storage_config:
-            from omegaconf import DictConfig, OmegaConf
-
-            cfg = OmegaConf.load(storage_config)
-            if isinstance(cfg, DictConfig):
-                storage_cfg = cfg
-            else:
-                console.print("[red]Error:[/red] Storage config must be a YAML dict, not a list")
-                raise SystemExit(1)
-
-        for backend_name in storage_backends:
-            # Get backend-specific config section
-            storage_kwargs: dict = {}
-            if storage_cfg:
-                backend_cfg = storage_cfg.get(backend_name, {})
-                storage_kwargs = OmegaConf.to_container(backend_cfg, resolve=True) or {}  # type: ignore
-
-            # For postgres, use CLI options if no config file provided
-            if backend_name == "postgres" and not storage_cfg:
-                storage_kwargs = {
-                    "host": db_host,
-                    "port": db_port,
-                    "database": db_name,
-                    "user": db_user,
-                    "password": db_password,
-                }
-
-            try:
-                storage = get_backend(backend_name, **storage_kwargs)
-                storages.append(storage)
-                console.print(f"[green]Initialized {backend_name} storage backend[/green]")
-            except ImportError as e:
-                console.print(f"[red]Storage backend error:[/red] {e}")
-                raise SystemExit(1) from None
-            except Exception as e:
-                console.print(
-                    f"[red]Failed to initialize {backend_name} storage backend:[/red] {e}"
-                )
-                raise SystemExit(1) from None
+        try:
+            storage = get_backend(
+                "postgres",
+                host=db_host,
+                port=db_port,
+                database=db_name,
+                user=db_user,
+                password=db_password,
+            )
+            storages.append(storage)
+            console.print("[green]Initialized postgres storage backend[/green]")
+        except ImportError as e:
+            console.print(f"[red]Storage backend error:[/red] {e}")
+            raise SystemExit(1) from None
+        except Exception as e:
+            console.print(f"[red]Failed to initialize storage backend:[/red] {e}")
+            raise SystemExit(1) from None
 
     # Set up S3 config if specified
     s3_config = None

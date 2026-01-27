@@ -130,9 +130,9 @@ def beaker() -> None:
     help="S3 region (default: us-east-1)",
 )
 @click.option(
-    "--postgres/--no-postgres",
+    "--store/--no-store",
     default=False,
-    help="Enable PostgreSQL storage backend",
+    help="Persist results to the configured database",
 )
 def launch(
     config: str | None,
@@ -164,7 +164,7 @@ def launch(
     s3_prefix: str | None,
     s3_endpoint_url: str | None,
     s3_region: str,
-    postgres: bool,
+    store: bool,
 ) -> None:
     """Launch an evaluation job on Beaker.
 
@@ -727,12 +727,12 @@ def launch(
     else:
         common_secrets = ensure_common_secrets(workspace=workspace)
 
-    # Build postgres secrets list if --postgres is enabled
+    # Build store secrets list if --store is enabled
     # User must have manually created these secrets in Beaker (shared, not per-user)
-    postgres_secrets: list[tuple[str, str]] = []
-    if postgres:
+    store_secrets: list[tuple[str, str]] = []
+    if store:
         for env_var in ["PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD"]:
-            postgres_secrets.append((env_var, f"olmo_eval_{env_var}"))
+            store_secrets.append((env_var, f"olmo_eval_{env_var}"))
 
     # Build all BeakerJobConfig objects first
     job_configs: list[BeakerJobConfig] = []
@@ -838,9 +838,9 @@ def launch(
             if s3_region != "us-east-1":
                 command.extend(["--s3-region", s3_region])
 
-        # Add postgres storage backend if enabled (credentials come from env secrets)
-        if postgres:
-            command.extend(["-s", "postgres"])
+        # Add storage backend if enabled (credentials come from env secrets)
+        if store:
+            command.append("--store")
 
         # Determine the backend this model will use at runtime
         from olmo_eval.core.configs import get_model_config as get_runtime_model_config
@@ -865,7 +865,7 @@ def launch(
             BeakerEnvSecret(env_var, secret_name) for env_var, secret_name in common_secrets
         ]
         env_secrets.extend(
-            BeakerEnvSecret(env_var, secret_name) for env_var, secret_name in postgres_secrets
+            BeakerEnvSecret(env_var, secret_name) for env_var, secret_name in store_secrets
         )
 
         job_config = BeakerJobConfig(
