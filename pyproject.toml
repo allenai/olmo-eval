@@ -81,9 +81,7 @@ dev = [
     "olmo-eval-internal[storage]",
 ]
 
-# ty file-based overrides for optional dependencies
-# This allows unresolved imports only in files that use optional packages,
-# preserving full type checking elsewhere in the codebase
+# ty file-based overrides for optional dependencies (backends use vllm/litellm)
 [[tool.ty.overrides]]
 include = ["src/olmo_eval/backends/**"]
 [tool.ty.overrides.rules]

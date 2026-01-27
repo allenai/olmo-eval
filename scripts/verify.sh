@@ -25,6 +25,10 @@ done
 echo "Running verification checks..."
 
 echo ""
+echo "==> Syncing dependencies..."
+uv sync --dev --extra beaker --extra hf
+
+echo ""
 echo "==> Checking formatting with ruff..."
 uv run ruff format --check src/ tests/
 
