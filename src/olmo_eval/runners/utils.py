@@ -485,7 +485,7 @@ def build_predictions(scored: Sequence[Response]) -> list[dict]:
             "doc_id": idx,
             "native_id": resp.instance.metadata.get("id", f"doc_{idx}"),
             "model_output": model_output,
-            "metrics": dict(resp.scores),
+            "instance_metrics": dict(resp.scores),
             "label": label,
         }
 
