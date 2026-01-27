@@ -172,10 +172,13 @@ class SyncEvalRunner(RunnerResultsMixin):
                 task_data["primary_metric"] = task_result.primary_metric
             if task_result.predictions:
                 task_data["predictions"] = task_result.predictions
-            results["tasks"][spec] = task_data
 
-            # Compute task hash from config
+            # Compute task hash from config and add to task_data
             task_hash = compute_task_hash(task_result.config)
+            if task_hash:
+                task_data["task_hash"] = task_hash
+
+            results["tasks"][spec] = task_data
 
             # Write predictions to JSONL
             if task_result.predictions:

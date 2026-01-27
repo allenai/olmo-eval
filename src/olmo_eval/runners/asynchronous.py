@@ -1079,6 +1079,10 @@ class AsyncEvalRunner(AsyncRunnerMixin):
                             task_data["primary_metric"] = task_result.primary_metric
                         if task_result.predictions:
                             task_data["predictions"] = task_result.predictions
+                        # Add task_hash for storage
+                        task_hash = compute_task_hash(task_result.config)
+                        if task_hash:
+                            task_data["task_hash"] = task_hash
                         model_results["tasks"][spec] = task_data
 
             # Store model config details for metrics.json
@@ -1515,6 +1519,10 @@ class StreamingEvalRunner(AsyncRunnerMixin):
                             task_data["primary_metric"] = task_result.primary_metric
                         if task_result.predictions:
                             task_data["predictions"] = task_result.predictions
+                        # Add task_hash for storage
+                        task_hash = compute_task_hash(task_result.config)
+                        if task_hash:
+                            task_data["task_hash"] = task_hash
                         model_results["tasks"][spec] = task_data
 
             # Store model config details for metrics.json
