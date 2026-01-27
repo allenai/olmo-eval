@@ -28,12 +28,12 @@ from olmo_eval.core import (
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.evals.tasks import Task, get_task
 from olmo_eval.runners.constants import SAMPLING_KEYS, TASKCONFIG_KEYS
-from olmo_eval.runners.mixins import AsyncRunnerMixin
+from olmo_eval.runners.mixins import AsyncRunnerMixin, S3Config
 from olmo_eval.runners.utils import (
     TaskResult,
     build_predictions,
     compute_suite_aggregations,
-    serialize_sampling_params,
+    compute_task_hash,
     write_predictions_jsonl,
     write_requests_jsonl,
 )
@@ -239,14 +239,7 @@ def finalize_task(tracker: TaskTracker) -> TaskResult:
 
     return TaskResult(
         spec=tracker.spec,
-        config={
-            "name": tracker.task.config.name,
-            "split": tracker.task.config.split.value,
-            "num_fewshot": tracker.task.config.num_fewshot,
-            "fewshot_seed": tracker.task.config.fewshot_seed,
-            "limit": tracker.task.config.limit,
-            "sampling_params": serialize_sampling_params(tracker.task.config.sampling_params),
-        },
+        config=tracker.task.config.to_dict(),
         num_instances=tracker.total_instances,
         metrics=metrics,
         duration_seconds=duration,
@@ -739,6 +732,9 @@ class AsyncEvalRunner(AsyncRunnerMixin):
     # Maps model name -> overrides dict
     model_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
 
+    # S3 upload configuration (optional)
+    s3_config: S3Config | None = None
+
     # Configuration for print_config display
     _mode_name: str = "Async Mode"
     _mode_description: str = "Async (All-at-once)"
@@ -842,7 +838,8 @@ class AsyncEvalRunner(AsyncRunnerMixin):
                     # Write requests early - we know them upfront before generation
                     if items and tracker.task:
                         request_objects = build_requests_from_items(items, tracker.task.config.name)
-                        self._write_requests(model_name, spec, request_objects)
+                        task_hash = compute_task_hash(tracker.task.config.to_dict())
+                        self._write_requests(model_name, spec, request_objects, task_hash)
 
         total_instances = sum(len(items) for items in model_items.values())
         console.print(f"[bold]Total instances:[/bold] {total_instances}")
@@ -1015,8 +1012,9 @@ class AsyncEvalRunner(AsyncRunnerMixin):
                     self._report_task_completion(tracker.model_name, task_result)
                     # Write predictions to JSONL
                     if task_result.predictions:
+                        task_hash = compute_task_hash(task_result.config)
                         self._write_predictions(
-                            tracker.model_name, task_result.spec, task_result.predictions
+                            tracker.model_name, task_result.spec, task_result.predictions, task_hash
                         )
                     # Note: Requests are written early during task preparation,
                     # so we don't need to write them again here
@@ -1103,19 +1101,38 @@ class AsyncEvalRunner(AsyncRunnerMixin):
         # Write metrics.json for Beaker
         self._write_metrics_json(results_dict, multi_model=True)
 
+        # Upload to S3 if configured (upload per model)
+        if self.s3_config:
+            import uuid
+
+            from olmo_eval.core.types import compute_model_hash
+
+            for model_name, model_data in results_dict.get("models", {}).items():
+                model_hash = compute_model_hash(model_data.get("_model_config", {}))
+                experiment_id = str(uuid.uuid4())
+                self._upload_to_s3(
+                    model_name=model_name,
+                    model_hash=model_hash,
+                    experiment_id=experiment_id,
+                )
+
         return results_dict
 
     def run(self) -> dict[str, Any]:
         """Sync wrapper for async execution."""
         return asyncio.run(self.run_async())
 
-    def _write_predictions(self, model_name: str, spec: str, predictions: list[dict]) -> None:
+    def _write_predictions(
+        self, model_name: str, spec: str, predictions: list[dict], task_hash: str | None = None
+    ) -> None:
         """Write per-instance predictions to JSONL."""
-        write_predictions_jsonl(self.output_dir, spec, predictions, model_name)
+        write_predictions_jsonl(self.output_dir, spec, predictions, model_name, task_hash=task_hash)
 
-    def _write_requests(self, model_name: str, spec: str, requests: list[dict]) -> None:
+    def _write_requests(
+        self, model_name: str, spec: str, requests: list[dict], task_hash: str | None = None
+    ) -> None:
         """Write per-instance requests to JSONL (oe-eval compatible format)."""
-        write_requests_jsonl(self.output_dir, spec, requests, model_name)
+        write_requests_jsonl(self.output_dir, spec, requests, model_name, task_hash=task_hash)
 
 
 # -----------------------------------------------------------------------------
@@ -1157,6 +1174,9 @@ class StreamingEvalRunner(AsyncRunnerMixin):
     # Per-model overrides from inline spec (e.g., model::tokenizer=..., model::load_format=...)
     # Maps model name -> overrides dict
     model_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    # S3 upload configuration (optional)
+    s3_config: S3Config | None = None
 
     # Configuration for print_config display
     _mode_name: str = "Streaming Mode"
@@ -1258,7 +1278,8 @@ class StreamingEvalRunner(AsyncRunnerMixin):
                     # Write requests early - we know them upfront before generation
                     if items and tracker.task:
                         request_objects = build_requests_from_items(items, tracker.task.config.name)
-                        self._write_requests(model_name, spec, request_objects)
+                        task_hash = compute_task_hash(tracker.task.config.to_dict())
+                        self._write_requests(model_name, spec, request_objects, task_hash)
 
         total_instances = sum(len(items) for items in model_items.values())
         console.print(f"[bold]Total instances:[/bold] {total_instances}")
@@ -1418,8 +1439,9 @@ class StreamingEvalRunner(AsyncRunnerMixin):
                     self._report_task_completion(tracker.model_name, task_result)
                     # Write predictions to JSONL
                     if task_result.predictions:
+                        task_hash = compute_task_hash(task_result.config)
                         self._write_predictions(
-                            tracker.model_name, task_result.spec, task_result.predictions
+                            tracker.model_name, task_result.spec, task_result.predictions, task_hash
                         )
                     # Note: Requests are written early during task preparation,
                     # so we don't need to write them again here
@@ -1500,16 +1522,35 @@ class StreamingEvalRunner(AsyncRunnerMixin):
         self._save_results(results_dict)
         self._write_metrics_json(results_dict, multi_model=True)
 
+        # Upload to S3 if configured (upload per model)
+        if self.s3_config:
+            import uuid
+
+            from olmo_eval.core.types import compute_model_hash
+
+            for model_name, model_data in results_dict.get("models", {}).items():
+                model_hash = compute_model_hash(model_data.get("_model_config", {}))
+                experiment_id = str(uuid.uuid4())
+                self._upload_to_s3(
+                    model_name=model_name,
+                    model_hash=model_hash,
+                    experiment_id=experiment_id,
+                )
+
         return results_dict
 
     def run(self) -> dict[str, Any]:
         """Sync wrapper for async execution."""
         return asyncio.run(self.run_async())
 
-    def _write_predictions(self, model_name: str, spec: str, predictions: list[dict]) -> None:
+    def _write_predictions(
+        self, model_name: str, spec: str, predictions: list[dict], task_hash: str | None = None
+    ) -> None:
         """Write per-instance predictions to JSONL."""
-        write_predictions_jsonl(self.output_dir, spec, predictions, model_name)
+        write_predictions_jsonl(self.output_dir, spec, predictions, model_name, task_hash=task_hash)
 
-    def _write_requests(self, model_name: str, spec: str, requests: list[dict]) -> None:
+    def _write_requests(
+        self, model_name: str, spec: str, requests: list[dict], task_hash: str | None = None
+    ) -> None:
         """Write per-instance requests to JSONL (oe-eval compatible format)."""
-        write_requests_jsonl(self.output_dir, spec, requests, model_name)
+        write_requests_jsonl(self.output_dir, spec, requests, model_name, task_hash=task_hash)

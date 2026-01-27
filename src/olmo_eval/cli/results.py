@@ -503,7 +503,7 @@ def query(
                 task_hash = task_hashes.get(task)
                 if task_hash:
                     padded_task = task.ljust(max_task_len)
-                    col_name = f"{padded_task} [dim]{task_hash[-4:]}[/dim]"
+                    col_name = f"{padded_task} [dim]{task_hash[-6:]}[/dim]"
                 else:
                     col_name = task
                 table.add_column(col_name, justify="right", style="green")
@@ -511,11 +511,11 @@ def query(
             for _, scores, model_name, model_hash in rows:
                 if model_name and model_hash:
                     padded_name = model_name.ljust(max_name_len)
-                    display = f"{padded_name} [dim]{model_hash[-4:]}[/dim]"
+                    display = f"{padded_name} [dim]{model_hash[-6:]}[/dim]"
                 elif model_name:
                     display = model_name
                 elif model_hash:
-                    display = f"[dim]{model_hash[-4:]}[/dim]"
+                    display = f"[dim]{model_hash[-6:]}[/dim]"
                 else:
                     display = "-"
 

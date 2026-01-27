@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from dataclasses import dataclass, field
@@ -15,10 +16,11 @@ from olmo_eval.backends import Backend, BackendType, create_backend
 from olmo_eval.core import expand_tasks, get_model_config
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.runners.constants import SAMPLING_KEYS, TASKCONFIG_KEYS, ValidationError
-from olmo_eval.runners.mixins import RunnerResultsMixin
+from olmo_eval.runners.mixins import RunnerResultsMixin, S3Config
 from olmo_eval.runners.utils import (
     TaskResult,
     compute_suite_aggregations,
+    compute_task_hash,
     run_task_impl,
     write_predictions_jsonl,
     write_requests_jsonl,
@@ -52,6 +54,9 @@ class SyncEvalRunner(RunnerResultsMixin):
 
     # Model overrides from inline spec (e.g., model::tokenizer=..., model::load_format=...)
     model_overrides: dict[str, Any] = field(default_factory=dict)
+
+    # S3 upload configuration (optional)
+    s3_config: S3Config | None = None
 
     def validate(self) -> None:
         """Validate all inputs before running.
@@ -164,12 +169,16 @@ class SyncEvalRunner(RunnerResultsMixin):
                 task_data["primary_metric"] = task_result.primary_metric
             results["tasks"][spec] = task_data
 
+            # Compute task hash from config
+            task_hash = compute_task_hash(task_result.config)
+
             # Write predictions to JSONL
             if task_result.predictions:
-                self._write_predictions(spec, task_result.predictions)
+                self._write_predictions(spec, task_result.predictions, task_hash)
 
-            # Note: Requests are written early via the requests_callback in _run_task,
-            # so we don't need to write them again here
+            # Write requests to JSONL (with hash now that we have the config)
+            if task_result.requests:
+                self._write_requests(spec, task_result.requests, task_hash)
 
             # Log metrics (for Beaker job details)
             if task_result.metrics:
@@ -189,6 +198,18 @@ class SyncEvalRunner(RunnerResultsMixin):
 
         # Write metrics.json for Beaker
         self._write_metrics_json(results)
+
+        # Upload to S3 if configured
+        if self.s3_config:
+            from olmo_eval.core.types import compute_model_hash
+
+            model_hash = compute_model_hash(results.get("_model_config", {}))
+            experiment_id = str(uuid.uuid4())
+            self._upload_to_s3(
+                model_name=results["model"],
+                model_hash=model_hash,
+                experiment_id=experiment_id,
+            )
 
         return results
 
@@ -214,14 +235,12 @@ class SyncEvalRunner(RunnerResultsMixin):
                 sampling_overrides[key] = value
 
         # Use shared task execution logic
-        # Pass callback to write requests early (before generation completes)
         result = run_task_impl(
             spec=spec,
             backend=backend,
             overrides=overrides or None,
             progress_callback=lambda msg: console.print(f"  {msg}"),
             sampling_overrides=sampling_overrides or None,
-            requests_callback=lambda reqs: self._write_requests(spec, reqs),
         )
 
         # Check for errors
@@ -230,10 +249,10 @@ class SyncEvalRunner(RunnerResultsMixin):
 
         return result
 
-    def _write_predictions(self, spec: str, predictions: list[dict]) -> None:
+    def _write_predictions(self, spec: str, predictions: list[dict], task_hash: str | None = None) -> None:
         """Write per-instance predictions to JSONL."""
-        write_predictions_jsonl(self.output_dir, spec, predictions)
+        write_predictions_jsonl(self.output_dir, spec, predictions, task_hash=task_hash)
 
-    def _write_requests(self, spec: str, requests: list[dict]) -> None:
+    def _write_requests(self, spec: str, requests: list[dict], task_hash: str | None = None) -> None:
         """Write per-instance requests to JSONL (oe-eval compatible format)."""
-        write_requests_jsonl(self.output_dir, spec, requests)
+        write_requests_jsonl(self.output_dir, spec, requests, task_hash=task_hash)

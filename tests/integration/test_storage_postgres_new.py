@@ -8,6 +8,7 @@ from datetime import datetime
 import pytest
 
 from olmo_eval.storage.base import compute_model_hash
+from olmo_eval.storage.db.queries import QueryHelper
 
 
 class TestPostgresBackendWithInstances:
@@ -40,7 +41,10 @@ class TestPostgresBackendWithInstances:
             ],
         }
 
-        experiment_id = postgres_backend.save_with_instances(sample_eval_result, instances_by_task)
+        with postgres_backend.db.session() as session:
+            helper = QueryHelper(session)
+            experiment_id = helper.save_with_instances(sample_eval_result, instances_by_task)
+
         assert experiment_id == sample_eval_result.experiment_id
 
         # Verify experiment was saved
@@ -66,7 +70,9 @@ class TestPostgresBackendWithInstances:
             ]
         }
 
-        postgres_backend.save_with_instances(sample_eval_result, instances_by_task)
+        with postgres_backend.db.session() as session:
+            helper = QueryHelper(session)
+            helper.save_with_instances(sample_eval_result, instances_by_task)
 
         # Query instances
         with postgres_backend.db.session() as session:
@@ -120,9 +126,11 @@ class TestQueryHelpers:
             {"native_id": "doc_1", "doc_id": 1, "instance_metrics": {"acc": 0.5}},
         ]
 
-        postgres_backend.save_with_instances(exp, {"test": instances})
-
         model_hash = compute_model_hash(exp.config)
+
+        with postgres_backend.db.session() as session:
+            helper = QueryHelper(session)
+            helper.save_with_instances(exp, {"test": instances})
 
         with postgres_backend.db.session() as session:
             helper = QueryHelper(session)
@@ -164,11 +172,13 @@ class TestQueryHelpers:
             {"native_id": "task3_doc_0", "doc_id": 0, "instance_metrics": {"acc": 0.6}},
         ]
 
-        postgres_backend.save_with_instances(
-            exp, {"task1": instances_task1, "task2": instances_task2, "task3": instances_task3}
-        )
-
         model_hash = compute_model_hash(exp.config)
+
+        with postgres_backend.db.session() as session:
+            helper = QueryHelper(session)
+            helper.save_with_instances(
+                exp, {"task1": instances_task1, "task2": instances_task2, "task3": instances_task3}
+            )
 
         # Test querying multiple tasks
         with postgres_backend.db.session() as session:
@@ -216,7 +226,9 @@ class TestQueryHelpers:
             {"native_id": "doc_2", "doc_id": 2, "instance_metrics": {"acc": 0.75}},
         ]
 
-        postgres_backend.save_with_instances(exp, {"mmlu": instances})
+        with postgres_backend.db.session() as session:
+            helper = QueryHelper(session)
+            helper.save_with_instances(exp, {"mmlu": instances})
 
         # Query by model_name instead of model_hash (more user-friendly!)
         with postgres_backend.db.session() as session:
@@ -286,8 +298,10 @@ class TestUserIsolation:
         ]
 
         # Both users save their results
-        postgres_backend.save_with_instances(eval_user1, {"mmlu": instances_user1})
-        postgres_backend.save_with_instances(eval_user2, {"mmlu": instances_user2})
+        with postgres_backend.db.session() as session:
+            helper = QueryHelper(session)
+            helper.save_with_instances(eval_user1, {"mmlu": instances_user1})
+            helper.save_with_instances(eval_user2, {"mmlu": instances_user2})
 
         # Same config = same model_hash (this is correct!)
         model_hash = compute_model_hash(config)
@@ -355,7 +369,9 @@ class TestBackwardCompatibility:
             "mmlu": [{"native_id": "doc_0", "doc_id": 0, "instance_metrics": {"acc": 1.0}}]
         }
 
-        postgres_backend.save_with_instances(sample_eval_result, instances)
+        with postgres_backend.db.session() as session:
+            helper = QueryHelper(session)
+            helper.save_with_instances(sample_eval_result, instances)
 
         # Delete experiment
         deleted = postgres_backend.delete(sample_eval_result.experiment_id)

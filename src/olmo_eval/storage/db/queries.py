@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
 
+from olmo_eval.core.types import EvalResult, compute_model_hash
 from olmo_eval.storage.db.repository import ExperimentRepository, InstancePredictionRepository
 
 
@@ -21,6 +23,111 @@ class QueryHelper:
         self.session = session
         self.experiment_repo = ExperimentRepository(session)
         self.instance_repo = InstancePredictionRepository(session)
+
+    def save(self, result: EvalResult) -> str:
+        """Save an evaluation result.
+
+        Args:
+            result: EvalResult dataclass containing run data.
+
+        Returns:
+            The experiment_id of the saved evaluation.
+        """
+        return self.experiment_repo.save(result)
+
+    def save_with_instances(
+        self,
+        result: EvalResult,
+        instances_by_task: dict[str, list[dict[str, Any]]],
+    ) -> str:
+        """Save an evaluation result with instance-level predictions.
+
+        Args:
+            result: EvalResult dataclass containing run data.
+            instances_by_task: Dict mapping task_name -> list of instance dicts.
+                Each instance dict should have:
+                - native_id: Original dataset ID
+                - doc_id: Sequential ID
+                - instance_metrics: Dict of metric names to values
+                - s3_prediction_key: Optional S3 key
+
+        Returns:
+            The experiment_id of the saved evaluation.
+        """
+        # Save experiment and task results
+        experiment_id = self.experiment_repo.save(result)
+
+        # Save instance predictions
+        model_hash = compute_model_hash(result.config)
+
+        for task_name, instances in instances_by_task.items():
+            self.instance_repo.save_instances(
+                experiment_id=experiment_id,
+                task_name=task_name,
+                instances=instances,
+                model_hash=model_hash,
+            )
+
+        return experiment_id
+
+    def get(self, experiment_id: str) -> EvalResult | None:
+        """Retrieve an evaluation result by experiment_id.
+
+        Args:
+            experiment_id: The unique identifier of the result.
+
+        Returns:
+            EvalResult if found, None otherwise.
+        """
+        return self.experiment_repo.get(experiment_id)
+
+    def query(
+        self,
+        model_name: str | None = None,
+        model_hash: str | None = None,
+        task_name: str | None = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        latest: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[EvalResult]:
+        """Query evaluation results by filters.
+
+        Args:
+            model_name: Filter by model name.
+            model_hash: Filter by model hash.
+            task_name: Filter by task name (results containing this task).
+            start_time: Filter by timestamp >= start_time.
+            end_time: Filter by timestamp <= end_time.
+            latest: If True, return only the most recent result.
+            limit: Maximum number of results to return.
+            offset: Number of results to skip (for pagination).
+
+        Returns:
+            List of matching evaluation results.
+        """
+        return self.experiment_repo.query(
+            model_name=model_name,
+            model_hash=model_hash,
+            task_name=task_name,
+            start_time=start_time,
+            end_time=end_time,
+            latest=latest,
+            limit=limit,
+            offset=offset,
+        )
+
+    def delete(self, experiment_id: str) -> bool:
+        """Delete an evaluation result.
+
+        Args:
+            experiment_id: The unique identifier of the result to delete.
+
+        Returns:
+            True if deleted, False if not found.
+        """
+        return self.experiment_repo.delete(experiment_id)
 
     def get_model_task_metrics(
         self,

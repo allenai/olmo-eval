@@ -14,7 +14,6 @@ def test_import_backends_module():
     try:
         mod = importlib.import_module("olmo_eval.storage.backends")
         assert hasattr(mod, "PostgresBackend")
-        assert hasattr(mod, "S3Backend")
     except ImportError as e:
         pytest.skip(f"Storage backends not available: {e}")
 
@@ -86,22 +85,12 @@ def test_import_postgres_backend():
         pytest.skip(f"Required dependencies not installed: {e}")
 
 
-def test_import_s3_backend():
-    """Test importing S3Backend."""
-    try:
-        mod = importlib.import_module("olmo_eval.storage.backends.s3")
-        assert hasattr(mod, "S3Backend")
-    except ImportError as e:
-        pytest.skip(f"Required dependencies not installed: {e}")
-
-
 def test_postgres_backend_has_methods():
     """Test that PostgresBackend has the expected methods."""
     try:
         mod = importlib.import_module("olmo_eval.storage.backends.postgres")
         backend_cls = mod.PostgresBackend
 
-        assert hasattr(backend_cls, "save_with_instances")
         assert hasattr(backend_cls, "save")
         assert hasattr(backend_cls, "get")
         assert hasattr(backend_cls, "query")

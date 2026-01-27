@@ -225,42 +225,41 @@ def postgres_backend(storage_docker_services):
 
 
 @pytest.fixture
-def s3_backend(storage_docker_services):
-    """Provide an S3Backend connected to LocalStack.
+def s3_client(storage_docker_services):
+    """Provide an S3 client connected to LocalStack.
 
     Creates bucket before yielding, cleans up after.
     """
-    pytest.importorskip("boto3")
+    boto3 = pytest.importorskip("boto3")
 
     from botocore.exceptions import ClientError
 
-    from olmo_eval.storage.backends.s3 import S3Backend
-
-    backend = S3Backend(
+    s3 = boto3.client(
+        "s3",
         endpoint_url="http://localhost:4566",
-        region="us-east-1",
+        region_name="us-east-1",
     )
 
     test_bucket = "test-eval-bucket"
-    test_prefix = "results/"
+    test_prefix = "olmo-eval/"
 
     # Create bucket for testing
     try:
-        backend._s3.head_bucket(Bucket=test_bucket)
+        s3.head_bucket(Bucket=test_bucket)
     except ClientError:
-        backend._s3.create_bucket(Bucket=test_bucket)
+        s3.create_bucket(Bucket=test_bucket)
 
     # Attach test bucket/prefix info for tests to use
-    backend.test_bucket = test_bucket
-    backend.test_prefix = test_prefix
+    s3.test_bucket = test_bucket
+    s3.test_prefix = test_prefix
 
-    yield backend
+    yield s3
 
     # Clean up all objects after testing
-    paginator = backend._s3.get_paginator("list_objects_v2")
+    paginator = s3.get_paginator("list_objects_v2")
     for page in paginator.paginate(Bucket=test_bucket, Prefix=test_prefix):
         for obj in page.get("Contents", []):
-            backend._s3.delete_object(Bucket=test_bucket, Key=obj["Key"])
+            s3.delete_object(Bucket=test_bucket, Key=obj["Key"])
 
 
 @pytest.fixture

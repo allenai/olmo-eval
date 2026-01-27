@@ -170,29 +170,3 @@ class TestPostgresBackend:
             assert exp2.task_results[0].primary_score == 0.66
 
 
-class TestS3Backend:
-    """Integration tests for S3Backend with LocalStack."""
-
-    @pytest.mark.integration
-    def test_save_and_get(self, s3_backend, sample_eval_result):
-        """Test saving and retrieving a result."""
-        bucket = s3_backend.test_bucket
-        key = f"{s3_backend.test_prefix}{sample_eval_result.experiment_id}.json"
-
-        s3_uri = s3_backend.save(bucket, key, sample_eval_result)
-        assert s3_uri == f"s3://{bucket}/{key}"
-
-        retrieved = s3_backend.get(bucket, key)
-        assert retrieved is not None
-        assert retrieved.experiment_id == sample_eval_result.experiment_id
-        assert retrieved.model_name == sample_eval_result.model_name
-        assert len(retrieved.tasks) == 2
-
-    @pytest.mark.integration
-    def test_get_nonexistent(self, s3_backend):
-        """Test getting a non-existent result returns None."""
-        bucket = s3_backend.test_bucket
-        key = f"{s3_backend.test_prefix}nonexistent-id.json"
-
-        result = s3_backend.get(bucket, key)
-        assert result is None

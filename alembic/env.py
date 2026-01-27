@@ -43,7 +43,7 @@ def get_url_from_env():
     port = os.environ.get("POSTGRES_PORT", "5432")
     database = os.environ.get("POSTGRES_DB", "olmo_eval")
     user = os.environ.get("POSTGRES_USER", "postgres")
-    password = os.environ.get("POSTGRES_PASSWORD", "")
+    password = os.environ.get("POSTGRES_PASSWORD", "postgres")
 
     return f"postgresql+psycopg://{user}:{password}@{host}:{port}/{database}"
 

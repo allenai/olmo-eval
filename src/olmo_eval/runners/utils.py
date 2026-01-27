@@ -22,6 +22,7 @@ __all__ = [
     "build_predictions",
     "build_requests",
     "compute_suite_aggregations",
+    "compute_task_hash",
     "get_primary_metric",
     "run_task_impl",
     "sanitize_spec_for_filename",
@@ -83,6 +84,21 @@ def serialize_sampling_params(params: SamplingParams | None) -> dict[str, Any] |
         "top_k": params.top_k,
         "num_samples": params.num_samples,
     }
+
+
+def compute_task_hash(config: dict) -> str:
+    """Compute a hash from task config.
+
+    Args:
+        config: Task configuration dictionary
+
+    Returns:
+        SHA256 hash of the JSON-serialized config
+    """
+    import hashlib
+
+    config_str = json.dumps(config, sort_keys=True)
+    return hashlib.sha256(config_str.encode()).hexdigest()
 
 
 def get_primary_metric(
@@ -691,6 +707,7 @@ def write_predictions_jsonl(
     spec: str,
     predictions: list[dict],
     model_name: str | None = None,
+    task_hash: str | None = None,
 ) -> None:
     """Write per-instance predictions to JSONL.
 
@@ -699,6 +716,7 @@ def write_predictions_jsonl(
         spec: Task specification string (used for filename)
         predictions: List of prediction dicts to write
         model_name: Optional model name for multi-model runs (adds subdirectory)
+        task_hash: Optional task config hash (last 6 chars added to filename)
     """
     if model_name:
         pred_dir = os.path.join(output_dir, "predictions", sanitize_spec_for_filename(model_name))
@@ -706,7 +724,11 @@ def write_predictions_jsonl(
         pred_dir = os.path.join(output_dir, "predictions")
     os.makedirs(pred_dir, exist_ok=True)
 
-    filename = sanitize_spec_for_filename(spec) + PREDICTIONS_SUFFIX
+    # Build filename with optional hash suffix
+    base_name = sanitize_spec_for_filename(spec)
+    if task_hash:
+        base_name = f"{base_name}_{task_hash[-6:]}"
+    filename = base_name + PREDICTIONS_SUFFIX
     filepath = os.path.join(pred_dir, filename)
 
     with open(filepath, "w") as f:
@@ -721,6 +743,7 @@ def write_requests_jsonl(
     spec: str,
     requests: list[dict],
     model_name: str | None = None,
+    task_hash: str | None = None,
 ) -> None:
     """Write per-instance requests to JSONL (oe-eval compatible format).
 
@@ -732,6 +755,7 @@ def write_requests_jsonl(
         spec: Task specification string (used for filename)
         requests: List of request dicts to write
         model_name: Optional model name for multi-model runs (adds subdirectory)
+        task_hash: Optional task config hash (last 6 chars added to filename)
     """
     if model_name:
         req_dir = os.path.join(output_dir, "requests", sanitize_spec_for_filename(model_name))
@@ -739,7 +763,11 @@ def write_requests_jsonl(
         req_dir = os.path.join(output_dir, "requests")
     os.makedirs(req_dir, exist_ok=True)
 
-    filename = sanitize_spec_for_filename(spec) + REQUESTS_SUFFIX
+    # Build filename with optional hash suffix
+    base_name = sanitize_spec_for_filename(spec)
+    if task_hash:
+        base_name = f"{base_name}_{task_hash[-6:]}"
+    filename = base_name + REQUESTS_SUFFIX
     filepath = os.path.join(req_dir, filename)
 
     with open(filepath, "w") as f:

@@ -1,8 +1,8 @@
 """Scoring protocols and implementations."""
 
 import math
-from dataclasses import dataclass
-from typing import Protocol
+from dataclasses import asdict, dataclass
+from typing import Any, Protocol
 
 from .types import Instance, LMOutput
 
@@ -39,6 +39,10 @@ class ExactMatchScorer:
             gold, pred = gold.lower(), pred.lower()
         return 1.0 if gold == pred else 0.0
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a dictionary."""
+        return {"type": "ExactMatchScorer", **asdict(self)}
+
 
 @dataclass(frozen=True, slots=True)
 class MultipleChoiceScorer:
@@ -53,6 +57,10 @@ class MultipleChoiceScorer:
         gold = str(instance.gold_answer).strip().upper()
         pred = str(output.extracted_answer).strip().upper()
         return 1.0 if gold == pred else 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a dictionary."""
+        return {"type": "MultipleChoiceScorer", **asdict(self)}
 
 
 def _normalize_text(text: str) -> str:
@@ -101,6 +109,10 @@ class F1Scorer:
             return 0.0
         return _compute_f1(str(output.extracted_answer), str(instance.gold_answer))
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a dictionary."""
+        return {"type": "F1Scorer", **asdict(self)}
+
 
 @dataclass(frozen=True, slots=True)
 class BitsPerByteScorer:
@@ -137,6 +149,10 @@ class BitsPerByteScorer:
 
         return bits_per_byte
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a dictionary."""
+        return {"type": "BitsPerByteScorer", **asdict(self)}
+
 
 @dataclass(frozen=True, slots=True)
 class PerplexityScorer:
@@ -162,6 +178,10 @@ class PerplexityScorer:
 
         return perplexity
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a dictionary."""
+        return {"type": "PerplexityScorer", **asdict(self)}
+
 
 @dataclass(frozen=True, slots=True)
 class LogprobScorer:
@@ -183,3 +203,7 @@ class LogprobScorer:
             return float("-inf")
 
         return sum(logprobs)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a dictionary."""
+        return {"type": "LogprobScorer", **asdict(self)}

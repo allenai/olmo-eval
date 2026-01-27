@@ -7,6 +7,7 @@ import logging
 import os
 import uuid
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
@@ -18,6 +19,61 @@ if TYPE_CHECKING:
 
 console = Console()
 logger = logging.getLogger(__name__)
+
+
+# -----------------------------------------------------------------------------
+# Configuration dataclasses
+# -----------------------------------------------------------------------------
+
+
+@dataclass
+class S3Config:
+    """Configuration for S3 uploads.
+
+    The S3 path structure is:
+    s3://{bucket}/{prefix}/{group}/{model_name}_{model_hash_last_6}/{experiment_id}/
+        - metrics.json
+        - predictions/{task}-predictions.jsonl
+        - requests/{task}-requests.jsonl
+    """
+
+    bucket: str
+    prefix: str  # Base prefix, e.g., "olmo-eval"
+    group: str  # Experiment group, e.g., "baseline", "ablation-lr"
+    endpoint_url: str | None = None
+    region: str = "us-east-1"
+
+
+def sanitize_model_name(model_name: str) -> str:
+    """Sanitize model name for use in S3 paths.
+
+    For paths like /weka/.../model_dir/step61007-hf/, extracts last 2 components
+    and joins with underscore: model_dir_step61007-hf
+
+    For HuggingFace-style names like meta-llama/Llama-3.1-8B, replaces / with _.
+
+    Args:
+        model_name: Model name or path.
+
+    Returns:
+        Sanitized model name safe for S3 paths.
+    """
+    # Strip trailing slashes
+    model_name = model_name.rstrip("/")
+
+    # Check if it looks like an absolute path (starts with / or contains /weka, /data, etc.)
+    if model_name.startswith("/") or "/weka/" in model_name or "/data/" in model_name:
+        # It's a filesystem path - take last 2 components
+        parts = [p for p in model_name.split("/") if p]
+        if len(parts) >= 2:
+            return f"{parts[-2]}_{parts[-1]}"
+        elif len(parts) == 1:
+            return parts[0]
+        else:
+            return "unknown"
+
+    # For HuggingFace-style names (org/model), just replace / with _
+    return model_name.replace("/", "_")
 
 
 # -----------------------------------------------------------------------------
@@ -116,6 +172,9 @@ class RunnerResultsMixin:
     storages: list[StorageBackend]
     task_specs: list[str]
 
+    # Optional S3 upload configuration
+    s3_config: S3Config | None
+
     def _validate_task_specs(self) -> list[str]:
         """Validate task specs and return list of errors.
 
@@ -178,6 +237,87 @@ class RunnerResultsMixin:
                 console.print(f"[green]{msg}[/green]")
         else:
             logger.info("No storage backend configured; skipping results save.")
+
+    def _upload_to_s3(
+        self,
+        model_name: str,
+        model_hash: str,
+        experiment_id: str,
+    ) -> str | None:
+        """Upload evaluation output to S3.
+
+        Uploads metrics.json, predictions/, and requests/ directories to S3.
+        Requires s3_config to be set.
+
+        Path structure:
+        s3://{bucket}/{prefix}/{group}/{model_name}_{hash_last_6}/{experiment_id}/
+
+        Args:
+            model_name: Model name or path.
+            model_hash: Model configuration hash.
+            experiment_id: Unique experiment identifier.
+
+        Returns:
+            S3 base URI if uploaded, None if S3 not configured.
+        """
+        s3_config = getattr(self, "s3_config", None)
+        if not s3_config:
+            logger.debug("S3 upload not configured; skipping.")
+            return None
+
+        try:
+            import boto3
+        except ImportError:
+            logger.warning("boto3 not installed; skipping S3 upload.")
+            return None
+
+        # Build S3 prefix:
+        # {prefix}/{group}/{sanitized_model_name}_{hash_last_6}/{experiment_id}
+        sanitized_model = sanitize_model_name(model_name)
+        hash_suffix = model_hash[-6:] if model_hash else "000000"
+        prefix = "/".join([
+            s3_config.prefix.rstrip("/"),
+            s3_config.group,
+            f"{sanitized_model}_{hash_suffix}",
+            experiment_id,
+        ])
+
+        # Create S3 client
+        client_kwargs: dict[str, Any] = {"region_name": s3_config.region}
+        if s3_config.endpoint_url:
+            client_kwargs["endpoint_url"] = s3_config.endpoint_url
+        s3 = boto3.client("s3", **client_kwargs)
+
+        output_path = Path(self.output_dir)
+        uploaded_count = 0
+
+        # Upload all files in output directory
+        for local_path in output_path.rglob("*"):
+            if local_path.is_file():
+                relative = local_path.relative_to(output_path)
+                key = f"{prefix}/{relative}"
+
+                # Auto-detect content type
+                if local_path.suffix == ".json":
+                    content_type = "application/json"
+                elif local_path.suffix == ".jsonl":
+                    content_type = "application/x-ndjson"
+                else:
+                    content_type = "application/octet-stream"
+
+                s3.upload_file(
+                    str(local_path),
+                    s3_config.bucket,
+                    key,
+                    ExtraArgs={"ContentType": content_type},
+                )
+                uploaded_count += 1
+
+        s3_location = f"s3://{s3_config.bucket}/{prefix}"
+        logger.info(f"Uploaded {uploaded_count} files to S3: {s3_location}")
+        console.print(f"[green]Uploaded {uploaded_count} files to S3: {s3_location}[/green]")
+
+        return s3_location
 
     def _log_summary(self, results: dict[str, Any], multi_model: bool = False) -> None:
         """Log summary of all task scores.

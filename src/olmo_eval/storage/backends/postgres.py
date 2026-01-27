@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any
 
 from olmo_eval.core.types import EvalResult
-from olmo_eval.storage.base import StorageBackend, compute_model_hash
-from olmo_eval.storage.db.repository import ExperimentRepository, InstancePredictionRepository
+from olmo_eval.storage.base import StorageBackend
+from olmo_eval.storage.db.queries import QueryHelper
 from olmo_eval.storage.db.session import DatabaseSession
 
 logger = logging.getLogger(__name__)
@@ -16,6 +15,9 @@ logger = logging.getLogger(__name__)
 
 class PostgresBackend(StorageBackend):
     """PostgreSQL-based storage backend for evaluation results.
+
+    This is a thin wrapper that provides session management and implements
+    the StorageBackend interface. All actual query logic lives in QueryHelper.
 
     The database stores queryable metadata while S3 stores the full
     evaluation data (completions, predictions, detailed metrics).
@@ -66,53 +68,12 @@ class PostgresBackend(StorageBackend):
             result: EvalResult dataclass containing run data.
 
         Returns:
-            The experiment_id (experiment_id) of the saved evaluation.
+            The experiment_id of the saved evaluation.
         """
         with self.db.session() as session:
-            repo = ExperimentRepository(session)
-            experiment_id = repo.save(result)
+            helper = QueryHelper(session)
+            experiment_id = helper.save(result)
             logger.debug(f"Saved experiment {experiment_id}")
-            return experiment_id
-
-    def save_with_instances(
-        self,
-        result: EvalResult,
-        instances_by_task: dict[str, list[dict[str, Any]]],
-    ) -> str:
-        """Save an evaluation result with instance-level predictions.
-
-        Args:
-            result: EvalResult dataclass containing run data.
-            instances_by_task: Dict mapping task_name -> list of instance dicts.
-                Each instance dict should have:
-                - native_id: Original dataset ID
-                - doc_id: Sequential ID
-                - instance_metrics: Dict of metric names to values
-                - s3_prediction_key: Optional S3 key
-
-        Returns:
-            The experiment_id (experiment_id) of the saved evaluation.
-        """
-        with self.db.session() as session:
-            # Save experiment and task results
-            exp_repo = ExperimentRepository(session)
-            experiment_id = exp_repo.save(result)
-
-            # Save instance predictions
-            inst_repo = InstancePredictionRepository(session)
-
-            model_hash = compute_model_hash(result.config)
-
-            for task_name, instances in instances_by_task.items():
-                inst_repo.save_instances(
-                    experiment_id=experiment_id,
-                    task_name=task_name,
-                    instances=instances,
-                    model_hash=model_hash,
-                )
-
-            num_instances = sum(len(v) for v in instances_by_task.values())
-            logger.debug(f"Saved experiment {experiment_id} with {num_instances} instances")
             return experiment_id
 
     def get(self, experiment_id: str) -> EvalResult | None:
@@ -125,8 +86,8 @@ class PostgresBackend(StorageBackend):
             EvalResult if found, None otherwise.
         """
         with self.db.session() as session:
-            repo = ExperimentRepository(session)
-            return repo.get(experiment_id)
+            helper = QueryHelper(session)
+            return helper.get(experiment_id)
 
     def query(
         self,
@@ -149,8 +110,8 @@ class PostgresBackend(StorageBackend):
             List of matching evaluation results.
         """
         with self.db.session() as session:
-            repo = ExperimentRepository(session)
-            return repo.query(
+            helper = QueryHelper(session)
+            return helper.query(
                 model_name=model_name,
                 task_name=task_name,
                 start_time=start_time,
@@ -168,8 +129,8 @@ class PostgresBackend(StorageBackend):
             True if deleted, False if not found.
         """
         with self.db.session() as session:
-            repo = ExperimentRepository(session)
-            return repo.delete(experiment_id)
+            helper = QueryHelper(session)
+            return helper.delete(experiment_id)
 
     def dispose(self) -> None:
         """Dispose of the database engine and close all connections."""
