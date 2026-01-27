@@ -29,18 +29,23 @@ def get_url_from_env():
     3. alembic.ini sqlalchemy.url
 
     Returns:
-        Database URL string or None if using alembic.ini default.
+        Tuple of (database URL string or None, source description).
     """
+    import logging
     import os
+
+    log = logging.getLogger("alembic.env")
 
     # Check for full URL in environment
     db_url = os.environ.get("OLMO_EVAL_DB_URL")
     if db_url:
+        log.info("Database URL source: OLMO_EVAL_DB_URL environment variable")
         return db_url
 
     # Check if any PG* vars are set
     host = os.environ.get("PGHOST")
     if not host:
+        log.info("Database URL source: alembic.ini sqlalchemy.url")
         return None  # Use alembic.ini default
 
     # Build URL from standard PostgreSQL env vars
@@ -49,6 +54,7 @@ def get_url_from_env():
     user = os.environ.get("PGUSER", "postgres")
     password = os.environ.get("PGPASSWORD", "postgres")
 
+    log.info("Database URL source: PG* environment variables (PGHOST, PGPORT, etc.)")
     return f"postgresql+psycopg://{user}:{password}@{host}:{port}/{database}"
 
 

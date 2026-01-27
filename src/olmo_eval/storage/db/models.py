@@ -36,7 +36,7 @@ class Experiment(Base):
 
     # Experiment metadata
     experiment_name: Mapped[str | None] = mapped_column(String(255))
-    workspace: Mapped[str | None] = mapped_column(String(100), index=True)
+    workspace: Mapped[str | None] = mapped_column(String(255))
     author: Mapped[str | None] = mapped_column(String(100), index=True)
     tags: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
 
