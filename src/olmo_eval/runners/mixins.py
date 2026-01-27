@@ -255,20 +255,69 @@ class RunnerResultsMixin:
         return errors
 
     def _save_results(self, results: dict[str, Any]) -> None:
-        """Save results to all configured storage backends."""
-        if self.storages:
-            from olmo_eval.storage.base import convert_runner_results
+        """Save results to all configured storage backends.
 
-            experiment_id = generate_experiment_id()
-            eval_result = convert_runner_results(results, experiment_id)
-            for storage in self.storages:
-                storage.save(eval_result)
-                backend_name = type(storage).__name__
-                logger.info(f"Results saved to {backend_name} (experiment_id: {experiment_id})")
-                msg = f"Results saved to {backend_name} (experiment_id: {experiment_id})"
-                console.print(f"[green]{msg}[/green]")
-        else:
+        Handles both single-model results (with 'model' key) and multi-model
+        results (with 'models' dict). For multi-model results, saves each
+        model's results separately.
+        """
+        if not self.storages:
             logger.info("No storage backend configured; skipping results save.")
+            return
+
+        from olmo_eval.storage.base import convert_runner_results
+
+        # Determine if this is multi-model or single-model results
+        if "models" in results:
+            # Multi-model async results - save each model separately
+            models_to_save = []
+            for model_name, model_data in results["models"].items():
+                # Build single-model results dict from multi-model structure
+                single_model_results = {
+                    "model": model_data.get("model", model_name),
+                    "backend": model_data.get("backend", "unknown"),
+                    "timestamp": results.get("timestamp"),
+                    "tasks": model_data.get("tasks", {}),
+                    "suites": model_data.get("suites"),
+                    "_model_config": model_data.get("_model_config"),
+                }
+                models_to_save.append((model_name, single_model_results))
+            logger.info(f"Saving results for {len(models_to_save)} model(s) to storage")
+        else:
+            # Single-model results
+            models_to_save = [(results.get("model", "unknown"), results)]
+            logger.info(f"Saving results for model '{results.get('model')}' to storage")
+
+        for model_name, model_results in models_to_save:
+            experiment_id = generate_experiment_id()
+            task_count = len(model_results.get("tasks", {}))
+            logger.info(
+                f"Converting results: model={model_name}, tasks={task_count}, "
+                f"experiment_id={experiment_id}"
+            )
+
+            try:
+                eval_result = convert_runner_results(model_results, experiment_id)
+            except Exception as e:
+                logger.error(f"Failed to convert results for {model_name}: {e}")
+                console.print(f"[red]Failed to convert results for {model_name}: {e}[/red]")
+                continue
+
+            for storage in self.storages:
+                backend_name = type(storage).__name__
+                try:
+                    storage.save(eval_result)
+                    logger.info(
+                        f"Saved to {backend_name}: model={model_name}, "
+                        f"experiment_id={experiment_id}, tasks={task_count}"
+                    )
+                    console.print(
+                        f"[green]Saved to {backend_name}:[/green] {model_name} "
+                        f"({task_count} tasks, id={experiment_id})"
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to save to {backend_name}: {e}")
+                    console.print(f"[red]Failed to save to {backend_name}: {e}[/red]")
 
     def _upload_to_s3(
         self,
@@ -302,6 +351,14 @@ class RunnerResultsMixin:
         except ImportError:
             logger.warning("boto3 not installed; skipping S3 upload.")
             return None
+
+        # Log S3 configuration
+        logger.info(
+            f"Uploading to S3: bucket={s3_config.bucket}, prefix={s3_config.prefix}, "
+            f"region={s3_config.region}, group={s3_config.group}"
+        )
+        if s3_config.endpoint_url:
+            logger.info(f"  Using custom endpoint: {s3_config.endpoint_url}")
 
         # Build S3 prefix:
         # {prefix}/{group}/{sanitized_model_name}_{hash_last_6}/{experiment_id}
