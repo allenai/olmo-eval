@@ -298,6 +298,7 @@ class RunnerResultsMixin:
 
             try:
                 eval_result = convert_runner_results(model_results, experiment_id)
+                logger.info(f"Converted results for {model_name}, saving to {len(self.storages)} backend(s)")
             except Exception as e:
                 logger.error(f"Failed to convert results for {model_name}: {e}")
                 console.print(f"[red]Failed to convert results for {model_name}: {e}[/red]")
@@ -305,6 +306,7 @@ class RunnerResultsMixin:
 
             for storage in self.storages:
                 backend_name = type(storage).__name__
+                logger.info(f"Saving to {backend_name}...")
                 try:
                     storage.save(eval_result)
                     logger.info(
@@ -378,6 +380,7 @@ class RunnerResultsMixin:
 
         output_path = Path(self.output_dir)
         uploaded_count = 0
+        failed_count = 0
 
         # Upload all files in output directory
         for local_path in output_path.rglob("*"):
@@ -393,19 +396,30 @@ class RunnerResultsMixin:
                 else:
                     content_type = "application/octet-stream"
 
-                s3.upload_file(
-                    str(local_path),
-                    s3_config.bucket,
-                    key,
-                    ExtraArgs={"ContentType": content_type},
-                )
-                uploaded_count += 1
+                try:
+                    s3.upload_file(
+                        str(local_path),
+                        s3_config.bucket,
+                        key,
+                        ExtraArgs={"ContentType": content_type},
+                    )
+                    uploaded_count += 1
+                except Exception as e:
+                    failed_count += 1
+                    logger.error(f"Failed to upload {relative} to s3://{s3_config.bucket}/{key}: {e}")
+                    console.print(f"[red]Failed to upload {relative}:[/red] {e}")
 
         s3_location = f"s3://{s3_config.bucket}/{prefix}"
-        logger.info(f"Uploaded {uploaded_count} files to S3: {s3_location}")
-        console.print(f"[green]Uploaded {uploaded_count} files to S3: {s3_location}[/green]")
+        if failed_count > 0:
+            logger.warning(f"S3 upload completed with errors: {uploaded_count} succeeded, {failed_count} failed")
+            console.print(
+                f"[yellow]S3 upload:[/yellow] {uploaded_count} files uploaded, {failed_count} failed -> {s3_location}"
+            )
+        else:
+            logger.info(f"Uploaded {uploaded_count} files to S3: {s3_location}")
+            console.print(f"[green]Uploaded {uploaded_count} files to S3:[/green] {s3_location}")
 
-        return s3_location
+        return s3_location if uploaded_count > 0 else None
 
     def _log_summary(self, results: dict[str, Any], multi_model: bool = False) -> None:
         """Log summary of all task scores.
