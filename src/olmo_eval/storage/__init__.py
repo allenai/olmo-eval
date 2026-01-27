@@ -37,8 +37,8 @@ def get_backend(
             from olmo_eval.storage.backends.postgres import PostgresBackend
         except ImportError as e:
             raise ImportError(
-                "Postgres backend requires psycopg. "
-                "Install with: pip install olmo-eval-internal[postgres]"
+                "Postgres backend requires psycopg (the PostgreSQL driver for SQLAlchemy). "
+                "Install with: uv pip install 'olmo-eval-internal[postgres]'"
             ) from e
         return PostgresBackend(**kwargs)
     else:

@@ -30,9 +30,9 @@ Example with per-model resources:
     cluster: h100
 
 Example usage:
-    config = LaunchConfig.from_yaml("eval_config.yaml")
+    config = EvalConfig.from_yaml("eval_config.yaml")
     # Or with CLI overrides:
-    config = LaunchConfig.from_yaml("eval_config.yaml", overrides=["gpus=4", "priority=high"])
+    config = EvalConfig.from_yaml("eval_config.yaml", overrides=["gpus=4", "priority=high"])
 """
 
 from __future__ import annotations
@@ -257,7 +257,7 @@ def get_tasks_short_name(tasks: list[str], max_total_len: int = 24) -> str:
 
 
 @dataclass
-class LaunchConfig:
+class EvalConfig:
     """Configuration for launching Beaker evaluation jobs.
 
     This dataclass can be loaded from YAML files using OmegaConf,
@@ -399,7 +399,7 @@ class LaunchConfig:
         cls,
         path: str | Path,
         overrides: list[str] | None = None,
-    ) -> LaunchConfig:
+    ) -> EvalConfig:
         """Load configuration from a YAML file.
 
         Args:
@@ -407,7 +407,7 @@ class LaunchConfig:
             overrides: Optional list of dotlist overrides (e.g., ["gpus=4", "priority=high"]).
 
         Returns:
-            LaunchConfig instance with merged configuration.
+            EvalConfig instance with merged configuration.
 
         Raises:
             FileNotFoundError: If the config file doesn't exist.
@@ -415,10 +415,10 @@ class LaunchConfig:
 
         Example:
             # Load basic config
-            config = LaunchConfig.from_yaml("eval_config.yaml")
+            config = EvalConfig.from_yaml("eval_config.yaml")
 
             # Load with overrides
-            config = LaunchConfig.from_yaml(
+            config = EvalConfig.from_yaml(
                 "eval_config.yaml",
                 overrides=["gpus=4", "cluster=a100"]
             )
@@ -445,14 +445,14 @@ class LaunchConfig:
         return OmegaConf.to_object(merged)  # type: ignore[return-value]
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> LaunchConfig:
+    def from_dict(cls, data: dict[str, Any]) -> EvalConfig:
         """Create configuration from a dictionary.
 
         Args:
             data: Dictionary with configuration values.
 
         Returns:
-            LaunchConfig instance.
+            EvalConfig instance.
         """
         schema = OmegaConf.structured(cls)
         merged = OmegaConf.merge(schema, OmegaConf.create(data))

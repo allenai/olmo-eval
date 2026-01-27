@@ -8,7 +8,7 @@ from rich.pretty import Pretty
 from rich.table import Table
 
 from olmo_eval.cli.utils import (
-    LaunchSummary,
+    EvalSummary,
     ModelSummary,
     RunnerConfig,
     TaskSummary,
@@ -209,7 +209,7 @@ def launch(
             BeakerEnvSecret,
             BeakerJobConfig,
             BeakerLauncher,
-            LaunchConfig,
+            EvalConfig,
             ModelConfig,
             calculate_experiment_splits,
             get_model_short_name,
@@ -232,12 +232,12 @@ def launch(
     cli_timeout = timeout
 
     # Load config from file if provided
-    cfg: LaunchConfig | None = None
+    cfg: EvalConfig | None = None
     model_configs: list[ModelConfig] = []
 
     if config:
         try:
-            cfg = LaunchConfig.from_yaml(config)
+            cfg = EvalConfig.from_yaml(config)
         except FileNotFoundError as e:
             console.print(f"[red]Error:[/red] {e}")
             raise SystemExit(1) from None
@@ -656,8 +656,8 @@ def launch(
             attention_backend=effective_attention_backend,
         )
 
-    # Build the complete launch summary dataclass
-    launch_config_summary = LaunchSummary(
+    # Build the eval summary for display
+    eval_summary = EvalSummary(
         models=model_summaries,
         tasks=task_summaries,
         runner=runner_config,
@@ -667,7 +667,7 @@ def launch(
     console.print()
     console.print(
         Panel(
-            Pretty(launch_config_summary, expand_all=True),
+            Pretty(eval_summary, expand_all=True),
             title="[bold]Launch Configuration[/bold]",
             border_style="blue",
         )
@@ -853,12 +853,17 @@ def launch(
             runtime_model_config = get_runtime_model_config(model_name)
             runtime_backend = runtime_model_config.backend
 
-        # CLI backends override auto-detected backend optional group
+        # CLI model backends override auto-detected backend
         if backends:
-            effective_backends = list(backends)
+            model_backends = list(backends)
         else:
             backend_group = BACKEND_OPTIONAL_GROUPS.get(runtime_backend)
-            effective_backends = [backend_group] if backend_group else []
+            model_backends = [backend_group] if backend_group else []
+
+        # Combine model backends and storage dependencies for installation
+        install_extras = list(model_backends)
+        if store:
+            install_extras.append("postgres")
 
         # Convert secrets to BeakerEnvSecret objects
         env_secrets = [
@@ -880,7 +885,7 @@ def launch(
             retries=retries,
             workspace=workspace,
             budget=budget,
-            backends=effective_backends,
+            backends=install_extras,
             groups=effective_groups,
             beaker_image=effective_image,
             inject_aws_credentials=inject_aws_credentials,

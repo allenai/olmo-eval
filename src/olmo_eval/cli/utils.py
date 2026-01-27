@@ -71,7 +71,7 @@ class RunnerConfig:
 
 
 @dataclass
-class LaunchSummary:
+class EvalSummary:
     """Complete launch configuration summary for pretty-printing."""
 
     models: list[ModelSummary]

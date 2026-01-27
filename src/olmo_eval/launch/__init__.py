@@ -30,7 +30,7 @@ from olmo_eval.launch.beaker import (
     validate_priority_configuration,
 )
 from olmo_eval.launch.config import (
-    LaunchConfig,
+    EvalConfig,
     ModelConfig,
     get_model_short_name,
     get_tasks_short_name,
@@ -45,7 +45,7 @@ __all__ = [
     "BeakerJobConfig",
     "BeakerLauncher",
     "BeakerWekaBucket",
-    "LaunchConfig",
+    "EvalConfig",
     "ModelConfig",
     "calculate_experiment_splits",
     "get_model_short_name",
