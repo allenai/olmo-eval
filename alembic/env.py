@@ -25,11 +25,11 @@ def get_url_from_env():
 
     Priority:
     1. OLMO_EVAL_DB_URL environment variable
-    2. Individual components (POSTGRES_HOST, POSTGRES_USER, etc.)
+    2. Standard PostgreSQL env vars (PGHOST, PGUSER, etc.)
     3. alembic.ini sqlalchemy.url
 
     Returns:
-        Database URL string.
+        Database URL string or None if using alembic.ini default.
     """
     import os
 
@@ -38,12 +38,16 @@ def get_url_from_env():
     if db_url:
         return db_url
 
-    # Build URL from components
-    host = os.environ.get("POSTGRES_HOST", "localhost")
-    port = os.environ.get("POSTGRES_PORT", "5432")
-    database = os.environ.get("POSTGRES_DB", "olmo_eval")
-    user = os.environ.get("POSTGRES_USER", "postgres")
-    password = os.environ.get("POSTGRES_PASSWORD", "postgres")
+    # Check if any PG* vars are set
+    host = os.environ.get("PGHOST")
+    if not host:
+        return None  # Use alembic.ini default
+
+    # Build URL from standard PostgreSQL env vars
+    port = os.environ.get("PGPORT", "5432")
+    database = os.environ.get("PGDATABASE", "olmo_eval")
+    user = os.environ.get("PGUSER", "postgres")
+    password = os.environ.get("PGPASSWORD", "postgres")
 
     return f"postgresql+psycopg://{user}:{password}@{host}:{port}/{database}"
 

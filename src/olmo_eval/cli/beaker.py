@@ -112,6 +112,28 @@ def beaker() -> None:
     default=None,
     help="Inject GCS credentials for gs:// model access. Auto-detected from gs:// model paths.",
 )
+@click.option(
+    "--s3-bucket",
+    help="S3 bucket for storing evaluation results (required for S3 uploads)",
+)
+@click.option(
+    "--s3-prefix",
+    help="S3 prefix/path within bucket for results (required for S3 uploads)",
+)
+@click.option(
+    "--s3-endpoint-url",
+    help="S3 endpoint URL (for S3-compatible storage like LocalStack)",
+)
+@click.option(
+    "--s3-region",
+    default="us-east-1",
+    help="S3 region (default: us-east-1)",
+)
+@click.option(
+    "--postgres/--no-postgres",
+    default=False,
+    help="Enable PostgreSQL storage backend",
+)
 def launch(
     config: str | None,
     name: str | None,
@@ -138,6 +160,11 @@ def launch(
     follow: bool,
     aws_credentials: bool | None,
     gcs_credentials: bool | None,
+    s3_bucket: str | None,
+    s3_prefix: str | None,
+    s3_endpoint_url: str | None,
+    s3_region: str,
+    postgres: bool,
 ) -> None:
     """Launch an evaluation job on Beaker.
 
@@ -276,6 +303,14 @@ def launch(
         raise SystemExit(1)
     if not budget:
         console.print("[red]Error:[/red] --budget/-B is required (or set 'budget' in config)")
+        raise SystemExit(1)
+
+    # Validate S3 options - both bucket and prefix required if either is set
+    if s3_bucket and not s3_prefix:
+        console.print("[red]Error:[/red] --s3-prefix is required when --s3-bucket is set")
+        raise SystemExit(1)
+    if s3_prefix and not s3_bucket:
+        console.print("[red]Error:[/red] --s3-bucket is required when --s3-prefix is set")
         raise SystemExit(1)
 
     # Keep suites unexpanded - let the runner expand them so it knows suite names for aggregation
@@ -692,6 +727,13 @@ def launch(
     else:
         common_secrets = ensure_common_secrets(workspace=workspace)
 
+    # Build postgres secrets list if --postgres is enabled
+    # User must have manually created these secrets in Beaker (shared, not per-user)
+    postgres_secrets: list[tuple[str, str]] = []
+    if postgres:
+        for env_var in ["PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD"]:
+            postgres_secrets.append((env_var, f"olmo_eval_{env_var}"))
+
     # Build all BeakerJobConfig objects first
     job_configs: list[BeakerJobConfig] = []
 
@@ -784,6 +826,22 @@ def launch(
             if effective_gpus_per_worker and effective_gpus_per_worker != 1:
                 command.extend(["--gpus-per-worker", str(effective_gpus_per_worker)])
 
+        # Add S3 options if configured (group is inferred from beaker group)
+        if s3_bucket and s3_prefix:
+            command.extend(["--s3-bucket", s3_bucket])
+            command.extend(["--s3-prefix", s3_prefix])
+            # Use the first beaker group as the S3 group
+            if effective_groups:
+                command.extend(["--s3-group", effective_groups[0]])
+            if s3_endpoint_url:
+                command.extend(["--s3-endpoint-url", s3_endpoint_url])
+            if s3_region != "us-east-1":
+                command.extend(["--s3-region", s3_region])
+
+        # Add postgres storage backend if enabled (credentials come from env secrets)
+        if postgres:
+            command.extend(["-s", "postgres"])
+
         # Determine the backend this model will use at runtime
         from olmo_eval.core.configs import get_model_config as get_runtime_model_config
         from olmo_eval.core.constants.infrastructure import BACKEND_OPTIONAL_GROUPS
@@ -802,10 +860,13 @@ def launch(
             backend_group = BACKEND_OPTIONAL_GROUPS.get(runtime_backend)
             effective_backends = [backend_group] if backend_group else []
 
-        # Convert common secrets to BeakerEnvSecret objects
+        # Convert secrets to BeakerEnvSecret objects
         env_secrets = [
             BeakerEnvSecret(env_var, secret_name) for env_var, secret_name in common_secrets
         ]
+        env_secrets.extend(
+            BeakerEnvSecret(env_var, secret_name) for env_var, secret_name in postgres_secrets
+        )
 
         job_config = BeakerJobConfig(
             name=exp_name,

@@ -35,6 +35,10 @@ class Metric(Protocol):
         """Compute aggregate metric from scored responses."""
         ...
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a dictionary."""
+        ...
+
 
 @dataclass(frozen=True, slots=True)
 class AccuracyMetric:

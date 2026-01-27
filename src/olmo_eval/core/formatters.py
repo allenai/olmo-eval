@@ -17,6 +17,10 @@ class Formatter(Protocol):
         """Format an instance with optional few-shot examples."""
         ...
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a dictionary."""
+        ...
+
 
 @dataclass(slots=True)
 class ChatFormatter:

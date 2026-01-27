@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from dataclasses import dataclass, field
@@ -21,6 +20,7 @@ from olmo_eval.runners.utils import (
     TaskResult,
     compute_suite_aggregations,
     compute_task_hash,
+    generate_experiment_id,
     run_task_impl,
     write_predictions_jsonl,
     write_requests_jsonl,
@@ -204,12 +204,13 @@ class SyncEvalRunner(RunnerResultsMixin):
             from olmo_eval.core.types import compute_model_hash
 
             model_hash = compute_model_hash(results.get("_model_config", {}))
-            experiment_id = str(uuid.uuid4())
-            self._upload_to_s3(
-                model_name=results["model"],
-                model_hash=model_hash,
-                experiment_id=experiment_id,
-            )
+            if model_hash:
+                experiment_id = generate_experiment_id()
+                self._upload_to_s3(
+                    model_name=results["model"],
+                    model_hash=model_hash,
+                    experiment_id=experiment_id,
+                )
 
         return results
 
@@ -249,10 +250,14 @@ class SyncEvalRunner(RunnerResultsMixin):
 
         return result
 
-    def _write_predictions(self, spec: str, predictions: list[dict], task_hash: str | None = None) -> None:
+    def _write_predictions(
+        self, spec: str, predictions: list[dict], task_hash: str | None = None
+    ) -> None:
         """Write per-instance predictions to JSONL."""
         write_predictions_jsonl(self.output_dir, spec, predictions, task_hash=task_hash)
 
-    def _write_requests(self, spec: str, requests: list[dict], task_hash: str | None = None) -> None:
+    def _write_requests(
+        self, spec: str, requests: list[dict], task_hash: str | None = None
+    ) -> None:
         """Write per-instance requests to JSONL (oe-eval compatible format)."""
         write_requests_jsonl(self.output_dir, spec, requests, task_hash=task_hash)

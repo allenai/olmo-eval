@@ -5,14 +5,13 @@ from __future__ import annotations
 import json
 import logging
 import os
-import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
 
-from olmo_eval.runners.utils import TaskResult, get_primary_metric
+from olmo_eval.runners.utils import TaskResult, generate_experiment_id, get_primary_metric
 
 if TYPE_CHECKING:
     from olmo_eval.storage import StorageBackend
@@ -99,12 +98,14 @@ def build_s3_prefix(
     """
     sanitized_model = sanitize_model_name(model_name)
     hash_suffix = model_hash[-6:] if model_hash else "000000"
-    return "/".join([
-        base_prefix.rstrip("/"),
-        group,
-        f"{sanitized_model}_{hash_suffix}",
-        experiment_id,
-    ])
+    return "/".join(
+        [
+            base_prefix.rstrip("/"),
+            group,
+            f"{sanitized_model}_{hash_suffix}",
+            experiment_id,
+        ]
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -258,7 +259,7 @@ class RunnerResultsMixin:
         if self.storages:
             from olmo_eval.storage.base import convert_runner_results
 
-            experiment_id = str(uuid.uuid4())
+            experiment_id = generate_experiment_id()
             eval_result = convert_runner_results(results, experiment_id)
             for storage in self.storages:
                 storage.save(eval_result)

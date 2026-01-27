@@ -168,5 +168,3 @@ class TestPostgresBackend:
             # And different results
             assert exp1.task_results[0].primary_score == 0.65
             assert exp2.task_results[0].primary_score == 0.66
-
-

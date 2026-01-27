@@ -7,6 +7,7 @@ import functools
 import json
 import sys
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import click
@@ -14,6 +15,28 @@ from rich.panel import Panel
 from rich.table import Table
 
 from olmo_eval.cli.utils import console
+
+
+def s3_options(func: Any) -> Any:
+    """Decorator that adds common S3 connection options to a command."""
+
+    @click.option(
+        "--s3-endpoint-url",
+        envvar="S3_ENDPOINT_URL",
+        default=None,
+        help="S3 endpoint URL (for LocalStack or S3-compatible services).",
+    )
+    @click.option(
+        "--s3-region",
+        envvar="AWS_REGION",
+        default="us-east-1",
+        help="AWS region.",
+    )
+    @functools.wraps(func)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        return func(*args, **kwargs)
+
+    return wrapper
 
 
 def db_options(func: Any) -> Any:
@@ -45,9 +68,10 @@ def db_options(func: Any) -> Any:
         help="Database user.",
     )
     @click.option(
-        "--db-password-env",
-        default="OLMO_EVAL_DB_PASSWORD",
-        help="Environment variable containing database password.",
+        "--db-password",
+        envvar="OLMO_EVAL_DB_PASSWORD",
+        default="postgres",
+        help="Database password.",
     )
     @functools.wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -61,7 +85,7 @@ def get_database_session(
     db_port: int,
     db_name: str,
     db_user: str,
-    db_password_env: str,
+    db_password: str,
 ) -> Any:
     """Create and initialize a DatabaseSession.
 
@@ -85,7 +109,7 @@ def get_database_session(
         port=db_port,
         database=db_name,
         user=db_user,
-        password_env=db_password_env,
+        password=db_password,
     )
     db.initialize()
     return db
@@ -182,7 +206,9 @@ def print_instances_table(instances: list[dict[str, Any]]) -> None:
         # Format metrics as key: value pairs
         metrics = inst.get("instance_metrics", {})
         if metrics:
-            metrics_str = ", ".join(f"{k}: {v:.3f}" if isinstance(v, float) else f"{k}: {v}" for k, v in metrics.items())
+            metrics_str = ", ".join(
+                f"{k}: {v:.3f}" if isinstance(v, float) else f"{k}: {v}" for k, v in metrics.items()
+            )
         else:
             metrics_str = "-"
 
@@ -200,31 +226,33 @@ def experiments_to_json(experiments: list[Any]) -> str:
     """Convert experiments to JSON string."""
     data = []
     for exp in experiments:
-        data.append({
-            "experiment_id": exp.experiment_id,
-            "model_name": exp.model_name,
-            "model_hash": exp.model_hash,
-            "backend_name": exp.backend_name,
-            "timestamp": exp.timestamp.isoformat() if exp.timestamp else None,
-            "experiment_name": exp.experiment_name,
-            "workspace": exp.workspace,
-            "author": exp.author,
-            "tags": exp.tags,
-            "git_ref": exp.git_ref,
-            "revision": exp.revision,
-            "s3_location": exp.s3_location,
-            "tasks": [
-                {
-                    "task_name": t.task_name,
-                    "task_hash": t.task_hash,
-                    "primary_metric": t.primary_metric,
-                    "primary_score": t.primary_score,
-                    "num_instances": t.num_instances,
-                    "metrics": t.metrics,
-                }
-                for t in exp.tasks
-            ],
-        })
+        data.append(
+            {
+                "experiment_id": exp.experiment_id,
+                "model_name": exp.model_name,
+                "model_hash": exp.model_hash,
+                "backend_name": exp.backend_name,
+                "timestamp": exp.timestamp.isoformat() if exp.timestamp else None,
+                "experiment_name": exp.experiment_name,
+                "workspace": exp.workspace,
+                "author": exp.author,
+                "tags": exp.tags,
+                "git_ref": exp.git_ref,
+                "revision": exp.revision,
+                "s3_location": exp.s3_location,
+                "tasks": [
+                    {
+                        "task_name": t.task_name,
+                        "task_hash": t.task_hash,
+                        "primary_metric": t.primary_metric,
+                        "primary_score": t.primary_score,
+                        "num_instances": t.num_instances,
+                        "metrics": t.metrics,
+                    }
+                    for t in exp.tasks
+                ],
+            }
+        )
     return json.dumps(data, indent=2)
 
 
@@ -233,13 +261,15 @@ def experiments_to_csv(experiments: list[Any]) -> None:
     writer = csv.writer(sys.stdout)
     writer.writerow(["experiment_id", "model_name", "backend_name", "timestamp", "task_count"])
     for exp in experiments:
-        writer.writerow([
-            exp.experiment_id,
-            exp.model_name,
-            exp.backend_name or "",
-            exp.timestamp.isoformat() if exp.timestamp else "",
-            len(exp.tasks),
-        ])
+        writer.writerow(
+            [
+                exp.experiment_id,
+                exp.model_name,
+                exp.backend_name or "",
+                exp.timestamp.isoformat() if exp.timestamp else "",
+                len(exp.tasks),
+            ]
+        )
 
 
 def instances_to_json(instances: list[dict[str, Any]]) -> str:
@@ -253,20 +283,121 @@ def instances_to_csv(instances: list[dict[str, Any]]) -> None:
     writer.writerow(["doc_id", "native_id", "task_name", "experiment_id", "model_hash", "metrics"])
     for inst in instances:
         metrics_str = json.dumps(inst.get("instance_metrics", {}))
-        writer.writerow([
-            inst.get("doc_id", ""),
-            inst.get("native_id", ""),
-            inst.get("task_name", ""),
-            inst.get("experiment_id", ""),
-            inst.get("model_hash", ""),
-            metrics_str,
-        ])
+        writer.writerow(
+            [
+                inst.get("doc_id", ""),
+                inst.get("native_id", ""),
+                inst.get("task_name", ""),
+                inst.get("experiment_id", ""),
+                inst.get("model_hash", ""),
+                metrics_str,
+            ]
+        )
 
 
 @click.group()
 def results() -> None:
     """Query and display evaluation results."""
     pass
+
+
+def _download_s3_files(
+    experiment: Any,
+    task_filter: tuple[str, ...],
+    download_metrics: bool,
+    download_predictions: bool,
+    download_requests: bool,
+    output_dir: str,
+    s3_endpoint_url: str | None,
+    s3_region: str,
+) -> None:
+    """Download files from S3 for an experiment.
+
+    Args:
+        experiment: The experiment ORM object.
+        task_filter: Task names to filter (empty means all).
+        download_metrics: Whether to download metrics.json.
+        download_predictions: Whether to download predictions files.
+        download_requests: Whether to download requests files.
+        output_dir: Directory to save files.
+        s3_endpoint_url: S3 endpoint URL (for LocalStack).
+        s3_region: AWS region.
+    """
+    import boto3
+
+    if not experiment.s3_location:
+        console.print("[yellow]Warning:[/yellow] Experiment has no S3 location set")
+        return
+
+    # Parse S3 location: s3://bucket/prefix/...
+    s3_location = experiment.s3_location
+    if not s3_location.startswith("s3://"):
+        console.print(f"[red]Error:[/red] Invalid S3 location: {s3_location}")
+        return
+
+    s3_path = s3_location[5:]  # Remove 's3://'
+    bucket, *prefix_parts = s3_path.split("/")
+    base_prefix = "/".join(prefix_parts)
+
+    # Create output directory
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    # Create S3 client
+    s3_client = boto3.client(
+        "s3",
+        endpoint_url=s3_endpoint_url,
+        region_name=s3_region,
+    )
+
+    downloaded_files: list[str] = []
+
+    # Path structure: {base_prefix}/{task}_{hash}/predictions.jsonl, requests.jsonl
+    # metrics.json is at {base_prefix}/metrics.json
+    #
+    # Files are downloaded preserving the S3 directory structure under output_dir
+
+    def download_file(s3_key: str) -> str | None:
+        """Download a file preserving directory structure."""
+        local_file = output_path / s3_key
+        local_file.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            s3_client.download_file(bucket, s3_key, str(local_file))
+            console.print(f"[green]Downloaded:[/green] {local_file}")
+            return str(local_file)
+        except Exception as e:
+            console.print(f"[yellow]Warning:[/yellow] Failed to download {s3_key}: {e}")
+            return None
+
+    # Download metrics.json (at experiment root)
+    if download_metrics:
+        metrics_key = f"{base_prefix}/metrics.json"
+        if result := download_file(metrics_key):
+            downloaded_files.append(result)
+
+    # Download predictions and requests files for each task
+    if download_predictions or download_requests:
+        tasks_to_download = experiment.tasks
+        if task_filter:
+            tasks_to_download = [t for t in tasks_to_download if t.task_name in task_filter]
+
+        for task in tasks_to_download:
+            task_name = task.task_name
+            task_hash_suffix = task.task_hash[-6:] if task.task_hash else ""
+            task_dir = f"{task_name}_{task_hash_suffix}"
+
+            if download_predictions:
+                pred_key = f"{base_prefix}/{task_dir}/predictions.jsonl"
+                if result := download_file(pred_key):
+                    downloaded_files.append(result)
+
+            if download_requests:
+                req_key = f"{base_prefix}/{task_dir}/requests.jsonl"
+                if result := download_file(req_key):
+                    downloaded_files.append(result)
+
+    if not downloaded_files:
+        console.print("[yellow]No files were downloaded.[/yellow]")
 
 
 @results.command()
@@ -309,18 +440,23 @@ def get(
     db_port: int,
     db_name: str,
     db_user: str,
-    db_password_env: str,
+    db_password: str,
 ) -> None:
     """Get results for a specific experiment.
 
     EXPERIMENT_ID is the unique identifier of the experiment.
 
-    Example: olmo-eval results get abc123def456
+    Examples:
+        olmo-eval results get exp_llama31_8b_001
+        olmo-eval results get exp_llama31_8b_001 --task mmlu --task gsm8k
     """
-    db = get_database_session(db_host, db_port, db_name, db_user, db_password_env)
+    db = get_database_session(db_host, db_port, db_name, db_user, db_password)
 
     try:
-        from olmo_eval.storage.db.repository import ExperimentRepository, InstancePredictionRepository
+        from olmo_eval.storage.db.repository import (
+            ExperimentRepository,
+            InstancePredictionRepository,
+        )
 
         with db.session() as session:
             repo = ExperimentRepository(session)
@@ -387,6 +523,31 @@ def get(
     help="Task name(s) to display (can specify multiple).",
 )
 @click.option(
+    "--metrics",
+    is_flag=True,
+    default=False,
+    help="Download metrics.json from S3 for matched experiments.",
+)
+@click.option(
+    "--predictions",
+    is_flag=True,
+    default=False,
+    help="Download predictions files from S3 for matched experiments.",
+)
+@click.option(
+    "--requests",
+    is_flag=True,
+    default=False,
+    help="Download requests files from S3 for matched experiments.",
+)
+@click.option(
+    "--output-dir",
+    "-o",
+    default=".",
+    type=click.Path(),
+    help="Directory to save downloaded files (default: current directory).",
+)
+@click.option(
     "--format",
     "-f",
     "output_format",
@@ -394,32 +555,41 @@ def get(
     default="table",
     help="Output format.",
 )
+@s3_options
 @db_options
 def query(
     model_names: tuple[str, ...],
     model_hashes: tuple[str, ...],
     task_names: tuple[str, ...],
+    metrics: bool,
+    predictions: bool,
+    requests: bool,
+    output_dir: str,
     output_format: str,
     db_host: str,
     db_port: int,
     db_name: str,
     db_user: str,
-    db_password_env: str,
+    db_password: str,
+    s3_endpoint_url: str | None,
+    s3_region: str,
 ) -> None:
     """Query evaluation results across models and tasks.
 
     Displays a table with models/hashes as rows and task scores as columns.
     Uses the most recent experiment for each model.
 
+    Use --metrics, --predictions, or --requests to download S3 data for matched experiments.
+
     Examples:
         olmo-eval results query -m llama3.1-8b -m qwen2.5-72b -t mmlu -t gsm8k
         olmo-eval results query -h abc123 -h def456 -t mmlu -t gsm8k
-        olmo-eval results query -m olmo-2-13b -t suite:core -t suite:overall
+        olmo-eval results query -m olmo-2-13b -t mmlu --metrics --predictions -o ./downloads
     """
     if not model_names and not model_hashes:
         raise click.UsageError("At least one --model or --model-hash is required")
 
-    db = get_database_session(db_host, db_port, db_name, db_user, db_password_env)
+    db = get_database_session(db_host, db_port, db_name, db_user, db_password)
 
     try:
         from olmo_eval.storage.db.repository import ExperimentRepository
@@ -427,8 +597,8 @@ def query(
         with db.session() as session:
             repo = ExperimentRepository(session)
 
-            # Each row: (display_label, scores_dict, model_name, model_hash)
-            rows: list[tuple[str, dict[str, float | None], str, str | None]] = []
+            # Each row: (display_label, scores_dict, model_name, model_hash, experiment)
+            rows: list[tuple[str, dict[str, float | None], str, str | None, Any]] = []
             # Collect task hashes for column headers
             task_hashes: dict[str, str | None] = {task: None for task in task_names}
 
@@ -441,8 +611,12 @@ def query(
             for model_name in model_names:
                 experiments = repo.query(model_name=model_name, limit=1000)
                 if not experiments:
-                    console.print(f"[yellow]Warning:[/yellow] No experiments found for model '{model_name}'")
-                    rows.append((model_name, {task: None for task in task_names}, model_name, None))
+                    console.print(
+                        f"[yellow]Warning:[/yellow] No experiments found for model '{model_name}'"
+                    )
+                    rows.append(
+                        (model_name, {task: None for task in task_names}, model_name, None, None)
+                    )
                 else:
                     latest_by_hash: dict[str | None, Any] = {}
                     for exp in experiments:
@@ -453,20 +627,24 @@ def query(
                     for exp in latest_by_hash.values():
                         task_scores = {t.task_name: t.primary_score for t in exp.tasks}
                         scores = {task: task_scores.get(task) for task in task_names}
-                        rows.append((model_name, scores, exp.model_name, exp.model_hash))
+                        rows.append((model_name, scores, exp.model_name, exp.model_hash, exp))
 
             # Query by model hashes
             for model_hash in model_hashes:
                 experiments = repo.query(model_hash=model_hash, latest=True)
                 if not experiments:
-                    console.print(f"[yellow]Warning:[/yellow] No experiments found for hash '{model_hash}'")
-                    rows.append((model_hash, {task: None for task in task_names}, "", model_hash))
+                    console.print(
+                        f"[yellow]Warning:[/yellow] No experiments found for hash '{model_hash}'"
+                    )
+                    rows.append(
+                        (model_hash, {task: None for task in task_names}, "", model_hash, None)
+                    )
                 else:
                     exp = experiments[0]
                     collect_task_hashes(exp)
                     task_scores = {t.task_name: t.primary_score for t in exp.tasks}
                     scores = {task: task_scores.get(task) for task in task_names}
-                    rows.append((model_hash, scores, exp.model_name, exp.model_hash))
+                    rows.append((model_hash, scores, exp.model_name, exp.model_hash, exp))
 
             if not rows:
                 console.print("[dim]No results found.[/dim]")
@@ -476,9 +654,11 @@ def query(
             if output_format == "json":
                 # JSON: use model_name + hash suffix as key to handle multiple configs
                 data = {}
-                for _, scores, model_name, model_hash in rows:
+                for _, scores, model_name, model_hash, _ in rows:
                     hash_suffix = model_hash[-6:] if model_hash else ""
-                    key = f"{model_name} {hash_suffix}" if hash_suffix else (model_name or "unknown")
+                    key = (
+                        f"{model_name} {hash_suffix}" if hash_suffix else (model_name or "unknown")
+                    )
                     data[key] = {"model_hash": model_hash, "scores": scores}
                 print(json.dumps(data, indent=2))
                 return
@@ -486,7 +666,7 @@ def query(
             if output_format == "csv":
                 writer = csv.writer(sys.stdout)
                 writer.writerow(["model", "model_hash"] + list(task_names))
-                for _, scores, model_name, model_hash in rows:
+                for _, scores, model_name, model_hash, _ in rows:
                     row = [model_name, model_hash or ""]
                     for task in task_names:
                         score = scores.get(task)
@@ -509,7 +689,7 @@ def query(
                     col_name = task
                 table.add_column(col_name, justify="right", style="green")
 
-            for _, scores, model_name, model_hash in rows:
+            for _, scores, model_name, model_hash, _ in rows:
                 if model_name and model_hash:
                     padded_name = model_name.ljust(max_name_len)
                     display = f"{padded_name} [dim]{model_hash[-6:]}[/dim]"
@@ -527,6 +707,25 @@ def query(
                 table.add_row(*row)
 
             console.print(table)
+
+            # Handle S3 downloads if any download flags are set
+            if metrics or predictions or requests:
+                console.print()  # Add spacing
+                experiments_to_download = [exp for _, _, _, _, exp in rows if exp is not None]
+                for experiment in experiments_to_download:
+                    console.print(
+                        f"[bold]Downloading files for {experiment.experiment_id}...[/bold]"
+                    )
+                    _download_s3_files(
+                        experiment=experiment,
+                        task_filter=task_names,
+                        download_metrics=metrics,
+                        download_predictions=predictions,
+                        download_requests=requests,
+                        output_dir=output_dir,
+                        s3_endpoint_url=s3_endpoint_url,
+                        s3_region=s3_region,
+                    )
     finally:
         db.dispose()
 
@@ -589,7 +788,7 @@ def instances(
     db_port: int,
     db_name: str,
     db_user: str,
-    db_password_env: str,
+    db_password: str,
 ) -> None:
     """Get instance-level predictions.
 
@@ -601,11 +800,9 @@ def instances(
     """
     # Validate that at least one identifier is provided
     if not any([experiment_id, model_name, model_hash]):
-        raise click.UsageError(
-            "At least one of --experiment, --model, or --model-hash is required"
-        )
+        raise click.UsageError("At least one of --experiment, --model, or --model-hash is required")
 
-    db = get_database_session(db_host, db_port, db_name, db_user, db_password_env)
+    db = get_database_session(db_host, db_port, db_name, db_user, db_password)
 
     try:
         from olmo_eval.storage.db.queries import QueryHelper

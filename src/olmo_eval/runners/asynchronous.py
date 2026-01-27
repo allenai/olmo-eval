@@ -34,6 +34,7 @@ from olmo_eval.runners.utils import (
     build_predictions,
     compute_suite_aggregations,
     compute_task_hash,
+    generate_experiment_id,
     write_predictions_jsonl,
     write_requests_jsonl,
 )
@@ -1103,18 +1104,17 @@ class AsyncEvalRunner(AsyncRunnerMixin):
 
         # Upload to S3 if configured (upload per model)
         if self.s3_config:
-            import uuid
-
             from olmo_eval.core.types import compute_model_hash
 
             for model_name, model_data in results_dict.get("models", {}).items():
                 model_hash = compute_model_hash(model_data.get("_model_config", {}))
-                experiment_id = str(uuid.uuid4())
-                self._upload_to_s3(
-                    model_name=model_name,
-                    model_hash=model_hash,
-                    experiment_id=experiment_id,
-                )
+                if model_hash:
+                    experiment_id = generate_experiment_id()
+                    self._upload_to_s3(
+                        model_name=model_name,
+                        model_hash=model_hash,
+                        experiment_id=experiment_id,
+                    )
 
         return results_dict
 
@@ -1524,18 +1524,17 @@ class StreamingEvalRunner(AsyncRunnerMixin):
 
         # Upload to S3 if configured (upload per model)
         if self.s3_config:
-            import uuid
-
             from olmo_eval.core.types import compute_model_hash
 
             for model_name, model_data in results_dict.get("models", {}).items():
                 model_hash = compute_model_hash(model_data.get("_model_config", {}))
-                experiment_id = str(uuid.uuid4())
-                self._upload_to_s3(
-                    model_name=model_name,
-                    model_hash=model_hash,
-                    experiment_id=experiment_id,
-                )
+                if model_hash:
+                    experiment_id = generate_experiment_id()
+                    self._upload_to_s3(
+                        model_name=model_name,
+                        model_hash=model_hash,
+                        experiment_id=experiment_id,
+                    )
 
         return results_dict
 

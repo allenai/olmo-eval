@@ -6,6 +6,7 @@ import json
 import logging
 import math
 import os
+import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
@@ -23,6 +24,7 @@ __all__ = [
     "build_requests",
     "compute_suite_aggregations",
     "compute_task_hash",
+    "generate_experiment_id",
     "get_primary_metric",
     "run_task_impl",
     "sanitize_spec_for_filename",
@@ -36,6 +38,23 @@ logger = logging.getLogger(__name__)
 # Filename suffixes for output files (consistent across all runners and storage backends)
 PREDICTIONS_SUFFIX = "-predictions.jsonl"
 REQUESTS_SUFFIX = "-requests.jsonl"
+
+
+def generate_experiment_id() -> str:
+    """Generate a unique experiment ID.
+
+    Returns a short 12-character hex string from UUID4. Since experiments
+    are partitioned by model/task, collision risk is minimal.
+
+    Returns:
+        A 12-character hex string to uniquely identify an experiment.
+
+    Example:
+        >>> exp_id = generate_experiment_id()
+        >>> len(exp_id)
+        12
+    """
+    return uuid.uuid4().hex[:12]
 
 
 def sanitize_spec_for_filename(spec: str) -> str:

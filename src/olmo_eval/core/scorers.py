@@ -19,6 +19,10 @@ class Scorer(Protocol):
         """Score a single output against the gold answer."""
         ...
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a dictionary."""
+        ...
+
 
 @dataclass(frozen=True, slots=True)
 class ExactMatchScorer:

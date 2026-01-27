@@ -80,6 +80,58 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
     default=1,
     help="Number of model instances to run in parallel (passed from launch command)",
 )
+@click.option(
+    "--s3-bucket",
+    help="S3 bucket for storing evaluation results",
+)
+@click.option(
+    "--s3-prefix",
+    help="S3 prefix/path within bucket for results",
+)
+@click.option(
+    "--s3-group",
+    help="S3 group name (used in path structure)",
+)
+@click.option(
+    "--s3-endpoint-url",
+    help="S3 endpoint URL (for S3-compatible storage)",
+)
+@click.option(
+    "--s3-region",
+    default="us-east-1",
+    help="S3 region (default: us-east-1)",
+)
+@click.option(
+    "--db-host",
+    envvar="PGHOST",
+    default="localhost",
+    help="PostgreSQL host (env: PGHOST, default: localhost)",
+)
+@click.option(
+    "--db-port",
+    type=int,
+    envvar="PGPORT",
+    default=5432,
+    help="PostgreSQL port (env: PGPORT, default: 5432)",
+)
+@click.option(
+    "--db-name",
+    envvar="PGDATABASE",
+    default="olmo_eval",
+    help="PostgreSQL database name (env: PGDATABASE, default: olmo_eval)",
+)
+@click.option(
+    "--db-user",
+    envvar="PGUSER",
+    default="postgres",
+    help="PostgreSQL user (env: PGUSER, default: postgres)",
+)
+@click.option(
+    "--db-password",
+    envvar="PGPASSWORD",
+    default="postgres",
+    help="PostgreSQL password (env: PGPASSWORD, default: postgres)",
+)
 def run(
     models: tuple[str, ...],
     task: tuple[str, ...],
@@ -98,6 +150,16 @@ def run(
     gpus_per_worker: int,
     attention_backend: str | None,
     parallelism: int,
+    s3_bucket: str | None,
+    s3_prefix: str | None,
+    s3_group: str | None,
+    s3_endpoint_url: str | None,
+    s3_region: str,
+    db_host: str,
+    db_port: int,
+    db_name: str,
+    db_user: str,
+    db_password: str,
 ) -> None:
     """Run evaluation on specified tasks.
 
@@ -203,6 +265,16 @@ def run(
                 backend_cfg = storage_cfg.get(backend_name, {})
                 storage_kwargs = OmegaConf.to_container(backend_cfg, resolve=True) or {}  # type: ignore
 
+            # For postgres, use CLI options if no config file provided
+            if backend_name == "postgres" and not storage_cfg:
+                storage_kwargs = {
+                    "host": db_host,
+                    "port": db_port,
+                    "database": db_name,
+                    "user": db_user,
+                    "password": db_password,
+                }
+
             try:
                 storage = get_backend(backend_name, **storage_kwargs)
                 storages.append(storage)
@@ -215,6 +287,33 @@ def run(
                     f"[red]Failed to initialize {backend_name} storage backend:[/red] {e}"
                 )
                 raise SystemExit(1) from None
+
+    # Set up S3 config if specified
+    s3_config = None
+    if s3_bucket or s3_prefix or s3_group:
+        # Validate that all required S3 options are provided
+        if not s3_bucket:
+            console.print("[red]Error:[/red] --s3-bucket is required for S3 uploads")
+            raise SystemExit(1)
+        if not s3_prefix:
+            console.print("[red]Error:[/red] --s3-prefix is required for S3 uploads")
+            raise SystemExit(1)
+        if not s3_group:
+            console.print("[red]Error:[/red] --s3-group is required for S3 uploads")
+            raise SystemExit(1)
+
+        from olmo_eval.runners.mixins import S3Config
+
+        s3_config = S3Config(
+            bucket=s3_bucket,
+            prefix=s3_prefix,
+            group=s3_group,
+            endpoint_url=s3_endpoint_url,
+            region=s3_region,
+        )
+        console.print(
+            f"[green]S3 uploads enabled:[/green] s3://{s3_bucket}/{s3_prefix}/{s3_group}/..."
+        )
 
     # Check for incompatible task types with --async-stream
     if use_async_stream:
@@ -257,6 +356,7 @@ def run(
             attention_backend=attention_backend.upper() if attention_backend else None,
             task_overrides=task_overrides,
             model_overrides=per_model_overrides,
+            s3_config=s3_config,
         )
     elif use_async:
         from olmo_eval.runners.asynchronous import AsyncEvalRunner
@@ -278,6 +378,7 @@ def run(
             attention_backend=attention_backend.upper() if attention_backend else None,
             task_overrides=task_overrides,
             model_overrides=per_model_overrides,
+            s3_config=s3_config,
         )
     else:
         # Sequential runner - run each model in sequence
@@ -309,6 +410,7 @@ def run(
                 else None,
                 task_overrides=task_overrides,
                 model_overrides=model_overrides,
+                s3_config=s3_config,
             )
 
             try:
