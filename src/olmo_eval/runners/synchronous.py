@@ -149,7 +149,7 @@ class SyncEvalRunner(RunnerResultsMixin):
             "timestamp": datetime.now().isoformat(),
             "tasks": {},
             # Store model config details for metrics.json
-            "_model_config": {
+            "model_config": {
                 "model": model_config.model,
                 "tokenizer": model_config.tokenizer,
                 "backend": backend_type.value,
@@ -207,7 +207,7 @@ class SyncEvalRunner(RunnerResultsMixin):
         from olmo_eval.core.types import compute_model_hash
 
         experiment_id = generate_experiment_id()
-        model_hash = compute_model_hash(results.get("_model_config", {}))
+        model_hash = compute_model_hash(results.get("model_config", {}))
         s3_location: str | None = None
 
         # Upload to S3 first if configured (so we have s3_location for storage)

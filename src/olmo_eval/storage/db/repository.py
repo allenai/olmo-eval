@@ -49,7 +49,7 @@ class ExperimentRepository:
             git_ref=eval_result.git_ref,
             revision=eval_result.revision,
             s3_location=eval_result.s3_location,
-            config=eval_result.config,
+            model_config=eval_result.model_config,
             metadata_=eval_result.metadata,
         )
         self.session.add(experiment)
@@ -180,8 +180,8 @@ class ExperimentRepository:
             StoredTaskResult(
                 task_name=task.task_name,
                 metrics=task.metrics,
-                num_instances=task.num_instances,
                 task_hash=task.task_hash,
+                num_instances=task.num_instances,
                 primary_metric=task.primary_metric,
                 primary_score=task.primary_score,
                 s3_metrics_key=task.s3_metrics_key,
@@ -204,7 +204,7 @@ class ExperimentRepository:
             model_hash=experiment.model_hash,
             revision=experiment.revision,
             s3_location=experiment.s3_location,
-            config=experiment.config,
+            model_config=experiment.model_config,
             metadata=experiment.metadata_,
         )
 
@@ -225,7 +225,8 @@ class InstancePredictionRepository:
         experiment_id: str,
         task_name: str,
         instances: list[dict[str, Any]],
-        model_hash: str | None = None,
+        model_hash: str,
+        task_hash: str,
     ) -> None:
         """Save instance predictions for an experiment's task.
 
@@ -237,12 +238,14 @@ class InstancePredictionRepository:
                 - doc_id: Sequential ID
                 - instance_metrics: Dict of metric names to values
                 - s3_prediction_key: Optional S3 key for full prediction
-            model_hash: Optional model hash (denormalized).
+            model_hash: Model configuration hash.
+            task_hash: Task configuration hash.
         """
         for inst_data in instances:
             instance = InstancePrediction(
                 experiment_id=experiment_id,
                 model_hash=model_hash,
+                task_hash=task_hash,
                 task_name=task_name,
                 native_id=inst_data["native_id"],
                 doc_id=inst_data["doc_id"],
@@ -311,6 +314,7 @@ class InstancePredictionRepository:
             "id": instance.id,
             "experiment_id": instance.experiment_id,
             "model_hash": instance.model_hash,
+            "task_hash": instance.task_hash,
             "task_name": instance.task_name,
             "native_id": instance.native_id,
             "doc_id": instance.doc_id,

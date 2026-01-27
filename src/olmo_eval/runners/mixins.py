@@ -299,7 +299,7 @@ class RunnerResultsMixin:
                     "timestamp": results.get("timestamp"),
                     "tasks": model_data.get("tasks", {}),
                     "suites": model_data.get("suites"),
-                    "_model_config": model_data.get("_model_config"),
+                    "model_config": model_data.get("model_config"),
                 }
                 # For multi-model, get per-model values from model_data if available
                 m_experiment_id = model_data.get("_experiment_id") or generate_experiment_id()
@@ -328,7 +328,7 @@ class RunnerResultsMixin:
                 f"experiment_id={exp_id}"
             )
 
-            model_cfg = model_results.get("_model_config", {})
+            model_cfg = model_results.get("model_config", {})
             revision = model_cfg.get("revision") or "unknown"
             if not m_hash:
                 from olmo_eval.core.types import compute_model_hash
@@ -545,7 +545,7 @@ class RunnerResultsMixin:
     def _build_single_model_metrics(self, results: dict[str, Any]) -> MetricsOutput:
         """Build metrics output for single-model format."""
         # Build config from stored model config
-        model_cfg = results.get("_model_config", {})
+        model_cfg = results.get("model_config", {})
         config = ModelConfig(
             model=model_cfg.get("model", results.get("model", "")),
             backend=model_cfg.get("backend", results.get("backend", "")),
@@ -600,7 +600,7 @@ class RunnerResultsMixin:
         # Build config for each model
         models_config: dict[str, ModelConfig] = {}
         for model_name, model_data in results.get("models", {}).items():
-            model_cfg = model_data.get("_model_config", {})
+            model_cfg = model_data.get("model_config", {})
             models_config[model_name] = ModelConfig(
                 model=model_cfg.get("model", model_data.get("model", "")),
                 backend=model_cfg.get("backend", model_data.get("backend", "")),

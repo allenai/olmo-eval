@@ -15,27 +15,28 @@ class TestStoredTaskResult:
         result = StoredTaskResult(
             task_name="mmlu",
             metrics={"accuracy": 0.75},
+            task_hash="mmlu-hash-001",
         )
         assert result.task_name == "mmlu"
         assert result.metrics == {"accuracy": 0.75}
+        assert result.task_hash == "mmlu-hash-001"
         assert result.num_instances is None
-        assert result.task_hash is None
 
     def test_create_full(self):
         """Test creating with all fields."""
         result = StoredTaskResult(
             task_name="mmlu",
             metrics={"accuracy": 0.75, "f1": 0.72},
-            num_instances=1000,
             task_hash="abc123",
+            num_instances=1000,
             primary_metric="accuracy",
             primary_score=0.75,
             s3_metrics_key="s3://bucket/metrics.json",
             s3_predictions_key="s3://bucket/predictions.jsonl",
         )
         assert result.task_name == "mmlu"
-        assert result.num_instances == 1000
         assert result.task_hash == "abc123"
+        assert result.num_instances == 1000
         assert result.primary_metric == "accuracy"
         assert result.primary_score == 0.75
         assert result.s3_metrics_key == "s3://bucket/metrics.json"
@@ -43,9 +44,9 @@ class TestStoredTaskResult:
 
     def test_equality(self):
         """Test dataclass equality."""
-        r1 = StoredTaskResult(task_name="mmlu", metrics={"accuracy": 0.75})
-        r2 = StoredTaskResult(task_name="mmlu", metrics={"accuracy": 0.75})
-        r3 = StoredTaskResult(task_name="gsm8k", metrics={"accuracy": 0.75})
+        r1 = StoredTaskResult(task_name="mmlu", metrics={"accuracy": 0.75}, task_hash="hash1")
+        r2 = StoredTaskResult(task_name="mmlu", metrics={"accuracy": 0.75}, task_hash="hash1")
+        r3 = StoredTaskResult(task_name="gsm8k", metrics={"accuracy": 0.75}, task_hash="hash2")
         assert r1 == r2
         assert r1 != r3
 
@@ -57,8 +58,8 @@ class TestEvalResult:
     def sample_tasks(self):
         """Create sample task results."""
         return [
-            StoredTaskResult(task_name="mmlu", metrics={"accuracy": 0.65}),
-            StoredTaskResult(task_name="gsm8k", metrics={"exact_match": 0.58}),
+            StoredTaskResult(task_name="mmlu", metrics={"accuracy": 0.65}, task_hash="mmlu-hash"),
+            StoredTaskResult(task_name="gsm8k", metrics={"exact_match": 0.58}, task_hash="gsm8k-hash"),
         ]
 
     @pytest.fixture
@@ -80,7 +81,7 @@ class TestEvalResult:
         assert result.backend_name == "vllm"
         assert result.timestamp == sample_timestamp
         assert len(result.tasks) == 2
-        assert result.config is None
+        assert result.model_config is None
         assert result.metadata is None
 
     def test_create_full(self, sample_tasks, sample_timestamp):
@@ -99,10 +100,10 @@ class TestEvalResult:
             model_hash="model-hash-123",
             revision="main",
             s3_location="s3://bucket/results/run-1/",
-            config={"batch_size": 32},
+            model_config={"batch_size": 32},
             metadata={"git_sha": "abc123"},
         )
-        assert result.config == {"batch_size": 32}
+        assert result.model_config == {"batch_size": 32}
         assert result.metadata == {"git_sha": "abc123"}
         assert result.experiment_name == "benchmark-run-1"
         assert result.model_hash == "model-hash-123"
@@ -116,7 +117,7 @@ class TestEvalResult:
             backend_name="vllm",
             timestamp=sample_timestamp,
             tasks=sample_tasks,
-            config=config,
+            model_config=config,
         )
         assert result.model_hash is not None
         assert result.model_hash == compute_model_hash(config)
@@ -130,7 +131,7 @@ class TestEvalResult:
             timestamp=sample_timestamp,
             tasks=sample_tasks,
             model_hash="explicit-hash",
-            config={"model": "llama"},
+            model_config={"model": "llama"},
         )
         assert result.model_hash == "explicit-hash"
 

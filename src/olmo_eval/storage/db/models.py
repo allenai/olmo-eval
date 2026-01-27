@@ -48,7 +48,7 @@ class Experiment(Base):
     s3_location: Mapped[str | None] = mapped_column(String(512))
 
     # Flexible storage (JSONB for efficient querying)
-    config: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    model_config: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSONB)
 
     # Audit timestamp
@@ -95,7 +95,7 @@ class TaskResult(Base):
 
     # Task metadata
     task_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    task_hash: Mapped[str | None] = mapped_column(String(64))
+    task_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
 
     # Aggregated metrics (task-level)
     metrics: Mapped[dict[str, float]] = mapped_column(JSONB, nullable=False)
@@ -133,7 +133,8 @@ class InstancePrediction(Base):
         index=True,
     )
 
-    model_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+    model_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    task_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
 
     # Task identification
     task_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)

@@ -62,15 +62,23 @@ def generate_experiment_id() -> str:
 def get_author() -> str:
     """Get the current user for experiment attribution.
 
-    Checks environment variables in order: USER, USERNAME, LOGNAME.
-    Falls back to getpass.getuser() if no env var is set.
+    Checks environment variables in order:
+    1. BEAKER_AUTHOR - set by olmo-eval beaker launch for Beaker jobs
+    2. USER, USERNAME, LOGNAME - standard Unix user env vars
+    3. Falls back to getpass.getuser() if no env var is set.
 
     Returns:
         Username string.
     """
     import getpass
 
-    return os.environ.get("USER") or os.environ.get("USERNAME") or os.environ.get("LOGNAME") or getpass.getuser()
+    return (
+        os.environ.get("BEAKER_AUTHOR")
+        or os.environ.get("USER")
+        or os.environ.get("USERNAME")
+        or os.environ.get("LOGNAME")
+        or getpass.getuser()
+    )
 
 
 def get_git_ref() -> str:

@@ -131,12 +131,17 @@ def convert_runner_results(
         primary_metric = task_data.get("primary_metric")
         primary_score = metrics.get(primary_metric) if primary_metric else None
 
+        # task_hash is required
+        task_hash = task_data.get("task_hash")
+        if not task_hash:
+            raise ValueError(f"task_hash is required for task '{spec}'")
+
         tasks.append(
             StoredTaskResult(
                 task_name=spec,
                 metrics=metrics,
+                task_hash=task_hash,
                 num_instances=task_data.get("num_instances"),
-                task_hash=task_data.get("task_hash"),
                 primary_metric=primary_metric,
                 primary_score=primary_score,
                 s3_metrics_key=s3_metrics_key,
@@ -158,6 +163,6 @@ def convert_runner_results(
         model_hash=model_hash,
         revision=revision,
         s3_location=s3_location,
-        config=results.get("config"),
+        model_config=results.get("model_config"),
         metadata=results.get("metadata"),
     )

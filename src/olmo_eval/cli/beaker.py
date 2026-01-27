@@ -887,6 +887,13 @@ def launch(
             BeakerEnvSecret(env_var, secret_name) for env_var, secret_name in store_secrets
         )
 
+        # Build env vars: include defaults plus Beaker author for attribution
+        job_env_vars = {
+            "HF_HOME": "/weka/oe-eval-default/oyvindt/hf-cache",
+            "HF_HUB_CACHE": "/weka/oe-eval-default/oyvindt/hf-cache",
+            "BEAKER_AUTHOR": beaker_username,
+        }
+
         job_config = BeakerJobConfig(
             name=exp_name,
             command=command,
@@ -904,6 +911,7 @@ def launch(
             beaker_image=effective_image,
             inject_aws_credentials=inject_aws_credentials,
             inject_gcs_credentials=inject_gcs_credentials,
+            env_vars=job_env_vars,
             env_secrets=env_secrets,
         )
         job_configs.append(job_config)

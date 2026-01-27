@@ -157,8 +157,8 @@ class StoredTaskResult:
 
     task_name: str
     metrics: dict[str, float]
+    task_hash: str
     num_instances: int | None = None
-    task_hash: str | None = None
     primary_metric: str | None = None
     primary_score: float | None = None
     # Storage references for detailed data
@@ -197,10 +197,10 @@ class EvalResult:
     # Storage reference - base path where all task results are stored
     s3_location: str | None = None
     # Flexible config and metadata
-    config: dict[str, Any] | None = None
+    model_config: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
-        """Compute model_hash from config if not provided."""
-        if self.model_hash is None and self.config is not None:
-            self.model_hash = compute_model_hash(self.config)
+        """Compute model_hash from model_config if not provided."""
+        if self.model_hash is None and self.model_config is not None:
+            self.model_hash = compute_model_hash(self.model_config)

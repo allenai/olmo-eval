@@ -1082,7 +1082,7 @@ class AsyncEvalRunner(AsyncRunnerMixin):
                         model_results["tasks"][spec] = task_data
 
             # Store model config details for metrics.json
-            model_results["_model_config"] = {
+            model_results["model_config"] = {
                 "model": model_config.model,
                 "tokenizer": model_config.tokenizer,
                 "backend": backend_type.value,
@@ -1109,7 +1109,7 @@ class AsyncEvalRunner(AsyncRunnerMixin):
 
         for model_name, model_data in results_dict.get("models", {}).items():
             experiment_id = generate_experiment_id()
-            model_hash = compute_model_hash(model_data.get("_model_config", {}))
+            model_hash = compute_model_hash(model_data.get("model_config", {}))
             s3_location: str | None = None
 
             if self.s3_config and model_hash:
@@ -1518,7 +1518,7 @@ class StreamingEvalRunner(AsyncRunnerMixin):
                         model_results["tasks"][spec] = task_data
 
             # Store model config details for metrics.json
-            model_results["_model_config"] = {
+            model_results["model_config"] = {
                 "model": model_config.model,
                 "tokenizer": model_config.tokenizer,
                 "backend": "vllm",
@@ -1542,7 +1542,7 @@ class StreamingEvalRunner(AsyncRunnerMixin):
 
         for model_name, model_data in results_dict.get("models", {}).items():
             experiment_id = generate_experiment_id()
-            model_hash = compute_model_hash(model_data.get("_model_config", {}))
+            model_hash = compute_model_hash(model_data.get("model_config", {}))
             s3_location: str | None = None
 
             if self.s3_config and model_hash:

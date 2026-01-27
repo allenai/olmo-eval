@@ -57,15 +57,27 @@ class QueryHelper:
         # Save experiment and task results
         experiment_id = self.experiment_repo.save(result)
 
-        # Save instance predictions
-        model_hash = compute_model_hash(result.config)
+        # Compute model_hash - required for instance predictions
+        model_hash = compute_model_hash(result.model_config)
+        if not model_hash:
+            raise ValueError("model_config is required to compute model_hash for instance predictions")
+
+        # Build task_hash lookup from result.tasks
+        task_hash_lookup: dict[str, str] = {}
+        for task in result.tasks:
+            if task.task_hash:
+                task_hash_lookup[task.task_name] = task.task_hash
 
         for task_name, instances in instances_by_task.items():
+            task_hash = task_hash_lookup.get(task_name)
+            if not task_hash:
+                raise ValueError(f"task_hash is required for task '{task_name}' instance predictions")
             self.instance_repo.save_instances(
                 experiment_id=experiment_id,
                 task_name=task_name,
                 instances=instances,
                 model_hash=model_hash,
+                task_hash=task_hash,
             )
 
         return experiment_id

@@ -37,14 +37,14 @@ class TestExperimentModel:
             git_ref="abc123",
             revision="main",
             s3_location="s3://bucket/results/",
-            config={"batch_size": 32},
+            model_config={"batch_size": 32},
             metadata_={"version": "1.0"},
         )
         assert exp.experiment_id == "test-002"
         assert exp.model_hash == "model-abc123"
         assert exp.workspace == "ai2/olmo"
         assert exp.tags == ["benchmark", "release"]
-        assert exp.config == {"batch_size": 32}
+        assert exp.model_config == {"batch_size": 32}
         assert exp.metadata_ == {"version": "1.0"}
 
     def test_experiment_repr(self):
@@ -113,23 +113,27 @@ class TestInstancePredictionModel:
         """Test creating an instance prediction with required fields."""
         inst = InstancePrediction(
             experiment_id="exp-001",
+            model_hash="model-abc123",
+            task_hash="task-def456",
             task_name="mmlu",
             native_id="doc_123",
             doc_id=0,
             instance_metrics={"acc": 1.0},
         )
         assert inst.experiment_id == "exp-001"
+        assert inst.model_hash == "model-abc123"
+        assert inst.task_hash == "task-def456"
         assert inst.task_name == "mmlu"
         assert inst.native_id == "doc_123"
         assert inst.doc_id == 0
         assert inst.instance_metrics == {"acc": 1.0}
-        assert inst.model_hash is None
 
     def test_create_full_instance_prediction(self):
         """Test creating an instance prediction with all fields."""
         inst = InstancePrediction(
             experiment_id="exp-002",
             model_hash="model-abc",
+            task_hash="task-xyz789",
             task_name="gsm8k",
             native_id="gsm8k_456",
             doc_id=5,
@@ -137,6 +141,7 @@ class TestInstancePredictionModel:
             s3_prediction_key="s3://bucket/predictions/exp-002/gsm8k/pred_5.json",
         )
         assert inst.model_hash == "model-abc"
+        assert inst.task_hash == "task-xyz789"
         assert inst.instance_metrics == {"exact_match": 0.0, "f1": 0.3}
         assert inst.s3_prediction_key == "s3://bucket/predictions/exp-002/gsm8k/pred_5.json"
 
@@ -144,6 +149,8 @@ class TestInstancePredictionModel:
         """Test instance prediction string representation."""
         inst = InstancePrediction(
             experiment_id="exp-003",
+            model_hash="model-repr",
+            task_hash="task-repr",
             task_name="hellaswag",
             native_id="hellaswag_789",
             doc_id=10,
@@ -192,6 +199,8 @@ class TestModelRelationships:
         )
         inst = InstancePrediction(
             experiment_id="rel-test-002",
+            model_hash="model-rel",
+            task_hash="task-rel",
             task_name="task1",
             native_id="doc_1",
             doc_id=0,
@@ -235,3 +244,4 @@ class TestTableMetadata:
         assert "idx_instance_model_task" in index_names
         assert "idx_instance_task_native" in index_names
         assert "idx_instance_exp_task" in index_names
+        assert "ix_instance_predictions_task_hash" in index_names

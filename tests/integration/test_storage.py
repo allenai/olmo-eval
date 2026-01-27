@@ -116,11 +116,12 @@ class TestPostgresBackend:
                 StoredTaskResult(
                     task_name="mmlu",
                     metrics={"accuracy": 0.65},
+                    task_hash="mmlu-hash-user1",
                     primary_metric="accuracy",
                     primary_score=0.65,
                 )
             ],
-            config=config,
+            model_config=config,
             author="user1",
         )
 
@@ -133,11 +134,12 @@ class TestPostgresBackend:
                 StoredTaskResult(
                     task_name="mmlu",
                     metrics={"accuracy": 0.66},
+                    task_hash="mmlu-hash-user2",
                     primary_metric="accuracy",
                     primary_score=0.66,
                 )
             ],
-            config=config,
+            model_config=config,
             author="user2",
         )
 

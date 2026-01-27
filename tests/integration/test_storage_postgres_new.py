@@ -58,7 +58,7 @@ class TestPostgresBackendWithInstances:
         from olmo_eval.storage.db.repository import InstancePredictionRepository
 
         # Add model_hash to config for testing
-        sample_eval_result.config = {"model": "test-model"}
+        sample_eval_result.model_config = {"model": "test-model"}
 
         instances_by_task = {
             "mmlu": [
@@ -116,8 +116,8 @@ class TestQueryHelpers:
             model_name="test-model",
             backend_name="vllm",
             timestamp=datetime.now(),
-            tasks=[StoredTaskResult(task_name="test", metrics={"accuracy": 0.7})],
-            config={"model": "test"},
+            tasks=[StoredTaskResult(task_name="test", metrics={"accuracy": 0.7}, task_hash="test-hash")],
+            model_config={"model": "test"},
             author="test-user",
         )
 
@@ -126,7 +126,7 @@ class TestQueryHelpers:
             {"native_id": "doc_1", "doc_id": 1, "instance_metrics": {"acc": 0.5}},
         ]
 
-        model_hash = compute_model_hash(exp.config)
+        model_hash = compute_model_hash(exp.model_config)
 
         with postgres_backend.db.session() as session:
             helper = QueryHelper(session)
@@ -152,11 +152,11 @@ class TestQueryHelpers:
             backend_name="vllm",
             timestamp=datetime.now(),
             tasks=[
-                StoredTaskResult(task_name="task1", metrics={"accuracy": 0.7}),
-                StoredTaskResult(task_name="task2", metrics={"accuracy": 0.8}),
-                StoredTaskResult(task_name="task3", metrics={"accuracy": 0.6}),
+                StoredTaskResult(task_name="task1", metrics={"accuracy": 0.7}, task_hash="task1-hash"),
+                StoredTaskResult(task_name="task2", metrics={"accuracy": 0.8}, task_hash="task2-hash"),
+                StoredTaskResult(task_name="task3", metrics={"accuracy": 0.6}, task_hash="task3-hash"),
             ],
-            config={"model": "test"},
+            model_config={"model": "test"},
             author="test-user",
         )
 
@@ -172,7 +172,7 @@ class TestQueryHelpers:
             {"native_id": "task3_doc_0", "doc_id": 0, "instance_metrics": {"acc": 0.6}},
         ]
 
-        model_hash = compute_model_hash(exp.config)
+        model_hash = compute_model_hash(exp.model_config)
 
         with postgres_backend.db.session() as session:
             helper = QueryHelper(session)
@@ -215,8 +215,8 @@ class TestQueryHelpers:
             model_name="llama3.1-8b-instruct",
             backend_name="vllm",
             timestamp=datetime.now(),
-            tasks=[StoredTaskResult(task_name="mmlu", metrics={"accuracy": 0.75})],
-            config={"model": "llama3.1-8b", "mode": "instruct"},
+            tasks=[StoredTaskResult(task_name="mmlu", metrics={"accuracy": 0.75}, task_hash="mmlu-hash")],
+            model_config={"model": "llama3.1-8b", "mode": "instruct"},
             author="test-user",
         )
 
@@ -271,8 +271,8 @@ class TestUserIsolation:
             model_name="llama3.1-8b",
             backend_name="vllm",
             timestamp=datetime.now(),
-            tasks=[StoredTaskResult(task_name="mmlu", metrics={"accuracy": 0.65})],
-            config=config,
+            tasks=[StoredTaskResult(task_name="mmlu", metrics={"accuracy": 0.65}, task_hash="mmlu-hash-user")],
+            model_config=config,
             author="alice@example.com",
         )
 
@@ -287,8 +287,8 @@ class TestUserIsolation:
             model_name="llama3.1-8b",
             backend_name="vllm",
             timestamp=datetime.now(),
-            tasks=[StoredTaskResult(task_name="mmlu", metrics={"accuracy": 0.70})],
-            config=config,
+            tasks=[StoredTaskResult(task_name="mmlu", metrics={"accuracy": 0.70}, task_hash="mmlu-hash-user2")],
+            model_config=config,
             author="bob@example.com",
         )
 
