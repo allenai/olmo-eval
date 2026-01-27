@@ -11,7 +11,13 @@ from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
 
-from olmo_eval.runners.utils import TaskResult, generate_experiment_id, get_primary_metric
+from olmo_eval.runners.utils import (
+    TaskResult,
+    generate_experiment_id,
+    get_author,
+    get_git_ref,
+    get_primary_metric,
+)
 
 if TYPE_CHECKING:
     from olmo_eval.storage import StorageBackend
@@ -309,6 +315,12 @@ class RunnerResultsMixin:
             models_to_save = [(results.get("model", "unknown"), results, exp_id, model_hash, s3_location)]
             logger.info(f"Saving results for model '{results.get('model')}' to storage")
 
+        author = get_author()
+        git_ref = get_git_ref()
+        s3_cfg = getattr(self, "s3_config", None)
+        workspace = s3_cfg.group if s3_cfg else "default"
+        runner_experiment_name = getattr(self, "experiment_name", None)
+
         for model_name, model_results, exp_id, m_hash, s3_loc in models_to_save:
             task_count = len(model_results.get("tasks", {}))
             logger.info(
@@ -316,12 +328,24 @@ class RunnerResultsMixin:
                 f"experiment_id={exp_id}"
             )
 
+            model_cfg = model_results.get("_model_config", {})
+            revision = model_cfg.get("revision") or "unknown"
+            if not m_hash:
+                from olmo_eval.core.types import compute_model_hash
+
+                m_hash = (compute_model_hash(model_cfg) if model_cfg else None) or "unknown"
+
             try:
                 eval_result = convert_runner_results(
                     model_results,
                     exp_id,
                     s3_location=s3_loc,
+                    experiment_name=runner_experiment_name or exp_id,
+                    workspace=workspace,
+                    author=author,
+                    git_ref=git_ref,
                     model_hash=m_hash,
+                    revision=revision,
                 )
                 logger.info(f"Converted results for {model_name}, saving to {len(self.storages)} backend(s)")
             except Exception as e:

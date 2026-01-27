@@ -736,6 +736,9 @@ class AsyncEvalRunner(AsyncRunnerMixin):
     # S3 upload configuration (optional)
     s3_config: S3Config | None = None
 
+    # Experiment name for database storage
+    experiment_name: str | None = None
+
     # Configuration for print_config display
     _mode_name: str = "Async Mode"
     _mode_description: str = "Async (All-at-once)"
@@ -1185,6 +1188,9 @@ class StreamingEvalRunner(AsyncRunnerMixin):
 
     # S3 upload configuration (optional)
     s3_config: S3Config | None = None
+
+    # Experiment name for database storage
+    experiment_name: str | None = None
 
     # Configuration for print_config display
     _mode_name: str = "Streaming Mode"

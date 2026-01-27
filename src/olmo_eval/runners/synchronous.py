@@ -58,6 +58,9 @@ class SyncEvalRunner(RunnerResultsMixin):
     # S3 upload configuration (optional)
     s3_config: S3Config | None = None
 
+    # Experiment name for database storage
+    experiment_name: str | None = None
+
     def validate(self) -> None:
         """Validate all inputs before running.
 

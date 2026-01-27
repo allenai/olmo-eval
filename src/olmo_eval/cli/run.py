@@ -124,6 +124,10 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
     default="postgres",
     help="PostgreSQL password",
 )
+@click.option(
+    "--experiment-name",
+    help="Human-readable experiment name for database storage",
+)
 def run(
     models: tuple[str, ...],
     task: tuple[str, ...],
@@ -151,6 +155,7 @@ def run(
     db_name: str,
     db_user: str,
     db_password: str,
+    experiment_name: str | None,
 ) -> None:
     """Run evaluation on specified tasks.
 
@@ -327,6 +332,7 @@ def run(
             task_overrides=task_overrides,
             model_overrides=per_model_overrides,
             s3_config=s3_config,
+            experiment_name=experiment_name,
         )
     elif use_async:
         from olmo_eval.runners.asynchronous import AsyncEvalRunner
@@ -349,6 +355,7 @@ def run(
             task_overrides=task_overrides,
             model_overrides=per_model_overrides,
             s3_config=s3_config,
+            experiment_name=experiment_name,
         )
     else:
         # Sequential runner - run each model in sequence
@@ -381,6 +388,7 @@ def run(
                 task_overrides=task_overrides,
                 model_overrides=model_overrides,
                 s3_config=s3_config,
+                experiment_name=experiment_name,
             )
 
             try:

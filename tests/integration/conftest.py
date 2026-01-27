@@ -298,6 +298,7 @@ def sample_eval_result():
         tags=["test", "integration"],
         git_ref="abc123",
         model_hash="model-hash-test",
+        revision="main",
         s3_location="s3://test-bucket/results/test-integration-001/",
         config={"batch_size": 32},
         metadata={"test": True},
@@ -335,8 +336,12 @@ def multiple_eval_results():
                             primary_score=primary_score,
                         )
                     ],
+                    experiment_name=f"test-run-{i}-{j}",
                     workspace="ai2/olmo-test",
                     author="test-runner",
+                    git_ref="abc123",
+                    model_hash=f"hash-{model[:8]}",
+                    revision="main",
                 )
             )
 

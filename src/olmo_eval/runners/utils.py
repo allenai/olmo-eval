@@ -25,6 +25,8 @@ __all__ = [
     "compute_suite_aggregations",
     "compute_task_hash",
     "generate_experiment_id",
+    "get_author",
+    "get_git_ref",
     "get_primary_metric",
     "run_task_impl",
     "sanitize_spec_for_filename",
@@ -55,6 +57,42 @@ def generate_experiment_id() -> str:
         12
     """
     return uuid.uuid4().hex[:12]
+
+
+def get_author() -> str:
+    """Get the current user for experiment attribution.
+
+    Checks environment variables in order: USER, USERNAME, LOGNAME.
+    Falls back to getpass.getuser() if no env var is set.
+
+    Returns:
+        Username string.
+    """
+    import getpass
+
+    return os.environ.get("USER") or os.environ.get("USERNAME") or os.environ.get("LOGNAME") or getpass.getuser()
+
+
+def get_git_ref() -> str:
+    """Get the current git commit hash.
+
+    Returns:
+        Git commit hash (short form) or "unknown" if not in a git repo.
+    """
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return "unknown"
 
 
 def sanitize_spec_for_filename(spec: str) -> str:

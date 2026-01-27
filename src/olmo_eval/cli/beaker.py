@@ -847,6 +847,9 @@ def launch(
             if s3_region != "us-east-1":
                 command.extend(["--s3-region", s3_region])
 
+        # Add experiment name for database storage
+        command.extend(["--experiment-name", exp_name])
+
         # Enable PostgreSQL storage backend for persisting evaluation results
         # (model metrics, task scores, S3 locations) after each task completes.
         # Credentials are injected via Beaker secrets (PGHOST, PGPORT, etc.)
