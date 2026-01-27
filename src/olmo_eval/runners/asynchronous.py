@@ -1137,13 +1137,13 @@ class AsyncEvalRunner(AsyncRunnerMixin):
         self, model_name: str, spec: str, predictions: list[dict], task_hash: str | None = None
     ) -> None:
         """Write per-instance predictions to JSONL."""
-        write_predictions_jsonl(self.output_dir, spec, predictions, model_name, task_hash=task_hash)
+        write_predictions_jsonl(self.output_dir, spec, predictions, task_hash=task_hash)
 
     def _write_requests(
         self, model_name: str, spec: str, requests: list[dict], task_hash: str | None = None
     ) -> None:
         """Write per-instance requests to JSONL (oe-eval compatible format)."""
-        write_requests_jsonl(self.output_dir, spec, requests, model_name, task_hash=task_hash)
+        write_requests_jsonl(self.output_dir, spec, requests, task_hash=task_hash)
 
 
 # -----------------------------------------------------------------------------
@@ -1570,10 +1570,10 @@ class StreamingEvalRunner(AsyncRunnerMixin):
         self, model_name: str, spec: str, predictions: list[dict], task_hash: str | None = None
     ) -> None:
         """Write per-instance predictions to JSONL."""
-        write_predictions_jsonl(self.output_dir, spec, predictions, model_name, task_hash=task_hash)
+        write_predictions_jsonl(self.output_dir, spec, predictions, task_hash=task_hash)
 
     def _write_requests(
         self, model_name: str, spec: str, requests: list[dict], task_hash: str | None = None
     ) -> None:
         """Write per-instance requests to JSONL (oe-eval compatible format)."""
-        write_requests_jsonl(self.output_dir, spec, requests, model_name, task_hash=task_hash)
+        write_requests_jsonl(self.output_dir, spec, requests, task_hash=task_hash)
