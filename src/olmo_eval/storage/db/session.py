@@ -27,6 +27,7 @@ def create_postgres_engine(
     max_overflow: int = 10,
     pool_timeout: float = 30.0,
     pool_recycle: int = 3600,
+    connect_timeout: int = 10,
     echo: bool = False,
     **engine_kwargs: Any,
 ) -> Engine:
@@ -43,6 +44,7 @@ def create_postgres_engine(
         max_overflow: Maximum number of connections to create beyond pool_size.
         pool_timeout: Seconds to wait before timing out on connection pool.
         pool_recycle: Seconds after which to recycle connections (prevents stale connections).
+        connect_timeout: Seconds to wait for initial database connection (default 10).
         echo: If True, log all SQL statements (useful for debugging).
         **engine_kwargs: Additional keyword arguments passed to create_engine.
 
@@ -62,8 +64,8 @@ def create_postgres_engine(
         password = os.environ.get(password_env, password)
 
     # Build connection URL
-    # Use postgresql+psycopg (psycopg3) driver
-    connection_url = f"postgresql+psycopg://{user}:{password}@{host}:{port}/{database}"
+    # Use postgresql+psycopg (psycopg3) driver with connection timeout
+    connection_url = f"postgresql+psycopg://{user}:{password}@{host}:{port}/{database}?connect_timeout={connect_timeout}"
 
     # Determine pooling strategy
     # For testing or single-threaded use, NullPool is simpler
@@ -248,11 +250,18 @@ class DatabaseSession:
         self._session_factory: sessionmaker[Session] | None = None
 
     def initialize(self) -> None:
-        """Initialize the database engine and session factory."""
+        """Initialize the database engine and session factory.
+
+        Tests the connection to ensure the database is reachable.
+
+        Raises:
+            Exception: If unable to connect to the database.
+        """
         if self._engine is not None:
             logger.warning("Database already initialized")
             return
 
+        logger.info(f"Connecting to PostgreSQL: {self.host}:{self.port}/{self.database}")
         self._engine = create_postgres_engine(
             host=self.host,
             port=self.port,
@@ -266,7 +275,13 @@ class DatabaseSession:
             **self.engine_kwargs,
         )
         self._session_factory = create_session_factory(self._engine)
-        logger.info(f"Database session manager initialized for {self.database}")
+
+        # Test the connection to fail fast if database is unreachable
+        from sqlalchemy import text
+
+        with self._engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        logger.info(f"Connected to PostgreSQL: {self.host}:{self.port}/{self.database}")
 
     @property
     def engine(self) -> Engine:
