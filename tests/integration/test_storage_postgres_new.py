@@ -7,7 +7,6 @@ from datetime import datetime
 
 import pytest
 
-from olmo_eval.storage.base import compute_model_hash
 from olmo_eval.storage.db.queries import QueryHelper
 
 
@@ -106,7 +105,9 @@ class TestQueryHelpers:
             model_name="test-model",
             backend_name="vllm",
             timestamp=datetime.now(),
-            tasks=[StoredTaskResult(task_name="test", metrics={"accuracy": 0.7}, task_hash="test-hash")],
+            tasks=[
+                StoredTaskResult(task_name="test", metrics={"accuracy": 0.7}, task_hash="test-hash")
+            ],
             model_config={"model": "test"},
             author="test-user",
             experiment_name="test-exp",
@@ -144,9 +145,15 @@ class TestQueryHelpers:
             backend_name="vllm",
             timestamp=datetime.now(),
             tasks=[
-                StoredTaskResult(task_name="task1", metrics={"accuracy": 0.7}, task_hash="task1-hash"),
-                StoredTaskResult(task_name="task2", metrics={"accuracy": 0.8}, task_hash="task2-hash"),
-                StoredTaskResult(task_name="task3", metrics={"accuracy": 0.6}, task_hash="task3-hash"),
+                StoredTaskResult(
+                    task_name="task1", metrics={"accuracy": 0.7}, task_hash="task1-hash"
+                ),
+                StoredTaskResult(
+                    task_name="task2", metrics={"accuracy": 0.8}, task_hash="task2-hash"
+                ),
+                StoredTaskResult(
+                    task_name="task3", metrics={"accuracy": 0.6}, task_hash="task3-hash"
+                ),
             ],
             model_config={"model": "test"},
             author="test-user",
@@ -192,7 +199,9 @@ class TestQueryHelpers:
         # Test querying single task still works
         with postgres_backend.db.session() as session:
             helper = QueryHelper(session)
-            results = helper.get_model_task_instances(task_name="task3", experiment_pk=experiment_pk)
+            results = helper.get_model_task_instances(
+                task_name="task3", experiment_pk=experiment_pk
+            )
 
         assert len(results) == 1
         assert results[0]["native_id"] == "task3_doc_0"
@@ -205,7 +214,6 @@ class TestUserIsolation:
     def test_concurrent_users_same_model_different_experiments(self, postgres_backend):
         """Test that same model config from different users creates separate experiments."""
         from olmo_eval.core import EvalResult, StoredTaskResult
-        from olmo_eval.storage import compute_model_hash
         from olmo_eval.storage.db.repository import InstancePredictionRepository
 
         # Same config, tasks, and model - only difference is author and experiment_id
@@ -217,7 +225,11 @@ class TestUserIsolation:
             model_name="llama3.1-8b",
             backend_name="vllm",
             timestamp=datetime.now(),
-            tasks=[StoredTaskResult(task_name="mmlu", metrics={"accuracy": 0.65}, task_hash="mmlu-hash-user1")],
+            tasks=[
+                StoredTaskResult(
+                    task_name="mmlu", metrics={"accuracy": 0.65}, task_hash="mmlu-hash-user1"
+                )
+            ],
             model_config=config,
             author="alice@example.com",
             experiment_name="test",
@@ -237,7 +249,11 @@ class TestUserIsolation:
             model_name="llama3.1-8b",
             backend_name="vllm",
             timestamp=datetime.now(),
-            tasks=[StoredTaskResult(task_name="mmlu", metrics={"accuracy": 0.70}, task_hash="mmlu-hash-user2")],
+            tasks=[
+                StoredTaskResult(
+                    task_name="mmlu", metrics={"accuracy": 0.70}, task_hash="mmlu-hash-user2"
+                )
+            ],
             model_config=config,
             author="bob@example.com",
             experiment_name="test",
@@ -257,10 +273,7 @@ class TestUserIsolation:
             exp_pk_1 = helper.save_with_instances(eval_user1, {"mmlu": instances_user1})
             exp_pk_2 = helper.save_with_instances(eval_user2, {"mmlu": instances_user2})
 
-        # Same config = same model_hash
-        model_hash = compute_model_hash(config)
-
-        # Query instances by experiment_pk - this is how users are isolated
+        # Query instances by experiment_pk
         with postgres_backend.db.session() as session:
             repo = InstancePredictionRepository(session)
 
@@ -317,9 +330,7 @@ class TestBackwardCompatibility:
     @pytest.mark.integration
     def test_delete_cascades_to_instances(self, postgres_backend, sample_eval_result):
         """Test that deleting an experiment cascades to instance predictions."""
-        instances = {
-            "mmlu": [{"native_id": "doc_0", "instance_metrics": {"acc": 1.0}}]
-        }
+        instances = {"mmlu": [{"native_id": "doc_0", "instance_metrics": {"acc": 1.0}}]}
 
         with postgres_backend.db.session() as session:
             helper = QueryHelper(session)

@@ -39,6 +39,7 @@ class PostgresBackend(StorageBackend):
         password_env: str | None = None,
         pool_size: int = 5,
         max_overflow: int = 10,
+        sslmode: str = "require",
         echo: bool = False,
     ):
         """Initialize the PostgreSQL backend.
@@ -52,6 +53,7 @@ class PostgresBackend(StorageBackend):
             password_env: Environment variable containing password (takes precedence).
             pool_size: Connection pool size.
             max_overflow: Maximum overflow connections.
+            sslmode: SSL mode for connection (require, prefer, disable, etc.).
             echo: Whether to echo SQL statements (for debugging).
         """
         self.db = DatabaseSession(
@@ -63,6 +65,7 @@ class PostgresBackend(StorageBackend):
             password_env=password_env,
             pool_size=pool_size,
             max_overflow=max_overflow,
+            sslmode=sslmode,
             echo=echo,
         )
 

@@ -184,7 +184,10 @@ class TestInstancePredictionRepository:
     @pytest.mark.integration
     def test_save_instances(self, postgres_backend, sample_eval_result):
         """Test saving instance predictions."""
-        from olmo_eval.storage.db.repository import ExperimentRepository, InstancePredictionRepository
+        from olmo_eval.storage.db.repository import (
+            ExperimentRepository,
+            InstancePredictionRepository,
+        )
 
         with postgres_backend.db.session() as session:
             exp_repo = ExperimentRepository(session)
@@ -222,7 +225,10 @@ class TestInstancePredictionRepository:
     @pytest.mark.integration
     def test_get_instances_by_task_name(self, postgres_backend, sample_eval_result):
         """Test retrieving instances by task name (via JOIN)."""
-        from olmo_eval.storage.db.repository import ExperimentRepository, InstancePredictionRepository
+        from olmo_eval.storage.db.repository import (
+            ExperimentRepository,
+            InstancePredictionRepository,
+        )
 
         with postgres_backend.db.session() as session:
             exp_repo = ExperimentRepository(session)
@@ -250,17 +256,17 @@ class TestInstancePredictionRepository:
     @pytest.mark.integration
     def test_get_instances_pagination(self, postgres_backend, sample_eval_result):
         """Test instance pagination."""
-        from olmo_eval.storage.db.repository import ExperimentRepository, InstancePredictionRepository
+        from olmo_eval.storage.db.repository import (
+            ExperimentRepository,
+            InstancePredictionRepository,
+        )
 
         with postgres_backend.db.session() as session:
             exp_repo = ExperimentRepository(session)
             experiment_pk = exp_repo.save(sample_eval_result)
 
         # Save 10 instances
-        instances = [
-            {"native_id": f"doc_{i}", "instance_metrics": {"acc": 0.5}}
-            for i in range(10)
-        ]
+        instances = [{"native_id": f"doc_{i}", "instance_metrics": {"acc": 0.5}} for i in range(10)]
         task_hash = sample_eval_result.tasks[0].task_hash
 
         with postgres_backend.db.session() as session:

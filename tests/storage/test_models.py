@@ -13,14 +13,20 @@ class TestExperimentModel:
         exp = Experiment(
             experiment_id="test-001",
             model_name="llama3.1-8b",
+            model_hash="abc123",
             backend_name="vllm",
             timestamp=datetime(2024, 1, 15, 10, 30, 0),
+            experiment_name="test",
+            workspace="test-ws",
+            author="test-author",
+            git_ref="main",
+            revision="v1",
         )
         assert exp.experiment_id == "test-001"
         assert exp.model_name == "llama3.1-8b"
         assert exp.backend_name == "vllm"
-        assert exp.model_hash is None
-        assert exp.workspace is None
+        assert exp.model_hash == "abc123"
+        assert exp.workspace == "test-ws"
 
     def test_create_full_experiment(self):
         """Test creating an experiment with all fields."""
@@ -52,8 +58,14 @@ class TestExperimentModel:
         exp = Experiment(
             experiment_id="test-003",
             model_name="test-model",
+            model_hash="hash123",
             backend_name="vllm",
             timestamp=datetime(2024, 1, 15, 10, 0, 0),
+            experiment_name="test",
+            workspace="ws",
+            author="author",
+            git_ref="ref",
+            revision="rev",
         )
         repr_str = repr(exp)
         assert "test-003" in repr_str
@@ -66,43 +78,53 @@ class TestTaskResultModel:
     def test_create_minimal_task_result(self):
         """Test creating a task result with only required fields."""
         task = TaskResult(
-            experiment_id="exp-001",
+            experiment_pk=1,
+            model_hash="model-abc",
             task_name="mmlu",
+            task_hash="task-123",
             metrics={"accuracy": 0.75},
         )
-        assert task.experiment_id == "exp-001"
+        assert task.experiment_pk == 1
+        assert task.model_hash == "model-abc"
         assert task.task_name == "mmlu"
+        assert task.task_hash == "task-123"
         assert task.metrics == {"accuracy": 0.75}
         assert task.num_instances is None
 
     def test_create_full_task_result(self):
         """Test creating a task result with all fields."""
         task = TaskResult(
-            experiment_id="exp-002",
+            experiment_pk=2,
+            model_hash="model-xyz",
             task_name="gsm8k",
             task_hash="hash123",
+            task_config={"shots": 5},
             metrics={"exact_match": 0.58, "f1": 0.62},
             num_instances=500,
             primary_metric="exact_match",
             primary_score=0.58,
             s3_metrics_key="s3://bucket/metrics.json",
             s3_predictions_key="s3://bucket/predictions.jsonl",
+            s3_requests_key="s3://bucket/requests.jsonl",
         )
         assert task.task_hash == "hash123"
+        assert task.task_config == {"shots": 5}
         assert task.num_instances == 500
         assert task.primary_metric == "exact_match"
         assert task.primary_score == 0.58
+        assert task.s3_requests_key == "s3://bucket/requests.jsonl"
 
     def test_task_result_repr(self):
         """Test task result string representation."""
         task = TaskResult(
-            experiment_id="exp-003",
+            experiment_pk=3,
+            model_hash="model-repr",
             task_name="arc_challenge",
+            task_hash="task-repr",
             metrics={"accuracy": 0.52},
             primary_score=0.52,
         )
         repr_str = repr(task)
-        assert "exp-003" in repr_str
         assert "arc_challenge" in repr_str
 
 
@@ -112,53 +134,36 @@ class TestInstancePredictionModel:
     def test_create_minimal_instance_prediction(self):
         """Test creating an instance prediction with required fields."""
         inst = InstancePrediction(
-            experiment_id="exp-001",
-            model_hash="model-abc123",
+            experiment_pk=1,
             task_hash="task-def456",
-            task_name="mmlu",
             native_id="doc_123",
-            doc_id=0,
             instance_metrics={"acc": 1.0},
         )
-        assert inst.experiment_id == "exp-001"
-        assert inst.model_hash == "model-abc123"
+        assert inst.experiment_pk == 1
         assert inst.task_hash == "task-def456"
-        assert inst.task_name == "mmlu"
         assert inst.native_id == "doc_123"
-        assert inst.doc_id == 0
         assert inst.instance_metrics == {"acc": 1.0}
 
     def test_create_full_instance_prediction(self):
         """Test creating an instance prediction with all fields."""
         inst = InstancePrediction(
-            experiment_id="exp-002",
-            model_hash="model-abc",
+            experiment_pk=2,
             task_hash="task-xyz789",
-            task_name="gsm8k",
             native_id="gsm8k_456",
-            doc_id=5,
             instance_metrics={"exact_match": 0.0, "f1": 0.3},
-            s3_prediction_key="s3://bucket/predictions/exp-002/gsm8k/pred_5.json",
         )
-        assert inst.model_hash == "model-abc"
         assert inst.task_hash == "task-xyz789"
         assert inst.instance_metrics == {"exact_match": 0.0, "f1": 0.3}
-        assert inst.s3_prediction_key == "s3://bucket/predictions/exp-002/gsm8k/pred_5.json"
 
     def test_instance_prediction_repr(self):
         """Test instance prediction string representation."""
         inst = InstancePrediction(
-            experiment_id="exp-003",
-            model_hash="model-repr",
+            experiment_pk=3,
             task_hash="task-repr",
-            task_name="hellaswag",
             native_id="hellaswag_789",
-            doc_id=10,
             instance_metrics={"acc": 1.0},
         )
         repr_str = repr(inst)
-        assert "exp-003" in repr_str
-        assert "hellaswag" in repr_str
         assert "hellaswag_789" in repr_str
 
 
@@ -170,21 +175,31 @@ class TestModelRelationships:
         exp = Experiment(
             experiment_id="rel-test-001",
             model_name="test-model",
+            model_hash="hash-001",
             backend_name="vllm",
             timestamp=datetime.now(),
+            experiment_name="test",
+            workspace="ws",
+            author="author",
+            git_ref="ref",
+            revision="rev",
         )
         task1 = TaskResult(
-            experiment_id="rel-test-001",
+            experiment_pk=1,
+            model_hash="hash-001",
             task_name="task1",
+            task_hash="th1",
             metrics={"score": 0.5},
         )
         task2 = TaskResult(
-            experiment_id="rel-test-001",
+            experiment_pk=1,
+            model_hash="hash-001",
             task_name="task2",
+            task_hash="th2",
             metrics={"score": 0.6},
         )
 
-        # Add tasks to experiment (if using relationships)
+        # Check relationships exist
         assert hasattr(exp, "task_results")
         assert hasattr(task1, "experiment")
         assert hasattr(task2, "experiment")
@@ -194,16 +209,19 @@ class TestModelRelationships:
         exp = Experiment(
             experiment_id="rel-test-002",
             model_name="test-model",
+            model_hash="hash-002",
             backend_name="vllm",
             timestamp=datetime.now(),
+            experiment_name="test",
+            workspace="ws",
+            author="author",
+            git_ref="ref",
+            revision="rev",
         )
         inst = InstancePrediction(
-            experiment_id="rel-test-002",
-            model_hash="model-rel",
+            experiment_pk=1,
             task_hash="task-rel",
-            task_name="task1",
             native_id="doc_1",
-            doc_id=0,
             instance_metrics={"acc": 1.0},
         )
 
@@ -239,9 +257,9 @@ class TestTableMetadata:
         # TaskResult indexes
         assert "idx_task_results_exp_task" in index_names
         assert "idx_task_results_score_desc" in index_names
+        assert "idx_task_results_model_task" in index_names
 
         # InstancePrediction indexes
-        assert "idx_instance_model_task" in index_names
-        assert "idx_instance_task_native" in index_names
-        assert "idx_instance_exp_task" in index_names
+        assert "idx_instance_exp_task_hash" in index_names
+        assert "idx_instance_task_hash_native" in index_names
         assert "ix_instance_predictions_task_hash" in index_names

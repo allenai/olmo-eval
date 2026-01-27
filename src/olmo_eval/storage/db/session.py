@@ -28,6 +28,7 @@ def create_postgres_engine(
     pool_timeout: float = 30.0,
     pool_recycle: int = 3600,
     connect_timeout: int = 10,
+    sslmode: str = "require",
     echo: bool = False,
     **engine_kwargs: Any,
 ) -> Engine:
@@ -45,6 +46,7 @@ def create_postgres_engine(
         pool_timeout: Seconds to wait before timing out on connection pool.
         pool_recycle: Seconds after which to recycle connections (prevents stale connections).
         connect_timeout: Seconds to wait for initial database connection (default 10).
+        sslmode: SSL mode for connection (require, prefer, disable, etc.).
         echo: If True, log all SQL statements (useful for debugging).
         **engine_kwargs: Additional keyword arguments passed to create_engine.
 
@@ -64,7 +66,10 @@ def create_postgres_engine(
         password = os.environ.get(password_env, password)
 
     # Build connection URL (postgresql+psycopg = psycopg3 driver)
-    connection_url = f"postgresql+psycopg://{user}:{password}@{host}:{port}/{database}?connect_timeout={connect_timeout}&sslmode=require"
+    connection_url = (
+        f"postgresql+psycopg://{user}:{password}@{host}:{port}/{database}"
+        f"?connect_timeout={connect_timeout}&sslmode={sslmode}"
+    )
 
     # Determine pooling strategy
     # For testing or single-threaded use, NullPool is simpler
@@ -81,7 +86,7 @@ def create_postgres_engine(
         pool_recycle=pool_recycle,
         echo=echo,
         future=True,  # Use SQLAlchemy 2.0 style
-        connect_args={"sslmode": "require"},
+        connect_args={"sslmode": sslmode},
         **engine_kwargs,
     )
 
@@ -218,6 +223,7 @@ class DatabaseSession:
         password_env: str | None = None,
         pool_size: int = 5,
         max_overflow: int = 10,
+        sslmode: str = "require",
         echo: bool = False,
         **engine_kwargs: Any,
     ):
@@ -232,6 +238,7 @@ class DatabaseSession:
             password_env: Environment variable containing password.
             pool_size: Connection pool size.
             max_overflow: Maximum overflow connections.
+            sslmode: SSL mode for connection (require, prefer, disable, etc.).
             echo: Whether to echo SQL statements.
             **engine_kwargs: Additional engine configuration.
         """
@@ -243,6 +250,7 @@ class DatabaseSession:
         self.password_env = password_env
         self.pool_size = pool_size
         self.max_overflow = max_overflow
+        self.sslmode = sslmode
         self.echo = echo
         self.engine_kwargs = engine_kwargs
 
@@ -271,6 +279,7 @@ class DatabaseSession:
             password_env=self.password_env,
             pool_size=self.pool_size,
             max_overflow=self.max_overflow,
+            sslmode=self.sslmode,
             echo=self.echo,
             **self.engine_kwargs,
         )

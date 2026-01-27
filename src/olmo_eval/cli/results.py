@@ -150,7 +150,7 @@ def print_experiment_detail(experiment: Any) -> None:
     console.print(Panel("\n".join(lines), title="Experiment Details", expand=False))
 
 
-def print_task_results_table(tasks: list[Any], task_filter: tuple[str, ...] | None = None) -> None:
+def print_task_results_table(tasks: list[Any], task_filter: set[str] | None = None) -> None:
     """Print a table of task results."""
     table = Table(title="Task Results")
     table.add_column("Task", style="cyan")
@@ -207,7 +207,9 @@ def _build_model_task_scores(
     return sorted(all_tasks), model_scores
 
 
-def print_task_comparison_matrix(experiments: list[Any], task_filter: set[str] | None = None) -> None:
+def print_task_comparison_matrix(
+    experiments: list[Any], task_filter: set[str] | None = None
+) -> None:
     """Print a comparison matrix with models as rows and tasks as columns.
 
     Args:
@@ -467,14 +469,16 @@ def _download_s3_files(
 
     for task in tasks_to_download:
         if download_predictions and task.s3_predictions_key:
-            if result := download_file(task.s3_predictions_key, f"{task.task_name} predictions"):
+            result = download_file(task.s3_predictions_key, f"{task.task_name} predictions")
+            if result:
                 downloaded_files.append(result)
 
         # For requests, derive from predictions path (same directory, different filename)
         if download_requests and task.s3_predictions_key:
             # Replace predictions filename with requests filename
             requests_uri = task.s3_predictions_key.replace("predictions.jsonl", "requests.jsonl")
-            if result := download_file(requests_uri, f"{task.task_name} requests"):
+            result = download_file(requests_uri, f"{task.task_name} requests")
+            if result:
                 downloaded_files.append(result)
 
     if not downloaded_files:
@@ -484,7 +488,9 @@ def _download_s3_files(
 @results.command(name="get", hidden=True)
 @click.argument("experiment_id")
 @click.option("--task", "-t", "task_filter", multiple=True)
-@click.option("--format", "-f", "output_format", type=click.Choice(["table", "json", "csv"]), default="table")
+@click.option(
+    "--format", "-f", "output_format", type=click.Choice(["table", "json", "csv"]), default="table"
+)
 @db_options
 @click.pass_context
 def get_deprecated(
@@ -623,7 +629,8 @@ def query(
     # Validate at least one filter is provided
     if not any([experiment_ids, model_names, model_hashes, task_names, task_hash]):
         raise click.UsageError(
-            "At least one filter is required: --experiment, --model, --model-hash, --task, or --task-hash"
+            "At least one filter is required: "
+            "--experiment, --model, --model-hash, --task, or --task-hash"
         )
 
     db = get_database_session(db_host, db_port, db_name, db_user, db_password)
@@ -671,9 +678,12 @@ def query(
                 elif model_names or model_hashes:
                     # Query instances by model
                     if not task_names:
-                        raise click.UsageError("--task is required when querying instances by model")
+                        raise click.UsageError(
+                            "--task is required when querying instances by model"
+                        )
+                    task_list = list(task_names)
                     instance_data = helper.get_instances_by_model(
-                        task_name=task_name_filter[0] if len(task_name_filter) == 1 else task_name_filter,
+                        task_name=task_list[0] if len(task_list) == 1 else task_list,
                         model_name=model_names[0] if model_names else None,
                         model_hash=model_hashes[0] if model_hashes else None,
                         limit=limit,
@@ -706,21 +716,27 @@ def query(
             for exp_id in experiment_ids:
                 exps = helper.get_by_experiment_id(exp_id)
                 if not exps:
-                    console.print(f"[yellow]Warning:[/yellow] No experiments found for ID '{exp_id}'")
+                    console.print(
+                        f"[yellow]Warning:[/yellow] No experiments found for ID '{exp_id}'"
+                    )
                 all_experiments.extend(exps)
 
             # Query by model names
             for model_name in model_names:
                 exps = repo.query(model_name=model_name, limit=1000)
                 if not exps:
-                    console.print(f"[yellow]Warning:[/yellow] No experiments found for model '{model_name}'")
+                    console.print(
+                        f"[yellow]Warning:[/yellow] No experiments found for model '{model_name}'"
+                    )
                 all_experiments.extend(exps)
 
             # Query by model hashes
             for mhash in model_hashes:
                 exps = repo.query(model_hash=mhash, latest=True)
                 if not exps:
-                    console.print(f"[yellow]Warning:[/yellow] No experiments found for hash '{mhash}'")
+                    console.print(
+                        f"[yellow]Warning:[/yellow] No experiments found for hash '{mhash}'"
+                    )
                 all_experiments.extend(exps)
 
             # Determine if this is a comparison query (no experiment filter)
@@ -770,7 +786,8 @@ def query(
 
                 for i, experiment in enumerate(all_experiments):
                     if len(all_experiments) > 1:
-                        console.print(f"[bold cyan]--- Experiment {i + 1}/{len(all_experiments)} ---[/bold cyan]")
+                        n = len(all_experiments)
+                        console.print(f"[bold cyan]--- Experiment {i + 1}/{n} ---[/bold cyan]")
 
                     print_experiment_detail(experiment)
                     console.print()

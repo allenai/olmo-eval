@@ -312,7 +312,9 @@ class RunnerResultsMixin:
         else:
             # Single-model results - use passed values or generate
             exp_id = experiment_id or generate_experiment_id()
-            models_to_save = [(results.get("model", "unknown"), results, exp_id, model_hash, s3_location)]
+            models_to_save = [
+                (results.get("model", "unknown"), results, exp_id, model_hash, s3_location)
+            ]
             logger.info(f"Saving results for model '{results.get('model')}' to storage")
 
         author = get_author()
@@ -347,7 +349,9 @@ class RunnerResultsMixin:
                     model_hash=m_hash,
                     revision=revision,
                 )
-                logger.info(f"Converted results for {model_name}, saving to {len(self.storages)} backend(s)")
+                logger.info(
+                    f"Converted results for {model_name}, saving to {len(self.storages)} backend(s)"
+                )
             except Exception as e:
                 logger.error(f"Failed to convert results for {model_name}: {e}")
                 console.print(f"[red]Failed to convert results for {model_name}: {e}[/red]")
@@ -463,14 +467,20 @@ class RunnerResultsMixin:
                     uploaded_count += 1
                 except Exception as e:
                     failed_count += 1
-                    logger.error(f"Failed to upload {relative} to s3://{s3_config.bucket}/{key}: {e}")
+                    logger.error(
+                        f"Failed to upload {relative} to s3://{s3_config.bucket}/{key}: {e}"
+                    )
                     console.print(f"[red]Failed to upload {relative}:[/red] {e}")
 
         s3_location = f"s3://{s3_config.bucket}/{prefix}"
         if failed_count > 0:
-            logger.warning(f"S3 upload completed with errors: {uploaded_count} succeeded, {failed_count} failed")
+            logger.warning(
+                f"S3 upload completed with errors: "
+                f"{uploaded_count} succeeded, {failed_count} failed"
+            )
             console.print(
-                f"[yellow]S3 upload:[/yellow] {uploaded_count} files uploaded, {failed_count} failed -> {s3_location}"
+                f"[yellow]S3 upload:[/yellow] {uploaded_count} uploaded, "
+                f"{failed_count} failed -> {s3_location}"
             )
         else:
             logger.info(f"Uploaded {uploaded_count} files to S3: {s3_location}")

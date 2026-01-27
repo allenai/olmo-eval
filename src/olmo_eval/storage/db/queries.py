@@ -64,7 +64,9 @@ class QueryHelper:
         for task_name, instances in instances_by_task.items():
             task_hash = task_hash_lookup.get(task_name)
             if not task_hash:
-                raise ValueError(f"task_hash is required for task '{task_name}' instance predictions")
+                raise ValueError(
+                    f"task_hash is required for task '{task_name}' instance predictions"
+                )
             self.instance_repo.save_instances(
                 experiment_pk=experiment_pk,
                 task_hash=task_hash,

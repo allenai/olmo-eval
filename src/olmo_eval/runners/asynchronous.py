@@ -1108,7 +1108,7 @@ class AsyncEvalRunner(AsyncRunnerMixin):
         # Write metrics.json for Beaker
         self._write_metrics_json(results_dict, multi_model=True)
 
-        # Compute experiment_id, model_hash, and upload to S3 first (so we have s3_location for storage)
+        # Compute experiment_id, model_hash, upload to S3 (need s3_location for storage)
         from olmo_eval.core.types import compute_model_hash
 
         for model_name, model_data in results_dict.get("models", {}).items():
@@ -1545,7 +1545,7 @@ class StreamingEvalRunner(AsyncRunnerMixin):
         self._log_summary(results_dict, multi_model=True)
         self._write_metrics_json(results_dict, multi_model=True)
 
-        # Compute experiment_id, model_hash, and upload to S3 first (so we have s3_location for storage)
+        # Compute experiment_id, model_hash, upload to S3 (need s3_location for storage)
         from olmo_eval.core.types import compute_model_hash
 
         for model_name, model_data in results_dict.get("models", {}).items():

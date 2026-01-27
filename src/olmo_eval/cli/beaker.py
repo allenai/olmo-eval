@@ -921,7 +921,9 @@ def launch(
         storage_lines = []
         if store:
             storage_lines.append("[bold]PostgreSQL:[/bold]")
-            storage_lines.append("  Credentials from Beaker secrets: olmo_eval_PGHOST, olmo_eval_PGPORT,")
+            storage_lines.append(
+                "  Credentials from Beaker secrets: olmo_eval_PGHOST, olmo_eval_PGPORT,"
+            )
             storage_lines.append("    olmo_eval_PGDATABASE, olmo_eval_PGUSER, olmo_eval_PGPASSWORD")
         if s3_bucket and s3_prefix:
             storage_lines.append("[bold]S3:[/bold]")

@@ -116,9 +116,7 @@ class ExperimentRepository:
         Returns:
             True if deleted, False if not found.
         """
-        result = self.session.execute(
-            delete(Experiment).where(Experiment.id == experiment_pk)
-        )
+        result = self.session.execute(delete(Experiment).where(Experiment.id == experiment_pk))
         return result.rowcount > 0  # type: ignore[union-attr]
 
     def delete_by_experiment_id(self, experiment_id: str) -> int:
@@ -489,13 +487,10 @@ class InstancePredictionRepository:
             raise ValueError("Either task_name or task_hash is required")
 
         # Build query with JOIN to get task_name
-        stmt = (
-            select(InstancePrediction, TaskResult.task_name)
-            .join(
-                TaskResult,
-                (TaskResult.experiment_pk == InstancePrediction.experiment_pk)
-                & (TaskResult.task_hash == InstancePrediction.task_hash),
-            )
+        stmt = select(InstancePrediction, TaskResult.task_name).join(
+            TaskResult,
+            (TaskResult.experiment_pk == InstancePrediction.experiment_pk)
+            & (TaskResult.task_hash == InstancePrediction.task_hash),
         )
 
         if task_hash:

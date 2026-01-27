@@ -210,6 +210,7 @@ def postgres_backend(storage_docker_services):
         user="test",
         password="test",
         pool_size=2,  # Small pool for testing
+        sslmode="disable",  # Test container doesn't support SSL
         echo=False,  # Set to True for SQL debugging
     )
 

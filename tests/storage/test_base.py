@@ -59,7 +59,9 @@ class TestEvalResult:
         """Create sample task results."""
         return [
             StoredTaskResult(task_name="mmlu", metrics={"accuracy": 0.65}, task_hash="mmlu-hash"),
-            StoredTaskResult(task_name="gsm8k", metrics={"exact_match": 0.58}, task_hash="gsm8k-hash"),
+            StoredTaskResult(
+                task_name="gsm8k", metrics={"exact_match": 0.58}, task_hash="gsm8k-hash"
+            ),
         ]
 
     @pytest.fixture
