@@ -313,6 +313,13 @@ def launch(
         console.print("[red]Error:[/red] --s3-bucket is required when --s3-prefix is set")
         raise SystemExit(1)
 
+    # --store requires S3 configuration for storing result artifacts
+    if store and (not s3_bucket or not s3_prefix):
+        console.print(
+            "[red]Error:[/red] --s3-bucket and --s3-prefix are required when --store is enabled"
+        )
+        raise SystemExit(1)
+
     # Keep suites unexpanded - let the runner expand them so it knows suite names for aggregation
     from olmo_eval.core.configs import expand_tasks, validate_tasks
 
@@ -838,7 +845,9 @@ def launch(
             if s3_region != "us-east-1":
                 command.extend(["--s3-region", s3_region])
 
-        # Add storage backend if enabled (credentials come from env secrets)
+        # Enable PostgreSQL storage backend for persisting evaluation results
+        # (model metrics, task scores, S3 locations) after each task completes.
+        # Credentials are injected via Beaker secrets (PGHOST, PGPORT, etc.)
         if store:
             command.append("--store")
 
@@ -893,6 +902,30 @@ def launch(
             env_secrets=env_secrets,
         )
         job_configs.append(job_config)
+
+    # Display storage configuration if enabled
+    if store or (s3_bucket and s3_prefix):
+        storage_lines = []
+        if store:
+            storage_lines.append("[bold]PostgreSQL:[/bold]")
+            storage_lines.append("  Credentials from Beaker secrets: olmo_eval_PGHOST, olmo_eval_PGPORT,")
+            storage_lines.append("    olmo_eval_PGDATABASE, olmo_eval_PGUSER, olmo_eval_PGPASSWORD")
+        if s3_bucket and s3_prefix:
+            storage_lines.append("[bold]S3:[/bold]")
+            storage_lines.append(f"  Bucket: {s3_bucket}")
+            storage_lines.append(f"  Prefix: {s3_prefix}")
+            storage_lines.append(f"  Region: {s3_region}")
+            if s3_endpoint_url:
+                storage_lines.append(f"  Endpoint: {s3_endpoint_url}")
+            if effective_groups:
+                storage_lines.append(f"  Group: {effective_groups[0]}")
+        console.print(
+            Panel(
+                "\n".join(storage_lines),
+                title="[bold]Storage Configuration[/bold]",
+                border_style="green",
+            )
+        )
 
     # Display all BeakerJobConfig objects
     for job_config in job_configs:
