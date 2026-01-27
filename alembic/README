@@ -44,14 +44,14 @@ Set the database URL using environment variables (recommended):
 export OLMO_EVAL_DB_URL="postgresql+psycopg://user:password@host:port/database"
 ```
 
-Or set individual components:
+Or set individual components using standard PostgreSQL environment variables (compatible with Beaker):
 
 ```bash
-export POSTGRES_HOST="localhost"
-export POSTGRES_PORT="5432"
-export POSTGRES_DB="olmo_eval"
-export POSTGRES_USER="postgres"
-export POSTGRES_PASSWORD="your_password"
+export PGHOST="localhost"
+export PGPORT="5432"
+export PGDATABASE="olmo_eval"
+export PGUSER="postgres"
+export PGPASSWORD="your_password"
 ```
 
 Alternatively, edit `alembic.ini` and set `sqlalchemy.url`.
