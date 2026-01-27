@@ -246,8 +246,9 @@ def run(
                 user=db_user,
                 password=db_password,
             )
+            storage.initialize()
             storages.append(storage)
-            console.print("[green]Initialized postgres storage backend[/green]")
+            console.print(f"[green]Connected to postgres storage:[/green] {db_host}:{db_port}/{db_name}")
         except ImportError as e:
             console.print(f"[red]Storage backend error:[/red] {e}")
             raise SystemExit(1) from None

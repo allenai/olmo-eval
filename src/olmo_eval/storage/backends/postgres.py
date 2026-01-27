@@ -61,6 +61,13 @@ class PostgresBackend(StorageBackend):
             echo=echo,
         )
 
+    def initialize(self) -> None:
+        """Initialize the database connection.
+
+        Must be called before any database operations (save, get, query, delete).
+        """
+        self.db.initialize()
+
     def save(self, result: EvalResult) -> str:
         """Save an evaluation result to PostgreSQL.
 
