@@ -353,13 +353,13 @@ def launch(
     multiple_models = len(model_configs) > 1
     multiple_priorities = len(tasks_by_priority) > 1
 
-    # Auto-detect S3 model paths for AWS credential injection
+    # Auto-detect when AWS credentials are needed
     from olmo_eval.launch.aws import get_local_aws_credentials, is_s3_path
 
     s3_models = [m.name_or_path for m in model_configs if is_s3_path(m.name_or_path)]
     inject_aws_credentials = aws_credentials
     if inject_aws_credentials is None:
-        inject_aws_credentials = bool(s3_models)
+        inject_aws_credentials = bool(s3_models) or store
 
     if inject_aws_credentials:
         local_creds = get_local_aws_credentials()
