@@ -26,7 +26,7 @@ class Experiment(Base):
 
     # Model identification
     model_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    model_hash: Mapped[str | None] = mapped_column(String(64), index=True)  # Hash of model config
+    model_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)  # Hash of model config
     backend_name: Mapped[str] = mapped_column(String(50), nullable=False)
 
     # Timestamp
@@ -35,14 +35,14 @@ class Experiment(Base):
     )
 
     # Experiment metadata
-    experiment_name: Mapped[str | None] = mapped_column(String(255))
-    workspace: Mapped[str | None] = mapped_column(String(255))
-    author: Mapped[str | None] = mapped_column(String(100), index=True)
-    tags: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
+    experiment_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    workspace: Mapped[str] = mapped_column(String(255), nullable=False)
+    author: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    tags: Mapped[list[str] | None] = mapped_column(ARRAY(Text))  # Only tags can be null
 
     # Version tracking
-    git_ref: Mapped[str | None] = mapped_column(String(100))
-    revision: Mapped[str | None] = mapped_column(String(255))
+    git_ref: Mapped[str] = mapped_column(String(100), nullable=False)
+    revision: Mapped[str] = mapped_column(String(255), nullable=False)
 
     # S3 reference for full evaluation data
     s3_location: Mapped[str | None] = mapped_column(String(512))

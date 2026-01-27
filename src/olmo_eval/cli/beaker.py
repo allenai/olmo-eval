@@ -97,6 +97,7 @@ def beaker() -> None:
 @click.option("--num-workers", "-W", type=int, help="Number of workers for async mode")
 @click.option("--gpus-per-worker", type=int, default=1, help="GPUs per worker for async mode")
 @click.option("--dry-run", "-d", is_flag=True, help="Print spec without launching")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
 @click.option(
     "--follow/--no-follow",
     default=True,
@@ -157,6 +158,7 @@ def launch(
     num_workers: int | None,
     gpus_per_worker: int,
     dry_run: bool,
+    yes: bool,
     follow: bool,
     aws_credentials: bool | None,
     gcs_credentials: bool | None,
@@ -938,7 +940,7 @@ def launch(
         )
 
     # Confirm before launching
-    if not dry_run and not click.confirm("Proceed with launch?", default=True):
+    if not dry_run and not yes and not click.confirm("Proceed with launch?", default=True):
         console.print("[yellow]Launch cancelled[/yellow]")
         raise SystemExit(0)
 

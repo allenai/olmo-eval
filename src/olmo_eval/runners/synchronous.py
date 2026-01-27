@@ -167,6 +167,8 @@ class SyncEvalRunner(RunnerResultsMixin):
             }
             if task_result.primary_metric:
                 task_data["primary_metric"] = task_result.primary_metric
+            if task_result.predictions:
+                task_data["predictions"] = task_result.predictions
             results["tasks"][spec] = task_data
 
             # Compute task hash from config
@@ -194,23 +196,32 @@ class SyncEvalRunner(RunnerResultsMixin):
 
         # Log summary of all scores
         self._log_summary(results)
-        self._save_results(results)
 
         # Write metrics.json for Beaker
         self._write_metrics_json(results)
 
-        # Upload to S3 if configured
-        if self.s3_config:
-            from olmo_eval.core.types import compute_model_hash
+        # Compute experiment_id and model_hash upfront for both S3 and storage
+        from olmo_eval.core.types import compute_model_hash
 
-            model_hash = compute_model_hash(results.get("_model_config", {}))
-            if model_hash:
-                experiment_id = generate_experiment_id()
-                self._upload_to_s3(
-                    model_name=results["model"],
-                    model_hash=model_hash,
-                    experiment_id=experiment_id,
-                )
+        experiment_id = generate_experiment_id()
+        model_hash = compute_model_hash(results.get("_model_config", {}))
+        s3_location: str | None = None
+
+        # Upload to S3 first if configured (so we have s3_location for storage)
+        if self.s3_config and model_hash:
+            s3_location = self._upload_to_s3(
+                model_name=results["model"],
+                model_hash=model_hash,
+                experiment_id=experiment_id,
+            )
+
+        # Save to storage backends with all context
+        self._save_results(
+            results,
+            experiment_id=experiment_id,
+            model_hash=model_hash,
+            s3_location=s3_location,
+        )
 
         return results
 

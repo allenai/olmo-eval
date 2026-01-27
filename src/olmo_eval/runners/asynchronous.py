@@ -1074,6 +1074,8 @@ class AsyncEvalRunner(AsyncRunnerMixin):
                         }
                         if task_result.primary_metric:
                             task_data["primary_metric"] = task_result.primary_metric
+                        if task_result.predictions:
+                            task_data["predictions"] = task_result.predictions
                         model_results["tasks"][spec] = task_data
 
             # Store model config details for metrics.json
@@ -1096,25 +1098,31 @@ class AsyncEvalRunner(AsyncRunnerMixin):
         # Log summary of all scores
         self._log_summary(results_dict, multi_model=True)
 
-        # Save results
-        self._save_results(results_dict)
-
         # Write metrics.json for Beaker
         self._write_metrics_json(results_dict, multi_model=True)
 
-        # Upload to S3 if configured (upload per model)
-        if self.s3_config:
-            from olmo_eval.core.types import compute_model_hash
+        # Compute experiment_id, model_hash, and upload to S3 first (so we have s3_location for storage)
+        from olmo_eval.core.types import compute_model_hash
 
-            for model_name, model_data in results_dict.get("models", {}).items():
-                model_hash = compute_model_hash(model_data.get("_model_config", {}))
-                if model_hash:
-                    experiment_id = generate_experiment_id()
-                    self._upload_to_s3(
-                        model_name=model_name,
-                        model_hash=model_hash,
-                        experiment_id=experiment_id,
-                    )
+        for model_name, model_data in results_dict.get("models", {}).items():
+            experiment_id = generate_experiment_id()
+            model_hash = compute_model_hash(model_data.get("_model_config", {}))
+            s3_location: str | None = None
+
+            if self.s3_config and model_hash:
+                s3_location = self._upload_to_s3(
+                    model_name=model_name,
+                    model_hash=model_hash,
+                    experiment_id=experiment_id,
+                )
+
+            # Store these in model_data so _save_results can use them
+            model_data["_experiment_id"] = experiment_id
+            model_data["_model_hash"] = model_hash
+            model_data["_s3_location"] = s3_location
+
+        # Save results with all context
+        self._save_results(results_dict)
 
         return results_dict
 
@@ -1499,6 +1507,8 @@ class StreamingEvalRunner(AsyncRunnerMixin):
                         }
                         if task_result.primary_metric:
                             task_data["primary_metric"] = task_result.primary_metric
+                        if task_result.predictions:
+                            task_data["predictions"] = task_result.predictions
                         model_results["tasks"][spec] = task_data
 
             # Store model config details for metrics.json
@@ -1519,22 +1529,30 @@ class StreamingEvalRunner(AsyncRunnerMixin):
                 model_results["suites"] = suite_aggs
 
         self._log_summary(results_dict, multi_model=True)
-        self._save_results(results_dict)
         self._write_metrics_json(results_dict, multi_model=True)
 
-        # Upload to S3 if configured (upload per model)
-        if self.s3_config:
-            from olmo_eval.core.types import compute_model_hash
+        # Compute experiment_id, model_hash, and upload to S3 first (so we have s3_location for storage)
+        from olmo_eval.core.types import compute_model_hash
 
-            for model_name, model_data in results_dict.get("models", {}).items():
-                model_hash = compute_model_hash(model_data.get("_model_config", {}))
-                if model_hash:
-                    experiment_id = generate_experiment_id()
-                    self._upload_to_s3(
-                        model_name=model_name,
-                        model_hash=model_hash,
-                        experiment_id=experiment_id,
-                    )
+        for model_name, model_data in results_dict.get("models", {}).items():
+            experiment_id = generate_experiment_id()
+            model_hash = compute_model_hash(model_data.get("_model_config", {}))
+            s3_location: str | None = None
+
+            if self.s3_config and model_hash:
+                s3_location = self._upload_to_s3(
+                    model_name=model_name,
+                    model_hash=model_hash,
+                    experiment_id=experiment_id,
+                )
+
+            # Store these in model_data so _save_results can use them
+            model_data["_experiment_id"] = experiment_id
+            model_data["_model_hash"] = model_hash
+            model_data["_s3_location"] = s3_location
+
+        # Save results with all context
+        self._save_results(results_dict)
 
         return results_dict
 

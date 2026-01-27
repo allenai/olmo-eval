@@ -19,11 +19,17 @@ class StorageBackend(ABC):
     """Abstract base class for result storage backends."""
 
     @abstractmethod
-    def save(self, result: EvalResult) -> str:
+    def save(
+        self,
+        result: EvalResult,
+        instances_by_task: dict[str, list[dict[str, Any]]] | None = None,
+    ) -> str:
         """Save an evaluation result.
 
         Args:
             result: The evaluation result to save.
+            instances_by_task: Optional dict mapping task_name -> list of instance dicts.
+                Each instance dict should have native_id, doc_id, instance_metrics, etc.
 
         Returns:
             The experiment_id of the saved result.

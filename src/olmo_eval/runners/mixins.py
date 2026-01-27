@@ -254,12 +254,24 @@ class RunnerResultsMixin:
 
         return errors
 
-    def _save_results(self, results: dict[str, Any]) -> None:
+    def _save_results(
+        self,
+        results: dict[str, Any],
+        experiment_id: str | None = None,
+        model_hash: str | None = None,
+        s3_location: str | None = None,
+    ) -> None:
         """Save results to all configured storage backends.
 
         Handles both single-model results (with 'model' key) and multi-model
         results (with 'models' dict). For multi-model results, saves each
         model's results separately.
+
+        Args:
+            results: The results dict from the runner.
+            experiment_id: Pre-generated experiment ID (for single-model only).
+            model_hash: Model configuration hash (for single-model only).
+            s3_location: S3 location where results were uploaded (for single-model only).
         """
         if not self.storages:
             logger.info("No storage backend configured; skipping results save.")
@@ -270,7 +282,9 @@ class RunnerResultsMixin:
         # Determine if this is multi-model or single-model results
         if "models" in results:
             # Multi-model async results - save each model separately
-            models_to_save = []
+            # For multi-model, we ignore the passed experiment_id/model_hash/s3_location
+            # as each model needs its own values
+            models_to_save: list[tuple[str, dict[str, Any], str, str | None, str | None]] = []
             for model_name, model_data in results["models"].items():
                 # Build single-model results dict from multi-model structure
                 single_model_results = {
@@ -281,41 +295,60 @@ class RunnerResultsMixin:
                     "suites": model_data.get("suites"),
                     "_model_config": model_data.get("_model_config"),
                 }
-                models_to_save.append((model_name, single_model_results))
+                # For multi-model, get per-model values from model_data if available
+                m_experiment_id = model_data.get("_experiment_id") or generate_experiment_id()
+                m_model_hash = model_data.get("_model_hash")
+                m_s3_location = model_data.get("_s3_location")
+                models_to_save.append(
+                    (model_name, single_model_results, m_experiment_id, m_model_hash, m_s3_location)
+                )
             logger.info(f"Saving results for {len(models_to_save)} model(s) to storage")
         else:
-            # Single-model results
-            models_to_save = [(results.get("model", "unknown"), results)]
+            # Single-model results - use passed values or generate
+            exp_id = experiment_id or generate_experiment_id()
+            models_to_save = [(results.get("model", "unknown"), results, exp_id, model_hash, s3_location)]
             logger.info(f"Saving results for model '{results.get('model')}' to storage")
 
-        for model_name, model_results in models_to_save:
-            experiment_id = generate_experiment_id()
+        for model_name, model_results, exp_id, m_hash, s3_loc in models_to_save:
             task_count = len(model_results.get("tasks", {}))
             logger.info(
                 f"Converting results: model={model_name}, tasks={task_count}, "
-                f"experiment_id={experiment_id}"
+                f"experiment_id={exp_id}"
             )
 
             try:
-                eval_result = convert_runner_results(model_results, experiment_id)
+                eval_result = convert_runner_results(
+                    model_results,
+                    exp_id,
+                    s3_location=s3_loc,
+                    model_hash=m_hash,
+                )
                 logger.info(f"Converted results for {model_name}, saving to {len(self.storages)} backend(s)")
             except Exception as e:
                 logger.error(f"Failed to convert results for {model_name}: {e}")
                 console.print(f"[red]Failed to convert results for {model_name}: {e}[/red]")
                 continue
 
+            # Build instances_by_task from predictions in model_results
+            instances_by_task: dict[str, list[dict[str, Any]]] = {}
+            for task_name, task_data in model_results.get("tasks", {}).items():
+                predictions = task_data.get("predictions")
+                if predictions:
+                    instances_by_task[task_name] = predictions
+
             for storage in self.storages:
                 backend_name = type(storage).__name__
                 logger.info(f"Saving to {backend_name}...")
                 try:
-                    storage.save(eval_result)
+                    storage.save(eval_result, instances_by_task if instances_by_task else None)
                     logger.info(
                         f"Saved to {backend_name}: model={model_name}, "
-                        f"experiment_id={experiment_id}, tasks={task_count}"
+                        f"experiment_id={exp_id}, tasks={task_count}"
                     )
+                    instance_count = sum(len(preds) for preds in instances_by_task.values())
                     console.print(
                         f"[green]Saved to {backend_name}:[/green] {model_name} "
-                        f"({task_count} tasks, id={experiment_id})"
+                        f"({task_count} tasks, {instance_count} instances, id={exp_id})"
                     )
                 except Exception as e:
                     logger.error(f"Failed to save to {backend_name}: {e}")
@@ -417,7 +450,6 @@ class RunnerResultsMixin:
             )
         else:
             logger.info(f"Uploaded {uploaded_count} files to S3: {s3_location}")
-            console.print(f"[green]Uploaded {uploaded_count} files to S3:[/green] {s3_location}")
 
         return s3_location if uploaded_count > 0 else None
 

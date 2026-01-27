@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from typing import Any
 
 from olmo_eval.core.types import EvalResult
 from olmo_eval.storage.base import StorageBackend
@@ -68,18 +69,27 @@ class PostgresBackend(StorageBackend):
         """
         self.db.initialize()
 
-    def save(self, result: EvalResult) -> str:
+    def save(
+        self,
+        result: EvalResult,
+        instances_by_task: dict[str, list[dict[str, Any]]] | None = None,
+    ) -> str:
         """Save an evaluation result to PostgreSQL.
 
         Args:
             result: EvalResult dataclass containing run data.
+            instances_by_task: Optional dict mapping task_name -> list of instance dicts.
+                Each instance dict should have native_id, doc_id, instance_metrics, etc.
 
         Returns:
             The experiment_id of the saved evaluation.
         """
         with self.db.session() as session:
             helper = QueryHelper(session)
-            experiment_id = helper.save(result)
+            if instances_by_task:
+                experiment_id = helper.save_with_instances(result, instances_by_task)
+            else:
+                experiment_id = helper.save(result)
             logger.debug(f"Saved experiment {experiment_id}")
             return experiment_id
 

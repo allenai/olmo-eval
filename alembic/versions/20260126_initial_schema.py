@@ -18,19 +18,20 @@ depends_on = None
 
 def upgrade() -> None:
     # Create experiments table
+    # NOTE: Schema should match olmo_eval.storage.db.models.Experiment
     op.create_table(
         'experiments',
         sa.Column('experiment_id', sa.String(length=64), nullable=False),
         sa.Column('model_name', sa.String(length=255), nullable=False),
-        sa.Column('model_hash', sa.String(length=64), nullable=True),
+        sa.Column('model_hash', sa.String(length=64), nullable=False),
         sa.Column('backend_name', sa.String(length=50), nullable=False),
         sa.Column('timestamp', sa.TIMESTAMP(timezone=True), nullable=False),
-        sa.Column('experiment_name', sa.String(length=255), nullable=True),
-        sa.Column('workspace', sa.String(length=100), nullable=True),
-        sa.Column('author', sa.String(length=100), nullable=True),
-        sa.Column('tags', postgresql.ARRAY(sa.Text()), nullable=True),
-        sa.Column('git_ref', sa.String(length=100), nullable=True),
-        sa.Column('revision', sa.String(length=255), nullable=True),
+        sa.Column('experiment_name', sa.String(length=255), nullable=False),
+        sa.Column('workspace', sa.String(length=255), nullable=False),
+        sa.Column('author', sa.String(length=100), nullable=False),
+        sa.Column('tags', postgresql.ARRAY(sa.Text()), nullable=True),  # Only tags can be null
+        sa.Column('git_ref', sa.String(length=100), nullable=False),
+        sa.Column('revision', sa.String(length=255), nullable=False),
         sa.Column('s3_location', sa.String(length=512), nullable=True),
         sa.Column('config', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column('metadata', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
