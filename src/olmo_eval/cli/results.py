@@ -650,9 +650,9 @@ def _download_s3_files(
 @click.option(
     "--limit",
     "-n",
-    default=100,
+    default=None,
     type=int,
-    help="Maximum results to return (applies to instances).",
+    help="Maximum instances to return (default: no limit).",
 )
 @click.option(
     "--after-id",

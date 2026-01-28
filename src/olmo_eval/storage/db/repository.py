@@ -595,9 +595,6 @@ class InstancePredictionRepository:
         Returns:
             List of instance dicts with task_name and model_hash included.
         """
-        # Determine required joins based on filters
-        needs_experiment_join = bool(experiment_ids or model_names or model_hashes)
-
         # Build select - always include task_name and model_hash for consistency
         columns = [
             InstancePrediction.id,
@@ -605,9 +602,8 @@ class InstancePredictionRepository:
             InstancePrediction.native_id,
             InstancePrediction.instance_metrics,
             TaskResult.task_name,
+            Experiment.model_hash,
         ]
-        if needs_experiment_join:
-            columns.append(Experiment.model_hash)
 
         stmt = select(*columns)
 
@@ -620,9 +616,8 @@ class InstancePredictionRepository:
             ),
         )
 
-        # Join Experiment if needed for model/experiment_id filters
-        if needs_experiment_join:
-            stmt = stmt.join(Experiment, Experiment.id == InstancePrediction.experiment_pk)
+        # Always join Experiment to get model_hash
+        stmt = stmt.join(Experiment, Experiment.id == InstancePrediction.experiment_pk)
 
         # Apply filters - all compose with AND
         if after_id is not None:
@@ -653,16 +648,14 @@ class InstancePredictionRepository:
         # Build result dicts with consistent schema
         output = []
         for row in results:
-            d: dict[str, Any] = {
+            output.append({
                 "id": row.id,
                 "task_hash": row.task_hash,
                 "task_name": row.task_name,
                 "native_id": row.native_id,
                 "instance_metrics": row.instance_metrics,
-            }
-            if needs_experiment_join:
-                d["model_hash"] = row.model_hash
-            output.append(d)
+                "model_hash": row.model_hash,
+            })
 
         return output
 
