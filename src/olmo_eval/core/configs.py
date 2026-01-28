@@ -118,17 +118,6 @@ def validate_tasks(tasks: list[str]) -> tuple[list[str], list[str]]:
     return valid_tasks, invalid_tasks
 
 
-def _parse_int_override(value: Any) -> int | None:
-    """Parse an override value as int, handling string conversion."""
-    if value is None:
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        return int(value)
-    return int(value)
-
-
 # Keys that are vLLM/backend-specific and should not be passed to ModelConfig
 # These are handled separately by the runners
 _BACKEND_ONLY_KEYS = {"load_format", "extra_loader_config", "attention_backend", "gpus_per_worker"}
@@ -153,15 +142,6 @@ def get_model_config(name: str, **overrides: Any) -> ModelConfig:
     if name in models:
         base = models[name]
         if filtered_overrides:
-            # Parse max_model_len as int if present (inline overrides come as strings)
-            max_model_len_override = filtered_overrides.get("max_model_len")
-            effective_max_model_len = (
-                _parse_int_override(max_model_len_override)
-                if max_model_len_override is not None
-                else base.max_model_len
-            )
-
-            # Create new config with overrides
             return ModelConfig(
                 model=filtered_overrides.get("model", base.model),
                 tokenizer=filtered_overrides.get("tokenizer", base.tokenizer),
@@ -171,14 +151,9 @@ def get_model_config(name: str, **overrides: Any) -> ModelConfig:
                     "trust_remote_code", base.trust_remote_code
                 ),
                 dtype=filtered_overrides.get("dtype", base.dtype),
-                max_model_len=effective_max_model_len,
+                max_model_len=filtered_overrides.get("max_model_len", base.max_model_len),
                 extra_args={**base.extra_args, **filtered_overrides.get("extra_args", {})},
             )
         return base
 
-    # Treat as HuggingFace model path - parse max_model_len if present
-    if "max_model_len" in filtered_overrides:
-        filtered_overrides["max_model_len"] = _parse_int_override(
-            filtered_overrides["max_model_len"]
-        )
     return ModelConfig(model=name, **filtered_overrides)
