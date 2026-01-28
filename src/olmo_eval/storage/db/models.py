@@ -56,6 +56,9 @@ class Experiment(Base):
     # S3 reference for full evaluation data
     s3_location: Mapped[str | None] = mapped_column(String(512))
 
+    # Original model path (when alias is used, model_name is the alias)
+    model_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
     # Flexible storage (JSONB for efficient querying)
     metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSONB)
 

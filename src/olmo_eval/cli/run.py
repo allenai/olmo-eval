@@ -128,6 +128,11 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
     "--experiment-name",
     help="Human-readable experiment name for database storage",
 )
+@click.option(
+    "--alias",
+    "-a",
+    help="Short name for model (used as model_name in DB, original path stored as model_path)",
+)
 def run(
     models: tuple[str, ...],
     task: tuple[str, ...],
@@ -156,6 +161,7 @@ def run(
     db_user: str,
     db_password: str,
     experiment_name: str | None,
+    alias: str | None,
 ) -> None:
     """Run evaluation on specified tasks.
 
@@ -333,6 +339,7 @@ def run(
             model_overrides=per_model_overrides,
             s3_config=s3_config,
             experiment_name=experiment_name,
+            alias=alias,
         )
     elif use_async:
         from olmo_eval.runners.asynchronous import AsyncEvalRunner
@@ -356,6 +363,7 @@ def run(
             model_overrides=per_model_overrides,
             s3_config=s3_config,
             experiment_name=experiment_name,
+            alias=alias,
         )
     else:
         # Sequential runner - run each model in sequence
@@ -389,6 +397,7 @@ def run(
                 model_overrides=model_overrides,
                 s3_config=s3_config,
                 experiment_name=experiment_name,
+                alias=alias,
             )
 
             try:

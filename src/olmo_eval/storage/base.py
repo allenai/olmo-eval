@@ -95,6 +95,7 @@ def convert_runner_results(
     model_hash: str | None = None,
     revision: str | None = None,
     tags: list[str] | None = None,
+    model_path: str | None = None,
 ) -> EvalResult:
     """Convert EvalRunner results dict to EvalResult.
 
@@ -176,4 +177,5 @@ def convert_runner_results(
         s3_location=s3_location,
         model_config=results.get("model_config"),
         metadata=results.get("metadata"),
+        model_path=model_path,
     )

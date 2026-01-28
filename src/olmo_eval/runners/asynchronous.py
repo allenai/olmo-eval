@@ -739,6 +739,11 @@ class AsyncEvalRunner(AsyncRunnerMixin):
     # Experiment name for database storage
     experiment_name: str | None = None
 
+    # Model alias (short name used as model_name in DB)
+    # When running via beaker, each model gets its own CLI invocation with --alias
+    # For direct CLI with multiple -m flags, alias applies to single-model runs only
+    alias: str | None = None
+
     # Configuration for print_config display
     _mode_name: str = "Async Mode"
     _mode_description: str = "Async (All-at-once)"
@@ -1046,12 +1051,21 @@ class AsyncEvalRunner(AsyncRunnerMixin):
             "errors": [],
         }
 
+        from olmo_eval.runners.mixins import sanitize_model_name
+
         for model_name in self.model_names:
             model_config = model_configs[model_name]
             backend_type = BackendType(model_config.backend)
 
+            # Use alias for model name if provided and single model, else sanitize
+            if self.alias and len(self.model_names) == 1:
+                display_model_name = self.alias
+            else:
+                display_model_name = sanitize_model_name(model_config.model)
+
             model_results: dict[str, Any] = {
-                "model": model_config.model,
+                "model": display_model_name,
+                "model_path": model_config.model,  # Original full path
                 "backend": backend_type.value,
                 "tasks": {},
             }
@@ -1195,6 +1209,11 @@ class StreamingEvalRunner(AsyncRunnerMixin):
 
     # Experiment name for database storage
     experiment_name: str | None = None
+
+    # Model alias (short name used as model_name in DB)
+    # When running via beaker, each model gets its own CLI invocation with --alias
+    # For direct CLI with multiple -m flags, alias applies to single-model runs only
+    alias: str | None = None
 
     # Configuration for print_config display
     _mode_name: str = "Streaming Mode"
@@ -1487,11 +1506,20 @@ class StreamingEvalRunner(AsyncRunnerMixin):
             "errors": [],
         }
 
+        from olmo_eval.runners.mixins import sanitize_model_name
+
         for model_name in self.model_names:
             model_config = model_configs[model_name]
 
+            # Use alias for model name if provided and single model, else sanitize
+            if self.alias and len(self.model_names) == 1:
+                display_model_name = self.alias
+            else:
+                display_model_name = sanitize_model_name(model_config.model)
+
             model_results: dict[str, Any] = {
-                "model": model_config.model,
+                "model": display_model_name,
+                "model_path": model_config.model,  # Original full path
                 "backend": "vllm",
                 "tasks": {},
             }

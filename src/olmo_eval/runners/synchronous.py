@@ -61,6 +61,9 @@ class SyncEvalRunner(RunnerResultsMixin):
     # Experiment name for database storage
     experiment_name: str | None = None
 
+    # Model alias (short name used as model_name in DB, original path stored as model_path)
+    alias: str | None = None
+
     def validate(self) -> None:
         """Validate all inputs before running.
 
@@ -143,8 +146,15 @@ class SyncEvalRunner(RunnerResultsMixin):
         )
 
         expanded_tasks = expand_tasks(self.task_specs)
+
+        # Determine model name for results (use alias if provided, else sanitize the path)
+        from olmo_eval.runners.mixins import sanitize_model_name
+
+        display_model_name = self.alias if self.alias else sanitize_model_name(model_config.model)
+
         results: dict[str, Any] = {
-            "model": model_config.model,
+            "model": display_model_name,
+            "model_path": model_config.model,  # Original full path
             "backend": backend_type.value,
             "timestamp": datetime.now().isoformat(),
             "tasks": {},

@@ -50,6 +50,7 @@ class ExperimentRepository:
             git_ref=eval_result.git_ref,
             revision=eval_result.revision,
             s3_location=eval_result.s3_location,
+            model_path=eval_result.model_path,
             metadata_=eval_result.metadata,
         )
         self.session.add(experiment)
@@ -240,6 +241,7 @@ class ExperimentRepository:
             s3_location=experiment.s3_location,
             model_config=experiment.model_config,
             metadata=experiment.metadata_,
+            model_path=experiment.model_path,
         )
 
 

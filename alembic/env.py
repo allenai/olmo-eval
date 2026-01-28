@@ -91,6 +91,8 @@ def run_migrations_online() -> None:
     """
     # Get database URL (from environment or config)
     url = get_url_from_env() or config.get_main_option("sqlalchemy.url")
+    if not url:
+        raise RuntimeError("No database URL configured. Set OLMO_EVAL_DB_URL or sqlalchemy.url")
 
     # Update config with URL
     configuration = config.get_section(config.config_ini_section, {})

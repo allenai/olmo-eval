@@ -295,6 +295,7 @@ class RunnerResultsMixin:
                 # Build single-model results dict from multi-model structure
                 single_model_results = {
                     "model": model_data.get("model", model_name),
+                    "model_path": model_data.get("model_path"),  # Original full path
                     "backend": model_data.get("backend", "unknown"),
                     "timestamp": results.get("timestamp"),
                     "tasks": model_data.get("tasks", {}),
@@ -348,6 +349,7 @@ class RunnerResultsMixin:
                     git_ref=git_ref,
                     model_hash=m_hash,
                     revision=revision,
+                    model_path=model_results.get("model_path"),
                 )
                 logger.info(
                     f"Converted results for {model_name}, saving to {len(self.storages)} backend(s)"

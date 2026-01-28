@@ -806,6 +806,10 @@ def launch(
         for t in task_list:
             command.extend(["-t", t])
 
+        # Add alias if defined in model config
+        if model_cfg.alias:
+            command.extend(["--alias", model_cfg.alias])
+
         # Add parallelism if > 1
         if exp_parallelism > 1:
             command.extend(["--parallelism", str(exp_parallelism)])
