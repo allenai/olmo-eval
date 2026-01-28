@@ -734,7 +734,7 @@ def query(
 
             # Fetch experiments based on filters
             all_experiments = _query_experiments(
-                helper, repo, experiment_ids, model_names, model_hashes, task_names
+                helper, repo, experiment_ids, model_names, model_hashes, task_names, task_hash
             )
             if not all_experiments:
                 console.print("[dim]No results found.[/dim]")
@@ -742,6 +742,25 @@ def query(
 
             # Comparison mode: no experiment IDs specified
             is_comparison = not experiment_ids
+
+            # Filter experiments by model_hashes if specified
+            if model_hashes:
+                model_hash_set = set(model_hashes)
+                all_experiments = [
+                    exp for exp in all_experiments if exp.model_hash in model_hash_set
+                ]
+
+            # Filter tasks within experiments by task_hash or task_names
+            if task_hash or task_names:
+                task_name_set = set(task_names) if task_names else None
+                for exp in all_experiments:
+                    exp.tasks = [
+                        t
+                        for t in exp.tasks
+                        if (task_hash is None or t.task_hash == task_hash)
+                        and (task_name_set is None or t.task_name in task_name_set)
+                    ]
+
             task_filter = set(task_names) if task_names else None
 
             # Fetch instances if requested
@@ -813,6 +832,7 @@ def _query_experiments(
     model_names: tuple[str, ...],
     model_hashes: tuple[str, ...],
     task_names: tuple[str, ...],
+    task_hash: str | None = None,
 ) -> list[Any]:
     """Query experiments based on provided filters."""
     results: list[Any] = []
@@ -830,7 +850,7 @@ def _query_experiments(
     # Query by each filter type
     query_with_warning(experiment_ids, helper.get_by_experiment_id, FilterType.EXPERIMENT_ID)
     query_with_warning(
-        model_names, lambda x: repo.query(model_name=x, limit=1000), FilterType.MODEL_NAME
+        model_names, lambda x: repo.query(model_name=x), FilterType.MODEL_NAME
     )
     query_with_warning(
         model_hashes, lambda x: repo.query(model_hash=x, latest=True), FilterType.MODEL_HASH
@@ -839,8 +859,15 @@ def _query_experiments(
     # Task-only query (no model filters)
     if task_names and not model_names and not model_hashes:
         query_with_warning(
-            task_names, lambda x: repo.query(task_name=x, limit=100), FilterType.TASK_NAME
+            task_names, lambda x: repo.query(task_name=x), FilterType.TASK_NAME
         )
+
+    # Task hash query (if no results yet from other filters)
+    if task_hash and not results:
+        exps = repo.query(task_hash=task_hash)
+        if not exps:
+            console.print(f"[yellow]Warning:[/yellow] No experiments found with task_hash='{task_hash}'")
+        results.extend(exps)
 
     return results
 
@@ -919,18 +946,79 @@ def _output_results(
             console.print("\n[dim]No instance predictions found.[/dim]")
 
 
+def _print_experiment_summary(experiments: list[Any]) -> None:
+    """Print a unified experiment summary grouping by experiment_id.
+
+    Shows shared experiment details once, then lists models and tasks.
+    """
+    from collections import defaultdict
+
+    # Group experiments by experiment_id
+    by_exp_id: dict[str, list[Any]] = defaultdict(list)
+    for exp in experiments:
+        by_exp_id[exp.experiment_id].append(exp)
+
+    for exp_id, exp_group in by_exp_id.items():
+        first_exp = exp_group[0]
+
+        # Build unified summary table
+        table = Table(
+            title=f"Experiment: {exp_id}",
+            show_header=False,
+            box=None,
+            padding=(0, 2),
+            collapse_padding=True,
+        )
+        table.add_column("Field", style="bold", width=12)
+        table.add_column("Value")
+
+        # Global experiment fields
+        if first_exp.experiment_name:
+            table.add_row("Name", first_exp.experiment_name)
+        if first_exp.experiment_group:
+            table.add_row("Group", first_exp.experiment_group)
+        if first_exp.workspace:
+            table.add_row("Workspace", first_exp.workspace)
+        if first_exp.author:
+            table.add_row("Author", first_exp.author)
+        if first_exp.timestamp:
+            table.add_row("Timestamp", format_timestamp(first_exp.timestamp))
+        if first_exp.git_ref:
+            table.add_row("Git Ref", first_exp.git_ref)
+        if first_exp.revision and first_exp.revision != "unknown":
+            table.add_row("Revision", first_exp.revision)
+        if first_exp.tags:
+            table.add_row("Tags", ", ".join(first_exp.tags))
+        if first_exp.s3_location:
+            table.add_row("S3 Location", first_exp.s3_location)
+
+        # Models section
+        table.add_row("", "")  # Spacer
+        table.add_row("Models", f"[dim]({len(exp_group)} total)[/dim]")
+        for exp in exp_group:
+            hash_str = f"[dim]({exp.model_hash[:8]})[/dim]" if exp.model_hash else ""
+            table.add_row("", f"  {exp.model_name} {hash_str}")
+
+        # Tasks section - collect unique tasks across all models
+        tasks_seen: dict[str, str] = {}  # task_name -> task_hash
+        for exp in exp_group:
+            for task in exp.tasks:
+                if task.task_name not in tasks_seen:
+                    tasks_seen[task.task_name] = task.task_hash or ""
+
+        if tasks_seen:
+            table.add_row("", "")  # Spacer
+            table.add_row("Tasks", f"[dim]({len(tasks_seen)} total)[/dim]")
+            for task_name in sorted(tasks_seen.keys()):
+                task_hash = tasks_seen[task_name]
+                hash_str = f"[dim]({task_hash[:8]})[/dim]" if task_hash else ""
+                table.add_row("", f"  {task_name} {hash_str}")
+
+        console.print(table)
+        console.print()
+
+
 def _print_experiments_table(experiments: list[Any], task_filter: set[str] | None) -> None:
     """Print experiments in table format with details."""
-    if len(experiments) > 1:
-        console.print(f"[bold]Found {len(experiments)} experiment(s)[/bold]\n")
-
-    for i, experiment in enumerate(experiments):
-        if len(experiments) > 1:
-            console.print(f"[bold cyan]--- Experiment {i + 1}/{len(experiments)} ---[/bold cyan]")
-
-        print_experiment_detail(experiment)
-        console.print()
-        print_task_results_table(experiment.tasks, task_filter)
-
-        if i < len(experiments) - 1:
-            console.print()
+    # Use unified summary view for experiment queries
+    _print_experiment_summary(experiments)

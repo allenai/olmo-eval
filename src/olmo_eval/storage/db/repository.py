@@ -146,10 +146,11 @@ class ExperimentRepository:
         model_name: str | None = None,
         model_hash: str | None = None,
         task_name: str | None = None,
+        task_hash: str | None = None,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
         latest: bool = False,
-        limit: int = 100,
+        limit: int | None = None,
         offset: int = 0,
     ) -> list[EvalResult]:
         """Query evaluation experiments with filters.
@@ -158,10 +159,11 @@ class ExperimentRepository:
             model_name: Filter by model name (exact match).
             model_hash: Filter by model hash (hash of model config).
             task_name: Filter by task name (experiments containing this task).
+            task_hash: Filter by task hash (experiments containing this task config).
             start_time: Filter by timestamp >= start_time.
             end_time: Filter by timestamp <= end_time.
             latest: If True, return only the most recent result (limit=1).
-            limit: Maximum number of results to return.
+            limit: Maximum number of results to return (None = unlimited).
             offset: Number of results to skip (for pagination).
 
         Returns:
@@ -192,13 +194,24 @@ class ExperimentRepository:
                 .where(TaskResult.task_name == task_name)
             )
 
+        if task_hash:
+            # Subquery to find experiment ids that have this task hash
+            from sqlalchemy import exists
+
+            stmt = stmt.where(
+                exists()
+                .where(TaskResult.experiment_pk == Experiment.id)
+                .where(TaskResult.task_hash == task_hash)
+            )
+
         # Order by timestamp descending (most recent first)
         stmt = stmt.order_by(Experiment.timestamp.desc())
 
         # Apply pagination (latest overrides limit)
-        effective_limit = 1 if latest else limit
-        stmt = stmt.limit(effective_limit)
-        if not latest:
+        if latest:
+            stmt = stmt.limit(1)
+        elif limit is not None:
+            stmt = stmt.limit(limit)
             stmt = stmt.offset(offset)
 
         # Execute query
