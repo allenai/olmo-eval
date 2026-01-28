@@ -90,8 +90,7 @@ class LiteLLMBackend(Backend):
             logprobs_data = getattr(choice, "logprobs", None)
             if logprobs_data and hasattr(logprobs_data, "content") and logprobs_data.content:
                 logprob_entries = [
-                    LogProbEntry(token=lp.token, logprob=lp.logprob)
-                    for lp in logprobs_data.content
+                    LogProbEntry(token=lp.token, logprob=lp.logprob) for lp in logprobs_data.content
                 ]
 
             outputs.append(LMOutput(text=text, logprobs=logprob_entries))
