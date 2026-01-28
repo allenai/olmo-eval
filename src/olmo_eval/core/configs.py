@@ -3,23 +3,30 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
+from olmo_eval.core.literals import BackendLiteral, DtypeLiteral
 
 
 @dataclass
 class ModelConfig:
-    """Model/backend configuration."""
+    """Core model configuration for inference.
+
+    Note: There are multiple ModelConfig classes with different purposes:
+    - core/configs.py:ModelConfig (this one) - Core model config for inference
+    - launch/config.py:ModelConfig - Beaker launch config with resource settings
+    - runners/mixins.py:ModelConfig - Metrics output format for JSON serialization
+    """
 
     model: str
     tokenizer: str | None = None  # Tokenizer path/identifier, defaults to model if None
-    backend: str = "vllm"  # BackendType value as string to avoid circular import
+    backend: BackendLiteral = "vllm"
     revision: str | None = None
     trust_remote_code: bool = False
-    dtype: str = "auto"
+    dtype: DtypeLiteral = "auto"
     max_model_len: int | None = None  # Override model's default context length (vLLM)
     extra_args: dict[str, Any] = field(default_factory=dict)
 
@@ -31,7 +38,7 @@ class RunConfig:
     model: ModelConfig
     tasks: list[str] = field(default_factory=list)
     output_dir: str = BEAKER_RESULT_DIR
-    batch_size: int | str = "auto"
+    batch_size: int | Literal["auto"] = "auto"
 
 
 def load_config(path: str) -> DictConfig | ListConfig:

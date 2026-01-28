@@ -46,7 +46,7 @@ class GCSBackend:
         self._gcs_client = None
 
     @property
-    def gcs_client(self):
+    def gcs_client(self) -> Any:
         """Lazily initialize the GCS client."""
         if self._gcs_client is None:
             try:

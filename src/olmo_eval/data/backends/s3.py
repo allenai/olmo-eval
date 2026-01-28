@@ -52,7 +52,7 @@ class S3Backend:
         self._s3_client = None
 
     @property
-    def s3_client(self):
+    def s3_client(self) -> Any:
         """Lazily initialize the S3 client."""
         if self._s3_client is None:
             try:

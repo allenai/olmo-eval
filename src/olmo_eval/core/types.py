@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TypedDict
 
 
 def compute_model_hash(config: dict[str, Any] | None) -> str | None:
@@ -79,6 +79,13 @@ class RequestType(Enum):
     LOGLIKELIHOOD = auto()
 
 
+class LogProbEntry(TypedDict):
+    """A single logprob entry for a token."""
+
+    token: str
+    logprob: float
+
+
 @dataclass(frozen=True, slots=True)
 class Instance:
     """A single evaluation instance."""
@@ -132,7 +139,7 @@ class LMOutput:
     """Output from a language model."""
 
     text: str
-    logprobs: list[dict[str, Any]] | None = None
+    logprobs: list[LogProbEntry] | None = None
     extracted_answer: Any = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
