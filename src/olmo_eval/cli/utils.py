@@ -1,11 +1,19 @@
 """Shared utilities for the CLI."""
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from rich.console import Console
 
 console = Console()
+
+
+def format_timestamp(ts: datetime | None) -> str:
+    """Format a timestamp for display."""
+    if ts is None:
+        return "-"
+    return ts.strftime("%Y-%m-%d %H:%M:%S")
 
 # Keys that apply to model/backend config
 MODEL_KEYS = {

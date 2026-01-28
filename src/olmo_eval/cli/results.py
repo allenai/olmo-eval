@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import csv
+import enum
 import functools
 import json
 import sys
-from datetime import datetime
+from collections.abc import Callable
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +16,26 @@ import click
 from rich.panel import Panel
 from rich.table import Table
 
-from olmo_eval.cli.utils import console
+from olmo_eval.cli.utils import console, format_timestamp
+from olmo_eval.storage.formatters import (
+    ComparisonModelOutput,
+    ComparisonOutput,
+    ComparisonTaskOutput,
+    ExperimentOutput,
+    ExperimentsOutput,
+    ExperimentTaskOutput,
+    InstanceOutput,
+    PaginationOutput,
+)
+
+
+class FilterType(enum.Enum):
+    """Filter types for experiment queries."""
+
+    EXPERIMENT_ID = "experiment_id"
+    MODEL_NAME = "model_name"
+    MODEL_HASH = "model_hash"
+    TASK_NAME = "task_name"
 
 
 def s3_options(func: Any) -> Any:
@@ -96,7 +117,11 @@ def get_database_session(
         SystemExit: If psycopg is not installed.
     """
     try:
-        from olmo_eval.storage.db.session import DatabaseSession
+        from olmo_eval.storage.db.session import (
+            get_database_session as _get_database_session,
+        )
+
+        return _get_database_session(db_host, db_port, db_name, db_user, db_password)
     except ImportError:
         console.print(
             "[red]Error:[/red] Database support requires psycopg. "
@@ -104,50 +129,31 @@ def get_database_session(
         )
         raise SystemExit(1) from None
 
-    db = DatabaseSession(
-        host=db_host,
-        port=db_port,
-        database=db_name,
-        user=db_user,
-        password=db_password,
-    )
-    db.initialize()
-    return db
-
-
-def format_timestamp(ts: datetime | None) -> str:
-    """Format a timestamp for display."""
-    if ts is None:
-        return "-"
-    return ts.strftime("%Y-%m-%d %H:%M:%S")
-
 
 def print_experiment_detail(experiment: Any) -> None:
     """Print detailed information about an experiment."""
-    # Header panel with metadata
+    # Required fields (always shown)
     lines = [
-        f"[bold]Experiment ID:[/bold] {experiment.experiment_id}",
-        f"[bold]Model:[/bold] {experiment.model_name}",
-        f"[bold]Backend:[/bold] {experiment.backend_name or '-'}",
-        f"[bold]Timestamp:[/bold] {format_timestamp(experiment.timestamp)}",
+        ("Experiment ID", experiment.experiment_id),
+        ("Model", experiment.model_name),
+        ("Backend", experiment.backend_name or "-"),
+        ("Timestamp", format_timestamp(experiment.timestamp)),
     ]
 
-    if experiment.experiment_name:
-        lines.append(f"[bold]Name:[/bold] {experiment.experiment_name}")
-    if experiment.model_hash:
-        lines.append(f"[bold]Model Hash:[/bold] {experiment.model_hash}")
-    if experiment.workspace:
-        lines.append(f"[bold]Workspace:[/bold] {experiment.workspace}")
-    if experiment.author:
-        lines.append(f"[bold]Author:[/bold] {experiment.author}")
-    if experiment.tags:
-        lines.append(f"[bold]Tags:[/bold] {', '.join(experiment.tags)}")
-    if experiment.git_ref:
-        lines.append(f"[bold]Git Ref:[/bold] {experiment.git_ref}")
-    if experiment.revision:
-        lines.append(f"[bold]Revision:[/bold] {experiment.revision}")
+    # Optional fields (shown only if truthy)
+    optional = [
+        ("Name", experiment.experiment_name),
+        ("Model Hash", experiment.model_hash),
+        ("Workspace", experiment.workspace),
+        ("Author", experiment.author),
+        ("Tags", ", ".join(experiment.tags) if experiment.tags else None),
+        ("Git Ref", experiment.git_ref),
+        ("Revision", experiment.revision),
+    ]
+    lines.extend((label, value) for label, value in optional if value)
 
-    console.print(Panel("\n".join(lines), title="Experiment Details", expand=False))
+    formatted = [f"[bold]{label}:[/bold] {value}" for label, value in lines]
+    console.print(Panel("\n".join(formatted), title="Experiment Details", expand=False))
 
 
 def print_task_results_table(tasks: list[Any], task_filter: set[str] | None = None) -> None:
@@ -267,72 +273,65 @@ def experiments_to_dict(
         Dict with experiments containing tasks containing instances.
     """
     # Group instances by task_hash
-    instance_groups: dict[str, list[dict[str, Any]]] = {}
+    instance_groups: dict[str, list[InstanceOutput]] = {}
     last_id: int | None = None
     if instances:
         for inst in instances:
-            # Track last_id for pagination
             inst_id = inst.get("id")
             if inst_id is not None:
                 last_id = inst_id
-            # Use task_hash as key since we're grouping within experiments
             key = inst.get("task_hash", "")
             if key not in instance_groups:
                 instance_groups[key] = []
-            # Only include native_id and instance_metrics in grouped output
             instance_groups[key].append(
-                {
-                    "native_id": inst.get("native_id"),
-                    "instance_metrics": inst.get("instance_metrics"),
-                }
+                InstanceOutput(
+                    native_id=inst.get("native_id", ""),
+                    instance_metrics=inst.get("instance_metrics", {}),
+                )
             )
 
-    data = []
+    experiment_outputs = []
     for exp in experiments:
         tasks = []
         for t in exp.tasks:
-            task_entry: dict[str, Any] = {
-                "task_name": t.task_name,
-                "task_hash": t.task_hash,
-                "primary_metric": t.primary_metric,
-                "primary_score": t.primary_score,
-                "num_instances": t.num_instances,
-                "metrics": t.metrics,
-            }
-            # Add instances for this task if available
-            if t.task_hash and t.task_hash in instance_groups:
-                task_entry["instances"] = instance_groups[t.task_hash]
-            tasks.append(task_entry)
+            task_instances = instance_groups.get(t.task_hash) if t.task_hash else None
+            tasks.append(
+                ExperimentTaskOutput(
+                    task_name=t.task_name,
+                    task_hash=t.task_hash,
+                    primary_metric=t.primary_metric,
+                    primary_score=t.primary_score,
+                    num_instances=t.num_instances,
+                    metrics=t.metrics,
+                    instances=task_instances,
+                )
+            )
 
-        data.append(
-            {
-                "experiment_id": exp.experiment_id,
-                "model_name": exp.model_name,
-                "model_hash": exp.model_hash,
-                "backend_name": exp.backend_name,
-                "timestamp": exp.timestamp.isoformat() if exp.timestamp else None,
-                "experiment_name": exp.experiment_name,
-                "workspace": exp.workspace,
-                "author": exp.author,
-                "tags": exp.tags,
-                "git_ref": exp.git_ref,
-                "revision": exp.revision,
-                "s3_location": exp.s3_location,
-                "tasks": tasks,
-            }
+        experiment_outputs.append(
+            ExperimentOutput(
+                experiment_id=exp.experiment_id,
+                model_name=exp.model_name,
+                model_hash=exp.model_hash,
+                backend_name=exp.backend_name,
+                timestamp=exp.timestamp.isoformat() if exp.timestamp else None,
+                experiment_name=exp.experiment_name,
+                workspace=exp.workspace,
+                author=exp.author,
+                tags=exp.tags,
+                git_ref=exp.git_ref,
+                revision=exp.revision,
+                s3_location=exp.s3_location,
+                tasks=tasks,
+            )
         )
 
-    result: dict[str, Any] = {"experiments": data}
-
-    # Add pagination metadata if instances were queried
+    pagination = None
     if instances is not None:
         has_more = limit is not None and len(instances) >= limit
-        result["pagination"] = {
-            "last_id": last_id,
-            "has_more": has_more,
-        }
+        pagination = PaginationOutput(last_id=last_id, has_more=has_more)
 
-    return result
+    output = ExperimentsOutput(experiments=experiment_outputs, pagination=pagination)
+    return asdict(output)
 
 
 def experiments_to_json(
@@ -405,64 +404,58 @@ def task_comparison_to_dict(
         Dict with models containing tasks containing scores and instances.
     """
     # Group instances by (model_hash, task_hash)
-    instance_groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    instance_groups: dict[tuple[str, str], list[InstanceOutput]] = {}
     last_id: int | None = None
     if instances:
         for inst in instances:
-            # Track last_id for pagination
             inst_id = inst.get("id")
             if inst_id is not None:
                 last_id = inst_id
             key = (inst.get("model_hash", ""), inst.get("task_hash", ""))
             if key not in instance_groups:
                 instance_groups[key] = []
-            # Only include native_id and instance_metrics in grouped output
             instance_groups[key].append(
-                {
-                    "native_id": inst.get("native_id"),
-                    "instance_metrics": inst.get("instance_metrics"),
-                }
+                InstanceOutput(
+                    native_id=inst.get("native_id", ""),
+                    instance_metrics=inst.get("instance_metrics", {}),
+                )
             )
 
-    # Build output structured by model
-    output: dict[str, Any] = {"models": []}
-
+    models = []
     for exp in experiments:
-        model_entry = {
-            "model_name": exp.model_name,
-            "model_hash": exp.model_hash,
-            "tasks": [],
-        }
-
+        tasks = []
         for task in exp.tasks:
             if task_filter and task.task_name not in task_filter:
                 continue
 
-            task_entry: dict[str, Any] = {
-                "task_name": task.task_name,
-                "task_hash": task.task_hash,
-                "primary_metric": task.primary_metric,
-                "primary_score": task.primary_score,
-            }
-
-            # Add instances for this model-task pair if available
             key = (exp.model_hash or "", task.task_hash or "")
-            if key in instance_groups:
-                task_entry["instances"] = instance_groups[key]
+            task_instances = instance_groups.get(key)
 
-            model_entry["tasks"].append(task_entry)
+            tasks.append(
+                ComparisonTaskOutput(
+                    task_name=task.task_name,
+                    task_hash=task.task_hash,
+                    primary_metric=task.primary_metric,
+                    primary_score=task.primary_score,
+                    instances=task_instances,
+                )
+            )
 
-        output["models"].append(model_entry)
+        models.append(
+            ComparisonModelOutput(
+                model_name=exp.model_name,
+                model_hash=exp.model_hash,
+                tasks=tasks,
+            )
+        )
 
-    # Add pagination metadata if instances were queried
+    pagination = None
     if instances is not None:
         has_more = limit is not None and len(instances) >= limit
-        output["pagination"] = {
-            "last_id": last_id,
-            "has_more": has_more,
-        }
+        pagination = PaginationOutput(last_id=last_id, has_more=has_more)
 
-    return output
+    output = ComparisonOutput(models=models, pagination=pagination)
+    return asdict(output)
 
 
 def task_comparison_to_json(
@@ -715,8 +708,8 @@ def query(
         # Get instances for an experiment group (cross-model analysis)
         olmo-eval results query -G my-benchmark --instances --format json
     """
-    # Validate at least one filter is provided
-    if not any([experiment_ids, model_names, model_hashes, task_names, task_hash, experiment_group]):
+    filters = [experiment_ids, model_names, model_hashes, task_names, task_hash, experiment_group]
+    if not any(filters):
         raise click.UsageError(
             "At least one filter is required: "
             "--experiment, --model, --model-hash, --task, --task-hash, or --experiment-group"
@@ -726,202 +719,206 @@ def query(
 
     try:
         from olmo_eval.storage.db.queries import QueryHelper
-        from olmo_eval.storage.db.repository import (
-            ExperimentRepository,
-            InstancePredictionRepository,
-        )
+        from olmo_eval.storage.db.repository import ExperimentRepository
 
         with db.session() as session:
             helper = QueryHelper(session)
             repo = ExperimentRepository(session)
 
-            # Handle experiment_group queries with streaming for efficiency
+            # Experiment group with instances uses streaming (early return)
             if experiment_group and instances:
-                from olmo_eval.storage.formatters import (
-                    stream_instances_to_csv,
-                    stream_instances_to_nested_json,
+                _stream_experiment_group_instances(
+                    session, experiment_group, model_hashes, task_hash, output_format
                 )
-
-                instance_repo = InstancePredictionRepository(session)
-                instance_stream = instance_repo.stream_instances_with_metadata(
-                    experiment_group=experiment_group,
-                    model_hashes=list(model_hashes) if model_hashes else None,
-                    task_hashes=[task_hash] if task_hash else None,
-                )
-
-                if output_format == "csv":
-                    stream_instances_to_csv(instance_stream, sys.stdout, experiment_group)
-                elif output_format == "json":
-                    stream_instances_to_nested_json(
-                        instance_stream, sys.stdout, experiment_group
-                    )
-                else:
-                    console.print(
-                        "[yellow]Note:[/yellow] Use --format json or --format csv "
-                        "with --experiment-group --instances for output."
-                    )
                 return
 
-            all_experiments: list[Any] = []
-
-            # Query by experiment IDs
-            for exp_id in experiment_ids:
-                exps = helper.get_by_experiment_id(exp_id)
-                if not exps:
-                    console.print(
-                        f"[yellow]Warning:[/yellow] No experiments found with "
-                        f"experiment_id='{exp_id}'"
-                    )
-                all_experiments.extend(exps)
-
-            # Query by model names
-            for model_name in model_names:
-                exps = repo.query(model_name=model_name, limit=1000)
-                if not exps:
-                    console.print(
-                        f"[yellow]Warning:[/yellow] No experiments found with "
-                        f"model_name='{model_name}'"
-                    )
-                all_experiments.extend(exps)
-
-            # Query by model hashes
-            for mhash in model_hashes:
-                exps = repo.query(model_hash=mhash, latest=True)
-                if not exps:
-                    console.print(
-                        f"[yellow]Warning:[/yellow] No experiments found with model_hash='{mhash}'"
-                    )
-                all_experiments.extend(exps)
-
-            # Determine if this is a comparison query (no experiment filter)
-            # Show matrix for task-only, model-only, or model+task queries
-            # Only show experiment details when querying by experiment ID
-            comparison_query = not experiment_ids
-
-            # If only task filter provided (no model filters), query by task
-            if task_names and not model_names and not model_hashes:
-                for tname in task_names:
-                    exps = repo.query(task_name=tname, limit=100)
-                    if not exps:
-                        console.print(
-                            f"[yellow]Warning:[/yellow] No experiments found with "
-                            f"task_name='{tname}'"
-                        )
-                    all_experiments.extend(exps)
-
+            # Fetch experiments based on filters
+            all_experiments = _query_experiments(
+                helper, repo, experiment_ids, model_names, model_hashes, task_names
+            )
             if not all_experiments:
                 console.print("[dim]No results found.[/dim]")
                 return
 
-            # Filter tasks if task_names specified
+            # Comparison mode: no experiment IDs specified
+            is_comparison = not experiment_ids
             task_filter = set(task_names) if task_names else None
 
-            # Query instance-level predictions if requested
-            instance_data: list[dict[str, Any]] = []
-            if instances:
-                task_name_filter = list(task_names) if task_names else None
+            # Fetch instances if requested
+            instance_data = (
+                _query_instances(
+                    helper, experiment_ids, model_names, model_hashes,
+                    task_names, task_hash, limit, after_id
+                )
+                if instances else []
+            )
 
-                if experiment_ids:
-                    for exp_id in experiment_ids:
-                        instance_data.extend(
-                            helper.get_instances_by_experiment_id(
-                                experiment_id=exp_id,
-                                task_name=task_name_filter,
-                                limit=limit,
-                                after_id=after_id,
-                            )
-                        )
-                elif task_hash:
-                    instance_data = helper.instance_repo.get_instances_by_task(
-                        task_hash=task_hash,
-                        task_name=task_name_filter,
-                        limit=limit,
-                        after_id=after_id,
-                    )
-                elif task_names and not model_names and not model_hashes:
-                    instance_data = helper.instance_repo.get_instances_by_task(
-                        task_name=task_name_filter,
-                        limit=limit,
-                        after_id=after_id,
-                    )
-                elif model_names or model_hashes:
-                    if not task_names:
-                        raise click.UsageError(
-                            "--task is required when querying instances by model"
-                        )
-                    task_list = list(task_names)
-                    instance_data = helper.get_instances_by_model(
-                        task_name=task_list[0] if len(task_list) == 1 else task_list,
-                        model_name=model_names[0] if model_names else None,
-                        model_hash=model_hashes[0] if model_hashes else None,
-                        limit=limit,
-                        after_id=after_id,
-                    )
-
-            # Handle output formats
-            if comparison_query:
-                # Comparison query (task-only or model-only): use comparison matrix format
-                if output_format == "json":
-                    output = task_comparison_to_dict(
-                        all_experiments,
-                        task_filter,
-                        instance_data if instances else None,
-                        limit if instances else None,
-                    )
-                    print(json.dumps(output, indent=2, default=str))
-                    return
-                if output_format == "csv":
-                    task_comparison_to_csv(all_experiments, task_filter)
-                    if instances and instance_data:
-                        console.print("\n[bold]Instance Predictions[/bold]")
-                        instances_to_csv(instance_data)
-                    return
-            else:
-                # Experiment query: use standard experiment format
-                if output_format == "json":
-                    output = experiments_to_dict(
-                        all_experiments,
-                        instance_data if instances else None,
-                        limit if instances else None,
-                    )
-                    print(json.dumps(output, indent=2, default=str))
-                    return
-                if output_format == "csv":
-                    experiments_to_csv(all_experiments)
-                    if instances and instance_data:
-                        console.print("\n[bold]Instance Predictions[/bold]")
-                        instances_to_csv(instance_data)
-                    return
-
-            # Table format
-            if comparison_query:
-                # Comparison query: show matrix (models as rows, tasks as columns)
-                print_task_comparison_matrix(all_experiments, task_filter)
-            else:
-                # Experiment/model query: show experiment details
-                if len(all_experiments) > 1:
-                    console.print(f"[bold]Found {len(all_experiments)} experiment(s)[/bold]\n")
-
-                for i, experiment in enumerate(all_experiments):
-                    if len(all_experiments) > 1:
-                        n = len(all_experiments)
-                        console.print(f"[bold cyan]--- Experiment {i + 1}/{n} ---[/bold cyan]")
-
-                    print_experiment_detail(experiment)
-                    console.print()
-                    print_task_results_table(experiment.tasks, task_filter)
-
-                    if i < len(all_experiments) - 1:
-                        console.print()
-
-            # Show instance summary for table format
-            if instances:
-                if instance_data:
-                    console.print(
-                        f"\n[yellow]Found {len(instance_data)} instance(s). "
-                        f"Use --format json or --format csv to include them.[/yellow]"
-                    )
-                else:
-                    console.print("\n[dim]No instance predictions found.[/dim]")
+            # Output results
+            _output_results(
+                all_experiments, instance_data, is_comparison, task_filter,
+                output_format, instances, limit
+            )
     finally:
         db.dispose()
+
+
+def _stream_experiment_group_instances(
+    session: Any,
+    experiment_group: str,
+    model_hashes: tuple[str, ...],
+    task_hash: str | None,
+    output_format: str,
+) -> None:
+    """Stream instances for an experiment group directly to output."""
+    from olmo_eval.storage.db.repository import InstancePredictionRepository
+    from olmo_eval.storage.formatters import (
+        stream_instances_to_csv,
+        stream_instances_to_nested_json,
+    )
+
+    instance_repo = InstancePredictionRepository(session)
+    instance_stream = instance_repo.stream_instances_with_metadata(
+        experiment_group=experiment_group,
+        model_hashes=list(model_hashes) if model_hashes else None,
+        task_hashes=[task_hash] if task_hash else None,
+    )
+
+    if output_format == "csv":
+        stream_instances_to_csv(instance_stream, sys.stdout, experiment_group)
+    elif output_format == "json":
+        stream_instances_to_nested_json(instance_stream, sys.stdout, experiment_group)
+    else:
+        console.print(
+            "[yellow]Note:[/yellow] Use --format json or --format csv "
+            "with --experiment-group --instances for output."
+        )
+
+
+def _query_experiments(
+    helper: Any,
+    repo: Any,
+    experiment_ids: tuple[str, ...],
+    model_names: tuple[str, ...],
+    model_hashes: tuple[str, ...],
+    task_names: tuple[str, ...],
+) -> list[Any]:
+    """Query experiments based on provided filters."""
+    results: list[Any] = []
+
+    def query_with_warning(
+        items: tuple[str, ...], query_fn: Callable[[str], list[Any]], filter_type: FilterType
+    ) -> None:
+        for item in items:
+            exps = query_fn(item)
+            if not exps:
+                msg = f"No experiments found with {filter_type.value}='{item}'"
+                console.print(f"[yellow]Warning:[/yellow] {msg}")
+            results.extend(exps)
+
+    # Query by each filter type
+    query_with_warning(experiment_ids, helper.get_by_experiment_id, FilterType.EXPERIMENT_ID)
+    query_with_warning(
+        model_names, lambda x: repo.query(model_name=x, limit=1000), FilterType.MODEL_NAME
+    )
+    query_with_warning(
+        model_hashes, lambda x: repo.query(model_hash=x, latest=True), FilterType.MODEL_HASH
+    )
+
+    # Task-only query (no model filters)
+    if task_names and not model_names and not model_hashes:
+        query_with_warning(
+            task_names, lambda x: repo.query(task_name=x, limit=100), FilterType.TASK_NAME
+        )
+
+    return results
+
+
+def _query_instances(
+    helper: Any,
+    experiment_ids: tuple[str, ...],
+    model_names: tuple[str, ...],
+    model_hashes: tuple[str, ...],
+    task_names: tuple[str, ...],
+    task_hash: str | None,
+    limit: int,
+    after_id: int | None,
+) -> list[dict[str, Any]]:
+    """Query instance-level predictions based on filters."""
+    return helper.query_instances(
+        experiment_ids=list(experiment_ids) or None,
+        model_names=list(model_names) or None,
+        model_hashes=list(model_hashes) or None,
+        task_names=list(task_names) or None,
+        task_hash=task_hash,
+        limit=limit,
+        after_id=after_id,
+    )
+
+
+def _output_results(
+    experiments: list[Any],
+    instance_data: list[dict[str, Any]],
+    is_comparison: bool,
+    task_filter: set[str] | None,
+    output_format: str,
+    include_instances: bool,
+    limit: int,
+) -> None:
+    """Output query results in the requested format."""
+    instances_for_output = instance_data if include_instances else None
+    limit_for_output = limit if include_instances else None
+
+    # JSON output
+    if output_format == "json":
+        if is_comparison:
+            output = task_comparison_to_dict(
+                experiments, task_filter, instances_for_output, limit_for_output
+            )
+        else:
+            output = experiments_to_dict(experiments, instances_for_output, limit_for_output)
+        print(json.dumps(output, indent=2, default=str))
+        return
+
+    # CSV output
+    if output_format == "csv":
+        if is_comparison:
+            task_comparison_to_csv(experiments, task_filter)
+        else:
+            experiments_to_csv(experiments)
+        if include_instances and instance_data:
+            console.print("\n[bold]Instance Predictions[/bold]")
+            instances_to_csv(instance_data)
+        return
+
+    # Table output
+    if is_comparison:
+        print_task_comparison_matrix(experiments, task_filter)
+    else:
+        _print_experiments_table(experiments, task_filter)
+
+    # Instance summary for table format
+    if include_instances:
+        if instance_data:
+            console.print(
+                f"\n[yellow]Found {len(instance_data)} instance(s). "
+                f"Use --format json or --format csv to include them.[/yellow]"
+            )
+        else:
+            console.print("\n[dim]No instance predictions found.[/dim]")
+
+
+def _print_experiments_table(experiments: list[Any], task_filter: set[str] | None) -> None:
+    """Print experiments in table format with details."""
+    if len(experiments) > 1:
+        console.print(f"[bold]Found {len(experiments)} experiment(s)[/bold]\n")
+
+    for i, experiment in enumerate(experiments):
+        if len(experiments) > 1:
+            console.print(f"[bold cyan]--- Experiment {i + 1}/{len(experiments)} ---[/bold cyan]")
+
+        print_experiment_detail(experiment)
+        console.print()
+        print_task_results_table(experiment.tasks, task_filter)
+
+        if i < len(experiments) - 1:
+            console.print()

@@ -335,3 +335,39 @@ class DatabaseSession:
             self._engine = None
             self._session_factory = None
             logger.info("Database session manager disposed")
+
+
+def get_database_session(
+    db_host: str,
+    db_port: int,
+    db_name: str,
+    db_user: str,
+    db_password: str,
+) -> DatabaseSession:
+    """Create and initialize a DatabaseSession.
+
+    Convenience function for CLI and other consumers that need a quick
+    database connection with standard settings.
+
+    Args:
+        db_host: Database host.
+        db_port: Database port.
+        db_name: Database name.
+        db_user: Database user.
+        db_password: Database password.
+
+    Returns:
+        Initialized DatabaseSession instance.
+
+    Raises:
+        ImportError: If psycopg is not installed.
+    """
+    db = DatabaseSession(
+        host=db_host,
+        port=db_port,
+        database=db_name,
+        user=db_user,
+        password=db_password,
+    )
+    db.initialize()
+    return db

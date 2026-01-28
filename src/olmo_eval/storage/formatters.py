@@ -39,7 +39,8 @@ class ModelOutput:
 class PaginationOutput:
     """Pagination metadata."""
 
-    last_id: int
+    last_id: int | None = None
+    has_more: bool | None = None
 
 
 @dataclass
@@ -62,6 +63,80 @@ class InstanceCSVRow:
     task_hash: str
     native_id: str
     instance_metrics: str  # JSON string
+
+
+# --- Experiment query output dataclasses ---
+
+
+@dataclass
+class ExperimentTaskOutput:
+    """Task result within an experiment."""
+
+    task_name: str
+    task_hash: str | None
+    primary_metric: str | None
+    primary_score: float | None
+    num_instances: int | None
+    metrics: dict[str, Any] | None
+    instances: list[InstanceOutput] | None = None
+
+
+@dataclass
+class ExperimentOutput:
+    """Full experiment with metadata and tasks."""
+
+    experiment_id: str
+    model_name: str
+    model_hash: str | None
+    backend_name: str | None
+    timestamp: str | None  # ISO format string
+    experiment_name: str | None
+    workspace: str | None
+    author: str | None
+    tags: list[str] | None
+    git_ref: str | None
+    revision: str | None
+    s3_location: str | None
+    tasks: list[ExperimentTaskOutput] = field(default_factory=list)
+
+
+@dataclass
+class ExperimentsOutput:
+    """Top-level output for experiment queries."""
+
+    experiments: list[ExperimentOutput]
+    pagination: PaginationOutput | None = None
+
+
+# --- Comparison query output dataclasses ---
+
+
+@dataclass
+class ComparisonTaskOutput:
+    """Task result for comparison output (simpler than ExperimentTaskOutput)."""
+
+    task_name: str
+    task_hash: str | None
+    primary_metric: str | None
+    primary_score: float | None
+    instances: list[InstanceOutput] | None = None
+
+
+@dataclass
+class ComparisonModelOutput:
+    """Model with tasks for comparison output."""
+
+    model_name: str
+    model_hash: str | None
+    tasks: list[ComparisonTaskOutput] = field(default_factory=list)
+
+
+@dataclass
+class ComparisonOutput:
+    """Top-level output for task comparison queries."""
+
+    models: list[ComparisonModelOutput]
+    pagination: PaginationOutput | None = None
 
 
 # Use field names for headers

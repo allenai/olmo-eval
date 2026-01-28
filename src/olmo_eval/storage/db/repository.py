@@ -557,6 +557,104 @@ class InstancePredictionRepository:
             "instance_metrics": instance.instance_metrics,
         }
 
+    def query_instances(
+        self,
+        experiment_ids: list[str] | None = None,
+        model_names: list[str] | None = None,
+        model_hashes: list[str] | None = None,
+        task_names: list[str] | None = None,
+        task_hash: str | None = None,
+        limit: int | None = None,
+        after_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Query instances with composable filters.
+
+        All filters are optional and compose with AND logic. Joins are added
+        automatically based on which filters are provided.
+
+        Args:
+            experiment_ids: Filter by experiment ID strings.
+            model_names: Filter by model names.
+            model_hashes: Filter by model hashes.
+            task_names: Filter by task names.
+            task_hash: Filter by exact task hash.
+            limit: Maximum number of results.
+            after_id: Return instances with id > after_id (keyset pagination).
+
+        Returns:
+            List of instance dicts with task_name and model_hash included.
+        """
+        # Determine required joins based on filters
+        needs_experiment_join = bool(experiment_ids or model_names or model_hashes)
+
+        # Build select - always include task_name and model_hash for consistency
+        columns = [
+            InstancePrediction.id,
+            InstancePrediction.task_hash,
+            InstancePrediction.native_id,
+            InstancePrediction.instance_metrics,
+            TaskResult.task_name,
+        ]
+        if needs_experiment_join:
+            columns.append(Experiment.model_hash)
+
+        stmt = select(*columns)
+
+        # Always join TaskResult to get task_name
+        stmt = stmt.join(
+            TaskResult,
+            and_(
+                TaskResult.experiment_pk == InstancePrediction.experiment_pk,
+                TaskResult.task_hash == InstancePrediction.task_hash,
+            ),
+        )
+
+        # Join Experiment if needed for model/experiment_id filters
+        if needs_experiment_join:
+            stmt = stmt.join(Experiment, Experiment.id == InstancePrediction.experiment_pk)
+
+        # Apply filters - all compose with AND
+        if after_id is not None:
+            stmt = stmt.where(InstancePrediction.id > after_id)
+
+        if experiment_ids:
+            stmt = stmt.where(Experiment.experiment_id.in_(experiment_ids))
+
+        if model_names:
+            stmt = stmt.where(Experiment.model_name.in_(model_names))
+
+        if model_hashes:
+            stmt = stmt.where(Experiment.model_hash.in_(model_hashes))
+
+        if task_hash:
+            stmt = stmt.where(InstancePrediction.task_hash == task_hash)
+
+        if task_names:
+            stmt = stmt.where(TaskResult.task_name.in_(task_names))
+
+        stmt = stmt.order_by(InstancePrediction.id)
+
+        if limit:
+            stmt = stmt.limit(limit)
+
+        results = self.session.execute(stmt).all()
+
+        # Build result dicts with consistent schema
+        output = []
+        for row in results:
+            d: dict[str, Any] = {
+                "id": row.id,
+                "task_hash": row.task_hash,
+                "task_name": row.task_name,
+                "native_id": row.native_id,
+                "instance_metrics": row.instance_metrics,
+            }
+            if needs_experiment_join:
+                d["model_hash"] = row.model_hash
+            output.append(d)
+
+        return output
+
     def stream_instances(
         self,
         experiment_pk: int,
