@@ -59,6 +59,14 @@ class Experiment(Base):
     # Original model path (when alias is used, model_name is the alias)
     model_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
+    # Experiment group for grouping related experiments
+    experiment_group: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        index=True,
+        comment="Groups related experiments for analysis",
+    )
+
     # Flexible storage (JSONB for efficient querying)
     metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSONB)
 
@@ -159,6 +167,13 @@ class InstancePrediction(Base):
     # Task hash for joining to task_results
     task_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
 
+    # Experiment group - denormalized from experiment for fast filtering
+    experiment_group: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        comment="Denormalized from experiment for fast filtering",
+    )
+
     # Instance identification
     native_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
 
@@ -186,6 +201,7 @@ Index("idx_experiments_experiment_id", Experiment.experiment_id)
 Index("idx_experiments_model_hash", Experiment.model_hash)
 Index("idx_experiments_model_name", Experiment.model_name)
 Index("idx_experiments_model_name_ts", Experiment.model_name, Experiment.timestamp.desc())
+Index("ix_experiments_experiment_group", Experiment.experiment_group)
 
 # Task Results Indexes
 Index("idx_task_results_exp_task", TaskResult.experiment_pk, TaskResult.task_name)
@@ -208,5 +224,18 @@ Index(
 Index(
     "idx_instance_exp_id",
     InstancePrediction.experiment_pk,
+    InstancePrediction.id,
+)
+
+# Experiment group composite indexes for cross-model analysis
+Index(
+    "idx_instance_group_task_exp",
+    InstancePrediction.experiment_group,
+    InstancePrediction.task_hash,
+    InstancePrediction.experiment_pk,
+)
+Index(
+    "idx_instance_group_id",
+    InstancePrediction.experiment_group,
     InstancePrediction.id,
 )

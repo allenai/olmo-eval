@@ -55,6 +55,11 @@ class QueryHelper:
         # Save experiment and task results, get the experiment PK
         experiment_pk = self.experiment_repo.save(result)
 
+        # Get the experiment_group for denormalization - must never be empty
+        experiment_group = (
+            result.experiment_group or result.experiment_name or result.experiment_id
+        )
+
         # Build task_hash lookup from result.tasks
         task_hash_lookup: dict[str, str] = {}
         for task in result.tasks:
@@ -71,6 +76,7 @@ class QueryHelper:
                 experiment_pk=experiment_pk,
                 task_hash=task_hash,
                 instances=instances,
+                experiment_group=experiment_group,
             )
 
         return experiment_pk

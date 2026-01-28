@@ -739,6 +739,9 @@ class AsyncEvalRunner(AsyncRunnerMixin):
     # Experiment name for database storage
     experiment_name: str | None = None
 
+    # Experiment group for grouping related experiments
+    experiment_group: str | None = None
+
     # Model alias (short name used as model_name in DB)
     # When running via beaker, each model gets its own CLI invocation with --alias
     # For direct CLI with multiple -m flags, alias applies to single-model runs only
@@ -1209,6 +1212,9 @@ class StreamingEvalRunner(AsyncRunnerMixin):
 
     # Experiment name for database storage
     experiment_name: str | None = None
+
+    # Experiment group for grouping related experiments
+    experiment_group: str | None = None
 
     # Model alias (short name used as model_name in DB)
     # When running via beaker, each model gets its own CLI invocation with --alias

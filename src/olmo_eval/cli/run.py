@@ -129,6 +129,10 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
     help="Human-readable experiment name for database storage",
 )
 @click.option(
+    "--experiment-group",
+    help="Experiment group for grouping related experiments (defaults to experiment-name)",
+)
+@click.option(
     "--alias",
     "-a",
     help="Short name for model (used as model_name in DB, original path stored as model_path)",
@@ -161,6 +165,7 @@ def run(
     db_user: str,
     db_password: str,
     experiment_name: str | None,
+    experiment_group: str | None,
     alias: str | None,
 ) -> None:
     """Run evaluation on specified tasks.
@@ -339,6 +344,7 @@ def run(
             model_overrides=per_model_overrides,
             s3_config=s3_config,
             experiment_name=experiment_name,
+            experiment_group=experiment_group,
             alias=alias,
         )
     elif use_async:
@@ -363,6 +369,7 @@ def run(
             model_overrides=per_model_overrides,
             s3_config=s3_config,
             experiment_name=experiment_name,
+            experiment_group=experiment_group,
             alias=alias,
         )
     else:
@@ -397,6 +404,7 @@ def run(
                 model_overrides=model_overrides,
                 s3_config=s3_config,
                 experiment_name=experiment_name,
+                experiment_group=experiment_group,
                 alias=alias,
             )
 

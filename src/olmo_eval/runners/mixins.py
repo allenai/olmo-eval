@@ -323,6 +323,7 @@ class RunnerResultsMixin:
         s3_cfg = getattr(self, "s3_config", None)
         workspace = s3_cfg.group if s3_cfg else "default"
         runner_experiment_name = getattr(self, "experiment_name", None)
+        runner_experiment_group = getattr(self, "experiment_group", None)
 
         for model_name, model_results, exp_id, m_hash, s3_loc in models_to_save:
             task_count = len(model_results.get("tasks", {}))
@@ -339,17 +340,24 @@ class RunnerResultsMixin:
                 m_hash = (compute_model_hash(model_cfg) if model_cfg else None) or "unknown"
 
             try:
+                # experiment_group must always have a value - never empty
+                effective_experiment_name = runner_experiment_name or exp_id
+                effective_experiment_group = (
+                    runner_experiment_group or effective_experiment_name
+                )
+
                 eval_result = convert_runner_results(
                     model_results,
                     exp_id,
                     s3_location=s3_loc,
-                    experiment_name=runner_experiment_name or exp_id,
+                    experiment_name=effective_experiment_name,
                     workspace=workspace,
                     author=author,
                     git_ref=git_ref,
                     model_hash=m_hash,
                     revision=revision,
                     model_path=model_results.get("model_path"),
+                    experiment_group=effective_experiment_group,
                 )
                 logger.info(
                     f"Converted results for {model_name}, saving to {len(self.storages)} backend(s)"

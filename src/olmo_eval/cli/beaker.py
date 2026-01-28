@@ -855,6 +855,10 @@ def launch(
             if s3_region != "us-east-1":
                 command.extend(["--s3-region", s3_region])
 
+        # Add experiment group for grouping related experiments
+        if effective_groups:
+            command.extend(["--experiment-group", effective_groups[0]])
+
         # Add experiment name for database storage
         command.extend(["--experiment-name", exp_name])
 

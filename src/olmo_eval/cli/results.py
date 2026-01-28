@@ -610,52 +610,6 @@ def _download_s3_files(
         console.print("[yellow]No files were downloaded.[/yellow]")
 
 
-@results.command(name="get", hidden=True)
-@click.argument("experiment_id")
-@click.option("--task", "-t", "task_filter", multiple=True)
-@click.option(
-    "--format", "-f", "output_format", type=click.Choice(["table", "json", "csv"]), default="table"
-)
-@db_options
-@click.pass_context
-def get_deprecated(
-    ctx: click.Context,
-    experiment_id: str,
-    task_filter: tuple[str, ...],
-    output_format: str,
-    db_host: str,
-    db_port: int,
-    db_name: str,
-    db_user: str,
-    db_password: str,
-) -> None:
-    """[DEPRECATED] Use 'olmo-eval results query --experiment <id>' instead."""
-    console.print(
-        "[yellow]Warning:[/yellow] 'olmo-eval results get' is deprecated.\n"
-        f"Use: olmo-eval results query --experiment {experiment_id}"
-        + (f" --task {' --task '.join(task_filter)}" if task_filter else "")
-        + (f" --format {output_format}" if output_format != "table" else "")
-        + "\n"
-    )
-    ctx.invoke(
-        query,
-        experiment_ids=(experiment_id,),
-        model_names=(),
-        model_hashes=(),
-        task_names=task_filter,
-        task_hash=None,
-        instances=False,
-        limit=100,
-        after_id=None,
-        output_format=output_format,
-        db_host=db_host,
-        db_port=db_port,
-        db_name=db_name,
-        db_user=db_user,
-        db_password=db_password,
-    )
-
-
 @results.command()
 @click.option(
     "--experiment",
@@ -691,6 +645,11 @@ def get_deprecated(
     help="Task hash to filter by (exact match).",
 )
 @click.option(
+    "--experiment-group",
+    "-G",
+    help="Filter by experiment group (for cross-model analysis).",
+)
+@click.option(
     "--instances/--no-instances",
     default=False,
     help="Include instance-level predictions (requires --format json or csv).",
@@ -724,6 +683,7 @@ def query(
     model_hashes: tuple[str, ...],
     task_names: tuple[str, ...],
     task_hash: str | None,
+    experiment_group: str | None,
     instances: bool,
     limit: int,
     after_id: int | None,
@@ -736,7 +696,7 @@ def query(
 ) -> None:
     """Query evaluation results with flexible filters.
 
-    Filter by experiment, model, model-hash, task, or task-hash.
+    Filter by experiment, model, model-hash, task, task-hash, or experiment-group.
     Use --instances with --format json or csv to include instance-level predictions.
 
     Examples:
@@ -751,23 +711,56 @@ def query(
 
         # Get instances by experiment
         olmo-eval results query --experiment exp_001 --task mmlu --instances
+
+        # Get instances for an experiment group (cross-model analysis)
+        olmo-eval results query -G my-benchmark --instances --format json
     """
     # Validate at least one filter is provided
-    if not any([experiment_ids, model_names, model_hashes, task_names, task_hash]):
+    if not any([experiment_ids, model_names, model_hashes, task_names, task_hash, experiment_group]):
         raise click.UsageError(
             "At least one filter is required: "
-            "--experiment, --model, --model-hash, --task, or --task-hash"
+            "--experiment, --model, --model-hash, --task, --task-hash, or --experiment-group"
         )
 
     db = get_database_session(db_host, db_port, db_name, db_user, db_password)
 
     try:
         from olmo_eval.storage.db.queries import QueryHelper
-        from olmo_eval.storage.db.repository import ExperimentRepository
+        from olmo_eval.storage.db.repository import (
+            ExperimentRepository,
+            InstancePredictionRepository,
+        )
 
         with db.session() as session:
             helper = QueryHelper(session)
             repo = ExperimentRepository(session)
+
+            # Handle experiment_group queries with streaming for efficiency
+            if experiment_group and instances:
+                from olmo_eval.storage.formatters import (
+                    stream_instances_to_csv,
+                    stream_instances_to_nested_json,
+                )
+
+                instance_repo = InstancePredictionRepository(session)
+                instance_stream = instance_repo.stream_instances_with_metadata(
+                    experiment_group=experiment_group,
+                    model_hashes=list(model_hashes) if model_hashes else None,
+                    task_hashes=[task_hash] if task_hash else None,
+                )
+
+                if output_format == "csv":
+                    stream_instances_to_csv(instance_stream, sys.stdout, experiment_group)
+                elif output_format == "json":
+                    stream_instances_to_nested_json(
+                        instance_stream, sys.stdout, experiment_group
+                    )
+                else:
+                    console.print(
+                        "[yellow]Note:[/yellow] Use --format json or --format csv "
+                        "with --experiment-group --instances for output."
+                    )
+                return
 
             all_experiments: list[Any] = []
 

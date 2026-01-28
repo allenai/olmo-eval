@@ -206,6 +206,8 @@ class EvalResult:
     metadata: dict[str, Any] | None = None
     # Original model path (when alias is used, model_name is the alias)
     model_path: str | None = None
+    # Experiment group for grouping related experiments
+    experiment_group: str | None = None
 
     def __post_init__(self) -> None:
         """Compute model_hash from model_config if not provided."""

@@ -1,0 +1,159 @@
+"""Unified streaming formatters for evaluation results output."""
+
+from __future__ import annotations
+
+import csv
+import json
+from collections.abc import Iterator
+from dataclasses import asdict, astuple, dataclass, field, fields
+from typing import IO, Any
+
+
+@dataclass
+class InstanceOutput:
+    """Single instance prediction for output."""
+
+    native_id: str
+    instance_metrics: dict[str, Any]
+
+
+@dataclass
+class TaskOutput:
+    """Task with its instances for output."""
+
+    task_name: str
+    task_hash: str
+    instances: list[InstanceOutput] = field(default_factory=list)
+
+
+@dataclass
+class ModelOutput:
+    """Model with its tasks for output."""
+
+    model_name: str
+    model_hash: str
+    tasks: list[TaskOutput] = field(default_factory=list)
+
+
+@dataclass
+class PaginationOutput:
+    """Pagination metadata."""
+
+    last_id: int
+
+
+@dataclass
+class InstanceStreamOutput:
+    """Top-level output for instance streaming."""
+
+    models: list[ModelOutput]
+    experiment_group: str | None = None
+    pagination: PaginationOutput | None = None
+
+
+@dataclass
+class InstanceCSVRow:
+    """Single row for CSV output - defines column order."""
+
+    experiment_group: str
+    model_name: str
+    model_hash: str
+    task_name: str
+    task_hash: str
+    native_id: str
+    instance_metrics: str  # JSON string
+
+
+# Use field names for headers
+CSV_HEADERS = [f.name for f in fields(InstanceCSVRow)]
+
+
+def stream_instances_to_csv(
+    instances: Iterator[Any],
+    output: IO[str],
+    experiment_group: str | None = None,
+) -> None:
+    """Stream instances directly to CSV. Memory-efficient for any size.
+
+    Args:
+        instances: Iterator of SQLAlchemy Row objects with instance and metadata fields.
+        output: File-like object to write CSV output to.
+        experiment_group: Optional experiment group to include in each row.
+    """
+    writer = csv.writer(output)
+    writer.writerow(CSV_HEADERS)
+
+    for row in instances:
+        csv_row = InstanceCSVRow(
+            experiment_group=experiment_group or getattr(row, "experiment_group", ""),
+            model_name=row.model_name,
+            model_hash=row.model_hash,
+            task_name=row.task_name,
+            task_hash=row.task_hash,
+            native_id=row.native_id,
+            instance_metrics=json.dumps(row.instance_metrics),
+        )
+        writer.writerow(astuple(csv_row))
+
+
+def stream_instances_to_nested_json(
+    instances: Iterator[Any],
+    output: IO[str],
+    experiment_group: str | None = None,
+) -> None:
+    """Stream instances to nested JSON. Groups in single pass.
+
+    Uses ordered grouping - assumes input is sorted by model_hash, task_hash.
+    This enables single-pass grouping with constant memory for the grouping state.
+
+    Args:
+        instances: Iterator of SQLAlchemy Row objects sorted by (model_hash, task_hash, id).
+        output: File-like object to write JSON output to.
+        experiment_group: Optional experiment group to include in output.
+    """
+    current_model: ModelOutput | None = None
+    current_task: TaskOutput | None = None
+    models: list[ModelOutput] = []
+    last_id: int | None = None
+
+    for row in instances:
+        last_id = row.id
+
+        # New model?
+        if current_model is None or current_model.model_hash != row.model_hash:
+            if current_model:
+                models.append(current_model)
+            current_model = ModelOutput(
+                model_name=row.model_name,
+                model_hash=row.model_hash,
+            )
+            current_task = None
+
+        # New task?
+        if current_task is None or current_task.task_hash != row.task_hash:
+            current_task = TaskOutput(
+                task_name=row.task_name,
+                task_hash=row.task_hash,
+            )
+            current_model.tasks.append(current_task)
+
+        # Add instance
+        current_task.instances.append(
+            InstanceOutput(
+                native_id=row.native_id,
+                instance_metrics=row.instance_metrics,
+            )
+        )
+
+    # Don't forget last model
+    if current_model:
+        models.append(current_model)
+
+    # Build output
+    output_data = InstanceStreamOutput(
+        models=models,
+        experiment_group=experiment_group,
+        pagination=PaginationOutput(last_id=last_id) if last_id else None,
+    )
+
+    json.dump(asdict(output_data), output, indent=2, default=str)

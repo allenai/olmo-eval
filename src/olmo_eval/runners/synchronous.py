@@ -61,6 +61,9 @@ class SyncEvalRunner(RunnerResultsMixin):
     # Experiment name for database storage
     experiment_name: str | None = None
 
+    # Experiment group for grouping related experiments
+    experiment_group: str | None = None
+
     # Model alias (short name used as model_name in DB, original path stored as model_path)
     alias: str | None = None
 

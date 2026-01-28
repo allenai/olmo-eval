@@ -96,6 +96,7 @@ def convert_runner_results(
     revision: str | None = None,
     tags: list[str] | None = None,
     model_path: str | None = None,
+    experiment_group: str | None = None,
 ) -> EvalResult:
     """Convert EvalRunner results dict to EvalResult.
 
@@ -110,6 +111,8 @@ def convert_runner_results(
         model_hash: Hash of model configuration.
         revision: Model revision/checkpoint.
         tags: List of tags for categorization.
+        model_path: Original model path (when alias is used).
+        experiment_group: Group for organizing related experiments.
 
     Returns:
         EvalResult instance.
@@ -178,4 +181,5 @@ def convert_runner_results(
         model_config=results.get("model_config"),
         metadata=results.get("metadata"),
         model_path=model_path,
+        experiment_group=experiment_group,
     )
