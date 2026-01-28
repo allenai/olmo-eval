@@ -384,8 +384,6 @@ class InstancePredictionRepository:
 
         return [
             {
-                "id": inst.id,
-                "experiment_pk": inst.experiment_pk,
                 "task_hash": inst.task_hash,
                 "task_name": task_name_val,
                 "native_id": inst.native_id,
@@ -456,8 +454,6 @@ class InstancePredictionRepository:
 
         return [
             {
-                "id": inst.id,
-                "experiment_pk": inst.experiment_pk,
                 "task_hash": inst.task_hash,
                 "task_name": task_name_val,
                 "model_hash": model_hash_val,
@@ -516,8 +512,6 @@ class InstancePredictionRepository:
 
         return [
             {
-                "id": inst.id,
-                "experiment_pk": inst.experiment_pk,
                 "task_hash": inst.task_hash,
                 "task_name": task_name_val,
                 "native_id": inst.native_id,
@@ -537,8 +531,6 @@ class InstancePredictionRepository:
             Instance dict.
         """
         return {
-            "id": instance.id,
-            "experiment_pk": instance.experiment_pk,
             "task_hash": instance.task_hash,
             "native_id": instance.native_id,
             "instance_metrics": instance.instance_metrics,

@@ -175,7 +175,7 @@ def print_task_results_table(tasks: list[Any], task_filter: set[str] | None = No
 
 def _build_model_task_scores(
     experiments: list[Any], task_filter: set[str] | None = None
-) -> tuple[list[str], dict[str, dict[str, float | None]]]:
+) -> tuple[list[str], dict[str, dict[str, float | None]], dict[str, str]]:
     """Build model-task score mapping from experiments.
 
     Args:
@@ -183,16 +183,17 @@ def _build_model_task_scores(
         task_filter: Optional set of task names to include.
 
     Returns:
-        Tuple of (sorted_tasks, model_scores) where model_scores maps
-        model_key -> task_name -> score.
+        Tuple of (sorted_tasks, model_scores, task_hashes) where model_scores maps
+        model_key -> task_name -> score, and task_hashes maps task_name -> short_hash.
     """
     all_tasks: set[str] = set()
     model_scores: dict[str, dict[str, float | None]] = {}
+    task_hashes: dict[str, str] = {}
 
     for exp in experiments:
         model_key = exp.model_name
         if exp.model_hash:
-            model_key += f" ({exp.model_hash[:8]})"
+            model_key += f" [dim]({exp.model_hash[-4:]})[/dim]"
 
         if model_key not in model_scores:
             model_scores[model_key] = {}
@@ -203,8 +204,11 @@ def _build_model_task_scores(
             all_tasks.add(task.task_name)
             # Keep the latest score if we see duplicates
             model_scores[model_key][task.task_name] = task.primary_score
+            # Store task hash (use latest if multiple)
+            if task.task_hash:
+                task_hashes[task.task_name] = task.task_hash[-4:]
 
-    return sorted(all_tasks), model_scores
+    return sorted(all_tasks), model_scores, task_hashes
 
 
 def print_task_comparison_matrix(
@@ -216,18 +220,21 @@ def print_task_comparison_matrix(
         experiments: List of experiment results.
         task_filter: Optional set of task names to include.
     """
-    sorted_tasks, model_scores = _build_model_task_scores(experiments, task_filter)
+    sorted_tasks, model_scores, task_hashes = _build_model_task_scores(experiments, task_filter)
 
     if not sorted_tasks:
         console.print("[dim]No matching tasks found.[/dim]")
         return
 
     # Create the comparison table
-    table = Table(title="Model-Task Comparison")
+    table = Table(title="Results")
     table.add_column("Model", style="cyan")
 
     for task_name in sorted_tasks:
-        table.add_column(task_name, justify="right")
+        # Include short hash in column header if available (dimmed)
+        short_hash = task_hashes.get(task_name)
+        header = f"{task_name} [dim]({short_hash})[/dim]" if short_hash else task_name
+        table.add_column(header, justify="right")
 
     # Add rows for each model
     for model_key in sorted(model_scores.keys()):
@@ -244,10 +251,51 @@ def print_task_comparison_matrix(
     console.print(table)
 
 
-def experiments_to_json(experiments: list[Any]) -> str:
-    """Convert experiments to JSON string."""
+def experiments_to_dict(
+    experiments: list[Any], instances: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
+    """Convert experiments to dict with optional instances grouped by task.
+
+    Args:
+        experiments: List of experiment results.
+        instances: Optional list of instance predictions to include.
+
+    Returns:
+        Dict with experiments containing tasks containing instances.
+    """
+    # Group instances by task_hash
+    instance_groups: dict[str, list[dict[str, Any]]] = {}
+    if instances:
+        for inst in instances:
+            # Use task_hash as key since we're grouping within experiments
+            key = inst.get("task_hash", "")
+            if key not in instance_groups:
+                instance_groups[key] = []
+            # Only include native_id and instance_metrics in grouped output
+            instance_groups[key].append(
+                {
+                    "native_id": inst.get("native_id"),
+                    "instance_metrics": inst.get("instance_metrics"),
+                }
+            )
+
     data = []
     for exp in experiments:
+        tasks = []
+        for t in exp.tasks:
+            task_entry: dict[str, Any] = {
+                "task_name": t.task_name,
+                "task_hash": t.task_hash,
+                "primary_metric": t.primary_metric,
+                "primary_score": t.primary_score,
+                "num_instances": t.num_instances,
+                "metrics": t.metrics,
+            }
+            # Add instances for this task if available
+            if t.task_hash and t.task_hash in instance_groups:
+                task_entry["instances"] = instance_groups[t.task_hash]
+            tasks.append(task_entry)
+
         data.append(
             {
                 "experiment_id": exp.experiment_id,
@@ -262,20 +310,17 @@ def experiments_to_json(experiments: list[Any]) -> str:
                 "git_ref": exp.git_ref,
                 "revision": exp.revision,
                 "s3_location": exp.s3_location,
-                "tasks": [
-                    {
-                        "task_name": t.task_name,
-                        "task_hash": t.task_hash,
-                        "primary_metric": t.primary_metric,
-                        "primary_score": t.primary_score,
-                        "num_instances": t.num_instances,
-                        "metrics": t.metrics,
-                    }
-                    for t in exp.tasks
-                ],
+                "tasks": tasks,
             }
         )
-    return json.dumps(data, indent=2)
+    return {"experiments": data}
+
+
+def experiments_to_json(
+    experiments: list[Any], instances: list[dict[str, Any]] | None = None
+) -> str:
+    """Convert experiments to JSON string."""
+    return json.dumps(experiments_to_dict(experiments, instances), indent=2)
 
 
 def experiments_to_csv(experiments: list[Any]) -> None:
@@ -301,7 +346,7 @@ def task_comparison_to_csv(experiments: list[Any], task_filter: set[str] | None 
         experiments: List of experiment results.
         task_filter: Optional set of task names to include.
     """
-    sorted_tasks, model_scores = _build_model_task_scores(experiments, task_filter)
+    sorted_tasks, model_scores, _ = _build_model_task_scores(experiments, task_filter)
 
     if not sorted_tasks:
         return
@@ -321,33 +366,76 @@ def task_comparison_to_csv(experiments: list[Any], task_filter: set[str] | None 
         writer.writerow(row)
 
 
-def task_comparison_to_json(experiments: list[Any], task_filter: set[str] | None = None) -> str:
-    """Convert task comparison to JSON string.
+def task_comparison_to_dict(
+    experiments: list[Any],
+    task_filter: set[str] | None = None,
+    instances: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Convert task comparison to dict with optional instances grouped by model-task.
 
     Args:
         experiments: List of experiment results.
         task_filter: Optional set of task names to include.
+        instances: Optional list of instance predictions to include.
 
     Returns:
-        JSON string with model-task scores.
+        Dict with models containing tasks containing scores and instances.
     """
-    sorted_tasks, model_scores = _build_model_task_scores(experiments, task_filter)
+    # Group instances by (model_hash, task_hash)
+    instance_groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    if instances:
+        for inst in instances:
+            key = (inst.get("model_hash", ""), inst.get("task_hash", ""))
+            if key not in instance_groups:
+                instance_groups[key] = []
+            # Only include native_id and instance_metrics in grouped output
+            instance_groups[key].append(
+                {
+                    "native_id": inst.get("native_id"),
+                    "instance_metrics": inst.get("instance_metrics"),
+                }
+            )
 
-    # Build JSON-friendly output with model_hash included
-    output: dict[str, Any] = {}
+    # Build output structured by model
+    output: dict[str, Any] = {"models": []}
+
     for exp in experiments:
-        model_key = exp.model_name
-        if exp.model_hash:
-            model_key += f" ({exp.model_hash[:8]})"
+        model_entry = {
+            "model_name": exp.model_name,
+            "model_hash": exp.model_hash,
+            "tasks": [],
+        }
 
-        if model_key not in output:
-            output[model_key] = {
-                "model_name": exp.model_name,
-                "model_hash": exp.model_hash,
-                "scores": model_scores.get(model_key, {}),
+        for task in exp.tasks:
+            if task_filter and task.task_name not in task_filter:
+                continue
+
+            task_entry: dict[str, Any] = {
+                "task_name": task.task_name,
+                "task_hash": task.task_hash,
+                "primary_metric": task.primary_metric,
+                "primary_score": task.primary_score,
             }
 
-    return json.dumps(output, indent=2)
+            # Add instances for this model-task pair if available
+            key = (exp.model_hash or "", task.task_hash or "")
+            if key in instance_groups:
+                task_entry["instances"] = instance_groups[key]
+
+            model_entry["tasks"].append(task_entry)
+
+        output["models"].append(model_entry)
+
+    return output
+
+
+def task_comparison_to_json(
+    experiments: list[Any],
+    task_filter: set[str] | None = None,
+    instances: list[dict[str, Any]] | None = None,
+) -> str:
+    """Convert task comparison to JSON string."""
+    return json.dumps(task_comparison_to_dict(experiments, task_filter, instances), indent=2)
 
 
 def instances_to_json(instances: list[dict[str, Any]]) -> str:
@@ -568,7 +656,7 @@ def get_deprecated(
 @click.option(
     "--instances/--no-instances",
     default=False,
-    help="Output instance-level predictions instead of experiment summaries.",
+    help="Include instance-level predictions (requires --format json or csv).",
 )
 @click.option(
     "--limit",
@@ -611,7 +699,7 @@ def query(
     """Query evaluation results with flexible filters.
 
     Filter by experiment, model, model-hash, task, or task-hash.
-    Use --instances to get instance-level predictions instead of experiment summaries.
+    Use --instances with --format json or csv to include instance-level predictions.
 
     Examples:
         # Get experiment by ID
@@ -643,73 +731,6 @@ def query(
             helper = QueryHelper(session)
             repo = ExperimentRepository(session)
 
-            # Handle --instances mode: output instance-level predictions
-            if instances:
-                task_name_filter = list(task_names) if task_names else None
-
-                # Determine which query method to use based on filters
-                if experiment_ids:
-                    # Query instances by experiment ID(s)
-                    instance_data: list[dict[str, Any]] = []
-                    for exp_id in experiment_ids:
-                        instance_data.extend(
-                            helper.get_instances_by_experiment_id(
-                                experiment_id=exp_id,
-                                task_name=task_name_filter,
-                                limit=limit,
-                                offset=offset,
-                            )
-                        )
-                elif task_hash:
-                    # Query instances by task hash
-                    instance_data = helper.instance_repo.get_instances_by_task(
-                        task_hash=task_hash,
-                        task_name=task_name_filter,
-                        limit=limit,
-                        offset=offset,
-                    )
-                elif task_names and not model_names and not model_hashes:
-                    # Query instances by task name only
-                    instance_data = helper.instance_repo.get_instances_by_task(
-                        task_name=task_name_filter,
-                        limit=limit,
-                        offset=offset,
-                    )
-                elif model_names or model_hashes:
-                    # Query instances by model
-                    if not task_names:
-                        raise click.UsageError(
-                            "--task is required when querying instances by model"
-                        )
-                    task_list = list(task_names)
-                    instance_data = helper.get_instances_by_model(
-                        task_name=task_list[0] if len(task_list) == 1 else task_list,
-                        model_name=model_names[0] if model_names else None,
-                        model_hash=model_hashes[0] if model_hashes else None,
-                        limit=limit,
-                        offset=offset,
-                    )
-                else:
-                    instance_data = []
-
-                if not instance_data:
-                    console.print("[dim]No instances found matching filters.[/dim]")
-                    return
-
-                # Output instances
-                if output_format == "json":
-                    print(instances_to_json(instance_data))
-                elif output_format == "csv":
-                    instances_to_csv(instance_data)
-                else:
-                    console.print(
-                        "[dim]Instance data is too large for table output. "
-                        "Use --format json or --format csv.[/dim]"
-                    )
-                    console.print(f"[dim]Found {len(instance_data)} instance(s)[/dim]")
-                return
-
-            # Non-instances mode: output experiments/task results
             all_experiments: list[Any] = []
 
             # Query by experiment IDs
@@ -717,7 +738,8 @@ def query(
                 exps = helper.get_by_experiment_id(exp_id)
                 if not exps:
                     console.print(
-                        f"[yellow]Warning:[/yellow] No experiments found for ID '{exp_id}'"
+                        f"[yellow]Warning:[/yellow] No experiments found with "
+                        f"experiment_id='{exp_id}'"
                     )
                 all_experiments.extend(exps)
 
@@ -726,7 +748,8 @@ def query(
                 exps = repo.query(model_name=model_name, limit=1000)
                 if not exps:
                     console.print(
-                        f"[yellow]Warning:[/yellow] No experiments found for model '{model_name}'"
+                        f"[yellow]Warning:[/yellow] No experiments found with "
+                        f"model_name='{model_name}'"
                     )
                 all_experiments.extend(exps)
 
@@ -735,7 +758,7 @@ def query(
                 exps = repo.query(model_hash=mhash, latest=True)
                 if not exps:
                     console.print(
-                        f"[yellow]Warning:[/yellow] No experiments found for hash '{mhash}'"
+                        f"[yellow]Warning:[/yellow] No experiments found with model_hash='{mhash}'"
                     )
                 all_experiments.extend(exps)
 
@@ -748,6 +771,11 @@ def query(
             if task_names and not model_names and not model_hashes:
                 for tname in task_names:
                     exps = repo.query(task_name=tname, limit=100)
+                    if not exps:
+                        console.print(
+                            f"[yellow]Warning:[/yellow] No experiments found with "
+                            f"task_name='{tname}'"
+                        )
                     all_experiments.extend(exps)
 
             if not all_experiments:
@@ -757,22 +785,79 @@ def query(
             # Filter tasks if task_names specified
             task_filter = set(task_names) if task_names else None
 
+            # Query instance-level predictions if requested
+            instance_data: list[dict[str, Any]] = []
+            if instances:
+                task_name_filter = list(task_names) if task_names else None
+
+                if experiment_ids:
+                    for exp_id in experiment_ids:
+                        instance_data.extend(
+                            helper.get_instances_by_experiment_id(
+                                experiment_id=exp_id,
+                                task_name=task_name_filter,
+                                limit=limit,
+                                offset=offset,
+                            )
+                        )
+                elif task_hash:
+                    instance_data = helper.instance_repo.get_instances_by_task(
+                        task_hash=task_hash,
+                        task_name=task_name_filter,
+                        limit=limit,
+                        offset=offset,
+                    )
+                elif task_names and not model_names and not model_hashes:
+                    instance_data = helper.instance_repo.get_instances_by_task(
+                        task_name=task_name_filter,
+                        limit=limit,
+                        offset=offset,
+                    )
+                elif model_names or model_hashes:
+                    if not task_names:
+                        raise click.UsageError(
+                            "--task is required when querying instances by model"
+                        )
+                    task_list = list(task_names)
+                    instance_data = helper.get_instances_by_model(
+                        task_name=task_list[0] if len(task_list) == 1 else task_list,
+                        model_name=model_names[0] if model_names else None,
+                        model_hash=model_hashes[0] if model_hashes else None,
+                        limit=limit,
+                        offset=offset,
+                    )
+
             # Handle output formats
             if comparison_query:
                 # Comparison query (task-only or model-only): use comparison matrix format
                 if output_format == "json":
-                    print(task_comparison_to_json(all_experiments, task_filter))
+                    output = task_comparison_to_dict(
+                        all_experiments,
+                        task_filter,
+                        instance_data if instances else None,
+                    )
+                    print(json.dumps(output, indent=2, default=str))
                     return
                 if output_format == "csv":
                     task_comparison_to_csv(all_experiments, task_filter)
+                    if instances and instance_data:
+                        console.print("\n[bold]Instance Predictions[/bold]")
+                        instances_to_csv(instance_data)
                     return
             else:
                 # Experiment query: use standard experiment format
                 if output_format == "json":
-                    print(experiments_to_json(all_experiments))
+                    output = experiments_to_dict(
+                        all_experiments,
+                        instance_data if instances else None,
+                    )
+                    print(json.dumps(output, indent=2, default=str))
                     return
                 if output_format == "csv":
                     experiments_to_csv(all_experiments)
+                    if instances and instance_data:
+                        console.print("\n[bold]Instance Predictions[/bold]")
+                        instances_to_csv(instance_data)
                     return
 
             # Table format
@@ -795,5 +880,15 @@ def query(
 
                     if i < len(all_experiments) - 1:
                         console.print()
+
+            # Show instance summary for table format
+            if instances:
+                if instance_data:
+                    console.print(
+                        f"\n[yellow]Found {len(instance_data)} instance(s). "
+                        f"Use --format json or --format csv to include them.[/yellow]"
+                    )
+                else:
+                    console.print("\n[dim]No instance predictions found.[/dim]")
     finally:
         db.dispose()
