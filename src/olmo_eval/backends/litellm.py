@@ -136,13 +136,14 @@ class LiteLLMBackend(Backend):
             )
 
             # Extract logprobs from response
-            completion_logprobs = []
+            completion_logprobs: list[LogProbEntry] = []
             if response.choices:
                 choice = response.choices[0]
                 logprobs_data = getattr(choice, "logprobs", None)
                 if logprobs_data and hasattr(logprobs_data, "content") and logprobs_data.content:
                     completion_logprobs = [
-                        {"token": lp.token, "logprob": lp.logprob} for lp in logprobs_data.content
+                        LogProbEntry(token=lp.token, logprob=lp.logprob)
+                        for lp in logprobs_data.content
                     ]
 
             # Map to continuations
