@@ -648,14 +648,16 @@ class InstancePredictionRepository:
         # Build result dicts with consistent schema
         output = []
         for row in results:
-            output.append({
-                "id": row.id,
-                "task_hash": row.task_hash,
-                "task_name": row.task_name,
-                "native_id": row.native_id,
-                "instance_metrics": row.instance_metrics,
-                "model_hash": row.model_hash,
-            })
+            output.append(
+                {
+                    "id": row.id,
+                    "task_hash": row.task_hash,
+                    "task_name": row.task_name,
+                    "native_id": row.native_id,
+                    "instance_metrics": row.instance_metrics,
+                    "model_hash": row.model_hash,
+                }
+            )
 
         return output
 

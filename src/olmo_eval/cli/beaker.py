@@ -544,7 +544,9 @@ def launch(
 
     def get_runtime_signature(m_cfg: ModelConfig, m_spec: str) -> tuple:
         """Get a hashable runtime signature for grouping compatible models."""
-        m_gpus, m_parallelism, m_cluster, m_backend = get_model_resources_for_grouping(m_cfg, m_spec)
+        m_gpus, m_parallelism, m_cluster, m_backend = get_model_resources_for_grouping(
+            m_cfg, m_spec
+        )
 
         # Extract inline overrides from spec (e.g., "model::attention_backend=FLASH_ATTN")
         _, _, inline_overrides = m_spec.partition("::")
@@ -556,7 +558,7 @@ def launch(
 
     model_data = [
         (get_runtime_signature(m_cfg, m_spec), i, m_cfg, m_spec)
-        for i, (m_cfg, m_spec) in enumerate(zip(model_configs, model_specs))
+        for i, (m_cfg, m_spec) in enumerate(zip(model_configs, model_specs, strict=True))
     ]
     sorted_models = sorted(model_data, key=lambda x: (x[0], x[1]))
     model_groups = [list(group) for _, group in groupby(sorted_models, key=lambda x: x[0])]
@@ -659,7 +661,7 @@ def launch(
     from olmo_eval.core.configs import get_model_config as get_runtime_model_config
 
     model_summaries: list[ModelSummary] = []
-    for m, m_spec in zip(model_configs, model_specs):
+    for m, m_spec in zip(model_configs, model_specs, strict=True):
         # Use original spec to extract inline overrides (name_or_path has them stripped)
         model_base_name, model_inline_overrides = parse_model_spec(m_spec)
 
@@ -863,12 +865,9 @@ def launch(
         command: list[str] = ["olmo-eval", "run"]
 
         # Add each model with its spec (preserves inline overrides like ::attention_backend=X)
-        for m_cfg, m_spec in zip(exp_model_cfgs, exp_model_specs):
+        for m_cfg, m_spec in zip(exp_model_cfgs, exp_model_specs, strict=True):
             # Check if config file specifies additional inline overrides (load_format, etc.)
-            if cfg is not None:
-                m_resources = cfg.get_model_resources(m_cfg)
-            else:
-                m_resources = model_resources
+            m_resources = cfg.get_model_resources(m_cfg) if cfg is not None else model_resources
 
             # Build final model spec with any config-file inline overrides
             final_model_spec = m_spec

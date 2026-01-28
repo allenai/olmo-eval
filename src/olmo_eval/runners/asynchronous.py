@@ -986,8 +986,8 @@ class AsyncEvalRunner(AsyncRunnerMixin):
                         worker.terminate()
                         worker.join(timeout=5)
                 # Cancel queue join threads to allow clean process exit
-                for queue in list(model_queues.values()) + [result_queue]:
-                    queue.cancel_join_thread()
+                for mp_queue in list(model_queues.values()) + [result_queue]:
+                    mp_queue.cancel_join_thread()
                 raise RuntimeError(f"Worker process crashed: {result_item.error}")
 
             key = (result_item.model_name, result_item.task_id)
@@ -1457,8 +1457,8 @@ class StreamingEvalRunner(AsyncRunnerMixin):
                         worker.terminate()
                         worker.join(timeout=5)
                 # Cancel queue join threads to allow clean process exit
-                for queue in list(model_queues.values()) + [result_queue]:
-                    queue.cancel_join_thread()
+                for mp_queue in list(model_queues.values()) + [result_queue]:
+                    mp_queue.cancel_join_thread()
                 raise RuntimeError(f"Worker process crashed: {result_item.error}")
 
             key = (result_item.model_name, result_item.task_id)

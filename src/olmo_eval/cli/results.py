@@ -849,24 +849,22 @@ def _query_experiments(
 
     # Query by each filter type
     query_with_warning(experiment_ids, helper.get_by_experiment_id, FilterType.EXPERIMENT_ID)
-    query_with_warning(
-        model_names, lambda x: repo.query(model_name=x), FilterType.MODEL_NAME
-    )
+    query_with_warning(model_names, lambda x: repo.query(model_name=x), FilterType.MODEL_NAME)
     query_with_warning(
         model_hashes, lambda x: repo.query(model_hash=x, latest=True), FilterType.MODEL_HASH
     )
 
     # Task-only query (no model filters)
     if task_names and not model_names and not model_hashes:
-        query_with_warning(
-            task_names, lambda x: repo.query(task_name=x), FilterType.TASK_NAME
-        )
+        query_with_warning(task_names, lambda x: repo.query(task_name=x), FilterType.TASK_NAME)
 
     # Task hash query (if no results yet from other filters)
     if task_hash and not results:
         exps = repo.query(task_hash=task_hash)
         if not exps:
-            console.print(f"[yellow]Warning:[/yellow] No experiments found with task_hash='{task_hash}'")
+            console.print(
+                f"[yellow]Warning:[/yellow] No experiments found with task_hash='{task_hash}'"
+            )
         results.extend(exps)
 
     return results
