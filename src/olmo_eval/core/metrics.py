@@ -166,3 +166,41 @@ class MeanPerplexityMetric:
             total += scorer_instance.score(response.instance, output)
 
         return total / len(responses)
+
+
+@dataclass(frozen=True, slots=True)
+class CorpusPerplexityMetric:
+    """Corpus-level (token-weighted) perplexity.
+
+    This is the standard token-weighted aggregation across docs.
+    """
+
+    name: str = "corpus_perplexity"
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        if not responses:
+            return 0.0
+
+        total_logprob = 0.0
+        total_tokens = 0
+
+        for response in responses:
+            outputs = response.outputs
+            if not outputs:
+                continue
+            # We assume this contains one output for the entire doc
+            output = outputs[0]
+            if output.logprobs is None:
+                continue
+            for tok in output.logprobs:
+                lp = tok.get("logprob")
+                if lp is None:
+                    continue
+                total_logprob += lp
+                total_tokens += 1
+
+        if total_tokens == 0:
+            return 0.0
+        
+        avg_logprob = total_logprob / total_tokens
+        return math.exp(-avg_logprob)

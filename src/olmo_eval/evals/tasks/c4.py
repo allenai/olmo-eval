@@ -1,17 +1,18 @@
 """C4 perplexity task implementations."""
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from typing import Any
 
 from olmo_eval.core import (
     BitsPerByteScorer,
     BPBMetric,
+    CorpusPerplexityMetric,
     Instance,
     LMOutput,
     LMRequest,
-    MeanPerplexityMetric,
     PerplexityScorer,
     RequestType,
+    Response,
 )
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register, register_variant
@@ -72,9 +73,15 @@ class C4Task(Task):
             continuations=(instance.gold_answer,),
         )
 
-    def extract_answer(self, output: LMOutput) -> str:
-        # Not used for scoring PPL/BPB, but keeps predictions readable.
-        return output.text
+
+    def score_responses(self, responses: Sequence[Response]) -> Sequence[Response]:
+        """Apply all scorers to extract answers and compute scores."""
+        for response in responses:
+            # Apply each scorer, taking best score across outputs (for multi-sample)
+            for scorer in self.config.scorers:
+                scores = [scorer.score(response.instance, o) for o in response.outputs]
+                response.scores[scorer.name] = max(scores) if scores else 0.0
+        return responses
 
 
 # =============================================================================
@@ -111,13 +118,6 @@ register_variant(
     "c4",
     "ppl",
     scorers=(PerplexityScorer(),),
-    metrics=(MeanPerplexityMetric(),),
-    primary_metric=MeanPerplexityMetric(),
-)
-register_variant(
-    "c4",
-    "bpb",
-    scorers=(BitsPerByteScorer(),),
-    metrics=(BPBMetric(),),
-    primary_metric=BPBMetric(),
+    metrics=(CorpusPerplexityMetric(),),
+    primary_metric=CorpusPerplexityMetric(),
 )
