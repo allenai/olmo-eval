@@ -131,11 +131,15 @@ def parse_model_config(model: str | dict[str, Any] | ModelConfig) -> ModelConfig
     Examples:
         parse_model_config("llama3.1-8b")
         parse_model_config({"name_or_path": "llama3.1-70b", "gpus": 4})
+        parse_model_config("llama3.1-8b::attention_backend=FLASH_ATTN")
     """
     if isinstance(model, ModelConfig):
         return model
     if isinstance(model, str):
-        return ModelConfig(name_or_path=model)
+        # Strip inline overrides (::key=value) from model spec for name_or_path
+        # The full spec with overrides is preserved in the original string for command building
+        name_or_path, _, _ = model.partition("::")
+        return ModelConfig(name_or_path=name_or_path)
     if isinstance(model, dict):
         schema = OmegaConf.structured(ModelConfig)
         merged = OmegaConf.merge(schema, OmegaConf.create(model))

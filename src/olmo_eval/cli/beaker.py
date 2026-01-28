@@ -256,10 +256,14 @@ def launch(
         budget = budget or cfg.budget
 
         # Get model configs from file (with per-model resource overrides)
+        # Also store the original specs (with ::overrides) for command building
         if not model:
             model_configs = cfg.get_model_configs()
+            # For config file models, use name_or_path as spec (no inline overrides)
+            model_specs: list[str] = [m.name_or_path for m in model_configs]
         else:
             # CLI models override config file models
+            model_specs = list(model)  # Original specs with ::overrides
             model_configs = [parse_model_config(m) for m in model]
 
         # Set defaults from config (will be overridden by per-model or CLI)
@@ -276,6 +280,7 @@ def launch(
         gpus_per_worker = gpus_per_worker if gpus_per_worker != 1 else cfg.gpus_per_worker
     else:
         # No config file - use CLI models
+        model_specs = list(model) if model else []  # Original specs with ::overrides
         model_configs = [parse_model_config(m) for m in model] if model else []
 
     # Apply defaults for values not set by config or CLI
@@ -508,12 +513,14 @@ def launch(
     launched_experiments: list[str] = []
 
     # Build experiment plan with parallelism and splitting
+    # Group models by compatible runtime to run them in the same job
     experiment_plan: list[dict] = []
     split_models: list[str] = []
 
-    for m_cfg in model_configs:
-        m_name = m_cfg.name_or_path
-        short_m = get_model_short_name(m_cfg)
+    def get_model_resources_for_grouping(
+        m_cfg: ModelConfig, m_spec: str
+    ) -> tuple[int, int, str | None, str | None]:
+        """Get runtime-critical resources for a model to determine grouping compatibility."""
         if cfg is not None:
             m_resources = cfg.get_model_resources(m_cfg)
             m_gpus = cli_gpus if cli_gpus is not None else m_resources.get("gpus", 1)
@@ -522,6 +529,8 @@ def launch(
                 if cli_parallelism is not None
                 else m_resources.get("parallelism", 1)
             )
+            m_cluster = cli_cluster if cli_cluster is not None else m_resources.get("cluster")
+            m_backend = m_resources.get("backend")
         else:
             m_gpus = cli_gpus if cli_gpus is not None else (m_cfg.gpus or gpus)
             m_parallelism = (
@@ -529,10 +538,49 @@ def launch(
                 if cli_parallelism is not None
                 else (m_cfg.parallelism or parallelism)
             )
+            m_cluster = cli_cluster if cli_cluster is not None else (m_cfg.cluster or cluster)
+            m_backend = m_cfg.backend
+        return m_gpus, m_parallelism, m_cluster, m_backend
+
+    def get_runtime_signature(m_cfg: ModelConfig, m_spec: str) -> tuple:
+        """Get a hashable runtime signature for grouping compatible models."""
+        m_gpus, m_parallelism, m_cluster, m_backend = get_model_resources_for_grouping(m_cfg, m_spec)
+
+        # Extract inline overrides from spec (e.g., "model::attention_backend=FLASH_ATTN")
+        _, _, inline_overrides = m_spec.partition("::")
+
+        return (m_gpus, m_parallelism, m_cluster, m_backend, inline_overrides)
+
+    # Group models by runtime signature
+    from itertools import groupby
+
+    model_data = [
+        (get_runtime_signature(m_cfg, m_spec), i, m_cfg, m_spec)
+        for i, (m_cfg, m_spec) in enumerate(zip(model_configs, model_specs))
+    ]
+    sorted_models = sorted(model_data, key=lambda x: (x[0], x[1]))
+    model_groups = [list(group) for _, group in groupby(sorted_models, key=lambda x: x[0])]
+
+    for model_group in model_groups:
+        group_model_cfgs = [g[2] for g in model_group]
+        group_model_specs = [g[3] for g in model_group]
+
+        # Use first model's resources (all models in group have same signature)
+        first_cfg = group_model_cfgs[0]
+        first_spec = group_model_specs[0]
+        m_gpus, m_parallelism, _, _ = get_model_resources_for_grouping(first_cfg, first_spec)
+
+        # Determine if we have multiple models in this group (for naming)
+        group_has_multiple_models = len(group_model_cfgs) > 1
 
         for t_priority, t_list in tasks_by_priority.items():
+            # When models are grouped, use base name without model suffix
+            # Only append model suffix if there's exactly one model in the group
+            # and there are multiple model groups (ungrouped models)
             base_name = name
-            if multiple_models:
+            if not group_has_multiple_models and multiple_models:
+                # Single model in group, but multiple models overall - append model name
+                short_m = get_model_short_name(first_cfg)
                 base_name = f"{base_name}-{short_m}"
             if multiple_priorities:
                 base_name = f"{base_name}-{t_priority}"
@@ -545,7 +593,8 @@ def launch(
             )
 
             if len(splits) > 1:
-                split_models.append(m_name)
+                for m_cfg in group_model_cfgs:
+                    split_models.append(m_cfg.name_or_path)
 
             total_splits = len(splits)
             total_expanded = expanded_counts_by_priority[t_priority]
@@ -555,8 +604,8 @@ def launch(
                 experiment_plan.append(
                     {
                         "name": exp_name,
-                        "model_name": m_name,
-                        "model_cfg": m_cfg,
+                        "model_cfgs": group_model_cfgs,  # List of models in this group
+                        "model_specs": group_model_specs,  # Original specs with ::overrides
                         "priority": t_priority,
                         "tasks": split["tasks"],
                         "original_task_specs": original_task_specs,
@@ -700,7 +749,7 @@ def launch(
     if total_experiments > 1:
         matrix_table = Table(show_header=True, title="Experiment Plan")
         matrix_table.add_column("Name", style="cyan")
-        matrix_table.add_column("Model", style="blue")
+        matrix_table.add_column("Models", style="blue")
         matrix_table.add_column("Priority", style="yellow")
         matrix_table.add_column("Tasks", justify="right")
         matrix_table.add_column("GPUs", style="green", justify="right")
@@ -711,9 +760,15 @@ def launch(
             task_display = (
                 f"{task_count}/{total_tasks}" if exp["split_index"] is not None else str(task_count)
             )
+            # Show model names (may be multiple if grouped)
+            model_cfgs = exp["model_cfgs"]
+            if len(model_cfgs) == 1:
+                model_display = model_cfgs[0].name_or_path
+            else:
+                model_display = f"{len(model_cfgs)} models"
             matrix_table.add_row(
                 exp["name"],
-                exp["model_name"],
+                model_display,
                 exp["priority"],
                 task_display,
                 str(exp["num_gpus"]),
@@ -751,29 +806,38 @@ def launch(
     job_configs: list[BeakerJobConfig] = []
 
     for exp in experiment_plan:
-        model_cfg = exp["model_cfg"]
-        model_name = exp["model_name"]
+        exp_model_cfgs = exp["model_cfgs"]
+        exp_model_specs = exp["model_specs"]
         exp_name = exp["name"]
         task_list = exp["tasks"]
         exp_num_gpus = exp["num_gpus"]
         exp_parallelism = exp["parallelism"]
         effective_priority = exp["priority"]
 
-        # Get effective resources for this model
+        # Use first model's resources (all models in group have compatible runtime)
+        first_model_cfg = exp_model_cfgs[0]
+
+        # Get effective resources for this model group
         if cfg is not None:
-            model_resources = cfg.get_model_resources(model_cfg)
+            model_resources = cfg.get_model_resources(first_model_cfg)
         else:
-            m_para = model_cfg.parallelism
+            m_para = first_model_cfg.parallelism
             model_resources = {
-                "gpus": model_cfg.gpus if model_cfg.gpus is not None else gpus,
+                "gpus": first_model_cfg.gpus if first_model_cfg.gpus is not None else gpus,
                 "parallelism": m_para if m_para is not None else parallelism,
-                "cluster": model_cfg.cluster if model_cfg.cluster is not None else cluster,
-                "preemptible": (
-                    model_cfg.preemptible if model_cfg.preemptible is not None else preemptible
+                "cluster": (
+                    first_model_cfg.cluster if first_model_cfg.cluster is not None else cluster
                 ),
-                "timeout": model_cfg.timeout if model_cfg.timeout is not None else timeout,
-                "shared_memory": model_cfg.shared_memory,
-                "backend": model_cfg.backend,
+                "preemptible": (
+                    first_model_cfg.preemptible
+                    if first_model_cfg.preemptible is not None
+                    else preemptible
+                ),
+                "timeout": (
+                    first_model_cfg.timeout if first_model_cfg.timeout is not None else timeout
+                ),
+                "shared_memory": first_model_cfg.shared_memory,
+                "backend": first_model_cfg.backend,
             }
 
         # CLI args always override per-model config
@@ -789,30 +853,50 @@ def launch(
         res_shared_memory = model_resources.get("shared_memory")
         effective_shared_memory: str = str(res_shared_memory) if res_shared_memory else "10GiB"
 
-        # Build model spec with inline overrides for per-model vLLM loading options
-        model_spec = model_name
-        model_inline_overrides: list[str] = []
+        # Build command with all models in this group
+        command: list[str] = ["olmo-eval", "run"]
 
-        effective_load_format = model_resources.get("load_format")
-        if effective_load_format:
-            model_inline_overrides.append(f"load_format={effective_load_format}")
+        # Add each model with its spec (preserves inline overrides like ::attention_backend=X)
+        for m_cfg, m_spec in zip(exp_model_cfgs, exp_model_specs):
+            # Check if config file specifies additional inline overrides (load_format, etc.)
+            if cfg is not None:
+                m_resources = cfg.get_model_resources(m_cfg)
+            else:
+                m_resources = model_resources
 
-        effective_extra_loader_config = model_resources.get("extra_loader_config")
-        if effective_extra_loader_config:
-            json_config = json_module.dumps(effective_extra_loader_config, separators=(",", ":"))
-            model_inline_overrides.append(f"extra_loader_config={json_config}")
+            # Build final model spec with any config-file inline overrides
+            final_model_spec = m_spec
+            config_inline_overrides: list[str] = []
 
-        if model_inline_overrides:
-            model_spec = f"{model_name}::{','.join(model_inline_overrides)}"
+            effective_load_format = m_resources.get("load_format")
+            if effective_load_format:
+                config_inline_overrides.append(f"load_format={effective_load_format}")
 
-        # Build command with this model and experiment's tasks
-        command = ["olmo-eval", "run", "-m", model_spec]
+            effective_extra_loader_config = m_resources.get("extra_loader_config")
+            if effective_extra_loader_config:
+                json_config = json_module.dumps(
+                    effective_extra_loader_config, separators=(",", ":")
+                )
+                config_inline_overrides.append(f"extra_loader_config={json_config}")
+
+            # Merge config-file overrides with CLI inline overrides
+            if config_inline_overrides:
+                if "::" in final_model_spec:
+                    # Append to existing inline overrides
+                    final_model_spec = f"{final_model_spec},{','.join(config_inline_overrides)}"
+                else:
+                    # Add inline overrides
+                    final_model_spec = f"{final_model_spec}::{','.join(config_inline_overrides)}"
+
+            command.extend(["-m", final_model_spec])
+
+            # Add alias for this model if defined (scoped to the preceding -m flag)
+            if m_cfg.alias:
+                command.extend(["--alias", m_cfg.alias])
+
+        # Add tasks
         for t in task_list:
             command.extend(["-t", t])
-
-        # Add alias if defined in model config
-        if model_cfg.alias:
-            command.extend(["--alias", model_cfg.alias])
 
         # Add parallelism if > 1
         if exp_parallelism > 1:
@@ -868,7 +952,7 @@ def launch(
         if store:
             command.append("--store")
 
-        # Determine the backend this model will use at runtime
+        # Determine the backend this model group will use at runtime
         from olmo_eval.core.configs import get_model_config as get_runtime_model_config
         from olmo_eval.core.constants.infrastructure import BACKEND_OPTIONAL_GROUPS
 
@@ -876,7 +960,7 @@ def launch(
         if config_backend:
             runtime_backend: str = str(config_backend)
         else:
-            runtime_model_config = get_runtime_model_config(model_name)
+            runtime_model_config = get_runtime_model_config(first_model_cfg.name_or_path)
             runtime_backend = runtime_model_config.backend
 
         # CLI extras override auto-detected backend
