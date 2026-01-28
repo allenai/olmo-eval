@@ -74,14 +74,9 @@ class C4Task(Task):
         )
 
 
-    def score_responses(self, responses: Sequence[Response]) -> Sequence[Response]:
-        """Apply all scorers to extract answers and compute scores."""
-        for response in responses:
-            # Apply each scorer, taking best score across outputs (for multi-sample)
-            for scorer in self.config.scorers:
-                scores = [scorer.score(response.instance, o) for o in response.outputs]
-                response.scores[scorer.name] = max(scores) if scores else 0.0
-        return responses
+    def extract_answer(self, output: LMOutput) -> str:
+        # Not used for scoring PPL/BPB; this is just the input text again.
+        return output.text
 
 
 # =============================================================================
