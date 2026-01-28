@@ -198,8 +198,10 @@ def postgres_backend(storage_docker_services):
     Creates tables before yielding, drops them after.
     """
     pytest.importorskip("psycopg")
+    pytest.importorskip("sqlalchemy")
 
-    from olmo_eval.storage.postgres import PostgresBackend
+    from olmo_eval.storage.backends.postgres import PostgresBackend
+    from olmo_eval.storage.db.models import Base
 
     backend = PostgresBackend(
         host="localhost",
@@ -207,33 +209,58 @@ def postgres_backend(storage_docker_services):
         database="olmo_eval_test",
         user="test",
         password="test",
+        pool_size=2,  # Small pool for testing
+        sslmode="disable",  # Test container doesn't support SSL
+        echo=False,  # Set to True for SQL debugging
     )
 
-    backend.initialize()
+    # Initialize database and create tables for testing
+    backend.db.initialize()
+    Base.metadata.create_all(backend.db.engine)
+
     yield backend
-    backend.cleanup()
+
+    # Drop all tables after testing
+    Base.metadata.drop_all(backend.db.engine)
+    backend.dispose()
 
 
 @pytest.fixture
-def s3_backend(storage_docker_services):
-    """Provide an S3Backend connected to LocalStack.
+def s3_client(storage_docker_services):
+    """Provide an S3 client connected to LocalStack.
 
     Creates bucket before yielding, cleans up after.
     """
-    pytest.importorskip("boto3")
+    boto3 = pytest.importorskip("boto3")
 
-    from olmo_eval.storage.s3 import S3Backend
+    from botocore.exceptions import ClientError
 
-    backend = S3Backend(
-        bucket="test-eval-bucket",
-        prefix="results/",
+    s3 = boto3.client(
+        "s3",
         endpoint_url="http://localhost:4566",
-        region="us-east-1",
+        region_name="us-east-1",
     )
 
-    backend.initialize()
-    yield backend
-    backend.cleanup()
+    test_bucket = "test-eval-bucket"
+    test_prefix = "olmo-eval/"
+
+    # Create bucket for testing
+    try:
+        s3.head_bucket(Bucket=test_bucket)
+    except ClientError:
+        s3.create_bucket(Bucket=test_bucket)
+
+    # Attach test bucket/prefix info for tests to use
+    s3.test_bucket = test_bucket
+    s3.test_prefix = test_prefix
+
+    yield s3
+
+    # Clean up all objects after testing
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=test_bucket, Prefix=test_prefix):
+        for obj in page.get("Contents", []):
+            s3.delete_object(Bucket=test_bucket, Key=obj["Key"])
 
 
 @pytest.fixture
@@ -241,15 +268,15 @@ def sample_eval_result():
     """Create a sample EvalResult for storage testing."""
     from datetime import datetime
 
-    from olmo_eval.storage import EvalResult, TaskResult
+    from olmo_eval.core import EvalResult, StoredTaskResult
 
     return EvalResult(
-        run_id="test-integration-001",
+        experiment_id="test-integration-001",
         model_name="llama3.1-8b",
         backend_name="vllm",
         timestamp=datetime(2024, 1, 15, 10, 30, 0),
         tasks=[
-            TaskResult(
+            StoredTaskResult(
                 task_name="mmlu",
                 metrics={"accuracy": 0.65},
                 num_instances=100,
@@ -257,7 +284,7 @@ def sample_eval_result():
                 primary_metric="accuracy",
                 primary_score=0.65,
             ),
-            TaskResult(
+            StoredTaskResult(
                 task_name="gsm8k",
                 metrics={"exact_match": 0.58},
                 num_instances=50,
@@ -272,8 +299,9 @@ def sample_eval_result():
         tags=["test", "integration"],
         git_ref="abc123",
         model_hash="model-hash-test",
+        revision="main",
         s3_location="s3://test-bucket/results/test-integration-001/",
-        config={"batch_size": 32},
+        model_config={"batch_size": 32},
         metadata={"test": True},
     )
 
@@ -283,7 +311,7 @@ def multiple_eval_results():
     """Create multiple EvalResults for query testing."""
     from datetime import datetime
 
-    from olmo_eval.storage import EvalResult, TaskResult
+    from olmo_eval.core import EvalResult, StoredTaskResult
 
     results = []
     models = ["llama3.1-8b", "llama3.1-70b", "olmo-2-7b"]
@@ -297,20 +325,25 @@ def multiple_eval_results():
         for j, (task_name, metrics, primary_metric, primary_score) in enumerate(tasks_data):
             results.append(
                 EvalResult(
-                    run_id=f"run-{i}-{j}",
+                    experiment_id=f"run-{i}-{j}",
                     model_name=model,
                     backend_name="vllm",
                     timestamp=datetime(2024, 1, 15, 10 + i, j, 0),
                     tasks=[
-                        TaskResult(
+                        StoredTaskResult(
                             task_name=task_name,
                             metrics=metrics,
+                            task_hash=f"{task_name}-hash-{i}-{j}",
                             primary_metric=primary_metric,
                             primary_score=primary_score,
                         )
                     ],
+                    experiment_name=f"test-run-{i}-{j}",
                     workspace="ai2/olmo-test",
                     author="test-runner",
+                    git_ref="abc123",
+                    model_hash=f"hash-{model[:8]}",
+                    revision="main",
                 )
             )
 

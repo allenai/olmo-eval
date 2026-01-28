@@ -6,6 +6,7 @@ import json
 import logging
 import math
 import os
+import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
@@ -22,6 +23,10 @@ __all__ = [
     "build_predictions",
     "build_requests",
     "compute_suite_aggregations",
+    "compute_task_hash",
+    "generate_experiment_id",
+    "get_author",
+    "get_git_ref",
     "get_primary_metric",
     "run_task_impl",
     "sanitize_spec_for_filename",
@@ -35,6 +40,67 @@ logger = logging.getLogger(__name__)
 # Filename suffixes for output files (consistent across all runners and storage backends)
 PREDICTIONS_SUFFIX = "-predictions.jsonl"
 REQUESTS_SUFFIX = "-requests.jsonl"
+
+
+def generate_experiment_id() -> str:
+    """Generate a unique experiment ID.
+
+    Returns a short 12-character hex string from UUID4. Since experiments
+    are partitioned by model/task, collision risk is minimal.
+
+    Returns:
+        A 12-character hex string to uniquely identify an experiment.
+
+    Example:
+        >>> exp_id = generate_experiment_id()
+        >>> len(exp_id)
+        12
+    """
+    return uuid.uuid4().hex[:12]
+
+
+def get_author() -> str:
+    """Get the current user for experiment attribution.
+
+    Checks environment variables in order:
+    1. BEAKER_AUTHOR - set by olmo-eval beaker launch for Beaker jobs
+    2. USER, USERNAME, LOGNAME - standard Unix user env vars
+    3. Falls back to getpass.getuser() if no env var is set.
+
+    Returns:
+        Username string.
+    """
+    import getpass
+
+    return (
+        os.environ.get("BEAKER_AUTHOR")
+        or os.environ.get("USER")
+        or os.environ.get("USERNAME")
+        or os.environ.get("LOGNAME")
+        or getpass.getuser()
+    )
+
+
+def get_git_ref() -> str:
+    """Get the current git commit hash.
+
+    Returns:
+        Git commit hash (short form) or "unknown" if not in a git repo.
+    """
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return "unknown"
 
 
 def sanitize_spec_for_filename(spec: str) -> str:
@@ -83,6 +149,21 @@ def serialize_sampling_params(params: SamplingParams | None) -> dict[str, Any] |
         "top_k": params.top_k,
         "num_samples": params.num_samples,
     }
+
+
+def compute_task_hash(config: dict) -> str:
+    """Compute a hash from task config.
+
+    Args:
+        config: Task configuration dictionary
+
+    Returns:
+        16-character hex string hash of the config
+    """
+    import hashlib
+
+    config_str = json.dumps(config, sort_keys=True)
+    return hashlib.sha256(config_str.encode()).hexdigest()[:16]
 
 
 def get_primary_metric(
@@ -412,7 +493,7 @@ def build_predictions(scored: Sequence[Response]) -> list[dict]:
             "doc_id": idx,
             "native_id": resp.instance.metadata.get("id", f"doc_{idx}"),
             "model_output": model_output,
-            "metrics": dict(resp.scores),
+            "instance_metrics": dict(resp.scores),
             "label": label,
         }
 
@@ -691,6 +772,7 @@ def write_predictions_jsonl(
     spec: str,
     predictions: list[dict],
     model_name: str | None = None,
+    task_hash: str | None = None,
 ) -> None:
     """Write per-instance predictions to JSONL.
 
@@ -699,6 +781,7 @@ def write_predictions_jsonl(
         spec: Task specification string (used for filename)
         predictions: List of prediction dicts to write
         model_name: Optional model name for multi-model runs (adds subdirectory)
+        task_hash: Optional task config hash (last 6 chars added to filename)
     """
     if model_name:
         pred_dir = os.path.join(output_dir, "predictions", sanitize_spec_for_filename(model_name))
@@ -706,14 +789,18 @@ def write_predictions_jsonl(
         pred_dir = os.path.join(output_dir, "predictions")
     os.makedirs(pred_dir, exist_ok=True)
 
-    filename = sanitize_spec_for_filename(spec) + PREDICTIONS_SUFFIX
+    # Build filename with optional hash suffix
+    base_name = sanitize_spec_for_filename(spec)
+    if task_hash:
+        base_name = f"{base_name}_{task_hash[-6:]}"
+    filename = base_name + PREDICTIONS_SUFFIX
     filepath = os.path.join(pred_dir, filename)
 
     with open(filepath, "w") as f:
         for pred in predictions:
             f.write(json.dumps(pred) + "\n")
 
-    logger.info(f"Predictions written to {filepath}")
+    logger.info(f"Wrote {len(predictions)} predictions for {spec}")
 
 
 def write_requests_jsonl(
@@ -721,6 +808,7 @@ def write_requests_jsonl(
     spec: str,
     requests: list[dict],
     model_name: str | None = None,
+    task_hash: str | None = None,
 ) -> None:
     """Write per-instance requests to JSONL (oe-eval compatible format).
 
@@ -732,6 +820,7 @@ def write_requests_jsonl(
         spec: Task specification string (used for filename)
         requests: List of request dicts to write
         model_name: Optional model name for multi-model runs (adds subdirectory)
+        task_hash: Optional task config hash (last 6 chars added to filename)
     """
     if model_name:
         req_dir = os.path.join(output_dir, "requests", sanitize_spec_for_filename(model_name))
@@ -739,11 +828,15 @@ def write_requests_jsonl(
         req_dir = os.path.join(output_dir, "requests")
     os.makedirs(req_dir, exist_ok=True)
 
-    filename = sanitize_spec_for_filename(spec) + REQUESTS_SUFFIX
+    # Build filename with optional hash suffix
+    base_name = sanitize_spec_for_filename(spec)
+    if task_hash:
+        base_name = f"{base_name}_{task_hash[-6:]}"
+    filename = base_name + REQUESTS_SUFFIX
     filepath = os.path.join(req_dir, filename)
 
     with open(filepath, "w") as f:
         for req in requests:
             f.write(json.dumps(req) + "\n")
 
-    logger.info(f"Requests written to {filepath}")
+    logger.info(f"Wrote {len(requests)} requests for {spec}")

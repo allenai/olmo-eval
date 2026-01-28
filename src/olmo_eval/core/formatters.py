@@ -1,7 +1,7 @@
 """Formatter protocols and implementations."""
 
-from dataclasses import dataclass
-from typing import Protocol
+from dataclasses import asdict, dataclass
+from typing import Any, Protocol
 
 from .types import Instance, LMRequest, RequestType
 
@@ -15,6 +15,10 @@ class Formatter(Protocol):
         fewshot: list[Instance] | None = None,
     ) -> LMRequest:
         """Format an instance with optional few-shot examples."""
+        ...
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a dictionary."""
         ...
 
 
@@ -55,6 +59,10 @@ class ChatFormatter:
         )
         return LMRequest(request_type=RequestType.CHAT, messages=tuple(messages))
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a dictionary."""
+        return {"type": "ChatFormatter", **asdict(self)}
+
 
 @dataclass(slots=True)
 class CompletionFormatter:
@@ -78,6 +86,10 @@ class CompletionFormatter:
         parts.append(self.template.format(question=instance.question) + self.answer_prefix)
         prompt = self.fewshot_separator.join(parts)
         return LMRequest(request_type=RequestType.COMPLETION, prompt=prompt)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a dictionary."""
+        return {"type": "CompletionFormatter", **asdict(self)}
 
 
 @dataclass(slots=True)
@@ -109,6 +121,10 @@ class MultipleChoiceFormatter:
             continuations=continuations,
         )
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a dictionary."""
+        return {"type": "MultipleChoiceFormatter", **asdict(self)}
+
 
 @dataclass(slots=True)
 class MCQAChatFormatter:
@@ -137,6 +153,10 @@ class MCQAChatFormatter:
         messages.append({"role": "user", "content": question_text})
 
         return LMRequest(request_type=RequestType.CHAT, messages=tuple(messages))
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a dictionary."""
+        return {"type": "MCQAChatFormatter", **asdict(self)}
 
 
 @dataclass(slots=True)
@@ -220,3 +240,7 @@ class PPLFormatter:
             prompt=prompt,
             continuations=(gold_text,),
         )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a dictionary."""
+        return {"type": "PPLFormatter", **asdict(self)}

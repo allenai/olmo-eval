@@ -140,3 +140,14 @@ class DataSource:
             split=self.split,
             source_type=self.source_type,
         )
+
+    def to_dict(self) -> dict:
+        """Serialize to a dictionary."""
+        return {
+            "path": self.path,
+            "subset": self.subset,
+            "split": self.split,
+            "source_type": self.source_type.value if self.source_type else None,
+            "data_files": self.data_files,
+            "revision": self.revision,
+        }

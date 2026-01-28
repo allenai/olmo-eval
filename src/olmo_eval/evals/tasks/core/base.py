@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from olmo_eval.core import (
     Formatter,
@@ -42,6 +42,9 @@ class TaskConfig:
         ...     data_source="hf://cais/mmlu?subset=abstract_algebra",
         ... )
     """
+
+    #: Fields that can be overridden via inline task specs (e.g., task::num_fewshot=5)
+    OVERRIDE_KEYS: ClassVar[set[str]] = {"num_fewshot", "limit", "fewshot_seed", "sampling_params"}
 
     name: str
 
@@ -104,6 +107,47 @@ class TaskConfig:
             return self.get_data_source(split=split)
         except ValueError:
             return None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize config to a dictionary for hashing and storage.
+
+        Returns:
+            Dictionary with all config values serialized.
+        """
+        from dataclasses import asdict
+
+        def serialize_data_source(ds: Any) -> Any:
+            if ds is None:
+                return None
+            if isinstance(ds, str):
+                return ds
+            return ds.to_dict()
+
+        def serialize_primary_metric(pm: Any) -> Any:
+            if pm is None:
+                return None
+            # MetricName is a str Enum
+            if hasattr(pm, "value"):
+                return pm.value
+            # Metric instance
+            if hasattr(pm, "to_dict"):
+                return pm.to_dict()
+            return str(pm)
+
+        return {
+            "name": self.name,
+            "data_source": serialize_data_source(self.data_source),
+            "fewshot_source": serialize_data_source(self.fewshot_source),
+            "formatter": self.formatter.to_dict() if self.formatter else None,
+            "scorers": [s.to_dict() for s in self.scorers],
+            "metrics": [m.to_dict() for m in self.metrics],
+            "num_fewshot": self.num_fewshot,
+            "fewshot_seed": self.fewshot_seed,
+            "limit": self.limit,
+            "split": self.split.value,
+            "primary_metric": serialize_primary_metric(self.primary_metric),
+            "sampling_params": asdict(self.sampling_params) if self.sampling_params else None,
+        }
 
 
 class Task(ABC):

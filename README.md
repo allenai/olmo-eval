@@ -170,7 +170,7 @@ olmo-eval run --async-stream --num-workers 2 --gpus-per-worker 4 -m llama3.1-70b
 
 **Key Differences:**
 - **Async**: Workers collect all instances first, then batch process. Works with any backend.
-- **Streaming**: Requests flow continuously through vLLM's async engine. Maximum throughput, earliest completion. vLLM only.
+- **Streaming**: Requests flow continuously through vLLM's async engine. Only supported for generative tasks. vLLM only.
 
 ## Key Concepts
 
@@ -849,6 +849,72 @@ uv pip install -e '.[vllm]'  # includes vllm[runai]
 ```
 
 The script auto-detects the image name from the tag (e.g., `olmo-eval-cu128-trc291-amd64`)
+
+## Querying Results
+
+Evaluation results are stored in PostgreSQL and can be queried via the CLI.
+
+### Basic Queries
+
+```bash
+# Query by experiment ID
+olmo-eval results query --experiment exp_001
+
+# Query by model
+olmo-eval results query --model llama3.1-8b
+
+# Query by task (shows comparison matrix)
+olmo-eval results query --task mmlu --task gsm8k
+
+# Combine filters
+olmo-eval results query --model llama3.1-8b --task mmlu --format json
+```
+
+### Instance-Level Predictions
+
+Include `--instances` to retrieve instance-level predictions:
+
+```bash
+# Get instances for an experiment
+olmo-eval results query --experiment exp_001 --task mmlu --instances --format json
+
+# Paginate through large result sets using keyset pagination
+olmo-eval results query --task mmlu --instances --limit 1000 --format json
+
+# Get next page using last_id from previous response
+olmo-eval results query --task mmlu --instances --limit 1000 --after-id 1000 --format json
+```
+
+JSON output includes pagination metadata:
+```json
+{
+  "experiments": [...],
+  "pagination": {
+    "last_id": 12345,
+    "has_more": true
+  }
+}
+```
+
+### Output Formats
+
+| Format | Flag | Description |
+|--------|------|-------------|
+| Table | `--format table` | Rich terminal tables (default) |
+| JSON | `--format json` | Structured JSON with pagination metadata |
+| CSV | `--format csv` | CSV output to stdout |
+
+### Database Configuration
+
+Configure via environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OLMO_EVAL_DB_HOST` | `localhost` | Database host |
+| `OLMO_EVAL_DB_PORT` | `5432` | Database port |
+| `OLMO_EVAL_DB_NAME` | `olmo_eval` | Database name |
+| `OLMO_EVAL_DB_USER` | `postgres` | Database user |
+| `OLMO_EVAL_DB_PASSWORD` | `postgres` | Database password |
 
 ## Development
 

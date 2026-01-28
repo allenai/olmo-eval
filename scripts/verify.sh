@@ -25,6 +25,10 @@ done
 echo "Running verification checks..."
 
 echo ""
+echo "==> Syncing dependencies..."
+uv sync --dev --extra beaker --extra hf --extra postgres
+
+echo ""
 echo "==> Checking formatting with ruff..."
 uv run ruff format --check src/ tests/
 
@@ -34,7 +38,7 @@ uv run ruff check src/ tests/
 
 echo ""
 echo "==> Running ty type checker..."
-uv run ty check src/
+uv run ty check src/ alembic/
 
 echo ""
 echo "==> Running tests with coverage..."

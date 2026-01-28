@@ -5,7 +5,7 @@ import tempfile
 import pytest
 
 from olmo_eval.launch.config import (
-    LaunchConfig,
+    EvalConfig,
     ModelConfig,
     get_model_short_name,
     get_tasks_short_name,
@@ -231,12 +231,12 @@ class TestGetTasksShortName:
         assert result == "mmlu_gsm8k_arc"
 
 
-class TestLaunchConfigModelConfigs:
-    """Tests for LaunchConfig model configuration features."""
+class TestEvalConfigModelConfigs:
+    """Tests for EvalConfig model configuration features."""
 
     def test_get_model_configs_from_strings(self):
         """Test get_model_configs with simple string models."""
-        config = LaunchConfig(
+        config = EvalConfig(
             name="test",
             models=["llama3.1-8b", "olmo-2-7b"],
             tasks=["mmlu"],
@@ -250,7 +250,7 @@ class TestLaunchConfigModelConfigs:
 
     def test_get_model_configs_from_dicts(self):
         """Test get_model_configs with dict model configs."""
-        config = LaunchConfig(
+        config = EvalConfig(
             name="test",
             models=[
                 {"name_or_path": "llama3.1-8b", "gpus": 1},
@@ -269,7 +269,7 @@ class TestLaunchConfigModelConfigs:
 
     def test_get_model_configs_mixed(self):
         """Test get_model_configs with mixed string and dict models."""
-        config = LaunchConfig(
+        config = EvalConfig(
             name="test",
             models=[
                 "llama3.1-8b",  # Simple string
@@ -286,12 +286,12 @@ class TestLaunchConfigModelConfigs:
         assert model_configs[1].gpus == 4
 
 
-class TestLaunchConfigGetModelResources:
-    """Tests for LaunchConfig.get_model_resources method."""
+class TestEvalConfigGetModelResources:
+    """Tests for EvalConfig.get_model_resources method."""
 
     def test_get_model_resources_no_overrides(self):
         """Test get_model_resources returns defaults when no model overrides."""
-        config = LaunchConfig(
+        config = EvalConfig(
             name="test",
             models=["llama3.1-8b"],
             tasks=["mmlu"],
@@ -308,7 +308,7 @@ class TestLaunchConfigGetModelResources:
 
     def test_get_model_resources_with_overrides(self):
         """Test get_model_resources applies model overrides."""
-        config = LaunchConfig(
+        config = EvalConfig(
             name="test",
             models=["llama3.1-8b"],
             tasks=["mmlu"],
@@ -329,7 +329,7 @@ class TestLaunchConfigGetModelResources:
 
     def test_get_model_resources_partial_overrides(self):
         """Test get_model_resources with only some overrides."""
-        config = LaunchConfig(
+        config = EvalConfig(
             name="test",
             models=["llama3.1-8b"],
             tasks=["mmlu"],
@@ -350,7 +350,7 @@ class TestLaunchConfigGetModelResources:
 
     def test_get_model_resources_shared_memory(self):
         """Test get_model_resources handles shared_memory."""
-        config = LaunchConfig(
+        config = EvalConfig(
             name="test",
             models=["llama3.1-8b"],
             tasks=["mmlu"],
@@ -365,7 +365,7 @@ class TestLaunchConfigGetModelResources:
 
     def test_get_model_resources_parallelism_default(self):
         """Test get_model_resources returns default parallelism."""
-        config = LaunchConfig(
+        config = EvalConfig(
             name="test",
             models=["llama3.1-8b"],
             tasks=["mmlu"],
@@ -378,7 +378,7 @@ class TestLaunchConfigGetModelResources:
 
     def test_get_model_resources_parallelism_override(self):
         """Test get_model_resources applies model parallelism override."""
-        config = LaunchConfig(
+        config = EvalConfig(
             name="test",
             models=["llama3.1-8b"],
             tasks=["mmlu"],
@@ -393,8 +393,8 @@ class TestLaunchConfigGetModelResources:
         assert resources["parallelism"] == 8  # Model override wins
 
 
-class TestLaunchConfigFromYaml:
-    """Tests for LaunchConfig.from_yaml with per-model configs."""
+class TestEvalConfigFromYaml:
+    """Tests for EvalConfig.from_yaml with per-model configs."""
 
     def test_from_yaml_simple_models(self):
         """Test loading YAML with simple string models."""
@@ -413,7 +413,7 @@ gpus: 1
             f.write(yaml_content)
             f.flush()
 
-            config = LaunchConfig.from_yaml(f.name)
+            config = EvalConfig.from_yaml(f.name)
 
             assert config.name == "test-eval"
             assert len(config.models) == 2
@@ -446,7 +446,7 @@ priority: normal
             f.write(yaml_content)
             f.flush()
 
-            config = LaunchConfig.from_yaml(f.name)
+            config = EvalConfig.from_yaml(f.name)
 
             model_configs = config.get_model_configs()
             assert len(model_configs) == 2
@@ -476,7 +476,7 @@ tasks:
             f.write(yaml_content)
             f.flush()
 
-            config = LaunchConfig.from_yaml(f.name)
+            config = EvalConfig.from_yaml(f.name)
             model_configs = config.get_model_configs()
 
             assert model_configs[0].name_or_path == "llama3.1-8b"
@@ -498,7 +498,7 @@ gpus: 1
             f.write(yaml_content)
             f.flush()
 
-            config = LaunchConfig.from_yaml(f.name, overrides=["gpus=4", "priority=high"])
+            config = EvalConfig.from_yaml(f.name, overrides=["gpus=4", "priority=high"])
 
             assert config.gpus == 4
             assert config.priority == "high"

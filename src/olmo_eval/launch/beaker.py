@@ -418,8 +418,8 @@ class BeakerJobConfig:
     # Result path
     result_path: str = "/results"
 
-    # Runtime backend installation
-    backends: list[str] = field(default_factory=list)
+    # Optional dependency groups to install at runtime (e.g., ["vllm", "postgres"])
+    extras: list[str] = field(default_factory=list)
 
     # Group assignment - experiment will be added to these groups at creation time
     groups: list[str] | None = None
@@ -528,32 +528,33 @@ class BeakerLauncher:
             self._beaker = Beaker.from_env(default_workspace=self._workspace)
         return self._beaker
 
-    def _build_command_with_backends(
+    def _build_command_with_extras(
         self,
         command: list[str],
-        backends: list[str],
+        extras: list[str],
     ) -> list[str]:
-        """Build command with source installation and backend installation prepended.
+        """Build command with source installation and extras installation prepended.
 
         Gantry clones the source code to /gantry-runtime, so we:
-        1. Install olmo-eval from the cloned source with optional backend groups
+        1. Install olmo-eval from the cloned source with optional extras
         2. Run the actual command
 
         Args:
             command: The command to run after setup.
-            backends: Optional dependency group names from pyproject.toml (e.g., ["vllm", "hf"]).
+            extras: Optional dependency group names from pyproject.toml.
         """
         # Build the full command
         # Export UV_PROJECT_ENVIRONMENT so all uv commands use Docker's /opt/venv
         steps = ["export UV_PROJECT_ENVIRONMENT=/opt/venv"]
 
-        # Install olmo-eval from gantry-cloned source with optional backend groups
+        # Install olmo-eval from gantry-cloned source with optional extras
         # Generate constraints from pre-installed CUDA packages to prevent uv from changing them
         constraints = "/tmp/cuda-constraints.txt"
-        steps.append(f"uv pip freeze | grep -E '^(torch|nvidia-)' > {constraints}")
-        if backends:
-            extras = ",".join(backends)
-            steps.append(f"cd /gantry-runtime && uv pip install -e '.[{extras}]' -c {constraints}")
+        steps.append(f"uv pip freeze -q | grep -E '^(torch|nvidia-)' > {constraints}")
+        if extras:
+            extras_str = ",".join(extras)
+            install_cmd = f"uv pip install -e '.[{extras_str}]' -c {constraints}"
+            steps.append(f"cd /gantry-runtime && {install_cmd}")
         else:
             steps.append(f"cd /gantry-runtime && uv pip install -e . -c {constraints}")
 
@@ -579,7 +580,7 @@ class BeakerLauncher:
 
         clusters = resolve_clusters(config.cluster)
 
-        final_command = self._build_command_with_backends(config.command, config.backends)
+        final_command = self._build_command_with_extras(config.command, config.extras)
 
         # Build weka mounts as tuples: (bucket, mount_path)
         weka_mounts: list[tuple[str, str]] = []

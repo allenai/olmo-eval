@@ -15,12 +15,12 @@ class TestPostgresBackend:
     @pytest.mark.integration
     def test_save_and_get(self, postgres_backend, sample_eval_result):
         """Test saving and retrieving a result."""
-        run_id = postgres_backend.save(sample_eval_result)
-        assert run_id == sample_eval_result.run_id
+        experiment_id = postgres_backend.save(sample_eval_result)
+        assert experiment_id == sample_eval_result.experiment_id
 
-        retrieved = postgres_backend.get(run_id)
+        retrieved = postgres_backend.get(experiment_id)
         assert retrieved is not None
-        assert retrieved.run_id == sample_eval_result.run_id
+        assert retrieved.experiment_id == sample_eval_result.experiment_id
         assert retrieved.model_name == sample_eval_result.model_name
         assert retrieved.backend_name == sample_eval_result.backend_name
         assert len(retrieved.tasks) == 2
@@ -36,11 +36,11 @@ class TestPostgresBackend:
         """Test deleting a result."""
         postgres_backend.save(sample_eval_result)
 
-        deleted = postgres_backend.delete(sample_eval_result.run_id)
+        deleted = postgres_backend.delete(sample_eval_result.experiment_id)
         assert deleted is True
 
         # Verify it's gone
-        retrieved = postgres_backend.get(sample_eval_result.run_id)
+        retrieved = postgres_backend.get(sample_eval_result.experiment_id)
         assert retrieved is None
 
     @pytest.mark.integration
@@ -97,114 +97,156 @@ class TestPostgresBackend:
         assert len(results) == 5
 
     @pytest.mark.integration
-    def test_upsert_behavior(self, postgres_backend, sample_eval_result):
-        """Test that saving the same run_id updates the record."""
-        postgres_backend.save(sample_eval_result)
+    def test_same_model_different_experiments(self, postgres_backend):
+        """Test that same model config produces same model_hash across different experiments."""
+        from datetime import datetime
 
-        # Modify and save again
-        from olmo_eval.storage import EvalResult, TaskResult
+        from olmo_eval.core import EvalResult, StoredTaskResult
+        from olmo_eval.storage import compute_model_hash
 
-        updated = EvalResult(
-            run_id=sample_eval_result.run_id,
-            model_name="updated-model",
-            backend_name="hf",
-            timestamp=sample_eval_result.timestamp,
-            tasks=[TaskResult(task_name="new_task", metrics={"score": 0.99})],
+        # Same config, different authors
+        config = {"model": "llama3.1-8b", "temperature": 0.7}
+
+        eval1 = EvalResult(
+            experiment_id="eval-user1",
+            model_name="llama3.1-8b",
+            backend_name="vllm",
+            timestamp=datetime(2024, 1, 15, 10, 0, 0),
+            tasks=[
+                StoredTaskResult(
+                    task_name="mmlu",
+                    metrics={"accuracy": 0.65},
+                    task_hash="mmlu-hash-user1",
+                    primary_metric="accuracy",
+                    primary_score=0.65,
+                )
+            ],
+            model_config=config,
+            author="user1",
+            experiment_name="test",
+            workspace="test",
+            git_ref="abc123",
+            revision="main",
         )
-        postgres_backend.save(updated)
 
-        retrieved = postgres_backend.get(sample_eval_result.run_id)
-        assert retrieved.model_name == "updated-model"
-        assert len(retrieved.tasks) == 1
-        assert retrieved.tasks[0].task_name == "new_task"
+        eval2 = EvalResult(
+            experiment_id="eval-user2",
+            model_name="llama3.1-8b",
+            backend_name="vllm",
+            timestamp=datetime(2024, 1, 15, 10, 5, 0),
+            tasks=[
+                StoredTaskResult(
+                    task_name="mmlu",
+                    metrics={"accuracy": 0.66},
+                    task_hash="mmlu-hash-user2",
+                    primary_metric="accuracy",
+                    primary_score=0.66,
+                )
+            ],
+            model_config=config,
+            author="user2",
+            experiment_name="test",
+            workspace="test",
+            git_ref="abc123",
+            revision="main",
+        )
 
+        # Save both evaluations
+        postgres_backend.save(eval1)
+        postgres_backend.save(eval2)
 
-class TestS3Backend:
-    """Integration tests for S3Backend with LocalStack."""
+        # Query database directly to check the relationship
+        with postgres_backend.db.session() as session:
+            from sqlalchemy import select
 
-    @pytest.mark.integration
-    def test_save_and_get(self, s3_backend, sample_eval_result):
-        """Test saving and retrieving a result."""
-        run_id = s3_backend.save(sample_eval_result)
-        assert run_id == sample_eval_result.run_id
+            from olmo_eval.storage.db.models import Experiment
 
-        retrieved = s3_backend.get(run_id)
-        assert retrieved is not None
-        assert retrieved.run_id == sample_eval_result.run_id
-        assert retrieved.model_name == sample_eval_result.model_name
-        assert len(retrieved.tasks) == 2
+            stmt = select(Experiment).where(Experiment.experiment_id == "eval-user1")
+            exp1 = session.execute(stmt).scalar_one_or_none()
 
-    @pytest.mark.integration
-    def test_get_nonexistent(self, s3_backend):
-        """Test getting a non-existent result returns None."""
-        result = s3_backend.get("nonexistent-id")
-        assert result is None
+            stmt = select(Experiment).where(Experiment.experiment_id == "eval-user2")
+            exp2 = session.execute(stmt).scalar_one_or_none()
 
-    @pytest.mark.integration
-    def test_delete(self, s3_backend, sample_eval_result):
-        """Test deleting a result."""
-        s3_backend.save(sample_eval_result)
+            assert exp1 is not None
+            assert exp2 is not None
 
-        deleted = s3_backend.delete(sample_eval_result.run_id)
-        assert deleted is True
+            # Same config should give same model_hash
+            expected_model_hash = compute_model_hash(config)
+            assert exp1.model_hash == expected_model_hash
+            assert exp2.model_hash == expected_model_hash
+            assert exp1.model_hash == exp2.model_hash  # Same model!
 
-        # Verify it's gone
-        retrieved = s3_backend.get(sample_eval_result.run_id)
-        assert retrieved is None
+            # But different experiments
+            assert exp1.experiment_id != exp2.experiment_id
+            assert exp1.author != exp2.author
 
-    @pytest.mark.integration
-    def test_delete_nonexistent(self, s3_backend):
-        """Test deleting a non-existent result returns False."""
-        deleted = s3_backend.delete("nonexistent-id")
-        assert deleted is False
-
-    @pytest.mark.integration
-    def test_query_by_model(self, s3_backend, multiple_eval_results):
-        """Test querying by model name."""
-        for result in multiple_eval_results:
-            s3_backend.save(result)
-
-        results = s3_backend.query(model_name="llama3.1-8b")
-        assert len(results) == 3
-        for r in results:
-            assert r.model_name == "llama3.1-8b"
+            # And different results
+            assert exp1.task_results[0].primary_score == 0.65
+            assert exp2.task_results[0].primary_score == 0.66
 
     @pytest.mark.integration
-    def test_query_by_task(self, s3_backend, multiple_eval_results):
-        """Test querying by task name."""
-        for result in multiple_eval_results:
-            s3_backend.save(result)
+    def test_get_all_returns_multiple_experiments(self, postgres_backend):
+        """Test that get_all() returns all experiments with shared experiment_id."""
+        from olmo_eval.core import EvalResult, StoredTaskResult
 
-        results = s3_backend.query(task_name="mmlu")
-        assert len(results) == 3
+        # Create two experiments with the same experiment_id (simulating multi-model launch)
+        shared_experiment_id = "beaker-multi-model-run"
 
-    @pytest.mark.integration
-    def test_query_limit(self, s3_backend, multiple_eval_results):
-        """Test that query respects limit."""
-        for result in multiple_eval_results:
-            s3_backend.save(result)
+        eval1 = EvalResult(
+            experiment_id=shared_experiment_id,
+            model_name="llama3.1-8b",
+            backend_name="vllm",
+            timestamp=datetime(2024, 1, 15, 10, 0, 0),
+            tasks=[
+                StoredTaskResult(
+                    task_name="mmlu",
+                    metrics={"accuracy": 0.65},
+                    task_hash="mmlu-hash-1",
+                    primary_metric="accuracy",
+                    primary_score=0.65,
+                )
+            ],
+            model_config={"model": "llama3.1-8b"},
+            author="user",
+            experiment_name="test",
+            workspace="test",
+            git_ref="abc123",
+            revision="main",
+        )
 
-        results = s3_backend.query(limit=5)
-        assert len(results) == 5
+        eval2 = EvalResult(
+            experiment_id=shared_experiment_id,
+            model_name="llama3.1-70b",
+            backend_name="vllm",
+            timestamp=datetime(2024, 1, 15, 10, 0, 0),
+            tasks=[
+                StoredTaskResult(
+                    task_name="mmlu",
+                    metrics={"accuracy": 0.75},
+                    task_hash="mmlu-hash-2",
+                    primary_metric="accuracy",
+                    primary_score=0.75,
+                )
+            ],
+            model_config={"model": "llama3.1-70b"},
+            author="user",
+            experiment_name="test",
+            workspace="test",
+            git_ref="abc123",
+            revision="main",
+        )
 
-    @pytest.mark.integration
-    def test_multiple_models_index(self, s3_backend):
-        """Test that indexes are maintained per model."""
-        from olmo_eval.storage import EvalResult, TaskResult
+        # Save both with same experiment_id
+        postgres_backend.save(eval1)
+        postgres_backend.save(eval2)
 
-        # Save results for different models
-        for i, model in enumerate(["model-a", "model-b", "model-c"]):
-            result = EvalResult(
-                run_id=f"run-{i}",
-                model_name=model,
-                backend_name="vllm",
-                timestamp=datetime(2024, 1, 15, 10, 0, 0),
-                tasks=[TaskResult(task_name="test", metrics={"score": 0.5})],
-            )
-            s3_backend.save(result)
+        # get() returns only the first one
+        first_result = postgres_backend.get(shared_experiment_id)
+        assert first_result is not None
 
-        # Each model should have its own results
-        for model in ["model-a", "model-b", "model-c"]:
-            results = s3_backend.query(model_name=model)
-            assert len(results) == 1
-            assert results[0].model_name == model
+        # get_all() returns all experiments with that ID
+        all_results = postgres_backend.get_all(shared_experiment_id)
+        assert len(all_results) == 2
+        model_names = {r.model_name for r in all_results}
+        assert "llama3.1-8b" in model_names
+        assert "llama3.1-70b" in model_names
