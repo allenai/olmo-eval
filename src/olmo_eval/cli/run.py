@@ -327,7 +327,6 @@ def run(
         from olmo_eval.runners.asynchronous import StreamingEvalRunner
 
         console.print("[bold cyan]Using StreamingEvalRunner[/bold cyan]")
-        console.print(f"[bold]Models:[/bold] {len(model_names)}")
 
         runner = StreamingEvalRunner(
             model_names=model_names,
@@ -351,7 +350,6 @@ def run(
         from olmo_eval.runners.asynchronous import AsyncEvalRunner
 
         console.print("[bold cyan]Using AsyncEvalRunner[/bold cyan]")
-        console.print(f"[bold]Models:[/bold] {len(model_names)}")
 
         runner = AsyncEvalRunner(
             model_names=model_names,

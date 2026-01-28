@@ -598,8 +598,13 @@ def launch(
 
             total_splits = len(splits)
             total_expanded = expanded_counts_by_priority[t_priority]
+            num_models_in_group = len(group_model_cfgs)
             for i, split in enumerate(splits):
                 exp_name = f"{base_name}-{i + 1:03d}" if total_splits > 1 else base_name
+
+                # Total GPUs = GPUs per split * number of models in group
+                # Each model needs its own set of GPUs
+                total_gpus_for_group = split["num_gpus"] * num_models_in_group
 
                 experiment_plan.append(
                     {
@@ -611,7 +616,7 @@ def launch(
                         "original_task_specs": original_task_specs,
                         "total_expanded_tasks": total_expanded,
                         "gpus_per_model": m_gpus,
-                        "num_gpus": split["num_gpus"],
+                        "num_gpus": total_gpus_for_group,
                         "parallelism": split["parallelism"],
                         "split_index": i + 1 if total_splits > 1 else None,
                         "total_splits": total_splits if total_splits > 1 else None,

@@ -78,7 +78,7 @@ class VLLMBackend(Backend):
             raise ImportError("vllm is required for VLLMBackend") from e
 
         super().__init__(model_name)
-        engine_kwargs.setdefault("gpu_memory_utilization", 0.7)
+        engine_kwargs.setdefault("gpu_memory_utilization", 0.8)
 
         # Configure attention backend if specified (e.g., FLASHINFER, FLASH_ATTN)
         if attention_backend:
@@ -305,7 +305,7 @@ class AsyncVLLMBackend:
         os.environ.setdefault("VLLM_LOGGING_LEVEL", "WARNING")
 
         self.model_name = model_name
-        engine_kwargs.setdefault("gpu_memory_utilization", 0.7)
+        engine_kwargs.setdefault("gpu_memory_utilization", 0.8)
 
         # Configure attention backend if specified
         if attention_backend:
