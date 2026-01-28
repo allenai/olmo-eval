@@ -82,10 +82,10 @@ def beaker() -> None:
     help="Add experiments to Beaker group(s) (can specify multiple, creates if needed)",
 )
 @click.option(
-    "--backends",
-    "-b",
+    "--extras",
+    "-e",
     multiple=True,
-    help="Backend optional groups to install at runtime (e.g., vllm, hf, litellm)",
+    help="Optional dependency groups to install at runtime (e.g., vllm, postgres)",
 )
 @click.option("--async", "-a", "use_async", is_flag=True, help="Enable parallel task execution")
 @click.option(
@@ -152,7 +152,7 @@ def launch(
     budget: str | None,
     image: str | None,
     group: tuple[str, ...],
-    backends: tuple[str, ...],
+    extras: tuple[str, ...],
     use_async: bool,
     use_async_stream: bool,
     num_workers: int | None,
@@ -175,7 +175,7 @@ def launch(
     Multiple models and/or tasks with different priorities will create separate experiments.
     Use --config/-f to load settings from a YAML file; CLI arguments override config values.
     Use --group/-g to organize experiments into a Beaker group for result aggregation.
-    Use --backends/-b to install inference backends at runtime (e.g., vllm, transformers).
+    Use --extras/-e to install optional dependencies at runtime (e.g., vllm, postgres).
 
     Examples:
 
@@ -250,7 +250,7 @@ def launch(
         # Use config values as defaults, CLI args override
         name = name or cfg.name
         task = task if task else tuple(cfg.tasks)
-        backends = backends if backends else (tuple(cfg.backends) if cfg.backends else ())
+        extras = extras if extras else (tuple(cfg.extras) if cfg.extras else ())
         retries = retries if retries is not None else cfg.retries
         workspace = workspace or cfg.workspace
         budget = budget or cfg.budget
@@ -374,7 +374,7 @@ def launch(
         local_creds = get_local_aws_credentials()
         beaker_user = launcher.beaker.user_name
 
-        s3_table = Table(title="S3 Access Configuration", show_header=False, box=None)
+        s3_table = Table(show_header=False, box=None, expand=True)
         s3_table.add_column("Key", style="blue")
         s3_table.add_column("Value")
 
@@ -393,7 +393,9 @@ def launch(
             )
 
         console.print()
-        console.print(s3_table)
+        console.print(
+            Panel(s3_table, title="[bold]S3 Access Configuration[/bold]", border_style="yellow")
+        )
         console.print()
 
     # Auto-detect GCS model paths for GCS credential injection
@@ -408,7 +410,7 @@ def launch(
         local_gcs_creds = get_local_gcs_credentials()
         beaker_user = launcher.beaker.user_name
 
-        gcs_table = Table(title="GCS Access Configuration", show_header=False, box=None)
+        gcs_table = Table(show_header=False, box=None, expand=True)
         gcs_table.add_column("Key", style="blue")
         gcs_table.add_column("Value")
 
@@ -427,7 +429,9 @@ def launch(
             )
 
         console.print()
-        console.print(gcs_table)
+        console.print(
+            Panel(gcs_table, title="[bold]GCS Access Configuration[/bold]", border_style="magenta")
+        )
         console.print()
 
     # Get workspace object for beaker API calls that require it
@@ -676,7 +680,7 @@ def launch(
     console.print()
     console.print(
         Panel(
-            Pretty(eval_summary, expand_all=True),
+            Pretty(eval_summary, expand_all=True, no_wrap=True, overflow="fold"),
             title="[bold]Launch Configuration[/bold]",
             border_style="blue",
         )
@@ -871,9 +875,9 @@ def launch(
             runtime_model_config = get_runtime_model_config(model_name)
             runtime_backend = runtime_model_config.backend
 
-        # CLI model backends override auto-detected backend
-        if backends:
-            model_backends = list(backends)
+        # CLI extras override auto-detected backend
+        if extras:
+            model_backends = list(extras)
         else:
             backend_group = BACKEND_OPTIONAL_GROUPS.get(runtime_backend)
             model_backends = [backend_group] if backend_group else []
@@ -910,7 +914,7 @@ def launch(
             retries=retries,
             workspace=workspace,
             budget=budget,
-            backends=install_extras,
+            extras=install_extras,
             groups=effective_groups,
             beaker_image=effective_image,
             inject_aws_credentials=inject_aws_credentials,
@@ -950,7 +954,7 @@ def launch(
     for job_config in job_configs:
         console.print(
             Panel(
-                Pretty(job_config, expand_all=True),
+                Pretty(job_config, expand_all=True, no_wrap=True, overflow="fold"),
                 title=f"[bold]BeakerJobConfig: {job_config.name}[/bold]",
                 border_style="cyan",
             )

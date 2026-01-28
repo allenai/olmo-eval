@@ -296,7 +296,7 @@ class EvalConfig:
         beaker_image: Container image to use.
         description: Optional experiment description.
         groups: List of Beaker groups to add experiments to.
-        backends: Optional dependency groups to install at runtime (e.g., ["vllm", "hf"]).
+        extras: Optional dependency groups to install at runtime (e.g., ["vllm", "postgres"]).
         use_async: Enable parallel task execution with multiple workers.
         use_async_stream: Enable streaming async with vLLM's AsyncLLMEngine (vLLM only).
         num_workers: Number of workers for async modes.
@@ -333,8 +333,8 @@ class EvalConfig:
     description: str | None = None
     groups: list[str] | None = None  # Groups to add experiments to
 
-    # Runtime backend installation
-    backends: list[str] | None = None
+    # Optional dependency groups to install at runtime
+    extras: list[str] | None = None
 
     def get_model_configs(self) -> list[ModelConfig]:
         """Get parsed ModelConfig objects for all models.
