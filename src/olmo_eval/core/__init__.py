@@ -17,7 +17,14 @@ from .formatters import (
     MultipleChoiceFormatter,
     PPLFormatter,
 )
-from .metrics import AccuracyMetric, BPBMetric, F1Metric, MeanPerplexityMetric, Metric
+from .metrics import (
+    AccuracyMetric, 
+    BPBMetric, 
+    CorpusPerplexityMetric, 
+    F1Metric, 
+    MeanPerplexityMetric, 
+    Metric
+)
 from .scorers import (
     BitsPerByteScorer,
     ExactMatchScorer,
@@ -78,6 +85,7 @@ __all__ = [
     "F1Metric",
     "BPBMetric",
     "MeanPerplexityMetric",
+    "CorpusPerplexityMetric",
     # Code execution
     "CodeExecutionScorer",
     "PassAtKMetric",
