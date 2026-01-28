@@ -6,6 +6,7 @@ import asyncio
 import logging
 import multiprocessing as mp
 import os
+import queue
 import random
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -288,7 +289,7 @@ def check_workers_alive(
                 # Put non-fatal item back (this is rare but handle it)
                 result_queue.put(result_item)
                 break
-    except Exception:
+    except queue.Empty:
         pass  # Queue empty, continue
 
     # Check if all workers are dead
@@ -339,7 +340,7 @@ def wait_for_workers_ready(
             else:
                 # Put non-fatal item back
                 result_queue.put(result_item)
-        except Exception:
+        except queue.Empty:
             pass  # Queue empty
 
         # Check if any worker died with non-zero exit code
@@ -966,7 +967,7 @@ class AsyncEvalRunner(AsyncRunnerMixin):
                 result_item: ResultItem = await asyncio.get_event_loop().run_in_executor(
                     None, lambda: result_queue.get(timeout=1.0)
                 )
-            except Exception:
+            except queue.Empty:
                 # Queue timeout - check worker health
                 if time.time() - last_health_check > health_check_interval:
                     check_workers_alive(workers, result_queue)
@@ -1437,7 +1438,7 @@ class StreamingEvalRunner(AsyncRunnerMixin):
                 result_item: ResultItem = await asyncio.get_event_loop().run_in_executor(
                     None, lambda: result_queue.get(timeout=1.0)
                 )
-            except Exception:
+            except queue.Empty:
                 # Queue timeout - check worker health
                 if time.time() - last_health_check > health_check_interval:
                     check_workers_alive(workers, result_queue)
