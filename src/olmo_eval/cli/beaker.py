@@ -654,8 +654,9 @@ def launch(
     from olmo_eval.core.configs import get_model_config as get_runtime_model_config
 
     model_summaries: list[ModelSummary] = []
-    for m in model_configs:
-        model_base_name, model_inline_overrides = parse_model_spec(m.name_or_path)
+    for m, m_spec in zip(model_configs, model_specs):
+        # Use original spec to extract inline overrides (name_or_path has them stripped)
+        model_base_name, model_inline_overrides = parse_model_spec(m_spec)
 
         if m.backend:
             effective_backend = m.backend
