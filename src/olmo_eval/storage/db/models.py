@@ -204,3 +204,9 @@ Index(
     InstancePrediction.task_hash,
     InstancePrediction.native_id,
 )
+# Composite index for efficient keyset pagination within experiments
+Index(
+    "idx_instance_exp_id",
+    InstancePrediction.experiment_pk,
+    InstancePrediction.id,
+)

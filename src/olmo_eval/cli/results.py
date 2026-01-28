@@ -252,21 +252,29 @@ def print_task_comparison_matrix(
 
 
 def experiments_to_dict(
-    experiments: list[Any], instances: list[dict[str, Any]] | None = None
+    experiments: list[Any],
+    instances: list[dict[str, Any]] | None = None,
+    limit: int | None = None,
 ) -> dict[str, Any]:
     """Convert experiments to dict with optional instances grouped by task.
 
     Args:
         experiments: List of experiment results.
         instances: Optional list of instance predictions to include.
+        limit: The limit used for querying instances (for pagination metadata).
 
     Returns:
         Dict with experiments containing tasks containing instances.
     """
     # Group instances by task_hash
     instance_groups: dict[str, list[dict[str, Any]]] = {}
+    last_id: int | None = None
     if instances:
         for inst in instances:
+            # Track last_id for pagination
+            inst_id = inst.get("id")
+            if inst_id is not None:
+                last_id = inst_id
             # Use task_hash as key since we're grouping within experiments
             key = inst.get("task_hash", "")
             if key not in instance_groups:
@@ -313,14 +321,27 @@ def experiments_to_dict(
                 "tasks": tasks,
             }
         )
-    return {"experiments": data}
+
+    result: dict[str, Any] = {"experiments": data}
+
+    # Add pagination metadata if instances were queried
+    if instances is not None:
+        has_more = limit is not None and len(instances) >= limit
+        result["pagination"] = {
+            "last_id": last_id,
+            "has_more": has_more,
+        }
+
+    return result
 
 
 def experiments_to_json(
-    experiments: list[Any], instances: list[dict[str, Any]] | None = None
+    experiments: list[Any],
+    instances: list[dict[str, Any]] | None = None,
+    limit: int | None = None,
 ) -> str:
     """Convert experiments to JSON string."""
-    return json.dumps(experiments_to_dict(experiments, instances), indent=2)
+    return json.dumps(experiments_to_dict(experiments, instances, limit), indent=2)
 
 
 def experiments_to_csv(experiments: list[Any]) -> None:
@@ -370,6 +391,7 @@ def task_comparison_to_dict(
     experiments: list[Any],
     task_filter: set[str] | None = None,
     instances: list[dict[str, Any]] | None = None,
+    limit: int | None = None,
 ) -> dict[str, Any]:
     """Convert task comparison to dict with optional instances grouped by model-task.
 
@@ -377,14 +399,20 @@ def task_comparison_to_dict(
         experiments: List of experiment results.
         task_filter: Optional set of task names to include.
         instances: Optional list of instance predictions to include.
+        limit: The limit used for querying instances (for pagination metadata).
 
     Returns:
         Dict with models containing tasks containing scores and instances.
     """
     # Group instances by (model_hash, task_hash)
     instance_groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    last_id: int | None = None
     if instances:
         for inst in instances:
+            # Track last_id for pagination
+            inst_id = inst.get("id")
+            if inst_id is not None:
+                last_id = inst_id
             key = (inst.get("model_hash", ""), inst.get("task_hash", ""))
             if key not in instance_groups:
                 instance_groups[key] = []
@@ -426,6 +454,14 @@ def task_comparison_to_dict(
 
         output["models"].append(model_entry)
 
+    # Add pagination metadata if instances were queried
+    if instances is not None:
+        has_more = limit is not None and len(instances) >= limit
+        output["pagination"] = {
+            "last_id": last_id,
+            "has_more": has_more,
+        }
+
     return output
 
 
@@ -433,9 +469,10 @@ def task_comparison_to_json(
     experiments: list[Any],
     task_filter: set[str] | None = None,
     instances: list[dict[str, Any]] | None = None,
+    limit: int | None = None,
 ) -> str:
     """Convert task comparison to JSON string."""
-    return json.dumps(task_comparison_to_dict(experiments, task_filter, instances), indent=2)
+    return json.dumps(task_comparison_to_dict(experiments, task_filter, instances, limit), indent=2)
 
 
 def instances_to_json(instances: list[dict[str, Any]]) -> str:
@@ -609,7 +646,7 @@ def get_deprecated(
         task_hash=None,
         instances=False,
         limit=100,
-        offset=0,
+        after_id=None,
         output_format=output_format,
         db_host=db_host,
         db_port=db_port,
@@ -666,10 +703,11 @@ def get_deprecated(
     help="Maximum results to return (applies to instances).",
 )
 @click.option(
-    "--offset",
-    default=0,
+    "--after-id",
+    "after_id",
+    default=None,
     type=int,
-    help="Skip first N results (applies to instances).",
+    help="Return instances after this ID (for keyset pagination).",
 )
 @click.option(
     "--format",
@@ -688,7 +726,7 @@ def query(
     task_hash: str | None,
     instances: bool,
     limit: int,
-    offset: int,
+    after_id: int | None,
     output_format: str,
     db_host: str,
     db_port: int,
@@ -797,7 +835,7 @@ def query(
                                 experiment_id=exp_id,
                                 task_name=task_name_filter,
                                 limit=limit,
-                                offset=offset,
+                                after_id=after_id,
                             )
                         )
                 elif task_hash:
@@ -805,13 +843,13 @@ def query(
                         task_hash=task_hash,
                         task_name=task_name_filter,
                         limit=limit,
-                        offset=offset,
+                        after_id=after_id,
                     )
                 elif task_names and not model_names and not model_hashes:
                     instance_data = helper.instance_repo.get_instances_by_task(
                         task_name=task_name_filter,
                         limit=limit,
-                        offset=offset,
+                        after_id=after_id,
                     )
                 elif model_names or model_hashes:
                     if not task_names:
@@ -824,7 +862,7 @@ def query(
                         model_name=model_names[0] if model_names else None,
                         model_hash=model_hashes[0] if model_hashes else None,
                         limit=limit,
-                        offset=offset,
+                        after_id=after_id,
                     )
 
             # Handle output formats
@@ -835,6 +873,7 @@ def query(
                         all_experiments,
                         task_filter,
                         instance_data if instances else None,
+                        limit if instances else None,
                     )
                     print(json.dumps(output, indent=2, default=str))
                     return
@@ -850,6 +889,7 @@ def query(
                     output = experiments_to_dict(
                         all_experiments,
                         instance_data if instances else None,
+                        limit if instances else None,
                     )
                     print(json.dumps(output, indent=2, default=str))
                     return

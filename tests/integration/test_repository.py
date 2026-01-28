@@ -255,7 +255,7 @@ class TestInstancePredictionRepository:
 
     @pytest.mark.integration
     def test_get_instances_pagination(self, postgres_backend, sample_eval_result):
-        """Test instance pagination."""
+        """Test instance keyset pagination with after_id."""
         from olmo_eval.storage.db.repository import (
             ExperimentRepository,
             InstancePredictionRepository,
@@ -277,16 +277,23 @@ class TestInstancePredictionRepository:
                 instances=instances,
             )
 
-        # Get with pagination
+        # Get with keyset pagination using after_id
         with postgres_backend.db.session() as session:
             repo = InstancePredictionRepository(session)
-            page1 = repo.get_instances(experiment_pk=experiment_pk, limit=5, offset=0)
-            page2 = repo.get_instances(experiment_pk=experiment_pk, limit=5, offset=5)
+            # First page - no after_id
+            page1 = repo.get_instances(experiment_pk=experiment_pk, limit=5)
+            # Second page - after last id from first page
+            last_id = page1[-1]["id"]
+            page2 = repo.get_instances(experiment_pk=experiment_pk, limit=5, after_id=last_id)
 
         assert len(page1) == 5
         assert len(page2) == 5
 
-        # Verify no overlap
+        # Verify no overlap using native_id
         page1_ids = {inst["native_id"] for inst in page1}
         page2_ids = {inst["native_id"] for inst in page2}
         assert len(page1_ids & page2_ids) == 0
+
+        # Verify each instance has an 'id' for pagination
+        for inst in page1 + page2:
+            assert "id" in inst

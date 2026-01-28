@@ -200,7 +200,7 @@ class QueryHelper:
         experiment_pk: int | None = None,
         task_hash: str | None = None,
         limit: int | None = None,
-        offset: int = 0,
+        after_id: int | None = None,
     ) -> list[dict[str, Any]]:
         """Get instance predictions for a task.
 
@@ -209,7 +209,7 @@ class QueryHelper:
             experiment_pk: Specific experiment PK to filter by.
             task_hash: Task hash to filter by.
             limit: Optional maximum number of instances.
-            offset: Number of instances to skip.
+            after_id: Return instances with id > after_id (keyset pagination).
 
         Returns:
             List of instance dicts with metrics and metadata.
@@ -219,7 +219,7 @@ class QueryHelper:
             task_hash=task_hash,
             task_name=task_name,
             limit=limit,
-            offset=offset,
+            after_id=after_id,
         )
 
     def get_instances_by_experiment_id(
@@ -227,7 +227,7 @@ class QueryHelper:
         experiment_id: str,
         task_name: str | list[str] | None = None,
         limit: int | None = None,
-        offset: int = 0,
+        after_id: int | None = None,
     ) -> list[dict[str, Any]]:
         """Get instance predictions by experiment_id (string).
 
@@ -235,7 +235,7 @@ class QueryHelper:
             experiment_id: Experiment ID (string) to filter by.
             task_name: Optional task name filter.
             limit: Optional maximum number of instances.
-            offset: Number of instances to skip.
+            after_id: Return instances with id > after_id (keyset pagination).
 
         Returns:
             List of instance dicts with task_name included.
@@ -244,7 +244,7 @@ class QueryHelper:
             experiment_id=experiment_id,
             task_name=task_name,
             limit=limit,
-            offset=offset,
+            after_id=after_id,
         )
 
     def get_instances_by_model(
@@ -253,7 +253,7 @@ class QueryHelper:
         model_name: str | None = None,
         model_hash: str | None = None,
         limit: int | None = None,
-        offset: int = 0,
+        after_id: int | None = None,
     ) -> list[dict[str, Any]]:
         """Get instance predictions by model name or hash.
 
@@ -262,7 +262,7 @@ class QueryHelper:
             model_name: Model name to filter by.
             model_hash: Model hash to filter by.
             limit: Optional maximum number of instances.
-            offset: Number of instances to skip.
+            after_id: Return instances with id > after_id (keyset pagination).
 
         Returns:
             List of instance dicts with task_name and model_hash included.
@@ -272,7 +272,7 @@ class QueryHelper:
             model_hash=model_hash,
             task_name=task_name,
             limit=limit,
-            offset=offset,
+            after_id=after_id,
         )
 
     def get_instances_by_task(
@@ -280,7 +280,7 @@ class QueryHelper:
         task_name: str | list[str] | None = None,
         task_hash: str | None = None,
         limit: int | None = None,
-        offset: int = 0,
+        after_id: int | None = None,
     ) -> list[dict[str, Any]]:
         """Get instance predictions by task name or hash.
 
@@ -288,7 +288,7 @@ class QueryHelper:
             task_name: Task name(s) to filter by.
             task_hash: Task hash to filter by (exact match).
             limit: Optional maximum number of instances.
-            offset: Number of instances to skip.
+            after_id: Return instances with id > after_id (keyset pagination).
 
         Returns:
             List of instance dicts with task_name included.
@@ -297,5 +297,5 @@ class QueryHelper:
             task_name=task_name,
             task_hash=task_hash,
             limit=limit,
-            offset=offset,
+            after_id=after_id,
         )

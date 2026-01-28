@@ -6,6 +6,7 @@ providing a clean separation between business logic and database operations.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import datetime
 from typing import Any
 
@@ -286,7 +287,7 @@ class InstancePredictionRepository:
         task_hash: str | None = None,
         task_name: str | list[str] | None = None,
         limit: int | None = None,
-        offset: int = 0,
+        after_id: int | None = None,
     ) -> list[dict[str, Any]]:
         """Get instance predictions with filters.
 
@@ -295,12 +296,16 @@ class InstancePredictionRepository:
             task_hash: Filter by task hash.
             task_name: Filter by task name (requires JOIN to task_results).
             limit: Optional maximum number of results.
-            offset: Number of results to skip.
+            after_id: Return instances with id > after_id (keyset pagination).
 
         Returns:
-            List of instance dicts.
+            List of instance dicts with 'id' field for pagination.
         """
         stmt = select(InstancePrediction)
+
+        # Keyset pagination - much faster than OFFSET for large datasets
+        if after_id is not None:
+            stmt = stmt.where(InstancePrediction.id > after_id)
 
         if experiment_pk:
             stmt = stmt.where(InstancePrediction.experiment_pk == experiment_pk)
@@ -325,9 +330,6 @@ class InstancePredictionRepository:
         if limit:
             stmt = stmt.limit(limit)
 
-        if offset:
-            stmt = stmt.offset(offset)
-
         instances = self.session.execute(stmt).scalars().all()
 
         return [self._to_instance_dict(inst) for inst in instances]
@@ -337,7 +339,7 @@ class InstancePredictionRepository:
         experiment_id: str,
         task_name: str | list[str] | None = None,
         limit: int | None = None,
-        offset: int = 0,
+        after_id: int | None = None,
     ) -> list[dict[str, Any]]:
         """Get instance predictions by experiment_id (string).
 
@@ -347,7 +349,7 @@ class InstancePredictionRepository:
             experiment_id: Filter by experiment_id (string).
             task_name: Filter by task name.
             limit: Optional maximum number of results.
-            offset: Number of results to skip.
+            after_id: Return instances with id > after_id (keyset pagination).
 
         Returns:
             List of instance dicts with enriched data (task_name included).
@@ -366,6 +368,10 @@ class InstancePredictionRepository:
             .where(Experiment.experiment_id == experiment_id)
         )
 
+        # Keyset pagination - much faster than OFFSET for large datasets
+        if after_id is not None:
+            stmt = stmt.where(InstancePrediction.id > after_id)
+
         if task_name:
             if isinstance(task_name, list):
                 stmt = stmt.where(TaskResult.task_name.in_(task_name))
@@ -377,13 +383,11 @@ class InstancePredictionRepository:
         if limit:
             stmt = stmt.limit(limit)
 
-        if offset:
-            stmt = stmt.offset(offset)
-
         results = self.session.execute(stmt).all()
 
         return [
             {
+                "id": inst.id,
                 "task_hash": inst.task_hash,
                 "task_name": task_name_val,
                 "native_id": inst.native_id,
@@ -398,7 +402,7 @@ class InstancePredictionRepository:
         model_hash: str | None = None,
         task_name: str | list[str] | None = None,
         limit: int | None = None,
-        offset: int = 0,
+        after_id: int | None = None,
     ) -> list[dict[str, Any]]:
         """Get instance predictions by model name or hash.
 
@@ -409,7 +413,7 @@ class InstancePredictionRepository:
             model_hash: Filter by model hash.
             task_name: Filter by task name.
             limit: Optional maximum number of results.
-            offset: Number of results to skip.
+            after_id: Return instances with id > after_id (keyset pagination).
 
         Returns:
             List of instance dicts with enriched data (task_name, model_hash included).
@@ -430,6 +434,10 @@ class InstancePredictionRepository:
             )
         )
 
+        # Keyset pagination - much faster than OFFSET for large datasets
+        if after_id is not None:
+            stmt = stmt.where(InstancePrediction.id > after_id)
+
         if model_name:
             stmt = stmt.where(Experiment.model_name == model_name)
 
@@ -447,13 +455,11 @@ class InstancePredictionRepository:
         if limit:
             stmt = stmt.limit(limit)
 
-        if offset:
-            stmt = stmt.offset(offset)
-
         results = self.session.execute(stmt).all()
 
         return [
             {
+                "id": inst.id,
                 "task_hash": inst.task_hash,
                 "task_name": task_name_val,
                 "model_hash": model_hash_val,
@@ -468,7 +474,7 @@ class InstancePredictionRepository:
         task_name: str | list[str] | None = None,
         task_hash: str | None = None,
         limit: int | None = None,
-        offset: int = 0,
+        after_id: int | None = None,
     ) -> list[dict[str, Any]]:
         """Get instance predictions by task name or hash.
 
@@ -476,7 +482,7 @@ class InstancePredictionRepository:
             task_name: Filter by task name(s).
             task_hash: Filter by task hash (exact match).
             limit: Optional maximum number of results.
-            offset: Number of results to skip.
+            after_id: Return instances with id > after_id (keyset pagination).
 
         Returns:
             List of instance dicts with task_name included.
@@ -490,6 +496,10 @@ class InstancePredictionRepository:
             (TaskResult.experiment_pk == InstancePrediction.experiment_pk)
             & (TaskResult.task_hash == InstancePrediction.task_hash),
         )
+
+        # Keyset pagination - much faster than OFFSET for large datasets
+        if after_id is not None:
+            stmt = stmt.where(InstancePrediction.id > after_id)
 
         if task_hash:
             stmt = stmt.where(InstancePrediction.task_hash == task_hash)
@@ -505,13 +515,11 @@ class InstancePredictionRepository:
         if limit:
             stmt = stmt.limit(limit)
 
-        if offset:
-            stmt = stmt.offset(offset)
-
         results = self.session.execute(stmt).all()
 
         return [
             {
+                "id": inst.id,
                 "task_hash": inst.task_hash,
                 "task_name": task_name_val,
                 "native_id": inst.native_id,
@@ -528,10 +536,40 @@ class InstancePredictionRepository:
             instance: InstancePrediction ORM instance.
 
         Returns:
-            Instance dict.
+            Instance dict with id for pagination.
         """
         return {
+            "id": instance.id,
             "task_hash": instance.task_hash,
             "native_id": instance.native_id,
             "instance_metrics": instance.instance_metrics,
         }
+
+    def stream_instances(
+        self,
+        experiment_pk: int,
+        task_hash: str | None = None,
+        batch_size: int = 1000,
+    ) -> Iterator[dict[str, Any]]:
+        """Stream instances in batches for memory efficiency.
+
+        Uses SQLAlchemy's yield_per() to avoid loading all rows into memory.
+        Useful for exporting large datasets.
+
+        Args:
+            experiment_pk: Experiment primary key (required for streaming).
+            task_hash: Optional task hash filter.
+            batch_size: Number of rows to fetch per batch.
+
+        Yields:
+            Instance dicts one at a time.
+        """
+        stmt = select(InstancePrediction).where(InstancePrediction.experiment_pk == experiment_pk)
+
+        if task_hash:
+            stmt = stmt.where(InstancePrediction.task_hash == task_hash)
+
+        stmt = stmt.order_by(InstancePrediction.id)
+
+        for instance in self.session.execute(stmt).scalars().yield_per(batch_size):
+            yield self._to_instance_dict(instance)
