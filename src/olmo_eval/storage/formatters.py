@@ -6,6 +6,8 @@ import csv
 import json
 from collections.abc import Iterator
 from dataclasses import asdict, astuple, dataclass, field, fields
+from itertools import groupby
+from operator import attrgetter
 from typing import IO, Any
 
 
@@ -179,52 +181,40 @@ def stream_instances_to_nested_json(
     """Stream instances to nested JSON. Groups in single pass.
 
     Uses ordered grouping - assumes input is sorted by model_hash, task_hash.
-    This enables single-pass grouping with constant memory for the grouping state.
 
     Args:
         instances: Iterator of SQLAlchemy Row objects sorted by (model_hash, task_hash, id).
         output: File-like object to write JSON output to.
         experiment_group: Optional experiment group to include in output.
     """
-    current_model: ModelOutput | None = None
-    current_task: TaskOutput | None = None
     models: list[ModelOutput] = []
     last_id: int | None = None
 
-    for row in instances:
-        last_id = row.id
-
-        # New model?
-        if current_model is None or current_model.model_hash != row.model_hash:
-            if current_model:
-                models.append(current_model)
-            current_model = ModelOutput(
-                model_name=row.model_name,
-                model_hash=row.model_hash,
-            )
-            current_task = None
-
-        # New task?
-        if current_task is None or current_task.task_hash != row.task_hash:
-            current_task = TaskOutput(
-                task_name=row.task_name,
-                task_hash=row.task_hash,
-            )
-            current_model.tasks.append(current_task)
-
-        # Add instance
-        current_task.instances.append(
-            InstanceOutput(
-                native_id=row.native_id,
-                instance_metrics=row.instance_metrics,
-            )
+    for model_hash, model_group in groupby(instances, key=attrgetter("model_hash")):
+        model_rows = list(model_group)
+        model = ModelOutput(
+            model_name=model_rows[0].model_name,
+            model_hash=model_hash,
         )
 
-    # Don't forget last model
-    if current_model:
-        models.append(current_model)
+        for task_hash, task_group in groupby(model_rows, key=attrgetter("task_hash")):
+            task_rows = list(task_group)
+            task = TaskOutput(
+                task_name=task_rows[0].task_name,
+                task_hash=task_hash,
+                instances=[
+                    InstanceOutput(
+                        native_id=row.native_id,
+                        instance_metrics=row.instance_metrics,
+                    )
+                    for row in task_rows
+                ],
+            )
+            model.tasks.append(task)
+            last_id = task_rows[-1].id
 
-    # Build output
+        models.append(model)
+
     output_data = InstanceStreamOutput(
         models=models,
         experiment_group=experiment_group,
