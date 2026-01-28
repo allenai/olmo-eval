@@ -771,7 +771,7 @@ def write_predictions_jsonl(
     output_dir: str,
     spec: str,
     predictions: list[dict],
-    model_name: str | None = None,
+    model_name: str,
     task_hash: str | None = None,
 ) -> None:
     """Write per-instance predictions to JSONL.
@@ -780,13 +780,10 @@ def write_predictions_jsonl(
         output_dir: Base output directory
         spec: Task specification string (used for filename)
         predictions: List of prediction dicts to write
-        model_name: Optional model name for multi-model runs (adds subdirectory)
+        model_name: Model name or alias (used for subdirectory)
         task_hash: Optional task config hash (last 6 chars added to filename)
     """
-    if model_name:
-        pred_dir = os.path.join(output_dir, "predictions", sanitize_spec_for_filename(model_name))
-    else:
-        pred_dir = os.path.join(output_dir, "predictions")
+    pred_dir = os.path.join(output_dir, "predictions", sanitize_spec_for_filename(model_name))
     os.makedirs(pred_dir, exist_ok=True)
 
     # Build filename with optional hash suffix
@@ -807,7 +804,7 @@ def write_requests_jsonl(
     output_dir: str,
     spec: str,
     requests: list[dict],
-    model_name: str | None = None,
+    model_name: str,
     task_hash: str | None = None,
 ) -> None:
     """Write per-instance requests to JSONL (oe-eval compatible format).
@@ -819,13 +816,10 @@ def write_requests_jsonl(
         output_dir: Base output directory
         spec: Task specification string (used for filename)
         requests: List of request dicts to write
-        model_name: Optional model name for multi-model runs (adds subdirectory)
+        model_name: Model name or alias (used for subdirectory)
         task_hash: Optional task config hash (last 6 chars added to filename)
     """
-    if model_name:
-        req_dir = os.path.join(output_dir, "requests", sanitize_spec_for_filename(model_name))
-    else:
-        req_dir = os.path.join(output_dir, "requests")
+    req_dir = os.path.join(output_dir, "requests", sanitize_spec_for_filename(model_name))
     os.makedirs(req_dir, exist_ok=True)
 
     # Build filename with optional hash suffix

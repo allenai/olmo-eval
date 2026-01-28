@@ -150,10 +150,10 @@ class SyncEvalRunner(RunnerResultsMixin):
 
         expanded_tasks = expand_tasks(self.task_specs)
 
-        # Determine model name for results (use alias if provided, else sanitize the path)
-        from olmo_eval.runners.mixins import sanitize_model_name
+        from olmo_eval.runners.mixins import get_model_display_name
 
-        display_model_name = self.alias if self.alias else sanitize_model_name(model_config.model)
+        model_alias = self.model_overrides.get("alias")
+        display_model_name = get_model_display_name(model_config.model, model_alias)
 
         results: dict[str, Any] = {
             "model": display_model_name,
@@ -195,11 +195,13 @@ class SyncEvalRunner(RunnerResultsMixin):
 
             # Write predictions to JSONL
             if task_result.predictions:
-                self._write_predictions(spec, task_result.predictions, task_hash)
+                self._write_predictions(
+                    display_model_name, spec, task_result.predictions, task_hash
+                )
 
             # Write requests to JSONL (with hash now that we have the config)
             if task_result.requests:
-                self._write_requests(spec, task_result.requests, task_hash)
+                self._write_requests(display_model_name, spec, task_result.requests, task_hash)
 
             # Log metrics (for Beaker job details)
             if task_result.metrics:
@@ -216,14 +218,21 @@ class SyncEvalRunner(RunnerResultsMixin):
         # Log summary of all scores
         self._log_summary(results)
 
-        # Write metrics.json for Beaker
-        self._write_metrics_json(results)
-
-        # Compute experiment_id and model_hash upfront for both S3 and storage
+        # Compute experiment_id and model_hash upfront for both metrics.json and storage
         from olmo_eval.core.types import compute_model_hash
 
         experiment_id = generate_experiment_id()
         model_hash = compute_model_hash(results.get("model_config", {}))
+
+        # Write metrics.json for Beaker (with experiment identification fields)
+        self._write_metrics_json(
+            results,
+            experiment_id=experiment_id,
+            experiment_name=self.experiment_name,
+            experiment_group=self.experiment_group,
+            model_hash=model_hash,
+        )
+
         s3_location: str | None = None
 
         # Upload to S3 first if configured (so we have s3_location for storage)
@@ -281,13 +290,13 @@ class SyncEvalRunner(RunnerResultsMixin):
         return result
 
     def _write_predictions(
-        self, spec: str, predictions: list[dict], task_hash: str | None = None
+        self, model_name: str, spec: str, predictions: list[dict], task_hash: str | None = None
     ) -> None:
         """Write per-instance predictions to JSONL."""
-        write_predictions_jsonl(self.output_dir, spec, predictions, task_hash=task_hash)
+        write_predictions_jsonl(self.output_dir, spec, predictions, model_name, task_hash=task_hash)
 
     def _write_requests(
-        self, spec: str, requests: list[dict], task_hash: str | None = None
+        self, model_name: str, spec: str, requests: list[dict], task_hash: str | None = None
     ) -> None:
         """Write per-instance requests to JSONL (oe-eval compatible format)."""
-        write_requests_jsonl(self.output_dir, spec, requests, task_hash=task_hash)
+        write_requests_jsonl(self.output_dir, spec, requests, model_name, task_hash=task_hash)

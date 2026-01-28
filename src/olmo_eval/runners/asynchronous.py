@@ -1054,17 +1054,14 @@ class AsyncEvalRunner(AsyncRunnerMixin):
             "errors": [],
         }
 
-        from olmo_eval.runners.mixins import sanitize_model_name
+        from olmo_eval.runners.mixins import get_model_display_name
 
         for model_name in self.model_names:
             model_config = model_configs[model_name]
             backend_type = BackendType(model_config.backend)
 
-            # Use alias for model name if provided and single model, else sanitize
-            if self.alias and len(self.model_names) == 1:
-                display_model_name = self.alias
-            else:
-                display_model_name = sanitize_model_name(model_config.model)
+            model_alias = self.model_overrides.get(model_name, {}).get("alias")
+            display_model_name = get_model_display_name(model_config.model, model_alias)
 
             model_results: dict[str, Any] = {
                 "model": display_model_name,
@@ -1122,15 +1119,29 @@ class AsyncEvalRunner(AsyncRunnerMixin):
         # Log summary of all scores
         self._log_summary(results_dict, multi_model=True)
 
-        # Write metrics.json for Beaker
-        self._write_metrics_json(results_dict, multi_model=True)
-
-        # Compute experiment_id, model_hash, upload to S3 (need s3_location for storage)
+        # Compute experiment_id and model_hash upfront for metrics.json and storage
         from olmo_eval.core.types import compute_model_hash
 
-        for model_name, model_data in results_dict.get("models", {}).items():
-            experiment_id = generate_experiment_id()
+        # Single experiment_id for the whole run
+        experiment_id = generate_experiment_id()
+
+        # Compute model_hash per model and store for metrics.json
+        for model_data in results_dict.get("models", {}).values():
             model_hash = compute_model_hash(model_data.get("model_config", {}))
+            model_data["_model_hash"] = model_hash
+
+        # Write metrics.json for Beaker (with experiment identification fields)
+        self._write_metrics_json(
+            results_dict,
+            multi_model=True,
+            experiment_id=experiment_id,
+            experiment_name=self.experiment_name,
+            experiment_group=self.experiment_group,
+        )
+
+        # Upload to S3 and prepare storage context
+        for model_name, model_data in results_dict.get("models", {}).items():
+            model_hash = model_data.get("_model_hash")
             s3_location: str | None = None
 
             if self.s3_config and model_hash:
@@ -1142,7 +1153,6 @@ class AsyncEvalRunner(AsyncRunnerMixin):
 
             # Store these in model_data so _save_results can use them
             model_data["_experiment_id"] = experiment_id
-            model_data["_model_hash"] = model_hash
             model_data["_s3_location"] = s3_location
 
         # Save results with all context
@@ -1158,13 +1168,13 @@ class AsyncEvalRunner(AsyncRunnerMixin):
         self, model_name: str, spec: str, predictions: list[dict], task_hash: str | None = None
     ) -> None:
         """Write per-instance predictions to JSONL."""
-        write_predictions_jsonl(self.output_dir, spec, predictions, task_hash=task_hash)
+        write_predictions_jsonl(self.output_dir, spec, predictions, model_name, task_hash=task_hash)
 
     def _write_requests(
         self, model_name: str, spec: str, requests: list[dict], task_hash: str | None = None
     ) -> None:
         """Write per-instance requests to JSONL (oe-eval compatible format)."""
-        write_requests_jsonl(self.output_dir, spec, requests, task_hash=task_hash)
+        write_requests_jsonl(self.output_dir, spec, requests, model_name, task_hash=task_hash)
 
 
 # -----------------------------------------------------------------------------
@@ -1512,16 +1522,13 @@ class StreamingEvalRunner(AsyncRunnerMixin):
             "errors": [],
         }
 
-        from olmo_eval.runners.mixins import sanitize_model_name
+        from olmo_eval.runners.mixins import get_model_display_name
 
         for model_name in self.model_names:
             model_config = model_configs[model_name]
 
-            # Use alias for model name if provided and single model, else sanitize
-            if self.alias and len(self.model_names) == 1:
-                display_model_name = self.alias
-            else:
-                display_model_name = sanitize_model_name(model_config.model)
+            model_alias = self.model_overrides.get(model_name, {}).get("alias")
+            display_model_name = get_model_display_name(model_config.model, model_alias)
 
             model_results: dict[str, Any] = {
                 "model": display_model_name,
@@ -1577,14 +1584,30 @@ class StreamingEvalRunner(AsyncRunnerMixin):
                 model_results["suites"] = suite_aggs
 
         self._log_summary(results_dict, multi_model=True)
-        self._write_metrics_json(results_dict, multi_model=True)
 
-        # Compute experiment_id, model_hash, upload to S3 (need s3_location for storage)
+        # Compute experiment_id and model_hash upfront for metrics.json and storage
         from olmo_eval.core.types import compute_model_hash
 
-        for model_name, model_data in results_dict.get("models", {}).items():
-            experiment_id = generate_experiment_id()
+        # Single experiment_id for the whole run
+        experiment_id = generate_experiment_id()
+
+        # Compute model_hash per model and store for metrics.json
+        for model_data in results_dict.get("models", {}).values():
             model_hash = compute_model_hash(model_data.get("model_config", {}))
+            model_data["_model_hash"] = model_hash
+
+        # Write metrics.json for Beaker (with experiment identification fields)
+        self._write_metrics_json(
+            results_dict,
+            multi_model=True,
+            experiment_id=experiment_id,
+            experiment_name=self.experiment_name,
+            experiment_group=self.experiment_group,
+        )
+
+        # Upload to S3 and prepare storage context
+        for model_name, model_data in results_dict.get("models", {}).items():
+            model_hash = model_data.get("_model_hash")
             s3_location: str | None = None
 
             if self.s3_config and model_hash:
@@ -1596,7 +1619,6 @@ class StreamingEvalRunner(AsyncRunnerMixin):
 
             # Store these in model_data so _save_results can use them
             model_data["_experiment_id"] = experiment_id
-            model_data["_model_hash"] = model_hash
             model_data["_s3_location"] = s3_location
 
         # Save results with all context
@@ -1612,10 +1634,10 @@ class StreamingEvalRunner(AsyncRunnerMixin):
         self, model_name: str, spec: str, predictions: list[dict], task_hash: str | None = None
     ) -> None:
         """Write per-instance predictions to JSONL."""
-        write_predictions_jsonl(self.output_dir, spec, predictions, task_hash=task_hash)
+        write_predictions_jsonl(self.output_dir, spec, predictions, model_name, task_hash=task_hash)
 
     def _write_requests(
         self, model_name: str, spec: str, requests: list[dict], task_hash: str | None = None
     ) -> None:
         """Write per-instance requests to JSONL (oe-eval compatible format)."""
-        write_requests_jsonl(self.output_dir, spec, requests, task_hash=task_hash)
+        write_requests_jsonl(self.output_dir, spec, requests, model_name, task_hash=task_hash)

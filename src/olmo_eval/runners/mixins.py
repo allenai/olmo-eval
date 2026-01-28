@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -79,6 +79,25 @@ def sanitize_model_name(model_name: str) -> str:
 
     # For HuggingFace-style names (org/model), just replace / with _
     return model_name.replace("/", "_")
+
+
+def get_model_display_name(model_path: str, alias: str | None = None) -> str:
+    """Get the display name for a model.
+
+    Uses alias if provided, otherwise sanitizes the model path.
+    This is the standard way to get a model name for file paths,
+    S3 prefixes, and display purposes.
+
+    Args:
+        model_path: Model name or path (e.g., "meta-llama/Llama-3.1-8B" or "/weka/.../step1000-hf")
+        alias: Optional alias override
+
+    Returns:
+        Display name: alias if provided, else sanitized model path
+    """
+    if alias:
+        return alias
+    return sanitize_model_name(model_path)
 
 
 def build_s3_prefix(
@@ -157,6 +176,7 @@ class TaskMetricsEntry:
     primary_metric: str | None = None
     config: dict[str, Any] | None = None
     duration_seconds: float | None = None
+    task_hash: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dict, excluding None values."""
@@ -173,6 +193,8 @@ class TaskMetricsEntry:
             result["config"] = self.config
         if self.duration_seconds is not None:
             result["duration_seconds"] = self.duration_seconds
+        if self.task_hash is not None:
+            result["task_hash"] = self.task_hash
         return result
 
 
@@ -197,10 +219,27 @@ class MetricsOutput:
     tasks: list[dict[str, Any]]  # List of TaskMetricsEntry.to_dict()
     summary: dict[str, Any]  # task_name -> ScoreSummary or model -> task -> ScoreSummary
     errors: list[dict[str, Any]] = field(default_factory=list)
+    # Experiment identification fields for querying results
+    experiment_id: str | None = None
+    experiment_name: str | None = None
+    experiment_group: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dict for JSON serialization."""
-        return asdict(self)
+        """Convert to dict for JSON serialization, excluding None values."""
+        result: dict[str, Any] = {
+            "timestamp": self.timestamp,
+            "config": self.config,
+            "tasks": self.tasks,
+            "summary": self.summary,
+            "errors": self.errors,
+        }
+        if self.experiment_id is not None:
+            result["experiment_id"] = self.experiment_id
+        if self.experiment_name is not None:
+            result["experiment_name"] = self.experiment_name
+        if self.experiment_group is not None:
+            result["experiment_group"] = self.experiment_group
+        return result
 
 
 class RunnerResultsMixin:
@@ -538,20 +577,43 @@ class RunnerResultsMixin:
                     metric_name, score = primary
                     logger.info(f"  {suite_name}: {score:.4f} ({metric_name})")
 
-    def _write_metrics_json(self, results: dict[str, Any], multi_model: bool = False) -> None:
+    def _write_metrics_json(
+        self,
+        results: dict[str, Any],
+        multi_model: bool = False,
+        experiment_id: str | None = None,
+        experiment_name: str | None = None,
+        experiment_group: str | None = None,
+        model_hash: str | None = None,
+    ) -> None:
         """Write metrics.json
 
         Args:
             results: Results dictionary
             multi_model: If True, use multi-model format with results["models"],
                         otherwise use single-model format with results["tasks"]
+            experiment_id: Unique ID for this experiment run
+            experiment_name: Human-readable experiment name
+            experiment_group: Group for related experiments
+            model_hash: Hash of model config (single-model only)
         """
         metrics_file = os.path.join(self.output_dir, "metrics.json")
 
         if multi_model:
-            metrics_output = self._build_multi_model_metrics(results)
+            metrics_output = self._build_multi_model_metrics(
+                results,
+                experiment_id=experiment_id,
+                experiment_name=experiment_name,
+                experiment_group=experiment_group,
+            )
         else:
-            metrics_output = self._build_single_model_metrics(results)
+            metrics_output = self._build_single_model_metrics(
+                results,
+                experiment_id=experiment_id,
+                experiment_name=experiment_name,
+                experiment_group=experiment_group,
+                model_hash=model_hash,
+            )
 
         os.makedirs(self.output_dir, exist_ok=True)
         with open(metrics_file, "w") as f:
@@ -560,7 +622,14 @@ class RunnerResultsMixin:
         logger.info(f"Metrics written to {metrics_file}")
         console.print(f"[green]Metrics written to {metrics_file}[/green]")
 
-    def _build_single_model_metrics(self, results: dict[str, Any]) -> MetricsOutput:
+    def _build_single_model_metrics(
+        self,
+        results: dict[str, Any],
+        experiment_id: str | None = None,
+        experiment_name: str | None = None,
+        experiment_group: str | None = None,
+        model_hash: str | None = None,
+    ) -> MetricsOutput:
         """Build metrics output for single-model format."""
         # Build config from stored model config
         model_cfg = results.get("model_config", {})
@@ -573,6 +642,11 @@ class RunnerResultsMixin:
             attention_backend=model_cfg.get("attention_backend"),
         )
 
+        # Build config dict with model_hash included
+        config_dict = config.to_dict()
+        if model_hash is not None:
+            config_dict["model_hash"] = model_hash
+
         # Build task entries
         tasks_list: list[TaskMetricsEntry] = []
         for task_name, task_data in results.get("tasks", {}).items():
@@ -583,6 +657,7 @@ class RunnerResultsMixin:
                 primary_metric=task_data.get("primary_metric"),
                 config=task_data.get("config"),
                 duration_seconds=task_data.get("duration_seconds"),
+                task_hash=task_data.get("task_hash"),
             )
             tasks_list.append(entry)
 
@@ -607,19 +682,28 @@ class RunnerResultsMixin:
 
         return MetricsOutput(
             timestamp=results.get("timestamp", ""),
-            config=config.to_dict(),
+            config=config_dict,
             tasks=[t.to_dict() for t in tasks_list],
             summary={k: v.to_dict() for k, v in summary.items()},
             errors=results.get("errors", []),
+            experiment_id=experiment_id,
+            experiment_name=experiment_name,
+            experiment_group=experiment_group,
         )
 
-    def _build_multi_model_metrics(self, results: dict[str, Any]) -> MetricsOutput:
+    def _build_multi_model_metrics(
+        self,
+        results: dict[str, Any],
+        experiment_id: str | None = None,
+        experiment_name: str | None = None,
+        experiment_group: str | None = None,
+    ) -> MetricsOutput:
         """Build metrics output for multi-model format."""
-        # Build config for each model
-        models_config: dict[str, ModelConfig] = {}
+        # Build config for each model (include model_hash per model)
+        models_config: dict[str, dict[str, Any]] = {}
         for model_name, model_data in results.get("models", {}).items():
             model_cfg = model_data.get("model_config", {})
-            models_config[model_name] = ModelConfig(
+            config = ModelConfig(
                 model=model_cfg.get("model", model_data.get("model", "")),
                 backend=model_cfg.get("backend", model_data.get("backend", "")),
                 dtype=model_cfg.get("dtype", "auto"),
@@ -627,6 +711,11 @@ class RunnerResultsMixin:
                 revision=model_cfg.get("revision"),
                 attention_backend=model_cfg.get("attention_backend"),
             )
+            config_dict = config.to_dict()
+            # Include model_hash in per-model config if available
+            if "_model_hash" in model_data:
+                config_dict["model_hash"] = model_data["_model_hash"]
+            models_config[model_name] = config_dict
 
         # Build task entries - flatten (model, task) pairs
         tasks_list: list[TaskMetricsEntry] = []
@@ -640,6 +729,7 @@ class RunnerResultsMixin:
                     primary_metric=task_data.get("primary_metric"),
                     config=task_data.get("config"),
                     duration_seconds=task_data.get("duration_seconds"),
+                    task_hash=task_data.get("task_hash"),
                 )
                 tasks_list.append(entry)
 
@@ -668,13 +758,16 @@ class RunnerResultsMixin:
 
         return MetricsOutput(
             timestamp=results.get("timestamp", ""),
-            config={"models": {k: v.to_dict() for k, v in models_config.items()}},
+            config={"models": models_config},
             tasks=[t.to_dict() for t in tasks_list],
             summary={
                 model: {task: s.to_dict() for task, s in tasks.items()}
                 for model, tasks in summary.items()
             },
             errors=results.get("errors", []),
+            experiment_id=experiment_id,
+            experiment_name=experiment_name,
+            experiment_group=experiment_group,
         )
 
     def _report_task_completion(self, model_name: str, result: TaskResult) -> None:
