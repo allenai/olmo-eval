@@ -40,9 +40,7 @@ class ExperimentRepository:
         # Use experiment_group from eval_result, or fall back to experiment_name/experiment_id
         # experiment_group must never be empty
         experiment_group = (
-            eval_result.experiment_group
-            or eval_result.experiment_name
-            or eval_result.experiment_id
+            eval_result.experiment_group or eval_result.experiment_name or eval_result.experiment_id
         )
         experiment = Experiment(
             experiment_id=eval_result.experiment_id,

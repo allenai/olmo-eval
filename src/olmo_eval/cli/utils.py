@@ -15,6 +15,7 @@ def format_timestamp(ts: datetime | None) -> str:
         return "-"
     return ts.strftime("%Y-%m-%d %H:%M:%S")
 
+
 # Keys that apply to model/backend config
 MODEL_KEYS = {
     "backend",

@@ -747,16 +747,28 @@ def query(
             # Fetch instances if requested
             instance_data = (
                 _query_instances(
-                    helper, experiment_ids, model_names, model_hashes,
-                    task_names, task_hash, limit, after_id
+                    helper,
+                    experiment_ids,
+                    model_names,
+                    model_hashes,
+                    task_names,
+                    task_hash,
+                    limit,
+                    after_id,
                 )
-                if instances else []
+                if instances
+                else []
             )
 
             # Output results
             _output_results(
-                all_experiments, instance_data, is_comparison, task_filter,
-                output_format, instances, limit
+                all_experiments,
+                instance_data,
+                is_comparison,
+                task_filter,
+                output_format,
+                instances,
+                limit,
             )
     finally:
         db.dispose()

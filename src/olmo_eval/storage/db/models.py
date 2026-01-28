@@ -201,7 +201,7 @@ Index("idx_experiments_experiment_id", Experiment.experiment_id)
 Index("idx_experiments_model_hash", Experiment.model_hash)
 Index("idx_experiments_model_name", Experiment.model_name)
 Index("idx_experiments_model_name_ts", Experiment.model_name, Experiment.timestamp.desc())
-Index("ix_experiments_experiment_group", Experiment.experiment_group)
+# Note: ix_experiments_experiment_group is auto-created via index=True on the column
 
 # Task Results Indexes
 Index("idx_task_results_exp_task", TaskResult.experiment_pk, TaskResult.task_name)

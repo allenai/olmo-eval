@@ -342,9 +342,7 @@ class RunnerResultsMixin:
             try:
                 # experiment_group must always have a value - never empty
                 effective_experiment_name = runner_experiment_name or exp_id
-                effective_experiment_group = (
-                    runner_experiment_group or effective_experiment_name
-                )
+                effective_experiment_group = runner_experiment_group or effective_experiment_name
 
                 eval_result = convert_runner_results(
                     model_results,
