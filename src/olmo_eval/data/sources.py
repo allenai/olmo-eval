@@ -36,9 +36,9 @@ class DataSource:
     path: str
     subset: str | None = None
     split: str = "test"
-    data_files: dict | None = None
     source_type: SourceType | None = None
     data_files: str | None = None
+    data_files_hf: dict | None = None
     revision: str | None = None
 
     def __post_init__(self) -> None:

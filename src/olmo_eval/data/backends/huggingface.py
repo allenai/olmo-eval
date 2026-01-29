@@ -45,7 +45,7 @@ class HuggingFaceBackend:
             path,
             name=source.subset,
             split=source.split,
-            data_files=source.data_files,
+            data_files=source.data_files_hf,
             streaming=streaming,
         )
 
