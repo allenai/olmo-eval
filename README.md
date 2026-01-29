@@ -1,5 +1,6 @@
 # olmo-eval
 
+[![CI](https://github.com/allenai/olmo-eval-internal/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/allenai/olmo-eval-internal/actions/workflows/ci.yml)
 ![Alpha](https://img.shields.io/badge/status-alpha-orange)
 
 Evaluation toolkit for OLMo and other language models.
