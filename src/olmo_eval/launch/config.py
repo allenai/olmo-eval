@@ -72,7 +72,7 @@ class ModelConfig:
         use_async_stream: Enable streaming async with vLLM (overrides default).
         num_workers: Number of workers for async modes (overrides default).
         gpus_per_worker: GPUs per worker for async modes (overrides default).
-        backend: Backend to install for this model (e.g., "vllm").
+        provider: Inference provider to install for this model (e.g., "vllm").
         load_format: vLLM model loading format (e.g., "runai_streamer" for distributed loading).
         extra_loader_config: Extra config for model loader (e.g., {"distributed": true}).
 
@@ -81,12 +81,12 @@ class ModelConfig:
           - name_or_path: llama3.1-8b
             gpus: 1
             parallelism: 4  # 4 instances × 1 GPU = 4 GPUs total
-            backend: vllm==0.13.0
+            provider: vllm==0.13.0
           - name_or_path: /weka/checkpoints/my-model/step1000-hf
             alias: my-model-1k  # Short name for experiment naming
             gpus: 4
             parallelism: 2  # 2 instances × 4 GPUs = 8 GPUs total
-            backend: transformers
+            provider: transformers
             use_async: true
             num_workers: 2
             gpus_per_worker: 4
@@ -114,8 +114,8 @@ class ModelConfig:
     num_workers: int | None = None
     gpus_per_worker: int | None = None
 
-    # Runtime backend installation (overrides default backend)
-    backend: str | None = None
+    # Runtime inference provider installation
+    provider: str | None = None
 
     # vLLM model loading configuration
     load_format: str | None = None
@@ -290,7 +290,7 @@ class EvalConfig:
     Attributes:
         name: Experiment name (required).
         models: List of model names/paths or ModelConfig dicts (required).
-            Each model can specify its own backend via the 'backend' field.
+            Each model can specify its own inference provider via the 'provider' field.
         tasks: List of task specs, optionally with @priority suffix (required).
         cluster: Default cluster alias or full name.
         gpus: Default number of GPUs per model instance.
@@ -395,7 +395,7 @@ class EvalConfig:
             "use_async_stream": use_async_stream,
             "num_workers": num_workers,
             "gpus_per_worker": gpus_per_worker,
-            "backend": model.backend,
+            "provider": model.provider,
             "load_format": model.load_format,
             "extra_loader_config": model.extra_loader_config,
         }

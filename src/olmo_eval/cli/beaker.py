@@ -166,13 +166,13 @@ def launch(
     Requires beaker-py to be installed: pip install 'olmo-eval-internal[beaker]'
 
     Multiple models and/or tasks with different priorities will create separate experiments.
-    Models with compatible runtime configurations (GPUs, backend, etc.) are grouped together.
+    Models with compatible runtime configurations (GPUs, inference provider, etc.) are grouped together.
     Use --config/-f to load settings from a YAML file; CLI arguments override config values.
     Use --group/-g to organize experiments into a Beaker group for result aggregation.
 
-    Backend packages (vllm, transformers, etc.) are auto-detected from each model's
-    configuration and installed at job startup. Specify per-model backends in the
-    config file using the 'backend' field on each model.
+    Inference provider packages (vllm, transformers, etc.) are auto-detected from each
+    model's configuration and installed at job startup. Specify per-model providers in
+    the config file using the 'provider' field on each model.
 
     Examples:
 
@@ -188,7 +188,7 @@ def launch(
         # Per-task priorities (creates separate experiments per priority level)
         olmo-eval beaker launch -n "eval-mixed" -m llama3.1-8b -t "mmlu@high" -t "gsm8k@normal"
 
-        # From YAML config file (with per-model backend configuration)
+        # From YAML config file (with per-model provider configuration)
         olmo-eval beaker launch -f eval_config.yaml
 
         # Config file with CLI overrides
@@ -523,7 +523,7 @@ def launch(
                 else m_resources.get("parallelism", 1)
             )
             m_cluster = cli_cluster if cli_cluster is not None else m_resources.get("cluster")
-            m_backend = m_resources.get("backend")
+            m_provider = m_resources.get("provider")
         else:
             m_gpus = cli_gpus if cli_gpus is not None else (m_cfg.gpus or gpus)
             m_parallelism = (
@@ -532,19 +532,19 @@ def launch(
                 else (m_cfg.parallelism or parallelism)
             )
             m_cluster = cli_cluster if cli_cluster is not None else (m_cfg.cluster or cluster)
-            m_backend = m_cfg.backend
-        return m_gpus, m_parallelism, m_cluster, m_backend
+            m_provider = m_cfg.provider
+        return m_gpus, m_parallelism, m_cluster, m_provider
 
     def get_runtime_signature(m_cfg: ModelConfig, m_spec: str) -> tuple:
         """Get a hashable runtime signature for grouping compatible models."""
-        m_gpus, m_parallelism, m_cluster, m_backend = get_model_resources_for_grouping(
+        m_gpus, m_parallelism, m_cluster, m_provider = get_model_resources_for_grouping(
             m_cfg, m_spec
         )
 
         # Extract inline overrides from spec (e.g., "model::attention_backend=FLASH_ATTN")
         _, _, inline_overrides = m_spec.partition("::")
 
-        return (m_gpus, m_parallelism, m_cluster, m_backend, inline_overrides)
+        return (m_gpus, m_parallelism, m_cluster, m_provider, inline_overrides)
 
     # Group models by runtime signature
     from itertools import groupby
@@ -650,7 +650,7 @@ def launch(
             )
         )
 
-    # Build model summaries with resolved backends
+    # Build model summaries with resolved providers
     from olmo_eval.core.configs import get_model_config as get_runtime_model_config
 
     model_summaries: list[ModelSummary] = []
@@ -658,8 +658,8 @@ def launch(
         # Use original spec to extract inline overrides (name_or_path has them stripped)
         model_base_name, model_inline_overrides = parse_model_spec(m_spec)
 
-        if m.backend:
-            effective_provider = m.backend
+        if m.provider:
+            effective_provider = m.provider
         else:
             runtime_model_config = get_runtime_model_config(model_base_name)
             effective_provider = runtime_model_config.provider
@@ -838,7 +838,7 @@ def launch(
                     first_model_cfg.timeout if first_model_cfg.timeout is not None else timeout
                 ),
                 "shared_memory": first_model_cfg.shared_memory,
-                "backend": first_model_cfg.backend,
+                "provider": first_model_cfg.provider,
             }
 
         # CLI args always override per-model config
@@ -950,29 +950,29 @@ def launch(
         if store:
             command.append("--store")
 
-        # Get the backend for this model group (required per-model configuration)
+        # Get the inference provider for this model group (required per-model configuration)
         from olmo_eval.core.constants.infrastructure import BACKEND_OPTIONAL_GROUPS
 
-        config_backend = model_resources.get("backend")
-        if not config_backend:
+        config_provider = model_resources.get("provider")
+        if not config_provider:
             model_name = first_model_cfg.name_or_path
             console.print(
-                f"[red]Error:[/red] No backend specified for model '{model_name}'.\n"
-                "Specify a backend in the config file:\n"
+                f"[red]Error:[/red] No inference provider specified for model '{model_name}'.\n"
+                "Specify a provider in the config file:\n"
                 "  models:\n"
                 "    - name_or_path: llama3.1-8b\n"
-                "      backend: vllm\n"
+                "      provider: vllm\n"
                 "\nOr via inline override:\n"
-                "  -m 'llama3.1-8b::backend=vllm'"
+                "  -m 'llama3.1-8b::provider=vllm'"
             )
             raise SystemExit(1)
 
-        runtime_backend: str = str(config_backend)
-        backend_group = BACKEND_OPTIONAL_GROUPS.get(runtime_backend)
-        model_backends = [backend_group] if backend_group else []
+        runtime_provider: str = str(config_provider)
+        provider_group = BACKEND_OPTIONAL_GROUPS.get(runtime_provider)
+        provider_extras = [provider_group] if provider_group else []
 
-        # Combine model backends and storage dependencies for installation
-        install_extras = list(model_backends)
+        # Combine inference provider and storage dependencies for installation
+        install_extras = list(provider_extras)
         if store:
             install_extras.append("postgres")
 

@@ -79,6 +79,49 @@ register(Suite(
 ))
 ```
 
+#### Suite Aggregation
+
+Suites support different strategies for combining task results:
+
+| Strategy | Description |
+|----------|-------------|
+| `AVERAGE` | Simple average of all task scores (default) |
+| `AVERAGE_OF_AVERAGES` | Average over child suite averages (equal weight per child) |
+| `DISPLAY_ONLY` | Display child results without computing suite average |
+| `NONE` | No aggregation - just collect individual task results |
+
+**Average of Averages Example:**
+
+```python
+from olmo_eval.evals.suites import Suite, AggregationStrategy, register
+
+# Nested suite with 3 tasks
+multilingual_code = Suite(
+    name="multilingual_code",
+    tasks=("mbpp_python", "mbpp_java", "mbpp_rust"),
+    aggregation=AggregationStrategy.AVERAGE,
+)
+
+# Parent suite using average of averages
+register(Suite(
+    name="code_eval",
+    tasks=(
+        "humaneval",        # Single task (score: 0.80)
+        multilingual_code,  # Nested suite with 3 tasks (scores: 0.40, 0.50, 0.60)
+    ),
+    aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+))
+
+# Results:
+# - humaneval: 0.80
+# - multilingual_code average: (0.40 + 0.50 + 0.60) / 3 = 0.50
+#
+# AVERAGE_OF_AVERAGES: (0.80 + 0.50) / 2 = 0.65
+# vs AVERAGE:          (0.80 + 0.40 + 0.50 + 0.60) / 4 = 0.575
+```
+
+Note: Currently `AVERAGE_OF_AVERAGES` gives each child equal weight regardless of how many tasks it contains. Custom weighting may be supported in the future.
+
 ### Model Presets
 
 Pre-configured model settings in `olmo_eval/core/constants/models.py`:
@@ -329,7 +372,7 @@ olmo-eval beaker launch -n "test" -m llama3.1-8b -t arc_easy --dry-run
 ### Multiple Models
 
 Run the same suite across multiple models by specifying `-m` multiple times.
-Models with compatible runtimes (same GPUs, parallelism, cluster, backend) are
+Models with compatible runtimes (same GPUs, parallelism, cluster, inference provider) are
 grouped into a single experiment:
 
 ```bash
@@ -399,20 +442,20 @@ olmo-eval beaker group info benchmark-2024 --wait --format csv > results.csv
 olmo-eval beaker group info benchmark-2024 --format json
 ```
 
-### Backend Configuration
+### Inference Provider Configuration
 
-Docker images do NOT include inference backends (vllm, transformers, litellm) by default.
-Each model must specify its backend, which is installed at job startup.
+Docker images do NOT include inference providers (vllm, transformers, litellm) by default.
+Each model must specify its provider, which is installed at job startup.
 
 **Via config file (recommended):**
 
 ```yaml
-name: eval-mixed-backends
+name: eval-mixed-providers
 models:
   - name_or_path: llama3.1-8b
-    backend: vllm
+    provider: vllm
   - name_or_path: gpt-4o
-    backend: litellm
+    provider: litellm
 tasks:
   - mmlu
 cluster: h100
@@ -421,13 +464,13 @@ cluster: h100
 **Via CLI inline override:**
 
 ```bash
-olmo-eval beaker launch -n "eval" -m "llama3.1-8b::backend=vllm" -t mmlu
+olmo-eval beaker launch -n "eval" -m "llama3.1-8b::provider=vllm" -t mmlu
 ```
 
-Models with the same backend (and other compatible settings) are grouped into the same experiment.
-Models with different backends run in separate experiments.
+Models with the same provider (and other compatible settings) are grouped into the same experiment.
+Models with different providers run in separate experiments.
 
-Available backends:
+Available inference providers:
 - `vllm` - vLLM inference engine
 - `hf` - HuggingFace transformers
 - `litellm` - LiteLLM for API-based models (OpenAI, Anthropic, etc.)
@@ -469,7 +512,7 @@ CLI arguments override values from the config file.
 name: eval-llama3-core
 models:
   - name_or_path: llama3.1-8b
-    backend: vllm
+    provider: vllm
 tasks:
   - mmlu
   - gsm8k
@@ -501,11 +544,11 @@ olmo-eval beaker launch -f eval_config.yaml -m olmo-2-7b
 name: eval-model-comparison
 models:
   - name_or_path: llama3.1-8b
-    backend: vllm
+    provider: vllm
   - name_or_path: olmo-2-7b
-    backend: vllm
+    provider: vllm
   - name_or_path: mistral-7b
-    backend: vllm
+    provider: vllm
 tasks:
   - mmlu
   - gsm8k
@@ -523,9 +566,9 @@ Tasks with different priorities create separate Beaker experiments:
 name: eval-prioritized
 models:
   - name_or_path: llama3.1-8b
-    backend: vllm
+    provider: vllm
   - name_or_path: olmo-2-7b
-    backend: vllm
+    provider: vllm
 tasks:
   # High priority - run first
   - mmlu@high
@@ -555,7 +598,7 @@ eval-prioritized-low:    models=[llama3.1-8b, olmo-2-7b], tasks=[winogrande, tru
 name: eval-70b-full
 models:
   - name_or_path: meta-llama/Llama-3.1-70B-Instruct
-    backend: vllm
+    provider: vllm
     gpus: 4
 tasks:
   - mmlu
@@ -574,7 +617,7 @@ description: "Full evaluation suite for Llama 70B"
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `name` | string | yes | Experiment name |
-| `models` | list | yes | List of ModelConfig objects (each must have `name_or_path` and `backend`) |
+| `models` | list | yes | List of ModelConfig objects (each must have `name_or_path` and `provider`) |
 | `tasks` | list | yes | List of task specs (with optional `@priority`) |
 | `cluster` | string | yes | Cluster alias or full name |
 | `gpus` | int | no | Default GPUs per model instance (default: `1`) |
@@ -628,7 +671,7 @@ print(f"Launched: {launcher.beaker.experiment.url(experiment)}")
 
 Docker images provide the runtime environment (Python, PyTorch, CUDA) but do NOT include:
 - **Source code** - Gantry mounts your git repository at runtime
-- **Backends** - Installed at job startup based on each model's `backend` config
+- **Inference providers** - Installed at job startup based on each model's `provider` config
 
 This approach allows you to:
 - Use any git commit without rebuilding images
@@ -667,24 +710,24 @@ The image does NOT contain:
 - olmo-eval source code (provided by gantry at runtime)
 - olmo-eval dependencies like click, datasets, rich, etc. (installed at job startup)
 - Storage backends like boto3, psycopg (installed at job startup if needed)
-- Inference backends like vllm, transformers, litellm (installed at job startup)
+- Inference providers like vllm, transformers, litellm (installed at job startup)
 
-### Installing Backends at Runtime
+### Installing Inference Providers at Runtime
 
-Inference backends are NOT baked into images. They are installed at job startup based on each model's `backend` configuration:
+Inference providers are NOT baked into images. They are installed at job startup based on each model's `provider` configuration:
 
 ```yaml
 # In config file
 models:
   - name_or_path: llama3.1-8b
-    backend: vllm  # Installs vllm at job startup
+    provider: vllm  # Installs vllm at job startup
   - name_or_path: gpt-4o
-    backend: litellm  # Installs litellm at job startup
+    provider: litellm  # Installs litellm at job startup
 ```
 
 ```bash
 # Or via CLI inline override
-olmo-eval beaker launch -n "eval" -m "llama3.1-8b::backend=vllm" -t mmlu
+olmo-eval beaker launch -n "eval" -m "llama3.1-8b::provider=vllm" -t mmlu
 
 # Manual installation inside container
 uv pip install -e '.[vllm]'  # includes vllm[runai]
