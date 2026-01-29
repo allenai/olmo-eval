@@ -22,6 +22,7 @@ class C4Task(Task):
     """C4 perplexity task."""
 
     default_source: str = "allenai/c4"
+    default_data_files = {"validation": "en/c4-validation.*.json.gz"}
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
@@ -32,17 +33,16 @@ class C4Task(Task):
         if self._instances_cache is None:
             self._instances_cache = []
             loader = DataLoader()
-            source = self._get_source_for_split("en", "validation")
+            source = self._get_source_from_data_files(self.default_data_files)
             for doc in loader.load(source):
                 self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
 
-    def _get_source_for_split(self, subset: str, split: str) -> DataSource:
-        """Get data source for a specific split."""
+    def _get_source_from_data_files(self, data_files: dict) -> DataSource:
+        """Get data source from data files."""
         return DataSource(
             path=self.default_source,
-            subset=subset,
-            split=split,
+            data_files=data_files,
         )
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:

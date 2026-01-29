@@ -45,8 +45,8 @@ class HuggingFaceBackend:
             path,
             name=source.subset,
             split=source.split,
+            data_files=source.data_files,
             streaming=streaming,
-            trust_remote_code=True,
         )
 
         yield from dataset

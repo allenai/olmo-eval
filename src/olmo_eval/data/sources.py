@@ -36,6 +36,7 @@ class DataSource:
     path: str
     subset: str | None = None
     split: str = "test"
+    data_files: dict | None = None
     source_type: SourceType | None = None
     data_files: str | None = None
     revision: str | None = None
