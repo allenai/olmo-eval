@@ -112,6 +112,7 @@ class QueryHelper:
         model_name: str | None = None,
         model_hash: str | None = None,
         task_name: str | None = None,
+        experiment_group: str | None = None,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
         latest: bool = False,
@@ -124,6 +125,7 @@ class QueryHelper:
             model_name: Filter by model name.
             model_hash: Filter by model hash.
             task_name: Filter by task name (results containing this task).
+            experiment_group: Filter by experiment group.
             start_time: Filter by timestamp >= start_time.
             end_time: Filter by timestamp <= end_time.
             latest: If True, return only the most recent result.
@@ -137,6 +139,7 @@ class QueryHelper:
             model_name=model_name,
             model_hash=model_hash,
             task_name=task_name,
+            experiment_group=experiment_group,
             start_time=start_time,
             end_time=end_time,
             latest=latest,

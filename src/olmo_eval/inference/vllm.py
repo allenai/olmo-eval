@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
@@ -14,6 +15,38 @@ from .base import InferenceProvider
 if TYPE_CHECKING:
     from vllm import LLM
     from vllm.outputs import RequestOutput
+
+
+def _configure_vllm_logger(worker_id: str | None) -> None:
+    """Configure vLLM's logger to include worker_id in output.
+
+    Args:
+        worker_id: Worker identifier to include in log format, or None to use default format.
+    """
+    vllm_logger = logging.getLogger("vllm")
+
+    # Remove existing handlers to avoid duplicates
+    for handler in vllm_logger.handlers[:]:
+        vllm_logger.removeHandler(handler)
+
+    handler = logging.StreamHandler()
+    if worker_id:
+        handler.setFormatter(
+            logging.Formatter(
+                f"%(asctime)s [{worker_id}] [%(levelname)s] %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+        )
+    else:
+        handler.setFormatter(
+            logging.Formatter(
+                "%(asctime)s [%(levelname)s] %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+        )
+    vllm_logger.addHandler(handler)
+    vllm_logger.setLevel(logging.INFO)
+    vllm_logger.propagate = False
 
 
 def _get_token_string(logprob_obj: Any, token_id: int, tokenizer: Any = None) -> str:
@@ -68,6 +101,7 @@ class VLLMProvider(InferenceProvider):
         model_name: str,
         tokenizer: str | None = None,
         attention_backend: str | None = None,
+        worker_id: str | None = None,
         **engine_kwargs,
     ) -> None:
         """Initialize the provider.
@@ -77,10 +111,16 @@ class VLLMProvider(InferenceProvider):
             tokenizer: Tokenizer path/identifier. If not specified, uses the model path.
             attention_backend: Attention backend to use (e.g., "FLASHINFER", "FLASH_ATTN").
                 If not specified, vLLM will auto-select based on available backends.
+            worker_id: Optional worker identifier for logging. If provided, vLLM logs
+                will include this identifier.
             **engine_kwargs: Additional arguments passed to vLLM LLM engine.
         """
-        # Suppress verbose vLLM logging
+        # Suppress verbose vLLM logging by default, but allow override
         os.environ.setdefault("VLLM_LOGGING_LEVEL", "WARNING")
+
+        # Configure vLLM logger with worker_id if provided
+        if worker_id:
+            _configure_vllm_logger(worker_id)
 
         try:
             from vllm import LLM
@@ -88,6 +128,7 @@ class VLLMProvider(InferenceProvider):
             raise ImportError("vllm is required for VLLMProvider") from e
 
         super().__init__(model_name)
+        self._worker_id = worker_id
         engine_kwargs.setdefault("gpu_memory_utilization", 0.8)
 
         # Configure attention backend if specified (e.g., FLASHINFER, FLASH_ATTN)
@@ -158,7 +199,8 @@ class VLLMProvider(InferenceProvider):
         vllm_params = self._build_sampling_params(params)
 
         prompts = [req.prompt for req in requests]
-        outputs: list[RequestOutput] = self.llm.generate(prompts, vllm_params)
+        # Disable tqdm progress bar - we use our own worker-scoped logging
+        outputs: list[RequestOutput] = self.llm.generate(prompts, vllm_params, use_tqdm=False)
 
         return [
             [
@@ -217,8 +259,9 @@ class VLLMProvider(InferenceProvider):
 
         # Call vLLM with token IDs instead of strings
         # Pass as list of dicts with prompt_token_ids key
+        # Disable tqdm progress bar - we use our own worker-scoped logging
         prompts = [{"prompt_token_ids": tokens} for tokens in token_inputs]
-        outputs: list[RequestOutput] = self.llm.generate(prompts, vllm_params)
+        outputs: list[RequestOutput] = self.llm.generate(prompts, vllm_params, use_tqdm=False)
 
         # Parse results back to per-request structure
         output_iter = iter(outputs)
@@ -307,6 +350,7 @@ class AsyncVLLMProvider:
         model_name: str,
         tokenizer: str | None = None,
         attention_backend: str | None = None,
+        worker_id: str | None = None,
         **engine_kwargs,
     ) -> None:
         """Initialize the async provider.
@@ -316,9 +360,17 @@ class AsyncVLLMProvider:
             tokenizer: Tokenizer path/identifier. If not specified, uses the model path.
             attention_backend: Attention backend to use (e.g., "FLASHINFER", "FLASH_ATTN").
                 If not specified, vLLM will auto-select based on available backends.
+            worker_id: Optional worker identifier for logging. If provided, vLLM logs
+                will include this identifier.
             **engine_kwargs: Additional arguments passed to vLLM engine.
         """
         os.environ.setdefault("VLLM_LOGGING_LEVEL", "WARNING")
+
+        # Configure vLLM logger with worker_id if provided
+        if worker_id:
+            _configure_vllm_logger(worker_id)
+
+        self._worker_id = worker_id
 
         self.model_name = model_name
         engine_kwargs.setdefault("gpu_memory_utilization", 0.8)

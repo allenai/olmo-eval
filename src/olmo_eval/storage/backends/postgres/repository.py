@@ -147,6 +147,7 @@ class ExperimentRepository:
         model_hash: str | None = None,
         task_name: str | None = None,
         task_hash: str | None = None,
+        experiment_group: str | None = None,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
         latest: bool = False,
@@ -160,6 +161,7 @@ class ExperimentRepository:
             model_hash: Filter by model hash (hash of model config).
             task_name: Filter by task name (experiments containing this task).
             task_hash: Filter by task hash (experiments containing this task config).
+            experiment_group: Filter by experiment group (exact match).
             start_time: Filter by timestamp >= start_time.
             end_time: Filter by timestamp <= end_time.
             latest: If True, return only the most recent result (limit=1).
@@ -177,6 +179,9 @@ class ExperimentRepository:
 
         if model_hash:
             stmt = stmt.where(Experiment.model_hash == model_hash)
+
+        if experiment_group:
+            stmt = stmt.where(Experiment.experiment_group == experiment_group)
 
         if start_time:
             stmt = stmt.where(Experiment.timestamp >= start_time)

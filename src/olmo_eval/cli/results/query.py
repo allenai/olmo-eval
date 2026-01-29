@@ -71,7 +71,7 @@ class FilterType(enum.Enum):
 @click.option(
     "--experiment-group",
     "-G",
-    help="Filter by experiment group (for cross-model analysis).",
+    help="Filter by experiment group.",
 )
 @click.option(
     "--instances/--no-instances",
@@ -165,7 +165,14 @@ def query(
 
             # Fetch experiments based on filters
             all_experiments = _query_experiments(
-                helper, repo, experiment_ids, model_names, model_hashes, task_names, task_hash
+                helper,
+                repo,
+                experiment_ids,
+                model_names,
+                model_hashes,
+                task_names,
+                task_hash,
+                experiment_group=experiment_group,
             )
             if not all_experiments:
                 console.print("[dim]No results found.[/dim]")
@@ -264,6 +271,7 @@ def _query_experiments(
     model_hashes: tuple[str, ...],
     task_names: tuple[str, ...],
     task_hash: str | None = None,
+    experiment_group: str | None = None,
 ) -> list[Any]:
     """Query experiments based on provided filters."""
     results: list[Any] = []
@@ -278,6 +286,14 @@ def _query_experiments(
                 console.print(f"[yellow]Warning:[/yellow] {msg}")
             results.extend(exps)
 
+    # Experiment group query (standalone filter)
+    if experiment_group:
+        exps = repo.query(experiment_group=experiment_group)
+        if not exps:
+            msg = f"No experiments found with experiment_group='{experiment_group}'"
+            console.print(f"[yellow]Warning:[/yellow] {msg}")
+        results.extend(exps)
+
     # Query by each filter type
     query_with_warning(experiment_ids, helper.get_by_experiment_id, FilterType.EXPERIMENT_ID)
     query_with_warning(model_names, lambda x: repo.query(model_name=x), FilterType.MODEL_NAME)
@@ -286,7 +302,7 @@ def _query_experiments(
     )
 
     # Task-only query (no model filters)
-    if task_names and not model_names and not model_hashes:
+    if task_names and not model_names and not model_hashes and not experiment_group:
         query_with_warning(task_names, lambda x: repo.query(task_name=x), FilterType.TASK_NAME)
 
     # Task hash query (if no results yet from other filters)

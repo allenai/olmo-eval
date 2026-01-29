@@ -472,7 +472,10 @@ def instance_worker_process(
             engine_kwargs["load_format"] = load_format
         if extra_loader_config:
             engine_kwargs["model_loader_extra_config"] = extra_loader_config
-        provider = create_provider(provider_type, model_name, tokenizer=tokenizer, **engine_kwargs)
+        # Pass worker_id for scoped logging in vLLM
+        provider = create_provider(
+            provider_type, model_name, tokenizer=tokenizer, worker_id=worker_id, **engine_kwargs
+        )
 
         worker_logger.info(f"Engine ready ({time.time() - init_start:.1f}s)")
 
@@ -617,10 +620,12 @@ async def _streaming_worker_async(
     if extra_loader_config:
         engine_kwargs["model_loader_extra_config"] = extra_loader_config
 
+    # Pass worker_id for scoped logging in vLLM
     provider = AsyncVLLMProvider(
         model_name,
         tokenizer=tokenizer,
         attention_backend=attention_backend,
+        worker_id=worker_id,
         **engine_kwargs,
     )
 
