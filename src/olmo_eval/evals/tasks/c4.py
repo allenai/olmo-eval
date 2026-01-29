@@ -26,6 +26,10 @@ class C4Task(Task):
     # default_data_files = {"validation": "en/c4-validation.*.json.gz"}
     default_data_files = {"validation": "en/c4-validation.00000-of-00008.json.gz"}
 
+    # We define a max (word) token length so we don't need to worry about rolling windows
+    # 1000 words will generally fit into the context length of most models
+    max_num_words = 1000
+
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
 
@@ -37,6 +41,9 @@ class C4Task(Task):
             loader = DataLoader()
             source = self._get_source_for_split(self.default_split, self.default_data_files)
             for doc in loader.load(source):
+                processed_doc = self.process_doc(doc)
+                if processed_doc.metadata["num_words"] > self.max_num_words:
+                    continue
                 self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
 
@@ -59,9 +66,8 @@ class C4Task(Task):
             gold_answer=text,     # the text we score as the "continuation"
             metadata={
                 "id": index,
-                "timestamp": doc.get("timestamp"),
-                "url": doc.get("url"),
                 "num_chars": len(text),
+                "num_words": len(text.strip().split()),
             },
         )
 
