@@ -26,8 +26,8 @@ class C4Task(Task):
     # default_data_files = {"validation": "en/c4-validation.*.json.gz"}
     default_data_files = {"validation": "en/c4-validation.00000-of-00008.json.gz"}
 
-    # We define a max (word) token length so we don't need to worry about rolling windows
-    # 1000 words will generally fit into the context length of most models
+    # We define a max word token length so we don't need to worry about rolling windows
+    # 1000 words will generally fit into the context of most models
     max_num_words = 1000
 
     def __init__(self, config: TaskConfig) -> None:

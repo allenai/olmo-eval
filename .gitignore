@@ -24,6 +24,9 @@ wheels/
 .installed.cfg
 *.egg
 
+# Dev notebooks
+scratch/
+
 # PyInstaller
 *.manifest
 *.spec
