@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, ClassVar
 
 from .types import Instance, LMOutput
+from .utils import _execute_code_unsafe
 
 
 @dataclass(frozen=True)
@@ -187,3 +188,31 @@ class LogprobScorer(Scorer):
             return float("-inf")
 
         return sum(logprobs)
+
+
+@dataclass(frozen=True, slots=True)
+class CodeExecutionScorer(Scorer):
+    """Score code by executing it against test cases.
+
+    Note: This scorer requires the instance metadata to contain a 'test' key
+    with the test code to run, and the output.extracted_answer to contain
+    the complete code to execute.
+    """
+
+    name: str = "code_execution"
+    timeout: float = 5.0
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        """Score by executing code + tests."""
+        if output.extracted_answer is None:
+            return 0.0
+
+        test_code = instance.metadata.get("test", "")
+        if not test_code:
+            return 0.0
+
+        # Combine generated code with tests
+        full_code = f"{output.extracted_answer}\n\n{test_code}"
+
+        success, _ = _execute_code_unsafe(full_code, self.timeout)
+        return 1.0 if success else 0.0

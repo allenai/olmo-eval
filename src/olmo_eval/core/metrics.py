@@ -1,6 +1,5 @@
 """Metric base class and implementations."""
 
-import math
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -8,12 +7,14 @@ from typing import Any, ClassVar
 
 from .scorers import (
     BitsPerByteScorer,
+    CodeExecutionScorer,
     ExactMatchScorer,
     F1Scorer,
     PerplexityScorer,
     Scorer,
 )
 from .types import Response
+from .utils import compute_pass_at_k
 
 
 @dataclass(frozen=True)
@@ -167,3 +168,40 @@ class MeanPerplexityMetric(Metric):
             total += scorer.score(response.instance, output)
 
         return total / len(responses)
+
+
+@dataclass(frozen=True, slots=True)
+class PassAtKMetric(Metric):
+    """Compute pass@k metric for code generation tasks.
+
+    This metric groups responses by task ID and computes pass@k
+    across multiple samples per task.
+    """
+
+    name: str = "pass_at_k"
+    k: int = 1
+    scorer: type[Scorer] = CodeExecutionScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        """Compute pass@k across all tasks."""
+        if not responses:
+            return 0.0
+
+        scorer_name = self.scorer().name
+
+        # Group by task ID
+        task_results: dict[str, list[float]] = {}
+        for r in responses:
+            task_id = r.instance.metadata.get("id", "unknown")
+            if task_id not in task_results:
+                task_results[task_id] = []
+            task_results[task_id].append(r.scores.get(scorer_name, 0.0))
+
+        # Compute pass@k for each task
+        pass_at_k_values = []
+        for scores in task_results.values():
+            n = len(scores)
+            c = sum(1 for s in scores if s > 0.5)  # Count passing
+            pass_at_k_values.append(compute_pass_at_k(n, c, min(self.k, n)))
+
+        return sum(pass_at_k_values) / len(pass_at_k_values) if pass_at_k_values else 0.0

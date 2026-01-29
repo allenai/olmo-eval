@@ -20,7 +20,6 @@ from .core import (
     register_variant,
     task_exists,
 )
-
 __all__ = [
     "Task",
     "TaskConfig",

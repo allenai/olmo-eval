@@ -140,11 +140,13 @@ class TestBPBMetric:
         entries = []
         for i, lp in enumerate(logprobs):
             char = text[i] if i < len(text) else ""
-            entries.append({
-                "token": char,
-                "logprob": lp,
-                "bytes": list(char.encode("utf-8")),
-            })
+            entries.append(
+                {
+                    "token": char,
+                    "logprob": lp,
+                    "bytes": list(char.encode("utf-8")),
+                }
+            )
         return LMOutput(text=text, logprobs=entries)
 
     def _make_response(
