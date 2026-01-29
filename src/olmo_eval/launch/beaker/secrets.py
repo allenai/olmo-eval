@@ -4,7 +4,7 @@ Provides utilities to retrieve local secrets (HuggingFace token, Weights & Biase
 and store them as user-scoped Beaker secrets.
 
 Example:
-    from olmo_eval.launch.secrets import ensure_common_secrets
+    from olmo_eval.launch.beaker.secrets import ensure_common_secrets
 
     # Ensure HF_TOKEN and WANDB_API_KEY exist in Beaker
     common_secrets = ensure_common_secrets(workspace="ai2/my-workspace")

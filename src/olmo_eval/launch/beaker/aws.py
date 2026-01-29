@@ -4,7 +4,7 @@ Provides utilities to retrieve local AWS credentials and store them as
 user-scoped Beaker secrets for S3 access in evaluation jobs.
 
 Example:
-    from olmo_eval.launch.aws import ensure_aws_secrets, is_s3_path
+    from olmo_eval.launch.beaker.aws import ensure_aws_secrets, is_s3_path
 
     if is_s3_path(model_path):
         aws_secrets = ensure_aws_secrets(workspace="ai2/my-workspace")

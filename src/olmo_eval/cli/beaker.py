@@ -361,7 +361,7 @@ def launch(
     multiple_priorities = len(tasks_by_priority) > 1
 
     # Auto-detect when AWS credentials are needed
-    from olmo_eval.launch.aws import get_local_aws_credentials, is_s3_path
+    from olmo_eval.launch.beaker.aws import get_local_aws_credentials, is_s3_path
 
     s3_models = [m.name_or_path for m in model_configs if is_s3_path(m.name_or_path)]
     inject_aws_credentials = aws_credentials
@@ -397,7 +397,7 @@ def launch(
         console.print()
 
     # Auto-detect GCS model paths for GCS credential injection
-    from olmo_eval.launch.gcs import get_local_gcs_credentials, is_gcs_path
+    from olmo_eval.launch.beaker.gcs import get_local_gcs_credentials, is_gcs_path
 
     gcs_models = [m.name_or_path for m in model_configs if is_gcs_path(m.name_or_path)]
     inject_gcs_credentials = gcs_credentials
@@ -780,7 +780,7 @@ def launch(
     console.print()
 
     # Ensure common secrets exist in Beaker
-    from olmo_eval.launch.secrets import (
+    from olmo_eval.launch.beaker.secrets import (
         ensure_common_secrets,
         get_local_hf_token,
         get_local_wandb_api_key,

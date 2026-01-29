@@ -3,7 +3,7 @@
 import json
 from unittest.mock import patch
 
-from olmo_eval.launch.gcs import (
+from olmo_eval.launch.beaker.gcs import (
     GCSCredentials,
     get_local_gcs_credentials,
     is_gcs_path,

@@ -4,7 +4,7 @@ Provides utilities to retrieve local GCS credentials and store them as
 user-scoped Beaker secrets for GCS access in evaluation jobs.
 
 Example:
-    from olmo_eval.launch.gcs import ensure_gcs_secrets, is_gcs_path
+    from olmo_eval.launch.beaker.gcs import ensure_gcs_secrets, is_gcs_path
 
     if is_gcs_path(model_path):
         gcs_secret = ensure_gcs_secrets(workspace="ai2/my-workspace")
