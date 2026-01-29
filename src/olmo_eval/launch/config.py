@@ -290,6 +290,7 @@ class EvalConfig:
     Attributes:
         name: Experiment name (required).
         models: List of model names/paths or ModelConfig dicts (required).
+            Each model can specify its own backend via the 'backend' field.
         tasks: List of task specs, optionally with @priority suffix (required).
         cluster: Default cluster alias or full name.
         gpus: Default number of GPUs per model instance.
@@ -305,7 +306,6 @@ class EvalConfig:
         beaker_image: Container image to use.
         description: Optional experiment description.
         groups: List of Beaker groups to add experiments to.
-        extras: Optional dependency groups to install at runtime (e.g., ["vllm", "postgres"]).
         use_async: Enable parallel task execution with multiple workers.
         use_async_stream: Enable streaming async with vLLM's AsyncLLMEngine (vLLM only).
         num_workers: Number of workers for async modes.
@@ -341,9 +341,6 @@ class EvalConfig:
     beaker_image: str | None = None
     description: str | None = None
     groups: list[str] | None = None  # Groups to add experiments to
-
-    # Optional dependency groups to install at runtime
-    extras: list[str] | None = None
 
     def get_model_configs(self) -> list[ModelConfig]:
         """Get parsed ModelConfig objects for all models.
