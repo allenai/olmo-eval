@@ -36,50 +36,56 @@ olmo-eval run -m olmo-2-7b -t olmes_core --limit 100
 
 ## Key Concepts
 
-### Tasks and Regimes
+The evaluation framework is built around these core abstractions:
 
-Tasks live in `olmo_eval/evals/tasks/` and are registered with the `@register` decorator. Regimes are named configuration presets that override task settings:
+| Abstraction | Description |
+|-------------|-------------|
+| **Task** | Defines a single evaluation (data loading, formatting, scoring) |
+| **Suite** | Groups tasks and/or nested suites with aggregation |
+| **Formatter** | Converts instances into LM requests (prompts) |
+| **Scorer** | Scores individual instance/output pairs |
+| **Metric** | Aggregates scores into final metrics |
+
+### Tasks
+
+Tasks define how to load data, format prompts, and score outputs. Register with `@register`:
 
 ```python
-from olmo_eval.data import DataSource
-from olmo_eval.evals.tasks import Task, TaskConfig, register, register_regime
+from olmo_eval.evals.tasks import Task, TaskConfig, register
 
-# Register the base task
-@register("arc_challenge", lambda: TaskConfig(
-    name="arc_challenge",
-    data_source=DataSource(path="allenai/ai2_arc", subset="ARC-Challenge"),
-    num_fewshot=0,
+@register("my_task", lambda: TaskConfig(
+    name="my_task",
+    data_source="hf://dataset/path",
+    formatter=MultipleChoiceFormatter(),
+    scorers=(MultipleChoiceScorer(),),
+    metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
 ))
-class ARCChallenge(Task): ...
-
-# Register a regime with configuration overrides
-register_regime(
-    "arc_challenge",
-    "olmes",
-    num_fewshot=5,
-    fewshot_seed=42,
-)
-
-# Usage: task_name:regime_name
-olmo-eval run -m model -t arc_challenge:olmes
+class MyTask(Task): ...
 ```
 
-Regimes allow you to define reusable evaluation configurations (e.g., few-shot settings, prompts) that can be applied to any task.
+**Regimes** are named presets that override task settings (e.g., few-shot count):
 
-### Task Suites
+```python
+from olmo_eval.evals.tasks import register_regime
 
-Suites live in `olmo_eval/evals/suites/` and group multiple tasks for batch evaluation:
+register_regime("my_task", "olmes", num_fewshot=5, fewshot_seed=42)
+# Usage: olmo-eval run -m model -t my_task:olmes
+```
+
+### Suites
+
+Suites group multiple tasks for batch evaluation:
 
 ```python
 from olmo_eval.evals.suites import Suite, register
 
 register(Suite(
-    name="olmes_core",
-    tasks=("arc_easy::olmes", "arc_challenge::olmes", "hellaswag::olmes"),
+    name="my_suite",
+    tasks=("task_a::olmes", "task_b::olmes", "task_c::olmes"),
 ))
 ```
 
-#### Suite Aggregation
+#### Aggregation
 
 Suites support different strategies for combining task results:
 
@@ -121,6 +127,40 @@ register(Suite(
 ```
 
 Note: Currently `AVERAGE_OF_AVERAGES` gives each child equal weight regardless of how many tasks it contains. Custom weighting may be supported in the future.
+
+### Formatters
+
+Formatters convert instances into LM requests. Available formatters:
+
+| Formatter | Description |
+|-----------|-------------|
+| `CompletionFormatter` | Text completion with template |
+| `ChatFormatter` | Chat messages (system/user/assistant) |
+| `MultipleChoiceFormatter` | MC with continuations for logprob scoring |
+| `PPLFormatter` | Perplexity/BPB evaluation |
+
+### Scorers
+
+Scorers compute a score for each instance/output pair. Available scorers:
+
+| Scorer | Description |
+|--------|-------------|
+| `ExactMatchScorer` | Exact string match (1.0 or 0.0) |
+| `MultipleChoiceScorer` | Compare selected choice index/letter |
+| `F1Scorer` | Token-level F1 score |
+| `BitsPerByteScorer` | Bits per byte from logprobs |
+| `CodeExecutionScorer` | Execute code against test cases |
+
+### Metrics
+
+Metrics aggregate scores across responses. Available metrics:
+
+| Metric | Description |
+|--------|-------------|
+| `AccuracyMetric` | Mean accuracy for a scorer |
+| `F1Metric` | Mean F1 score |
+| `BPBMetric` | Byte-weighted bits per byte |
+| `PassAtKMetric` | Pass@k for code generation |
 
 ### Model Presets
 
@@ -419,7 +459,7 @@ olmo-eval beaker launch -n "eval" -m llama3.1-8b -t mmlu -t gsm8k --priority hig
 
 ### Experiment Groups
 
-Organize multiple experiments into a Beaker group for result aggregation:
+Groups logically organize experiments for management and result retrieval:
 
 ```bash
 # Launch with grouping
