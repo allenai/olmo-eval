@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.core import LMOutput, LMRequest, SamplingParams
+from olmo_eval.core.types import LogProbEntry
 
 from .base import Backend
 
@@ -29,7 +30,10 @@ def _coerce_logprob_to_num(logprob: Any) -> float:
     return getattr(logprob, "logprob", logprob)
 
 
-def _convert_logprobs(vllm_logprobs: list | None, tokenizer: Any = None) -> list[dict] | None:
+def _convert_logprobs(
+    vllm_logprobs: list[dict[int, Any]] | None,
+    tokenizer: Any = None,
+) -> list[LogProbEntry] | None:
     """Convert vLLM logprobs format to standard format.
 
     Works with both old (float) and new (Logprob object) vLLM versions.
@@ -37,7 +41,7 @@ def _convert_logprobs(vllm_logprobs: list | None, tokenizer: Any = None) -> list
     if vllm_logprobs is None:
         return None
 
-    result = []
+    result: list[LogProbEntry] = []
     for token_logprobs in vllm_logprobs:
         if not token_logprobs:
             continue

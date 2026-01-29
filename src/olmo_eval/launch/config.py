@@ -48,9 +48,14 @@ from olmo_eval.core.constants.infrastructure import DEFAULT_MAX_GPUS_PER_NODE
 
 @dataclass
 class ModelConfig:
-    """Configuration for a single model with optional resource overrides.
+    """Configuration for a single model with optional resource overrides for Beaker launch.
 
     This allows specifying per-model resources for mixed-size evaluations.
+
+    Note: There are multiple ModelConfig classes with different purposes:
+    - core/configs.py:ModelConfig - Core model config for inference
+    - launch/config.py:ModelConfig (this one) - Beaker launch config with resource settings
+    - runners/mixins.py:ModelConfig - Metrics output format for JSON serialization
 
     Attributes:
         name_or_path: Model name, HuggingFace path, or local checkpoint path (required).
@@ -113,7 +118,7 @@ class ModelConfig:
     backend: str | None = None
 
     # vLLM model loading configuration
-    load_format: str | None = None  # e.g., "auto", "pt", "safetensors", "runai_streamer"
+    load_format: str | None = None
     extra_loader_config: dict[str, Any] | None = None  # e.g., {"distributed": true}
 
 

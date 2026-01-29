@@ -140,7 +140,13 @@ def build_s3_prefix(
 
 @dataclass
 class ModelConfig:
-    """Configuration for a single model."""
+    """Model configuration for metrics.json output format.
+
+    Note: There are multiple ModelConfig classes with different purposes:
+    - core/configs.py:ModelConfig - Core model config for inference
+    - launch/config.py:ModelConfig - Beaker launch config with resource settings
+    - runners/mixins.py:ModelConfig (this one) - Metrics output format for JSON serialization
+    """
 
     model: str
     backend: str

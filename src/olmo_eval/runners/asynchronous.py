@@ -12,11 +12,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from rich.console import Console
 
-from olmo_eval.backends import BackendType, create_backend
+from olmo_eval.backends import Backend, BackendType, create_backend
 from olmo_eval.core import (
     Instance,
     LMOutput,
@@ -27,6 +27,7 @@ from olmo_eval.core import (
     get_model_config,
 )
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
+from olmo_eval.core.literals import BackendLiteral
 from olmo_eval.evals.tasks import Task, get_task
 from olmo_eval.runners.constants import SAMPLING_KEYS, TASKCONFIG_KEYS
 from olmo_eval.runners.mixins import AsyncRunnerMixin, S3Config
@@ -363,7 +364,7 @@ def wait_for_workers_ready(
 
 def _process_batch(
     batch: list[QueueItem],
-    backend: Any,
+    backend: Backend,
     result_queue: mp.Queue,
 ) -> None:
     """Process a batch of instances through the backend.
@@ -787,7 +788,7 @@ class AsyncEvalRunner(AsyncRunnerMixin):
             overrides = self.model_overrides.get(model_name, {})
             model_config = get_model_config(model_name, **overrides)
             if self.backend_override:
-                model_config.backend = self.backend_override
+                model_config.backend = cast(BackendLiteral, self.backend_override)
             model_configs[model_name] = model_config
 
         # Prepare tasks in parallel

@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from olmo_eval.core import LMOutput, LMRequest, SamplingParams
+from olmo_eval.core.types import LogProbEntry
 
 from .base import Backend
 
@@ -85,15 +86,11 @@ class LiteLLMBackend(Backend):
             text = choice.message.content or ""
 
             # Convert logprobs to standard format
-            logprob_entries = None
+            logprob_entries: list[LogProbEntry] | None = None
             logprobs_data = getattr(choice, "logprobs", None)
             if logprobs_data and hasattr(logprobs_data, "content") and logprobs_data.content:
                 logprob_entries = [
-                    {
-                        "token": lp.token,
-                        "logprob": lp.logprob,
-                    }
-                    for lp in logprobs_data.content
+                    LogProbEntry(token=lp.token, logprob=lp.logprob) for lp in logprobs_data.content
                 ]
 
             outputs.append(LMOutput(text=text, logprobs=logprob_entries))
@@ -139,13 +136,14 @@ class LiteLLMBackend(Backend):
             )
 
             # Extract logprobs from response
-            completion_logprobs = []
+            completion_logprobs: list[LogProbEntry] = []
             if response.choices:
                 choice = response.choices[0]
                 logprobs_data = getattr(choice, "logprobs", None)
                 if logprobs_data and hasattr(logprobs_data, "content") and logprobs_data.content:
                     completion_logprobs = [
-                        {"token": lp.token, "logprob": lp.logprob} for lp in logprobs_data.content
+                        LogProbEntry(token=lp.token, logprob=lp.logprob)
+                        for lp in logprobs_data.content
                     ]
 
             # Map to continuations

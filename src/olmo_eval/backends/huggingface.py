@@ -75,14 +75,15 @@ class HuggingFaceBackend(Backend):
         if not stop_sequences:
             return tokens, self.tokenizer.decode(tokens, skip_special_tokens=True)
 
-        decoded = ""
+        decoded_parts: list[str] = []
         for idx, token in enumerate(tokens):
-            decoded += self.tokenizer.decode(token, skip_special_tokens=True)
+            decoded_parts.append(self.tokenizer.decode(token, skip_special_tokens=True))
+            decoded = "".join(decoded_parts)
             for stop in stop_sequences:
                 if stop in decoded:
                     return tokens[: idx + 1], decoded.split(stop)[0]
 
-        return tokens, decoded
+        return tokens, "".join(decoded_parts)
 
     def generate(
         self,

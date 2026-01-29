@@ -3,23 +3,30 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
+from olmo_eval.core.literals import BackendLiteral, DtypeLiteral
 
 
 @dataclass
 class ModelConfig:
-    """Model/backend configuration."""
+    """Core model configuration for inference.
+
+    Note: There are multiple ModelConfig classes with different purposes:
+    - core/configs.py:ModelConfig (this one) - Core model config for inference
+    - launch/config.py:ModelConfig - Beaker launch config with resource settings
+    - runners/mixins.py:ModelConfig - Metrics output format for JSON serialization
+    """
 
     model: str
     tokenizer: str | None = None  # Tokenizer path/identifier, defaults to model if None
-    backend: str = "vllm"  # BackendType value as string to avoid circular import
+    backend: BackendLiteral = "vllm"
     revision: str | None = None
     trust_remote_code: bool = False
-    dtype: str = "auto"
+    dtype: DtypeLiteral = "auto"
     max_model_len: int | None = None  # Override model's default context length (vLLM)
     extra_args: dict[str, Any] = field(default_factory=dict)
 
@@ -31,7 +38,7 @@ class RunConfig:
     model: ModelConfig
     tasks: list[str] = field(default_factory=list)
     output_dir: str = BEAKER_RESULT_DIR
-    batch_size: int | str = "auto"
+    batch_size: int | Literal["auto"] = "auto"
 
 
 def load_config(path: str) -> DictConfig | ListConfig:
@@ -118,17 +125,6 @@ def validate_tasks(tasks: list[str]) -> tuple[list[str], list[str]]:
     return valid_tasks, invalid_tasks
 
 
-def _parse_int_override(value: Any) -> int | None:
-    """Parse an override value as int, handling string conversion."""
-    if value is None:
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        return int(value)
-    return int(value)
-
-
 # Keys that are vLLM/backend-specific and should not be passed to ModelConfig
 # These are handled separately by the runners
 _BACKEND_ONLY_KEYS = {"load_format", "extra_loader_config", "attention_backend", "gpus_per_worker"}
@@ -153,15 +149,6 @@ def get_model_config(name: str, **overrides: Any) -> ModelConfig:
     if name in models:
         base = models[name]
         if filtered_overrides:
-            # Parse max_model_len as int if present (inline overrides come as strings)
-            max_model_len_override = filtered_overrides.get("max_model_len")
-            effective_max_model_len = (
-                _parse_int_override(max_model_len_override)
-                if max_model_len_override is not None
-                else base.max_model_len
-            )
-
-            # Create new config with overrides
             return ModelConfig(
                 model=filtered_overrides.get("model", base.model),
                 tokenizer=filtered_overrides.get("tokenizer", base.tokenizer),
@@ -171,14 +158,9 @@ def get_model_config(name: str, **overrides: Any) -> ModelConfig:
                     "trust_remote_code", base.trust_remote_code
                 ),
                 dtype=filtered_overrides.get("dtype", base.dtype),
-                max_model_len=effective_max_model_len,
+                max_model_len=filtered_overrides.get("max_model_len", base.max_model_len),
                 extra_args={**base.extra_args, **filtered_overrides.get("extra_args", {})},
             )
         return base
 
-    # Treat as HuggingFace model path - parse max_model_len if present
-    if "max_model_len" in filtered_overrides:
-        filtered_overrides["max_model_len"] = _parse_int_override(
-            filtered_overrides["max_model_len"]
-        )
     return ModelConfig(model=name, **filtered_overrides)
