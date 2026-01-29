@@ -467,7 +467,8 @@ olmo-eval beaker launch -n "test" -m llama3.1-8b -t arc_easy --dry-run
 ### Multiple Models
 
 Run the same suite across multiple models by specifying `-m` multiple times.
-Each model will be launched as a separate experiment:
+Models with compatible runtimes (same GPUs, parallelism, cluster, backend) are
+grouped into a single experiment:
 
 ```bash
 # Compare two models on the same tasks
@@ -476,18 +477,15 @@ olmo-eval beaker launch -n "eval-compare" \
     -m olmo-2-7b \
     -t mmlu -t gsm8k -t hellaswag
 
-# Creates 2 experiments:
-#   eval-compare-llama3.1-8b: runs all tasks on llama3.1-8b
-#   eval-compare-olmo-2-7b:   runs all tasks on olmo-2-7b
+# Creates 1 experiment running both models
 
-# Combine with per-task priorities (creates model x priority experiments)
-olmo-eval beaker launch -n "eval-full" \
-    -m llama3.1-8b -m olmo-2-7b \
-    -t "mmlu@high" -t "gsm8k@normal"
+# Models with different resource requirements get separate experiments
+olmo-eval beaker launch -n "eval-mixed" \
+    -m llama3.1-8b --gpus 1 \
+    -m llama3.1-70b --gpus 4 \
+    -t mmlu -t gsm8k
 
-# Creates 4 experiments:
-#   eval-full-llama3.1-8b-high, eval-full-llama3.1-8b-normal
-#   eval-full-olmo-2-7b-high, eval-full-olmo-2-7b-normal
+# Creates 2 experiments (different GPU requirements)
 ```
 
 ### Per-Task Priorities
