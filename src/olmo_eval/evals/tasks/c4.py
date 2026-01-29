@@ -23,7 +23,8 @@ class C4Task(Task):
 
     default_source: str = "allenai/c4"
     default_split = "validation"
-    default_data_files = {"validation": "en/c4-validation.*.json.gz"}
+    # default_data_files = {"validation": "en/c4-validation.*.json.gz"}
+    default_data_files = {"validation": "en/c4-validation.00000-of-00008.json.gz"}
 
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
