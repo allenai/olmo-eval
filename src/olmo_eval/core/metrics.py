@@ -1,9 +1,10 @@
-"""Metric protocols and implementations."""
+"""Metric base class and implementations."""
 
 import math
+from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, ClassVar
 
 from .scorers import (
     BitsPerByteScorer,
@@ -15,33 +16,30 @@ from .scorers import (
 from .types import Response
 
 
-def _get_scorer_name(scorer: type[Scorer]) -> str:
-    """Extract the default name from a scorer class."""
-    for f in scorer.__dataclass_fields__.values():
-        if f.name == "name":
-            return f.default
-    raise ValueError(f"Scorer {scorer} has no 'name' field")
+class Metric(ABC):
+    """Abstract base class for aggregating scores across responses.
 
+    Subclasses must define:
+        - name: str class attribute identifying the metric
+        - scorer: type[Scorer] class attribute for the associated scorer
+        - compute(): method to aggregate scores from responses
+    """
 
-class Metric(Protocol):
-    """Protocol for aggregating scores across responses."""
+    name: ClassVar[str]
+    scorer: ClassVar[type[Scorer]]
 
-    @property
-    def name(self) -> str:
-        """Unique identifier for this metric."""
-        ...
-
+    @abstractmethod
     def compute(self, responses: Sequence[Response]) -> float:
         """Compute aggregate metric from scored responses."""
         ...
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a dictionary."""
-        ...
+        return {"type": self.__class__.__name__, "name": self.name, "scorer": self.scorer.__name__}
 
 
 @dataclass(frozen=True, slots=True)
-class AccuracyMetric:
+class AccuracyMetric(Metric):
     """Mean accuracy across all responses for a given scorer."""
 
     name: str = "accuracy"
@@ -50,17 +48,13 @@ class AccuracyMetric:
     def compute(self, responses: Sequence[Response]) -> float:
         if not responses:
             return 0.0
-        scorer_name = _get_scorer_name(self.scorer)
+        scorer_name = self.scorer().name
         total = sum(r.scores.get(scorer_name, 0.0) for r in responses)
         return total / len(responses)
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to a dictionary."""
-        return {"type": "AccuracyMetric", "name": self.name, "scorer": self.scorer.__name__}
-
 
 @dataclass(frozen=True, slots=True)
-class F1Metric:
+class F1Metric(Metric):
     """Mean F1 score across all responses."""
 
     name: str = "f1"
@@ -69,17 +63,13 @@ class F1Metric:
     def compute(self, responses: Sequence[Response]) -> float:
         if not responses:
             return 0.0
-        scorer_name = _get_scorer_name(self.scorer)
+        scorer_name = self.scorer().name
         total = sum(r.scores.get(scorer_name, 0.0) for r in responses)
         return total / len(responses)
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to a dictionary."""
-        return {"type": "F1Metric", "name": self.name, "scorer": self.scorer.__name__}
-
 
 @dataclass(frozen=True, slots=True)
-class BPBMetric:
+class BPBMetric(Metric):
     """Aggregate bits-per-byte of the gold/correct completion.
 
     Computes BPB by summing total logprobs and total bytes across all responses,
@@ -138,13 +128,9 @@ class BPBMetric:
 
         return -total_logprobs / (total_bytes * math.log(2))
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to a dictionary."""
-        return {"type": "BPBMetric", "name": self.name, "scorer": self.scorer.__name__}
-
 
 @dataclass(frozen=True, slots=True)
-class MeanPerplexityMetric:
+class MeanPerplexityMetric(Metric):
     """Mean perplexity of the gold/correct completion.
 
     For tasks with multiple continuations (e.g., multiple choice), this returns
@@ -182,7 +168,3 @@ class MeanPerplexityMetric:
             total += scorer_instance.score(response.instance, output)
 
         return total / len(responses)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to a dictionary."""
-        return {"type": "MeanPerplexityMetric", "name": self.name, "scorer": self.scorer.__name__}

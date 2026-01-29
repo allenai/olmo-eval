@@ -1,14 +1,20 @@
-"""Formatter protocols and implementations."""
+"""Formatter base class and implementations."""
 
+from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
-from typing import Any, Protocol
+from typing import Any
 
 from .types import Instance, LMRequest, RequestType
 
 
-class Formatter(Protocol):
-    """Protocol for formatting instances into LM requests."""
+class Formatter(ABC):
+    """Abstract base class for formatting instances into LM requests.
 
+    Subclasses must define:
+        - format(): method to convert an instance to an LMRequest
+    """
+
+    @abstractmethod
     def format(
         self,
         instance: Instance,
@@ -19,11 +25,11 @@ class Formatter(Protocol):
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a dictionary."""
-        ...
+        return {"type": self.__class__.__name__, **asdict(self)}
 
 
 @dataclass(slots=True)
-class ChatFormatter:
+class ChatFormatter(Formatter):
     """Format instances as chat messages."""
 
     system_prompt: str = ""
@@ -59,13 +65,9 @@ class ChatFormatter:
         )
         return LMRequest(request_type=RequestType.CHAT, messages=tuple(messages))
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to a dictionary."""
-        return {"type": "ChatFormatter", **asdict(self)}
-
 
 @dataclass(slots=True)
-class CompletionFormatter:
+class CompletionFormatter(Formatter):
     """Format instances as completion prompts."""
 
     template: str = "{question}"
@@ -87,13 +89,9 @@ class CompletionFormatter:
         prompt = self.fewshot_separator.join(parts)
         return LMRequest(request_type=RequestType.COMPLETION, prompt=prompt)
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to a dictionary."""
-        return {"type": "CompletionFormatter", **asdict(self)}
-
 
 @dataclass(slots=True)
-class MultipleChoiceFormatter:
+class MultipleChoiceFormatter(Formatter):
     """Format multiple choice with continuations for logprob scoring."""
 
     template: str = "{question}"
@@ -121,13 +119,9 @@ class MultipleChoiceFormatter:
             continuations=continuations,
         )
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to a dictionary."""
-        return {"type": "MultipleChoiceFormatter", **asdict(self)}
-
 
 @dataclass(slots=True)
-class MCQAChatFormatter:
+class MCQAChatFormatter(Formatter):
     """Format multiple choice questions for chat-based CoT generation."""
 
     system_prompt: str = ""
@@ -154,13 +148,9 @@ class MCQAChatFormatter:
 
         return LMRequest(request_type=RequestType.CHAT, messages=tuple(messages))
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to a dictionary."""
-        return {"type": "MCQAChatFormatter", **asdict(self)}
-
 
 @dataclass(slots=True)
-class PPLFormatter:
+class PPLFormatter(Formatter):
     """Format instances for perplexity/BPB (bits-per-byte) evaluation.
 
     Uses the question as context and measures P(answer | question).
@@ -240,7 +230,3 @@ class PPLFormatter:
             prompt=prompt,
             continuations=(gold_text,),
         )
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to a dictionary."""
-        return {"type": "PPLFormatter", **asdict(self)}

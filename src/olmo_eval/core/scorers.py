@@ -1,31 +1,35 @@
-"""Scoring protocols and implementations."""
+"""Scoring base class and implementations."""
 
 import math
+from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
-from typing import Any, Protocol
+from typing import Any, ClassVar
 
 from .types import Instance, LMOutput
 
 
-class Scorer(Protocol):
-    """Protocol for scoring individual outputs."""
+class Scorer(ABC):
+    """Abstract base class for scoring individual outputs.
 
-    @property
-    def name(self) -> str:
-        """Unique identifier for this scorer."""
-        ...
+    Subclasses must define:
+        - name: str class attribute identifying the scorer
+        - score(): method to compute score for an instance/output pair
+    """
 
+    name: ClassVar[str]
+
+    @abstractmethod
     def score(self, instance: Instance, output: LMOutput) -> float:
         """Score a single output against the gold answer."""
         ...
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a dictionary."""
-        ...
+        return {"type": self.__class__.__name__, **asdict(self)}
 
 
 @dataclass(frozen=True, slots=True)
-class ExactMatchScorer:
+class ExactMatchScorer(Scorer):
     """Score 1.0 if extracted answer exactly matches gold, else 0.0."""
 
     name: str = "exact_match"
@@ -43,13 +47,9 @@ class ExactMatchScorer:
             gold, pred = gold.lower(), pred.lower()
         return 1.0 if gold == pred else 0.0
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to a dictionary."""
-        return {"type": "ExactMatchScorer", **asdict(self)}
-
 
 @dataclass(frozen=True, slots=True)
-class MultipleChoiceScorer:
+class MultipleChoiceScorer(Scorer):
     """Score multiple choice by comparing selected index/letter."""
 
     name: str = "multiple_choice"
@@ -61,10 +61,6 @@ class MultipleChoiceScorer:
         gold = str(instance.gold_answer).strip().upper()
         pred = str(output.extracted_answer).strip().upper()
         return 1.0 if gold == pred else 0.0
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to a dictionary."""
-        return {"type": "MultipleChoiceScorer", **asdict(self)}
 
 
 def _normalize_text(text: str) -> str:
@@ -103,7 +99,7 @@ def _compute_f1(pred: str, gold: str) -> float:
 
 
 @dataclass(frozen=True, slots=True)
-class F1Scorer:
+class F1Scorer(Scorer):
     """Score using token-level F1 between prediction and gold answer."""
 
     name: str = "f1"
@@ -113,13 +109,9 @@ class F1Scorer:
             return 0.0
         return _compute_f1(str(output.extracted_answer), str(instance.gold_answer))
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to a dictionary."""
-        return {"type": "F1Scorer", **asdict(self)}
-
 
 @dataclass(frozen=True, slots=True)
-class BitsPerByteScorer:
+class BitsPerByteScorer(Scorer):
     """Compute bits per byte from logprobs.
 
     Bits per byte is a measure of language model performance that normalizes
@@ -153,13 +145,9 @@ class BitsPerByteScorer:
 
         return bits_per_byte
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to a dictionary."""
-        return {"type": "BitsPerByteScorer", **asdict(self)}
-
 
 @dataclass(frozen=True, slots=True)
-class PerplexityScorer:
+class PerplexityScorer(Scorer):
     """Compute perplexity from logprobs.
 
     Perplexity measures how well a language model predicts a sequence,
@@ -182,13 +170,9 @@ class PerplexityScorer:
 
         return perplexity
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to a dictionary."""
-        return {"type": "PerplexityScorer", **asdict(self)}
-
 
 @dataclass(frozen=True, slots=True)
-class LogprobScorer:
+class LogprobScorer(Scorer):
     """Compute total logprob for a sequence.
 
     This returns the sum of all token logprobs, useful for comparing
@@ -207,7 +191,3 @@ class LogprobScorer:
             return float("-inf")
 
         return sum(logprobs)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to a dictionary."""
-        return {"type": "LogprobScorer", **asdict(self)}
