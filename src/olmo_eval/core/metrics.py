@@ -90,7 +90,8 @@ class BPBMetric(Metric):
         if not responses:
             return 0.0
 
-        total_logprobs = 0.0
+        scorer = self.scorer()
+        weighted_sum = 0.0
         total_bytes = 0
 
         for response in responses:
@@ -98,36 +99,33 @@ class BPBMetric(Metric):
             if not outputs:
                 continue
 
+            # Select gold output
             if len(outputs) > 1:
-                # Multiple outputs: select the gold/correct continuation
                 gold_idx = response.instance.metadata.get("gold_idx")
                 if gold_idx is not None and 0 <= gold_idx < len(outputs):
                     output = outputs[gold_idx]
                 else:
-                    # Fallback to first output if gold_idx not available
                     output = outputs[0]
             else:
-                # Single output: use it directly
                 output = outputs[0]
 
             if output.logprobs is None:
                 continue
 
-            logprobs = [tok["logprob"] for tok in output.logprobs if "logprob" in tok]
-            if not logprobs:
-                continue
-
-            num_bytes = len(output.text.encode("utf-8"))
+            # Get byte count for weighting
+            num_bytes = sum(len(tok.get("bytes", ())) for tok in output.logprobs)
             if num_bytes == 0:
                 continue
 
-            total_logprobs += sum(logprobs)
+            # Use scorer for BPB calculation
+            bpb = scorer.score(response.instance, output)
+            weighted_sum += bpb * num_bytes
             total_bytes += num_bytes
 
         if total_bytes == 0:
             return 0.0
 
-        return -total_logprobs / (total_bytes * math.log(2))
+        return weighted_sum / total_bytes
 
 
 @dataclass(frozen=True, slots=True)

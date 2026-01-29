@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
-from typing import Any, ClassVar, TypedDict
+from typing import Any, ClassVar, NotRequired, TypedDict
 
 
 def compute_model_hash(config: dict[str, Any] | None) -> str | None:
@@ -79,11 +79,25 @@ class RequestType(Enum):
     LOGLIKELIHOOD = auto()
 
 
-class LogProbEntry(TypedDict):
-    """A single logprob entry for a token."""
+class TopLogProb(TypedDict):
+    """A single top logprob alternative."""
 
     token: str
     logprob: float
+    bytes: NotRequired[list[int]]
+
+
+class LogProbEntry(TypedDict):
+    """A single logprob entry for a token.
+
+    Compatible with OpenAI's ChatCompletionTokenLogprob format.
+    The bytes and top_logprobs fields are optional for backward compatibility.
+    """
+
+    token: str
+    logprob: float
+    bytes: NotRequired[list[int]]
+    top_logprobs: NotRequired[list[TopLogProb]]
 
 
 @dataclass(frozen=True, slots=True)

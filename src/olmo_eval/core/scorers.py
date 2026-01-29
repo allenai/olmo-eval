@@ -128,21 +128,16 @@ class BitsPerByteScorer(Scorer):
         if output.logprobs is None:
             return 0.0
 
-        # Extract logprobs from the token data
-        logprobs = [tok["logprob"] for tok in output.logprobs if "logprob" in tok]
+        total_logprob, num_bytes = 0.0, 0
+        for tok in output.logprobs:
+            total_logprob += tok.get("logprob", 0.0)
+            num_bytes += len(tok.get("bytes", ()))
 
-        if not logprobs:
-            return 0.0
-
-        # Count UTF-8 bytes in the output text
-        num_bytes = len(output.text.encode("utf-8"))
         if num_bytes == 0:
             return 0.0
 
         # Compute bits per byte
-        total_logprob = sum(logprobs)
-        logprob_per_byte = total_logprob / num_bytes
-        bits_per_byte = -logprob_per_byte / math.log(2)
+        bits_per_byte = -total_logprob / (num_bytes * math.log(2))
 
         return bits_per_byte
 

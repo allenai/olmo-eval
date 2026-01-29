@@ -132,11 +132,20 @@ class TestBPBMetric:
     """Tests for BPBMetric with gold selection."""
 
     def _make_output_with_logprobs(self, text: str, logprobs: list[float]) -> LMOutput:
-        """Helper to create an LMOutput with logprobs."""
-        return LMOutput(
-            text=text,
-            logprobs=[{"logprob": lp} for lp in logprobs],
-        )
+        """Helper to create an LMOutput with logprobs.
+
+        Each logprob entry corresponds to one character of the text for simplicity.
+        """
+        # Create logprob entries with bytes (one char per token for test simplicity)
+        entries = []
+        for i, lp in enumerate(logprobs):
+            char = text[i] if i < len(text) else ""
+            entries.append({
+                "token": char,
+                "logprob": lp,
+                "bytes": list(char.encode("utf-8")),
+            })
+        return LMOutput(text=text, logprobs=entries)
 
     def _make_response(
         self,

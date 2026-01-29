@@ -121,7 +121,11 @@ class HuggingFaceBackend(Backend):
                     for i, tok in enumerate(gen_ids):
                         lp = log_probs[prompt_len + i - 1, tok].item()
                         token_str = self.tokenizer.decode(tok, skip_special_tokens=False)
-                        logprob_entries.append({"token": token_str, "logprob": lp})
+                        logprob_entries.append({
+                            "token": token_str,
+                            "logprob": lp,
+                            "bytes": list(token_str.encode("utf-8")),
+                        })
 
                 request_outputs.append(LMOutput(text=text, logprobs=logprob_entries))
 
@@ -161,7 +165,11 @@ class HuggingFaceBackend(Backend):
                 for i, tok in enumerate(cont_ids):
                     lp = log_probs[ctx_len + i - 1, tok].item()
                     token_str = self.tokenizer.decode(tok, skip_special_tokens=False)
-                    logprob_entries.append({"token": token_str, "logprob": lp})
+                    logprob_entries.append({
+                        "token": token_str,
+                        "logprob": lp,
+                        "bytes": list(token_str.encode("utf-8")),
+                    })
                     total += lp
 
                 request_outputs.append(

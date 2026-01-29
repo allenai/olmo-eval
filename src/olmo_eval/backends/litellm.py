@@ -89,9 +89,13 @@ class LiteLLMBackend(Backend):
             logprob_entries: list[LogProbEntry] | None = None
             logprobs_data = getattr(choice, "logprobs", None)
             if logprobs_data and hasattr(logprobs_data, "content") and logprobs_data.content:
-                logprob_entries = [
-                    LogProbEntry(token=lp.token, logprob=lp.logprob) for lp in logprobs_data.content
-                ]
+                logprob_entries = []
+                for lp in logprobs_data.content:
+                    entry: LogProbEntry = {"token": lp.token, "logprob": lp.logprob}
+                    lp_bytes = getattr(lp, "bytes", None)
+                    if lp_bytes is not None:
+                        entry["bytes"] = lp_bytes
+                    logprob_entries.append(entry)
 
             outputs.append(LMOutput(text=text, logprobs=logprob_entries))
 
@@ -141,10 +145,12 @@ class LiteLLMBackend(Backend):
                 choice = response.choices[0]
                 logprobs_data = getattr(choice, "logprobs", None)
                 if logprobs_data and hasattr(logprobs_data, "content") and logprobs_data.content:
-                    completion_logprobs = [
-                        LogProbEntry(token=lp.token, logprob=lp.logprob)
-                        for lp in logprobs_data.content
-                    ]
+                    for lp in logprobs_data.content:
+                        entry: LogProbEntry = {"token": lp.token, "logprob": lp.logprob}
+                        lp_bytes = getattr(lp, "bytes", None)
+                        if lp_bytes is not None:
+                            entry["bytes"] = lp_bytes
+                        completion_logprobs.append(entry)
 
             # Map to continuations
             outputs = []

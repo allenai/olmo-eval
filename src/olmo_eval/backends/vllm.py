@@ -49,7 +49,11 @@ def _convert_logprobs(
         token_id, logprob_obj = next(iter(token_logprobs.items()))
         token_str = _get_token_string(logprob_obj, token_id, tokenizer)
         logprob_val = _coerce_logprob_to_num(logprob_obj)
-        result.append({"token": token_str, "logprob": logprob_val})
+        result.append({
+            "token": token_str,
+            "logprob": logprob_val,
+            "bytes": list(token_str.encode("utf-8")),
+        })
 
     return result
 
@@ -250,7 +254,11 @@ class VLLMBackend(Backend):
                     logprob_val = _coerce_logprob_to_num(lp_obj)
 
                     token_str = _get_token_string(lp_obj, token_id, tokenizer)
-                    logprob_entries.append({"token": token_str, "logprob": logprob_val})
+                    logprob_entries.append({
+                        "token": token_str,
+                        "logprob": logprob_val,
+                        "bytes": list(token_str.encode("utf-8")),
+                    })
                     total += logprob_val
 
                     # Check if this token is the argmax (greedy choice)
