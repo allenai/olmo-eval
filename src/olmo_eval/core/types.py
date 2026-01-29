@@ -120,7 +120,7 @@ class LMRequest:
 
     request_type: RequestType
     # Chat-style fields
-    messages: tuple[dict[str, str], ...] = ()
+    messages: tuple[dict[str, Any], ...] = ()
     # Completion-style fields
     prompt: str = ""
     continuations: tuple[str, ...] | None = None
