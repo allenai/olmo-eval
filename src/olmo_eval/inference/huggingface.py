@@ -1,4 +1,4 @@
-"""Hugging Face Transformers backend."""
+"""Hugging Face Transformers provider."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from olmo_eval.core import LMOutput, LMRequest, SamplingParams
 
-from .base import Backend
+from .base import InferenceProvider
 
 if TYPE_CHECKING:
     import torch
@@ -23,11 +23,11 @@ def _get_device() -> torch.device:
     return torch.device("cpu")
 
 
-class HuggingFaceBackend(Backend):
-    """Backend using Hugging Face Transformers for local inference."""
+class HuggingFaceProvider(InferenceProvider):
+    """Provider using Hugging Face Transformers for local inference."""
 
     def __init__(self, model_name: str, tokenizer: str | None = None, **model_kwargs) -> None:
-        """Initialize the backend.
+        """Initialize the provider.
 
         Args:
             model_name: HuggingFace model identifier or local path.
@@ -38,7 +38,7 @@ class HuggingFaceBackend(Backend):
             from transformers import AutoModelForCausalLM, AutoTokenizer
         except ImportError as e:
             raise ImportError(
-                "transformers is required for HuggingFaceBackend. "
+                "transformers is required for HuggingFaceProvider. "
                 "Install with: pip install transformers"
             ) from e
 

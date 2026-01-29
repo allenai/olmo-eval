@@ -149,7 +149,7 @@ class ModelConfig:
     """
 
     model: str
-    backend: str
+    provider: str
     dtype: str = "auto"
     tokenizer: str | None = None
     revision: str | None = None
@@ -159,7 +159,7 @@ class ModelConfig:
         """Convert to dict, excluding None values."""
         result: dict[str, Any] = {
             "model": self.model,
-            "backend": self.backend,
+            "provider": self.provider,
             "dtype": self.dtype,
         }
         if self.tokenizer:
@@ -341,7 +341,7 @@ class RunnerResultsMixin:
                 single_model_results = {
                     "model": model_data.get("model", model_name),
                     "model_path": model_data.get("model_path"),  # Original full path
-                    "backend": model_data.get("backend", "unknown"),
+                    "provider": model_data.get("provider", "unknown"),
                     "timestamp": results.get("timestamp"),
                     "tasks": model_data.get("tasks", {}),
                     "suites": model_data.get("suites"),
@@ -641,7 +641,7 @@ class RunnerResultsMixin:
         model_cfg = results.get("model_config", {})
         config = ModelConfig(
             model=model_cfg.get("model", results.get("model", "")),
-            backend=model_cfg.get("backend", results.get("backend", "")),
+            provider=model_cfg.get("provider", results.get("provider", "")),
             dtype=model_cfg.get("dtype", "auto"),
             tokenizer=model_cfg.get("tokenizer"),
             revision=model_cfg.get("revision"),
@@ -711,7 +711,7 @@ class RunnerResultsMixin:
             model_cfg = model_data.get("model_config", {})
             config = ModelConfig(
                 model=model_cfg.get("model", model_data.get("model", "")),
-                backend=model_cfg.get("backend", model_data.get("backend", "")),
+                provider=model_cfg.get("provider", model_data.get("provider", "")),
                 dtype=model_cfg.get("dtype", "auto"),
                 tokenizer=model_cfg.get("tokenizer"),
                 revision=model_cfg.get("revision"),

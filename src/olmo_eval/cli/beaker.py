@@ -659,10 +659,10 @@ def launch(
         model_base_name, model_inline_overrides = parse_model_spec(m_spec)
 
         if m.backend:
-            effective_backend = m.backend
+            effective_provider = m.backend
         else:
             runtime_model_config = get_runtime_model_config(model_base_name)
-            effective_backend = runtime_model_config.backend
+            effective_provider = runtime_model_config.provider
 
         model_summaries.append(
             ModelSummary(
@@ -670,7 +670,7 @@ def launch(
                 gpus=m.gpus or gpus,
                 parallelism=m.parallelism or parallelism,
                 alias=m.alias,
-                backend=effective_backend,
+                provider=effective_provider,
                 overrides=model_inline_overrides if model_inline_overrides else None,
             )
         )

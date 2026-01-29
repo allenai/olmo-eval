@@ -8,7 +8,7 @@ from typing import Any, Literal
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
-from olmo_eval.core.literals import BackendLiteral, DtypeLiteral
+from olmo_eval.core.literals import DtypeLiteral, ProviderLiteral
 
 
 @dataclass
@@ -23,7 +23,7 @@ class ModelConfig:
 
     model: str
     tokenizer: str | None = None  # Tokenizer path/identifier, defaults to model if None
-    backend: BackendLiteral = "vllm"
+    provider: ProviderLiteral = "vllm"
     revision: str | None = None
     trust_remote_code: bool = False
     dtype: DtypeLiteral = "auto"
@@ -152,7 +152,7 @@ def get_model_config(name: str, **overrides: Any) -> ModelConfig:
             return ModelConfig(
                 model=filtered_overrides.get("model", base.model),
                 tokenizer=filtered_overrides.get("tokenizer", base.tokenizer),
-                backend=filtered_overrides.get("backend", base.backend),
+                provider=filtered_overrides.get("provider", base.provider),
                 revision=filtered_overrides.get("revision", base.revision),
                 trust_remote_code=filtered_overrides.get(
                     "trust_remote_code", base.trust_remote_code

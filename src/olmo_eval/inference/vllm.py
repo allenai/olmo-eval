@@ -1,4 +1,4 @@
-"""vLLM backend."""
+"""vLLM provider."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from olmo_eval.core import LMOutput, LMRequest, SamplingParams
 from olmo_eval.core.types import LogProbEntry
 
-from .base import Backend
+from .base import InferenceProvider
 
 if TYPE_CHECKING:
     from vllm import LLM
@@ -60,8 +60,8 @@ def _convert_logprobs(
     return result
 
 
-class VLLMBackend(Backend):
-    """Backend using vLLM for high-throughput inference."""
+class VLLMProvider(InferenceProvider):
+    """Provider using vLLM for high-throughput inference."""
 
     def __init__(
         self,
@@ -70,7 +70,7 @@ class VLLMBackend(Backend):
         attention_backend: str | None = None,
         **engine_kwargs,
     ) -> None:
-        """Initialize the backend.
+        """Initialize the provider.
 
         Args:
             model_name: HuggingFace model identifier or local path.
@@ -85,7 +85,7 @@ class VLLMBackend(Backend):
         try:
             from vllm import LLM
         except ImportError as e:
-            raise ImportError("vllm is required for VLLMBackend") from e
+            raise ImportError("vllm is required for VLLMProvider") from e
 
         super().__init__(model_name)
         engine_kwargs.setdefault("gpu_memory_utilization", 0.8)
@@ -294,8 +294,8 @@ class VLLMBackend(Backend):
         return results
 
 
-class AsyncVLLMBackend:
-    """Async vLLM backend with continuous batching for streaming results.
+class AsyncVLLMProvider:
+    """Async vLLM provider with continuous batching for streaming results.
 
     Uses vLLM's AsyncLLM (V1 engine) or AsyncLLMEngine (legacy) to enable
     true continuous batching where requests can be added while others are
@@ -309,7 +309,7 @@ class AsyncVLLMBackend:
         attention_backend: str | None = None,
         **engine_kwargs,
     ) -> None:
-        """Initialize the async backend.
+        """Initialize the async provider.
 
         Args:
             model_name: HuggingFace model identifier or local path.
@@ -349,7 +349,7 @@ class AsyncVLLMBackend:
                 engine_args = AsyncEngineArgs(model=model_name, **engine_kwargs)
                 self.engine = AsyncLLMEngine.from_engine_args(engine_args)
             except ImportError as e:
-                raise ImportError("vllm is required for AsyncVLLMBackend") from e
+                raise ImportError("vllm is required for AsyncVLLMProvider") from e
 
         self._request_counter = 0
         # Store pending requests: request_id -> (prompt, vllm_params)

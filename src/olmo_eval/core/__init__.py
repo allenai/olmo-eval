@@ -16,7 +16,14 @@ from .formatters import (
     MultipleChoiceFormatter,
     PPLFormatter,
 )
-from .metrics import AccuracyMetric, BPBMetric, F1Metric, MeanPerplexityMetric, Metric, PassAtKMetric
+from .metrics import (
+    AccuracyMetric,
+    BPBMetric,
+    F1Metric,
+    MeanPerplexityMetric,
+    Metric,
+    PassAtKMetric,
+)
 from .scorers import (
     BitsPerByteScorer,
     CodeExecutionScorer,
@@ -27,7 +34,6 @@ from .scorers import (
     PerplexityScorer,
     Scorer,
 )
-from .utils import compute_pass_at_k
 from .types import (
     EvalResult,
     Instance,
@@ -42,6 +48,7 @@ from .types import (
     compute_model_hash,
     compute_task_hash,
 )
+from .utils import compute_pass_at_k
 
 __all__ = [
     # Enums

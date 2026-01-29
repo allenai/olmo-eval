@@ -1,6 +1,11 @@
 # olmo-eval
 
+![Alpha](https://img.shields.io/badge/status-alpha-orange)
+
 Evaluation toolkit for OLMo and other language models.
+
+> **Warning**
+> This project is in alpha. APIs may change without warning.
 
 ## Quick Start
 

@@ -11,9 +11,9 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
-from olmo_eval.backends import Backend
 from olmo_eval.core import Response, SamplingParams
 from olmo_eval.evals.tasks import get_task
+from olmo_eval.inference import InferenceProvider
 
 # Re-export build_predictions for parallel runner
 __all__ = [
@@ -634,7 +634,7 @@ def build_requests(
 
 def run_task_impl(
     spec: str,
-    backend: Backend,
+    provider: InferenceProvider,
     overrides: dict[str, Any] | None = None,
     progress_callback: Callable[[str], None] | None = None,
     temperature: float | None = None,
@@ -647,7 +647,7 @@ def run_task_impl(
 
     Args:
         spec: Task specification (e.g., "mmlu_history" or "mmlu_history:olmes")
-        backend: Backend instance to use for generation
+        provider: InferenceProvider instance to use for generation
         overrides: Optional overrides for task config (num_fewshot, limit, fewshot_seed)
         progress_callback: Optional callback for progress messages
         temperature: Optional temperature for sampling (deprecated, use sampling_overrides)
@@ -716,9 +716,9 @@ def run_task_impl(
         from olmo_eval.core import RequestType
 
         if requests and requests[0].request_type == RequestType.LOGLIKELIHOOD:
-            outputs = backend.logprobs(requests)
+            outputs = provider.logprobs(requests)
         else:
-            outputs = backend.generate(requests, task.config.sampling_params)
+            outputs = provider.generate(requests, task.config.sampling_params)
 
         # Build responses
         responses = [
