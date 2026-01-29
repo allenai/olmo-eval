@@ -1,47 +1,47 @@
-"""Metric protocols and implementations."""
+"""Metric base class and implementations."""
 
-import math
+from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, ClassVar
 
 from .scorers import (
     BitsPerByteScorer,
+    CodeExecutionScorer,
     ExactMatchScorer,
     F1Scorer,
     PerplexityScorer,
     Scorer,
 )
 from .types import Response
+from .utils import compute_pass_at_k
 
 
-def _get_scorer_name(scorer: type[Scorer]) -> str:
-    """Extract the default name from a scorer class."""
-    for f in scorer.__dataclass_fields__.values():
-        if f.name == "name":
-            return f.default
-    raise ValueError(f"Scorer {scorer} has no 'name' field")
+@dataclass(frozen=True)
+class Metric(ABC):
+    """Abstract base class for aggregating scores across responses.
 
+    Subclasses must define:
+        - name: str class attribute identifying the metric
+        - scorer: type[Scorer] class attribute for the associated scorer
+        - compute(): method to aggregate scores from responses
+    """
 
-class Metric(Protocol):
-    """Protocol for aggregating scores across responses."""
+    name: ClassVar[str]
+    scorer: ClassVar[type[Scorer]]
 
-    @property
-    def name(self) -> str:
-        """Unique identifier for this metric."""
-        ...
-
+    @abstractmethod
     def compute(self, responses: Sequence[Response]) -> float:
         """Compute aggregate metric from scored responses."""
         ...
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a dictionary."""
-        ...
+        return {"type": self.__class__.__name__, "name": self.name, "scorer": self.scorer.__name__}
 
 
 @dataclass(frozen=True, slots=True)
-class AccuracyMetric:
+class AccuracyMetric(Metric):
     """Mean accuracy across all responses for a given scorer."""
 
     name: str = "accuracy"
@@ -50,17 +50,13 @@ class AccuracyMetric:
     def compute(self, responses: Sequence[Response]) -> float:
         if not responses:
             return 0.0
-        scorer_name = _get_scorer_name(self.scorer)
+        scorer_name = self.scorer().name
         total = sum(r.scores.get(scorer_name, 0.0) for r in responses)
         return total / len(responses)
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to a dictionary."""
-        return {"type": "AccuracyMetric", "name": self.name, "scorer": self.scorer.__name__}
-
 
 @dataclass(frozen=True, slots=True)
-class F1Metric:
+class F1Metric(Metric):
     """Mean F1 score across all responses."""
 
     name: str = "f1"
@@ -69,17 +65,13 @@ class F1Metric:
     def compute(self, responses: Sequence[Response]) -> float:
         if not responses:
             return 0.0
-        scorer_name = _get_scorer_name(self.scorer)
+        scorer_name = self.scorer().name
         total = sum(r.scores.get(scorer_name, 0.0) for r in responses)
         return total / len(responses)
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to a dictionary."""
-        return {"type": "F1Metric", "name": self.name, "scorer": self.scorer.__name__}
-
 
 @dataclass(frozen=True, slots=True)
-class BPBMetric:
+class BPBMetric(Metric):
     """Aggregate bits-per-byte of the gold/correct completion.
 
     Computes BPB by summing total logprobs and total bytes across all responses,
@@ -99,7 +91,8 @@ class BPBMetric:
         if not responses:
             return 0.0
 
-        total_logprobs = 0.0
+        scorer = self.scorer()
+        weighted_sum = 0.0
         total_bytes = 0
 
         for response in responses:
@@ -107,44 +100,37 @@ class BPBMetric:
             if not outputs:
                 continue
 
+            # Select gold output
             if len(outputs) > 1:
-                # Multiple outputs: select the gold/correct continuation
                 gold_idx = response.instance.metadata.get("gold_idx")
                 if gold_idx is not None and 0 <= gold_idx < len(outputs):
                     output = outputs[gold_idx]
                 else:
-                    # Fallback to first output if gold_idx not available
                     output = outputs[0]
             else:
-                # Single output: use it directly
                 output = outputs[0]
 
             if output.logprobs is None:
                 continue
 
-            logprobs = [tok["logprob"] for tok in output.logprobs if "logprob" in tok]
-            if not logprobs:
-                continue
-
-            num_bytes = len(output.text.encode("utf-8"))
+            # Get byte count for weighting
+            num_bytes = sum(len(tok.get("bytes", ())) for tok in output.logprobs)
             if num_bytes == 0:
                 continue
 
-            total_logprobs += sum(logprobs)
+            # Use scorer for BPB calculation
+            bpb = scorer.score(response.instance, output)
+            weighted_sum += bpb * num_bytes
             total_bytes += num_bytes
 
         if total_bytes == 0:
             return 0.0
 
-        return -total_logprobs / (total_bytes * math.log(2))
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to a dictionary."""
-        return {"type": "BPBMetric", "name": self.name, "scorer": self.scorer.__name__}
+        return weighted_sum / total_bytes
 
 
 @dataclass(frozen=True, slots=True)
-class MeanPerplexityMetric:
+class MeanPerplexityMetric(Metric):
     """Mean perplexity of the gold/correct completion.
 
     For tasks with multiple continuations (e.g., multiple choice), this returns
@@ -159,7 +145,7 @@ class MeanPerplexityMetric:
         if not responses:
             return 0.0
 
-        scorer_instance = self.scorer()
+        scorer = self.scorer()
         total = 0.0
 
         for response in responses:
@@ -179,10 +165,43 @@ class MeanPerplexityMetric:
                 # Single output: use it directly
                 output = outputs[0]
 
-            total += scorer_instance.score(response.instance, output)
+            total += scorer.score(response.instance, output)
 
         return total / len(responses)
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to a dictionary."""
-        return {"type": "MeanPerplexityMetric", "name": self.name, "scorer": self.scorer.__name__}
+
+@dataclass(frozen=True, slots=True)
+class PassAtKMetric(Metric):
+    """Compute pass@k metric for code generation tasks.
+
+    This metric groups responses by task ID and computes pass@k
+    across multiple samples per task.
+    """
+
+    name: str = "pass_at_k"
+    k: int = 1
+    scorer: type[Scorer] = CodeExecutionScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        """Compute pass@k across all tasks."""
+        if not responses:
+            return 0.0
+
+        scorer_name = self.scorer().name
+
+        # Group by task ID
+        task_results: dict[str, list[float]] = {}
+        for r in responses:
+            task_id = r.instance.metadata.get("id", "unknown")
+            if task_id not in task_results:
+                task_results[task_id] = []
+            task_results[task_id].append(r.scores.get(scorer_name, 0.0))
+
+        # Compute pass@k for each task
+        pass_at_k_values = []
+        for scores in task_results.values():
+            n = len(scores)
+            c = sum(1 for s in scores if s > 0.5)  # Count passing
+            pass_at_k_values.append(compute_pass_at_k(n, c, min(self.k, n)))
+
+        return sum(pass_at_k_values) / len(pass_at_k_values) if pass_at_k_values else 0.0

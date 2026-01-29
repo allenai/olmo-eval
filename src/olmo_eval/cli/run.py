@@ -28,7 +28,7 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 @click.option("--num-shots", type=int, help="Override num_fewshot for all tasks")
 @click.option("--limit", type=int, help="Override instance limit for all tasks")
 @click.option("--temperature", type=float, help="Override temperature for all tasks")
-@click.option("--backend", type=click.Choice(["hf", "vllm", "litellm"]), help="Override backend")
+@click.option("--provider", type=click.Choice(["hf", "vllm", "litellm"]), help="Override provider")
 @click.option(
     "--store",
     is_flag=True,
@@ -145,7 +145,7 @@ def run(
     num_shots: int | None,
     limit: int | None,
     temperature: float | None,
-    backend: str | None,
+    provider: str | None,
     store: bool,
     dry_run: bool,
     use_async: bool,
@@ -176,7 +176,7 @@ def run(
     Without --async or --async-stream, runs sequentially for each model.
 
     Inline overrides can be specified in -m and -t flags:
-        -m model::backend=vllm,tokenizer=allenai/dolma2-tokenizer
+        -m model::provider=vllm,tokenizer=allenai/dolma2-tokenizer
         -t task:olmes::temperature=0.6,num_fewshot=5
     """
     import logging
@@ -214,9 +214,9 @@ def run(
     # Extract model-level overrides
     first_model_name, first_model_overrides = parsed_models[0] if parsed_models else ("", {})
 
-    # Model overrides can specify backend/attention_backend
-    if not backend and "backend" in first_model_overrides:
-        backend = first_model_overrides["backend"]
+    # Model overrides can specify provider/attention_backend
+    if not provider and "provider" in first_model_overrides:
+        provider = first_model_overrides["provider"]
     if not attention_backend and "attention_backend" in first_model_overrides:
         attention_backend = first_model_overrides["attention_backend"]
 
@@ -241,11 +241,11 @@ def run(
         )
         use_async = False
 
-    # Warning for backend override with async-stream
-    if use_async_stream and backend and backend != "vllm":
+    # Warning for provider override with async-stream
+    if use_async_stream and provider and provider != "vllm":
         console.print(
-            f"[yellow]Warning:[/yellow] --async-stream only supports vLLM backend, "
-            f"ignoring --backend={backend}"
+            f"[yellow]Warning:[/yellow] --async-stream only supports vLLM provider, "
+            f"ignoring --provider={provider}"
         )
 
     # Set up storage backend if enabled
@@ -358,7 +358,7 @@ def run(
             num_shots_override=num_shots,
             limit_override=limit,
             temperature=temperature,
-            backend_override=backend,
+            provider_override=provider,
             storages=storages,
             num_workers=num_workers,
             gpus_per_worker=gpus_per_worker,
@@ -380,8 +380,8 @@ def run(
             if len(model_names) > 1:
                 console.print(f"\n[bold]Model {i + 1}/{len(model_names)}:[/bold] {model_name}")
 
-            # Apply per-model backend overrides
-            effective_backend = model_overrides.get("backend", backend)
+            # Apply per-model provider overrides
+            effective_provider = model_overrides.get("provider", provider)
             effective_attention_backend = model_overrides.get(
                 "attention_backend", attention_backend
             )
@@ -393,7 +393,7 @@ def run(
                 num_shots_override=num_shots,
                 limit_override=limit,
                 temperature=temperature,
-                backend_override=effective_backend,
+                provider_override=effective_provider,
                 storages=storages,
                 attention_backend=effective_attention_backend.upper()
                 if effective_attention_backend

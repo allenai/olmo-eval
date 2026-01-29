@@ -11,9 +11,9 @@ from typing import TYPE_CHECKING, Any
 from rich.console import Console
 from rich.table import Table
 
-from olmo_eval.backends import Backend, BackendType, create_backend
 from olmo_eval.core import expand_tasks, get_model_config
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
+from olmo_eval.inference import InferenceProvider, ProviderType, create_provider
 from olmo_eval.runners.constants import SAMPLING_KEYS, TASKCONFIG_KEYS, ValidationError
 from olmo_eval.runners.mixins import RunnerResultsMixin, S3Config
 from olmo_eval.runners.utils import (
@@ -43,7 +43,7 @@ class SyncEvalRunner(RunnerResultsMixin):
     num_shots_override: int | None = None
     limit_override: int | None = None
     temperature: float | None = None
-    backend_override: str | None = None
+    provider_override: str | None = None
     storages: list[StorageBackend] = field(default_factory=list)
 
     # vLLM config
@@ -84,12 +84,12 @@ class SyncEvalRunner(RunnerResultsMixin):
         table.add_column("Value", style="white")
 
         model_config = get_model_config(self.model_name, **self.model_overrides)
-        backend_str = self.backend_override or model_config.backend
+        provider_str = self.provider_override or model_config.provider
 
         table.add_row("Model", model_config.model)
         if model_config.tokenizer:
             table.add_row("Tokenizer", model_config.tokenizer)
-        table.add_row("Backend", backend_str)
+        table.add_row("Provider", provider_str)
         table.add_row("Output Dir", self.output_dir)
 
         if self.num_shots_override is not None:
@@ -113,12 +113,12 @@ class SyncEvalRunner(RunnerResultsMixin):
         """Execute the evaluation run."""
         model_config = get_model_config(self.model_name, **self.model_overrides)
 
-        # Determine backend (model_config.backend is a string)
-        backend_str = self.backend_override or model_config.backend
-        backend_type = BackendType(backend_str)
+        # Determine provider (model_config.provider is a string)
+        provider_str = self.provider_override or model_config.provider
+        provider_type = ProviderType(provider_str)
 
         # vLLM requires 'spawn' multiprocessing start method
-        if backend_type == BackendType.VLLM:
+        if provider_type == ProviderType.VLLM:
             current = os.environ.get("VLLM_WORKER_MULTIPROC_METHOD")
             if current != "spawn":
                 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
@@ -127,7 +127,7 @@ class SyncEvalRunner(RunnerResultsMixin):
                         f"Overriding VLLM_WORKER_MULTIPROC_METHOD from '{current}' to 'spawn'"
                     )
 
-        console.print(f"[bold]Initializing {backend_type.value} backend...[/bold]")
+        console.print(f"[bold]Initializing {provider_type.value} provider...[/bold]")
         extra_kwargs = dict(model_config.extra_args)
         if self.attention_backend:
             extra_kwargs["attention_backend"] = self.attention_backend
@@ -138,8 +138,8 @@ class SyncEvalRunner(RunnerResultsMixin):
             extra_kwargs["load_format"] = self.model_overrides["load_format"]
         if self.model_overrides.get("extra_loader_config"):
             extra_kwargs["model_loader_extra_config"] = self.model_overrides["extra_loader_config"]
-        backend = create_backend(
-            backend_type,
+        provider = create_provider(
+            provider_type,
             model_config.model,
             tokenizer=model_config.tokenizer,
             revision=model_config.revision,
@@ -158,14 +158,14 @@ class SyncEvalRunner(RunnerResultsMixin):
         results: dict[str, Any] = {
             "model": display_model_name,
             "model_path": model_config.model,  # Original full path
-            "backend": backend_type.value,
+            "provider": provider_type.value,
             "timestamp": datetime.now().isoformat(),
             "tasks": {},
             # Store model config details for metrics.json
             "model_config": {
                 "model": model_config.model,
                 "tokenizer": model_config.tokenizer,
-                "backend": backend_type.value,
+                "provider": provider_type.value,
                 "dtype": model_config.dtype,
                 "revision": model_config.revision,
                 "attention_backend": self.attention_backend,
@@ -174,7 +174,7 @@ class SyncEvalRunner(RunnerResultsMixin):
 
         for spec in expanded_tasks:
             console.print(f"\n[bold blue]Running {spec}...[/bold blue]")
-            task_result = self._run_task(spec, backend)
+            task_result = self._run_task(spec, provider)
             task_data: dict[str, Any] = {
                 "config": task_result.config,
                 "num_instances": task_result.num_instances,
@@ -253,7 +253,7 @@ class SyncEvalRunner(RunnerResultsMixin):
 
         return results
 
-    def _run_task(self, spec: str, backend: Backend) -> TaskResult:
+    def _run_task(self, spec: str, provider: InferenceProvider) -> TaskResult:
         """Run a single task and return results."""
         # Build overrides from instance settings (global CLI overrides)
         overrides: dict[str, Any] = {}
@@ -277,7 +277,7 @@ class SyncEvalRunner(RunnerResultsMixin):
         # Use shared task execution logic
         result = run_task_impl(
             spec=spec,
-            backend=backend,
+            provider=provider,
             overrides=overrides or None,
             progress_callback=lambda msg: console.print(f"  {msg}"),
             sampling_overrides=sampling_overrides or None,

@@ -107,7 +107,7 @@ class TestGetModelConfig:
 
         assert isinstance(config, ModelConfig)
         assert config.model == "meta-llama/Meta-Llama-3.1-8B"
-        assert config.backend == "vllm"
+        assert config.provider == "vllm"
 
     def test_get_preset_with_trust_remote_code(self):
         """Test preset that requires trust_remote_code."""
@@ -121,25 +121,25 @@ class TestGetModelConfig:
         config = get_model_config("some-org/custom-model")
 
         assert config.model == "some-org/custom-model"
-        assert config.backend == "vllm"  # Default
+        assert config.provider == "vllm"  # Default
 
     def test_get_model_with_override(self):
         """Test getting model with field override."""
-        config = get_model_config("llama3.1-8b", backend="vllm")
+        config = get_model_config("llama3.1-8b", provider="vllm")
 
         assert config.model == "meta-llama/Meta-Llama-3.1-8B"
-        assert config.backend == "vllm"
+        assert config.provider == "vllm"
 
     def test_get_model_with_multiple_overrides(self):
         """Test getting model with multiple overrides."""
         config = get_model_config(
             "llama3.1-8b",
-            backend="vllm",
+            provider="vllm",
             dtype="float16",
             revision="main",
         )
 
-        assert config.backend == "vllm"
+        assert config.provider == "vllm"
         assert config.dtype == "float16"
         assert config.revision == "main"
 
@@ -147,12 +147,12 @@ class TestGetModelConfig:
         """Test unknown model with overrides."""
         config = get_model_config(
             "custom/model",
-            backend="vllm",
+            provider="vllm",
             trust_remote_code=True,
         )
 
         assert config.model == "custom/model"
-        assert config.backend == "vllm"
+        assert config.provider == "vllm"
         assert config.trust_remote_code is True
 
     def test_get_model_extra_args_merged(self):
@@ -169,10 +169,10 @@ class TestGetModelConfig:
     def test_preset_not_mutated(self):
         """Test that getting with overrides doesn't mutate preset."""
         original = get_model_config("llama3.1-8b")
-        _ = get_model_config("llama3.1-8b", backend="hf")
+        _ = get_model_config("llama3.1-8b", provider="hf")
         after = get_model_config("llama3.1-8b")
 
-        assert original.backend == after.backend == "vllm"
+        assert original.provider == after.provider == "vllm"
 
     def test_tokenizer_override_preset(self):
         """Test tokenizer override on a preset model."""

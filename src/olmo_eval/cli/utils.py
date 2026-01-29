@@ -16,9 +16,9 @@ def format_timestamp(ts: datetime | None) -> str:
     return ts.strftime("%Y-%m-%d %H:%M:%S")
 
 
-# Keys that apply to model/backend config
+# Keys that apply to model/provider config
 MODEL_KEYS = {
-    "backend",
+    "provider",
     "attention_backend",
     "gpus_per_worker",
     "tokenizer",
@@ -35,7 +35,7 @@ class ModelSummary:
     gpus: int = 1
     parallelism: int = 1
     alias: str | None = None
-    backend: str | None = None
+    provider: str | None = None
     overrides: dict[str, Any] | None = None
 
 

@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 from rich.console import Console
 
-from olmo_eval.backends import Backend, BackendType, create_backend
 from olmo_eval.core import (
     Instance,
     LMOutput,
@@ -27,8 +26,9 @@ from olmo_eval.core import (
     get_model_config,
 )
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
-from olmo_eval.core.literals import BackendLiteral
+from olmo_eval.core.literals import ProviderLiteral
 from olmo_eval.evals.tasks import Task, get_task
+from olmo_eval.inference import InferenceProvider, ProviderType, create_provider
 from olmo_eval.runners.constants import SAMPLING_KEYS, TASKCONFIG_KEYS
 from olmo_eval.runners.mixins import AsyncRunnerMixin, S3Config
 from olmo_eval.runners.utils import (
@@ -364,14 +364,14 @@ def wait_for_workers_ready(
 
 def _process_batch(
     batch: list[QueueItem],
-    backend: Backend,
+    provider: InferenceProvider,
     result_queue: mp.Queue,
 ) -> None:
-    """Process a batch of instances through the backend.
+    """Process a batch of instances through the provider.
 
     Args:
         batch: List of QueueItems to process
-        backend: Backend instance
+        provider: InferenceProvider instance
         result_queue: Queue to put results
     """
     from olmo_eval.core import RequestType
@@ -382,9 +382,9 @@ def _process_batch(
     try:
         # Use logprobs for LOGLIKELIHOOD requests (e.g., BPB tasks)
         if requests and requests[0].request_type == RequestType.LOGLIKELIHOOD:
-            outputs_list = backend.logprobs(requests)
+            outputs_list = provider.logprobs(requests)
         else:
-            outputs_list = backend.generate(requests, sampling_params)
+            outputs_list = provider.generate(requests, sampling_params)
 
         for item, outputs in zip(batch, outputs_list, strict=True):
             result_queue.put(
@@ -421,7 +421,7 @@ def instance_worker_process(
     instance_queue: mp.Queue,
     result_queue: mp.Queue,
     model_name: str,
-    backend_type_str: str,
+    provider_type_str: str,
     attention_backend: str | None = None,
     tokenizer: str | None = None,
     max_model_len: int | None = None,
@@ -431,14 +431,14 @@ def instance_worker_process(
     """Worker that collects all items and processes them at once.
 
     Collects all items from the queue, then processes them in a single
-    backend call for maximum throughput. vLLM handles internal batching.
+    provider call for maximum throughput. vLLM handles internal batching.
 
     Args:
         gpu_ids: List of GPU IDs to use (for CUDA_VISIBLE_DEVICES)
         instance_queue: Queue of QueueItems (None = poison pill)
         result_queue: Queue to put ResultItems
-        model_name: Model name for backend
-        backend_type_str: Backend type string
+        model_name: Model name for provider
+        provider_type_str: Provider type string
         attention_backend: Attention backend to use (e.g., "FLASHINFER", "FLASH_ATTN")
         tokenizer: Tokenizer path/identifier, defaults to model if None
         max_model_len: Maximum model context length (overrides model's default)
@@ -451,7 +451,7 @@ def instance_worker_process(
         if gpu_ids:
             os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in gpu_ids)
 
-        backend_type = BackendType(backend_type_str)
+        provider_type = ProviderType(provider_type_str)
         # Pass tensor_parallel_size for vLLM to use all assigned GPUs
         engine_kwargs: dict[str, Any] = {"tensor_parallel_size": len(gpu_ids)} if gpu_ids else {}
         if attention_backend:
@@ -462,7 +462,7 @@ def instance_worker_process(
             engine_kwargs["load_format"] = load_format
         if extra_loader_config:
             engine_kwargs["model_loader_extra_config"] = extra_loader_config
-        backend = create_backend(backend_type, model_name, tokenizer=tokenizer, **engine_kwargs)
+        provider = create_provider(provider_type, model_name, tokenizer=tokenizer, **engine_kwargs)
 
         # Collect all items from queue
         items: list[QueueItem] = []
@@ -474,7 +474,7 @@ def instance_worker_process(
 
         # Process all items at once - vLLM handles internal batching
         if items:
-            _process_batch(items, backend, result_queue)
+            _process_batch(items, provider, result_queue)
     except Exception as e:
         logger.error(f"Worker process failed: {e}")
         # Put a fatal error marker in the result queue so main process knows we died
@@ -514,7 +514,7 @@ def streaming_worker_process(
         gpu_ids: List of GPU IDs to use (for CUDA_VISIBLE_DEVICES)
         instance_queue: Queue of QueueItems (None = poison pill)
         result_queue: Queue to put ResultItems
-        model_name: Model name for backend
+        model_name: Model name for provider
         attention_backend: Attention backend to use (e.g., "FLASHINFER", "FLASH_ATTN")
         tokenizer: Tokenizer path/identifier, defaults to model if None
         max_model_len: Maximum model context length (overrides model's default)
@@ -572,9 +572,9 @@ async def _streaming_worker_async(
 ) -> None:
     """Async implementation of streaming worker.
 
-    Uses AsyncVLLMBackend for true continuous batching with streaming results.
+    Uses AsyncVLLMProvider for true continuous batching with streaming results.
     """
-    from olmo_eval.backends.vllm import AsyncVLLMBackend
+    from olmo_eval.inference.vllm import AsyncVLLMProvider
 
     engine_kwargs: dict[str, Any] = {"tensor_parallel_size": num_gpus}
     if max_model_len:
@@ -584,7 +584,7 @@ async def _streaming_worker_async(
     if extra_loader_config:
         engine_kwargs["model_loader_extra_config"] = extra_loader_config
 
-    backend = AsyncVLLMBackend(
+    provider = AsyncVLLMProvider(
         model_name,
         tokenizer=tokenizer,
         attention_backend=attention_backend,
@@ -619,7 +619,7 @@ async def _streaming_worker_async(
 
             # Add to engine (non-blocking)
             try:
-                await backend.add_request(request_id, item.request)
+                await provider.add_request(request_id, item.request)
             except Exception as e:
                 # Report error immediately
                 result_queue.put(
@@ -647,7 +647,7 @@ async def _streaming_worker_async(
                 continue
 
             try:
-                async for request_id, outputs in backend.stream_results():
+                async for request_id, outputs in provider.stream_results():
                     if request_id not in pending_requests:
                         continue
 
@@ -694,7 +694,7 @@ async def _streaming_worker_async(
     await asyncio.gather(add_requests(), collect_results())
 
     # Shutdown engine
-    await backend.shutdown()
+    await provider.shutdown()
 
 
 # -----------------------------------------------------------------------------
@@ -718,7 +718,7 @@ class AsyncEvalRunner(AsyncRunnerMixin):
     num_shots_override: int | None = None
     limit_override: int | None = None
     temperature: float | None = None
-    backend_override: str | None = None
+    provider_override: str | None = None
     storages: list[StorageBackend] = field(default_factory=list)
 
     # Multi-worker config
@@ -787,8 +787,8 @@ class AsyncEvalRunner(AsyncRunnerMixin):
         for model_name in self.model_names:
             overrides = self.model_overrides.get(model_name, {})
             model_config = get_model_config(model_name, **overrides)
-            if self.backend_override:
-                model_config.backend = cast(BackendLiteral, self.backend_override)
+            if self.provider_override:
+                model_config.provider = cast(ProviderLiteral, self.provider_override)
             model_configs[model_name] = model_config
 
         # Prepare tasks in parallel
@@ -896,7 +896,7 @@ class AsyncEvalRunner(AsyncRunnerMixin):
 
         for model_name in self.model_names:
             model_config = model_configs[model_name]
-            backend_type = BackendType(model_config.backend)
+            provider_type = ProviderType(model_config.provider)
 
             # Get per-model vLLM loading options from model_overrides
             per_model_overrides = self.model_overrides.get(model_name, {})
@@ -919,7 +919,7 @@ class AsyncEvalRunner(AsyncRunnerMixin):
                         model_queues[model_name],
                         result_queue,
                         model_config.model,
-                        backend_type.value,
+                        provider_type.value,
                         self.attention_backend,
                         model_config.tokenizer,
                         model_config.max_model_len,
@@ -1060,7 +1060,7 @@ class AsyncEvalRunner(AsyncRunnerMixin):
 
         for model_name in self.model_names:
             model_config = model_configs[model_name]
-            backend_type = BackendType(model_config.backend)
+            provider_type = ProviderType(model_config.provider)
 
             model_alias = self.model_overrides.get(model_name, {}).get("alias")
             display_model_name = get_model_display_name(model_config.model, model_alias)
@@ -1068,7 +1068,7 @@ class AsyncEvalRunner(AsyncRunnerMixin):
             model_results: dict[str, Any] = {
                 "model": display_model_name,
                 "model_path": model_config.model,  # Original full path
-                "backend": backend_type.value,
+                "provider": provider_type.value,
                 "tasks": {},
             }
 
@@ -1105,7 +1105,7 @@ class AsyncEvalRunner(AsyncRunnerMixin):
             model_results["model_config"] = {
                 "model": model_config.model,
                 "tokenizer": model_config.tokenizer,
-                "backend": backend_type.value,
+                "provider": provider_type.value,
                 "dtype": model_config.dtype,
                 "revision": model_config.revision,
                 "attention_backend": self.attention_backend,
@@ -1194,7 +1194,7 @@ class StreamingEvalRunner(AsyncRunnerMixin):
     - Tasks report completion immediately when all instances finish
 
     This provides maximum throughput and earliest possible completion reporting.
-    Only supports vLLM backend.
+    Only supports vLLM provider.
     """
 
     model_names: list[str]
@@ -1535,7 +1535,7 @@ class StreamingEvalRunner(AsyncRunnerMixin):
             model_results: dict[str, Any] = {
                 "model": display_model_name,
                 "model_path": model_config.model,  # Original full path
-                "backend": "vllm",
+                "provider": "vllm",
                 "tasks": {},
             }
 
@@ -1572,7 +1572,7 @@ class StreamingEvalRunner(AsyncRunnerMixin):
             model_results["model_config"] = {
                 "model": model_config.model,
                 "tokenizer": model_config.tokenizer,
-                "backend": "vllm",
+                "provider": "vllm",
                 "dtype": model_config.dtype,
                 "revision": model_config.revision,
                 "attention_backend": self.attention_backend,

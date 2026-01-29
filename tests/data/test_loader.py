@@ -29,7 +29,7 @@ class TestDataLoader:
     def test_different_backends_for_different_types(self):
         loader = DataLoader()
         local_backend = loader._get_backend(SourceType.LOCAL)
-        hf_backend = loader._get_backend(SourceType.HUGGINGFACE)
+        hf_backend = loader._get_backend(SourceType.HF)
         assert local_backend is not hf_backend
 
     def test_load_accepts_string_uri(self):

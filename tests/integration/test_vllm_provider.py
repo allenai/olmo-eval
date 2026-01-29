@@ -1,17 +1,17 @@
-"""GPU integration tests for the vLLM backend.
+"""GPU integration tests for the vLLM provider.
 
 These tests require:
 - Docker with GPU support, OR
 - vLLM installed locally with GPU access
 
 Run with:
-    pytest tests/integration/test_vllm_backend.py -v --gpu
+    pytest tests/integration/test_vllm_provider.py -v --gpu
 
 To skip Docker management (if vLLM is already running):
-    pytest tests/integration/test_vllm_backend.py -v --gpu --no-docker
+    pytest tests/integration/test_vllm_provider.py -v --gpu --no-docker
 
 To use a different model:
-    pytest tests/integration/test_vllm_backend.py -v --gpu \\
+    pytest tests/integration/test_vllm_provider.py -v --gpu \\
         --vllm-model "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 """
 
@@ -22,8 +22,8 @@ from olmo_eval.core import LMRequest, RequestType, SamplingParams
 pytestmark = [pytest.mark.gpu]
 
 
-class TestVLLMBackendGenerate:
-    """Tests for VLLMBackend.generate method."""
+class TestVLLMProviderGenerate:
+    """Tests for VLLMProvider.generate method."""
 
     def test_generate_single_prompt(self, vllm_backend):
         """Test generating from a single prompt."""
@@ -156,8 +156,8 @@ class TestVLLMBackendGenerate:
         assert results1[0][0].text == results2[0][0].text
 
 
-class TestVLLMBackendLogprobs:
-    """Tests for VLLMBackend.logprobs method (multiple choice scoring)."""
+class TestVLLMProviderLogprobs:
+    """Tests for VLLMProvider.logprobs method (multiple choice scoring)."""
 
     def test_logprobs_single_request(self, vllm_backend):
         """Test logprobs for a single request with continuations."""
@@ -246,8 +246,8 @@ class TestVLLMBackendLogprobs:
             assert output.text == expected
 
 
-class TestVLLMBackendEdgeCases:
-    """Edge case tests for VLLMBackend."""
+class TestVLLMProviderEdgeCases:
+    """Edge case tests for VLLMProvider."""
 
     def test_empty_prompt(self, vllm_backend):
         """Test handling of empty prompt."""
@@ -346,7 +346,7 @@ class TestVLLMBackendEdgeCases:
         assert output.metadata["num_tokens"] > 0
 
 
-class TestVLLMBackendWithTasks:
+class TestVLLMProviderWithTasks:
     """Integration tests running actual evaluation tasks through vLLM."""
 
     def test_arc_task_format(self, vllm_backend):

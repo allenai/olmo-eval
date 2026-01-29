@@ -1,15 +1,15 @@
-"""Mock backend for testing."""
+"""Mock provider for testing."""
 
 from olmo_eval.core import LMOutput, LMRequest, SamplingParams
 
-from .base import Backend
+from .base import InferenceProvider
 
 
-class MockBackend(Backend):
-    """Mock backend that returns fixed responses for testing."""
+class MockProvider(InferenceProvider):
+    """Mock provider that returns fixed responses for testing."""
 
     def __init__(self, model_name: str = "mock-model") -> None:
-        """Initialize the mock backend.
+        """Initialize the mock provider.
 
         Args:
             model_name: Model name (defaults to "mock-model").

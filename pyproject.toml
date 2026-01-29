@@ -81,9 +81,9 @@ dev = [
     "olmo-eval-internal[storage]",
 ]
 
-# ty file-based overrides for optional dependencies (backends use vllm/litellm)
+# ty file-based overrides for optional dependencies (inference providers use vllm/litellm)
 [[tool.ty.overrides]]
-include = ["src/olmo_eval/backends/**"]
+include = ["src/olmo_eval/inference/**"]
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"
 

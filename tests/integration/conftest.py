@@ -115,8 +115,8 @@ def vllm_service(request):
 
 
 @pytest.fixture(scope="session")
-def vllm_backend(vllm_service, vllm_model):
-    """Create a VLLMBackend instance connected to the test container.
+def vllm_provider(vllm_service, vllm_model):
+    """Create a VLLMProvider instance connected to the test container.
 
     Note: This creates an in-process vLLM instance, not using the Docker
     container's API. For true integration testing with the container,
@@ -125,17 +125,24 @@ def vllm_backend(vllm_service, vllm_model):
     # Skip if vLLM not installed
     pytest.importorskip("vllm")
 
-    from olmo_eval.backends.vllm import VLLMBackend
+    from olmo_eval.inference.vllm import VLLMProvider
 
-    # Create backend with small memory footprint for testing
-    backend = VLLMBackend(
+    # Create provider with small memory footprint for testing
+    provider = VLLMProvider(
         vllm_model,
         max_model_len=512,
         gpu_memory_utilization=0.5,
         dtype="half",
     )
 
-    yield backend
+    yield provider
+
+
+# Backwards compatibility alias for existing tests
+@pytest.fixture(scope="session")
+def vllm_backend(vllm_provider):
+    """Backwards compatibility alias for vllm_provider fixture."""
+    return vllm_provider
 
 
 @pytest.fixture

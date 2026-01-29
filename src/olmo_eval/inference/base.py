@@ -1,21 +1,21 @@
-"""Backend base class and protocol definition."""
+"""Inference provider base class and protocol definition."""
 
 from abc import ABC, abstractmethod
 
 from olmo_eval.core import LMOutput, LMRequest, SamplingParams
 
 
-class Backend(ABC):
-    """Abstract base class for language model backends.
+class InferenceProvider(ABC):
+    """Abstract base class for language model inference providers.
 
-    All backends must implement `generate` and `logprobs` methods.
+    All providers must implement `generate` and `logprobs` methods.
     Common functionality like model name storage is handled here.
     """
 
     model_name: str
 
     def __init__(self, model_name: str) -> None:
-        """Initialize the backend.
+        """Initialize the provider.
 
         Args:
             model_name: Model identifier or path.

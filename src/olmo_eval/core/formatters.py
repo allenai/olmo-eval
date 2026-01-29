@@ -1,14 +1,21 @@
-"""Formatter protocols and implementations."""
+"""Formatter base class and implementations."""
 
+from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
-from typing import Any, Protocol
+from typing import Any
 
 from .types import Instance, LMRequest, RequestType
 
 
-class Formatter(Protocol):
-    """Protocol for formatting instances into LM requests."""
+@dataclass
+class Formatter(ABC):
+    """Abstract base class for formatting instances into LM requests.
 
+    Subclasses must define:
+        - format(): method to convert an instance to an LMRequest
+    """
+
+    @abstractmethod
     def format(
         self,
         instance: Instance,
@@ -19,11 +26,11 @@ class Formatter(Protocol):
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a dictionary."""
-        ...
+        return {"type": self.__class__.__name__, **asdict(self)}
 
 
 @dataclass(slots=True)
-class ChatFormatter:
+class ChatFormatter(Formatter):
     """Format instances as chat messages."""
 
     system_prompt: str = ""
@@ -59,13 +66,9 @@ class ChatFormatter:
         )
         return LMRequest(request_type=RequestType.CHAT, messages=tuple(messages))
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to a dictionary."""
-        return {"type": "ChatFormatter", **asdict(self)}
-
 
 @dataclass(slots=True)
-class CompletionFormatter:
+class CompletionFormatter(Formatter):
     """Format instances as completion prompts."""
 
     template: str = "{question}"
@@ -87,13 +90,9 @@ class CompletionFormatter:
         prompt = self.fewshot_separator.join(parts)
         return LMRequest(request_type=RequestType.COMPLETION, prompt=prompt)
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to a dictionary."""
-        return {"type": "CompletionFormatter", **asdict(self)}
-
 
 @dataclass(slots=True)
-class MultipleChoiceFormatter:
+class MultipleChoiceFormatter(Formatter):
     """Format multiple choice with continuations for logprob scoring."""
 
     template: str = "{question}"
@@ -121,13 +120,9 @@ class MultipleChoiceFormatter:
             continuations=continuations,
         )
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to a dictionary."""
-        return {"type": "MultipleChoiceFormatter", **asdict(self)}
-
 
 @dataclass(slots=True)
-class MCQAChatFormatter:
+class MCQAChatFormatter(Formatter):
     """Format multiple choice questions for chat-based CoT generation."""
 
     system_prompt: str = ""
@@ -154,13 +149,9 @@ class MCQAChatFormatter:
 
         return LMRequest(request_type=RequestType.CHAT, messages=tuple(messages))
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to a dictionary."""
-        return {"type": "MCQAChatFormatter", **asdict(self)}
-
 
 @dataclass(slots=True)
-class PPLFormatter:
+class PPLFormatter(Formatter):
     """Format instances for perplexity/BPB (bits-per-byte) evaluation.
 
     Uses the question as context and measures P(answer | question).
@@ -173,14 +164,10 @@ class PPLFormatter:
     """
 
     fewshot_separator: str = "\n\n"
-    leading_space: bool = True  # Whether to add leading space to continuation
-    # Whether to always prepend separator before the current instance's question.
+    leading_space: bool = True
     # This matches oe-eval's multilingual_mbpp behavior where the prompt always
     # has "\n\n" before the current doc's text (due to: join(...) + "\n\n" + text).
     always_prepend_separator: bool = False
-    # Prefix to add before gold_answer when building few-shot examples.
-    # In oe-eval, doc_to_target often returns " " + answer, so we can replicate
-    # this with answer_prefix=" ".
     answer_prefix: str = ""
 
     def format(
@@ -213,7 +200,7 @@ class PPLFormatter:
         for ex in fewshot or []:
             example = ex.question or ""
             if ex.gold_answer:
-                # Concatenate with optional prefix (oe-eval uses " " for humaneval)
+                # Concatenate with optional prefix
                 example += self.answer_prefix + ex.gold_answer
             parts.append(example)
 
@@ -223,10 +210,6 @@ class PPLFormatter:
 
         prompt = self.fewshot_separator.join(parts)
 
-        # In oe-eval's multilingual_mbpp, fewshot_context always adds "\n\n" before
-        # the current doc's text: join(fewshot) + "\n\n" + doc_text + ...
-        # This means even with 0-shot, the prompt starts with "\n\n".
-        # The always_prepend_separator option replicates this behavior.
         if self.always_prepend_separator and prompt:
             prompt = self.fewshot_separator + prompt
 
@@ -240,7 +223,3 @@ class PPLFormatter:
             prompt=prompt,
             continuations=(gold_text,),
         )
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to a dictionary."""
-        return {"type": "PPLFormatter", **asdict(self)}

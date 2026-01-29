@@ -1,6 +1,5 @@
 """Core abstractions for evaluation."""
 
-from .code_execution import CodeExecutionScorer, PassAtKMetric, compute_pass_at_k
 from .configs import (
     ModelConfig,
     RunConfig,
@@ -17,9 +16,17 @@ from .formatters import (
     MultipleChoiceFormatter,
     PPLFormatter,
 )
-from .metrics import AccuracyMetric, BPBMetric, F1Metric, MeanPerplexityMetric, Metric
+from .metrics import (
+    AccuracyMetric,
+    BPBMetric,
+    F1Metric,
+    MeanPerplexityMetric,
+    Metric,
+    PassAtKMetric,
+)
 from .scorers import (
     BitsPerByteScorer,
+    CodeExecutionScorer,
     ExactMatchScorer,
     F1Scorer,
     LogprobScorer,
@@ -41,6 +48,7 @@ from .types import (
     compute_model_hash,
     compute_task_hash,
 )
+from .utils import compute_pass_at_k
 
 __all__ = [
     # Enums

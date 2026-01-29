@@ -17,7 +17,7 @@ class TestTaskConfigDataSource:
         source = config.get_data_source()
         assert source.path == "cais/mmlu"
         assert source.subset == "math"
-        assert source.source_type == SourceType.HUGGINGFACE
+        assert source.source_type == SourceType.HF
 
     def test_data_source_with_string_uri(self):
         config = TaskConfig(

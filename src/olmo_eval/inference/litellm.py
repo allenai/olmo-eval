@@ -1,4 +1,4 @@
-"""LiteLLM backend for API-based inference."""
+"""LiteLLM provider for API-based inference."""
 
 from __future__ import annotations
 
@@ -9,14 +9,14 @@ from typing import Any
 from olmo_eval.core import LMOutput, LMRequest, SamplingParams
 from olmo_eval.core.types import LogProbEntry
 
-from .base import Backend
+from .base import InferenceProvider
 
 # Maximum stop sequences supported by OpenAI-compatible APIs
 _MAX_STOP_SEQUENCES = 4
 
 
-class LiteLLMBackend(Backend):
-    """Backend using LiteLLM for unified API access to various providers."""
+class LiteLLMProvider(InferenceProvider):
+    """Provider using LiteLLM for unified API access to various providers."""
 
     # Environment variable to LiteLLM attribute mappings
     _API_KEY_MAPPINGS = {
@@ -30,7 +30,7 @@ class LiteLLMBackend(Backend):
     }
 
     def __init__(self, model_name: str, **api_kwargs) -> None:
-        """Initialize the backend.
+        """Initialize the provider.
 
         Args:
             model_name: Model identifier (e.g., "gpt-4", "claude-3-opus").
@@ -40,7 +40,7 @@ class LiteLLMBackend(Backend):
             import litellm
         except ImportError as e:
             raise ImportError(
-                "litellm is required for LiteLLMBackend. Install with: pip install litellm"
+                "litellm is required for LiteLLMProvider. Install with: uv pip install litellm"
             ) from e
 
         super().__init__(model_name)
@@ -89,9 +89,13 @@ class LiteLLMBackend(Backend):
             logprob_entries: list[LogProbEntry] | None = None
             logprobs_data = getattr(choice, "logprobs", None)
             if logprobs_data and hasattr(logprobs_data, "content") and logprobs_data.content:
-                logprob_entries = [
-                    LogProbEntry(token=lp.token, logprob=lp.logprob) for lp in logprobs_data.content
-                ]
+                logprob_entries = []
+                for lp in logprobs_data.content:
+                    entry: LogProbEntry = {"token": lp.token, "logprob": lp.logprob}
+                    lp_bytes = getattr(lp, "bytes", None)
+                    if lp_bytes is not None:
+                        entry["bytes"] = lp_bytes
+                    logprob_entries.append(entry)
 
             outputs.append(LMOutput(text=text, logprobs=logprob_entries))
 
@@ -141,10 +145,12 @@ class LiteLLMBackend(Backend):
                 choice = response.choices[0]
                 logprobs_data = getattr(choice, "logprobs", None)
                 if logprobs_data and hasattr(logprobs_data, "content") and logprobs_data.content:
-                    completion_logprobs = [
-                        LogProbEntry(token=lp.token, logprob=lp.logprob)
-                        for lp in logprobs_data.content
-                    ]
+                    for lp in logprobs_data.content:
+                        entry: LogProbEntry = {"token": lp.token, "logprob": lp.logprob}
+                        lp_bytes = getattr(lp, "bytes", None)
+                        if lp_bytes is not None:
+                            entry["bytes"] = lp_bytes
+                        completion_logprobs.append(entry)
 
             # Map to continuations
             outputs = []
