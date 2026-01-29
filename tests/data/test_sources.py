@@ -9,7 +9,7 @@ class TestSourceType:
     """Tests for SourceType enum."""
 
     def test_source_types_exist(self):
-        assert SourceType.HUGGINGFACE.value == "huggingface"
+        assert SourceType.HF.value == "hf"
         assert SourceType.LOCAL.value == "local"
         assert SourceType.S3.value == "s3"
         assert SourceType.GCS.value == "gcs"
@@ -20,15 +20,15 @@ class TestDataSource:
 
     def test_huggingface_detection_org_repo(self):
         source = DataSource(path="cais/mmlu")
-        assert source.source_type == SourceType.HUGGINGFACE
+        assert source.source_type == SourceType.HF
 
     def test_huggingface_detection_hf_prefix(self):
         source = DataSource(path="hf://cais/mmlu")
-        assert source.source_type == SourceType.HUGGINGFACE
+        assert source.source_type == SourceType.HF
 
     def test_huggingface_detection_simple_name(self):
         source = DataSource(path="gsm8k")
-        assert source.source_type == SourceType.HUGGINGFACE
+        assert source.source_type == SourceType.HF
 
     def test_s3_detection(self):
         source = DataSource(path="s3://bucket/path/data.jsonl")
@@ -82,7 +82,7 @@ class TestDataSourceFromUri:
         assert source.path == "cais/mmlu"
         assert source.subset == "abstract_algebra"
         assert source.split == "test"
-        assert source.source_type == SourceType.HUGGINGFACE
+        assert source.source_type == SourceType.HF
 
     def test_huggingface_uri_no_query(self):
         source = DataSource.from_uri("hf://cais/mmlu")

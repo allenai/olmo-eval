@@ -81,7 +81,7 @@ class DataLoader:
 
     def _create_backend(self, source_type: SourceType) -> DataBackend:
         """Create a new backend instance for the given source type."""
-        if source_type == SourceType.HUGGINGFACE:
+        if source_type == SourceType.HF:
             return HuggingFaceBackend()
         elif source_type == SourceType.LOCAL:
             return LocalBackend()

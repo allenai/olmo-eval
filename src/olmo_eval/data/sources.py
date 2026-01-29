@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, urlparse
 class SourceType(Enum):
     """Supported data source types."""
 
-    HUGGINGFACE = "huggingface"
+    HF = "hf"
     LOCAL = "local"
     S3 = "s3"
     GCS = "gcs"
@@ -48,7 +48,7 @@ class DataSource:
     def _detect_type(self) -> SourceType:
         """Detect source type from path format."""
         if self.path.startswith("hf://"):
-            return SourceType.HUGGINGFACE
+            return SourceType.HF
         elif self.path.startswith("s3://"):
             return SourceType.S3
         elif self.path.startswith("gs://"):
@@ -61,13 +61,13 @@ class DataSource:
             return SourceType.LOCAL
         elif "/" in self.path and self.path.count("/") == 1 and not self.path.endswith("/"):
             # Looks like org/repo format (HuggingFace)
-            return SourceType.HUGGINGFACE
+            return SourceType.HF
         elif "." in self.path.split("/")[-1]:
             # Has file extension, treat as local
             return SourceType.LOCAL
         else:
             # Default to HuggingFace for simple names
-            return SourceType.HUGGINGFACE
+            return SourceType.HF
 
     @classmethod
     def from_uri(cls, uri: str, **kwargs) -> DataSource:
@@ -92,7 +92,7 @@ class DataSource:
 
         # Determine source type and path
         if scheme == "hf":
-            source_type = SourceType.HUGGINGFACE
+            source_type = SourceType.HF
             path = parsed.netloc + parsed.path if parsed.netloc else parsed.path.lstrip("/")
         elif scheme == "s3":
             source_type = SourceType.S3
