@@ -166,7 +166,7 @@ def launch(
     Requires beaker-py to be installed: pip install 'olmo-eval-internal[beaker]'
 
     Multiple models and/or tasks with different priorities will create separate experiments.
-    Models with compatible runtime configurations (GPUs, inference provider, etc.) are grouped together.
+    Models with compatible runtime configurations (GPUs, provider, etc.) are grouped together.
     Use --config/-f to load settings from a YAML file; CLI arguments override config values.
     Use --group/-g to organize experiments into a Beaker group for result aggregation.
 
