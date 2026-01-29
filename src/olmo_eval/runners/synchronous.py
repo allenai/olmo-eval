@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -11,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from rich.console import Console
 from rich.table import Table
 
-from olmo_eval.core import expand_tasks, get_model_config
+from olmo_eval.core import expand_tasks, get_logger, get_model_config
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.inference import InferenceProvider, ProviderType, create_provider
 from olmo_eval.runners.constants import SAMPLING_KEYS, TASKCONFIG_KEYS, ValidationError
@@ -30,7 +29,7 @@ if TYPE_CHECKING:
     from olmo_eval.storage import StorageBackend
 
 console = Console()
-logger = logging.getLogger(__name__)
+logger = get_logger("runners.synchronous")
 
 
 @dataclass

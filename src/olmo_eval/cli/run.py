@@ -179,22 +179,11 @@ def run(
         -m model::provider=vllm,tokenizer=allenai/dolma2-tokenizer
         -t task:olmes::temperature=0.6,num_fewshot=5
     """
-    import logging
-
+    from olmo_eval.core.logging import configure_logging
     from olmo_eval.runners import SyncEvalRunner, ValidationError
 
     # Configure logging for Beaker job visibility
-    logging.basicConfig(
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        level=logging.INFO,
-    )
-
-    # Suppress noisy HuggingFace warnings
-    import os
-
-    os.environ.setdefault("HF_DATASETS_DISABLE_PROGRESS_BAR", "1")
-    os.environ.setdefault("DATASETS_VERBOSITY", "error")
-    logging.getLogger("datasets").setLevel(logging.ERROR)
+    configure_logging(level="INFO")
 
     # Print runtime environment summary
     print_runtime_environment()

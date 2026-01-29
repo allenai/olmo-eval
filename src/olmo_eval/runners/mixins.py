@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
 
+from olmo_eval.core.logging import get_logger
 from olmo_eval.runners.utils import (
     TaskResult,
     generate_experiment_id,
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from olmo_eval.storage import StorageBackend
 
 console = Console()
-logger = logging.getLogger(__name__)
+logger = get_logger("runners.mixins")
 
 
 # -----------------------------------------------------------------------------

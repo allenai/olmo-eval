@@ -16,6 +16,12 @@ from .formatters import (
     MultipleChoiceFormatter,
     PPLFormatter,
 )
+from .logging import (
+    configure_logging,
+    configure_worker_logging,
+    get_logger,
+    get_worker_id,
+)
 from .metrics import (
     AccuracyMetric,
     BPBMetric,
@@ -73,6 +79,11 @@ __all__ = [
     # Utilities
     "compute_model_hash",
     "compute_task_hash",
+    # Logging
+    "configure_logging",
+    "configure_worker_logging",
+    "get_logger",
+    "get_worker_id",
     # Formatters
     "Formatter",
     "ChatFormatter",

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import multiprocessing as mp
 import os
 import queue
@@ -23,6 +22,7 @@ from olmo_eval.core import (
     Response,
     SamplingParams,
     expand_tasks,
+    get_logger,
     get_model_config,
 )
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
@@ -45,7 +45,7 @@ if TYPE_CHECKING:
     from olmo_eval.storage import StorageBackend
 
 console = Console()
-logger = logging.getLogger(__name__)
+logger = get_logger("runners.asynchronous")
 
 
 # -----------------------------------------------------------------------------
@@ -417,6 +417,7 @@ def _process_batch(
 
 
 def instance_worker_process(
+    worker_id: str,
     gpu_ids: list[int],
     instance_queue: mp.Queue,
     result_queue: mp.Queue,
@@ -434,6 +435,7 @@ def instance_worker_process(
     provider call for maximum throughput. vLLM handles internal batching.
 
     Args:
+        worker_id: Unique worker identifier (e.g., "OLMo-2-7B-w0")
         gpu_ids: List of GPU IDs to use (for CUDA_VISIBLE_DEVICES)
         instance_queue: Queue of QueueItems (None = poison pill)
         result_queue: Queue to put ResultItems
@@ -447,9 +449,17 @@ def instance_worker_process(
     """
     import sys
 
+    from olmo_eval.core.logging import configure_worker_logging
+
+    worker_logger = configure_worker_logging(worker_id)
+    worker_logger.info(f"Starting on GPUs {gpu_ids}")
+
     try:
         if gpu_ids:
             os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in gpu_ids)
+
+        worker_logger.info("Initializing vLLM engine...")
+        init_start = time.time()
 
         provider_type = ProviderType(provider_type_str)
         # Pass tensor_parallel_size for vLLM to use all assigned GPUs
@@ -464,6 +474,8 @@ def instance_worker_process(
             engine_kwargs["model_loader_extra_config"] = extra_loader_config
         provider = create_provider(provider_type, model_name, tokenizer=tokenizer, **engine_kwargs)
 
+        worker_logger.info(f"Engine ready ({time.time() - init_start:.1f}s)")
+
         # Collect all items from queue
         items: list[QueueItem] = []
         while True:
@@ -472,11 +484,15 @@ def instance_worker_process(
                 break
             items.append(item)
 
+        worker_logger.info(f"Processing {len(items)} instances...")
+
         # Process all items at once - vLLM handles internal batching
         if items:
             _process_batch(items, provider, result_queue)
+
+        worker_logger.info("Processing complete")
     except Exception as e:
-        logger.error(f"Worker process failed: {e}")
+        worker_logger.error(f"Worker process failed: {e}")
         # Put a fatal error marker in the result queue so main process knows we died
         result_queue.put(
             ResultItem(
@@ -493,6 +509,7 @@ def instance_worker_process(
 
 
 def streaming_worker_process(
+    worker_id: str,
     gpu_ids: list[int],
     instance_queue: mp.Queue,
     result_queue: mp.Queue,
@@ -511,6 +528,7 @@ def streaming_worker_process(
     3. Enable true continuous batching for optimal throughput
 
     Args:
+        worker_id: Unique worker identifier (e.g., "OLMo-2-7B-w0")
         gpu_ids: List of GPU IDs to use (for CUDA_VISIBLE_DEVICES)
         instance_queue: Queue of QueueItems (None = poison pill)
         result_queue: Queue to put ResultItems
@@ -523,6 +541,11 @@ def streaming_worker_process(
     """
     import sys
 
+    from olmo_eval.core.logging import configure_worker_logging
+
+    worker_logger = configure_worker_logging(worker_id)
+    worker_logger.info(f"Starting on GPUs {gpu_ids}")
+
     try:
         if gpu_ids:
             os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in gpu_ids)
@@ -531,6 +554,7 @@ def streaming_worker_process(
         num_gpus = len(gpu_ids) if gpu_ids else 1
         asyncio.run(
             _streaming_worker_async(
+                worker_id,
                 instance_queue,
                 result_queue,
                 model_name,
@@ -542,8 +566,9 @@ def streaming_worker_process(
                 extra_loader_config,
             )
         )
+        worker_logger.info("Processing complete")
     except Exception as e:
-        logger.error(f"Streaming worker process failed: {e}")
+        worker_logger.error(f"Streaming worker process failed: {e}")
         # Put a fatal error marker in the result queue so main process knows we died
         result_queue.put(
             ResultItem(
@@ -560,6 +585,7 @@ def streaming_worker_process(
 
 
 async def _streaming_worker_async(
+    worker_id: str,
     instance_queue: mp.Queue,
     result_queue: mp.Queue,
     model_name: str,
@@ -574,7 +600,14 @@ async def _streaming_worker_async(
 
     Uses AsyncVLLMProvider for true continuous batching with streaming results.
     """
+    import logging
+
     from olmo_eval.inference.vllm import AsyncVLLMProvider
+
+    # Get the worker logger (already configured by streaming_worker_process)
+    worker_logger = logging.getLogger(f"olmo_eval.worker.{worker_id}")
+    worker_logger.info("Initializing vLLM async engine...")
+    init_start = time.time()
 
     engine_kwargs: dict[str, Any] = {"tensor_parallel_size": num_gpus}
     if max_model_len:
@@ -590,6 +623,8 @@ async def _streaming_worker_async(
         attention_backend=attention_backend,
         **engine_kwargs,
     )
+
+    worker_logger.info(f"Async engine ready ({time.time() - init_start:.1f}s)")
 
     # Track request_id -> QueueItem mapping
     pending_requests: dict[str, QueueItem] = {}
@@ -891,6 +926,8 @@ class AsyncEvalRunner(AsyncRunnerMixin):
                 model_queues[model_name].put(None)
 
         # Start workers for each model
+        from olmo_eval.core.logging import get_worker_id
+
         workers: list[mp.process.BaseProcess] = []
         gpu_offset = 0
 
@@ -905,6 +942,8 @@ class AsyncEvalRunner(AsyncRunnerMixin):
 
             # Spawn workers for this model
             for i in range(workers_per_model):
+                worker_id = get_worker_id(model_config.model, i)
+
                 if total_gpus > 0:
                     start_gpu = gpu_offset + (i * self.gpus_per_worker)
                     end_gpu = min(start_gpu + self.gpus_per_worker, gpu_offset + gpus_per_model)
@@ -915,6 +954,7 @@ class AsyncEvalRunner(AsyncRunnerMixin):
                 worker = ctx.Process(
                     target=instance_worker_process,
                     args=(
+                        worker_id,
                         gpu_ids,
                         model_queues[model_name],
                         result_queue,
@@ -1356,6 +1396,8 @@ class StreamingEvalRunner(AsyncRunnerMixin):
         console.print(f"[bold]GPUs per model:[/bold] {gpus_per_model}")
 
         # Start streaming workers for each model
+        from olmo_eval.core.logging import get_worker_id
+
         workers: list[mp.process.BaseProcess] = []
         gpu_offset = 0
 
@@ -1368,6 +1410,8 @@ class StreamingEvalRunner(AsyncRunnerMixin):
             effective_extra_loader_config = per_model_overrides.get("extra_loader_config")
 
             for i in range(workers_per_model):
+                worker_id = get_worker_id(model_config.model, i)
+
                 if total_gpus > 0:
                     start_gpu = gpu_offset + (i * self.gpus_per_worker)
                     end_gpu = min(start_gpu + self.gpus_per_worker, gpu_offset + gpus_per_model)
@@ -1378,6 +1422,7 @@ class StreamingEvalRunner(AsyncRunnerMixin):
                 worker = ctx.Process(
                     target=streaming_worker_process,
                     args=(
+                        worker_id,
                         gpu_ids,
                         model_queues[model_name],
                         result_queue,
