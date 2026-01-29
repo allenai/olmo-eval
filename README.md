@@ -42,7 +42,7 @@ The evaluation framework is built around these core abstractions:
 |-------------|-------------|
 | **Task** | Defines a single evaluation (data loading, formatting, scoring) |
 | **Suite** | Groups tasks and/or nested suites with aggregation |
-| **Formatter** | Converts instances into LM requests (prompts) |
+| **Formatter** | Converts instances into LM requests |
 | **Scorer** | Scores individual instance/output pairs |
 | **Metric** | Aggregates scores into final metrics |
 
