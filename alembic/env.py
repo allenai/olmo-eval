@@ -7,7 +7,7 @@ from sqlalchemy import engine_from_config, pool
 from alembic import context
 
 # Import the Base from your models to get metadata
-from olmo_eval.storage.db.models import Base
+from olmo_eval.storage.backends.postgres.models import Base
 
 # This is the Alembic Config object
 config = context.config

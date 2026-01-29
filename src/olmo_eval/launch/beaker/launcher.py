@@ -595,7 +595,7 @@ class BeakerLauncher:
 
         # Inject AWS credentials if requested
         if config.inject_aws_credentials:
-            from olmo_eval.launch.aws import ensure_aws_secrets
+            from olmo_eval.launch.beaker.aws import ensure_aws_secrets
 
             aws_secrets = ensure_aws_secrets(config.workspace)
             env_secrets.extend(aws_secrets)
@@ -604,7 +604,7 @@ class BeakerLauncher:
         # Inject GCS credentials if requested
         google_credentials_secret: str | None = None
         if config.inject_gcs_credentials:
-            from olmo_eval.launch.gcs import ensure_gcs_secrets
+            from olmo_eval.launch.beaker.gcs import ensure_gcs_secrets
 
             google_credentials_secret = ensure_gcs_secrets(config.workspace)
             log.info("Injecting GCS credentials for GCS access")

@@ -159,7 +159,7 @@ class TestPostgresBackend:
         with postgres_backend.db.session() as session:
             from sqlalchemy import select
 
-            from olmo_eval.storage.db.models import Experiment
+            from olmo_eval.storage.backends.postgres.models import Experiment
 
             stmt = select(Experiment).where(Experiment.experiment_id == "eval-user1")
             exp1 = session.execute(stmt).scalar_one_or_none()

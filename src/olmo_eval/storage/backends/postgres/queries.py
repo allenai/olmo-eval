@@ -8,7 +8,10 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from olmo_eval.core.types import EvalResult
-from olmo_eval.storage.db.repository import ExperimentRepository, InstancePredictionRepository
+from olmo_eval.storage.backends.postgres.repository import (
+    ExperimentRepository,
+    InstancePredictionRepository,
+)
 
 
 class QueryHelper:

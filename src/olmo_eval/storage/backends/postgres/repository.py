@@ -14,7 +14,7 @@ from sqlalchemy import and_, delete, select
 from sqlalchemy.orm import Session
 
 from olmo_eval.core.types import EvalResult, StoredTaskResult
-from olmo_eval.storage.db.models import Experiment, InstancePrediction, TaskResult
+from olmo_eval.storage.backends.postgres.models import Experiment, InstancePrediction, TaskResult
 
 
 class ExperimentRepository:
@@ -377,8 +377,6 @@ class InstancePredictionRepository:
         Returns:
             List of instance dicts with enriched data (task_name included).
         """
-        from olmo_eval.storage.db.models import Experiment
-
         # Build query with JOINs to get task_name
         stmt = (
             select(InstancePrediction, TaskResult.task_name)
@@ -441,8 +439,6 @@ class InstancePredictionRepository:
         Returns:
             List of instance dicts with enriched data (task_name, model_hash included).
         """
-        from olmo_eval.storage.db.models import Experiment
-
         if not model_name and not model_hash:
             raise ValueError("Either model_name or model_hash is required")
 

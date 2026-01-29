@@ -29,6 +29,7 @@ from olmo_eval.launch.beaker import (
     resolve_clusters,
     validate_priority_configuration,
 )
+from olmo_eval.launch.beaker.secrets import ensure_common_secrets
 from olmo_eval.launch.config import (
     EvalConfig,
     ModelConfig,
@@ -37,7 +38,6 @@ from olmo_eval.launch.config import (
     get_template,
     parse_model_config,
 )
-from olmo_eval.launch.secrets import ensure_common_secrets
 
 __all__ = [
     "ensure_common_secrets",

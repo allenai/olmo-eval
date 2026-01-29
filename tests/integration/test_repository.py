@@ -11,7 +11,7 @@ class TestExperimentRepository:
     @pytest.mark.integration
     def test_save_experiment(self, postgres_backend, sample_eval_result):
         """Test saving an experiment through repository."""
-        from olmo_eval.storage.db.repository import ExperimentRepository
+        from olmo_eval.storage.backends.postgres.repository import ExperimentRepository
 
         with postgres_backend.db.session() as session:
             repo = ExperimentRepository(session)
@@ -28,7 +28,7 @@ class TestExperimentRepository:
     @pytest.mark.integration
     def test_get_experiment_by_pk(self, postgres_backend, sample_eval_result):
         """Test retrieving an experiment by primary key."""
-        from olmo_eval.storage.db.repository import ExperimentRepository
+        from olmo_eval.storage.backends.postgres.repository import ExperimentRepository
 
         with postgres_backend.db.session() as session:
             repo = ExperimentRepository(session)
@@ -46,7 +46,7 @@ class TestExperimentRepository:
     @pytest.mark.integration
     def test_get_experiment_by_experiment_id(self, postgres_backend, sample_eval_result):
         """Test retrieving experiments by experiment_id."""
-        from olmo_eval.storage.db.repository import ExperimentRepository
+        from olmo_eval.storage.backends.postgres.repository import ExperimentRepository
 
         postgres_backend.save(sample_eval_result)
 
@@ -61,7 +61,7 @@ class TestExperimentRepository:
     @pytest.mark.integration
     def test_delete_experiment(self, postgres_backend, sample_eval_result):
         """Test deleting an experiment by primary key."""
-        from olmo_eval.storage.db.repository import ExperimentRepository
+        from olmo_eval.storage.backends.postgres.repository import ExperimentRepository
 
         with postgres_backend.db.session() as session:
             repo = ExperimentRepository(session)
@@ -83,7 +83,7 @@ class TestExperimentRepository:
     @pytest.mark.integration
     def test_delete_by_experiment_id(self, postgres_backend, sample_eval_result):
         """Test deleting all experiments with an experiment_id."""
-        from olmo_eval.storage.db.repository import ExperimentRepository
+        from olmo_eval.storage.backends.postgres.repository import ExperimentRepository
 
         postgres_backend.save(sample_eval_result)
 
@@ -103,7 +103,7 @@ class TestExperimentRepository:
     @pytest.mark.integration
     def test_query_by_model_name(self, postgres_backend, multiple_eval_results):
         """Test querying experiments by model name."""
-        from olmo_eval.storage.db.repository import ExperimentRepository
+        from olmo_eval.storage.backends.postgres.repository import ExperimentRepository
 
         for result in multiple_eval_results:
             postgres_backend.save(result)
@@ -119,7 +119,7 @@ class TestExperimentRepository:
     @pytest.mark.integration
     def test_query_by_task_name(self, postgres_backend, multiple_eval_results):
         """Test querying experiments by task name."""
-        from olmo_eval.storage.db.repository import ExperimentRepository
+        from olmo_eval.storage.backends.postgres.repository import ExperimentRepository
 
         for result in multiple_eval_results:
             postgres_backend.save(result)
@@ -137,7 +137,7 @@ class TestExperimentRepository:
     @pytest.mark.integration
     def test_query_by_time_range(self, postgres_backend, multiple_eval_results):
         """Test querying experiments by time range."""
-        from olmo_eval.storage.db.repository import ExperimentRepository
+        from olmo_eval.storage.backends.postgres.repository import ExperimentRepository
 
         for result in multiple_eval_results:
             postgres_backend.save(result)
@@ -156,7 +156,7 @@ class TestExperimentRepository:
     @pytest.mark.integration
     def test_query_pagination(self, postgres_backend, multiple_eval_results):
         """Test query pagination."""
-        from olmo_eval.storage.db.repository import ExperimentRepository
+        from olmo_eval.storage.backends.postgres.repository import ExperimentRepository
 
         for result in multiple_eval_results:
             postgres_backend.save(result)
@@ -184,7 +184,7 @@ class TestInstancePredictionRepository:
     @pytest.mark.integration
     def test_save_instances(self, postgres_backend, sample_eval_result):
         """Test saving instance predictions."""
-        from olmo_eval.storage.db.repository import (
+        from olmo_eval.storage.backends.postgres.repository import (
             ExperimentRepository,
             InstancePredictionRepository,
         )
@@ -225,7 +225,7 @@ class TestInstancePredictionRepository:
     @pytest.mark.integration
     def test_get_instances_by_task_name(self, postgres_backend, sample_eval_result):
         """Test retrieving instances by task name (via JOIN)."""
-        from olmo_eval.storage.db.repository import (
+        from olmo_eval.storage.backends.postgres.repository import (
             ExperimentRepository,
             InstancePredictionRepository,
         )
@@ -256,7 +256,7 @@ class TestInstancePredictionRepository:
     @pytest.mark.integration
     def test_get_instances_pagination(self, postgres_backend, sample_eval_result):
         """Test instance keyset pagination with after_id."""
-        from olmo_eval.storage.db.repository import (
+        from olmo_eval.storage.backends.postgres.repository import (
             ExperimentRepository,
             InstancePredictionRepository,
         )

@@ -11,8 +11,14 @@ Evaluation toolkit for OLMo and other language models.
 ## Quick Start
 
 ```bash
-# Install
-uv pip install -e .
+# Development setup (includes pre-commit hooks)
+make setup
+
+# Full setup with beaker + storage (for launching jobs and fetching results)
+make setup-all
+
+# Or with specific extras
+make setup EXTRAS=beaker
 
 # List available commands
 olmo-eval --help
@@ -209,9 +215,6 @@ class MyTask(Task):
 
     default_source: str = "my-org/my-dataset"
 
-    def __init__(self, config: TaskConfig) -> None:
-        super().__init__(config)
-
     @property
     def instances(self) -> Iterator[Instance]:
         """Load and yield instances from the dataset."""
@@ -376,10 +379,10 @@ olmo-eval includes built-in support for launching evaluation jobs on [Beaker](ht
 
 ### Installation
 
-Install with the Beaker optional dependency:
+Install with the Beaker extra:
 
 ```bash
-uv pip install 'olmo-eval-internal[beaker]'
+make setup EXTRAS=beaker
 ```
 
 ### CLI Usage
@@ -891,12 +894,12 @@ olmo-eval run --async-stream -m llama3.1-8b -t mmlu -t gsm8k -t arc
 ## Development
 
 ```bash
-# Install dev dependencies
-uv pip install -e ".[dev]"
+# Setup (installs dev dependencies and pre-commit hooks)
+make setup
 
 # Run linter
-ruff check src/
+make lint
 
 # Run tests
-pytest
+make test
 ```
