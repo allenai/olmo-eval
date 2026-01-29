@@ -204,7 +204,7 @@ class CorpusPerplexityMetric:
             outputs = response.outputs
             if not outputs:
                 continue
-            # We assume this contains one output for the entire doc
+            # This should contain the output for the entire doc
             output = outputs[0]
             if output.logprobs is None:
                 continue
