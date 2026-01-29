@@ -144,7 +144,7 @@ class MeanPerplexityMetric(Metric):
         if not responses:
             return 0.0
 
-        scorer_instance = self.scorer()
+        scorer = self.scorer()
         total = 0.0
 
         for response in responses:
@@ -164,6 +164,6 @@ class MeanPerplexityMetric(Metric):
                 # Single output: use it directly
                 output = outputs[0]
 
-            total += scorer_instance.score(response.instance, output)
+            total += scorer.score(response.instance, output)
 
         return total / len(responses)
