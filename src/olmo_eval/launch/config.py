@@ -126,25 +126,42 @@ def parse_model_config(model: str | dict[str, Any] | ModelConfig) -> ModelConfig
     """Parse a model specification into ModelConfig.
 
     Handles both simple string format and detailed dict/ModelConfig format.
+    Inline overrides (::key=value) are parsed and applied to matching ModelConfig fields.
 
     Args:
         model: Model name/path string, dict with model config, or ModelConfig.
 
     Returns:
-        ModelConfig instance.
+        ModelConfig instance with any inline overrides applied.
 
     Examples:
         parse_model_config("llama3.1-8b")
         parse_model_config({"name_or_path": "llama3.1-70b", "gpus": 4})
-        parse_model_config("llama3.1-8b::attention_backend=FLASH_ATTN")
+        parse_model_config("llama3.1-8b::provider=vllm,load_format=auto")
     """
     if isinstance(model, ModelConfig):
         return model
     if isinstance(model, str):
-        # Strip inline overrides (::key=value) from model spec for name_or_path
-        # The full spec with overrides is preserved in the original string for command building
-        name_or_path, _, _ = model.partition("::")
-        return ModelConfig(name_or_path=name_or_path)
+        from olmo_eval.evals.tasks.core.registry import parse_overrides
+
+        # Parse inline overrides (::key=value) from model spec
+        name_or_path, _, override_str = model.partition("::")
+        overrides = parse_overrides(override_str) if override_str else {}
+
+        # Map inline overrides to ModelConfig fields
+        config_kwargs: dict[str, Any] = {"name_or_path": name_or_path}
+
+        # Fields that can be set via inline overrides
+        if "provider" in overrides:
+            config_kwargs["provider"] = overrides["provider"]
+        if "load_format" in overrides:
+            config_kwargs["load_format"] = overrides["load_format"]
+        if "gpus_per_worker" in overrides:
+            config_kwargs["gpus_per_worker"] = int(overrides["gpus_per_worker"])
+        if "extra_loader_config" in overrides:
+            config_kwargs["extra_loader_config"] = overrides["extra_loader_config"]
+
+        return ModelConfig(**config_kwargs)
     if isinstance(model, dict):
         schema = OmegaConf.structured(ModelConfig)
         merged = OmegaConf.merge(schema, OmegaConf.create(model))
