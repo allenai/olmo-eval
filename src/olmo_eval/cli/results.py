@@ -257,10 +257,28 @@ def print_task_comparison_matrix(
     console.print(table)
 
 
+def _filter_none_instances(d: dict[str, Any]) -> dict[str, Any]:
+    """Recursively remove 'instances' keys with None values from dict."""
+    result = {}
+    for k, v in d.items():
+        if k == "instances" and v is None:
+            continue
+        elif isinstance(v, dict):
+            result[k] = _filter_none_instances(v)
+        elif isinstance(v, list):
+            result[k] = [
+                _filter_none_instances(item) if isinstance(item, dict) else item for item in v
+            ]
+        else:
+            result[k] = v
+    return result
+
+
 def experiments_to_dict(
     experiments: list[Any],
     instances: list[dict[str, Any]] | None = None,
     limit: int | None = None,
+    include_instances: bool = False,
 ) -> dict[str, Any]:
     """Convert experiments to dict with optional instances grouped by task.
 
@@ -268,6 +286,7 @@ def experiments_to_dict(
         experiments: List of experiment results.
         instances: Optional list of instance predictions to include.
         limit: The limit used for querying instances (for pagination metadata).
+        include_instances: Whether user requested instances (controls key presence in output).
 
     Returns:
         Dict with experiments containing tasks containing instances.
@@ -331,16 +350,25 @@ def experiments_to_dict(
         pagination = PaginationOutput(last_id=last_id, has_more=has_more)
 
     output = ExperimentsOutput(experiments=experiment_outputs, pagination=pagination)
-    return asdict(output)
+    result = asdict(output)
+
+    # Remove instances keys if user didn't request them
+    if not include_instances:
+        result = _filter_none_instances(result)
+
+    return result
 
 
 def experiments_to_json(
     experiments: list[Any],
     instances: list[dict[str, Any]] | None = None,
     limit: int | None = None,
+    include_instances: bool = False,
 ) -> str:
     """Convert experiments to JSON string."""
-    return json.dumps(experiments_to_dict(experiments, instances, limit), indent=2)
+    return json.dumps(
+        experiments_to_dict(experiments, instances, limit, include_instances), indent=2
+    )
 
 
 def experiments_to_csv(experiments: list[Any]) -> None:
@@ -391,6 +419,7 @@ def task_comparison_to_dict(
     task_filter: set[str] | None = None,
     instances: list[dict[str, Any]] | None = None,
     limit: int | None = None,
+    include_instances: bool = False,
 ) -> dict[str, Any]:
     """Convert task comparison to dict with optional instances grouped by model-task.
 
@@ -399,6 +428,7 @@ def task_comparison_to_dict(
         task_filter: Optional set of task names to include.
         instances: Optional list of instance predictions to include.
         limit: The limit used for querying instances (for pagination metadata).
+        include_instances: Whether user requested instances (controls key presence in output).
 
     Returns:
         Dict with models containing tasks containing scores and instances.
@@ -455,7 +485,13 @@ def task_comparison_to_dict(
         pagination = PaginationOutput(last_id=last_id, has_more=has_more)
 
     output = ComparisonOutput(models=models, pagination=pagination)
-    return asdict(output)
+    result = asdict(output)
+
+    # Remove instances keys if user didn't request them
+    if not include_instances:
+        result = _filter_none_instances(result)
+
+    return result
 
 
 def task_comparison_to_json(
@@ -463,9 +499,13 @@ def task_comparison_to_json(
     task_filter: set[str] | None = None,
     instances: list[dict[str, Any]] | None = None,
     limit: int | None = None,
+    include_instances: bool = False,
 ) -> str:
     """Convert task comparison to JSON string."""
-    return json.dumps(task_comparison_to_dict(experiments, task_filter, instances, limit), indent=2)
+    return json.dumps(
+        task_comparison_to_dict(experiments, task_filter, instances, limit, include_instances),
+        indent=2,
+    )
 
 
 def instances_to_json(instances: list[dict[str, Any]]) -> str:
@@ -909,10 +949,12 @@ def _output_results(
     if output_format == "json":
         if is_comparison:
             output = task_comparison_to_dict(
-                experiments, task_filter, instances_for_output, limit_for_output
+                experiments, task_filter, instances_for_output, limit_for_output, include_instances
             )
         else:
-            output = experiments_to_dict(experiments, instances_for_output, limit_for_output)
+            output = experiments_to_dict(
+                experiments, instances_for_output, limit_for_output, include_instances
+            )
         print(json.dumps(output, indent=2, default=str))
         return
 
