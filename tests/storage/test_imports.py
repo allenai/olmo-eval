@@ -18,10 +18,10 @@ def test_import_backends_module():
         pytest.skip(f"Storage backends not available: {e}")
 
 
-def test_import_db_module():
-    """Test importing db module."""
+def test_import_postgres_package():
+    """Test importing postgres package with all components."""
     try:
-        mod = importlib.import_module("olmo_eval.storage.db")
+        mod = importlib.import_module("olmo_eval.storage.backends.postgres")
         assert hasattr(mod, "Base")
         assert hasattr(mod, "Experiment")
         assert hasattr(mod, "TaskResult")
@@ -30,6 +30,7 @@ def test_import_db_module():
         assert hasattr(mod, "ExperimentRepository")
         assert hasattr(mod, "InstancePredictionRepository")
         assert hasattr(mod, "QueryHelper")
+        assert hasattr(mod, "PostgresBackend")
     except ImportError as e:
         pytest.skip(f"Database infrastructure not available: {e}")
 
@@ -37,7 +38,7 @@ def test_import_db_module():
 def test_import_models():
     """Test importing SQLAlchemy models."""
     try:
-        mod = importlib.import_module("olmo_eval.storage.db.models")
+        mod = importlib.import_module("olmo_eval.storage.backends.postgres.models")
         assert hasattr(mod, "Base")
         assert hasattr(mod, "Experiment")
         assert hasattr(mod, "InstancePrediction")
@@ -49,7 +50,7 @@ def test_import_models():
 def test_import_session():
     """Test importing session management."""
     try:
-        mod = importlib.import_module("olmo_eval.storage.db.session")
+        mod = importlib.import_module("olmo_eval.storage.backends.postgres.session")
         assert hasattr(mod, "DatabaseSession")
         assert hasattr(mod, "create_postgres_engine")
         assert hasattr(mod, "create_session_factory")
@@ -60,7 +61,7 @@ def test_import_session():
 def test_import_repository():
     """Test importing repository layer."""
     try:
-        mod = importlib.import_module("olmo_eval.storage.db.repository")
+        mod = importlib.import_module("olmo_eval.storage.backends.postgres.repository")
         assert hasattr(mod, "ExperimentRepository")
         assert hasattr(mod, "InstancePredictionRepository")
     except ImportError as e:
@@ -70,7 +71,7 @@ def test_import_repository():
 def test_import_queries():
     """Test importing query helpers."""
     try:
-        mod = importlib.import_module("olmo_eval.storage.db.queries")
+        mod = importlib.import_module("olmo_eval.storage.backends.postgres.queries")
         assert hasattr(mod, "QueryHelper")
     except ImportError as e:
         pytest.skip(f"SQLAlchemy not installed: {e}")
