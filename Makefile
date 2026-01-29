@@ -1,4 +1,4 @@
-.PHONY: setup fix verify test lint type-check clean
+.PHONY: setup setup-all fix verify test lint type-check clean
 
 # Development setup
 # Usage: make setup [EXTRAS="beaker storage"]
@@ -7,6 +7,11 @@ EXTRA_FLAGS := $(foreach extra,$(EXTRAS),--extra $(extra))
 
 setup:
 	uv sync --dev $(EXTRA_FLAGS)
+	uv run pre-commit install
+
+# Full setup with beaker and storage (for launching jobs and fetching results)
+setup-all:
+	uv sync --dev --extra beaker --extra storage
 	uv run pre-commit install
 
 # Auto-fix formatting and lint issues
