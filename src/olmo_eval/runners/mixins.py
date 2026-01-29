@@ -780,10 +780,10 @@ class RunnerResultsMixin:
         """Report when a (model, task) pair completes."""
         label = f"{model_name}:{result.spec}"
         if result.error:
-            console.print(f"  [red]x[/red] {label} (ERROR: {result.error})")
+            console.print(f"  [red]✗[/red] {label} (ERROR: {result.error})")
         else:
             console.print(
-                f"  [green]v[/green] {label} ({result.num_instances} instances, "
+                f"  [green]✓[/green] {label} ({result.num_instances} instances, "
                 f"{result.duration_seconds:.1f}s)"
             )
 

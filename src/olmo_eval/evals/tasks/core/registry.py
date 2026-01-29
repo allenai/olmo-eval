@@ -107,8 +107,8 @@ def parse_overrides(override_str: str) -> dict[str, Any]:
     Examples:
         >>> parse_overrides("temperature=0.6,max_tokens=512")
         {"temperature": 0.6, "max_tokens": 512}
-        >>> parse_overrides("backend=vllm")
-        {"backend": "vllm"}
+        >>> parse_overrides("provider=vllm")
+        {"provider": "vllm"}
         >>> parse_overrides('extra_loader_config={"distributed":true}')
         {"extra_loader_config": {"distributed": True}}
     """

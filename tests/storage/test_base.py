@@ -5,6 +5,7 @@ from datetime import datetime
 import pytest
 
 from olmo_eval.core.types import EvalResult, StoredTaskResult, compute_model_hash
+from olmo_eval.storage.base import convert_runner_results
 
 
 class TestStoredTaskResult:
@@ -178,3 +179,80 @@ class TestComputeModelHash:
         config = {"model": "test"}
         h = compute_model_hash(config)
         assert len(h) == 16
+
+
+class TestConvertRunnerResults:
+    """Tests for convert_runner_results function."""
+
+    def test_converts_provider_field(self):
+        """Test that 'provider' field from runner results maps to backend_name.
+
+        This catches regressions where the wrong key is used (e.g., 'backend' vs 'provider').
+        """
+        results = {
+            "model": "llama3.1-8b",
+            "provider": "vllm",
+            "timestamp": "2024-01-15T10:30:00",
+            "tasks": {
+                "mmlu": {
+                    "metrics": {"accuracy": 0.75},
+                    "task_hash": "mmlu-hash-001",
+                }
+            },
+        }
+
+        eval_result = convert_runner_results(results, experiment_id="test-123")
+
+        assert eval_result.model_name == "llama3.1-8b"
+        assert eval_result.backend_name == "vllm"
+        assert eval_result.experiment_id == "test-123"
+
+    def test_missing_provider_raises_key_error(self):
+        """Test that missing 'provider' field raises KeyError."""
+        results = {
+            "model": "llama3.1-8b",
+            # "provider" is missing - should fail
+            "timestamp": "2024-01-15T10:30:00",
+            "tasks": {},
+        }
+
+        with pytest.raises(KeyError, match="provider"):
+            convert_runner_results(results, experiment_id="test-123")
+
+    def test_converts_all_required_fields(self):
+        """Test that all required fields from runner results are converted."""
+        results = {
+            "model": "olmo-2-7b",
+            "provider": "hf",
+            "timestamp": "2024-06-20T14:00:00",
+            "tasks": {
+                "gsm8k": {
+                    "metrics": {"exact_match": 0.58},
+                    "task_hash": "gsm8k-hash",
+                    "num_instances": 1000,
+                    "primary_metric": "exact_match",
+                },
+            },
+            "model_config": {"temperature": 0.0},
+            "metadata": {"run_id": "abc"},
+        }
+
+        eval_result = convert_runner_results(
+            results,
+            experiment_id="exp-456",
+            experiment_name="test-run",
+            workspace="ai2/test",
+            author="tester",
+        )
+
+        assert eval_result.model_name == "olmo-2-7b"
+        assert eval_result.backend_name == "hf"
+        assert eval_result.timestamp == datetime(2024, 6, 20, 14, 0, 0)
+        assert eval_result.experiment_name == "test-run"
+        assert eval_result.workspace == "ai2/test"
+        assert eval_result.author == "tester"
+        assert eval_result.model_config == {"temperature": 0.0}
+        assert eval_result.metadata == {"run_id": "abc"}
+        assert len(eval_result.tasks) == 1
+        assert eval_result.tasks[0].task_name == "gsm8k"
+        assert eval_result.tasks[0].metrics == {"exact_match": 0.58}

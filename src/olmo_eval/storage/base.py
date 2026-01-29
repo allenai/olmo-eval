@@ -167,7 +167,7 @@ def convert_runner_results(
     return EvalResult(
         experiment_id=experiment_id,
         model_name=results["model"],
-        backend_name=results["backend"],
+        backend_name=results["provider"],
         timestamp=datetime.fromisoformat(results["timestamp"]),
         tasks=tasks,
         experiment_name=experiment_name,

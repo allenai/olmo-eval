@@ -801,7 +801,7 @@ def write_predictions_jsonl(
         for pred in predictions:
             f.write(json.dumps(pred) + "\n")
 
-    logger.info(f"Wrote {len(predictions)} predictions for {spec}")
+    logger.info(f"Saved {len(predictions)} predictions: {spec}")
 
 
 def write_requests_jsonl(
@@ -837,4 +837,4 @@ def write_requests_jsonl(
         for req in requests:
             f.write(json.dumps(req) + "\n")
 
-    logger.info(f"Wrote {len(requests)} requests for {spec}")
+    logger.info(f"Saved {len(requests)} requests: {spec}")
