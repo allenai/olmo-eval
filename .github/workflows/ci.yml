@@ -215,7 +215,7 @@ jobs:
             uv-${{ runner.os }}-
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --dev --extra postgres --extra s3
 
       - name: Wait for services to be ready
         run: |
@@ -276,7 +276,7 @@ jobs:
 
       - name: Run vLLM integration tests
         run: |
-          uv run pytest tests/integration/test_vllm_backend.py \
+          uv run pytest tests/integration/test_vllm_provider.py \
             -v \
             --integration \
             --no-docker \
@@ -321,7 +321,7 @@ jobs:
 
       - name: Run vLLM integration tests with Docker
         run: |
-          uv run pytest tests/integration/test_vllm_backend.py \
+          uv run pytest tests/integration/test_vllm_provider.py \
             -v \
             --integration \
             --tb=short
