@@ -81,12 +81,6 @@ def beaker() -> None:
     multiple=True,
     help="Add experiments to Beaker group(s) (can specify multiple, creates if needed)",
 )
-@click.option(
-    "--extras",
-    "-e",
-    multiple=True,
-    help="Optional dependency groups to install at runtime (e.g., vllm, postgres)",
-)
 @click.option("--async", "-a", "use_async", is_flag=True, help="Enable parallel task execution")
 @click.option(
     "--async-stream",
@@ -152,7 +146,6 @@ def launch(
     budget: str | None,
     image: str | None,
     group: tuple[str, ...],
-    extras: tuple[str, ...],
     use_async: bool,
     use_async_stream: bool,
     num_workers: int | None,
@@ -173,9 +166,13 @@ def launch(
     Requires beaker-py to be installed: pip install 'olmo-eval-internal[beaker]'
 
     Multiple models and/or tasks with different priorities will create separate experiments.
+    Models with compatible runtime configurations (GPUs, backend, etc.) are grouped together.
     Use --config/-f to load settings from a YAML file; CLI arguments override config values.
     Use --group/-g to organize experiments into a Beaker group for result aggregation.
-    Use --extras/-e to install optional dependencies at runtime (e.g., vllm, postgres).
+
+    Backend packages (vllm, transformers, etc.) are auto-detected from each model's
+    configuration and installed at job startup. Specify per-model backends in the
+    config file using the 'backend' field on each model.
 
     Examples:
 
@@ -185,16 +182,13 @@ def launch(
 
         olmo-eval beaker launch -n "eval-70b" -m llama3.1-70b -t mmlu --cluster h100 --gpus 4
 
-        # Multiple models (creates separate experiments per model)
+        # Multiple models (grouped if compatible runtime)
         olmo-eval beaker launch -n "eval-compare" -m llama3.1-8b -m olmo-2-7b -t mmlu -t gsm8k
 
         # Per-task priorities (creates separate experiments per priority level)
         olmo-eval beaker launch -n "eval-mixed" -m llama3.1-8b -t "mmlu@high" -t "gsm8k@normal"
 
-        # Install backends at runtime
-        olmo-eval beaker launch -n "eval-vllm" -m llama3.1-8b -t mmlu -b vllm
-
-        # From YAML config file
+        # From YAML config file (with per-model backend configuration)
         olmo-eval beaker launch -f eval_config.yaml
 
         # Config file with CLI overrides
@@ -250,7 +244,6 @@ def launch(
         # Use config values as defaults, CLI args override
         name = name or cfg.name
         task = task if task else tuple(cfg.tasks)
-        extras = extras if extras else (tuple(cfg.extras) if cfg.extras else ())
         retries = retries if retries is not None else cfg.retries
         workspace = workspace or cfg.workspace
         budget = budget or cfg.budget
@@ -957,23 +950,26 @@ def launch(
         if store:
             command.append("--store")
 
-        # Determine the backend this model group will use at runtime
-        from olmo_eval.core.configs import get_model_config as get_runtime_model_config
+        # Get the backend for this model group (required per-model configuration)
         from olmo_eval.core.constants.infrastructure import BACKEND_OPTIONAL_GROUPS
 
         config_backend = model_resources.get("backend")
-        if config_backend:
-            runtime_backend: str = str(config_backend)
-        else:
-            runtime_model_config = get_runtime_model_config(first_model_cfg.name_or_path)
-            runtime_backend = runtime_model_config.backend
+        if not config_backend:
+            model_name = first_model_cfg.name_or_path
+            console.print(
+                f"[red]Error:[/red] No backend specified for model '{model_name}'.\n"
+                "Specify a backend in the config file:\n"
+                "  models:\n"
+                "    - name_or_path: llama3.1-8b\n"
+                "      backend: vllm\n"
+                "\nOr via inline override:\n"
+                "  -m 'llama3.1-8b::backend=vllm'"
+            )
+            raise SystemExit(1)
 
-        # CLI extras override auto-detected backend
-        if extras:
-            model_backends = list(extras)
-        else:
-            backend_group = BACKEND_OPTIONAL_GROUPS.get(runtime_backend)
-            model_backends = [backend_group] if backend_group else []
+        runtime_backend: str = str(config_backend)
+        backend_group = BACKEND_OPTIONAL_GROUPS.get(runtime_backend)
+        model_backends = [backend_group] if backend_group else []
 
         # Combine model backends and storage dependencies for installation
         install_extras = list(model_backends)

@@ -26,151 +26,7 @@ olmo-eval run -m llama3.1-8b -t arc_challenge::olmes --dry-run
 # Run evaluation
 olmo-eval run -m olmo-2-7b -t olmes_core --limit 100
 
-# Run tasks in parallel across GPUs (faster)
-olmo-eval run --async -m olmo-2-7b -t mmlu -t gsm8k -t arc
-
-# Specify number of workers and GPUs per worker
-olmo-eval run --async --num-workers 4 --gpus-per-worker 2 -m llama3.1-70b -t mmlu
 ```
-
-## Parallel Execution
-
-By default, tasks run sequentially. Two parallel execution modes are available:
-
-| Mode | Flag | Backend | Best For |
-|------|------|---------|----------|
-| Sequential | (default) | Any | Simple runs, debugging |
-| Async | `--async` | Any | Multi-GPU batch processing |
-| Streaming | `--async-stream` | vLLM only | Maximum throughput |
-
-### Sequential Mode (Default)
-
-Runs one task at a time on a single model instance:
-
-```bash
-olmo-eval run -m llama3.1-8b -t mmlu -t gsm8k -t arc
-```
-
-### Async Mode (`--async`)
-
-Spawns worker processes that each load the model and process batches. All instances are queued upfront, then processed in parallel:
-
-```bash
-# Auto-detect workers from available GPUs
-olmo-eval run --async -m llama3.1-8b -t mmlu -t gsm8k -t arc
-
-# Specify number of workers
-olmo-eval run --async --num-workers 4 -m llama3.1-8b -t mmlu -t gsm8k
-
-# Multi-GPU models (e.g., 70B on 4 GPUs per worker)
-olmo-eval run --async --num-workers 2 --gpus-per-worker 4 -m llama3.1-70b -t mmlu
-```
-
-### Streaming Mode (`--async-stream`)
-
-Uses vLLM's AsyncLLMEngine for true continuous batching. Requests are added continuously and results stream back as they complete:
-
-```bash
-# Streaming with auto-detected workers
-olmo-eval run --async-stream -m llama3.1-8b -t mmlu -t gsm8k -t arc
-
-# Streaming with specific worker config
-olmo-eval run --async-stream --num-workers 2 --gpus-per-worker 4 -m llama3.1-70b -t mmlu
-```
-
-### Architecture
-
-**Async Mode (`--async`)**
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Main Process                             │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐      │
-│  │ Prepare Task │───▶│ Prepare Task │───▶│ Prepare Task │      │
-│  │   (mmlu)     │    │   (gsm8k)    │    │    (arc)     │      │
-│  └──────────────┘    └──────────────┘    └──────────────┘      │
-│         │                   │                   │               │
-│         └───────────────────┴───────────────────┘               │
-│                             │                                   │
-│                             ▼                                   │
-│                  ┌─────────────────────┐                        │
-│                  │   Instance Queue    │ (all instances mixed)  │
-│                  │ [inst1, inst2, ...] │                        │
-│                  └─────────────────────┘                        │
-└─────────────────────────────┬───────────────────────────────────┘
-                              │
-          ┌───────────────────┼───────────────────┐
-          ▼                   ▼                   ▼
-   ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-   │  Worker 0   │     │  Worker 1   │     │  Worker 2   │
-   │  (GPU 0)    │     │  (GPU 1)    │     │  (GPU 2)    │
-   │             │     │             │     │             │
-   │ Load Model  │     │ Load Model  │     │ Load Model  │
-   │ Collect All │     │ Collect All │     │ Collect All │
-   │ Batch Infer │     │ Batch Infer │     │ Batch Infer │
-   └──────┬──────┘     └──────┬──────┘     └──────┬──────┘
-          │                   │                   │
-          └───────────────────┴───────────────────┘
-                              │
-                              ▼
-                  ┌─────────────────────┐
-                  │    Result Queue     │
-                  └─────────────────────┘
-                              │
-                              ▼
-                  ┌─────────────────────┐
-                  │  Score & Aggregate  │
-                  └─────────────────────┘
-```
-
-**Streaming Mode (`--async-stream`)**
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Main Process                             │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐      │
-│  │ Prepare Task │───▶│ Prepare Task │───▶│ Prepare Task │      │
-│  └──────────────┘    └──────────────┘    └──────────────┘      │
-│         │                   │                   │               │
-│         └───────────────────┴───────────────────┘               │
-│                             │                                   │
-│                             ▼                                   │
-│                  ┌─────────────────────┐                        │
-│                  │   Instance Queue    │ (streams continuously) │
-│                  └─────────────────────┘                        │
-└─────────────────────────────┬───────────────────────────────────┘
-                              │
-                              ▼
-                 ┌────────────────────────┐
-                 │   Streaming Worker     │
-                 │   (AsyncLLMEngine)     │
-                 │                        │
-                 │  ┌──────────────────┐  │
-                 │  │ Add requests     │◀─┼─── Continuous input
-                 │  │ continuously     │  │
-                 │  └────────┬─────────┘  │
-                 │           │            │
-                 │  ┌────────▼─────────┐  │
-                 │  │ vLLM Continuous  │  │
-                 │  │ Batching Engine  │  │
-                 │  └────────┬─────────┘  │
-                 │           │            │
-                 │  ┌────────▼─────────┐  │
-                 │  │ Stream results   │──┼─── Results as they complete
-                 │  │ as completed     │  │
-                 │  └──────────────────┘  │
-                 └────────────────────────┘
-                              │
-                              ▼
-                  ┌─────────────────────┐
-                  │  Score immediately  │
-                  │  as tasks complete  │
-                  └─────────────────────┘
-```
-
-**Key Differences:**
-- **Async**: Workers collect all instances first, then batch process. Works with any backend.
-- **Streaming**: Requests flow continuously through vLLM's async engine. Only supported for generative tasks. vLLM only.
 
 ## Key Concepts
 
@@ -522,11 +378,7 @@ olmo-eval beaker launch -n "benchmark-v1" --group "benchmark-2024" \
     -m llama3.1-8b -m olmo-2-7b \
     -t mmlu -t gsm8k -t hellaswag
 
-# Creates experiments and adds them to "benchmark-2024" group
-# Output:
-#   Launched: benchmark-v1-llama3.1-8b -> https://beaker.org/ex/...
-#   Launched: benchmark-v1-olmo-2-7b -> https://beaker.org/ex/...
-#   Group: Added 2 experiment(s) to 'benchmark-2024'
+# Creates experiment and adds it to "benchmark-2024" group
 
 # Check group status and results
 olmo-eval beaker group info benchmark-2024
@@ -541,32 +393,38 @@ olmo-eval beaker group info benchmark-2024 --wait --format csv > results.csv
 olmo-eval beaker group info benchmark-2024 --format json
 ```
 
-### Runtime Backend Installation
+### Backend Configuration
 
-Docker images do NOT include inference backends (vllm, transformers, litellm) by default. Install them at runtime when launching jobs using optional dependency group names:
+Docker images do NOT include inference backends (vllm, transformers, litellm) by default.
+Each model must specify its backend, which is installed at job startup.
 
-```bash
-# Install vLLM backend
-olmo-eval beaker launch -n "eval-vllm" -m llama3.1-8b -t mmlu --backends vllm
+**Via config file (recommended):**
 
-# Install HuggingFace transformers backend
-olmo-eval beaker launch -n "eval-hf" -m llama3.1-8b -t mmlu --backends hf
-
-# Install multiple backends
-olmo-eval beaker launch -n "eval-multi" -m llama3.1-8b -t mmlu \
-    --backends vllm \
-    --backends hf
-
-# Short flag
-olmo-eval beaker launch -n "eval-vllm" -m llama3.1-8b -t mmlu -b vllm
+```yaml
+name: eval-mixed-backends
+models:
+  - name_or_path: llama3.1-8b
+    backend: vllm
+  - name_or_path: gpt-4o
+    backend: litellm
+tasks:
+  - mmlu
+cluster: h100
 ```
 
-Available backend groups (defined in `pyproject.toml`):
-- `vllm` - vLLM inference engine (includes `vllm[runai]` for S3 model loading)
-- `hf` - HuggingFace transformers
-- `litellm` - LiteLLM for API-based models
+**Via CLI inline override:**
 
-Backends are installed via `uv pip install -e '.[backend]'` at job startup.
+```bash
+olmo-eval beaker launch -n "eval" -m "llama3.1-8b::backend=vllm" -t mmlu
+```
+
+Models with the same backend (and other compatible settings) are grouped into the same experiment.
+Models with different backends run in separate experiments.
+
+Available backends:
+- `vllm` - vLLM inference engine
+- `hf` - HuggingFace transformers
+- `litellm` - LiteLLM for API-based models (OpenAI, Anthropic, etc.)
 
 ### CLI Options
 
@@ -587,7 +445,6 @@ Backends are installed via `uv pip install -e '.[backend]'` at job startup.
 | `--workspace` | `-w` | required | Beaker workspace |
 | `--budget` | `-B` | required | Beaker budget |
 | `--group` | `-g` | none | Add experiments to Beaker group(s) (can specify multiple) |
-| `--backends` | `-b` | none | Backends to install at runtime (can specify multiple) |
 | `--async` | `-a` | `false` | Enable parallel task execution |
 | `--async-stream` | | `false` | Use vLLM's AsyncLLMEngine for continuous batching |
 | `--num-workers` | `-W` | auto | Number of workers for async mode |
@@ -605,7 +462,8 @@ CLI arguments override values from the config file.
 ```yaml
 name: eval-llama3-core
 models:
-  - llama3.1-8b
+  - name_or_path: llama3.1-8b
+    backend: vllm
 tasks:
   - mmlu
   - gsm8k
@@ -631,29 +489,17 @@ olmo-eval beaker launch -f eval_config.yaml --gpus 4 --priority high
 olmo-eval beaker launch -f eval_config.yaml -m olmo-2-7b
 ```
 
-**Config with runtime backends**:
-
-```yaml
-name: eval-vllm
-models:
-  - llama3.1-8b
-tasks:
-  - mmlu
-  - gsm8k
-backends:
-  - vllm
-cluster: h100
-gpus: 1
-```
-
 **Multi-model comparison config**:
 
 ```yaml
 name: eval-model-comparison
 models:
-  - llama3.1-8b
-  - olmo-2-7b
-  - mistral-7b
+  - name_or_path: llama3.1-8b
+    backend: vllm
+  - name_or_path: olmo-2-7b
+    backend: vllm
+  - name_or_path: mistral-7b
+    backend: vllm
 tasks:
   - mmlu
   - gsm8k
@@ -670,8 +516,10 @@ Tasks with different priorities create separate Beaker experiments:
 ```yaml
 name: eval-prioritized
 models:
-  - llama3.1-8b
-  - olmo-2-7b
+  - name_or_path: llama3.1-8b
+    backend: vllm
+  - name_or_path: olmo-2-7b
+    backend: vllm
 tasks:
   # High priority - run first
   - mmlu@high
@@ -687,15 +535,12 @@ gpus: 1
 timeout: 24h
 ```
 
-This creates **6 experiments** (2 models × 3 priority levels):
+This creates **3 experiments** (one per priority level, with both models in each):
 
 ```
-eval-prioritized-llama3.1-8b-high:   tasks=[mmlu, gsm8k]
-eval-prioritized-llama3.1-8b-normal: tasks=[hellaswag, arc_challenge]
-eval-prioritized-llama3.1-8b-low:    tasks=[winogrande, truthfulqa]
-eval-prioritized-olmo-2-7b-high:     tasks=[mmlu, gsm8k]
-eval-prioritized-olmo-2-7b-normal:   tasks=[hellaswag, arc_challenge]
-eval-prioritized-olmo-2-7b-low:      tasks=[winogrande, truthfulqa]
+eval-prioritized-high:   models=[llama3.1-8b, olmo-2-7b], tasks=[mmlu, gsm8k]
+eval-prioritized-normal: models=[llama3.1-8b, olmo-2-7b], tasks=[hellaswag, arc_challenge]
+eval-prioritized-low:    models=[llama3.1-8b, olmo-2-7b], tasks=[winogrande, truthfulqa]
 ```
 
 **Large model config**:
@@ -703,13 +548,14 @@ eval-prioritized-olmo-2-7b-low:      tasks=[winogrande, truthfulqa]
 ```yaml
 name: eval-70b-full
 models:
-  - meta-llama/Llama-3.1-70B-Instruct
+  - name_or_path: meta-llama/Llama-3.1-70B-Instruct
+    backend: vllm
+    gpus: 4
 tasks:
   - mmlu
   - gsm8k
   - hellaswag
 cluster: h100
-gpus: 4
 priority: high
 preemptible: false
 timeout: 48h
@@ -722,10 +568,10 @@ description: "Full evaluation suite for Llama 70B"
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `name` | string | yes | Experiment name |
-| `models` | list | yes | List of model names/paths or ModelConfig objects |
+| `models` | list | yes | List of ModelConfig objects (each must have `name_or_path` and `backend`) |
 | `tasks` | list | yes | List of task specs (with optional `@priority`) |
 | `cluster` | string | yes | Cluster alias or full name |
-| `gpus` | int | no | GPUs per model instance (default: `1`) |
+| `gpus` | int | no | Default GPUs per model instance (default: `1`) |
 | `parallelism` | int | no | Model instances to run in parallel (default: `1`) |
 | `max_gpus_per_node` | int | no | Max GPUs per node, splits tasks if exceeded (default: `8`) |
 | `priority` | string | no | Default priority (default: `normal`) |
@@ -736,7 +582,6 @@ description: "Full evaluation suite for Llama 70B"
 | `budget` | string | yes | Beaker budget |
 | `beaker_image` | string | no | Container image to use (config-only) |
 | `groups` | list | no | Beaker groups to add experiments to |
-| `backends` | list | no | Backends to install at runtime (e.g., `["vllm"]`) |
 | `use_async` | bool | no | Enable parallel task execution (default: `false`) |
 | `use_async_stream` | bool | no | Enable streaming async with vLLM (default: `false`) |
 | `num_workers` | int | no | Number of workers for async modes |
@@ -777,11 +622,10 @@ print(f"Launched: {launcher.beaker.experiment.url(experiment)}")
 
 Docker images provide the runtime environment (Python, PyTorch, CUDA) but do NOT include:
 - **Source code** - Gantry mounts your git repository at runtime
-- **Backends** - Install at job startup using `--backends` flag
+- **Backends** - Installed at job startup based on each model's `backend` config
 
 This approach allows you to:
 - Use any git commit without rebuilding images
-- Mix and match backend versions per job
 - Keep images small and cacheable
 
 ### Building Images
@@ -821,18 +665,22 @@ The image does NOT contain:
 
 ### Installing Backends at Runtime
 
-Inference backends are NOT baked into images. Install them when launching jobs using optional dependency group names:
+Inference backends are NOT baked into images. They are installed at job startup based on each model's `backend` configuration:
+
+```yaml
+# In config file
+models:
+  - name_or_path: llama3.1-8b
+    backend: vllm  # Installs vllm at job startup
+  - name_or_path: gpt-4o
+    backend: litellm  # Installs litellm at job startup
+```
 
 ```bash
-# Install vLLM backend
-olmo-eval beaker launch -n "eval" -m llama3.1-8b -t mmlu --backends vllm
+# Or via CLI inline override
+olmo-eval beaker launch -n "eval" -m "llama3.1-8b::backend=vllm" -t mmlu
 
-# Install multiple backends
-olmo-eval beaker launch -n "eval" -m llama3.1-8b -t mmlu \
-  --backends vllm \
-  --backends hf
-
-# Or manually inside container (runai extras enable S3 model loading)
+# Manual installation inside container
 uv pip install -e '.[vllm]'  # includes vllm[runai]
 ```
 
@@ -913,6 +761,43 @@ Configure via environment variables:
 | `OLMO_EVAL_DB_NAME` | `olmo_eval` | Database name |
 | `OLMO_EVAL_DB_USER` | `postgres` | Database user |
 | `OLMO_EVAL_DB_PASSWORD` | `postgres` | Database password |
+
+## Advanced Usage
+
+### Parallel Execution
+
+By default, tasks run sequentially. Two parallel execution modes are available for faster evaluation:
+
+| Mode | Flag | Backend | Best For |
+|------|------|---------|----------|
+| Sequential | (default) | Any | Simple runs, debugging |
+| Async | `--async` | Any | Multi-GPU batch processing |
+| Streaming | `--async-stream` | vLLM only | Generative tasks only |
+
+**Sequential Mode (Default)** - Runs one task at a time:
+
+```bash
+olmo-eval run -m llama3.1-8b -t mmlu -t gsm8k -t arc
+```
+
+**Async Mode (`--async`)** - Spawns worker processes that each load the model and process batches in parallel:
+
+```bash
+# Auto-detect workers from available GPUs
+olmo-eval run --async -m llama3.1-8b -t mmlu -t gsm8k -t arc
+
+# Specify number of workers
+olmo-eval run --async --num-workers 4 -m llama3.1-8b -t mmlu -t gsm8k
+
+# Multi-GPU models (e.g., 70B on 4 GPUs per worker)
+olmo-eval run --async --num-workers 2 --gpus-per-worker 4 -m llama3.1-70b -t mmlu
+```
+
+**Streaming Mode (`--async-stream`)** - Uses vLLM's AsyncLLMEngine for true continuous batching:
+
+```bash
+olmo-eval run --async-stream -m llama3.1-8b -t mmlu -t gsm8k -t arc
+```
 
 ## Development
 
