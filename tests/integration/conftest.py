@@ -207,8 +207,7 @@ def postgres_backend(storage_docker_services):
     pytest.importorskip("psycopg")
     pytest.importorskip("sqlalchemy")
 
-    from olmo_eval.storage.backends.postgres import PostgresBackend
-    from olmo_eval.storage.db.models import Base
+    from olmo_eval.storage.backends.postgres import Base, PostgresBackend
 
     backend = PostgresBackend(
         host="localhost",

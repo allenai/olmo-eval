@@ -7,7 +7,7 @@ from datetime import datetime
 
 import pytest
 
-from olmo_eval.storage.db.queries import QueryHelper
+from olmo_eval.storage.backends.postgres.queries import QueryHelper
 
 
 class TestPostgresBackendWithInstances:
@@ -50,7 +50,7 @@ class TestPostgresBackendWithInstances:
     @pytest.mark.integration
     def test_query_instances_by_experiment(self, postgres_backend, sample_eval_result):
         """Test querying instance predictions by experiment_pk."""
-        from olmo_eval.storage.db.repository import InstancePredictionRepository
+        from olmo_eval.storage.backends.postgres.repository import InstancePredictionRepository
 
         instances_by_task = {
             "mmlu": [
@@ -81,7 +81,7 @@ class TestQueryHelpers:
     @pytest.mark.integration
     def test_get_model_task_metrics(self, postgres_backend, sample_eval_result):
         """Test getting metrics for a specific model."""
-        from olmo_eval.storage.db.queries import QueryHelper
+        from olmo_eval.storage.backends.postgres.queries import QueryHelper
 
         postgres_backend.save(sample_eval_result)
 
@@ -98,7 +98,7 @@ class TestQueryHelpers:
     def test_get_model_task_instances(self, postgres_backend):
         """Test getting instances for a task."""
         from olmo_eval.core import EvalResult, StoredTaskResult
-        from olmo_eval.storage.db.queries import QueryHelper
+        from olmo_eval.storage.backends.postgres.queries import QueryHelper
 
         exp = EvalResult(
             experiment_id="test-exp",
@@ -137,7 +137,7 @@ class TestQueryHelpers:
     def test_get_model_task_instances_multiple_tasks(self, postgres_backend):
         """Test getting instances for multiple tasks."""
         from olmo_eval.core import EvalResult, StoredTaskResult
-        from olmo_eval.storage.db.queries import QueryHelper
+        from olmo_eval.storage.backends.postgres.queries import QueryHelper
 
         exp = EvalResult(
             experiment_id="test-exp-multi",
@@ -214,7 +214,7 @@ class TestUserIsolation:
     def test_concurrent_users_same_model_different_experiments(self, postgres_backend):
         """Test that same model config from different users creates separate experiments."""
         from olmo_eval.core import EvalResult, StoredTaskResult
-        from olmo_eval.storage.db.repository import InstancePredictionRepository
+        from olmo_eval.storage.backends.postgres.repository import InstancePredictionRepository
 
         # Same config, tasks, and model - only difference is author and experiment_id
         config = {"model": "llama3.1-8b", "temperature": 0.7}
@@ -345,7 +345,7 @@ class TestBackwardCompatibility:
         assert retrieved is None
 
         # Verify instances are also gone (cascade delete)
-        from olmo_eval.storage.db.repository import InstancePredictionRepository
+        from olmo_eval.storage.backends.postgres.repository import InstancePredictionRepository
 
         with postgres_backend.db.session() as session:
             repo = InstancePredictionRepository(session)

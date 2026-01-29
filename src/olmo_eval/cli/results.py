@@ -117,7 +117,7 @@ def get_database_session(
         SystemExit: If psycopg is not installed.
     """
     try:
-        from olmo_eval.storage.db.session import (
+        from olmo_eval.storage.backends.postgres.session import (
             get_database_session as _get_database_session,
         )
 
@@ -758,8 +758,8 @@ def query(
     db = get_database_session(db_host, db_port, db_name, db_user, db_password)
 
     try:
-        from olmo_eval.storage.db.queries import QueryHelper
-        from olmo_eval.storage.db.repository import ExperimentRepository
+        from olmo_eval.storage.backends.postgres.queries import QueryHelper
+        from olmo_eval.storage.backends.postgres.repository import ExperimentRepository
 
         with db.session() as session:
             helper = QueryHelper(session)
@@ -841,7 +841,7 @@ def _stream_experiment_group_instances(
     output_format: str,
 ) -> None:
     """Stream instances for an experiment group directly to output."""
-    from olmo_eval.storage.db.repository import InstancePredictionRepository
+    from olmo_eval.storage.backends.postgres.repository import InstancePredictionRepository
     from olmo_eval.storage.formatters import (
         stream_instances_to_csv,
         stream_instances_to_nested_json,
