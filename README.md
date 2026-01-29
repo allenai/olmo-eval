@@ -209,9 +209,6 @@ class MyTask(Task):
 
     default_source: str = "my-org/my-dataset"
 
-    def __init__(self, config: TaskConfig) -> None:
-        super().__init__(config)
-
     @property
     def instances(self) -> Iterator[Instance]:
         """Load and yield instances from the dataset."""
