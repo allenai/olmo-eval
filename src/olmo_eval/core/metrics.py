@@ -16,6 +16,7 @@ from .scorers import (
 from .types import Response
 
 
+@dataclass(frozen=True)
 class Metric(ABC):
     """Abstract base class for aggregating scores across responses.
 

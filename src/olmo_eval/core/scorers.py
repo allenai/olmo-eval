@@ -8,6 +8,7 @@ from typing import Any, ClassVar
 from .types import Instance, LMOutput
 
 
+@dataclass(frozen=True)
 class Scorer(ABC):
     """Abstract base class for scoring individual outputs.
 

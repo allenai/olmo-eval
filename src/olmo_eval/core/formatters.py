@@ -7,6 +7,7 @@ from typing import Any
 from .types import Instance, LMRequest, RequestType
 
 
+@dataclass
 class Formatter(ABC):
     """Abstract base class for formatting instances into LM requests.
 
