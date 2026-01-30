@@ -57,7 +57,20 @@ def create_provider(
         case ProviderType.LITELLM:
             from .litellm import LiteLLMProvider
 
-            return LiteLLMProvider(model_name, **kwargs)
+            # Filter out vLLM/HuggingFace-specific kwargs not supported by LiteLLM
+            unsupported_keys = {
+                "tokenizer",
+                "revision",
+                "trust_remote_code",
+                "dtype",
+                "attention_backend",
+                "gpu_memory_utilization",
+                "max_model_len",
+                "load_format",
+                "model_loader_extra_config",
+            }
+            litellm_kwargs = {k: v for k, v in kwargs.items() if k not in unsupported_keys}
+            return LiteLLMProvider(model_name, **litellm_kwargs)
         case _:
             raise ValueError(f"Unknown provider type: {provider_type}")
 

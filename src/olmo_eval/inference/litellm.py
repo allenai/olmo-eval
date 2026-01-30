@@ -6,6 +6,9 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+# Limit concurrent requests to avoid connection errors
+_MAX_WORKERS = 10
+
 from olmo_eval.core import LMOutput, LMRequest, SamplingParams
 from olmo_eval.core.types import LogProbEntry
 
@@ -108,7 +111,8 @@ class LiteLLMProvider(InferenceProvider):
     ) -> list[list[LMOutput]]:
         params = self._default_sampling_params(sampling_params)
 
-        with ThreadPoolExecutor() as executor:
+        # Use limited concurrency to balance speed vs connection stability
+        with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as executor:
             results = list(executor.map(lambda req: self._generate_single(req, params), requests))
 
         return results
@@ -170,7 +174,8 @@ class LiteLLMProvider(InferenceProvider):
 
             return outputs
 
-        with ThreadPoolExecutor() as executor:
+        # Use limited concurrency to balance speed vs connection stability
+        with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as executor:
             results = list(executor.map(_logprobs_single, requests))
 
         return results
