@@ -16,6 +16,23 @@ from .base import Scorer
 # Type for judge function: takes prompt, returns judge response
 JudgeFn = Callable[[str], str]
 
+# SimpleQA-style judge prompt template
+SIMPLEQA_JUDGE_PROMPT_TEMPLATE = """\
+You are a judge evaluating the correctness of an AI assistant's response.
+
+Question: {question}
+
+Correct Answer: {gold_answer}
+
+AI Assistant's Answer: {model_answer}
+
+Grade the AI's answer as one of the following:
+A) CORRECT - The AI's answer is factually correct and answers the question accurately.
+B) INCORRECT - The AI's answer is factually wrong or does not answer the question.
+C) NOT_ATTEMPTED - The AI explicitly declined to answer or said it doesn't know.
+
+Respond with only the letter (A, B, or C) corresponding to your grade."""
+
 
 @dataclass(frozen=True)
 class LLMJudgeScorer(Scorer):
@@ -89,33 +106,12 @@ class SimpleQAJudgeScorer(LLMJudgeScorer):
     not_attempted_score: float = 0.0  # Score for NOT_ATTEMPTED responses
 
     def format_judge_prompt(self, instance: Instance, output: LMOutput) -> str:
-        """Format SimpleQA-style judge prompt.
-
-        Args:
-            instance: The evaluation instance with gold_answer.
-            output: The model output to evaluate.
-
-        Returns:
-            Formatted prompt for the judge.
-        """
-        question = instance.question
-        gold_answer = instance.gold_answer or ""
-        model_answer = output.extracted_answer or output.text
-
-        return f"""You are a judge evaluating the correctness of an AI assistant's response.
-
-Question: {question}
-
-Correct Answer: {gold_answer}
-
-AI Assistant's Answer: {model_answer}
-
-Grade the AI's answer as one of the following:
-A) CORRECT - The AI's answer is factually correct and answers the question accurately.
-B) INCORRECT - The AI's answer is factually wrong or does not answer the question.
-C) NOT_ATTEMPTED - The AI explicitly declined to answer or said it doesn't know.
-
-Respond with only the letter (A, B, or C) corresponding to your grade."""
+        """Format SimpleQA-style judge prompt."""
+        return SIMPLEQA_JUDGE_PROMPT_TEMPLATE.format(
+            question=instance.question,
+            gold_answer=instance.gold_answer or "",
+            model_answer=output.extracted_answer or output.text,
+        )
 
     def parse_judge_response(self, response: str) -> float:
         """Parse A/B/C grade from judge response.
