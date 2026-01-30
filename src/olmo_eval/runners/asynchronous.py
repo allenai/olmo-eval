@@ -15,18 +15,11 @@ from typing import TYPE_CHECKING, Any, cast
 
 from rich.console import Console
 
-from olmo_eval.core import (
-    Instance,
-    LMOutput,
-    LMRequest,
-    Response,
-    SamplingParams,
-    expand_tasks,
-    get_logger,
-    get_model_config,
-)
+from olmo_eval.core.configs import expand_tasks, get_model_config
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.core.literals import ProviderLiteral
+from olmo_eval.core.logging import get_logger
+from olmo_eval.core.types import Instance, LMOutput, LMRequest, Response, SamplingParams
 from olmo_eval.evals.tasks import Task, get_task
 from olmo_eval.inference import InferenceProvider, ProviderType, create_provider
 from olmo_eval.runners.constants import SAMPLING_KEYS, TASKCONFIG_KEYS
@@ -374,7 +367,7 @@ def _process_batch(
         provider: InferenceProvider instance
         result_queue: Queue to put results
     """
-    from olmo_eval.core import RequestType
+    from olmo_eval.core.types import RequestType
 
     requests = [item.request for item in batch]
     sampling_params = batch[0].sampling_params if batch else None

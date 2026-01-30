@@ -7,8 +7,7 @@ import os
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
-from olmo_eval.core import LMOutput, LMRequest, SamplingParams
-from olmo_eval.core.types import LogProbEntry
+from olmo_eval.core.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
 
 from .base import InferenceProvider
 
@@ -442,7 +441,7 @@ class AsyncVLLMProvider:
         Raises:
             ValueError: If request type is LOGLIKELIHOOD (not supported in streaming mode).
         """
-        from olmo_eval.core import RequestType
+        from olmo_eval.core.types import RequestType
 
         # Streaming backend only supports COMPLETION requests
         # LOGLIKELIHOOD/BPB tasks require prompt_logprobs which isn't supported here

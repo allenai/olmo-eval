@@ -3,13 +3,13 @@
 from collections.abc import Iterator, Sequence
 from typing import Any
 
-from olmo_eval.core import (
-    BitsPerByteScorer,
-    BPBMetric,
+from olmo_eval.core.formatters import PPLFormatter
+from olmo_eval.core.metrics import BPBMetric
+from olmo_eval.core.scorers import BitsPerByteScorer
+from olmo_eval.core.types import (
     Instance,
     LMOutput,
     LMRequest,
-    PPLFormatter,
     RequestType,
     Response,
     SamplingParams,

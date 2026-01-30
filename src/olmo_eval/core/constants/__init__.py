@@ -48,6 +48,7 @@ from olmo_eval.core.constants.models import (
     TRANSFORMERS_GIT_URL,
     OlmoCoreDtype,
     OlmoModelType,
+    get_model_presets,
 )
 
 __all__ = [
@@ -87,4 +88,5 @@ __all__ = [
     "OlmoModelType",
     "TRANSFORMERS_COMMIT_HASH",
     "TRANSFORMERS_GIT_URL",
+    "get_model_presets",
 ]

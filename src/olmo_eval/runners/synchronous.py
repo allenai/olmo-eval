@@ -10,8 +10,9 @@ from typing import TYPE_CHECKING, Any
 from rich.console import Console
 from rich.table import Table
 
-from olmo_eval.core import expand_tasks, get_logger, get_model_config
+from olmo_eval.core.configs import expand_tasks, get_model_config
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
+from olmo_eval.core.logging import get_logger
 from olmo_eval.inference import InferenceProvider, ProviderType, create_provider
 from olmo_eval.runners.constants import SAMPLING_KEYS, TASKCONFIG_KEYS, ValidationError
 from olmo_eval.runners.mixins import RunnerResultsMixin, S3Config

@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 
-from olmo_eval.core import LMOutput, LMRequest, SamplingParams
+from olmo_eval.core.types import LMOutput, LMRequest, SamplingParams
 
 
 class InferenceProvider(ABC):

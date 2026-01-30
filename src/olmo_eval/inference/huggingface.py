@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from olmo_eval.core import LMOutput, LMRequest, SamplingParams
+from olmo_eval.core.types import LMOutput, LMRequest, SamplingParams
 
 from .base import InferenceProvider
 

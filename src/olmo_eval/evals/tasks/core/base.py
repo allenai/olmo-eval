@@ -7,16 +7,16 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from olmo_eval.core import (
-    Formatter,
+from olmo_eval.core.formatters import Formatter
+from olmo_eval.core.metrics import Metric
+from olmo_eval.core.scorers import Scorer
+from olmo_eval.core.types import (
     Instance,
     LMOutput,
     LMRequest,
-    Metric,
     MetricName,
     Response,
     SamplingParams,
-    Scorer,
     Split,
 )
 

@@ -10,8 +10,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
-from olmo_eval.core import Response, SamplingParams
 from olmo_eval.core.logging import get_logger
+from olmo_eval.core.types import Response, SamplingParams
 from olmo_eval.evals.tasks import get_task
 from olmo_eval.inference import InferenceProvider
 
@@ -550,7 +550,7 @@ def build_requests(
             "label": ...
         }
     """
-    from olmo_eval.core import RequestType
+    from olmo_eval.core.types import RequestType
 
     request_list = []
 
@@ -717,7 +717,7 @@ def run_task_impl(
             requests_callback(request_objects)
 
         # Generate outputs - use logprobs for LOGLIKELIHOOD requests
-        from olmo_eval.core import RequestType
+        from olmo_eval.core.types import RequestType
 
         if requests and requests[0].request_type == RequestType.LOGLIKELIHOOD:
             outputs = provider.logprobs(requests)

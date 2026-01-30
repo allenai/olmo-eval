@@ -274,7 +274,7 @@ def sample_eval_result():
     """Create a sample EvalResult for storage testing."""
     from datetime import datetime
 
-    from olmo_eval.core import EvalResult, StoredTaskResult
+    from olmo_eval.core.types import EvalResult, StoredTaskResult
 
     return EvalResult(
         experiment_id="test-integration-001",
@@ -317,7 +317,7 @@ def multiple_eval_results():
     """Create multiple EvalResults for query testing."""
     from datetime import datetime
 
-    from olmo_eval.core import EvalResult, StoredTaskResult
+    from olmo_eval.core.types import EvalResult, StoredTaskResult
 
     results = []
     models = ["llama3.1-8b", "llama3.1-70b", "olmo-2-7b"]

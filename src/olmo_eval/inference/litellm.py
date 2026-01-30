@@ -6,8 +6,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from olmo_eval.core import LMOutput, LMRequest, SamplingParams
-from olmo_eval.core.types import LogProbEntry
+from olmo_eval.core.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
 
 from .base import InferenceProvider
 

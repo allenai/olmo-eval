@@ -821,7 +821,7 @@ class AsyncRunnerMixin(RunnerResultsMixin):
         """Print configuration."""
         from rich.table import Table
 
-        from olmo_eval.core import expand_tasks
+        from olmo_eval.core.configs import expand_tasks
 
         table = Table(title=f"Run Configuration ({self._mode_name})")
         table.add_column("Setting", style="cyan")

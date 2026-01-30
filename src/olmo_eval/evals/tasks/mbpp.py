@@ -3,16 +3,10 @@
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.core import (
-    BitsPerByteScorer,
-    BPBMetric,
-    Instance,
-    LMOutput,
-    LMRequest,
-    PPLFormatter,
-    RequestType,
-    SamplingParams,
-)
+from olmo_eval.core.formatters import PPLFormatter
+from olmo_eval.core.metrics import BPBMetric
+from olmo_eval.core.scorers import BitsPerByteScorer
+from olmo_eval.core.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import MBPP_STOP_SEQUENCES
 from olmo_eval.evals.extract import extract_code

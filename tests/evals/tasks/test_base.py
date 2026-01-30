@@ -4,16 +4,9 @@ from collections.abc import Iterator
 
 import pytest
 
-from olmo_eval.core import (
-    AccuracyMetric,
-    ExactMatchScorer,
-    Instance,
-    LMOutput,
-    LMRequest,
-    RequestType,
-    Response,
-    Split,
-)
+from olmo_eval.core.metrics import AccuracyMetric
+from olmo_eval.core.scorers import ExactMatchScorer
+from olmo_eval.core.types import Instance, LMOutput, LMRequest, RequestType, Response, Split
 from olmo_eval.evals.tasks import Task, TaskConfig
 
 
