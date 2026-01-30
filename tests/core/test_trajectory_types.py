@@ -234,3 +234,170 @@ class TestAgentTrajectoryToolResults:
         assert len(results) == 2
         assert results[0].content == "first"
         assert results[1].content == "second"
+
+
+class TestAgentTurnSerialization:
+    """Tests for AgentTurn serialization."""
+
+    def test_to_dict_simple(self):
+        """Test converting simple AgentTurn to dict."""
+        turn = AgentTurn.assistant(content="Hello")
+        data = turn.to_dict()
+        assert data["role"] == "assistant"
+        assert data["content"] == "Hello"
+        assert data["tool_calls"] == []
+        assert data["tool_results"] == []
+
+    def test_to_dict_with_tool_calls(self):
+        """Test converting AgentTurn with tool calls to dict."""
+        calls = [ToolCall.create("1", "search", {"query": "test"})]
+        turn = AgentTurn.assistant(content="Searching", tool_calls=calls)
+        data = turn.to_dict()
+        assert len(data["tool_calls"]) == 1
+        assert data["tool_calls"][0]["function"]["name"] == "search"
+
+    def test_to_dict_with_tool_results(self):
+        """Test converting AgentTurn with tool results to dict."""
+        results = [ToolResult(tool_call_id="1", content="Result")]
+        turn = AgentTurn.tool(results)
+        data = turn.to_dict()
+        assert data["role"] == "tool"
+        assert len(data["tool_results"]) == 1
+        assert data["tool_results"][0]["content"] == "Result"
+
+    def test_to_dict_with_metadata(self):
+        """Test converting AgentTurn with optional fields to dict."""
+        turn = AgentTurn.assistant(content="Test", timestamp_ms=12345, token_count=10)
+        data = turn.to_dict()
+        assert data["timestamp_ms"] == 12345
+        assert data["token_count"] == 10
+
+    def test_from_dict_simple(self):
+        """Test creating AgentTurn from dict."""
+        data = {
+            "role": "user",
+            "content": "Hello there",
+            "tool_calls": [],
+            "tool_results": [],
+        }
+        turn = AgentTurn.from_dict(data)
+        assert turn.role == "user"
+        assert turn.content == "Hello there"
+
+    def test_from_dict_with_tool_calls(self):
+        """Test creating AgentTurn with tool calls from dict."""
+        data = {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "calc", "arguments": '{"x": 1}'},
+                }
+            ],
+            "tool_results": [],
+        }
+        turn = AgentTurn.from_dict(data)
+        assert turn.has_tool_calls
+        assert turn.tool_calls[0].function.name == "calc"
+
+    def test_roundtrip(self):
+        """Test to_dict/from_dict roundtrip."""
+        calls = [ToolCall.create("1", "search", {"q": "test"})]
+        original = AgentTurn.assistant(
+            content="Let me search",
+            tool_calls=calls,
+            timestamp_ms=99999,
+            token_count=25,
+        )
+        restored = AgentTurn.from_dict(original.to_dict())
+        assert restored.role == original.role
+        assert restored.content == original.content
+        assert len(restored.tool_calls) == len(original.tool_calls)
+        assert restored.tool_calls[0].function.name == original.tool_calls[0].function.name
+        assert restored.timestamp_ms == original.timestamp_ms
+        assert restored.token_count == original.token_count
+
+
+class TestAgentTrajectorySerialization:
+    """Tests for AgentTrajectory serialization."""
+
+    def test_to_dict_empty(self):
+        """Test converting empty AgentTrajectory to dict."""
+        traj = AgentTrajectory()
+        data = traj.to_dict()
+        assert data["turns"] == []
+        assert data["final_answer"] is None
+        assert data["state_snapshot"] == {}
+        assert data["metadata"] == {}
+
+    def test_to_dict_with_turns(self):
+        """Test converting AgentTrajectory with turns to dict."""
+        turns = [
+            AgentTurn.user(content="Hi"),
+            AgentTurn.assistant(content="Hello"),
+        ]
+        traj = AgentTrajectory.from_turns(turns)
+        data = traj.to_dict()
+        assert len(data["turns"]) == 2
+        assert data["turns"][0]["role"] == "user"
+        assert data["turns"][1]["role"] == "assistant"
+
+    def test_to_dict_with_final_answer(self):
+        """Test converting AgentTrajectory with final answer to dict."""
+        traj = AgentTrajectory().with_final_answer("42")
+        data = traj.to_dict()
+        assert data["final_answer"] == "42"
+
+    def test_to_dict_with_state(self):
+        """Test converting AgentTrajectory with state to dict."""
+        traj = AgentTrajectory().with_state({"count": 5, "done": True})
+        data = traj.to_dict()
+        assert data["state_snapshot"] == {"count": 5, "done": True}
+
+    def test_from_dict_empty(self):
+        """Test creating empty AgentTrajectory from dict."""
+        data = {"turns": [], "final_answer": None, "state_snapshot": {}, "metadata": {}}
+        traj = AgentTrajectory.from_dict(data)
+        assert traj.num_turns == 0
+        assert traj.final_answer is None
+
+    def test_from_dict_with_turns(self):
+        """Test creating AgentTrajectory with turns from dict."""
+        data = {
+            "turns": [
+                {"role": "user", "content": "Hello", "tool_calls": [], "tool_results": []},
+                {"role": "assistant", "content": "Hi", "tool_calls": [], "tool_results": []},
+            ],
+            "final_answer": "Done",
+            "state_snapshot": {"key": "value"},
+            "metadata": {},
+        }
+        traj = AgentTrajectory.from_dict(data)
+        assert traj.num_turns == 2
+        assert traj.final_answer == "Done"
+        assert traj.state_snapshot == {"key": "value"}
+
+    def test_roundtrip(self):
+        """Test to_dict/from_dict roundtrip with complex trajectory."""
+        call = ToolCall.create("1", "search", {"query": "test"})
+        result = ToolResult(tool_call_id="1", content="found it")
+        turns = [
+            AgentTurn.user(content="Find test"),
+            AgentTurn.assistant(content="Searching", tool_calls=[call]),
+            AgentTurn.tool([result]),
+            AgentTurn.assistant(content="Found it!"),
+        ]
+        original = AgentTrajectory(
+            turns=tuple(turns),
+            final_answer="Found it!",
+            state_snapshot={"searches": 1},
+            metadata={"task": "search"},
+        )
+        restored = AgentTrajectory.from_dict(original.to_dict())
+        assert restored.num_turns == original.num_turns
+        assert restored.final_answer == original.final_answer
+        assert restored.state_snapshot == original.state_snapshot
+        assert restored.metadata == original.metadata
+        assert restored.tool_call_names() == original.tool_call_names()

@@ -132,6 +132,41 @@ class ToolCall:
 
         return json.loads(self.function.arguments)
 
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization.
+
+        Returns:
+            Dictionary representation of the ToolCall.
+        """
+        return {
+            "id": self.id,
+            "type": self.type,
+            "function": {
+                "name": self.function.name,
+                "arguments": self.function.arguments,
+            },
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ToolCall":
+        """Create from dictionary.
+
+        Args:
+            data: Dictionary with ToolCall data.
+
+        Returns:
+            A new ToolCall instance.
+        """
+        func = data.get("function", {})
+        return cls(
+            id=data.get("id", ""),
+            type=data.get("type", "function"),
+            function=Function(
+                name=func.get("name", ""),
+                arguments=func.get("arguments", "{}"),
+            ),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class ToolResult:
@@ -152,6 +187,34 @@ class ToolResult:
             "tool_call_id": self.tool_call_id,
             "content": self.content,
         }
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization.
+
+        Returns:
+            Dictionary representation of the ToolResult.
+        """
+        return {
+            "tool_call_id": self.tool_call_id,
+            "content": self.content,
+            "is_error": self.is_error,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ToolResult":
+        """Create from dictionary.
+
+        Args:
+            data: Dictionary with ToolResult data.
+
+        Returns:
+            A new ToolResult instance.
+        """
+        return cls(
+            tool_call_id=data.get("tool_call_id", ""),
+            content=data.get("content", ""),
+            is_error=data.get("is_error", False),
+        )
 
 
 @dataclass(frozen=True, slots=True)

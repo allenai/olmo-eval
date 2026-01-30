@@ -105,6 +105,42 @@ class AgentTurn:
             timestamp_ms=timestamp_ms,
         )
 
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization.
+
+        Returns:
+            Dictionary representation of the AgentTurn.
+        """
+        return {
+            "role": self.role,
+            "content": self.content,
+            "tool_calls": [tc.to_dict() for tc in self.tool_calls],
+            "tool_results": [tr.to_dict() for tr in self.tool_results],
+            "timestamp_ms": self.timestamp_ms,
+            "token_count": self.token_count,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AgentTurn":
+        """Create from dictionary.
+
+        Args:
+            data: Dictionary with AgentTurn data.
+
+        Returns:
+            A new AgentTurn instance.
+        """
+        return cls(
+            role=data.get("role", "assistant"),
+            content=data.get("content", ""),
+            tool_calls=tuple(ToolCall.from_dict(tc) for tc in data.get("tool_calls", [])),
+            tool_results=tuple(ToolResult.from_dict(tr) for tr in data.get("tool_results", [])),
+            timestamp_ms=data.get("timestamp_ms"),
+            token_count=data.get("token_count"),
+            metadata=data.get("metadata", {}),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class AgentTrajectory:
@@ -261,3 +297,33 @@ class AgentTrajectory:
             elif turn.role == "system":
                 messages.append({"role": "system", "content": turn.content})
         return messages
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization.
+
+        Returns:
+            Dictionary representation of the AgentTrajectory.
+        """
+        return {
+            "turns": [t.to_dict() for t in self.turns],
+            "final_answer": self.final_answer,
+            "state_snapshot": self.state_snapshot,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AgentTrajectory":
+        """Create from dictionary.
+
+        Args:
+            data: Dictionary with AgentTrajectory data.
+
+        Returns:
+            A new AgentTrajectory instance.
+        """
+        return cls(
+            turns=tuple(AgentTurn.from_dict(t) for t in data.get("turns", [])),
+            final_answer=data.get("final_answer"),
+            state_snapshot=data.get("state_snapshot", {}),
+            metadata=data.get("metadata", {}),
+        )

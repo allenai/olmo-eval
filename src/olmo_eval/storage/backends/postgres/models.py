@@ -134,6 +134,9 @@ class TaskResult(Base):
     s3_predictions_key: Mapped[str | None] = mapped_column(String(512))
     s3_requests_key: Mapped[str | None] = mapped_column(String(512))
 
+    # Agent evaluation metrics (JSONB for nested structure)
+    agent_metrics: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+
     # Relationships
     experiment: Mapped[Experiment] = relationship("Experiment", back_populates="task_results")
 

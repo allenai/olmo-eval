@@ -175,8 +175,7 @@ class MeanPerplexityMetric(Metric):
 class PassAtKMetric(Metric):
     """Compute pass@k metric across multiple samples per task.
 
-    Groups responses by task ID and computes the unbiased pass@k
-    estimator: probability that at least one of k samples passes.
+    The probability that at least one of k samples passes.
     """
 
     name: str = "pass_at_k"
@@ -212,8 +211,7 @@ class PassAtKMetric(Metric):
 class PassPowKMetric(Metric):
     """Compute pass^k metric (all k trials succeed).
 
-    Measures automation readiness: the probability that k consecutive
-    runs all succeed. Computed as (success_rate)^k.
+    The probability that k consecutive runs all succeed. Computed as (success_rate)^k.
     """
 
     name: str = "pass_pow_k"

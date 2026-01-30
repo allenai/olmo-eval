@@ -501,6 +501,10 @@ def build_predictions(scored: Sequence[Response]) -> list[dict]:
             "label": label,
         }
 
+        # Add trajectory if present (multi-turn/agent tasks)
+        if resp.trajectory is not None:
+            prediction["trajectory"] = resp.trajectory.to_dict()
+
         predictions.append(prediction)
 
     return predictions

@@ -205,6 +205,82 @@ class TestToolSchema:
         assert "query" in schema.parameters["properties"]
 
 
+class TestToolCallSerialization:
+    """Tests for ToolCall serialization."""
+
+    def test_to_dict(self):
+        """Test converting ToolCall to dict."""
+        call = ToolCall.create("123", "get_weather", {"location": "NYC"})
+        result = call.to_dict()
+        assert result["id"] == "123"
+        assert result["type"] == "function"
+        assert result["function"]["name"] == "get_weather"
+        assert json.loads(result["function"]["arguments"]) == {"location": "NYC"}
+
+    def test_from_dict(self):
+        """Test creating ToolCall from dict."""
+        data = {
+            "id": "call_456",
+            "type": "function",
+            "function": {
+                "name": "search",
+                "arguments": '{"query": "test"}',
+            },
+        }
+        call = ToolCall.from_dict(data)
+        assert call.id == "call_456"
+        assert call.type == "function"
+        assert call.function.name == "search"
+        assert call.function.arguments == '{"query": "test"}'
+
+    def test_roundtrip(self):
+        """Test to_dict/from_dict roundtrip."""
+        original = ToolCall.create("789", "calculator", {"expression": "2+2"})
+        restored = ToolCall.from_dict(original.to_dict())
+        assert restored.id == original.id
+        assert restored.type == original.type
+        assert restored.function.name == original.function.name
+        assert restored.function.arguments == original.function.arguments
+
+
+class TestToolResultSerialization:
+    """Tests for ToolResult serialization."""
+
+    def test_to_dict(self):
+        """Test converting ToolResult to dict."""
+        result = ToolResult(tool_call_id="123", content="Result text", is_error=False)
+        data = result.to_dict()
+        assert data["tool_call_id"] == "123"
+        assert data["content"] == "Result text"
+        assert data["is_error"] is False
+
+    def test_to_dict_error(self):
+        """Test converting error ToolResult to dict."""
+        result = ToolResult(tool_call_id="456", content="Error message", is_error=True)
+        data = result.to_dict()
+        assert data["is_error"] is True
+
+    def test_from_dict(self):
+        """Test creating ToolResult from dict."""
+        data = {
+            "tool_call_id": "789",
+            "content": "Search results",
+            "is_error": False,
+        }
+        result = ToolResult.from_dict(data)
+        assert result.tool_call_id == "789"
+        assert result.content == "Search results"
+        assert result.is_error is False
+
+    def test_roundtrip(self):
+        """Test to_dict/from_dict roundtrip."""
+        original = ToolResult(tool_call_id="test", content="Content here", is_error=True)
+        restored = ToolResult.from_dict(original.to_dict())
+        assert restored.tool_call_id == original.tool_call_id
+        assert restored.content == original.content
+        assert restored.is_error == original.is_error
+
+
 class TestToolTypes:
     """Tests for ToolType implementations."""
 

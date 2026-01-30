@@ -16,6 +16,22 @@ from .base import Scorer
 # Type for judge function: takes prompt, returns judge response
 JudgeFn = Callable[[str], str]
 
+# Rubric-based judge prompt template
+RUBRIC_JUDGE_PROMPT_TEMPLATE = """\
+You are evaluating an AI assistant's response using the following rubric.
+
+Question: {question}
+
+Reference Answer: {gold_answer}
+
+AI Assistant's Answer: {model_answer}
+
+Rubric:
+{rubric_text}
+
+Provide your evaluation and end with a score in the format "Score: X" \
+where X is a number from 0 to {max_score}."""
+
 # SimpleQA-style judge prompt template
 SIMPLEQA_JUDGE_PROMPT_TEMPLATE = """\
 You are a judge evaluating the correctness of an AI assistant's response.
@@ -172,34 +188,14 @@ class RubricJudgeScorer(LLMJudgeScorer):
     default_score: float = 0.0
 
     def format_judge_prompt(self, instance: Instance, output: LMOutput) -> str:
-        """Format rubric-based judge prompt.
-
-        Args:
-            instance: The evaluation instance.
-            output: The model output to evaluate.
-
-        Returns:
-            Formatted prompt with rubric.
-        """
-        question = instance.question
-        gold_answer = instance.gold_answer or "N/A"
-        model_answer = output.extracted_answer or output.text
-
-        rubric_text = self.rubric or self._default_rubric()
-
-        return f"""You are evaluating an AI assistant's response using the following rubric.
-
-Question: {question}
-
-Reference Answer: {gold_answer}
-
-AI Assistant's Answer: {model_answer}
-
-Rubric:
-{rubric_text}
-
-Provide your evaluation and end with a score in the format "Score: X" where X is a number \
-from 0 to {self.max_score}."""
+        """Format rubric-based judge prompt."""
+        return RUBRIC_JUDGE_PROMPT_TEMPLATE.format(
+            question=instance.question,
+            gold_answer=instance.gold_answer or "N/A",
+            model_answer=output.extracted_answer or output.text,
+            rubric_text=self.rubric or self._default_rubric(),
+            max_score=self.max_score,
+        )
 
     def _default_rubric(self) -> str:
         """Default rubric when none provided."""
