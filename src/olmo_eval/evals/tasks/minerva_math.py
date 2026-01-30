@@ -133,14 +133,28 @@ class MinervaMathTask(Task):
         """Format an instance into an LM request.
 
         Uses the configured formatter if available, otherwise creates
-        a simple completion request with the problem as the prompt.
+        a completion request with few-shot examples included.
         """
         if self.config.formatter is not None:
             return self.config.formatter.format(instance, self.get_fewshot())
 
+        # Build prompt with few-shot examples
+        fewshot = self.get_fewshot()
+        parts: list[str] = []
+
+        for ex in fewshot:
+            # Format: "Problem: {question}\nSolution: {answer}"
+            example = f"Problem: {ex.question}\nSolution: {ex.gold_answer}"
+            parts.append(example)
+
+        # Add current instance with solution prefix to prompt generation
+        parts.append(f"Problem: {instance.question}\nSolution:")
+
+        prompt = "\n\n".join(parts)
+
         return LMRequest(
             request_type=RequestType.COMPLETION,
-            prompt=instance.question,
+            prompt=prompt,
         )
 
     def extract_answer(self, output: LMOutput) -> str | None:
@@ -164,6 +178,9 @@ class Math500Task(MinervaMathTask):
 
     A curated subset of 500 problems from the MATH dataset,
     provided by HuggingFace for more efficient evaluation.
+
+    Note: MATH-500 only has a test split, so few-shot examples are drawn
+    from the full MATH dataset's train split.
     """
 
     default_source: str = "HuggingFaceH4/MATH-500"
@@ -173,7 +190,19 @@ class Math500Task(MinervaMathTask):
         return None
 
     def _get_source_for_split(self, split: str) -> DataSource:
-        """Get data source for a specific split."""
+        """Get data source for a specific split.
+
+        For test split, uses MATH-500. For other splits (train/dev),
+        uses the full MATH dataset since MATH-500 only has test.
+        """
+        # MATH-500 only has test split; use full MATH for train/dev
+        if split != "test":
+            return DataSource(
+                path="EleutherAI/hendrycks_math",
+                subset="algebra",  # Use algebra subset for few-shot
+                split=split,
+            )
+
         try:
             return self.config.get_data_source(split=split)
         except ValueError:
