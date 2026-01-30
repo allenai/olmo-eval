@@ -41,7 +41,10 @@ def _execute_code_unsafe(code: str, timeout: float = 5.0) -> tuple[bool, str]:
 
 
 def compute_pass_at_k(n: int, c: int, k: int) -> float:
-    """Compute pass@k metric.
+    """Compute pass@k metric (unbiased estimator).
+
+    Pass@k measures the probability that at least one of k samples
+    is correct.
 
     Args:
         n: Total number of samples
@@ -53,7 +56,29 @@ def compute_pass_at_k(n: int, c: int, k: int) -> float:
     """
     if n - c < k:
         return 1.0
+    if n < k:
+        return 0.0 if c == 0 else 1.0
 
-    # Use log to avoid overflow for large n
+    # Use math.prod to avoid overflow for large n
     # pass@k = 1 - C(n-c, k) / C(n, k)
     return 1.0 - math.prod((n - c - i) / (n - i) for i in range(k))
+
+
+def compute_pass_pow_k(n: int, c: int, k: int) -> float:
+    """Compute pass^k metric (all k trials succeed).
+
+    Pass^k measures automation readiness: the probability that
+    k consecutive runs all succeed. Computed as (success_rate)^k.
+
+    Args:
+        n: Total number of samples
+        c: Number of correct samples
+        k: k value for pass^k
+
+    Returns:
+        pass^k probability (success_rate ** k)
+    """
+    if n == 0:
+        return 0.0
+    success_rate = c / n
+    return success_rate**k

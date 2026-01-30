@@ -5,16 +5,18 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
-from .scorers import (
+from ..scorers import (
+    AbstentionScorer,
     BitsPerByteScorer,
     CodeExecutionScorer,
     ExactMatchScorer,
     F1Scorer,
     PerplexityScorer,
     Scorer,
+    ToolCallScorer,
 )
-from .types import Response
-from .utils import compute_pass_at_k
+from ..types import Response
+from ..utils import compute_pass_at_k, compute_pass_pow_k
 
 
 @dataclass(frozen=True)
@@ -205,3 +207,72 @@ class PassAtKMetric(Metric):
             pass_at_k_values.append(compute_pass_at_k(n, c, min(self.k, n)))
 
         return sum(pass_at_k_values) / len(pass_at_k_values) if pass_at_k_values else 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class PassPowKMetric(Metric):
+    """Compute pass^k metric (all k trials succeed).
+
+    Pass^k measures automation readiness: the probability that
+    k consecutive runs all succeed. Computed as (success_rate)^k.
+    """
+
+    name: str = "pass_pow_k"
+    k: int = 1
+    scorer: type[Scorer] = CodeExecutionScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        """Compute pass^k across all tasks."""
+        if not responses:
+            return 0.0
+
+        scorer_name = self.scorer().name
+
+        # Group by task ID
+        task_results: dict[str, list[float]] = {}
+        for r in responses:
+            task_id = r.instance.metadata.get("id", "unknown")
+            if task_id not in task_results:
+                task_results[task_id] = []
+            task_results[task_id].append(r.scores.get(scorer_name, 0.0))
+
+        # Compute pass^k for each task
+        pass_pow_k_values = []
+        for scores in task_results.values():
+            n = len(scores)
+            c = sum(1 for s in scores if s > 0.5)  # Count passing
+            pass_pow_k_values.append(compute_pass_pow_k(n, c, self.k))
+
+        return sum(pass_pow_k_values) / len(pass_pow_k_values) if pass_pow_k_values else 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class ToolAccuracyMetric(Metric):
+    """Mean tool call accuracy across all responses."""
+
+    name: str = "tool_accuracy"
+    scorer: type[Scorer] = ToolCallScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        if not responses:
+            return 0.0
+        scorer_name = self.scorer().name
+        total = sum(r.scores.get(scorer_name, 0.0) for r in responses)
+        return total / len(responses)
+
+
+@dataclass(frozen=True, slots=True)
+class AbstentionAccuracyMetric(Metric):
+    """Mean abstention accuracy across responses with should_abstain field."""
+
+    name: str = "abstention_accuracy"
+    scorer: type[Scorer] = AbstentionScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        # Filter to only instances with should_abstain defined
+        abstention_responses = [r for r in responses if r.instance.should_abstain is not None]
+        if not abstention_responses:
+            return 0.0
+        scorer_name = self.scorer().name
+        total = sum(r.scores.get(scorer_name, 0.0) for r in abstention_responses)
+        return total / len(abstention_responses)

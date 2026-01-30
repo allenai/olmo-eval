@@ -1,11 +1,18 @@
 """Core data types and enums for evaluation."""
 
+from __future__ import annotations
+
 import hashlib
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
-from typing import Any, ClassVar, NotRequired, TypedDict
+from typing import TYPE_CHECKING, Any, ClassVar, NotRequired, TypedDict
+
+if TYPE_CHECKING:
+    from .agent import AgentMetrics
+    from .tools import ToolCall, ToolSchema
+    from .trajectory import AgentTrajectory
 
 
 def compute_model_hash(config: dict[str, Any] | None) -> str | None:
@@ -102,12 +109,24 @@ class LogProbEntry(TypedDict):
 
 @dataclass(frozen=True, slots=True)
 class Instance:
-    """A single evaluation instance."""
+    """A single evaluation instance.
+
+    The base fields (question, gold_answer, choices, metadata) support
+    traditional evaluation. The tool-related fields support agent and
+    tool calling evaluation.
+    """
 
     question: str
     gold_answer: str | None = None
     choices: tuple[str, ...] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Tool calling fields
+    tools: tuple[ToolSchema, ...] | None = None
+    expected_tool_calls: tuple[dict[str, Any], ...] | None = None
+    should_abstain: bool | None = None
+    required_trajectory: tuple[dict[str, Any], ...] | None = None
+    initial_state: dict[str, Any] | None = None
+    expected_final_state: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,22 +169,36 @@ class SamplingParams:
 
 @dataclass(slots=True)
 class LMOutput:
-    """Output from a language model."""
+    """Output from a language model.
+
+    Supports both text generation and tool calling outputs.
+    """
 
     text: str
     logprobs: list[LogProbEntry] | None = None
     extracted_answer: Any = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    tool_calls: list[ToolCall] | None = None
+
+    @property
+    def has_tool_calls(self) -> bool:
+        """Check if this output contains tool calls."""
+        return self.tool_calls is not None and len(self.tool_calls) > 0
 
 
 @dataclass(slots=True)
 class Response:
-    """Complete response pairing instance, request, and outputs."""
+    """Complete response pairing instance, request, and outputs.
+
+    For multi-turn agent evaluations, the trajectory field contains
+    the complete interaction history.
+    """
 
     instance: Instance
     request: LMRequest
     outputs: list[LMOutput] = field(default_factory=list)
     scores: dict[str, float] = field(default_factory=dict)
+    trajectory: AgentTrajectory | None = None
 
 
 @dataclass
@@ -187,6 +220,7 @@ class StoredTaskResult:
     s3_metrics_key: str | None = None
     s3_predictions_key: str | None = None
     s3_requests_key: str | None = None
+    agent: AgentMetrics | None = None
 
 
 @dataclass

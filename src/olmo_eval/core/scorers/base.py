@@ -5,8 +5,8 @@ from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
 from typing import Any, ClassVar
 
-from .types import Instance, LMOutput
-from .utils import _execute_code_unsafe
+from ..types import Instance, LMOutput
+from ..utils import _execute_code_unsafe
 
 
 @dataclass(frozen=True)
