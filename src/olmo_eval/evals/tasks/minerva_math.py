@@ -13,10 +13,13 @@ from typing import Any
 
 from olmo_eval.core import (
     AccuracyMetric,
+    BitsPerByteScorer,
+    BPBMetric,
     ExactMatchScorer,
     Instance,
     LMOutput,
     LMRequest,
+    PPLFormatter,
     RequestType,
     SamplingParams,
 )
@@ -134,6 +137,9 @@ class MinervaMathTask(Task):
 
         Uses the configured formatter if available, otherwise creates
         a completion request with few-shot examples included.
+
+        For few-shot examples, uses the full solution (with chain-of-thought
+        reasoning and \\boxed{} notation) so the model learns the expected format.
         """
         if self.config.formatter is not None:
             return self.config.formatter.format(instance, self.get_fewshot())
@@ -143,8 +149,10 @@ class MinervaMathTask(Task):
         parts: list[str] = []
 
         for ex in fewshot:
-            # Format: "Problem: {question}\nSolution: {answer}"
-            example = f"Problem: {ex.question}\nSolution: {ex.gold_answer}"
+            # Use full solution (with chain-of-thought and \boxed{}) from metadata
+            # so the model learns the expected format
+            full_solution = ex.metadata.get("full_solution", ex.gold_answer)
+            example = f"Problem: {ex.question}\nSolution: {full_solution}"
             parts.append(example)
 
         # Add current instance with solution prefix to prompt generation
@@ -351,4 +359,41 @@ for _subset in MATH_SUBSETS:
         "4shot",
         num_fewshot=4,
         fewshot_seed=42,
+    )
+
+# =============================================================================
+# BPB (Bits-Per-Byte) Variants - PPL-based evaluation
+# =============================================================================
+# These variants measure how well the model predicts the gold answer,
+# rather than generating and extracting answers.
+# Usage: math500:bpb, math500:4shot:bpb, minerva_math:bpb, etc.
+
+register_variant(
+    "minerva_math",
+    "bpb",
+    formatter=PPLFormatter(),
+    scorers=(BitsPerByteScorer(),),
+    metrics=(BPBMetric(),),
+    primary_metric=BPBMetric(),
+)
+
+register_variant(
+    "math500",
+    "bpb",
+    formatter=PPLFormatter(),
+    scorers=(BitsPerByteScorer(),),
+    metrics=(BPBMetric(),),
+    primary_metric=BPBMetric(),
+)
+
+# Register BPB variants for all subsets
+for _subset in MATH_SUBSETS:
+    _task_name = f"minerva_math_{_subset}"
+    register_variant(
+        _task_name,
+        "bpb",
+        formatter=PPLFormatter(),
+        scorers=(BitsPerByteScorer(),),
+        metrics=(BPBMetric(),),
+        primary_metric=BPBMetric(),
     )

@@ -487,6 +487,15 @@ def build_predictions(scored: Sequence[Response]) -> list[dict]:
 
             out_data["num_chars"] = num_chars
 
+            # Include generated text for generative tasks (useful for debugging)
+            # For PPL/BPB tasks, text is the gold continuation, so we skip it
+            if out.text and not meta.get("sum_logits"):
+                out_data["text"] = out.text
+
+            # Include extracted answer if available
+            if out.extracted_answer is not None:
+                out_data["extracted_answer"] = out.extracted_answer
+
             model_output.append(out_data)
 
         # Get label from metadata or gold_answer
