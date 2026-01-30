@@ -12,7 +12,7 @@ from typing import Any
 
 from olmo_eval.core.logging import get_logger
 from olmo_eval.core.types import Response, SamplingParams
-from olmo_eval.evals.tasks import get_task
+from olmo_eval.evals.tasks import AgentTask, get_task
 from olmo_eval.inference import InferenceProvider
 
 # Re-export build_predictions for parallel runner
@@ -28,6 +28,7 @@ __all__ = [
     "get_author",
     "get_git_ref",
     "get_primary_metric",
+    "run_agent_task_impl",
     "run_task_impl",
     "sanitize_spec_for_filename",
     "serialize_sampling_params",
@@ -636,6 +637,125 @@ def build_requests(
     return request_list
 
 
+def run_agent_task_impl(
+    task: AgentTask,
+    spec: str,
+    overrides: dict[str, Any] | None = None,
+    progress_callback: Callable[[str], None] | None = None,
+) -> TaskResult:
+    """Execute an agent task using async agent loop.
+
+    This function handles the special execution path for agent tasks, which
+    use multi-turn agent interactions instead of single-turn inference.
+
+    Args:
+        task: The AgentTask instance to execute.
+        spec: The original task specification string.
+        overrides: Optional config overrides (limit, etc.).
+        progress_callback: Optional callback for progress messages.
+
+    Returns:
+        TaskResult with metrics and metadata.
+    """
+    import asyncio
+    import time
+
+    start_time = time.time()
+
+    try:
+        # Apply overrides
+        if overrides:
+            task.config = replace(task.config, **overrides)
+
+        # Validate required secrets
+        task._validate_secrets()
+
+        # Collect instances
+        instances = list(task.instances)
+        if task.config.limit:
+            instances = instances[: task.config.limit]
+
+        if progress_callback:
+            progress_callback(f"Running agent on {len(instances)} instances...")
+
+        # Get agent config (use defaults if not configured)
+        agent_config = getattr(task.config, "agent_config", None)
+        if agent_config is None:
+            from olmo_eval.core.agents import AgentConfig
+
+            agent_config = AgentConfig(model="default")
+
+        # Run async agent loop
+        results = asyncio.run(
+            task._run_agent_loop(
+                instances=instances,
+                model=agent_config.model,
+                model_url=agent_config.model_url,
+                system_prompt=agent_config.system_prompt or None,
+                max_turns=agent_config.max_turns,
+                max_concurrency=agent_config.max_concurrency,
+                temperature=agent_config.temperature,
+            )
+        )
+
+        # Build responses from results
+        responses = task._build_responses(instances, results)
+
+        # Score responses
+        scored = task.score_responses(responses)
+
+        # Compute metrics using task's _compute_metrics
+        metrics = task._compute_metrics(results, instances=instances)
+
+        # Build predictions for per-instance inspection
+        predictions = build_predictions(scored)
+
+        # Build requests (for consistency with standard tasks)
+        requests_list = [task.format_request(inst) for inst in instances]
+        request_objects = build_requests(instances, requests_list, task.config.name)
+
+        duration = time.time() - start_time
+
+        # Extract primary metric name from task config if specified
+        primary_metric_name = None
+        if task.config.primary_metric:
+            primary_metric_name = task.config.primary_metric.name
+
+        return TaskResult(
+            spec=spec,
+            config={
+                "name": task.config.name,
+                "split": task.config.split.value,
+                "limit": task.config.limit,
+                "agent_config": {
+                    "model": agent_config.model,
+                    "model_url": agent_config.model_url,
+                    "max_turns": agent_config.max_turns,
+                    "max_concurrency": agent_config.max_concurrency,
+                    "temperature": agent_config.temperature,
+                },
+            },
+            num_instances=len(instances),
+            metrics=metrics,
+            duration_seconds=duration,
+            predictions=predictions,
+            requests=request_objects,
+            primary_metric=primary_metric_name,
+        )
+
+    except Exception as e:
+        duration = time.time() - start_time
+        logger.exception(f"Agent task {spec} failed: {e}")
+        return TaskResult(
+            spec=spec,
+            config={},
+            num_instances=0,
+            metrics={},
+            error=str(e),
+            duration_seconds=duration,
+        )
+
+
 def run_task_impl(
     spec: str,
     provider: InferenceProvider,
@@ -673,6 +793,15 @@ def run_task_impl(
     try:
         # Get task
         task = get_task(spec)
+
+        # Detect and handle agent tasks
+        if isinstance(task, AgentTask):
+            return run_agent_task_impl(
+                task=task,
+                spec=spec,
+                overrides=overrides,
+                progress_callback=progress_callback,
+            )
 
         # Apply overrides
         if overrides:
