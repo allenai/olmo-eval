@@ -1,5 +1,12 @@
-"""Answer extraction utilities tasks."""
+"""Answer extraction utilities for tasks."""
 
 from .code import extract_code
+from .math import MathExtractor, extract_math_answer, is_equiv, normalize_final_answer
 
-__all__ = ["extract_code"]
+__all__ = [
+    "extract_code",
+    "extract_math_answer",
+    "is_equiv",
+    "MathExtractor",
+    "normalize_final_answer",
+]
