@@ -13,16 +13,13 @@ from .base import (
 )
 
 __all__ = [
-    # Base metric class
-    "Metric",
-    # Standard metrics
+    "AbstentionAccuracyMetric",
     "AccuracyMetric",
-    "F1Metric",
     "BPBMetric",
+    "F1Metric",
     "MeanPerplexityMetric",
+    "Metric",
     "PassAtKMetric",
     "PassPowKMetric",
-    # Tool metrics
     "ToolAccuracyMetric",
-    "AbstentionAccuracyMetric",
 ]
