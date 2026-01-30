@@ -1,6 +1,7 @@
 """Tests for pass@k and pass^k reliability metrics."""
 
 from olmo_eval.core.metrics import PassAtKMetric, PassPowKMetric
+from olmo_eval.core.scorers import CodeExecutionScorer
 from olmo_eval.core.types import Instance, LMOutput, LMRequest, RequestType, Response
 from olmo_eval.core.utils import compute_pass_at_k, compute_pass_pow_k
 
@@ -88,7 +89,7 @@ class TestPassAtKMetric:
 
     def test_all_correct(self):
         """Test when all responses are correct."""
-        metric = PassAtKMetric(k=1)
+        metric = PassAtKMetric(scorer=CodeExecutionScorer, k=1)
         responses = [
             make_response("task1", 1.0),
             make_response("task2", 1.0),
@@ -99,7 +100,7 @@ class TestPassAtKMetric:
 
     def test_all_incorrect(self):
         """Test when all responses are incorrect."""
-        metric = PassAtKMetric(k=1)
+        metric = PassAtKMetric(scorer=CodeExecutionScorer, k=1)
         responses = [
             make_response("task1", 0.0),
             make_response("task2", 0.0),
@@ -110,7 +111,7 @@ class TestPassAtKMetric:
 
     def test_mixed_results(self):
         """Test with mixed results."""
-        metric = PassAtKMetric(k=1)
+        metric = PassAtKMetric(scorer=CodeExecutionScorer, k=1)
         responses = [
             make_response("task1", 1.0),
             make_response("task2", 0.0),
@@ -121,7 +122,7 @@ class TestPassAtKMetric:
 
     def test_multiple_samples_per_task(self):
         """Test with multiple samples per task."""
-        metric = PassAtKMetric(k=1)
+        metric = PassAtKMetric(scorer=CodeExecutionScorer, k=1)
         # Same task, multiple samples
         responses = [
             make_response("task1", 0.0),  # Sample 1 fails
@@ -135,7 +136,7 @@ class TestPassAtKMetric:
 
     def test_k_greater_than_1(self):
         """Test with k > 1."""
-        metric = PassAtKMetric(k=2)
+        metric = PassAtKMetric(scorer=CodeExecutionScorer, k=2)
         responses = [
             make_response("task1", 0.0),
             make_response("task1", 1.0),
@@ -147,13 +148,13 @@ class TestPassAtKMetric:
 
     def test_empty_responses(self):
         """Test with empty responses."""
-        metric = PassAtKMetric(k=1)
+        metric = PassAtKMetric(scorer=CodeExecutionScorer, k=1)
         result = metric.compute([])
         assert result == 0.0
 
     def test_to_dict(self):
         """Test serialization."""
-        metric = PassAtKMetric(k=5)
+        metric = PassAtKMetric(scorer=CodeExecutionScorer, k=5)
         d = metric.to_dict()
         assert d["type"] == "PassAtKMetric"
         assert d["name"] == "pass_at_k"
@@ -164,7 +165,7 @@ class TestPassPowKMetric:
 
     def test_all_correct(self):
         """Test when all responses are correct."""
-        metric = PassPowKMetric(k=1)
+        metric = PassPowKMetric(scorer=CodeExecutionScorer, k=1)
         responses = [
             make_response("task1", 1.0),
             make_response("task2", 1.0),
@@ -175,7 +176,7 @@ class TestPassPowKMetric:
 
     def test_all_incorrect(self):
         """Test when all responses are incorrect."""
-        metric = PassPowKMetric(k=1)
+        metric = PassPowKMetric(scorer=CodeExecutionScorer, k=1)
         responses = [
             make_response("task1", 0.0),
             make_response("task2", 0.0),
@@ -192,9 +193,9 @@ class TestPassPowKMetric:
             make_response("task1", 0.0),
         ]
 
-        k1_metric = PassPowKMetric(k=1)
-        k2_metric = PassPowKMetric(k=2)
-        k3_metric = PassPowKMetric(k=3)
+        k1_metric = PassPowKMetric(scorer=CodeExecutionScorer, k=1)
+        k2_metric = PassPowKMetric(scorer=CodeExecutionScorer, k=2)
+        k3_metric = PassPowKMetric(scorer=CodeExecutionScorer, k=3)
 
         k1_result = k1_metric.compute(responses)
         k2_result = k2_metric.compute(responses)
@@ -206,13 +207,13 @@ class TestPassPowKMetric:
 
     def test_empty_responses(self):
         """Test with empty responses."""
-        metric = PassPowKMetric(k=1)
+        metric = PassPowKMetric(scorer=CodeExecutionScorer, k=1)
         result = metric.compute([])
         assert result == 0.0
 
     def test_to_dict(self):
         """Test serialization."""
-        metric = PassPowKMetric(k=3)
+        metric = PassPowKMetric(scorer=CodeExecutionScorer, k=3)
         d = metric.to_dict()
         assert d["type"] == "PassPowKMetric"
         assert d["name"] == "pass_pow_k"
@@ -231,8 +232,8 @@ class TestMetricsComparison:
         ]
 
         for k in [1, 2, 3, 4]:
-            at_k = PassAtKMetric(k=k).compute(responses)
-            pow_k = PassPowKMetric(k=k).compute(responses)
+            at_k = PassAtKMetric(scorer=CodeExecutionScorer, k=k).compute(responses)
+            pow_k = PassPowKMetric(scorer=CodeExecutionScorer, k=k).compute(responses)
             assert at_k >= pow_k
 
     def test_both_equal_at_perfect_score(self):
@@ -244,7 +245,7 @@ class TestMetricsComparison:
         ]
 
         for k in [1, 2, 3]:
-            at_k = PassAtKMetric(k=k).compute(responses)
-            pow_k = PassPowKMetric(k=k).compute(responses)
+            at_k = PassAtKMetric(scorer=CodeExecutionScorer, k=k).compute(responses)
+            pow_k = PassPowKMetric(scorer=CodeExecutionScorer, k=k).compute(responses)
             assert at_k == 1.0
             assert pow_k == 1.0

@@ -2,13 +2,12 @@
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
 from ..scorers import (
     AbstentionScorer,
     BitsPerByteScorer,
-    CodeExecutionScorer,
     ExactMatchScorer,
     F1Scorer,
     PerplexityScorer,
@@ -174,15 +173,15 @@ class MeanPerplexityMetric(Metric):
 
 @dataclass(frozen=True, slots=True)
 class PassAtKMetric(Metric):
-    """Compute pass@k metric for code generation tasks.
+    """Compute pass@k metric across multiple samples per task.
 
-    This metric groups responses by task ID and computes pass@k
-    across multiple samples per task.
+    Groups responses by task ID and computes the unbiased pass@k
+    estimator: probability that at least one of k samples passes.
     """
 
     name: str = "pass_at_k"
     k: int = 1
-    scorer: type[Scorer] = CodeExecutionScorer
+    scorer: type[Scorer] = field(kw_only=True)
 
     def compute(self, responses: Sequence[Response]) -> float:
         """Compute pass@k across all tasks."""
@@ -213,13 +212,13 @@ class PassAtKMetric(Metric):
 class PassPowKMetric(Metric):
     """Compute pass^k metric (all k trials succeed).
 
-    Pass^k measures automation readiness: the probability that
-    k consecutive runs all succeed. Computed as (success_rate)^k.
+    Measures automation readiness: the probability that k consecutive
+    runs all succeed. Computed as (success_rate)^k.
     """
 
     name: str = "pass_pow_k"
     k: int = 1
-    scorer: type[Scorer] = CodeExecutionScorer
+    scorer: type[Scorer] = field(kw_only=True)
 
     def compute(self, responses: Sequence[Response]) -> float:
         """Compute pass^k across all tasks."""
