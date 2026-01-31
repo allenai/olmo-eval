@@ -13,8 +13,8 @@ def patch_openai_agents_for_vllm() -> None:
     Call this once before creating any agents that will talk to vLLM.
     Safe to call multiple times (idempotent).
     """
-    from agents import FunctionTool  # type: ignore[import-not-found]
-    from agents.models.chatcmpl_converter import Converter  # type: ignore[import-not-found]
+    from agents import FunctionTool
+    from agents.models.chatcmpl_converter import Converter
 
     # Check if already patched
     if getattr(Converter, "_vllm_patched", False):
@@ -22,8 +22,8 @@ def patch_openai_agents_for_vllm() -> None:
 
     _original_tool_to_openai = Converter.tool_to_openai
 
-    @classmethod  # type: ignore[misc]
-    def _patched_tool_to_openai(cls, tool):  # type: ignore[no-untyped-def]
+    @classmethod
+    def _patched_tool_to_openai(cls, tool):
         result = _original_tool_to_openai(tool)
         # Remove 'strict' field if False (vLLM doesn't support it)
         if isinstance(tool, FunctionTool) and not tool.strict_json_schema:

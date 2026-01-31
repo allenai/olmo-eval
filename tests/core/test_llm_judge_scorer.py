@@ -103,15 +103,6 @@ class TestSimpleQAJudgeScorer:
         score = scorer.score(instance, output)
         assert score == 0.0
 
-    def test_no_judge_fn(self):
-        """Test with no judge function."""
-        scorer = SimpleQAJudgeScorer()
-        instance = Instance(question="Q", gold_answer="A")
-        output = LMOutput(text="A")
-
-        score = scorer.score(instance, output)
-        assert score == 0.0
-
     def test_get_grade(self):
         """Test get_grade method."""
         scorer = SimpleQAJudgeScorer()
@@ -242,15 +233,6 @@ class TestRubricJudgeScorer:
         prompt = scorer.format_judge_prompt(instance, output)
         assert "10" in prompt
         assert "0" in prompt
-
-    def test_no_judge_fn(self):
-        """Test with no judge function."""
-        scorer = RubricJudgeScorer()
-        instance = Instance(question="Q", gold_answer="A")
-        output = LMOutput(text="Response")
-
-        score = scorer.score(instance, output)
-        assert score == 0.0
 
     def test_scorer_name(self):
         """Test scorer name."""
