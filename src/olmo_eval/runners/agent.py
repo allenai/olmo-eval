@@ -145,8 +145,6 @@ class AgentEvalRunner(RunnerResultsMixin):
                     "Use SyncEvalRunner for standard tasks."
                 )
 
-        console.print("[bold]Running agent tasks (vLLM server started per task)[/bold]")
-
         from olmo_eval.runners.mixins import get_model_display_name
 
         model_alias = self.model_overrides.get("alias")
@@ -170,7 +168,7 @@ class AgentEvalRunner(RunnerResultsMixin):
         }
 
         for spec in expanded_tasks:
-            console.print(f"\n[bold blue]Running agent task {spec}...[/bold blue]")
+            console.print(f"[bold blue]Running agent task: {spec}[/bold blue]")
             task_result = self._run_agent_task(spec)
             task_data: dict[str, Any] = {
                 "config": task_result.config,
