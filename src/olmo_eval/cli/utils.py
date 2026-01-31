@@ -88,6 +88,22 @@ class EvalSummary:
     runner: RunnerConfig
 
 
+@dataclass
+class ExperimentSummary:
+    """Per-experiment summary for beaker launch display."""
+
+    name: str
+    models: list[ModelSummary]
+    tasks: list[TaskSummary]
+    runner: RunnerConfig
+    cluster: str
+    num_gpus: int
+    priority: str
+    preemptible: bool = True
+    timeout: str = "2d"
+    shared_memory: str = "10GiB"
+
+
 def parse_model_spec(spec: str) -> tuple[str, dict[str, Any]]:
     """Parse model spec into (model_name, overrides).
 

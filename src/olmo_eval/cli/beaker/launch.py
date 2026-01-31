@@ -6,7 +6,7 @@ from rich.pretty import Pretty
 from rich.table import Table
 
 from olmo_eval.cli.utils import (
-    EvalSummary,
+    ExperimentSummary,
     ModelSummary,
     RunnerConfig,
     TaskSummary,
@@ -381,34 +381,6 @@ def launch(
     if inject_aws_credentials is None:
         inject_aws_credentials = bool(s3_models) or store
 
-    if inject_aws_credentials:
-        local_creds = get_local_aws_credentials()
-        beaker_user = launcher.beaker.user_name
-
-        s3_table = Table(show_header=False, box=None, expand=True)
-        s3_table.add_column("Key", style="blue")
-        s3_table.add_column("Value")
-
-        if local_creds:
-            cred_type = "temporary" if local_creds.session_token else "long-term"
-            s3_table.add_row("Credentials", f"[green]found[/green] ({cred_type})")
-            s3_table.add_row("Beaker user", beaker_user)
-            s3_table.add_row(
-                "Beaker secrets",
-                f"{beaker_user}_AWS_ACCESS_KEY_ID, {beaker_user}_AWS_SECRET_ACCESS_KEY",
-            )
-        else:
-            s3_table.add_row(
-                "Credentials",
-                "[yellow]not found[/yellow] - job may fail if S3 access is required",
-            )
-
-        console.print()
-        console.print(
-            Panel(s3_table, title="[bold]S3 Access Configuration[/bold]", border_style="yellow")
-        )
-        console.print()
-
     # Auto-detect GCS model paths for GCS credential injection
     from olmo_eval.launch.beaker.gcs import get_local_gcs_credentials, is_gcs_path
 
@@ -463,6 +435,56 @@ def launch(
     # Auto-generate a group if none specified
     if not effective_groups:
         effective_groups = [f"{name}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"]
+
+    # Display storage configuration if enabled
+    if store or (s3_bucket and s3_prefix) or inject_aws_credentials:
+        storage_lines = []
+
+        # S3 Access credentials
+        if inject_aws_credentials:
+            local_creds = get_local_aws_credentials()
+            beaker_user = launcher.beaker.user_name
+            storage_lines.append("[bold]S3 Access:[/bold]")
+            if local_creds:
+                cred_type = "temporary" if local_creds.session_token else "long-term"
+                storage_lines.append(f"  Credentials: [green]found[/green] ({cred_type})")
+                storage_lines.append(
+                    f"  Beaker secrets: {beaker_user}_AWS_ACCESS_KEY_ID, "
+                    f"{beaker_user}_AWS_SECRET_ACCESS_KEY"
+                )
+            else:
+                storage_lines.append(
+                    "  Credentials: [yellow]not found[/yellow] - "
+                    "job may fail if S3 access is required"
+                )
+
+        # S3 storage settings
+        if s3_bucket and s3_prefix:
+            storage_lines.append("[bold]S3 Storage:[/bold]")
+            storage_lines.append(f"  Bucket: {s3_bucket}")
+            storage_lines.append(f"  Prefix: {s3_prefix}")
+            storage_lines.append(f"  Region: {s3_region}")
+            if s3_endpoint_url:
+                storage_lines.append(f"  Endpoint: {s3_endpoint_url}")
+            if effective_groups:
+                storage_lines.append(f"  Group: {effective_groups[0]}")
+
+        # PostgreSQL storage
+        if store:
+            storage_lines.append("[bold]PostgreSQL:[/bold]")
+            storage_lines.append(
+                "  Credentials from Beaker secrets: olmo_eval_PGHOST, olmo_eval_PGPORT,"
+            )
+            storage_lines.append("    olmo_eval_PGDATABASE, olmo_eval_PGUSER, olmo_eval_PGPASSWORD")
+
+        console.print(
+            Panel(
+                "\n".join(storage_lines),
+                title="[bold]Storage Configuration[/bold]",
+                border_style="green",
+            )
+        )
+        console.print()
 
     # Determine the effective image
     from olmo_eval.core.constants.infrastructure import BEAKER_DEFAULT_IMAGE
@@ -706,83 +728,140 @@ def launch(
             )
         )
 
-    # Build runner config
-    from olmo_eval.runners import AsyncEvalRunner, StreamingEvalRunner, SyncEvalRunner
+    # Build per-experiment summaries for display
+    from olmo_eval.runners import (
+        AgentEvalRunner,
+        AsyncEvalRunner,
+        StreamingEvalRunner,
+        SyncEvalRunner,
+    )
 
+    # Get effective attention backend
     effective_attention_backend = None
     if cfg is not None and model_configs:
         first_model = model_configs[0]
         model_resources = cfg.get_model_resources(first_model)
         effective_attention_backend = model_resources.get("attention_backend")
 
-    if use_async_stream:
-        effective_num_workers = num_workers
-        if effective_num_workers is None and cfg is not None and model_configs:
-            first_model = model_configs[0]
-            model_resources = cfg.get_model_resources(first_model)
-            effective_num_workers = model_resources.get("num_workers")
+    # Build a lookup for task summaries by spec
+    task_summary_by_spec: dict[str, TaskSummary] = {}
+    for ts in task_summaries:
+        # Build the full spec including variants and overrides
+        full_spec = ts.config.name
+        if ts.spec and ts.spec != ts.config.name:
+            full_spec = ts.spec
+        task_summary_by_spec[full_spec] = ts
 
-        runner_config = RunnerConfig(
-            runner=StreamingEvalRunner,
-            output_dir=BEAKER_RESULT_DIR,
-            attention_backend=effective_attention_backend,
-            num_workers=effective_num_workers if effective_num_workers is not None else "auto",
-            gpus_per_worker=gpus_per_worker,
+    # Build experiment summaries for display
+    experiment_summaries: list[ExperimentSummary] = []
+    for exp in experiment_plan:
+        exp_model_cfgs = exp["model_cfgs"]
+        exp_model_specs = exp["model_specs"]
+        exp_is_agent = exp.get("is_agent", False)
+        first_model_cfg = exp_model_cfgs[0]
+
+        # Build model summaries for this experiment (with full details)
+        exp_model_summaries = []
+        for m_cfg, m_spec in zip(exp_model_cfgs, exp_model_specs, strict=True):
+            model_base_name, model_inline_overrides = parse_model_spec(m_spec)
+            exp_model_summaries.append(
+                ModelSummary(
+                    name=model_base_name,
+                    gpus=m_cfg.gpus or gpus,
+                    parallelism=m_cfg.parallelism or parallelism,
+                    alias=m_cfg.alias,
+                    provider=m_cfg.provider,
+                    overrides=model_inline_overrides if model_inline_overrides else None,
+                )
+            )
+
+        # Build task summaries for this experiment
+        exp_task_summaries = []
+        for task_spec in exp["tasks"]:
+            # Strip priority suffix for lookup
+            base_spec = task_spec.rsplit("@", 1)[0] if "@" in task_spec else task_spec
+            if base_spec in task_summary_by_spec:
+                exp_task_summaries.append(task_summary_by_spec[base_spec])
+            else:
+                # Fallback: create minimal task summary
+                from olmo_eval.evals.tasks import get_task as get_task_instance
+
+                try:
+                    task_instance = get_task_instance(base_spec)
+                    exp_task_summaries.append(TaskSummary(config=task_instance.config))
+                except Exception:
+                    pass  # Skip if task can't be loaded
+
+        # Determine runner for this experiment
+        if exp_is_agent:
+            exp_runner_class = AgentEvalRunner
+        elif use_async_stream:
+            exp_runner_class = StreamingEvalRunner
+        elif use_async:
+            exp_runner_class = AsyncEvalRunner
+        else:
+            exp_runner_class = SyncEvalRunner
+
+        # Build RunnerConfig with full details
+        if use_async_stream or use_async:
+            effective_num_workers = num_workers
+            if effective_num_workers is None and cfg is not None:
+                model_resources = cfg.get_model_resources(first_model_cfg)
+                effective_num_workers = model_resources.get("num_workers")
+            exp_runner_config = RunnerConfig(
+                runner=exp_runner_class,
+                output_dir=BEAKER_RESULT_DIR,
+                attention_backend=effective_attention_backend,
+                num_workers=effective_num_workers if effective_num_workers else "auto",
+                gpus_per_worker=gpus_per_worker,
+            )
+        else:
+            exp_runner_config = RunnerConfig(
+                runner=exp_runner_class,
+                output_dir=BEAKER_RESULT_DIR,
+                attention_backend=effective_attention_backend if not exp_is_agent else None,
+            )
+
+        # Get effective cluster and other job config details
+        exp_cluster = first_model_cfg.cluster or cluster or "ai2/allennlp-cirrascale"
+        exp_preemptible = (
+            first_model_cfg.preemptible if first_model_cfg.preemptible is not None else preemptible
         )
-    elif use_async:
-        effective_num_workers = num_workers
-        if effective_num_workers is None and cfg is not None and model_configs:
-            first_model = model_configs[0]
-            model_resources = cfg.get_model_resources(first_model)
-            effective_num_workers = model_resources.get("num_workers")
+        exp_timeout = first_model_cfg.timeout or timeout or "2d"
+        exp_shared_memory = first_model_cfg.shared_memory or "10GiB"
 
-        runner_config = RunnerConfig(
-            runner=AsyncEvalRunner,
-            output_dir=BEAKER_RESULT_DIR,
-            attention_backend=effective_attention_backend,
-            num_workers=effective_num_workers if effective_num_workers is not None else "auto",
-            gpus_per_worker=gpus_per_worker,
-        )
-    else:
-        runner_config = RunnerConfig(
-            runner=SyncEvalRunner,
-            output_dir=BEAKER_RESULT_DIR,
-            attention_backend=effective_attention_backend,
+        experiment_summaries.append(
+            ExperimentSummary(
+                name=exp["name"],
+                models=exp_model_summaries,
+                tasks=exp_task_summaries,
+                runner=exp_runner_config,
+                cluster=str(exp_cluster),
+                num_gpus=exp["num_gpus"],
+                priority=exp["priority"],
+                preemptible=exp_preemptible,
+                timeout=str(exp_timeout),
+                shared_memory=str(exp_shared_memory),
+            )
         )
 
-    # Build the eval summary for display
-    eval_summary = EvalSummary(
-        models=model_summaries,
-        tasks=task_summaries,
-        runner=runner_config,
-    )
-
-    # Print consolidated launch configuration using rich repr
+    # Print header
     console.print()
     console.print(
-        Panel(
-            Pretty(eval_summary, expand_all=True, no_wrap=True, overflow="fold"),
-            title="[bold]Launch Configuration[/bold]",
-            border_style="blue",
-        )
-    )
-
-    # Print experiment summary
-    console.print(
-        f"\n[bold]Experiments:[/bold] {total_experiments} experiment(s), "
-        f"{total_expanded_tasks} task(s)"
+        f"[bold]Launching {total_experiments} experiment(s) "
+        f"with {total_expanded_tasks} task(s)[/bold]"
     )
     if split_models:
         console.print(
             "[dim]  Tasks distributed across multiple experiments due to GPU constraints[/dim]"
         )
 
-    # Simplified experiment table - only show if multiple experiments
+    # Experiment matrix table - show when multiple experiments
     if total_experiments > 1:
         matrix_table = Table(show_header=True, title="Experiment Plan")
         matrix_table.add_column("Name", style="cyan")
         matrix_table.add_column("Models", style="blue")
-        matrix_table.add_column("Type", style="magenta")
+        matrix_table.add_column("Runner", style="magenta")
         matrix_table.add_column("Priority", style="yellow")
         matrix_table.add_column("Tasks", justify="right")
         matrix_table.add_column("GPUs", style="green", justify="right")
@@ -793,18 +872,25 @@ def launch(
             task_display = (
                 f"{task_count}/{total_tasks}" if exp["split_index"] is not None else str(task_count)
             )
-            # Show model names (may be multiple if grouped)
             model_cfgs = exp["model_cfgs"]
             if len(model_cfgs) == 1:
                 model_display = model_cfgs[0].name_or_path
             else:
                 model_display = f"{len(model_cfgs)} models"
-            # Show task type
-            task_type = "agent" if exp.get("is_agent", False) else "simple"
+            # Show runner type
+            exp_is_agent = exp.get("is_agent", False)
+            if exp_is_agent:
+                runner_display = "AgentEvalRunner"
+            elif use_async_stream:
+                runner_display = "StreamingEvalRunner"
+            elif use_async:
+                runner_display = "AsyncEvalRunner"
+            else:
+                runner_display = "SyncEvalRunner"
             matrix_table.add_row(
                 exp["name"],
                 model_display,
-                task_type,
+                runner_display,
                 exp["priority"],
                 task_display,
                 str(exp["num_gpus"]),
@@ -813,6 +899,26 @@ def launch(
         console.print(matrix_table)
 
     console.print()
+
+    # Print per-experiment summaries
+    for exp_summary in experiment_summaries:
+        # Determine border style based on runner type
+        runner_name = exp_summary.runner.runner.__name__
+        if runner_name == "AgentEvalRunner":
+            border_style = "magenta"
+        elif runner_name in ("StreamingEvalRunner", "AsyncEvalRunner"):
+            border_style = "green"
+        else:
+            border_style = "blue"
+
+        console.print(
+            Panel(
+                Pretty(exp_summary, expand_all=True),
+                title=f"[bold]{exp_summary.name}[/bold]",
+                border_style=border_style,
+            )
+        )
+        console.print()
 
     # Ensure common secrets exist in Beaker
     from olmo_eval.launch.beaker.secrets import (
@@ -1013,8 +1119,8 @@ def launch(
         from olmo_eval.core.constants.infrastructure import BACKEND_OPTIONAL_GROUPS
 
         if exp_is_agent:
-            # Agent tasks always use vLLM internally
-            provider_extras = ["vllm"]
+            # Agent tasks need vLLM (for server) and agents (for agent SDK)
+            provider_extras = ["vllm", "agents"]
         else:
             config_provider = model_resources.get("provider") or "vllm"
             runtime_provider: str = str(config_provider)
@@ -1065,42 +1171,6 @@ def launch(
             env_secrets=env_secrets,
         )
         job_configs.append(job_config)
-
-    # Display storage configuration if enabled
-    if store or (s3_bucket and s3_prefix):
-        storage_lines = []
-        if store:
-            storage_lines.append("[bold]PostgreSQL:[/bold]")
-            storage_lines.append(
-                "  Credentials from Beaker secrets: olmo_eval_PGHOST, olmo_eval_PGPORT,"
-            )
-            storage_lines.append("    olmo_eval_PGDATABASE, olmo_eval_PGUSER, olmo_eval_PGPASSWORD")
-        if s3_bucket and s3_prefix:
-            storage_lines.append("[bold]S3:[/bold]")
-            storage_lines.append(f"  Bucket: {s3_bucket}")
-            storage_lines.append(f"  Prefix: {s3_prefix}")
-            storage_lines.append(f"  Region: {s3_region}")
-            if s3_endpoint_url:
-                storage_lines.append(f"  Endpoint: {s3_endpoint_url}")
-            if effective_groups:
-                storage_lines.append(f"  Group: {effective_groups[0]}")
-        console.print(
-            Panel(
-                "\n".join(storage_lines),
-                title="[bold]Storage Configuration[/bold]",
-                border_style="green",
-            )
-        )
-
-    # Display all BeakerJobConfig objects
-    for job_config in job_configs:
-        console.print(
-            Panel(
-                Pretty(job_config, expand_all=True, no_wrap=True, overflow="fold"),
-                title=f"[bold]BeakerJobConfig: {job_config.name}[/bold]",
-                border_style="cyan",
-            )
-        )
 
     # Confirm before launching
     if not dry_run and not yes and not click.confirm("Proceed with launch?", default=True):
