@@ -16,7 +16,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -41,16 +41,21 @@ def _wait_for_server(
     url: str,
     timeout: float = DEFAULT_STARTUP_TIMEOUT,
     interval: float = DEFAULT_HEALTH_CHECK_INTERVAL,
-) -> bool:
+    process: subprocess.Popen | None = None,
+) -> tuple[bool, Exception | None, str | None]:
     """Wait for vLLM server to be ready.
 
     Args:
         url: Base URL of the server (e.g., "http://localhost:8000/v1")
         timeout: Maximum time to wait in seconds
         interval: Time between health checks in seconds
+        process: Optional subprocess to monitor for early exit
 
     Returns:
-        True if server is ready, False if timeout exceeded
+        Tuple of (success, last_error, process_output):
+        - success: True if server is ready, False if timeout exceeded or process died
+        - last_error: The last error encountered, or None
+        - process_output: Captured output if process died early, or None
     """
     import urllib.error
     import urllib.request
@@ -59,17 +64,29 @@ def _wait_for_server(
     models_url = url.rstrip("/") + "/models"
 
     start_time = time.time()
-    last_error = None
+    last_error: Exception | None = None
 
     while time.time() - start_time < timeout:
+        # Check if the subprocess has died
+        if process is not None:
+            exit_code = process.poll()
+            if exit_code is not None:
+                # Process exited - read its output
+                output = None
+                if process.stdout:
+                    with suppress(Exception):
+                        output = process.stdout.read().decode("utf-8", errors="replace")
+                logger.error(f"vLLM server process exited with code {exit_code}")
+                return False, RuntimeError(f"Process exited with code {exit_code}"), output
+
         try:
             # Try health endpoint first
             with urllib.request.urlopen(health_url, timeout=5) as response:
                 if response.status == 200:
                     logger.info(f"vLLM server ready at {url}")
-                    return True
-        except urllib.error.URLError:
-            pass
+                    return True, None, None
+        except urllib.error.URLError as e:
+            last_error = e
         except Exception as e:
             last_error = e
 
@@ -78,16 +95,16 @@ def _wait_for_server(
             with urllib.request.urlopen(models_url, timeout=5) as response:
                 if response.status == 200:
                     logger.info(f"vLLM server ready at {url}")
-                    return True
-        except urllib.error.URLError:
-            pass
+                    return True, None, None
+        except urllib.error.URLError as e:
+            last_error = e
         except Exception as e:
             last_error = e
 
         time.sleep(interval)
 
     logger.error(f"vLLM server failed to start within {timeout}s. Last error: {last_error}")
-    return False
+    return False, last_error, None
 
 
 def _build_server_command(
@@ -220,12 +237,38 @@ class VLLMServerProcess:
         atexit.register(self.stop)
 
         # Wait for server to be ready
-        if not _wait_for_server(self.base_url, timeout=self.startup_timeout):
+        success, last_error, process_output = _wait_for_server(
+            self.base_url, timeout=self.startup_timeout, process=self._process
+        )
+        if not success:
+            # Try to capture any remaining output before stopping
+            if process_output is None and self._process and self._process.stdout:
+                with suppress(Exception):
+                    process_output = self._process.stdout.read().decode("utf-8", errors="replace")
+
+            # Log the captured output for debugging
+            if process_output:
+                logger.error(f"vLLM server output:\n{process_output}")
+
             self.stop()
-            raise RuntimeError(
+
+            # Build a detailed error message
+            error_msg = (
                 f"vLLM server failed to start for model {self.model_name} "
                 f"within {self.startup_timeout}s"
             )
+            if last_error:
+                error_msg += f". Error: {last_error}"
+            if process_output:
+                # Include a truncated version of the output in the exception
+                max_output_len = 2000
+                if len(process_output) > max_output_len:
+                    truncated_output = "...[truncated]...\n" + process_output[-max_output_len:]
+                else:
+                    truncated_output = process_output
+                error_msg += f"\n\nServer output:\n{truncated_output}"
+
+            raise RuntimeError(error_msg)
 
         self._started = True
         logger.info(f"vLLM server started at {self.base_url}")
