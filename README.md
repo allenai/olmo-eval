@@ -20,6 +20,9 @@ make setup-all
 # Or with specific extras
 make setup EXTRAS=beaker
 
+# For agent tasks
+make setup EXTRAS=agents
+
 # List available commands
 olmo-eval --help
 
@@ -136,37 +139,45 @@ Note: Currently `AVERAGE_OF_AVERAGES` gives each child equal weight regardless o
 
 ### Formatters
 
-Formatters convert instances into LM requests. Available formatters:
+Formatters convert instances into LM requests. See `olmo_eval.core.formatters` for available options.
 
-| Formatter | Description |
-|-----------|-------------|
-| `CompletionFormatter` | Text completion with template |
-| `ChatFormatter` | Chat messages (system/user/assistant) |
-| `MultipleChoiceFormatter` | MC with continuations for logprob scoring |
-| `PPLFormatter` | Perplexity/BPB evaluation |
+```python
+from olmo_eval.core import MultipleChoiceFormatter, ChatFormatter
+
+# Multiple choice with logprob scoring
+formatter = MultipleChoiceFormatter(template="Q: {question}\n\nA:")
+
+# Chat-based formatting
+formatter = ChatFormatter(system="You are a helpful assistant.")
+```
 
 ### Scorers
 
-Scorers compute a score for each instance/output pair. Available scorers:
+Scorers compute a score for each instance/output pair. See `olmo_eval.core.scorers` for available options.
 
-| Scorer | Description |
-|--------|-------------|
-| `ExactMatchScorer` | Exact string match (1.0 or 0.0) |
-| `MultipleChoiceScorer` | Compare selected choice index/letter |
-| `F1Scorer` | Token-level F1 score |
-| `BitsPerByteScorer` | Bits per byte from logprobs |
-| `CodeExecutionScorer` | Execute code against test cases |
+```python
+from olmo_eval.core import ExactMatchScorer, MultipleChoiceScorer
+
+# Exact string match
+scorer = ExactMatchScorer()
+
+# Multiple choice comparison
+scorer = MultipleChoiceScorer()
+```
 
 ### Metrics
 
-Metrics aggregate scores across responses. Available metrics:
+Metrics aggregate scores across responses. See `olmo_eval.core.metrics` for available options.
 
-| Metric | Description |
-|--------|-------------|
-| `AccuracyMetric` | Mean accuracy for a scorer |
-| `F1Metric` | Mean F1 score |
-| `BPBMetric` | Byte-weighted bits per byte |
-| `PassAtKMetric` | Pass@k for code generation |
+```python
+from olmo_eval.core import AccuracyMetric, F1Metric
+
+# Mean accuracy
+metric = AccuracyMetric(scorer=ExactMatchScorer)
+
+# Mean F1 score
+metric = F1Metric(scorer=F1Scorer)
+```
 
 ### Model Presets
 
@@ -611,6 +622,15 @@ olmo-eval beaker group info benchmark-2024 --wait --format csv > results.csv
 
 # Export as JSON
 olmo-eval beaker group info benchmark-2024 --format json
+
+# Watch experiment logs
+olmo-eval beaker watch -e <experiment-id>
+
+# Cancel all experiments in a group
+olmo-eval beaker group cancel benchmark-2024
+
+# List groups in a workspace
+olmo-eval beaker group list -w <workspace>
 ```
 
 ### Inference Provider Configuration
@@ -808,7 +828,7 @@ description: "Full evaluation suite for Llama 70B"
 | `gpus_per_worker` | int | no | GPUs per worker for async modes (default: `1`) |
 | `description` | string | no | Experiment description (config-only) |
 
-See `examples/configs/` for more configuration examples.
+See `examples/beaker/configs/` for more configuration examples.
 
 ### Cluster Aliases
 
@@ -931,6 +951,9 @@ olmo-eval results query --model llama3.1-8b
 
 # Query by task (shows comparison matrix)
 olmo-eval results query --task mmlu --task gsm8k
+
+# Query by experiment group
+olmo-eval results query -G my-benchmark-group --format json
 
 # Combine filters
 olmo-eval results query --model llama3.1-8b --task mmlu --format json
