@@ -308,7 +308,7 @@ class SimpleQAAgentTask(AgentTask):
             ModelSettings,
             OpenAIChatCompletionsModel,
         )
-        from openai import AsyncOpenAI  # type: ignore[import-not-found]
+        from openai import AsyncOpenAI
 
         s2_api_key = os.getenv("S2_API_KEY")
         if not s2_api_key:
