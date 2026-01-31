@@ -19,6 +19,7 @@ from olmo_eval.core.scorers import SimpleQAJudgeScorer
 from olmo_eval.core.types import SEARCH_TOOLS, Instance, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.core import AgentTask, AgentTaskConfig, register
+from olmo_eval.inference.utils import patch_openai_agents_for_vllm
 
 logger = logging.getLogger(__name__)
 
@@ -302,6 +303,9 @@ class SimpleQAAgentTask(AgentTask):
             OpenAIChatCompletionsModel,
         )
         from openai import AsyncOpenAI
+
+        # Patch SDK to omit 'strict' field for vLLM compatibility
+        patch_openai_agents_for_vllm()
 
         s2_api_key = os.getenv("S2_API_KEY")
         if not s2_api_key:
