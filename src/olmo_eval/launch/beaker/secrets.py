@@ -27,6 +27,7 @@ __all__ = [
     "get_local_hf_token",
     "get_local_wandb_api_key",
     "ensure_common_secrets",
+    "ensure_task_secrets",
 ]
 
 
@@ -204,6 +205,62 @@ def ensure_common_secrets(
         log.warning(
             "No Weights & Biases API key found. Set WANDB_API_KEY environment variable "
             "or run 'wandb login' to enable W&B logging."
+        )
+
+    return secrets
+
+
+def ensure_task_secrets(
+    workspace: str,
+    required_secrets: set[str],
+) -> list[tuple[str, str]]:
+    """Ensure task-required secrets exist in Beaker.
+
+    Unlike ensure_common_secrets, this function DOES raise an error if
+    any required secret is not found. Task-required secrets are mandatory
+    for the evaluation to run correctly.
+
+    Secrets are expected to be stored with a username prefix to prevent
+    collisions between users in shared workspaces. For example, user "alice"
+    requesting "S2_API_KEY" will look for secret "alice_S2_API_KEY".
+
+    Args:
+        workspace: Beaker workspace to check secrets in.
+        required_secrets: Set of environment variable names that must exist
+            as Beaker secrets.
+
+    Returns:
+        List of (env_var_name, secret_name) tuples.
+
+    Raises:
+        ValueError: If any required secret is not found in Beaker.
+    """
+    if not required_secrets:
+        return []
+
+    from beaker import Beaker
+    from beaker.exceptions import BeakerSecretNotFound
+
+    client = Beaker.from_env(default_workspace=workspace)
+    username = _get_beaker_username(client)
+    secrets: list[tuple[str, str]] = []
+    missing: list[str] = []
+
+    for env_var in sorted(required_secrets):
+        secret_name = f"{username}_{env_var}"
+        try:
+            client.secret.get(secret_name)
+            secrets.append((env_var, secret_name))
+            log.debug(f"Found required secret {secret_name}")
+        except BeakerSecretNotFound:
+            missing.append(f"{env_var} (expected Beaker secret: {secret_name})")
+
+    if missing:
+        raise ValueError(
+            "Missing required Beaker secrets:\n"
+            + "\n".join(f"  - {m}" for m in missing)
+            + "\n\nCreate these secrets with:\n"
+            + "\n".join(f"  beaker secret write {username}_{s.split()[0]} <value>" for s in missing)
         )
 
     return secrets

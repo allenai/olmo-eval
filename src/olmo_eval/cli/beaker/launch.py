@@ -630,6 +630,12 @@ def launch(
             )
         )
 
+    # Collect required secrets from all task configs
+    all_required_secrets: set[str] = set()
+    for ts in task_summaries:
+        if hasattr(ts.config, "required_secrets") and ts.config.required_secrets:
+            all_required_secrets.update(ts.config.required_secrets)
+
     # Build model summaries with resolved providers
     from olmo_eval.core.configs import get_model_config as get_runtime_model_config
 
@@ -762,6 +768,7 @@ def launch(
     # Ensure common secrets exist in Beaker
     from olmo_eval.launch.beaker.secrets import (
         ensure_common_secrets,
+        ensure_task_secrets,
         get_local_hf_token,
         get_local_wandb_api_key,
     )
@@ -773,8 +780,20 @@ def launch(
             common_secrets.append(("HF_TOKEN", f"{beaker_username}_HF_TOKEN"))
         if get_local_wandb_api_key():
             common_secrets.append(("WANDB_API_KEY", f"{beaker_username}_WANDB_API_KEY"))
+        # In dry-run, assume task secrets exist (just show what would be used)
+        task_secrets: list[tuple[str, str]] = [
+            (s, f"{beaker_username}_{s}") for s in sorted(all_required_secrets)
+        ]
     else:
         common_secrets = ensure_common_secrets(workspace=workspace)
+        # Validate and collect task-required secrets (will fail if any are missing)
+        try:
+            task_secrets = ensure_task_secrets(
+                workspace=workspace, required_secrets=all_required_secrets
+            )
+        except ValueError as e:
+            console.print(f"[red]Error:[/red] {e}")
+            raise SystemExit(1) from None
 
     # Build store secrets list if --store is enabled
     # User must have manually created these secrets in Beaker (shared, not per-user)
@@ -949,6 +968,9 @@ def launch(
         ]
         env_secrets.extend(
             BeakerEnvSecret(env_var, secret_name) for env_var, secret_name in store_secrets
+        )
+        env_secrets.extend(
+            BeakerEnvSecret(env_var, secret_name) for env_var, secret_name in task_secrets
         )
 
         # Build env vars: include defaults plus Beaker author for attribution
