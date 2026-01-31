@@ -1,8 +1,7 @@
-"""Evaluation runner orchestrator."""
+"""Agent evaluation runner for multi-turn agent tasks."""
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -13,7 +12,6 @@ from rich.table import Table
 from olmo_eval.core.configs import expand_tasks, get_model_config
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.core.logging import get_logger
-from olmo_eval.inference import InferenceProvider, ProviderType, create_provider
 from olmo_eval.runners.constants import SAMPLING_KEYS, TASKCONFIG_KEYS, ValidationError
 from olmo_eval.runners.mixins import RunnerResultsMixin, S3Config
 from olmo_eval.runners.utils import (
@@ -21,7 +19,7 @@ from olmo_eval.runners.utils import (
     compute_suite_aggregations,
     compute_task_hash,
     generate_experiment_id,
-    run_task_impl,
+    run_agent_task_impl,
     write_predictions_jsonl,
     write_requests_jsonl,
 )
@@ -30,12 +28,20 @@ if TYPE_CHECKING:
     from olmo_eval.storage import StorageBackend
 
 console = Console()
-logger = get_logger("runners.synchronous")
+logger = get_logger("runners.agent")
 
 
 @dataclass
-class SyncEvalRunner(RunnerResultsMixin):
-    """Orchestrates synchronous evaluation runs across tasks."""
+class AgentEvalRunner(RunnerResultsMixin):
+    """Orchestrates evaluation runs for agent tasks.
+
+    This runner is specialized for AgentTask evaluations which use multi-turn
+    agent interactions with tool use. Agent tasks start their own vLLM server
+    internally, so this runner does not initialize an inference provider.
+
+    Use this runner when all tasks are AgentTask instances. For standard tasks,
+    use SyncEvalRunner, AsyncEvalRunner, or StreamingEvalRunner instead.
+    """
 
     model_name: str
     task_specs: list[str]
@@ -43,11 +49,10 @@ class SyncEvalRunner(RunnerResultsMixin):
     num_shots_override: int | None = None
     limit_override: int | None = None
     temperature: float | None = None
-    provider_override: str | None = None
     storages: list[StorageBackend] = field(default_factory=list)
 
-    # vLLM config
-    attention_backend: str | None = None  # e.g., "FLASHINFER", "FLASH_ATTN"
+    # vLLM config for agent server
+    num_gpus: int = 1  # Number of GPUs for tensor parallelism
 
     # Per-task overrides from inline spec (e.g., task::temperature=0.6)
     task_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -71,25 +76,37 @@ class SyncEvalRunner(RunnerResultsMixin):
         """Validate all inputs before running.
 
         Raises:
-            ValidationError: If any task specs are invalid.
+            ValidationError: If any task specs are invalid or non-agent tasks are included.
         """
+        from olmo_eval.evals.tasks import AgentTask, get_task
+
         errors = self._validate_task_specs()
+
+        # Validate that all tasks are agent tasks
+        expanded_tasks = expand_tasks(self.task_specs)
+        for spec in expanded_tasks:
+            task = get_task(spec)
+            if not isinstance(task, AgentTask):
+                errors.append(
+                    f"Task '{spec}' is not an agent task. Use SyncEvalRunner for standard tasks."
+                )
+
         if errors:
             raise ValidationError("\n".join(errors))
 
     def print_config(self) -> None:
         """Print the resolved configuration without running."""
-        table = Table(title="Run Configuration")
+        table = Table(title="Agent Run Configuration")
         table.add_column("Setting", style="cyan")
         table.add_column("Value", style="white")
 
         model_config = get_model_config(self.model_name, **self.model_overrides)
-        provider_str = self.provider_override or model_config.provider
 
         table.add_row("Model", model_config.model)
         if model_config.tokenizer:
             table.add_row("Tokenizer", model_config.tokenizer)
-        table.add_row("Provider", provider_str)
+        table.add_row("Runner", "AgentEvalRunner")
+        table.add_row("GPUs", str(self.num_gpus))
         table.add_row("Output Dir", self.output_dir)
 
         if self.num_shots_override is not None:
@@ -101,7 +118,7 @@ class SyncEvalRunner(RunnerResultsMixin):
 
         # Show expanded tasks
         expanded = expand_tasks(self.task_specs)
-        task_table = Table(title="Tasks to Run")
+        task_table = Table(title="Agent Tasks to Run")
         task_table.add_column("Task Spec", style="cyan")
 
         for spec in expanded:
@@ -110,58 +127,25 @@ class SyncEvalRunner(RunnerResultsMixin):
         console.print(task_table)
 
     def run(self) -> dict[str, Any]:
-        """Execute the evaluation run."""
+        """Execute the agent evaluation run."""
         from olmo_eval.evals.tasks import AgentTask, get_task
 
         model_config = get_model_config(self.model_name, **self.model_overrides)
 
-        # Determine provider (model_config.provider is a string)
-        provider_str = self.provider_override or model_config.provider
-        provider_type = ProviderType(provider_str)
-
-        # Expand tasks first
+        # Expand tasks
         expanded_tasks = expand_tasks(self.task_specs)
 
-        # Check for agent tasks - they must use AgentEvalRunner
-        agent_tasks = [spec for spec in expanded_tasks if isinstance(get_task(spec), AgentTask)]
-        if agent_tasks:
-            raise ValidationError(
-                f"Agent tasks found: {', '.join(agent_tasks)}. "
-                "Use AgentEvalRunner for agent tasks. "
-                "When using beaker launch, agent tasks are automatically split "
-                "into separate experiments."
-            )
+        # Validate all tasks are agent tasks
+        for spec in expanded_tasks:
+            task = get_task(spec)
+            if not isinstance(task, AgentTask):
+                raise ValidationError(
+                    f"Task '{spec}' is not an agent task. "
+                    "AgentEvalRunner only supports AgentTask instances. "
+                    "Use SyncEvalRunner for standard tasks."
+                )
 
-        # vLLM requires 'spawn' multiprocessing start method
-        if provider_type == ProviderType.VLLM:
-            current = os.environ.get("VLLM_WORKER_MULTIPROC_METHOD")
-            if current != "spawn":
-                os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
-                if current:
-                    logger.info(
-                        f"Overriding VLLM_WORKER_MULTIPROC_METHOD from '{current}' to 'spawn'"
-                    )
-
-        console.print(f"[bold]Initializing {provider_type.value} provider...[/bold]")
-        extra_kwargs = dict(model_config.extra_args)
-        if self.attention_backend:
-            extra_kwargs["attention_backend"] = self.attention_backend
-        if model_config.max_model_len:
-            extra_kwargs["max_model_len"] = model_config.max_model_len
-        # Per-model vLLM loading options from inline spec (e.g., model::load_format=runai_streamer)
-        if self.model_overrides.get("load_format"):
-            extra_kwargs["load_format"] = self.model_overrides["load_format"]
-        if self.model_overrides.get("extra_loader_config"):
-            extra_kwargs["model_loader_extra_config"] = self.model_overrides["extra_loader_config"]
-        provider = create_provider(
-            provider_type,
-            model_config.model,
-            tokenizer=model_config.tokenizer,
-            revision=model_config.revision,
-            trust_remote_code=model_config.trust_remote_code,
-            dtype=model_config.dtype,
-            **extra_kwargs,
-        )
+        console.print("[bold]Running agent tasks (vLLM server started per task)[/bold]")
 
         from olmo_eval.runners.mixins import get_model_display_name
 
@@ -171,23 +155,23 @@ class SyncEvalRunner(RunnerResultsMixin):
         results: dict[str, Any] = {
             "model": display_model_name,
             "model_path": model_config.model,  # Original full path
-            "provider": provider_type.value,
+            "provider": "agent",  # Special provider type for agent tasks
             "timestamp": datetime.now().isoformat(),
             "tasks": {},
             # Store model config details for metrics.json
             "model_config": {
                 "model": model_config.model,
                 "tokenizer": model_config.tokenizer,
-                "provider": provider_type.value,
+                "provider": "agent",
                 "dtype": model_config.dtype,
                 "revision": model_config.revision,
-                "attention_backend": self.attention_backend,
+                "num_gpus": self.num_gpus,
             },
         }
 
         for spec in expanded_tasks:
-            console.print(f"\n[bold blue]Running {spec}...[/bold blue]")
-            task_result = self._run_task(spec, provider)
+            console.print(f"\n[bold blue]Running agent task {spec}...[/bold blue]")
+            task_result = self._run_agent_task(spec)
             task_data: dict[str, Any] = {
                 "config": task_result.config,
                 "num_instances": task_result.num_instances,
@@ -266,8 +250,10 @@ class SyncEvalRunner(RunnerResultsMixin):
 
         return results
 
-    def _run_task(self, spec: str, provider: InferenceProvider) -> TaskResult:
-        """Run a single task and return results."""
+    def _run_agent_task(self, spec: str) -> TaskResult:
+        """Run a single agent task and return results."""
+        from olmo_eval.evals.tasks import AgentTask, get_task
+
         # Build overrides from instance settings (global CLI overrides)
         overrides: dict[str, Any] = {}
         sampling_overrides: dict[str, Any] = {}
@@ -287,18 +273,26 @@ class SyncEvalRunner(RunnerResultsMixin):
             elif key in SAMPLING_KEYS:
                 sampling_overrides[key] = value
 
-        # Standard task - use shared task execution logic
-        result = run_task_impl(
+        # Get the task
+        task = get_task(spec)
+        if not isinstance(task, AgentTask):
+            raise ValidationError(
+                f"Task '{spec}' is not an AgentTask. AgentEvalRunner only supports agent tasks."
+            )
+
+        result = run_agent_task_impl(
+            task=task,
             spec=spec,
-            provider=provider,
+            model_name=self.model_name,
+            model_overrides=self.model_overrides,
             overrides=overrides or None,
             progress_callback=lambda msg: console.print(f"  {msg}"),
-            sampling_overrides=sampling_overrides or None,
+            num_gpus=self.num_gpus,
         )
 
         # Check for errors
         if result.error:
-            raise RuntimeError(f"Task {spec} failed: {result.error}")
+            raise RuntimeError(f"Agent task {spec} failed: {result.error}")
 
         return result
 

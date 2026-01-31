@@ -1,5 +1,6 @@
 """Evaluation runners."""
 
+from olmo_eval.runners.agent import AgentEvalRunner
 from olmo_eval.runners.asynchronous import AsyncEvalRunner, StreamingEvalRunner
 from olmo_eval.runners.constants import SAMPLING_KEYS, TASKCONFIG_KEYS, ValidationError
 from olmo_eval.runners.synchronous import SyncEvalRunner
@@ -8,6 +9,7 @@ from olmo_eval.runners.synchronous import SyncEvalRunner
 EvalRunner = SyncEvalRunner
 
 __all__ = [
+    "AgentEvalRunner",
     "SyncEvalRunner",
     "EvalRunner",
     "AsyncEvalRunner",

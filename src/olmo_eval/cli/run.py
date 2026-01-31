@@ -137,6 +137,17 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
     "-a",
     help="Short name for model (used as model_name in DB, original path stored as model_path)",
 )
+@click.option(
+    "--agent",
+    is_flag=True,
+    help="Use agent runner for multi-turn agent tasks (e.g., simpleqa_agent)",
+)
+@click.option(
+    "--num-gpus",
+    type=int,
+    default=1,
+    help="Number of GPUs for tensor parallelism (used with --agent)",
+)
 def run(
     models: tuple[str, ...],
     task: tuple[str, ...],
@@ -167,6 +178,8 @@ def run(
     experiment_name: str | None,
     experiment_group: str | None,
     alias: str | None,
+    agent: bool,
+    num_gpus: int,
 ) -> None:
     """Run evaluation on specified tasks.
 
@@ -307,12 +320,64 @@ def run(
             )
             raise SystemExit(1)
 
+    # Check for incompatible flags with --agent
+    if agent:
+        if use_async or use_async_stream:
+            console.print("[red]Error:[/red] --agent cannot be used with --async or --async-stream")
+            raise SystemExit(1)
+        if len(models) > 1:
+            console.print(
+                "[red]Error:[/red] --agent only supports a single model. "
+                "Use beaker launch for multi-model agent runs."
+            )
+            raise SystemExit(1)
+
     # Extract model names and build per-model overrides dict
     model_names = [name for name, _overrides in parsed_models]
     per_model_overrides = {name: overrides for name, overrides in parsed_models if overrides}
 
-    # Choose runner based on --async or --async-stream flag
-    if use_async_stream:
+    # Choose runner based on flags
+    if agent:
+        # Agent runner for multi-turn agent tasks
+        from olmo_eval.runners import AgentEvalRunner
+
+        console.print("[bold cyan]Using AgentEvalRunner[/bold cyan]")
+
+        model_name, model_overrides = parsed_models[0]
+        runner = AgentEvalRunner(
+            model_name=model_name,
+            task_specs=task_specs,
+            output_dir=output_dir,
+            num_shots_override=num_shots,
+            limit_override=limit,
+            temperature=temperature,
+            storages=storages,
+            num_gpus=num_gpus,
+            task_overrides=task_overrides,
+            model_overrides=model_overrides,
+            s3_config=s3_config,
+            experiment_name=experiment_name,
+            experiment_group=experiment_group,
+            alias=alias,
+        )
+
+        try:
+            runner.validate()
+        except ValidationError as e:
+            console.print(f"[red]Validation error:[/red]\n{e}")
+            raise SystemExit(1) from None
+
+        if dry_run:
+            runner.print_config()
+        else:
+            try:
+                runner.run()
+            except Exception as e:
+                console.print(f"\n[bold red]Evaluation failed:[/bold red] {e}")
+                raise SystemExit(1) from None
+
+        return  # Exit early since we handled everything
+    elif use_async_stream:
         from olmo_eval.runners.asynchronous import StreamingEvalRunner
 
         console.print("[bold cyan]Using StreamingEvalRunner[/bold cyan]")

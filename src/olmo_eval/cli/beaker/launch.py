@@ -332,6 +332,30 @@ def launch(
     expanded_for_validation = expand_tasks(all_task_specs)
     valid_tasks, invalid_tasks = validate_tasks(expanded_for_validation)
 
+    # Detect agent tasks vs simple tasks
+    from olmo_eval.evals.tasks import AgentTask
+    from olmo_eval.evals.tasks import get_task as get_task_for_classification
+
+    agent_task_specs: set[str] = set()
+    for task_spec in expanded_for_validation:
+        try:
+            task_instance = get_task_for_classification(task_spec)
+            if isinstance(task_instance, AgentTask):
+                agent_task_specs.add(task_spec)
+        except Exception:
+            pass  # Skip tasks that can't be loaded - they'll fail validation
+
+    # Classify original specs (with priority suffixes) as agent or simple
+    def is_agent_spec(spec: str) -> bool:
+        """Check if a task spec (potentially with priority suffix) is an agent task."""
+        # Strip priority suffix if present
+        base_spec = spec.rsplit("@", 1)[0] if "@" in spec else spec
+        # Strip inline overrides if present
+        base_spec = base_spec.split("::", 1)[0] if "::" in base_spec else base_spec
+        # Check expanded tasks
+        expanded = expand_tasks([base_spec])
+        return all(t in agent_task_specs for t in expanded)
+
     # Track expanded task counts per priority for display purposes
     expanded_counts_by_priority: dict[str, int] = {}
     for priority_level, specs in tasks_by_priority.items():
@@ -558,54 +582,71 @@ def launch(
         group_has_multiple_models = len(group_model_cfgs) > 1
 
         for t_priority, t_list in tasks_by_priority.items():
-            # When models are grouped, use base name without model suffix
-            # Only append model suffix if there's exactly one model in the group
-            # and there are multiple model groups (ungrouped models)
-            base_name = name
-            if not group_has_multiple_models and multiple_models:
-                # Single model in group, but multiple models overall - append model name
-                short_m = get_model_short_name(first_cfg)
-                base_name = f"{base_name}-{short_m}"
-            if multiple_priorities:
-                base_name = f"{base_name}-{t_priority}"
+            # Split tasks into agent and simple categories
+            agent_tasks_in_priority = [t for t in t_list if is_agent_spec(t)]
+            simple_tasks_in_priority = [t for t in t_list if not is_agent_spec(t)]
 
-            splits = calculate_experiment_splits(
-                tasks=t_list,
-                gpus_per_model=m_gpus,
-                parallelism=m_parallelism,
-                max_gpus_per_node=max_gpus_per_node,
-            )
+            # Process each task category (agent tasks get separate experiments)
+            for task_category, category_tasks in [
+                ("agent", agent_tasks_in_priority),
+                ("simple", simple_tasks_in_priority),
+            ]:
+                if not category_tasks:
+                    continue
 
-            if len(splits) > 1:
-                for m_cfg in group_model_cfgs:
-                    split_models.append(m_cfg.name_or_path)
+                # When models are grouped, use base name without model suffix
+                # Only append model suffix if there's exactly one model in the group
+                # and there are multiple model groups (ungrouped models)
+                base_name = name
+                if not group_has_multiple_models and multiple_models:
+                    # Single model in group, but multiple models overall - append model name
+                    short_m = get_model_short_name(first_cfg)
+                    base_name = f"{base_name}-{short_m}"
+                if multiple_priorities:
+                    base_name = f"{base_name}-{t_priority}"
+                # Add suffix for agent tasks to distinguish them
+                if task_category == "agent":
+                    base_name = f"{base_name}-agent"
 
-            total_splits = len(splits)
-            total_expanded = expanded_counts_by_priority[t_priority]
-            num_models_in_group = len(group_model_cfgs)
-            for i, split in enumerate(splits):
-                exp_name = f"{base_name}-{i + 1:03d}" if total_splits > 1 else base_name
-
-                # Total GPUs = GPUs per split * number of models in group
-                # Each model needs its own set of GPUs
-                total_gpus_for_group = split["num_gpus"] * num_models_in_group
-
-                experiment_plan.append(
-                    {
-                        "name": exp_name,
-                        "model_cfgs": group_model_cfgs,  # List of models in this group
-                        "model_specs": group_model_specs,  # Original specs with ::overrides
-                        "priority": t_priority,
-                        "tasks": split["tasks"],
-                        "original_task_specs": original_task_specs,
-                        "total_expanded_tasks": total_expanded,
-                        "gpus_per_model": m_gpus,
-                        "num_gpus": total_gpus_for_group,
-                        "parallelism": split["parallelism"],
-                        "split_index": i + 1 if total_splits > 1 else None,
-                        "total_splits": total_splits if total_splits > 1 else None,
-                    }
+                splits = calculate_experiment_splits(
+                    tasks=category_tasks,
+                    gpus_per_model=m_gpus,
+                    parallelism=m_parallelism,
+                    max_gpus_per_node=max_gpus_per_node,
                 )
+
+                if len(splits) > 1:
+                    for m_cfg in group_model_cfgs:
+                        split_models.append(m_cfg.name_or_path)
+
+                total_splits = len(splits)
+                # Count expanded tasks for this category
+                category_expanded = len(expand_tasks(category_tasks))
+                num_models_in_group = len(group_model_cfgs)
+                for i, split in enumerate(splits):
+                    exp_name = f"{base_name}-{i + 1:03d}" if total_splits > 1 else base_name
+
+                    # Total GPUs = GPUs per split * number of models in group
+                    # Each model needs its own set of GPUs
+                    total_gpus_for_group = split["num_gpus"] * num_models_in_group
+
+                    experiment_plan.append(
+                        {
+                            "name": exp_name,
+                            "model_cfgs": group_model_cfgs,  # List of models in this group
+                            "model_specs": group_model_specs,  # Original specs with ::overrides
+                            "priority": t_priority,
+                            "tasks": split["tasks"],
+                            "original_task_specs": original_task_specs,
+                            "total_expanded_tasks": category_expanded,
+                            "gpus_per_model": m_gpus,
+                            "num_gpus": total_gpus_for_group,
+                            "parallelism": split["parallelism"],
+                            "split_index": i + 1 if total_splits > 1 else None,
+                            "total_splits": total_splits if total_splits > 1 else None,
+                            "is_agent": task_category == "agent",  # Flag for agent tasks
+                        }
+                    )
 
     # Calculate total expanded tasks
     total_experiments = len(experiment_plan)
@@ -741,6 +782,7 @@ def launch(
         matrix_table = Table(show_header=True, title="Experiment Plan")
         matrix_table.add_column("Name", style="cyan")
         matrix_table.add_column("Models", style="blue")
+        matrix_table.add_column("Type", style="magenta")
         matrix_table.add_column("Priority", style="yellow")
         matrix_table.add_column("Tasks", justify="right")
         matrix_table.add_column("GPUs", style="green", justify="right")
@@ -757,9 +799,12 @@ def launch(
                 model_display = model_cfgs[0].name_or_path
             else:
                 model_display = f"{len(model_cfgs)} models"
+            # Show task type
+            task_type = "agent" if exp.get("is_agent", False) else "simple"
             matrix_table.add_row(
                 exp["name"],
                 model_display,
+                task_type,
                 exp["priority"],
                 task_display,
                 str(exp["num_gpus"]),
@@ -817,6 +862,7 @@ def launch(
         exp_num_gpus = exp["num_gpus"]
         exp_parallelism = exp["parallelism"]
         effective_priority = exp["priority"]
+        exp_is_agent = exp.get("is_agent", False)
 
         # Use first model's resources (all models in group have compatible runtime)
         first_model_cfg = exp_model_cfgs[0]
@@ -903,30 +949,39 @@ def launch(
         if exp_parallelism > 1:
             command.extend(["--parallelism", str(exp_parallelism)])
 
-        # Add async flags if enabled
-        effective_use_async = use_async or model_resources.get("use_async", False)
-        effective_use_async_stream = use_async_stream or model_resources.get(
-            "use_async_stream", False
-        )
-        effective_num_workers = (
-            num_workers if num_workers is not None else model_resources.get("num_workers")
-        )
-        effective_gpus_per_worker = (
-            gpus_per_worker if gpus_per_worker != 1 else model_resources.get("gpus_per_worker", 1)
-        )
+        # Agent tasks use a dedicated runner with their own vLLM server
+        if exp_is_agent:
+            command.append("--agent")
+            # Pass GPU count for tensor parallelism in the agent's vLLM server
+            if exp_num_gpus > 1:
+                command.extend(["--num-gpus", str(exp_num_gpus)])
+        else:
+            # Add async flags if enabled (not applicable to agent tasks)
+            effective_use_async = use_async or model_resources.get("use_async", False)
+            effective_use_async_stream = use_async_stream or model_resources.get(
+                "use_async_stream", False
+            )
+            effective_num_workers = (
+                num_workers if num_workers is not None else model_resources.get("num_workers")
+            )
+            effective_gpus_per_worker = (
+                gpus_per_worker
+                if gpus_per_worker != 1
+                else model_resources.get("gpus_per_worker", 1)
+            )
 
-        if effective_use_async_stream:
-            command.append("--async-stream")
-            if effective_num_workers is not None:
-                command.extend(["--num-workers", str(effective_num_workers)])
-            if effective_gpus_per_worker and effective_gpus_per_worker != 1:
-                command.extend(["--gpus-per-worker", str(effective_gpus_per_worker)])
-        elif effective_use_async:
-            command.append("--async")
-            if effective_num_workers is not None:
-                command.extend(["--num-workers", str(effective_num_workers)])
-            if effective_gpus_per_worker and effective_gpus_per_worker != 1:
-                command.extend(["--gpus-per-worker", str(effective_gpus_per_worker)])
+            if effective_use_async_stream:
+                command.append("--async-stream")
+                if effective_num_workers is not None:
+                    command.extend(["--num-workers", str(effective_num_workers)])
+                if effective_gpus_per_worker and effective_gpus_per_worker != 1:
+                    command.extend(["--gpus-per-worker", str(effective_gpus_per_worker)])
+            elif effective_use_async:
+                command.append("--async")
+                if effective_num_workers is not None:
+                    command.extend(["--num-workers", str(effective_num_workers)])
+                if effective_gpus_per_worker and effective_gpus_per_worker != 1:
+                    command.extend(["--gpus-per-worker", str(effective_gpus_per_worker)])
 
         # Add S3 options if configured (group is inferred from beaker group)
         if s3_bucket and s3_prefix:
@@ -954,12 +1009,17 @@ def launch(
             command.append("--store")
 
         # Get the inference provider for this model group (defaults to vllm)
+        # Agent tasks start their own vLLM server, so they need vllm extras
         from olmo_eval.core.constants.infrastructure import BACKEND_OPTIONAL_GROUPS
 
-        config_provider = model_resources.get("provider") or "vllm"
-        runtime_provider: str = str(config_provider)
-        provider_group = BACKEND_OPTIONAL_GROUPS.get(runtime_provider)
-        provider_extras = [provider_group] if provider_group else []
+        if exp_is_agent:
+            # Agent tasks always use vLLM internally
+            provider_extras = ["vllm"]
+        else:
+            config_provider = model_resources.get("provider") or "vllm"
+            runtime_provider: str = str(config_provider)
+            provider_group = BACKEND_OPTIONAL_GROUPS.get(runtime_provider)
+            provider_extras = [provider_group] if provider_group else []
 
         # Combine inference provider and storage dependencies for installation
         install_extras = list(provider_extras)
