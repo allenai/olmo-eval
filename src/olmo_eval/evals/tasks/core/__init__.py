@@ -4,6 +4,7 @@ from .agent_task import AgentTask, AgentTaskConfig
 from .base import Task, TaskConfig
 from .registry import (
     clear_registry,
+    get_base_task_name,
     get_task,
     list_regimes,
     list_tasks,
@@ -22,6 +23,7 @@ __all__ = [
     "Task",
     "TaskConfig",
     "clear_registry",
+    "get_base_task_name",
     "get_task",
     "list_regimes",
     "list_tasks",

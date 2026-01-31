@@ -376,11 +376,9 @@ def launch(
     # Classify original specs (with priority suffixes) as agent or simple
     def is_agent_spec(spec: str) -> bool:
         """Check if a task spec (potentially with priority suffix) is an agent task."""
-        # Strip priority suffix if present
-        base_spec = spec.rsplit("@", 1)[0] if "@" in spec else spec
-        # Strip inline overrides if present
-        base_spec = base_spec.split("::", 1)[0] if "::" in base_spec else base_spec
-        # Check expanded tasks
+        from olmo_eval.evals.tasks import get_base_task_name
+
+        base_spec = get_base_task_name(spec)
         expanded = expand_tasks([base_spec])
         return all(t in agent_task_specs for t in expanded)
 

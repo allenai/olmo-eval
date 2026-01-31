@@ -1,20 +1,19 @@
 """Evaluation runners."""
 
 from olmo_eval.runners.agent import AgentEvalRunner
-from olmo_eval.runners.asynchronous import AsyncEvalRunner, StreamingEvalRunner
-from olmo_eval.runners.constants import SAMPLING_KEYS, TASKCONFIG_KEYS, ValidationError
-from olmo_eval.runners.synchronous import SyncEvalRunner
+from olmo_eval.runners.base import BaseEvalRunner
+from olmo_eval.runners.constants import ValidationError
+from olmo_eval.runners.simple import AsyncEvalRunner, StreamingEvalRunner, SyncEvalRunner
 
 # Backwards-compatible alias
 EvalRunner = SyncEvalRunner
 
 __all__ = [
     "AgentEvalRunner",
-    "SyncEvalRunner",
-    "EvalRunner",
     "AsyncEvalRunner",
+    "BaseEvalRunner",
+    "EvalRunner",
     "StreamingEvalRunner",
+    "SyncEvalRunner",
     "ValidationError",
-    "TASKCONFIG_KEYS",
-    "SAMPLING_KEYS",
 ]

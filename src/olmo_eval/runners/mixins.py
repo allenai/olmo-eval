@@ -269,7 +269,8 @@ class RunnerResultsMixin:
         Returns:
             Tuple of (task_overrides, sampling_overrides)
         """
-        from olmo_eval.runners.constants import SAMPLING_KEYS, TASKCONFIG_KEYS
+        from olmo_eval.core.types import SamplingParams
+        from olmo_eval.evals.tasks.core.base import TaskConfig
 
         task_overrides: dict[str, Any] = {}
         sampling_overrides: dict[str, Any] = {}
@@ -277,9 +278,9 @@ class RunnerResultsMixin:
         # Apply per-task inline overrides
         per_task = getattr(self, "task_overrides", {}).get(spec, {})
         for key, value in per_task.items():
-            if key in TASKCONFIG_KEYS:
+            if key in TaskConfig.OVERRIDE_KEYS:
                 task_overrides[key] = value
-            elif key in SAMPLING_KEYS:
+            elif key in SamplingParams.OVERRIDE_KEYS:
                 sampling_overrides[key] = value
 
         return task_overrides, sampling_overrides

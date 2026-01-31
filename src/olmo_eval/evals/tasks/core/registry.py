@@ -209,6 +209,38 @@ def parse_task_spec(spec: str) -> tuple[str, list[str], dict[str, Any]]:
     return task_name, variants, overrides
 
 
+def get_base_task_name(spec: str) -> str:
+    """Extract the base task name from a spec, stripping priority and overrides.
+
+    This is useful for validation when you need to check if a task exists
+    without caring about the priority suffix (@high) or inline overrides (::key=val).
+
+    Args:
+        spec: Task specification string (e.g., "arc_easy@high::limit=5")
+
+    Returns:
+        Base task name with variants but without priority or overrides
+        (e.g., "arc_easy" or "arc_easy:mc")
+
+    Examples:
+        >>> get_base_task_name("arc_easy")
+        "arc_easy"
+        >>> get_base_task_name("arc_easy:mc")
+        "arc_easy:mc"
+        >>> get_base_task_name("arc_easy@high")
+        "arc_easy"
+        >>> get_base_task_name("arc_easy::limit=5")
+        "arc_easy"
+        >>> get_base_task_name("arc_easy:mc@high::limit=5,temperature=0.5")
+        "arc_easy:mc"
+    """
+    # Strip priority suffix first (e.g., "@high")
+    base = spec.rsplit("@", 1)[0] if "@" in spec else spec
+    # Strip inline overrides (e.g., "::limit=5")
+    base = base.split("::", 1)[0] if "::" in base else base
+    return base
+
+
 def get_task(spec: str, config_overrides: dict[str, Any] | None = None) -> Task:
     """Instantiate a task by spec.
 

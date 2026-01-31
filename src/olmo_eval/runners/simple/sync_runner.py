@@ -1,4 +1,4 @@
-"""Evaluation runner orchestrator."""
+"""Synchronous evaluation runner."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from olmo_eval.core.configs import expand_tasks, get_model_config
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.core.logging import get_logger
 from olmo_eval.inference import InferenceProvider, ProviderType, create_provider
+from olmo_eval.runners.base import BaseEvalRunner
 from olmo_eval.runners.constants import ValidationError
 from olmo_eval.runners.mixins import RunnerResultsMixin, S3Config
 from olmo_eval.runners.utils import (
@@ -28,15 +29,15 @@ if TYPE_CHECKING:
     from olmo_eval.storage import StorageBackend
 
 console = Console()
-logger = get_logger("runners.synchronous")
+logger = get_logger(__name__)
 
 
 @dataclass
-class SyncEvalRunner(RunnerResultsMixin):
+class SyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
     """Orchestrates synchronous evaluation runs across tasks."""
 
-    model_name: str
-    task_specs: list[str]
+    model_name: str = ""
+    task_specs: list[str] = field(default_factory=list)
     output_dir: str = BEAKER_RESULT_DIR
     provider_override: str | None = None
     storages: list[StorageBackend] = field(default_factory=list)

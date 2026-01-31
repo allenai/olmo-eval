@@ -12,6 +12,7 @@ from rich.table import Table
 from olmo_eval.core.configs import expand_tasks, get_model_config
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.core.logging import get_logger
+from olmo_eval.runners.base import BaseEvalRunner
 from olmo_eval.runners.constants import ValidationError
 from olmo_eval.runners.mixins import RunnerResultsMixin, S3Config
 from olmo_eval.runners.utils import (
@@ -30,7 +31,7 @@ logger = get_logger(__name__)
 
 
 @dataclass
-class AgentEvalRunner(RunnerResultsMixin):
+class AgentEvalRunner(RunnerResultsMixin, BaseEvalRunner):
     """Orchestrates evaluation runs for agent tasks.
 
     This runner is specialized for AgentTask evaluations which use multi-turn
@@ -41,8 +42,8 @@ class AgentEvalRunner(RunnerResultsMixin):
     use SyncEvalRunner, AsyncEvalRunner, or StreamingEvalRunner instead.
     """
 
-    model_name: str
-    task_specs: list[str]
+    model_name: str = ""
+    task_specs: list[str] = field(default_factory=list)
     output_dir: str = BEAKER_RESULT_DIR
     storages: list[StorageBackend] = field(default_factory=list)
 

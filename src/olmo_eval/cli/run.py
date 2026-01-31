@@ -405,7 +405,7 @@ def run(
 
         return  # Exit early since we handled everything
     elif use_async_stream:
-        from olmo_eval.runners.asynchronous import StreamingEvalRunner
+        from olmo_eval.runners.simple import StreamingEvalRunner
 
         console.print("[bold cyan]Using StreamingEvalRunner[/bold cyan]")
 
@@ -427,7 +427,7 @@ def run(
             save_requests=save_requests,
         )
     elif use_async:
-        from olmo_eval.runners.asynchronous import AsyncEvalRunner
+        from olmo_eval.runners.simple import AsyncEvalRunner
 
         console.print("[bold cyan]Using AsyncEvalRunner[/bold cyan]")
 

@@ -9,6 +9,7 @@ from olmo_eval.evals.tasks import (
     Task,
     TaskConfig,
     clear_registry,
+    get_base_task_name,
     get_task,
     list_regimes,
     list_tasks,
@@ -284,3 +285,44 @@ class TestClearRegistry:
 
         assert list_tasks() == []
         assert list_regimes() == {}
+
+
+class TestGetBaseTaskName:
+    """Tests for get_base_task_name utility function."""
+
+    def test_simple_task_name(self):
+        """Test with a simple task name (no modifiers)."""
+        assert get_base_task_name("arc_easy") == "arc_easy"
+
+    def test_task_with_variant(self):
+        """Test that variants are preserved."""
+        assert get_base_task_name("arc_easy:mc") == "arc_easy:mc"
+        assert get_base_task_name("arc_easy:mc:olmes") == "arc_easy:mc:olmes"
+
+    def test_task_with_priority(self):
+        """Test that priority suffix is stripped."""
+        assert get_base_task_name("arc_easy@high") == "arc_easy"
+        assert get_base_task_name("arc_easy@low") == "arc_easy"
+        assert get_base_task_name("arc_easy:mc@high") == "arc_easy:mc"
+
+    def test_task_with_overrides(self):
+        """Test that inline overrides are stripped."""
+        assert get_base_task_name("arc_easy::limit=5") == "arc_easy"
+        assert get_base_task_name("arc_easy::limit=5,temperature=0.5") == "arc_easy"
+        assert get_base_task_name("arc_easy:mc::limit=5") == "arc_easy:mc"
+
+    def test_task_with_priority_and_overrides(self):
+        """Test that both priority and overrides are stripped."""
+        assert get_base_task_name("arc_easy@high::limit=5") == "arc_easy"
+        assert get_base_task_name("arc_easy:mc@high::limit=5,temperature=0.5") == "arc_easy:mc"
+
+    def test_complex_override_values(self):
+        """Test with complex override values (JSON objects)."""
+        assert get_base_task_name('arc_easy::config={"key": "value"}') == "arc_easy"
+
+    def test_preserves_colons_in_task_name(self):
+        """Test that colons in task names are preserved (not confused with overrides)."""
+        # Task names can have colons for variants like "humaneval:bpb"
+        assert get_base_task_name("humaneval:bpb") == "humaneval:bpb"
+        assert get_base_task_name("humaneval:bpb@high") == "humaneval:bpb"
+        assert get_base_task_name("humaneval:bpb::limit=10") == "humaneval:bpb"
