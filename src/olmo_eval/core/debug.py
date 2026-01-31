@@ -40,24 +40,22 @@ def _log_request(request: httpx.Request) -> None:
 
 
 def _log_response(response: httpx.Response) -> None:
-    """Log HTTP response, especially errors."""
+    """Log HTTP response."""
     if not is_debug_requests():
         return
 
     status = response.status_code
-    if status >= 400:
-        logger.info(f"Response: {status} {response.reason_phrase}")
-        try:
-            body = response.read()
+    logger.info(f"Response: {status} {response.reason_phrase}")
+    try:
+        body = response.read()
+        if body:
             try:
-                error = json.loads(body.decode())
-                logger.info(f"Error:\n{json.dumps(error, indent=2)}")
+                parsed = json.loads(body.decode())
+                logger.info(f"Response body:\n{json.dumps(parsed, indent=2)}")
             except (json.JSONDecodeError, UnicodeDecodeError):
-                logger.info(f"Error: {body.decode()}")
-        except Exception as e:
-            logger.info(f"Could not read response body: {e}")
-    else:
-        logger.info(f"Response: {status} {response.reason_phrase}")
+                logger.info(f"Response body: {body.decode()[:1000]}")
+    except Exception as e:
+        logger.info(f"Could not read response body: {e}")
 
 
 def create_debug_http_client() -> httpx.AsyncClient:
