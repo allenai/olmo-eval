@@ -65,7 +65,17 @@ class SimpleQAAgentTask(AgentTask):
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         """Convert a dataset document to an Instance with tools."""
         # Handle different possible field names
+        # The dataset may have question directly, or in messages format
         question = doc.get("question") or doc.get("problem") or ""
+
+        # Handle messages format: [{"role": "user", "content": "..."}]
+        if not question and "messages" in doc:
+            messages = doc["messages"]
+            if messages and len(messages) > 0:
+                first_msg = messages[0]
+                if isinstance(first_msg, dict) and first_msg.get("role") == "user":
+                    question = first_msg.get("content", "")
+
         gold_answer = doc.get("answer") or doc.get("ground_truth") or doc.get("gold_answer") or ""
 
         if not question:
