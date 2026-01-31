@@ -15,7 +15,6 @@ from typing import Any
 
 from olmo_eval.core.formatters import PPLFormatter
 from olmo_eval.core.metrics import BPBMetric
-from olmo_eval.core.scorers import BitsPerByteScorer
 from olmo_eval.core.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register, register_variant
@@ -228,7 +227,6 @@ for _lang in MULTILINGUAL_MBPP_LANGUAGES:
         "bpb",
         # Matches oe-eval: no leading space, always prepend \n\n separator
         formatter=PPLFormatter(leading_space=False, always_prepend_separator=True),
-        scorers=(BitsPerByteScorer(),),
         metrics=(BPBMetric(),),
         primary_metric=BPBMetric(),
     )
@@ -249,7 +247,6 @@ for _lang in MULTILINGUAL_MBPP_LANGUAGES:
         "bpb",
         # Matches oe-eval: no leading space, always prepend \n\n separator
         formatter=PPLFormatter(leading_space=False, always_prepend_separator=True),
-        scorers=(BitsPerByteScorer(),),
         metrics=(BPBMetric(),),
         primary_metric=BPBMetric(),
     )

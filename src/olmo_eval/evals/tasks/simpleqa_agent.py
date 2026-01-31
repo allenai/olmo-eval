@@ -375,8 +375,7 @@ def _simpleqa_agent_config() -> AgentTaskConfig:
     return AgentTaskConfig(
         name="simpleqa_agent",
         data_source=DataSource(path="allenai/simpleqa_full", split="test"),
-        scorers=(SimpleQAJudgeScorer(),),
-        metrics=(AccuracyMetric(),),
+        metrics=(AccuracyMetric(scorer=SimpleQAJudgeScorer),),
         sampling_params=SamplingParams(max_tokens=2048, temperature=0.0),
         system_prompt=DEFAULT_SYSTEM_PROMPT,
         max_turns=10,

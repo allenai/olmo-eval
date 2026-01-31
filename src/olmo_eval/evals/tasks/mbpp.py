@@ -5,7 +5,6 @@ from typing import Any
 
 from olmo_eval.core.formatters import PPLFormatter
 from olmo_eval.core.metrics import BPBMetric
-from olmo_eval.core.scorers import BitsPerByteScorer
 from olmo_eval.core.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import MBPP_STOP_SEQUENCES
@@ -223,7 +222,6 @@ register_variant(
     "mbpp",
     "bpb",
     formatter=PPLFormatter(leading_space=False),
-    scorers=(BitsPerByteScorer(),),
     metrics=(BPBMetric(),),
     primary_metric=BPBMetric(),
 )
@@ -232,7 +230,6 @@ register_variant(
     "mbpp_plus",
     "bpb",
     formatter=PPLFormatter(leading_space=False),
-    scorers=(BitsPerByteScorer(),),
     metrics=(BPBMetric(),),
     primary_metric=BPBMetric(),
 )

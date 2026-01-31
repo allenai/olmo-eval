@@ -342,12 +342,27 @@ class Task(ABC):
             raise
 
     def score_responses(self, responses: Sequence[Response]) -> Sequence[Response]:
-        """Apply all scorers to extract answers and compute scores."""
+        """Apply all scorers to extract answers and compute scores.
+
+        Scorers are collected from both config.scorers and from metrics that
+        define a scorer. This allows metrics to specify their scorer without
+        needing to duplicate it in config.scorers.
+        """
+        # Collect scorers from config and metrics, avoiding duplicates by name
+        scorers_by_name: dict[str, Scorer] = {}
+        for scorer in self.config.scorers:
+            scorers_by_name[scorer.name] = scorer
+        for metric in self.config.metrics:
+            if hasattr(metric, "scorer") and metric.scorer is not None:
+                scorer_instance = metric.scorer()
+                if scorer_instance.name not in scorers_by_name:
+                    scorers_by_name[scorer_instance.name] = scorer_instance
+
         for response in responses:
             for output in response.outputs:
                 output.extracted_answer = self.extract_answer(output)
             # Apply each scorer, taking best score across outputs (for multi-sample)
-            for scorer in self.config.scorers:
+            for scorer in scorers_by_name.values():
                 scores = [scorer.score(response.instance, o) for o in response.outputs]
                 response.scores[scorer.name] = max(scores) if scores else 0.0
         return responses

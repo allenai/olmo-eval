@@ -5,7 +5,6 @@ from typing import Any
 
 from olmo_eval.core.formatters import PPLFormatter
 from olmo_eval.core.metrics import BPBMetric
-from olmo_eval.core.scorers import BitsPerByteScorer
 from olmo_eval.core.types import (
     Instance,
     LMOutput,
@@ -172,7 +171,6 @@ register_variant(
     "humaneval",
     "bpb",
     formatter=PPLFormatter(leading_space=True, answer_prefix=" "),
-    scorers=(BitsPerByteScorer(),),
     metrics=(BPBMetric(),),
     primary_metric=BPBMetric(),
 )
@@ -181,7 +179,6 @@ register_variant(
     "humaneval_plus",
     "bpb",
     formatter=PPLFormatter(leading_space=True, answer_prefix=" "),
-    scorers=(BitsPerByteScorer(),),
     metrics=(BPBMetric(),),
     primary_metric=BPBMetric(),
 )

@@ -261,18 +261,65 @@ class AgentTask(Task):
         turns: list[AgentTurn] = []
 
         for item in result.new_items:
-            if hasattr(item, "role"):
-                if item.role == "assistant":
+            item_type = getattr(item, "type", None)
+
+            if item_type == "message_output_item":
+                # Assistant message - extract from raw_item
+                raw = getattr(item, "raw_item", None)
+                content = ""
+                if raw and hasattr(raw, "content"):
+                    # Content can be a list of content parts or a string
+                    if isinstance(raw.content, list):
+                        content = "".join(
+                            part.text if hasattr(part, "text") else str(part)
+                            for part in raw.content
+                        )
+                    else:
+                        content = raw.content or ""
+                turns.append(AgentTurn.assistant(content=content, tool_calls=None))
+
+            elif item_type == "tool_call_item":
+                # Tool call - extract function name and arguments
+                raw = getattr(item, "raw_item", None)
+                if raw:
                     tool_calls: list[ToolCall] = []
+                    call_id = getattr(raw, "id", "") or getattr(raw, "call_id", "")
+                    name = getattr(raw, "name", "")
+                    arguments = getattr(raw, "arguments", "{}")
+
+                    tool_calls.append(
+                        ToolCall.create(
+                            call_id=call_id,
+                            name=name,
+                            arguments=arguments,
+                        )
+                    )
+                    turns.append(AgentTurn.assistant(content="", tool_calls=tool_calls))
+
+            elif item_type == "tool_call_output_item":
+                # Tool result
+                raw = getattr(item, "raw_item", None)
+                output = getattr(item, "output", "")
+                call_id = ""
+                if raw:
+                    call_id = getattr(raw, "call_id", "")
+                turns.append(
+                    AgentTurn.tool([ToolResult(tool_call_id=call_id, content=str(output))])
+                )
+
+            # Fallback for legacy format with 'role' attribute
+            elif hasattr(item, "role"):
+                if item.role == "assistant":
+                    legacy_tool_calls: list[ToolCall] = []
                     if hasattr(item, "tool_calls") and item.tool_calls:
-                        tool_calls = [
+                        legacy_tool_calls = [
                             ToolCall.from_openai(tc) if isinstance(tc, dict) else tc
                             for tc in item.tool_calls
                         ]
                     turns.append(
                         AgentTurn.assistant(
                             content=getattr(item, "content", "") or "",
-                            tool_calls=tool_calls if tool_calls else None,
+                            tool_calls=legacy_tool_calls if legacy_tool_calls else None,
                         )
                     )
                 elif item.role == "tool":
