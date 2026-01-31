@@ -3,7 +3,6 @@
 import pytest
 
 from olmo_eval.core.tools import (
-    CalculatorTool,
     CodeExecutionTool,
     MockTool,
     SearchTool,
@@ -19,9 +18,9 @@ class TestToolRegistry:
     def test_register_and_get(self):
         """Test registering and getting tools."""
         registry = ToolRegistry()
-        tool = CalculatorTool()
+        tool = SearchTool(search_fn=lambda q: [])
         registry.register(tool)
-        assert registry.get("calculator") is tool
+        assert registry.get("search") is tool
 
     def test_get_nonexistent(self):
         """Test getting nonexistent tool."""
@@ -31,9 +30,9 @@ class TestToolRegistry:
     def test_getitem(self):
         """Test dictionary-style access."""
         registry = ToolRegistry()
-        tool = CalculatorTool()
+        tool = SearchTool(search_fn=lambda q: [])
         registry.register(tool)
-        assert registry["calculator"] is tool
+        assert registry["search"] is tool
 
     def test_getitem_raises(self):
         """Test KeyError on missing tool."""
@@ -44,114 +43,41 @@ class TestToolRegistry:
     def test_contains(self):
         """Test 'in' operator."""
         registry = ToolRegistry()
-        tool = CalculatorTool()
+        tool = SearchTool(search_fn=lambda q: [])
         registry.register(tool)
-        assert "calculator" in registry
+        assert "search" in registry
         assert "nonexistent" not in registry
 
     def test_iteration(self):
         """Test iterating over tool names."""
         registry = ToolRegistry()
-        registry.register(CalculatorTool())
         registry.register(SearchTool(search_fn=lambda q: []))
+        registry.register(MockTool(name="mock"))
         names = list(registry)
-        assert "calculator" in names
         assert "search" in names
+        assert "mock" in names
 
     def test_len(self):
         """Test length."""
         registry = ToolRegistry()
         assert len(registry) == 0
-        registry.register(CalculatorTool())
+        registry.register(SearchTool(search_fn=lambda q: []))
         assert len(registry) == 1
 
     def test_names(self):
         """Test getting list of names."""
         registry = ToolRegistry()
-        registry.register(CalculatorTool())
-        assert registry.names() == ["calculator"]
+        registry.register(SearchTool(search_fn=lambda q: []))
+        assert registry.names() == ["search"]
 
     def test_to_schemas(self):
         """Test converting all tools to schemas."""
         registry = ToolRegistry()
-        registry.register(CalculatorTool())
+        registry.register(SearchTool(search_fn=lambda q: []))
         schemas = registry.to_schemas()
         assert len(schemas) == 1
         assert isinstance(schemas[0], ToolSchema)
-        assert schemas[0].name == "calculator"
-
-
-class TestCalculatorTool:
-    """Tests for CalculatorTool."""
-
-    def test_basic_addition(self):
-        """Test basic addition."""
-        tool = CalculatorTool()
-        result = tool.execute(expression="2 + 2")
-        assert result.content == "4"
-        assert result.is_error is False
-
-    def test_complex_expression(self):
-        """Test complex expression."""
-        tool = CalculatorTool()
-        result = tool.execute(expression="(10 + 5) * 2 - 3")
-        assert result.content == "27"
-
-    def test_division(self):
-        """Test division."""
-        tool = CalculatorTool()
-        result = tool.execute(expression="10 / 4")
-        assert result.content == "2.5"
-
-    def test_floor_division(self):
-        """Test floor division."""
-        tool = CalculatorTool()
-        result = tool.execute(expression="10 // 3")
-        assert result.content == "3"
-
-    def test_power(self):
-        """Test exponentiation."""
-        tool = CalculatorTool()
-        result = tool.execute(expression="2 ** 10")
-        assert result.content == "1024"
-
-    def test_negative_number(self):
-        """Test negative numbers."""
-        tool = CalculatorTool()
-        result = tool.execute(expression="-5 + 10")
-        assert result.content == "5"
-
-    def test_division_by_zero(self):
-        """Test division by zero error."""
-        tool = CalculatorTool()
-        result = tool.execute(expression="1 / 0")
-        assert result.is_error is True
-        assert "Division by zero" in result.content
-
-    def test_invalid_expression(self):
-        """Test invalid expression."""
-        tool = CalculatorTool()
-        result = tool.execute(expression="2 +* 2")
-        assert result.is_error is True
-
-    def test_no_expression(self):
-        """Test with no expression."""
-        tool = CalculatorTool()
-        result = tool.execute()
-        assert result.is_error is True
-
-    def test_unsafe_expression_rejected(self):
-        """Test that unsafe expressions are rejected."""
-        tool = CalculatorTool()
-        result = tool.execute(expression="__import__('os').system('ls')")
-        assert result.is_error is True
-
-    def test_to_schema(self):
-        """Test converting to schema."""
-        tool = CalculatorTool()
-        schema = tool.to_schema()
-        assert schema.name == "calculator"
-        assert "expression" in schema.parameters["properties"]
+        assert schemas[0].name == "search"
 
 
 class TestSearchTool:
@@ -280,12 +206,11 @@ class TestBaseTool:
 
     def test_validate_args(self):
         """Test argument validation."""
-        tool = CalculatorTool()
-        assert tool.validate_args({"expression": "2+2"})
+        tool = SearchTool(search_fn=lambda q: [])
+        assert tool.validate_args({"query": "test"})
         assert not tool.validate_args({})
 
     def test_category(self):
         """Test tool category."""
-        assert CalculatorTool().category == ToolCategory.CALCULATOR
         assert SearchTool().category == ToolCategory.SEARCH
         assert CodeExecutionTool().category == ToolCategory.CODE_EXECUTION

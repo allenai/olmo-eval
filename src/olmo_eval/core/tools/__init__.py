@@ -5,7 +5,6 @@ from .base import (
     ToolRegistry,
 )
 from .implementations import (
-    CalculatorTool,
     CodeExecutionTool,
     MockTool,
     SearchTool,
@@ -14,7 +13,6 @@ from .implementations import (
 
 __all__ = [
     "BaseTool",
-    "CalculatorTool",
     "CodeExecutionTool",
     "create_mock_tool",
     "MockTool",

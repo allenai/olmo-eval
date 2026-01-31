@@ -5,6 +5,7 @@ with LiteLLM and OpenAI's API format.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, ClassVar, Literal
@@ -18,7 +19,6 @@ class ToolCategory(str, Enum):
     FILE_SYSTEM = "file_system"
     API_CALL = "api_call"
     DATABASE = "database"
-    CALCULATOR = "calculator"
     CUSTOM = "custom"
 
 
@@ -282,6 +282,63 @@ class ToolSchema:
         )
 
 
+class ToolTypeRegistry:
+    """Registry for ToolType classes with decorator-based registration."""
+
+    _registry: dict[str, type["ToolType"]] = {}
+
+    @classmethod
+    def register(cls, name: str | None = None) -> Callable[[type["ToolType"]], type["ToolType"]]:
+        """Decorator to register a ToolType class.
+
+        Args:
+            name: Optional name override. Uses class.name if not provided.
+
+        Returns:
+            Decorator function.
+
+        Example:
+            @ToolTypeRegistry.register()
+            class SearchToolType(ToolType):
+                name = "search"
+                ...
+        """
+
+        def decorator(tool_cls: type["ToolType"]) -> type["ToolType"]:
+            registry_name = name or tool_cls.name
+            cls._registry[registry_name] = tool_cls
+            return tool_cls
+
+        return decorator
+
+    @classmethod
+    def get(cls, name: str) -> type["ToolType"] | None:
+        """Get a tool type class by name."""
+        return cls._registry.get(name)
+
+    @classmethod
+    def list_names(cls) -> list[str]:
+        """List all registered tool type names."""
+        return list(cls._registry.keys())
+
+    @classmethod
+    def list_by_category(cls, category: ToolCategory) -> list[type["ToolType"]]:
+        """Get all tool types in a given category.
+
+        Args:
+            category: The category to filter by.
+
+        Returns:
+            List of tool type classes matching the category.
+        """
+        return [t for t in cls._registry.values() if t.category == category]
+
+    @classmethod
+    def all(cls) -> dict[str, type["ToolType"]]:
+        """Get all registered tool types."""
+        return dict(cls._registry)
+
+
 class ToolType(ABC):
     """Abstract base class for tool type definitions.
 
@@ -308,6 +365,7 @@ class ToolType(ABC):
         ...
 
 
+@ToolTypeRegistry.register()
 class SearchToolType(ToolType):
     """Tool type for search operations."""
 
@@ -327,6 +385,7 @@ class SearchToolType(ToolType):
         return "query" in arguments and isinstance(arguments["query"], str)
 
 
+@ToolTypeRegistry.register()
 class CodeExecutionToolType(ToolType):
     """Tool type for code execution."""
 
@@ -347,6 +406,7 @@ class CodeExecutionToolType(ToolType):
         return "code" in arguments and isinstance(arguments["code"], str)
 
 
+@ToolTypeRegistry.register()
 class APICallToolType(ToolType):
     """Tool type for API calls."""
 
@@ -368,6 +428,7 @@ class APICallToolType(ToolType):
         return "url" in arguments and isinstance(arguments["url"], str)
 
 
+@ToolTypeRegistry.register()
 class DatabaseToolType(ToolType):
     """Tool type for database operations."""
 
@@ -388,6 +449,7 @@ class DatabaseToolType(ToolType):
         return "query" in arguments and isinstance(arguments["query"], str)
 
 
+@ToolTypeRegistry.register()
 class FileSystemToolType(ToolType):
     """Tool type for file system operations."""
 
@@ -414,34 +476,7 @@ class FileSystemToolType(ToolType):
         )
 
 
-class CalculatorToolType(ToolType):
-    """Tool type for calculator operations."""
-
-    name: ClassVar[str] = "calculator"
-    description: ClassVar[str] = "Evaluate mathematical expressions"
-    category: ClassVar[ToolCategory] = ToolCategory.CALCULATOR
-    parameters_schema: ClassVar[dict[str, Any]] = {
-        "type": "object",
-        "properties": {
-            "expression": {"type": "string", "description": "Mathematical expression to evaluate"},
-        },
-        "required": ["expression"],
-    }
-
-    def validate_arguments(self, arguments: dict[str, Any]) -> bool:
-        """Validate calculator arguments."""
-        return "expression" in arguments and isinstance(arguments["expression"], str)
-
-
-# Registry of tool types
-_TOOL_TYPE_REGISTRY: dict[str, type[ToolType]] = {
-    "search": SearchToolType,
-    "execute_code": CodeExecutionToolType,
-    "api_call": APICallToolType,
-    "database_query": DatabaseToolType,
-    "file_operation": FileSystemToolType,
-    "calculator": CalculatorToolType,
-}
+# Convenience functions wrapping ToolTypeRegistry for backwards compatibility
 
 
 def get_tool_type(name: str) -> type[ToolType] | None:
@@ -453,7 +488,7 @@ def get_tool_type(name: str) -> type[ToolType] | None:
     Returns:
         The tool type class, or None if not found.
     """
-    return _TOOL_TYPE_REGISTRY.get(name)
+    return ToolTypeRegistry.get(name)
 
 
 def register_tool_type(name: str, tool_type: type[ToolType]) -> None:
@@ -463,7 +498,7 @@ def register_tool_type(name: str, tool_type: type[ToolType]) -> None:
         name: The name to register the tool type under.
         tool_type: The tool type class to register.
     """
-    _TOOL_TYPE_REGISTRY[name] = tool_type
+    ToolTypeRegistry._registry[name] = tool_type
 
 
 def list_tool_types() -> list[str]:
@@ -472,7 +507,19 @@ def list_tool_types() -> list[str]:
     Returns:
         List of registered tool type names.
     """
-    return list(_TOOL_TYPE_REGISTRY.keys())
+    return ToolTypeRegistry.list_names()
+
+
+def get_tool_types_by_category(category: ToolCategory) -> list[type[ToolType]]:
+    """Get all tool types in a given category.
+
+    Args:
+        category: The category to filter by.
+
+    Returns:
+        List of tool type classes matching the category.
+    """
+    return ToolTypeRegistry.list_by_category(category)
 
 
 # =============================================================================

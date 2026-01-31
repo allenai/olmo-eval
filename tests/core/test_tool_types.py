@@ -6,7 +6,6 @@ import pytest
 
 from olmo_eval.core.types import (
     APICallToolType,
-    CalculatorToolType,
     CodeExecutionToolType,
     DatabaseToolType,
     FileSystemToolType,
@@ -16,7 +15,9 @@ from olmo_eval.core.types import (
     ToolCategory,
     ToolResult,
     ToolSchema,
+    ToolTypeRegistry,
     get_tool_type,
+    get_tool_types_by_category,
     list_tool_types,
     register_tool_type,
 )
@@ -32,7 +33,6 @@ class TestToolCategory:
         assert ToolCategory.FILE_SYSTEM.value == "file_system"
         assert ToolCategory.API_CALL.value == "api_call"
         assert ToolCategory.DATABASE.value == "database"
-        assert ToolCategory.CALCULATOR.value == "calculator"
         assert ToolCategory.CUSTOM.value == "custom"
 
 
@@ -235,7 +235,7 @@ class TestToolCallSerialization:
 
     def test_roundtrip(self):
         """Test to_dict/from_dict roundtrip."""
-        original = ToolCall.create("789", "calculator", {"expression": "2+2"})
+        original = ToolCall.create("789", "execute_code", {"code": "print(2+2)"})
         restored = ToolCall.from_dict(original.to_dict())
         assert restored.id == original.id
         assert restored.type == original.type
@@ -325,14 +325,6 @@ class TestToolTypes:
         assert tool.validate_arguments({"operation": "read", "path": "/tmp/test"})
         assert not tool.validate_arguments({"operation": "read"})
 
-    def test_calculator_tool_type(self):
-        """Test CalculatorToolType."""
-        tool = CalculatorToolType()
-        assert tool.name == "calculator"
-        assert tool.category == ToolCategory.CALCULATOR
-        assert tool.validate_arguments({"expression": "2 + 2"})
-        assert not tool.validate_arguments({})
-
 
 class TestRegistry:
     """Tests for tool type registry functions."""
@@ -348,7 +340,7 @@ class TestRegistry:
         types = list_tool_types()
         assert "search" in types
         assert "execute_code" in types
-        assert "calculator" in types
+        assert "api_call" in types
 
     def test_register_tool_type(self):
         """Test registering a custom tool type."""
@@ -358,3 +350,20 @@ class TestRegistry:
 
         register_tool_type("custom", CustomToolType)
         assert get_tool_type("custom") is CustomToolType
+
+    def test_get_tool_types_by_category(self):
+        """Test getting tool types by category."""
+        search_types = get_tool_types_by_category(ToolCategory.SEARCH)
+        assert SearchToolType in search_types
+
+        code_types = get_tool_types_by_category(ToolCategory.CODE_EXECUTION)
+        assert CodeExecutionToolType in code_types
+
+    def test_registry_decorator(self):
+        """Test the decorator-based registration."""
+        # All built-in types should be auto-registered
+        assert ToolTypeRegistry.get("search") is SearchToolType
+        assert ToolTypeRegistry.get("execute_code") is CodeExecutionToolType
+        assert ToolTypeRegistry.get("api_call") is APICallToolType
+        assert ToolTypeRegistry.get("database_query") is DatabaseToolType
+        assert ToolTypeRegistry.get("file_operation") is FileSystemToolType
