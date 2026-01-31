@@ -190,8 +190,14 @@ class LaunchConfigLoader:
         preemptible = preemptible if preemptible is not None else True
         timeout = timeout or "24h"
 
-        # Validate required fields
+        # Validate required fields (raises SystemExit if any are None)
         self._validate_required(name, model_configs, task_specs, cluster, workspace, budget)
+
+        # After validation, these are guaranteed to be non-None
+        assert name is not None
+        assert cluster is not None
+        assert workspace is not None
+        assert budget is not None
 
         # Validate S3 options
         s3_bucket = self.cli_args.get("s3_bucket")
