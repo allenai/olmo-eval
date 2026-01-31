@@ -157,7 +157,7 @@ def _simpleqa_agent_config() -> AgentTaskConfig:
         system_prompt=DEFAULT_SYSTEM_PROMPT,
         max_turns=10,
         max_concurrency=1,
-        required_secrets=("OPENAI_API_KEY", "S2_API_KEY", "SERPER_API_KEY"),
+        required_secrets=("HF_TOKEN", "OPENAI_API_KEY", "S2_API_KEY", "SERPER_API_KEY"),
     )
 
 
