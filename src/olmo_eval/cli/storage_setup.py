@@ -23,7 +23,7 @@ class StorageSetup:
         db_port: int = 5432,
         db_name: str = "olmo_eval",
         db_user: str = "postgres",
-        db_password: str = "postgres",
+        db_password: str = "",
         s3_bucket: str | None = None,
         s3_prefix: str | None = None,
         s3_group: str | None = None,
