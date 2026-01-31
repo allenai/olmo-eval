@@ -125,7 +125,7 @@ class Math500Task(MinervaMathTask):
     default_source: str = "HuggingFaceH4/MATH-500"
 
     def _get_subset_from_config(self) -> str | None:
-        return None # no subsets!
+        return None  # no subsets!
 
     def _get_source_for_split(self, split: str) -> DataSource:
         # MATH-500 only has test split; use full MATH for train/dev
@@ -162,6 +162,7 @@ class Math500Task(MinervaMathTask):
                 "full_solution": doc.get("solution", ""),
             },
         )
+
 
 def _minerva_math_config(subset: str | None = None) -> TaskConfig:
     data_source = DataSource(
@@ -200,6 +201,7 @@ class MinervaMath(MinervaMathTask):
 
 
 for _subset in MATH_SUBSETS:
+
     def _make_config(s: str = _subset) -> TaskConfig:
         return _minerva_math_config(s)
 
