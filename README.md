@@ -371,7 +371,7 @@ class MMLUAnatomy(MMLUTask):
 from olmo_eval.evals.tasks import register_variant
 
 # Register after task is defined
-register_variant("my_task", "3shot", num_fewshot=3)
+register_variant("my_task", "bpb", formatter=PPLFormatter(), scorers=(BitsPerByteScorer(),))
 ```
 
 **Regimes** are configuration presets (e.g., `:olmes`, `:zero`):
@@ -379,10 +379,10 @@ register_variant("my_task", "3shot", num_fewshot=3)
 from olmo_eval.evals.tasks import register_regime
 
 register_regime("my_task", "olmes", num_fewshot=5, fewshot_seed=1234)
-register_regime("my_task", "zero", num_fewshot=0)
+register_regime("my_task", "3shot", num_fewshot=3)
 ```
 
-Usage: `olmo-eval run -t my_task:3shot:olmes`
+Usage: `olmo-eval run -t my_task:bpb:3shot`
 
 ## Agent Tasks
 
