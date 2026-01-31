@@ -300,8 +300,29 @@ class SimpleQAAgentTask(AgentTask):
             Agent,
             ModelSettings,
             OpenAIChatCompletionsModel,
+            set_tracing_disabled,
         )
         from openai import AsyncOpenAI
+
+        # Enable/disable tracing based on debug mode
+        # When debugging, keep tracing on; otherwise disable (we're using vLLM, not OpenAI)
+        debug_mode = os.getenv("OLMO_EVAL_DEBUG_REQUESTS")
+        set_tracing_disabled(not debug_mode)
+
+        # Enable debug logging for agents SDK when debug mode is on
+        if debug_mode:
+            import logging as _logging
+
+            agents_logger = _logging.getLogger("openai.agents")
+            agents_logger.setLevel(_logging.DEBUG)
+            if not agents_logger.handlers:
+                agents_logger.addHandler(_logging.StreamHandler())
+
+            # Also enable httpx debug logging
+            httpx_logger = _logging.getLogger("httpx")
+            httpx_logger.setLevel(_logging.DEBUG)
+            if not httpx_logger.handlers:
+                httpx_logger.addHandler(_logging.StreamHandler())
 
         # Patch SDK to omit 'strict' field for vLLM compatibility
         patch_openai_agents_for_vllm()
@@ -317,10 +338,15 @@ class SimpleQAAgentTask(AgentTask):
         # Enable with OLMO_EVAL_DEBUG_REQUESTS=1
         http_client = create_debug_http_client()
 
+        # Disable retries in debug mode to see actual errors
+        max_retries = 0 if debug_mode else 2
+
         client = AsyncOpenAI(
             base_url=model_url or "http://localhost:8000/v1",
             api_key=os.getenv("OPENAI_API_KEY", "EMPTY"),
             http_client=http_client,
+            max_retries=max_retries,
+            timeout=60.0,  # 60 second timeout
         )
         llm = OpenAIChatCompletionsModel(openai_client=client, model=model)
         model_settings = ModelSettings(temperature=temperature)
