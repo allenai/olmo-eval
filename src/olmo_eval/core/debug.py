@@ -25,7 +25,7 @@ def is_debug_provider() -> bool:
     return os.getenv("OLMO_EVAL_DEBUG_PROVIDER", "").lower() in ("1", "true", "yes")
 
 
-def _log_request(request: httpx.Request) -> None:
+async def _log_request(request: httpx.Request) -> None:
     """Log outgoing HTTP request."""
     if not is_debug_requests():
         return
@@ -39,7 +39,7 @@ def _log_request(request: httpx.Request) -> None:
             logger.info(f"Body: {request.content.decode()}")
 
 
-def _log_response(response: httpx.Response) -> None:
+async def _log_response(response: httpx.Response) -> None:
     """Log HTTP response."""
     if not is_debug_requests():
         return
@@ -47,7 +47,7 @@ def _log_response(response: httpx.Response) -> None:
     status = response.status_code
     logger.info(f"Response: {status} {response.reason_phrase}")
     try:
-        body = response.read()
+        body = await response.aread()
         if body:
             try:
                 parsed = json.loads(body.decode())
