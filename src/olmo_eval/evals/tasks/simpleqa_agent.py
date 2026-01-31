@@ -271,7 +271,7 @@ class SimpleQAAgentTask(AgentTask):
         return Instance(
             question=question,
             gold_answer=gold_answer,
-            tools=SEARCH_TOOLS,
+            tools=self.config.tools or None,
             metadata={
                 "id": doc.get("id", f"simpleqa_{index}"),
                 "index": index,
@@ -340,6 +340,7 @@ def _simpleqa_agent_config() -> AgentTaskConfig:
         max_turns=10,
         max_concurrency=1,
         required_secrets=("OPENAI_API_KEY", "S2_API_KEY", "SERPER_API_KEY"),
+        tools=SEARCH_TOOLS,
     )
 
 

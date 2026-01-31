@@ -2,6 +2,7 @@
 
 import pytest
 
+from olmo_eval.cli.utils import TaskSummary
 from olmo_eval.core.types import SEARCH_TOOLS, Instance
 from olmo_eval.evals.tasks import get_task, list_tasks
 from olmo_eval.evals.tasks.core import AgentTask
@@ -38,6 +39,26 @@ class TestSimpleQAAgentRegistration:
         assert "OPENAI_API_KEY" in task.config.required_secrets
         assert "S2_API_KEY" in task.config.required_secrets
         assert "SERPER_API_KEY" in task.config.required_secrets
+
+    def test_simpleqa_agent_tools_in_config(self):
+        """Test that simpleqa_agent has tools configured."""
+        task = get_task("simpleqa_agent")
+        assert task.config.tools is not None
+        assert len(task.config.tools) == 3
+        tool_names = [t.name for t in task.config.tools]
+        assert "semantic_scholar_snippet_search" in tool_names
+        assert "serper_google_webpage_search" in tool_names
+        assert "serper_fetch_webpage_content" in tool_names
+
+    def test_task_summary_tool_names(self):
+        """Test that TaskSummary exposes tool names from agent config."""
+        task = get_task("simpleqa_agent")
+        summary = TaskSummary(config=task.config)
+        assert summary.tool_names is not None
+        assert len(summary.tool_names) == 3
+        assert "semantic_scholar_snippet_search" in summary.tool_names
+        assert "serper_google_webpage_search" in summary.tool_names
+        assert "serper_fetch_webpage_content" in summary.tool_names
 
 
 class TestSimpleQAAgentProcessDoc:

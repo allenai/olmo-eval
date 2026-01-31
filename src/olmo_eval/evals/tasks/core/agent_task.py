@@ -26,6 +26,7 @@ from olmo_eval.core.types import (
     Response,
     ToolCall,
     ToolResult,
+    ToolSchema,
 )
 
 from .base import Task, TaskConfig
@@ -47,6 +48,9 @@ class AgentTaskConfig(TaskConfig):
         max_concurrency: Maximum number of concurrent agent executions.
         required_secrets: Environment variable names required for this task.
             Used by Beaker launcher to set up --env-secret flags.
+        tools: Tool schemas available to the agent. Used for display and
+            instance creation. The actual tool implementations are created
+            in _get_agent().
 
     Note: temperature and max_tokens come from sampling_params.
     """
@@ -55,6 +59,7 @@ class AgentTaskConfig(TaskConfig):
     max_turns: int = 10
     max_concurrency: int = 1
     required_secrets: tuple[str, ...] = ()
+    tools: tuple[ToolSchema, ...] = ()
 
 
 class AgentTask(Task):

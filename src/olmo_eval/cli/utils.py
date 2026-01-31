@@ -55,6 +55,13 @@ class TaskSummary:
     def name(self) -> str:
         return self.config.name
 
+    @property
+    def tool_names(self) -> list[str] | None:
+        """Return tool names if this is an agent task with tools."""
+        if hasattr(self.config, "tools") and self.config.tools:
+            return [t.name for t in self.config.tools]
+        return None
+
 
 @dataclass
 class RunnerConfig:
