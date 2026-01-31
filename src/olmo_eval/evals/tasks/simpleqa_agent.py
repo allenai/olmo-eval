@@ -108,7 +108,7 @@ class SimpleQAAgentTask(AgentTask):
             OpenAIChatCompletionsModel,
         )
         from agents.mcp import MCPServerStdio  # type: ignore[import-not-found]
-        from agents.tool_filter import create_static_tool_filter  # type: ignore[import-not-found]
+        from agents.mcp.util import create_static_tool_filter  # type: ignore[import-not-found]
         from openai import AsyncOpenAI  # type: ignore[import-not-found]
 
         s2_api_key = os.getenv("S2_API_KEY")
