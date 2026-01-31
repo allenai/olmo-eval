@@ -21,6 +21,7 @@ from olmo_eval.runners.utils import (
     compute_suite_aggregations,
     compute_task_hash,
     generate_experiment_id,
+    run_agent_task_impl,
     run_task_impl,
     write_predictions_jsonl,
     write_requests_jsonl,
@@ -255,6 +256,8 @@ class SyncEvalRunner(RunnerResultsMixin):
 
     def _run_task(self, spec: str, provider: InferenceProvider) -> TaskResult:
         """Run a single task and return results."""
+        from olmo_eval.evals.tasks import AgentTask, get_task
+
         # Build overrides from instance settings (global CLI overrides)
         overrides: dict[str, Any] = {}
         sampling_overrides: dict[str, Any] = {}
@@ -274,14 +277,31 @@ class SyncEvalRunner(RunnerResultsMixin):
             elif key in SAMPLING_KEYS:
                 sampling_overrides[key] = value
 
-        # Use shared task execution logic
-        result = run_task_impl(
-            spec=spec,
-            provider=provider,
-            overrides=overrides or None,
-            progress_callback=lambda msg: console.print(f"  {msg}"),
-            sampling_overrides=sampling_overrides or None,
-        )
+        # Check if this is an agent task - handle specially with model info
+        task = get_task(spec)
+        if isinstance(task, AgentTask):
+            # Agent tasks use vLLM server instead of direct provider
+            # Get GPU count from provider if possible
+            num_gpus = getattr(provider, "tensor_parallel_size", 1)
+
+            result = run_agent_task_impl(
+                task=task,
+                spec=spec,
+                model_name=self.model_name,
+                model_overrides=self.model_overrides,
+                overrides=overrides or None,
+                progress_callback=lambda msg: console.print(f"  {msg}"),
+                num_gpus=num_gpus,
+            )
+        else:
+            # Standard task - use shared task execution logic
+            result = run_task_impl(
+                spec=spec,
+                provider=provider,
+                overrides=overrides or None,
+                progress_callback=lambda msg: console.print(f"  {msg}"),
+                sampling_overrides=sampling_overrides or None,
+            )
 
         # Check for errors
         if result.error:

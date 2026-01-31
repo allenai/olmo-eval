@@ -10,12 +10,12 @@ from __future__ import annotations
 import asyncio
 import os
 from abc import abstractmethod
-from collections.abc import AsyncGenerator, Sequence
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from olmo_eval.core.agents import AgentConfig, AgentExecutionResult
+from olmo_eval.core.agents import AgentExecutionResult
 from olmo_eval.core.types import (
     AgentTrajectory,
     AgentTurn,
@@ -38,15 +38,22 @@ if TYPE_CHECKING:
 class AgentTaskConfig(TaskConfig):
     """Configuration for an agent task.
 
-    Extends TaskConfig with agent-specific settings.
+    Extends TaskConfig with agent-specific settings. Model and model_url
+    are always provided via CLI, not in the config.
 
     Attributes:
-        agent_config: Configuration for agent execution.
+        system_prompt: System prompt for the agent. Empty string means use task default.
+        max_turns: Maximum number of agent turns before stopping.
+        max_concurrency: Maximum number of concurrent agent executions.
         required_secrets: Environment variable names required for this task.
             Used by Beaker launcher to set up --env-secret flags.
+
+    Note: temperature and max_tokens come from sampling_params.
     """
 
-    agent_config: AgentConfig | None = None
+    system_prompt: str = ""
+    max_turns: int = 10
+    max_concurrency: int = 1
     required_secrets: tuple[str, ...] = ()
 
 
@@ -136,33 +143,6 @@ class AgentTask(Task):
                     yield agent
         """
         yield
-
-    @abstractmethod
-    def _compute_metrics(
-        self,
-        results: list[AgentExecutionResult],
-        **kwargs: Any,
-    ) -> dict[str, float]:
-        """Compute metrics from execution results.
-
-        Subclasses must implement this to define task-specific metrics.
-
-        Args:
-            results: List of AgentExecutionResult from running the agent.
-            **kwargs: Additional arguments (e.g., instances for pairing).
-
-        Returns:
-            Dictionary of metric name to value.
-
-        Example:
-            def _compute_metrics(self, results, **kwargs):
-                correct = sum(1 for r in results if r.success and r.final_answer)
-                return {
-                    'accuracy': correct / len(results) if results else 0.0,
-                    'success_rate': sum(r.success for r in results) / len(results),
-                }
-        """
-        ...
 
     # -------------------------------------------------------------------------
     # Standard Task interface
@@ -356,29 +336,3 @@ class AgentTask(Task):
                     f"Required environment variable {secret} not set. "
                     f"This task requires: {', '.join(self.config.required_secrets)}"
                 )
-
-    # -------------------------------------------------------------------------
-    # Compute metrics with agent-specific handling
-    # -------------------------------------------------------------------------
-
-    def compute_metrics(self, responses: Sequence[Response]) -> dict[str, float]:
-        """Compute metrics from scored responses.
-
-        For agent tasks, this extracts the results from responses and calls
-        _compute_metrics. Subclasses should implement _compute_metrics rather
-        than overriding this method.
-        """
-        # For agent tasks, we need to convert responses back to results
-        # This is a fallback - normally _run_agent_task_impl handles this
-        results = []
-        for resp in responses:
-            if resp.trajectory is not None:
-                results.append(
-                    AgentExecutionResult(
-                        trajectory=resp.trajectory,
-                        final_answer=resp.trajectory.final_answer,
-                        success=not resp.outputs[0].metadata.get("error") if resp.outputs else True,
-                        error=resp.outputs[0].metadata.get("error") if resp.outputs else None,
-                    )
-                )
-        return self._compute_metrics(results, instances=list(responses))

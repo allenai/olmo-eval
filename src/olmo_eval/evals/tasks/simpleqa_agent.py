@@ -5,23 +5,17 @@ tools to answer questions, following the pattern from the OpenAI SimpleQA
 benchmark.
 """
 
+import os
 from collections.abc import AsyncGenerator, Iterator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from olmo_eval.core.agents import AgentConfig, AgentExecutionResult
 from olmo_eval.core.metrics import AccuracyMetric
-from olmo_eval.core.scorers import JudgeFn, SimpleQAJudgeScorer
-from olmo_eval.core.types import (
-    Instance,
-    LMOutput,
-    SamplingParams,
-    ToolSchema,
-)
+from olmo_eval.core.scorers import SimpleQAJudgeScorer
+from olmo_eval.core.types import SEARCH_TOOL_NAMES, SEARCH_TOOLS, Instance, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.core import AgentTask, AgentTaskConfig, register
 
-# Default system prompt for the search agent
 DEFAULT_SYSTEM_PROMPT = """\
 You are a helpful assistant that can search for information to answer questions accurately.
 
@@ -31,38 +25,6 @@ When answering questions:
 3. If you cannot find reliable information, say so rather than guessing.
 
 Always strive to give factually correct answers."""
-
-# Tool schemas for search (these match the MCP tools that will be available)
-SEARCH_TOOLS = (
-    ToolSchema(
-        name="semantic_scholar_snippet_search",
-        description="Search Semantic Scholar for academic papers and snippets matching a query.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Search query for academic papers and snippets.",
-                },
-            },
-            "required": ["query"],
-        },
-    ),
-    ToolSchema(
-        name="web_search",
-        description="Search the web for information using a search engine.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "The search query to find relevant web pages.",
-                },
-            },
-            "required": ["query"],
-        },
-    ),
-)
 
 
 class SimpleQAAgentTask(AgentTask):
@@ -129,121 +91,54 @@ class SimpleQAAgentTask(AgentTask):
         temperature: float = 0.0,
         **kwargs: Any,
     ) -> AsyncGenerator[Any, None]:
-        """Create agent with search tools via MCP.
-
-        This sets up an agent with MCP-based search tools (Semantic Scholar
-        and web search) for answering questions.
-        """
-        from agents import Agent, OpenAIChatCompletionsModel  # type: ignore[import-not-found]
+        """Create agent with search tools via MCP."""
+        from agents import (  # type: ignore[import-not-found]
+            Agent,
+            ModelSettings,
+            OpenAIChatCompletionsModel,
+        )
         from agents.mcp import MCPServerStdio  # type: ignore[import-not-found]
+        from agents.tool_filter import create_static_tool_filter  # type: ignore[import-not-found]
         from openai import AsyncOpenAI  # type: ignore[import-not-found]
 
-        # Validate required secrets
-        self._validate_secrets()
+        s2_api_key = os.getenv("S2_API_KEY")
+        if not s2_api_key:
+            raise ValueError("S2_API_KEY environment variable is required.")
+        serper_api_key = os.getenv("SERPER_API_KEY")
+        if not serper_api_key:
+            raise ValueError("SERPER_API_KEY environment variable is required.")
 
-        # Create OpenAI-compatible client
         client = AsyncOpenAI(
             base_url=model_url or "http://localhost:8000/v1",
-            api_key="EMPTY",  # For vLLM or similar
+            api_key=os.getenv("OPENAI_API_KEY", "EMPTY"),
         )
         llm = OpenAIChatCompletionsModel(openai_client=client, model=model)
+        model_settings = ModelSettings(temperature=temperature)
 
-        # Start MCP server for search tools
-        # Note: The actual MCP server implementation would be provided separately
+        tool_filter = create_static_tool_filter(allowed_tool_names=list(SEARCH_TOOL_NAMES))
+        env = {
+            "S2_API_KEY": s2_api_key,
+            "SERPER_API_KEY": serper_api_key,
+        }
+
         async with MCPServerStdio(
+            cache_tools_list=True,
+            tool_filter=tool_filter,
+            client_session_timeout_seconds=60,
             params={
                 "command": "python",
-                "args": ["-m", "search_mcp"],
-                "env": {
-                    "S2_API_KEY": kwargs.get("s2_api_key", ""),
-                    "SERPER_API_KEY": kwargs.get("serper_api_key", ""),
-                },
+                "args": ["-m", "dr_agent.mcp_backend.main", "--transport", "stdio"],
+                "env": env,
             },
         ) as server:
             agent = Agent(
                 name="SearchAgent",
                 instructions=system_prompt or DEFAULT_SYSTEM_PROMPT,
                 model=llm,
+                model_settings=model_settings,
                 mcp_servers=[server],
             )
             yield agent
-
-    def _compute_metrics(
-        self,
-        results: list[AgentExecutionResult],
-        **kwargs: Any,
-    ) -> dict[str, float]:
-        """Compute metrics from execution results using LLM judge."""
-        instances = kwargs.get("instances", [])
-
-        # Build judge function if we have the required API key
-        import os
-
-        judge_fn: JudgeFn | None = None
-        if os.getenv("OPENAI_API_KEY"):
-            judge_fn = self._build_judge_fn()
-
-        scorer = SimpleQAJudgeScorer(judge_fn=judge_fn)
-
-        # Track grades
-        grades = {"CORRECT": 0, "INCORRECT": 0, "NOT_ATTEMPTED": 0}
-        scores: list[float] = []
-
-        for i, result in enumerate(results):
-            if not result.success or not result.final_answer:
-                grades["NOT_ATTEMPTED"] += 1
-                scores.append(0.0)
-                continue
-
-            # Get corresponding instance
-            instance = instances[i] if i < len(instances) else Instance(question="", gold_answer="")
-
-            # Create LMOutput for scoring
-            output = LMOutput(
-                text=result.final_answer,
-                extracted_answer=result.final_answer,
-            )
-
-            if judge_fn:
-                # Use judge to determine grade
-                prompt = scorer.format_judge_prompt(instance, output)
-                response = judge_fn(prompt)
-                grade = scorer.get_grade(response)
-                grades[grade] += 1
-                scores.append(scorer.parse_judge_response(response))
-            else:
-                # Without judge, mark as correct if answer exists
-                scores.append(1.0 if result.final_answer else 0.0)
-                grades["CORRECT" if result.final_answer else "NOT_ATTEMPTED"] += 1
-
-        total = len(results)
-        return {
-            "accuracy": sum(scores) / total if total else 0.0,
-            "correct_rate": grades["CORRECT"] / total if total else 0.0,
-            "incorrect_rate": grades["INCORRECT"] / total if total else 0.0,
-            "not_attempted_rate": grades["NOT_ATTEMPTED"] / total if total else 0.0,
-            "success_rate": sum(1 for r in results if r.success) / total if total else 0.0,
-            "num_instances": float(total),
-        }
-
-    def _build_judge_fn(self) -> JudgeFn:
-        """Build a judge function using OpenAI API."""
-        import os
-
-        from openai import OpenAI  # type: ignore[import-not-found]
-
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-        def judge(prompt: str) -> str:
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.0,
-                max_tokens=10,
-            )
-            return response.choices[0].message.content or ""
-
-        return judge
 
 
 # =============================================================================
@@ -252,27 +147,35 @@ class SimpleQAAgentTask(AgentTask):
 
 
 def _simpleqa_agent_config() -> AgentTaskConfig:
-    """Create default configuration for SimpleQA agent task."""
+    """Create default configuration for SimpleQA agent task.
+
+    This task REQUIRES a model to be specified via CLI. There is no default model.
+
+    Usage examples:
+        # With a HuggingFace model (starts vLLM server)
+        olmo-eval run -m llama3.1-8b-instruct -t simpleqa_agent
+
+        # With an API model preset
+        olmo-eval run -m gpt-4o -t simpleqa_agent
+
+        # With custom API endpoint
+        olmo-eval run -m my-model::model_url=http://localhost:8000/v1 -t simpleqa_agent
+
+    Optional environment variables:
+    - OPENAI_API_KEY: Required for API models (gpt-4o, etc.) and LLM judge grading
+    - S2_API_KEY: Required for Semantic Scholar search tool
+    - SERPER_API_KEY: Required for web search tool
+    """
     return AgentTaskConfig(
         name="simpleqa_agent",
         data_source=DataSource(path="allenai/simpleqa_full", split="test"),
-        scorers=(),  # Scoring handled by _compute_metrics
+        scorers=(SimpleQAJudgeScorer(),),
         metrics=(AccuracyMetric(),),
         sampling_params=SamplingParams(max_tokens=2048, temperature=0.0),
-        agent_config=AgentConfig(
-            model="gpt-4o-mini",
-            model_url="https://api.openai.com/v1",
-            system_prompt=DEFAULT_SYSTEM_PROMPT,
-            max_turns=10,
-            max_concurrency=5,
-            temperature=0.0,
-            max_tokens=2048,
-        ),
-        required_secrets=(
-            "OPENAI_API_KEY",
-            "S2_API_KEY",
-            "SERPER_API_KEY",
-        ),
+        system_prompt=DEFAULT_SYSTEM_PROMPT,
+        max_turns=10,
+        max_concurrency=1,
+        required_secrets=("S2_API_KEY", "SERPER_API_KEY"),
     )
 
 

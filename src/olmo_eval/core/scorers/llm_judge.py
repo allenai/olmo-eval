@@ -107,6 +107,33 @@ class LLMJudgeScorer(Scorer):
 SimpleQAGrade = Literal["CORRECT", "INCORRECT", "NOT_ATTEMPTED"]
 
 
+def _build_openai_judge_fn(model: str = "gpt-4o-mini") -> JudgeFn | None:
+    """Build a judge function using OpenAI API if OPENAI_API_KEY is set."""
+    import os
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return None
+
+    try:
+        from openai import OpenAI  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+
+    client = OpenAI(api_key=api_key)
+
+    def judge(prompt: str) -> str:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=10,
+        )
+        return response.choices[0].message.content or ""
+
+    return judge
+
+
 @dataclass(frozen=True)
 class SimpleQAJudgeScorer(LLMJudgeScorer):
     """LLM judge following SimpleQA's CORRECT/INCORRECT/NOT_ATTEMPTED grading.
@@ -115,11 +142,26 @@ class SimpleQAJudgeScorer(LLMJudgeScorer):
     - A = CORRECT
     - B = INCORRECT
     - C = NOT_ATTEMPTED
+
+    If judge_fn is not provided, automatically uses OpenAI API with gpt-4o-mini
+    when OPENAI_API_KEY environment variable is set.
     """
 
     name: ClassVar[str] = "simpleqa_judge"
     judge_fn: JudgeFn | None = field(default=None)
-    not_attempted_score: float = 0.0  # Score for NOT_ATTEMPTED responses
+    not_attempted_score: float = 0.0
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        """Score using the judge function, auto-building from OpenAI if needed."""
+        judge = self.judge_fn
+        if judge is None:
+            judge = _build_openai_judge_fn()
+        if judge is None:
+            return 0.0
+
+        prompt = self.format_judge_prompt(instance, output)
+        response = judge(prompt)
+        return self.parse_judge_response(response)
 
     def format_judge_prompt(self, instance: Instance, output: LMOutput) -> str:
         """Format SimpleQA-style judge prompt."""

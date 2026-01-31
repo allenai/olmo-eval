@@ -145,8 +145,20 @@ def prepare_task_items(
 
     Returns:
         Tuple of (Task instance for scoring, list of QueueItems)
+
+    Raises:
+        NotImplementedError: If the task is an AgentTask (use sync runner instead)
     """
+    from olmo_eval.evals.tasks import AgentTask
+
     task = get_task(spec)
+
+    # Agent tasks require special handling with vLLM server
+    if isinstance(task, AgentTask):
+        raise NotImplementedError(
+            f"Agent task '{spec}' is not supported in async mode. "
+            "Use the sync runner instead: olmo-eval run (without --async or --async-stream)"
+        )
 
     if overrides:
         task.config = replace(task.config, **overrides)

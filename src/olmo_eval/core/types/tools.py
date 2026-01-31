@@ -473,3 +473,57 @@ def list_tool_types() -> list[str]:
         List of registered tool type names.
     """
     return list(_TOOL_TYPE_REGISTRY.keys())
+
+
+# =============================================================================
+# MCP Tool Schemas - Reusable tool definitions for agent tasks
+# =============================================================================
+
+SEMANTIC_SCHOLAR_SEARCH = ToolSchema(
+    name="semantic_scholar_snippet_search",
+    description="Search Semantic Scholar for academic papers and snippets matching a query.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Search query for academic papers and snippets.",
+            },
+        },
+        "required": ["query"],
+    },
+)
+
+SERPER_WEB_SEARCH = ToolSchema(
+    name="serper_google_webpage_search",
+    description="Search the web for information using Google via Serper.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "The search query to find relevant web pages.",
+            },
+        },
+        "required": ["query"],
+    },
+)
+
+SERPER_FETCH_WEBPAGE = ToolSchema(
+    name="serper_fetch_webpage_content",
+    description="Fetch and extract content from a webpage URL.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "url": {
+                "type": "string",
+                "description": "The URL of the webpage to fetch.",
+            },
+        },
+        "required": ["url"],
+    },
+)
+
+# Pre-built tool collections for common use cases
+SEARCH_TOOLS = (SEMANTIC_SCHOLAR_SEARCH, SERPER_WEB_SEARCH, SERPER_FETCH_WEBPAGE)
+SEARCH_TOOL_NAMES = tuple(t.name for t in SEARCH_TOOLS)

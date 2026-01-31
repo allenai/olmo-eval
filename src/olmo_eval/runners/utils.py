@@ -640,35 +640,65 @@ def build_requests(
 def run_agent_task_impl(
     task: AgentTask,
     spec: str,
+    model_name: str,
+    model_overrides: dict[str, Any] | None = None,
     overrides: dict[str, Any] | None = None,
     progress_callback: Callable[[str], None] | None = None,
+    num_gpus: int = 1,
 ) -> TaskResult:
     """Execute an agent task using async agent loop.
 
     This function handles the special execution path for agent tasks, which
     use multi-turn agent interactions instead of single-turn inference.
 
+    The model can be either:
+    1. A HuggingFace model (starts local vLLM server)
+    2. A model with model_url in config/overrides (uses API directly)
+
     Args:
         task: The AgentTask instance to execute.
         spec: The original task specification string.
+        model_name: Model name/path (required). Can be:
+            - HuggingFace model ID (e.g., "meta-llama/Llama-3.1-8B-Instruct")
+            - Model preset name (e.g., "gpt-4o", "llama3.1-8b-instruct")
+            - Local checkpoint path
+        model_overrides: Optional overrides for model configuration. Can include:
+            - tokenizer: Custom tokenizer path
+            - model_url: API endpoint (skips vLLM, uses API directly)
+            - max_model_len: Maximum sequence length
         overrides: Optional config overrides (limit, etc.).
         progress_callback: Optional callback for progress messages.
+        num_gpus: Number of GPUs for tensor parallelism when using vLLM.
 
     Returns:
         TaskResult with metrics and metadata.
+
+    Raises:
+        ValueError: If no model is specified.
     """
     import asyncio
     import time
 
+    from olmo_eval.core.configs import get_model_config
+
     start_time = time.time()
 
     try:
+        # Model is required for agent tasks
+        if not model_name:
+            raise ValueError(
+                f"Agent task '{spec}' requires a model. Specify with -m/--model. "
+                "Examples:\n"
+                "  olmo-eval run -m llama3.1-8b-instruct -t simpleqa_agent\n"
+                "  olmo-eval run -m gpt-4o -t simpleqa_agent"
+            )
+
         # Apply overrides
         if overrides:
             task.config = replace(task.config, **overrides)
 
-        # Validate required secrets
-        task._validate_secrets()
+        # Get model configuration (handles presets and inline overrides)
+        model_config = get_model_config(model_name, **(model_overrides or {}))
 
         # Collect instances
         instances = list(task.instances)
@@ -678,34 +708,61 @@ def run_agent_task_impl(
         if progress_callback:
             progress_callback(f"Running agent on {len(instances)} instances...")
 
-        # Get agent config (use defaults if not configured)
-        agent_config = getattr(task.config, "agent_config", None)
-        if agent_config is None:
-            from olmo_eval.core.agents import AgentConfig
+        # Get agent settings from task config
+        system_prompt = getattr(task.config, "system_prompt", "") or None
+        max_turns = getattr(task.config, "max_turns", 10)
+        max_concurrency = getattr(task.config, "max_concurrency", 1)
 
-            agent_config = AgentConfig(model="default")
+        # Temperature and max_tokens come from sampling_params
+        sampling_params = task.config.sampling_params
+        temperature = sampling_params.temperature if sampling_params else 0.0
 
-        # Run async agent loop
-        results = asyncio.run(
-            task._run_agent_loop(
-                instances=instances,
-                model=agent_config.model,
-                model_url=agent_config.model_url,
-                system_prompt=agent_config.system_prompt or None,
-                max_turns=agent_config.max_turns,
-                max_concurrency=agent_config.max_concurrency,
-                temperature=agent_config.temperature,
+        # Determine execution mode based on model_url
+        # If model has a URL, use it directly (API mode)
+        # Otherwise, start vLLM server (local mode)
+        if model_config.model_url:
+            # API mode: use the model_url directly
+            effective_model = model_config.model
+            effective_url = model_config.model_url
+
+            if progress_callback:
+                progress_callback(f"Using API endpoint: {effective_url}")
+
+            # Validate secrets for API access
+            task._validate_secrets()
+
+            results = asyncio.run(
+                task._run_agent_loop(
+                    instances=instances,
+                    model=effective_model,
+                    model_url=effective_url,
+                    system_prompt=system_prompt,
+                    max_turns=max_turns,
+                    max_concurrency=max_concurrency,
+                    temperature=temperature,
+                )
             )
-        )
+        else:
+            # vLLM mode: start local server
+            results, effective_model, effective_url = _run_agent_with_vllm_server(
+                task=task,
+                instances=instances,
+                model_name=model_config.model,
+                model_overrides=model_overrides or {},
+                system_prompt=system_prompt,
+                max_turns=max_turns,
+                max_concurrency=max_concurrency,
+                temperature=temperature,
+                num_gpus=num_gpus,
+                progress_callback=progress_callback,
+            )
 
         # Build responses from results
         responses = task._build_responses(instances, results)
 
-        # Score responses
+        # Score responses and compute metrics using standard flow
         scored = task.score_responses(responses)
-
-        # Compute metrics using task's _compute_metrics
-        metrics = task._compute_metrics(results, instances=instances)
+        metrics = task.compute_metrics(scored)
 
         # Build predictions for per-instance inspection
         predictions = build_predictions(scored)
@@ -727,12 +784,12 @@ def run_agent_task_impl(
                 "name": task.config.name,
                 "split": task.config.split.value,
                 "limit": task.config.limit,
-                "agent_config": {
-                    "model": agent_config.model,
-                    "model_url": agent_config.model_url,
-                    "max_turns": agent_config.max_turns,
-                    "max_concurrency": agent_config.max_concurrency,
-                    "temperature": agent_config.temperature,
+                "agent_settings": {
+                    "model": effective_model,
+                    "model_url": effective_url,
+                    "max_turns": max_turns,
+                    "max_concurrency": max_concurrency,
+                    "temperature": temperature,
                 },
             },
             num_instances=len(instances),
@@ -754,6 +811,73 @@ def run_agent_task_impl(
             error=str(e),
             duration_seconds=duration,
         )
+
+
+def _run_agent_with_vllm_server(
+    task: AgentTask,
+    instances: list,
+    model_name: str,
+    model_overrides: dict[str, Any],
+    system_prompt: str | None,
+    max_turns: int,
+    max_concurrency: int,
+    temperature: float,
+    num_gpus: int,
+    progress_callback: Callable[[str], None] | None,
+) -> tuple[list, str, str]:
+    """Run agent task with a local vLLM server.
+
+    Starts a vLLM server, runs the agent loop, and returns results.
+
+    Args:
+        task: The agent task to run.
+        instances: List of instances to process.
+        model_name: Model name/path to serve.
+        model_overrides: Model configuration overrides.
+        system_prompt: System prompt for the agent.
+        max_turns: Maximum agent turns.
+        max_concurrency: Maximum concurrent executions.
+        temperature: Sampling temperature.
+        num_gpus: Number of GPUs for tensor parallelism.
+        progress_callback: Optional progress callback.
+
+    Returns:
+        Tuple of (results, effective_model, effective_url).
+    """
+    import asyncio
+
+    from olmo_eval.inference.vllm_server import vllm_server_context
+
+    if progress_callback:
+        progress_callback(f"Starting vLLM server for {model_name}...")
+
+    # Extract vLLM-specific overrides
+    tokenizer = model_overrides.get("tokenizer")
+    max_model_len = model_overrides.get("max_model_len")
+
+    with vllm_server_context(
+        model_name=model_name,
+        tensor_parallel_size=num_gpus,
+        tokenizer=tokenizer,
+        max_model_len=max_model_len,
+    ) as server_url:
+        if progress_callback:
+            progress_callback(f"vLLM server ready at {server_url}")
+
+        # Run agent loop with local server
+        results = asyncio.run(
+            task._run_agent_loop(
+                instances=instances,
+                model=model_name,
+                model_url=server_url,
+                system_prompt=system_prompt,
+                max_turns=max_turns,
+                max_concurrency=max_concurrency,
+                temperature=temperature,
+            )
+        )
+
+        return results, model_name, server_url
 
 
 def run_task_impl(
@@ -794,13 +918,11 @@ def run_task_impl(
         # Get task
         task = get_task(spec)
 
-        # Detect and handle agent tasks
+        # Agent tasks must be run through run_agent_task_impl directly
         if isinstance(task, AgentTask):
-            return run_agent_task_impl(
-                task=task,
-                spec=spec,
-                overrides=overrides,
-                progress_callback=progress_callback,
+            raise ValueError(
+                f"Agent task '{spec}' cannot be run through run_task_impl. "
+                "Use run_agent_task_impl with a model specified via CLI instead."
             )
 
         # Apply overrides

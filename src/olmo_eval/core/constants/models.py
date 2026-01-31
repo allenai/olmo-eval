@@ -113,12 +113,19 @@ def get_model_presets() -> dict[str, ModelConfig]:
 
     Returns a dictionary mapping preset names to ModelConfig instances.
     Uses lazy import to avoid circular dependencies.
+
+    Model presets can be either:
+    1. HuggingFace models (for vLLM inference)
+    2. API-based models with model_url (for agent tasks or LiteLLM)
     """
     from olmo_eval.core.configs import ModelConfig
 
     return {
+        # HuggingFace models (vLLM inference)
         "llama3.1-8b": ModelConfig(model="meta-llama/Meta-Llama-3.1-8B"),
+        "llama3.1-8b-instruct": ModelConfig(model="meta-llama/Llama-3.1-8B-Instruct"),
         "llama3.1-70b": ModelConfig(model="meta-llama/Meta-Llama-3.1-70B"),
+        "llama3.1-70b-instruct": ModelConfig(model="meta-llama/Llama-3.1-70B-Instruct"),
         "olmo-2-7b": ModelConfig(
             model="allenai/OLMo-2-1124-7B",
             tokenizer=DEFAULT_OLMO2_TOKENIZER,
@@ -131,4 +138,30 @@ def get_model_presets() -> dict[str, ModelConfig]:
         ),
         "qwen2.5-7b": ModelConfig(model="Qwen/Qwen2.5-7B"),
         "mistral-7b": ModelConfig(model="mistralai/Mistral-7B-v0.3"),
+        # API-based models (for agent tasks - requires API keys)
+        "gpt-4o": ModelConfig(
+            model="gpt-4o",
+            model_url="https://api.openai.com/v1",
+            provider="litellm",
+        ),
+        "gpt-4o-mini": ModelConfig(
+            model="gpt-4o-mini",
+            model_url="https://api.openai.com/v1",
+            provider="litellm",
+        ),
+        "gpt-4-turbo": ModelConfig(
+            model="gpt-4-turbo",
+            model_url="https://api.openai.com/v1",
+            provider="litellm",
+        ),
+        "claude-3-opus": ModelConfig(
+            model="claude-3-opus-20240229",
+            model_url="https://api.anthropic.com",
+            provider="litellm",
+        ),
+        "claude-3-sonnet": ModelConfig(
+            model="claude-3-sonnet-20240229",
+            model_url="https://api.anthropic.com",
+            provider="litellm",
+        ),
     }

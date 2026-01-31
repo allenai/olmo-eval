@@ -19,6 +19,14 @@ class ModelConfig:
     - core/configs.py:ModelConfig (this one) - Core model config for inference
     - launch/config.py:ModelConfig - Beaker launch config with resource settings
     - runners/mixins.py:ModelConfig - Metrics output format for JSON serialization
+
+    For agent tasks, models can be specified in two ways:
+    1. HuggingFace model/path with provider="vllm" - starts local vLLM server
+    2. API endpoint with model_url - uses OpenAI-compatible API directly
+
+    Example presets for API-based models:
+        "gpt-4o": ModelConfig(model="gpt-4o", model_url="https://api.openai.com/v1")
+        "claude-3": ModelConfig(model="claude-3-opus", model_url="https://api.anthropic.com")
     """
 
     model: str
@@ -29,6 +37,9 @@ class ModelConfig:
     dtype: DtypeLiteral = "auto"
     max_model_len: int | None = None  # Override model's default context length (vLLM)
     extra_args: dict[str, Any] = field(default_factory=dict)
+    # API endpoint for OpenAI-compatible APIs (agent tasks only)
+    # When set, agent tasks use this URL directly instead of starting vLLM
+    model_url: str | None = None
 
 
 @dataclass
@@ -163,4 +174,19 @@ def get_model_config(name: str, **overrides: Any) -> ModelConfig:
             )
         return base
 
-    return ModelConfig(model=name, **filtered_overrides)
+    # Check if model_url was provided in overrides
+    model_url = filtered_overrides.pop("model_url", None)
+    config = ModelConfig(model=name, **filtered_overrides)
+    if model_url:
+        config = ModelConfig(
+            model=config.model,
+            tokenizer=config.tokenizer,
+            provider=config.provider,
+            revision=config.revision,
+            trust_remote_code=config.trust_remote_code,
+            dtype=config.dtype,
+            max_model_len=config.max_model_len,
+            extra_args=config.extra_args,
+            model_url=model_url,
+        )
+    return config
