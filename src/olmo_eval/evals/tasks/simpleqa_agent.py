@@ -147,25 +147,7 @@ class SimpleQAAgentTask(AgentTask):
 
 
 def _simpleqa_agent_config() -> AgentTaskConfig:
-    """Create default configuration for SimpleQA agent task.
-
-    This task REQUIRES a model to be specified via CLI. There is no default model.
-
-    Usage examples:
-        # With a HuggingFace model (starts vLLM server)
-        olmo-eval run -m llama3.1-8b-instruct -t simpleqa_agent
-
-        # With an API model preset
-        olmo-eval run -m gpt-4o -t simpleqa_agent
-
-        # With custom API endpoint
-        olmo-eval run -m my-model::model_url=http://localhost:8000/v1 -t simpleqa_agent
-
-    Optional environment variables:
-    - OPENAI_API_KEY: Required for API models (gpt-4o, etc.) and LLM judge grading
-    - S2_API_KEY: Required for Semantic Scholar search tool
-    - SERPER_API_KEY: Required for web search tool
-    """
+    """Create default configuration for SimpleQA agent task."""
     return AgentTaskConfig(
         name="simpleqa_agent",
         data_source=DataSource(path="allenai/simpleqa_full", split="test"),
