@@ -16,6 +16,7 @@ from .llm_judge import (
     RubricJudgeScorer,
     SimpleQAGrade,
     SimpleQAJudgeScorer,
+    build_openai_judge_fn,
 )
 from .tools import (
     AbstentionScorer,
@@ -33,6 +34,7 @@ from .trajectory import (
 __all__ = [
     "AbstentionScorer",
     "BitsPerByteScorer",
+    "build_openai_judge_fn",
     "CodeExecutionScorer",
     "ExactMatchScorer",
     "F1Scorer",

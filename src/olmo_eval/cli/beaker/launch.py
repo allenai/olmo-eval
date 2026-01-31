@@ -277,37 +277,37 @@ def launch(
     # Validate required fields
     if not name:
         console.print("[red]Error:[/red] --name/-n is required (or set 'name' in config)")
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     if not model_configs:
         console.print("[red]Error:[/red] --model/-m is required (or set 'models' in config)")
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     if not task:
         console.print("[red]Error:[/red] --task/-t is required (or set 'tasks' in config)")
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     if not cluster:
         console.print("[red]Error:[/red] --cluster/-c is required (or set 'cluster' in config)")
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     if not workspace:
         console.print("[red]Error:[/red] --workspace/-w is required (or set 'workspace' in config)")
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     if not budget:
         console.print("[red]Error:[/red] --budget/-B is required (or set 'budget' in config)")
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
     # Validate S3 options - both bucket and prefix required if either is set
     if s3_bucket and not s3_prefix:
         console.print("[red]Error:[/red] --s3-prefix is required when --s3-bucket is set")
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     if s3_prefix and not s3_bucket:
         console.print("[red]Error:[/red] --s3-bucket is required when --s3-prefix is set")
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
     # --store requires S3 configuration for storing result artifacts
     if store and (not s3_bucket or not s3_prefix):
         console.print(
             "[red]Error:[/red] --s3-bucket and --s3-prefix are required when --store is enabled"
         )
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
     # Keep suites unexpanded - let the runner expand them so it knows suite names for aggregation
     from olmo_eval.core.configs import expand_tasks, validate_tasks
@@ -343,7 +343,7 @@ def launch(
             console.print(f"  - {inv}")
         console.print("\nUse 'olmo-eval tasks' to see available tasks.")
         console.print("Use 'olmo-eval suites' to see available suites.")
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
     launcher = BeakerLauncher(workspace=workspace)
     multiple_models = len(model_configs) > 1
@@ -477,7 +477,7 @@ def launch(
             )
             if not click.confirm("Would you like to create these groups?", default=True):
                 console.print("[red]Aborted.[/red] Cannot launch without required groups.")
-                raise SystemExit(1)
+                raise SystemExit(1) from None
 
             for grp in missing_groups:
                 try:
@@ -619,7 +619,11 @@ def launch(
     for task_spec in valid_tasks:
         task_name, variants, inline_overrides = parse_task_spec(task_spec)
 
-        task_instance = get_task_instance(task_spec)
+        try:
+            task_instance = get_task_instance(task_spec)
+        except ValueError as e:
+            console.print(f"[red]Error loading task '{task_spec}':[/red] {e}")
+            raise SystemExit(1) from None
         task_cfg = task_instance.config
         task_summaries.append(
             TaskSummary(

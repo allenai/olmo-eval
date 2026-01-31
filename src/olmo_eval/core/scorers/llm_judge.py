@@ -53,29 +53,45 @@ Respond with only the letter (A, B, or C) corresponding to your grade."""
 SimpleQAGrade = Literal["CORRECT", "INCORRECT", "NOT_ATTEMPTED"]
 
 
-def _build_openai_judge_fn(model: str = "gpt-4o-mini") -> JudgeFn:
-    """Build a judge function using OpenAI API.
+def build_openai_judge_fn(
+    model: str = "gpt-4o-mini", scorer_name: str = "LLMJudgeScorer"
+) -> JudgeFn:
+    """Build a lazy judge function using OpenAI API.
 
-    Raises:
-        ValueError: If OPENAI_API_KEY is not set or openai package is not installed.
+    The returned function validates OPENAI_API_KEY on first call, not at construction.
+    This allows scorers to be instantiated before the environment variable is set
+    (e.g., in Beaker jobs where secrets are injected at runtime).
+
+    Args:
+        model: OpenAI model to use for judging.
+        scorer_name: Name of the scorer class (for error messages).
+
+    Returns:
+        A judge function that validates and calls OpenAI on first use.
     """
-    import os
-
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise ValueError("OPENAI_API_KEY environment variable is required for LLM judge scoring.")
-
-    try:
-        from openai import OpenAI  # type: ignore[import-not-found]
-    except ImportError:
-        raise ValueError(
-            "openai package is required for LLM judge scoring. Install with: pip install openai"
-        ) from None
-
-    client = OpenAI(api_key=api_key)
+    _client: list = []  # Mutable container for lazy initialization
 
     def judge(prompt: str) -> str:
-        response = client.chat.completions.create(
+        import os
+
+        if not _client:
+            api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key:
+                raise ValueError(
+                    f"OPENAI_API_KEY environment variable is required for {scorer_name}."
+                )
+
+            try:
+                from openai import OpenAI  # type: ignore[import-not-found]
+            except ImportError:
+                raise ValueError(
+                    f"openai package is required for {scorer_name}. "
+                    "Install with: pip install openai"
+                ) from None
+
+            _client.append(OpenAI(api_key=api_key))
+
+        response = _client[0].chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.0,
@@ -84,6 +100,18 @@ def _build_openai_judge_fn(model: str = "gpt-4o-mini") -> JudgeFn:
         return response.choices[0].message.content or ""
 
     return judge
+
+
+def _default_llm_judge_fn() -> JudgeFn:
+    return build_openai_judge_fn(scorer_name="LLMJudgeScorer")
+
+
+def _default_simpleqa_judge_fn() -> JudgeFn:
+    return build_openai_judge_fn(scorer_name="SimpleQAJudgeScorer")
+
+
+def _default_rubric_judge_fn() -> JudgeFn:
+    return build_openai_judge_fn(scorer_name="RubricJudgeScorer")
 
 
 @dataclass(frozen=True)
@@ -96,7 +124,7 @@ class LLMJudgeScorer(Scorer):
     """
 
     name: ClassVar[str] = "llm_judge"
-    judge_fn: JudgeFn = field(default_factory=_build_openai_judge_fn)
+    judge_fn: JudgeFn = field(default_factory=_default_llm_judge_fn)
 
     @abstractmethod
     def format_judge_prompt(self, instance: Instance, output: LMOutput) -> str:
@@ -152,6 +180,7 @@ class SimpleQAJudgeScorer(LLMJudgeScorer):
     """
 
     name: ClassVar[str] = "simpleqa_judge"
+    judge_fn: JudgeFn = field(default_factory=_default_simpleqa_judge_fn)
     not_attempted_score: float = 0.0
 
     def format_judge_prompt(self, instance: Instance, output: LMOutput) -> str:
@@ -216,6 +245,7 @@ class RubricJudgeScorer(LLMJudgeScorer):
     """
 
     name: ClassVar[str] = "rubric_judge"
+    judge_fn: JudgeFn = field(default_factory=_default_rubric_judge_fn)
     rubric: str = ""
     score_pattern: str = r"Score:\s*(\d+(?:\.\d+)?)"
     max_score: float = 10.0
