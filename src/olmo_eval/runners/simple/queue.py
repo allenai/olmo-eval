@@ -9,7 +9,7 @@ from typing import Any
 from olmo_eval.core.logging import get_logger
 from olmo_eval.core.types import Instance, LMOutput, LMRequest, Response, SamplingParams
 from olmo_eval.evals.tasks import Task, get_task
-from olmo_eval.runners.utils import TaskResult, build_predictions
+from olmo_eval.runners.utils import TaskResult, build_predictions, get_metric_metadata
 
 logger = get_logger(__name__)
 
@@ -212,10 +212,8 @@ def finalize_task(tracker: TaskTracker) -> TaskResult:
     # Get task config for serialization
     task_config = tracker.task.config
 
-    # Extract primary metric name from task config if specified
-    primary_metric_name = None
-    if task_config.primary_metric:
-        primary_metric_name = task_config.primary_metric.name
+    # Extract metric metadata
+    primary_metric_name, metric_scorers = get_metric_metadata(tracker.task)
 
     return TaskResult(
         spec=tracker.spec,
@@ -225,6 +223,7 @@ def finalize_task(tracker: TaskTracker) -> TaskResult:
         duration_seconds=duration,
         predictions=predictions,
         primary_metric=primary_metric_name,
+        metric_scorers=metric_scorers,
     )
 
 

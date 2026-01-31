@@ -185,6 +185,7 @@ class TaskMetricsEntry:
     config: dict[str, Any] | None = None
     duration_seconds: float | None = None
     task_hash: str | None = None
+    metric_scorers: dict[str, str] | None = None  # Maps metric name to scorer name
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dict, excluding None values."""
@@ -203,6 +204,8 @@ class TaskMetricsEntry:
             result["duration_seconds"] = self.duration_seconds
         if self.task_hash is not None:
             result["task_hash"] = self.task_hash
+        if self.metric_scorers is not None:
+            result["metric_scorers"] = self.metric_scorers
         return result
 
 
@@ -691,6 +694,7 @@ class RunnerResultsMixin:
                 config=task_data.get("config"),
                 duration_seconds=task_data.get("duration_seconds"),
                 task_hash=task_data.get("task_hash"),
+                metric_scorers=task_data.get("metric_scorers"),
             )
             tasks_list.append(entry)
 
@@ -763,6 +767,7 @@ class RunnerResultsMixin:
                     config=task_data.get("config"),
                     duration_seconds=task_data.get("duration_seconds"),
                     task_hash=task_data.get("task_hash"),
+                    metric_scorers=task_data.get("metric_scorers"),
                 )
                 tasks_list.append(entry)
 

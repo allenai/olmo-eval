@@ -145,9 +145,31 @@ class TaskConfig:
             "fewshot_seed": self.fewshot_seed,
             "limit": self.limit,
             "split": self.split.value,
-            "primary_metric": serialize_primary_metric(self.primary_metric),
+            "primary_metric": serialize_primary_metric(self.get_primary_metric()),
             "sampling_params": asdict(self.sampling_params) if self.sampling_params else None,
         }
+
+    def get_primary_metric(self) -> Metric | None:
+        """Get the effective primary metric for this task.
+
+        Returns the explicitly set primary_metric if available, otherwise
+        returns the single metric if exactly one is defined. Returns None
+        if no metrics are defined or multiple metrics exist without an
+        explicit primary.
+
+        Returns:
+            The primary Metric instance, or None.
+        """
+        if self.primary_metric is not None:
+            # If it's a Metric instance, return it directly
+            if hasattr(self.primary_metric, "name"):
+                return self.primary_metric
+            # If it's a MetricName enum, we can't resolve it to an instance here
+            return None
+        # Default to single metric if only one is defined
+        if len(self.metrics) == 1:
+            return self.metrics[0]
+        return None
 
 
 class Task(ABC):

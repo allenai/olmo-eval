@@ -188,6 +188,7 @@ class AgentTask(Task):
         max_turns: int = 10,
         max_concurrency: int = 1,
         temperature: float = 0.0,
+        on_instance_complete: Any | None = None,
         **kwargs: Any,
     ) -> list[AgentExecutionResult]:
         """Run agent on all instances with concurrency control.
@@ -203,6 +204,7 @@ class AgentTask(Task):
             max_turns: Maximum turns per instance.
             max_concurrency: Maximum concurrent executions.
             temperature: Sampling temperature.
+            on_instance_complete: Optional callback called after each instance completes.
             **kwargs: Additional arguments passed to _get_agent.
 
         Returns:
@@ -230,18 +232,22 @@ class AgentTask(Task):
                             max_turns=max_turns,
                         )
                         trajectory = self._convert_to_trajectory(result)
-                        return AgentExecutionResult(
+                        exec_result = AgentExecutionResult(
                             trajectory=trajectory,
                             final_answer=result.final_output,
                             success=True,
                         )
                     except Exception as e:
                         logger.exception(f"Agent execution failed: {e}")
-                        return AgentExecutionResult(
+                        exec_result = AgentExecutionResult(
                             trajectory=AgentTrajectory(),
                             error=str(e),
                             success=False,
                         )
+                    # Call progress callback if provided
+                    if on_instance_complete is not None:
+                        on_instance_complete()
+                    return exec_result
 
             # Process all instances concurrently (up to max_concurrency)
             tasks = [process_instance(inst) for inst in instances]

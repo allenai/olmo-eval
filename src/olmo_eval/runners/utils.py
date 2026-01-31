@@ -27,6 +27,7 @@ __all__ = [
     "generate_experiment_id",
     "get_author",
     "get_git_ref",
+    "get_metric_metadata",
     "get_primary_metric",
     "run_agent_task_impl",
     "run_task_impl",
@@ -435,6 +436,7 @@ class TaskResult:
     predictions: list[dict] | None = None
     requests: list[dict] | None = None  # oe-eval compatible request objects
     primary_metric: str | None = None  # Preferred metric name from task config
+    metric_scorers: dict[str, str] | None = None  # Maps metric name to scorer name
 
     def to_dict(self, include_predictions: bool = False) -> dict[str, Any]:
         """Serialize to dictionary for JSON output.
@@ -454,9 +456,37 @@ class TaskResult:
         }
         if self.primary_metric:
             result["primary_metric"] = self.primary_metric
+        if self.metric_scorers:
+            result["metric_scorers"] = self.metric_scorers
         if include_predictions and self.predictions:
             result["predictions"] = self.predictions
         return result
+
+
+def get_metric_metadata(task: Any) -> tuple[str | None, dict[str, str] | None]:
+    """Extract metric metadata from task config.
+
+    Args:
+        task: Task instance with config.metrics
+
+    Returns:
+        Tuple of (primary_metric_name, metric_scorers).
+        - primary_metric_name: Name of the primary metric, or None
+        - metric_scorers: Dict mapping metric name to scorer name, or None if empty
+    """
+    # Get primary metric name
+    primary_metric = task.config.get_primary_metric()
+    primary_metric_name = primary_metric.name if primary_metric else None
+
+    # Get metric-to-scorer mapping
+    metric_scorers: dict[str, str] = {}
+    if hasattr(task.config, "metrics"):
+        for metric in task.config.metrics:
+            if hasattr(metric, "scorer") and metric.scorer is not None:
+                scorer_instance = metric.scorer()
+                metric_scorers[metric.name] = scorer_instance.name
+
+    return primary_metric_name, metric_scorers if metric_scorers else None
 
 
 def build_predictions(scored: Sequence[Response]) -> list[dict]:
@@ -753,17 +783,21 @@ def run_agent_task_impl(
             # Validate secrets for API access
             task._validate_secrets()
 
-            results = asyncio.run(
-                task._run_agent_loop(
-                    instances=instances,
-                    model=effective_model,
-                    model_url=effective_url,
-                    system_prompt=system_prompt,
-                    max_turns=max_turns,
-                    max_concurrency=max_concurrency,
-                    temperature=temperature,
+            from tqdm import tqdm
+
+            with tqdm(total=len(instances), desc="Processing instances", unit="inst") as pbar:
+                results = asyncio.run(
+                    task._run_agent_loop(
+                        instances=instances,
+                        model=effective_model,
+                        model_url=effective_url,
+                        system_prompt=system_prompt,
+                        max_turns=max_turns,
+                        max_concurrency=max_concurrency,
+                        temperature=temperature,
+                        on_instance_complete=lambda: pbar.update(1),
+                    )
                 )
-            )
         else:
             # vLLM mode: start local server
             results, effective_model, effective_url = _run_agent_with_vllm_server(
@@ -783,7 +817,11 @@ def run_agent_task_impl(
         responses = task._build_responses(instances, results)
 
         # Score responses and compute metrics using standard flow
-        scored = task.score_responses(responses)
+        from tqdm import tqdm
+
+        with tqdm(total=len(responses), desc="Scoring instances", unit="inst") as pbar:
+            scored = task.score_responses(responses)
+            pbar.update(len(responses))
         metrics = task.compute_metrics(scored)
 
         # Build predictions for per-instance inspection
@@ -795,10 +833,8 @@ def run_agent_task_impl(
 
         duration = time.time() - start_time
 
-        # Extract primary metric name from task config if specified
-        primary_metric_name = None
-        if task.config.primary_metric:
-            primary_metric_name = task.config.primary_metric.name
+        # Extract metric metadata
+        primary_metric_name, metric_scorers = get_metric_metadata(task)
 
         return TaskResult(
             spec=spec,
@@ -820,6 +856,7 @@ def run_agent_task_impl(
             predictions=predictions,
             requests=request_objects,
             primary_metric=primary_metric_name,
+            metric_scorers=metric_scorers,
         )
 
     except Exception as e:
@@ -890,6 +927,8 @@ def _run_agent_with_vllm_server(
             # Default for Qwen, OLMo, and other models
             tool_call_parser = "hermes"
 
+    from tqdm import tqdm
+
     with vllm_server_context(
         model_name=model_name,
         tensor_parallel_size=num_gpus,
@@ -901,18 +940,19 @@ def _run_agent_with_vllm_server(
         if progress_callback:
             progress_callback(f"vLLM server ready at {server_url}")
 
-        # Run agent loop with local server
-        results = asyncio.run(
-            task._run_agent_loop(
-                instances=instances,
-                model=model_name,
-                model_url=server_url,
-                system_prompt=system_prompt,
-                max_turns=max_turns,
-                max_concurrency=max_concurrency,
-                temperature=temperature,
+        with tqdm(total=len(instances), desc="Processing instances", unit="inst") as pbar:
+            results = asyncio.run(
+                task._run_agent_loop(
+                    instances=instances,
+                    model=model_name,
+                    model_url=server_url,
+                    system_prompt=system_prompt,
+                    max_turns=max_turns,
+                    max_concurrency=max_concurrency,
+                    temperature=temperature,
+                    on_instance_complete=lambda: pbar.update(1),
+                )
             )
-        )
 
         return results, model_name, server_url
 
@@ -1027,10 +1067,8 @@ def run_task_impl(
 
         duration = time.time() - start_time
 
-        # Extract primary metric name from task config if specified
-        primary_metric_name = None
-        if task.config.primary_metric:
-            primary_metric_name = task.config.primary_metric.name
+        # Extract metric metadata
+        primary_metric_name, metric_scorers = get_metric_metadata(task)
 
         # Use existing_params (the actual params used for generation)
         return TaskResult(
@@ -1049,6 +1087,7 @@ def run_task_impl(
             predictions=predictions,
             requests=request_objects,
             primary_metric=primary_metric_name,
+            metric_scorers=metric_scorers,
         )
 
     except Exception as e:
