@@ -17,6 +17,8 @@ from olmo_eval.runners.utils import (
     get_author,
     get_git_ref,
     get_primary_metric,
+    write_predictions_jsonl,
+    write_requests_jsonl,
 )
 
 if TYPE_CHECKING:
@@ -257,6 +259,30 @@ class RunnerResultsMixin:
 
     # Optional S3 upload configuration
     s3_config: S3Config | None
+
+    # Per-task overrides from inline spec (e.g., task::temperature=0.6)
+    task_overrides: dict[str, dict[str, Any]]
+
+    def _build_task_overrides(self, spec: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Build task and sampling overrides for a given task spec.
+
+        Returns:
+            Tuple of (task_overrides, sampling_overrides)
+        """
+        from olmo_eval.runners.constants import SAMPLING_KEYS, TASKCONFIG_KEYS
+
+        task_overrides: dict[str, Any] = {}
+        sampling_overrides: dict[str, Any] = {}
+
+        # Apply per-task inline overrides
+        per_task = getattr(self, "task_overrides", {}).get(spec, {})
+        for key, value in per_task.items():
+            if key in TASKCONFIG_KEYS:
+                task_overrides[key] = value
+            elif key in SAMPLING_KEYS:
+                sampling_overrides[key] = value
+
+        return task_overrides, sampling_overrides
 
     def _validate_task_specs(self) -> list[str]:
         """Validate task specs and return list of errors.
@@ -787,6 +813,18 @@ class RunnerResultsMixin:
                 f"{result.duration_seconds:.1f}s)"
             )
 
+    def _write_predictions(
+        self, model_name: str, spec: str, predictions: list[dict], task_hash: str | None = None
+    ) -> None:
+        """Write per-instance predictions to JSONL."""
+        write_predictions_jsonl(self.output_dir, spec, predictions, model_name, task_hash=task_hash)
+
+    def _write_requests(
+        self, model_name: str, spec: str, requests: list[dict], task_hash: str | None = None
+    ) -> None:
+        """Write per-instance requests to JSONL (oe-eval compatible format)."""
+        write_requests_jsonl(self.output_dir, spec, requests, model_name, task_hash=task_hash)
+
 
 class AsyncRunnerMixin(RunnerResultsMixin):
     """Additional shared functionality for async runners."""
@@ -795,8 +833,6 @@ class AsyncRunnerMixin(RunnerResultsMixin):
     task_specs: list[str]
     num_workers: int | None
     gpus_per_worker: int
-    num_shots_override: int | None
-    limit_override: int | None
 
     # Subclasses should override these for print_config display
     _mode_name: str = "Async"
@@ -833,11 +869,6 @@ class AsyncRunnerMixin(RunnerResultsMixin):
         table.add_row("Output Dir", self.output_dir)
         table.add_row("Workers", str(self.num_workers or "auto-detect"))
         table.add_row("GPUs per Worker", str(self.gpus_per_worker))
-
-        if self.num_shots_override is not None:
-            table.add_row("Num Shots Override", str(self.num_shots_override))
-        if self.limit_override is not None:
-            table.add_row("Limit Override", str(self.limit_override))
 
         console.print(table)
 

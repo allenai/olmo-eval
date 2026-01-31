@@ -1,7 +1,6 @@
 """Metrics subpackage for evaluation metric implementations."""
 
 from .base import (
-    AbstentionAccuracyMetric,
     AccuracyMetric,
     BPBMetric,
     F1Metric,
@@ -13,7 +12,6 @@ from .base import (
 )
 
 __all__ = [
-    "AbstentionAccuracyMetric",
     "AccuracyMetric",
     "BPBMetric",
     "F1Metric",

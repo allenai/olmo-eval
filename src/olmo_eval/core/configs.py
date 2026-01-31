@@ -41,6 +41,12 @@ class ModelConfig:
     # When set, agent tasks use this URL directly instead of starting vLLM
     model_url: str | None = None
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to dictionary for JSON output."""
+        from dataclasses import asdict
+
+        return asdict(self)
+
 
 @dataclass
 class RunConfig:

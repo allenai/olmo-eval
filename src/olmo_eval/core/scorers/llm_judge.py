@@ -102,18 +102,6 @@ def build_openai_judge_fn(
     return judge
 
 
-def _default_llm_judge_fn() -> JudgeFn:
-    return build_openai_judge_fn(scorer_name="LLMJudgeScorer")
-
-
-def _default_simpleqa_judge_fn() -> JudgeFn:
-    return build_openai_judge_fn(scorer_name="SimpleQAJudgeScorer")
-
-
-def _default_rubric_judge_fn() -> JudgeFn:
-    return build_openai_judge_fn(scorer_name="RubricJudgeScorer")
-
-
 @dataclass(frozen=True)
 class LLMJudgeScorer(Scorer):
     """Abstract base class for LLM-as-judge scorers.
@@ -124,7 +112,9 @@ class LLMJudgeScorer(Scorer):
     """
 
     name: ClassVar[str] = "llm_judge"
-    judge_fn: JudgeFn = field(default_factory=_default_llm_judge_fn)
+    judge_fn: JudgeFn = field(
+        default_factory=lambda: build_openai_judge_fn(scorer_name="LLMJudgeScorer")
+    )
 
     @abstractmethod
     def format_judge_prompt(self, instance: Instance, output: LMOutput) -> str:
@@ -180,8 +170,9 @@ class SimpleQAJudgeScorer(LLMJudgeScorer):
     """
 
     name: ClassVar[str] = "simpleqa_judge"
-    judge_fn: JudgeFn = field(default_factory=_default_simpleqa_judge_fn)
-    not_attempted_score: float = 0.0
+    judge_fn: JudgeFn = field(
+        default_factory=lambda: build_openai_judge_fn(scorer_name="SimpleQAJudgeScorer")
+    )
 
     def format_judge_prompt(self, instance: Instance, output: LMOutput) -> str:
         """Format SimpleQA-style judge prompt."""
@@ -198,20 +189,14 @@ class SimpleQAJudgeScorer(LLMJudgeScorer):
             response: The judge's response.
 
         Returns:
-            1.0 for CORRECT (A), 0.0 for INCORRECT (B),
-            not_attempted_score for NOT_ATTEMPTED (C).
+            1.0 for CORRECT (A), 0.0 for INCORRECT (B) or NOT_ATTEMPTED (C).
         """
         response = response.strip().upper()
 
         # Look for letter grade
         if response.startswith("A") or "CORRECT" in response and "INCORRECT" not in response:
             return 1.0
-        elif response.startswith("B") or "INCORRECT" in response:
-            return 0.0
-        elif response.startswith("C") or "NOT_ATTEMPTED" in response or "NOT ATTEMPTED" in response:
-            return self.not_attempted_score
         else:
-            # Default to incorrect if can't parse
             return 0.0
 
     def get_grade(self, response: str) -> SimpleQAGrade:
@@ -245,7 +230,9 @@ class RubricJudgeScorer(LLMJudgeScorer):
     """
 
     name: ClassVar[str] = "rubric_judge"
-    judge_fn: JudgeFn = field(default_factory=_default_rubric_judge_fn)
+    judge_fn: JudgeFn = field(
+        default_factory=lambda: build_openai_judge_fn(scorer_name="RubricJudgeScorer")
+    )
     rubric: str = ""
     score_pattern: str = r"Score:\s*(\d+(?:\.\d+)?)"
     max_score: float = 10.0

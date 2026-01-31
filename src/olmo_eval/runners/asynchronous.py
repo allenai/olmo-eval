@@ -22,7 +22,6 @@ from olmo_eval.core.logging import get_logger
 from olmo_eval.core.types import Instance, LMOutput, LMRequest, Response, SamplingParams
 from olmo_eval.evals.tasks import Task, get_task
 from olmo_eval.inference import InferenceProvider, ProviderType, create_provider
-from olmo_eval.runners.constants import SAMPLING_KEYS, TASKCONFIG_KEYS
 from olmo_eval.runners.mixins import AsyncRunnerMixin, S3Config
 from olmo_eval.runners.utils import (
     TaskResult,
@@ -30,8 +29,6 @@ from olmo_eval.runners.utils import (
     compute_suite_aggregations,
     compute_task_hash,
     generate_experiment_id,
-    write_predictions_jsonl,
-    write_requests_jsonl,
 )
 
 if TYPE_CHECKING:
@@ -760,9 +757,6 @@ class AsyncEvalRunner(AsyncRunnerMixin):
     model_names: list[str]
     task_specs: list[str]
     output_dir: str = BEAKER_RESULT_DIR
-    num_shots_override: int | None = None
-    limit_override: int | None = None
-    temperature: float | None = None
     provider_override: str | None = None
     storages: list[StorageBackend] = field(default_factory=list)
 
@@ -794,6 +788,10 @@ class AsyncEvalRunner(AsyncRunnerMixin):
     # For direct CLI with multiple -m flags, alias applies to single-model runs only
     alias: str | None = None
 
+    # Output persistence options
+    save_predictions: bool = True
+    save_requests: bool = True
+
     # Configuration for print_config display
     _mode_name: str = "Async Mode"
     _mode_description: str = "Async (All-at-once)"
@@ -806,17 +804,6 @@ class AsyncEvalRunner(AsyncRunnerMixin):
         immediately when each (model, task) pair completes.
         """
         expanded_tasks = expand_tasks(self.task_specs)
-
-        # Build global overrides from CLI args
-        global_overrides: dict[str, Any] = {}
-        global_sampling_overrides: dict[str, Any] = {}
-
-        if self.num_shots_override is not None:
-            global_overrides["num_fewshot"] = self.num_shots_override
-        if self.limit_override is not None:
-            global_overrides["limit"] = self.limit_override
-        if self.temperature is not None:
-            global_sampling_overrides["temperature"] = self.temperature
 
         # Prepare all (model, task) pairs
         trackers: dict[tuple[str, str], TaskTracker] = {}
@@ -843,18 +830,8 @@ class AsyncEvalRunner(AsyncRunnerMixin):
             model_name: str, spec: str
         ) -> tuple[str, str, TaskTracker, list[QueueItem]]:
             try:
-                # Build overrides for this task
-                # 1. Start with global CLI overrides
-                overrides = dict(global_overrides)
-                sampling_overrides = dict(global_sampling_overrides)
-
-                # 2. Apply per-task overrides (highest priority)
-                task_specific = self.task_overrides.get(spec, {})
-                for key, value in task_specific.items():
-                    if key in TASKCONFIG_KEYS:
-                        overrides[key] = value
-                    elif key in SAMPLING_KEYS:
-                        sampling_overrides[key] = value
+                # Build overrides from per-task inline overrides
+                overrides, sampling_overrides = self._build_task_overrides(spec)
 
                 task, items = prepare_task_items(
                     spec,
@@ -895,7 +872,7 @@ class AsyncEvalRunner(AsyncRunnerMixin):
                 else:
                     console.print(f"  - {model_name}:{spec}: {len(items)} instances")
                     # Write requests early - we know them upfront before generation
-                    if items and tracker.task:
+                    if self.save_requests and items and tracker.task:
                         request_objects = build_requests_from_items(items, tracker.task.config.name)
                         task_hash = compute_task_hash(tracker.task.config.to_dict())
                         self._write_requests(model_name, spec, request_objects, task_hash)
@@ -1075,13 +1052,11 @@ class AsyncEvalRunner(AsyncRunnerMixin):
                     completed_pairs += 1
                     self._report_task_completion(tracker.model_name, task_result)
                     # Write predictions to JSONL
-                    if task_result.predictions:
+                    if self.save_predictions and task_result.predictions:
                         task_hash = compute_task_hash(task_result.config)
                         self._write_predictions(
                             tracker.model_name, task_result.spec, task_result.predictions, task_hash
                         )
-                    # Note: Requests are written early during task preparation,
-                    # so we don't need to write them again here
 
         # Wait for all workers
         for worker in workers:
@@ -1135,16 +1110,7 @@ class AsyncEvalRunner(AsyncRunnerMixin):
                             }
                         )
                     else:
-                        task_data: dict[str, Any] = {
-                            "config": task_result.config,
-                            "num_instances": task_result.num_instances,
-                            "metrics": task_result.metrics,
-                            "duration_seconds": task_result.duration_seconds,
-                        }
-                        if task_result.primary_metric:
-                            task_data["primary_metric"] = task_result.primary_metric
-                        if task_result.predictions:
-                            task_data["predictions"] = task_result.predictions
+                        task_data = task_result.to_dict(include_predictions=True)
                         # Add task_hash for storage
                         task_hash = compute_task_hash(task_result.config)
                         if task_hash:
@@ -1152,14 +1118,9 @@ class AsyncEvalRunner(AsyncRunnerMixin):
                         model_results["tasks"][spec] = task_data
 
             # Store model config details for metrics.json
-            model_results["model_config"] = {
-                "model": model_config.model,
-                "tokenizer": model_config.tokenizer,
-                "provider": provider_type.value,
-                "dtype": model_config.dtype,
-                "revision": model_config.revision,
-                "attention_backend": self.attention_backend,
-            }
+            model_config_dict = model_config.to_dict()
+            model_config_dict["attention_backend"] = self.attention_backend
+            model_results["model_config"] = model_config_dict
 
             results_dict["models"][model_name] = model_results
 
@@ -1216,18 +1177,6 @@ class AsyncEvalRunner(AsyncRunnerMixin):
         """Sync wrapper for async execution."""
         return asyncio.run(self.run_async())
 
-    def _write_predictions(
-        self, model_name: str, spec: str, predictions: list[dict], task_hash: str | None = None
-    ) -> None:
-        """Write per-instance predictions to JSONL."""
-        write_predictions_jsonl(self.output_dir, spec, predictions, model_name, task_hash=task_hash)
-
-    def _write_requests(
-        self, model_name: str, spec: str, requests: list[dict], task_hash: str | None = None
-    ) -> None:
-        """Write per-instance requests to JSONL (oe-eval compatible format)."""
-        write_requests_jsonl(self.output_dir, spec, requests, model_name, task_hash=task_hash)
-
 
 # -----------------------------------------------------------------------------
 # StreamingEvalRunner
@@ -1250,9 +1199,6 @@ class StreamingEvalRunner(AsyncRunnerMixin):
     model_names: list[str]
     task_specs: list[str]
     output_dir: str = BEAKER_RESULT_DIR
-    num_shots_override: int | None = None
-    limit_override: int | None = None
-    temperature: float | None = None
     storages: list[StorageBackend] = field(default_factory=list)
 
     # Multi-worker config
@@ -1283,6 +1229,10 @@ class StreamingEvalRunner(AsyncRunnerMixin):
     # For direct CLI with multiple -m flags, alias applies to single-model runs only
     alias: str | None = None
 
+    # Output persistence options
+    save_predictions: bool = True
+    save_requests: bool = True
+
     # Configuration for print_config display
     _mode_name: str = "Streaming Mode"
     _mode_description: str = "Streaming (AsyncLLMEngine)"
@@ -1294,17 +1244,6 @@ class StreamingEvalRunner(AsyncRunnerMixin):
         added continuously and results stream back as they complete.
         """
         expanded_tasks = expand_tasks(self.task_specs)
-
-        # Build global overrides from CLI args
-        global_overrides: dict[str, Any] = {}
-        global_sampling_overrides: dict[str, Any] = {}
-
-        if self.num_shots_override is not None:
-            global_overrides["num_fewshot"] = self.num_shots_override
-        if self.limit_override is not None:
-            global_overrides["limit"] = self.limit_override
-        if self.temperature is not None:
-            global_sampling_overrides["temperature"] = self.temperature
 
         # Prepare all (model, task) pairs
         trackers: dict[tuple[str, str], TaskTracker] = {}
@@ -1329,18 +1268,8 @@ class StreamingEvalRunner(AsyncRunnerMixin):
             model_name: str, spec: str
         ) -> tuple[str, str, TaskTracker, list[QueueItem]]:
             try:
-                # Build overrides for this task
-                # 1. Start with global CLI overrides
-                overrides = dict(global_overrides)
-                sampling_overrides = dict(global_sampling_overrides)
-
-                # 2. Apply per-task overrides (highest priority)
-                task_specific = self.task_overrides.get(spec, {})
-                for key, value in task_specific.items():
-                    if key in TASKCONFIG_KEYS:
-                        overrides[key] = value
-                    elif key in SAMPLING_KEYS:
-                        sampling_overrides[key] = value
+                # Build overrides from per-task inline overrides
+                overrides, sampling_overrides = self._build_task_overrides(spec)
 
                 task, items = prepare_task_items(
                     spec,
@@ -1381,7 +1310,7 @@ class StreamingEvalRunner(AsyncRunnerMixin):
                 else:
                     console.print(f"  - {model_name}:{spec}: {len(items)} instances")
                     # Write requests early - we know them upfront before generation
-                    if items and tracker.task:
+                    if self.save_requests and items and tracker.task:
                         request_objects = build_requests_from_items(items, tracker.task.config.name)
                         task_hash = compute_task_hash(tracker.task.config.to_dict())
                         self._write_requests(model_name, spec, request_objects, task_hash)
@@ -1548,13 +1477,11 @@ class StreamingEvalRunner(AsyncRunnerMixin):
                     completed_pairs += 1
                     self._report_task_completion(tracker.model_name, task_result)
                     # Write predictions to JSONL
-                    if task_result.predictions:
+                    if self.save_predictions and task_result.predictions:
                         task_hash = compute_task_hash(task_result.config)
                         self._write_predictions(
                             tracker.model_name, task_result.spec, task_result.predictions, task_hash
                         )
-                    # Note: Requests are written early during task preparation,
-                    # so we don't need to write them again here
 
         # Wait for workers
         for worker in workers:
@@ -1607,16 +1534,7 @@ class StreamingEvalRunner(AsyncRunnerMixin):
                             }
                         )
                     else:
-                        task_data: dict[str, Any] = {
-                            "config": task_result.config,
-                            "num_instances": task_result.num_instances,
-                            "metrics": task_result.metrics,
-                            "duration_seconds": task_result.duration_seconds,
-                        }
-                        if task_result.primary_metric:
-                            task_data["primary_metric"] = task_result.primary_metric
-                        if task_result.predictions:
-                            task_data["predictions"] = task_result.predictions
+                        task_data = task_result.to_dict(include_predictions=True)
                         # Add task_hash for storage
                         task_hash = compute_task_hash(task_result.config)
                         if task_hash:
@@ -1624,14 +1542,9 @@ class StreamingEvalRunner(AsyncRunnerMixin):
                         model_results["tasks"][spec] = task_data
 
             # Store model config details for metrics.json
-            model_results["model_config"] = {
-                "model": model_config.model,
-                "tokenizer": model_config.tokenizer,
-                "provider": "vllm",
-                "dtype": model_config.dtype,
-                "revision": model_config.revision,
-                "attention_backend": self.attention_backend,
-            }
+            model_config_dict = model_config.to_dict()
+            model_config_dict["attention_backend"] = self.attention_backend
+            model_results["model_config"] = model_config_dict
 
             results_dict["models"][model_name] = model_results
 
@@ -1686,15 +1599,3 @@ class StreamingEvalRunner(AsyncRunnerMixin):
     def run(self) -> dict[str, Any]:
         """Sync wrapper for async execution."""
         return asyncio.run(self.run_async())
-
-    def _write_predictions(
-        self, model_name: str, spec: str, predictions: list[dict], task_hash: str | None = None
-    ) -> None:
-        """Write per-instance predictions to JSONL."""
-        write_predictions_jsonl(self.output_dir, spec, predictions, model_name, task_hash=task_hash)
-
-    def _write_requests(
-        self, model_name: str, spec: str, requests: list[dict], task_hash: str | None = None
-    ) -> None:
-        """Write per-instance requests to JSONL (oe-eval compatible format)."""
-        write_requests_jsonl(self.output_dir, spec, requests, model_name, task_hash=task_hash)

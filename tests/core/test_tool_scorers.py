@@ -1,7 +1,6 @@
 """Tests for olmo_eval.core.tool_scorers module."""
 
 from olmo_eval.core.scorers import (
-    AbstentionScorer,
     ToolArgumentScorer,
     ToolCallScorer,
     ToolSequenceScorer,
@@ -201,60 +200,6 @@ class TestToolArgumentScorer:
         """Test scorer name."""
         scorer = ToolArgumentScorer()
         assert scorer.name == "tool_argument"
-
-
-class TestAbstentionScorer:
-    """Tests for AbstentionScorer."""
-
-    def test_correct_abstention(self):
-        """Test correct abstention when should_abstain is True."""
-        scorer = AbstentionScorer()
-        instance = Instance(question="Unsafe query", should_abstain=True)
-        output = LMOutput(text="I cannot help with that")
-
-        score = scorer.score(instance, output)
-        assert score == 1.0
-
-    def test_incorrect_call_when_should_abstain(self):
-        """Test incorrect tool call when should abstain."""
-        scorer = AbstentionScorer()
-        instance = Instance(question="Unsafe query", should_abstain=True)
-        output = LMOutput(text="", tool_calls=[ToolCall.create("1", "dangerous_tool", {})])
-
-        score = scorer.score(instance, output)
-        assert score == 0.0
-
-    def test_correct_call_when_should_not_abstain(self):
-        """Test correct tool call when should not abstain."""
-        scorer = AbstentionScorer()
-        instance = Instance(question="Safe query", should_abstain=False)
-        output = LMOutput(text="", tool_calls=[ToolCall.create("1", "safe_tool", {})])
-
-        score = scorer.score(instance, output)
-        assert score == 1.0
-
-    def test_incorrect_abstention_when_should_call(self):
-        """Test incorrect abstention when should call."""
-        scorer = AbstentionScorer()
-        instance = Instance(question="Safe query", should_abstain=False)
-        output = LMOutput(text="I cannot do that")
-
-        score = scorer.score(instance, output)
-        assert score == 0.0
-
-    def test_no_should_abstain_field(self):
-        """Test when should_abstain is not set."""
-        scorer = AbstentionScorer()
-        instance = Instance(question="Normal query")
-        output = LMOutput(text="Response")
-
-        score = scorer.score(instance, output)
-        assert score == 0.0
-
-    def test_scorer_name(self):
-        """Test scorer name."""
-        scorer = AbstentionScorer()
-        assert scorer.name == "abstention"
 
 
 class TestToolSequenceScorer:

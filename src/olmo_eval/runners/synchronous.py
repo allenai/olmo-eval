@@ -14,7 +14,7 @@ from olmo_eval.core.configs import expand_tasks, get_model_config
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.core.logging import get_logger
 from olmo_eval.inference import InferenceProvider, ProviderType, create_provider
-from olmo_eval.runners.constants import SAMPLING_KEYS, TASKCONFIG_KEYS, ValidationError
+from olmo_eval.runners.constants import ValidationError
 from olmo_eval.runners.mixins import RunnerResultsMixin, S3Config
 from olmo_eval.runners.utils import (
     TaskResult,
@@ -22,8 +22,6 @@ from olmo_eval.runners.utils import (
     compute_task_hash,
     generate_experiment_id,
     run_task_impl,
-    write_predictions_jsonl,
-    write_requests_jsonl,
 )
 
 if TYPE_CHECKING:
@@ -40,9 +38,6 @@ class SyncEvalRunner(RunnerResultsMixin):
     model_name: str
     task_specs: list[str]
     output_dir: str = BEAKER_RESULT_DIR
-    num_shots_override: int | None = None
-    limit_override: int | None = None
-    temperature: float | None = None
     provider_override: str | None = None
     storages: list[StorageBackend] = field(default_factory=list)
 
@@ -66,6 +61,10 @@ class SyncEvalRunner(RunnerResultsMixin):
 
     # Model alias (short name used as model_name in DB, original path stored as model_path)
     alias: str | None = None
+
+    # Output persistence options
+    save_predictions: bool = True
+    save_requests: bool = True
 
     def validate(self) -> None:
         """Validate all inputs before running.
@@ -91,11 +90,6 @@ class SyncEvalRunner(RunnerResultsMixin):
             table.add_row("Tokenizer", model_config.tokenizer)
         table.add_row("Provider", provider_str)
         table.add_row("Output Dir", self.output_dir)
-
-        if self.num_shots_override is not None:
-            table.add_row("Num Shots Override", str(self.num_shots_override))
-        if self.limit_override is not None:
-            table.add_row("Limit Override", str(self.limit_override))
 
         console.print(table)
 
@@ -165,36 +159,23 @@ class SyncEvalRunner(RunnerResultsMixin):
         model_alias = self.model_overrides.get("alias")
         display_model_name = get_model_display_name(model_config.model, model_alias)
 
+        # Build model_config dict from ModelConfig, adding runner-specific fields
+        model_config_dict = model_config.to_dict()
+        model_config_dict["attention_backend"] = self.attention_backend
+
         results: dict[str, Any] = {
             "model": display_model_name,
             "model_path": model_config.model,  # Original full path
             "provider": provider_type.value,
             "timestamp": datetime.now().isoformat(),
             "tasks": {},
-            # Store model config details for metrics.json
-            "model_config": {
-                "model": model_config.model,
-                "tokenizer": model_config.tokenizer,
-                "provider": provider_type.value,
-                "dtype": model_config.dtype,
-                "revision": model_config.revision,
-                "attention_backend": self.attention_backend,
-            },
+            "model_config": model_config_dict,
         }
 
         for spec in expanded_tasks:
             console.print(f"\n[bold blue]Running {spec}...[/bold blue]")
             task_result = self._run_task(spec, provider)
-            task_data: dict[str, Any] = {
-                "config": task_result.config,
-                "num_instances": task_result.num_instances,
-                "metrics": task_result.metrics,
-                "duration_seconds": task_result.duration_seconds,
-            }
-            if task_result.primary_metric:
-                task_data["primary_metric"] = task_result.primary_metric
-            if task_result.predictions:
-                task_data["predictions"] = task_result.predictions
+            task_data = task_result.to_dict(include_predictions=True)
 
             # Compute task hash from config and add to task_data
             task_hash = compute_task_hash(task_result.config)
@@ -204,13 +185,13 @@ class SyncEvalRunner(RunnerResultsMixin):
             results["tasks"][spec] = task_data
 
             # Write predictions to JSONL
-            if task_result.predictions:
+            if self.save_predictions and task_result.predictions:
                 self._write_predictions(
                     display_model_name, spec, task_result.predictions, task_hash
                 )
 
             # Write requests to JSONL (with hash now that we have the config)
-            if task_result.requests:
+            if self.save_requests and task_result.requests:
                 self._write_requests(display_model_name, spec, task_result.requests, task_hash)
 
             # Log metrics (for Beaker job details)
@@ -265,24 +246,8 @@ class SyncEvalRunner(RunnerResultsMixin):
 
     def _run_task(self, spec: str, provider: InferenceProvider) -> TaskResult:
         """Run a single task and return results."""
-        # Build overrides from instance settings (global CLI overrides)
-        overrides: dict[str, Any] = {}
-        sampling_overrides: dict[str, Any] = {}
-
-        if self.num_shots_override is not None:
-            overrides["num_fewshot"] = self.num_shots_override
-        if self.limit_override is not None:
-            overrides["limit"] = self.limit_override
-        if self.temperature is not None:
-            sampling_overrides["temperature"] = self.temperature
-
-        # Apply per-task overrides from spec (highest priority)
-        task_specific_overrides = self.task_overrides.get(spec, {})
-        for key, value in task_specific_overrides.items():
-            if key in TASKCONFIG_KEYS:
-                overrides[key] = value
-            elif key in SAMPLING_KEYS:
-                sampling_overrides[key] = value
+        # Build overrides from per-task inline overrides
+        overrides, sampling_overrides = self._build_task_overrides(spec)
 
         # Standard task - use shared task execution logic
         result = run_task_impl(
@@ -298,15 +263,3 @@ class SyncEvalRunner(RunnerResultsMixin):
             raise RuntimeError(f"Task {spec} failed: {result.error}")
 
         return result
-
-    def _write_predictions(
-        self, model_name: str, spec: str, predictions: list[dict], task_hash: str | None = None
-    ) -> None:
-        """Write per-instance predictions to JSONL."""
-        write_predictions_jsonl(self.output_dir, spec, predictions, model_name, task_hash=task_hash)
-
-    def _write_requests(
-        self, model_name: str, spec: str, requests: list[dict], task_hash: str | None = None
-    ) -> None:
-        """Write per-instance requests to JSONL (oe-eval compatible format)."""
-        write_requests_jsonl(self.output_dir, spec, requests, model_name, task_hash=task_hash)

@@ -436,6 +436,28 @@ class TaskResult:
     requests: list[dict] | None = None  # oe-eval compatible request objects
     primary_metric: str | None = None  # Preferred metric name from task config
 
+    def to_dict(self, include_predictions: bool = False) -> dict[str, Any]:
+        """Serialize to dictionary for JSON output.
+
+        Args:
+            include_predictions: Whether to include predictions in the output.
+                Defaults to False since predictions are typically written separately.
+
+        Returns:
+            Dictionary with task result data.
+        """
+        result: dict[str, Any] = {
+            "config": self.config,
+            "num_instances": self.num_instances,
+            "metrics": self.metrics,
+            "duration_seconds": self.duration_seconds,
+        }
+        if self.primary_metric:
+            result["primary_metric"] = self.primary_metric
+        if include_predictions and self.predictions:
+            result["predictions"] = self.predictions
+        return result
+
 
 def build_predictions(scored: Sequence[Response]) -> list[dict]:
     """Build per-instance predictions from scored responses.

@@ -1,7 +1,6 @@
 """Types subpackage for evaluation data structures."""
 
 from .agent import (
-    AbstentionMetrics,
     AgentMetrics,
     ExecutionMetrics,
     JudgeMetrics,
@@ -53,7 +52,6 @@ from .trajectory import (
 )
 
 __all__ = [
-    "AbstentionMetrics",
     "AgentMetrics",
     "AgentTrajectory",
     "AgentTurn",

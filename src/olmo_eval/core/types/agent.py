@@ -1,7 +1,7 @@
 """Nested metric types for agent evaluation.
 
 This module provides structured metric containers for different aspects
-of agent evaluation including tool use, abstention, trajectory, reliability,
+of agent evaluation including tool use, trajectory, reliability,
 execution, and LLM judge evaluation.
 """
 
@@ -29,32 +29,6 @@ class ToolMetrics:
             "num_tool_calls": self.num_tool_calls,
             "num_correct_calls": self.num_correct_calls,
             "num_correct_arguments": self.num_correct_arguments,
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class AbstentionMetrics:
-    """Metrics for abstention behavior.
-
-    Measures how well the model knows when NOT to use tools.
-    """
-
-    accuracy: float = 0.0
-    true_positive_rate: float = 0.0  # Correctly abstained when should abstain
-    true_negative_rate: float = 0.0  # Correctly called when should call
-    false_positive_rate: float = 0.0  # Incorrectly abstained when should call
-    false_negative_rate: float = 0.0  # Incorrectly called when should abstain
-    num_instances: int = 0
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "accuracy": self.accuracy,
-            "true_positive_rate": self.true_positive_rate,
-            "true_negative_rate": self.true_negative_rate,
-            "false_positive_rate": self.false_positive_rate,
-            "false_negative_rate": self.false_negative_rate,
-            "num_instances": self.num_instances,
         }
 
 
@@ -163,7 +137,6 @@ class AgentMetrics:
     """
 
     tool: ToolMetrics | None = None
-    abstention: AbstentionMetrics | None = None
     trajectory: TrajectoryMetrics | None = None
     reliability: ReliabilityMetrics | None = None
     execution: ExecutionMetrics | None = None
@@ -174,8 +147,6 @@ class AgentMetrics:
         result: dict[str, Any] = {}
         if self.tool is not None:
             result["tool"] = self.tool.to_dict()
-        if self.abstention is not None:
-            result["abstention"] = self.abstention.to_dict()
         if self.trajectory is not None:
             result["trajectory"] = self.trajectory.to_dict()
         if self.reliability is not None:
@@ -197,7 +168,6 @@ class AgentMetrics:
             A new AgentMetrics instance.
         """
         tool = ToolMetrics(**data["tool"]) if "tool" in data else None
-        abstention = AbstentionMetrics(**data["abstention"]) if "abstention" in data else None
         trajectory = TrajectoryMetrics(**data["trajectory"]) if "trajectory" in data else None
         reliability = ReliabilityMetrics(**data["reliability"]) if "reliability" in data else None
         execution = ExecutionMetrics(**data["execution"]) if "execution" in data else None
@@ -209,7 +179,6 @@ class AgentMetrics:
 
         return cls(
             tool=tool,
-            abstention=abstention,
             trajectory=trajectory,
             reliability=reliability,
             execution=execution,

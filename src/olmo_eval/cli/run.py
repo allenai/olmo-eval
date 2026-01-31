@@ -25,9 +25,6 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 @click.option("--task", "-t", multiple=True, required=True, help="Task spec or suite")
 @click.option("--config", "-c", type=click.Path(exists=True), help="YAML config file")
 @click.option("--output-dir", "-o", default=BEAKER_RESULT_DIR, help="Output directory")
-@click.option("--num-shots", type=int, help="Override num_fewshot for all tasks")
-@click.option("--limit", type=int, help="Override instance limit for all tasks")
-@click.option("--temperature", type=float, help="Override temperature for all tasks")
 @click.option("--provider", type=click.Choice(["hf", "vllm", "litellm"]), help="Override provider")
 @click.option(
     "--store",
@@ -158,14 +155,23 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
     is_flag=True,
     help="Enable verbose provider logging",
 )
+@click.option(
+    "--save-predictions/--no-save-predictions",
+    "save_predictions",
+    default=True,
+    help="Save per-instance predictions to JSONL (default: enabled)",
+)
+@click.option(
+    "--save-requests/--no-save-requests",
+    "save_requests",
+    default=True,
+    help="Save per-instance requests to JSONL (default: enabled)",
+)
 def run(
     models: tuple[str, ...],
     task: tuple[str, ...],
     config: str | None,
     output_dir: str,
-    num_shots: int | None,
-    limit: int | None,
-    temperature: float | None,
     provider: str | None,
     store: bool,
     dry_run: bool,
@@ -192,6 +198,8 @@ def run(
     num_gpus: int,
     debug_requests: bool,
     debug_provider: bool,
+    save_predictions: bool,
+    save_requests: bool,
 ) -> None:
     """Run evaluation on specified tasks.
 
@@ -368,9 +376,6 @@ def run(
             model_name=model_name,
             task_specs=task_specs,
             output_dir=output_dir,
-            num_shots_override=num_shots,
-            limit_override=limit,
-            temperature=temperature,
             storages=storages,
             num_gpus=num_gpus,
             task_overrides=task_overrides,
@@ -379,6 +384,8 @@ def run(
             experiment_name=experiment_name,
             experiment_group=experiment_group,
             alias=alias,
+            save_predictions=save_predictions,
+            save_requests=save_requests,
         )
 
         try:
@@ -406,9 +413,6 @@ def run(
             model_names=model_names,
             task_specs=task_specs,
             output_dir=output_dir,
-            num_shots_override=num_shots,
-            limit_override=limit,
-            temperature=temperature,
             storages=storages,
             num_workers=num_workers,
             gpus_per_worker=gpus_per_worker,
@@ -419,6 +423,8 @@ def run(
             experiment_name=experiment_name,
             experiment_group=experiment_group,
             alias=alias,
+            save_predictions=save_predictions,
+            save_requests=save_requests,
         )
     elif use_async:
         from olmo_eval.runners.asynchronous import AsyncEvalRunner
@@ -429,9 +435,6 @@ def run(
             model_names=model_names,
             task_specs=task_specs,
             output_dir=output_dir,
-            num_shots_override=num_shots,
-            limit_override=limit,
-            temperature=temperature,
             provider_override=provider,
             storages=storages,
             num_workers=num_workers,
@@ -443,6 +446,8 @@ def run(
             experiment_name=experiment_name,
             experiment_group=experiment_group,
             alias=alias,
+            save_predictions=save_predictions,
+            save_requests=save_requests,
         )
     else:
         # Sequential runner - run each model in sequence
@@ -464,9 +469,6 @@ def run(
                 model_name=model_name,
                 task_specs=task_specs,
                 output_dir=output_dir,
-                num_shots_override=num_shots,
-                limit_override=limit,
-                temperature=temperature,
                 provider_override=effective_provider,
                 storages=storages,
                 attention_backend=effective_attention_backend.upper()
@@ -478,6 +480,8 @@ def run(
                 experiment_name=experiment_name,
                 experiment_group=experiment_group,
                 alias=alias,
+                save_predictions=save_predictions,
+                save_requests=save_requests,
             )
 
             try:

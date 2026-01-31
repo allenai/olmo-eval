@@ -128,6 +128,18 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR, DEFAULT_M
     is_flag=True,
     help="Enable verbose provider logging",
 )
+@click.option(
+    "--save-predictions/--no-save-predictions",
+    "save_predictions",
+    default=True,
+    help="Save per-instance predictions to JSONL (default: enabled)",
+)
+@click.option(
+    "--save-requests/--no-save-requests",
+    "save_requests",
+    default=True,
+    help="Save per-instance requests to JSONL (default: enabled)",
+)
 def launch(
     config: str | None,
     name: str | None,
@@ -161,6 +173,8 @@ def launch(
     store: bool,
     debug_requests: bool,
     debug_provider: bool,
+    save_predictions: bool,
+    save_requests: bool,
 ) -> None:
     """Launch an evaluation job on Beaker.
 
@@ -1010,6 +1024,10 @@ def launch(
             command.append("--debug-requests")
         if debug_provider:
             command.append("--debug-provider")
+        if not save_predictions:
+            command.append("--no-save-predictions")
+        if not save_requests:
+            command.append("--no-save-requests")
 
         # Get the inference provider for this model group (defaults to vllm)
         # Agent tasks start their own vLLM server, so they need vllm extras

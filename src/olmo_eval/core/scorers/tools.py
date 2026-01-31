@@ -1,7 +1,7 @@
 """Scorers for tool calling evaluation.
 
 This module provides scorers for evaluating tool call accuracy,
-argument matching, abstention decisions, and tool sequences.
+argument matching, and tool sequences.
 """
 
 import json
@@ -191,40 +191,6 @@ class ToolArgumentScorer(Scorer):
             return 0.0
 
         return correct_calls / total_calls
-
-
-@dataclass(frozen=True, slots=True)
-class AbstentionScorer(Scorer):
-    """Score correct abstention decisions.
-
-    Evaluates whether the model correctly abstained from tool use
-    when should_abstain is True, or correctly used tools when False.
-    """
-
-    name: ClassVar[str] = "abstention"
-
-    def score(self, instance: Instance, output: LMOutput) -> float:
-        """Score abstention correctness.
-
-        Args:
-            instance: The evaluation instance with should_abstain field.
-            output: The model output with tool_calls.
-
-        Returns:
-            1.0 if correct decision, 0.0 otherwise.
-        """
-        if instance.should_abstain is None:
-            # Not an abstention instance, return 0
-            return 0.0
-
-        has_tool_calls = output.tool_calls is not None and len(output.tool_calls) > 0
-
-        if instance.should_abstain:
-            # Should NOT have called any tools
-            return 1.0 if not has_tool_calls else 0.0
-        else:
-            # Should have called tools
-            return 1.0 if has_tool_calls else 0.0
 
 
 @dataclass(frozen=True, slots=True)

@@ -51,19 +51,6 @@ class TestSimpleQAJudgeScorer:
         score = scorer.score(instance, output)
         assert score == 0.0
 
-    def test_not_attempted_custom_score(self):
-        """Test custom score for NOT_ATTEMPTED."""
-
-        def mock_judge(prompt: str) -> str:
-            return "C"
-
-        scorer = SimpleQAJudgeScorer(judge_fn=mock_judge, not_attempted_score=0.5)
-        instance = Instance(question="Q", gold_answer="A")
-        output = LMOutput(text="I cannot answer")
-
-        score = scorer.score(instance, output)
-        assert score == 0.5
-
     def test_parse_correct_word(self):
         """Test parsing 'CORRECT' text."""
 

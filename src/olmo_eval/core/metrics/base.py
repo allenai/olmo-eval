@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
 from ..scorers import (
-    AbstentionScorer,
     BitsPerByteScorer,
     ExactMatchScorer,
     F1Scorer,
@@ -256,20 +255,3 @@ class ToolAccuracyMetric(Metric):
         scorer_name = self.scorer().name
         total = sum(r.scores.get(scorer_name, 0.0) for r in responses)
         return total / len(responses)
-
-
-@dataclass(frozen=True, slots=True)
-class AbstentionAccuracyMetric(Metric):
-    """Mean abstention accuracy across responses with should_abstain field."""
-
-    name: str = "abstention_accuracy"
-    scorer: type[Scorer] = AbstentionScorer
-
-    def compute(self, responses: Sequence[Response]) -> float:
-        # Filter to only instances with should_abstain defined
-        abstention_responses = [r for r in responses if r.instance.should_abstain is not None]
-        if not abstention_responses:
-            return 0.0
-        scorer_name = self.scorer().name
-        total = sum(r.scores.get(scorer_name, 0.0) for r in abstention_responses)
-        return total / len(abstention_responses)

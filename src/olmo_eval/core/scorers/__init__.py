@@ -19,7 +19,6 @@ from .llm_judge import (
     build_openai_judge_fn,
 )
 from .tools import (
-    AbstentionScorer,
     ToolArgumentScorer,
     ToolCallScorer,
     ToolSequenceScorer,
@@ -32,7 +31,6 @@ from .trajectory import (
 )
 
 __all__ = [
-    "AbstentionScorer",
     "BitsPerByteScorer",
     "build_openai_judge_fn",
     "CodeExecutionScorer",
