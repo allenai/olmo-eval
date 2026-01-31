@@ -6,6 +6,7 @@ from rich.pretty import Pretty
 from rich.table import Table
 
 from olmo_eval.cli.utils import (
+    BeakerConfig,
     ExperimentSummary,
     ModelSummary,
     RunnerConfig,
@@ -836,12 +837,17 @@ def launch(
                 models=exp_model_summaries,
                 tasks=exp_task_summaries,
                 runner=exp_runner_config,
-                cluster=str(exp_cluster),
-                num_gpus=exp["num_gpus"],
-                priority=exp["priority"],
-                preemptible=exp_preemptible,
-                timeout=str(exp_timeout),
-                shared_memory=str(exp_shared_memory),
+                beaker=BeakerConfig(
+                    cluster=str(exp_cluster),
+                    workspace=workspace,
+                    budget=budget,
+                    image=effective_image,
+                    num_gpus=exp["num_gpus"],
+                    priority=exp["priority"],
+                    preemptible=exp_preemptible,
+                    timeout=str(exp_timeout),
+                    shared_memory=str(exp_shared_memory),
+                ),
             )
         )
 

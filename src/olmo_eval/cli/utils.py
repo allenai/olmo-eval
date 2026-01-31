@@ -89,6 +89,21 @@ class EvalSummary:
 
 
 @dataclass
+class BeakerConfig:
+    """Beaker-specific configuration for display."""
+
+    cluster: str
+    workspace: str
+    budget: str
+    image: str
+    num_gpus: int
+    priority: str
+    preemptible: bool = True
+    timeout: str = "2d"
+    shared_memory: str = "10GiB"
+
+
+@dataclass
 class ExperimentSummary:
     """Per-experiment summary for beaker launch display."""
 
@@ -96,12 +111,7 @@ class ExperimentSummary:
     models: list[ModelSummary]
     tasks: list[TaskSummary]
     runner: RunnerConfig
-    cluster: str
-    num_gpus: int
-    priority: str
-    preemptible: bool = True
-    timeout: str = "2d"
-    shared_memory: str = "10GiB"
+    beaker: BeakerConfig
 
 
 def parse_model_spec(spec: str) -> tuple[str, dict[str, Any]]:

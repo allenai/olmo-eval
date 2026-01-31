@@ -10,11 +10,198 @@ from collections.abc import AsyncGenerator, Iterator
 from contextlib import asynccontextmanager
 from typing import Any
 
+import httpx
+
 from olmo_eval.core.metrics import AccuracyMetric
 from olmo_eval.core.scorers import SimpleQAJudgeScorer
-from olmo_eval.core.types import SEARCH_TOOL_NAMES, SEARCH_TOOLS, Instance, SamplingParams
+from olmo_eval.core.types import SEARCH_TOOLS, Instance, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.core import AgentTask, AgentTaskConfig, register
+
+# =============================================================================
+# Tool Implementations
+# =============================================================================
+
+
+async def semantic_scholar_snippet_search(query: str) -> str:
+    """Search Semantic Scholar for academic papers and snippets matching a query.
+
+    Args:
+        query: Search query for academic papers and snippets.
+
+    Returns:
+        Formatted search results with paper titles, abstracts, and URLs.
+    """
+    api_key = os.getenv("S2_API_KEY")
+    headers = {}
+    if api_key:
+        headers["x-api-key"] = api_key
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            resp = await client.get(
+                "https://api.semanticscholar.org/graph/v1/paper/search",
+                params={"query": query, "limit": 5, "fields": "title,abstract,url,year,authors"},
+                headers=headers,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except httpx.HTTPStatusError as e:
+            return f"Error searching Semantic Scholar: HTTP {e.response.status_code}"
+        except httpx.RequestError as e:
+            return f"Error searching Semantic Scholar: {e}"
+
+    papers = data.get("data", [])
+    if not papers:
+        return "No papers found for query."
+
+    results = []
+    for paper in papers:
+        title = paper.get("title", "Unknown")
+        abstract = paper.get("abstract", "No abstract available")
+        url = paper.get("url", "")
+        year = paper.get("year", "")
+        authors = paper.get("authors", [])
+        author_names = ", ".join(a.get("name", "") for a in authors[:3])
+        if len(authors) > 3:
+            author_names += " et al."
+
+        result = f"**{title}**"
+        if year:
+            result += f" ({year})"
+        if author_names:
+            result += f"\nAuthors: {author_names}"
+        if abstract:
+            # Truncate long abstracts
+            if len(abstract) > 500:
+                abstract = abstract[:500] + "..."
+            result += f"\nAbstract: {abstract}"
+        if url:
+            result += f"\nURL: {url}"
+        results.append(result)
+
+    return "\n\n---\n\n".join(results)
+
+
+async def serper_google_webpage_search(query: str) -> str:
+    """Search the web for information using Google via Serper.
+
+    Args:
+        query: The search query to find relevant web pages.
+
+    Returns:
+        Formatted search results with titles, snippets, and URLs.
+    """
+    api_key = os.getenv("SERPER_API_KEY")
+    if not api_key:
+        return "Error: SERPER_API_KEY not configured."
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            resp = await client.post(
+                "https://google.serper.dev/search",
+                json={"q": query, "num": 5},
+                headers={
+                    "X-API-KEY": api_key,
+                    "Content-Type": "application/json",
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except httpx.HTTPStatusError as e:
+            return f"Error searching web: HTTP {e.response.status_code}"
+        except httpx.RequestError as e:
+            return f"Error searching web: {e}"
+
+    results = []
+
+    # Process organic results
+    organic = data.get("organic", [])
+    for item in organic[:5]:
+        title = item.get("title", "")
+        snippet = item.get("snippet", "")
+        link = item.get("link", "")
+        result = f"**{title}**\n{snippet}\nURL: {link}"
+        results.append(result)
+
+    # Include knowledge graph if available
+    kg = data.get("knowledgeGraph")
+    if kg:
+        kg_title = kg.get("title", "")
+        kg_desc = kg.get("description", "")
+        if kg_title and kg_desc:
+            results.insert(0, f"**Knowledge Graph: {kg_title}**\n{kg_desc}")
+
+    # Include answer box if available
+    answer_box = data.get("answerBox")
+    if answer_box:
+        answer = answer_box.get("answer") or answer_box.get("snippet", "")
+        if answer:
+            results.insert(0, f"**Direct Answer:**\n{answer}")
+
+    if not results:
+        return "No search results found."
+
+    return "\n\n---\n\n".join(results)
+
+
+async def serper_fetch_webpage_content(url: str) -> str:
+    """Fetch and extract content from a webpage URL.
+
+    Args:
+        url: The URL of the webpage to fetch.
+
+    Returns:
+        Extracted text content from the webpage.
+    """
+    api_key = os.getenv("SERPER_API_KEY")
+    if not api_key:
+        return "Error: SERPER_API_KEY not configured."
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            resp = await client.post(
+                "https://scrape.serper.dev",
+                json={"url": url},
+                headers={
+                    "X-API-KEY": api_key,
+                    "Content-Type": "application/json",
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except httpx.HTTPStatusError as e:
+            return f"Error fetching webpage: HTTP {e.response.status_code}"
+        except httpx.RequestError as e:
+            return f"Error fetching webpage: {e}"
+
+    # Extract text content
+    text = data.get("text", "")
+    if not text:
+        return "No content extracted from webpage."
+
+    # Truncate if too long
+    if len(text) > 4000:
+        text = text[:4000] + "\n\n[Content truncated...]"
+
+    return text
+
+
+def _create_function_tools() -> list[Any]:
+    """Create function tools for the agent.
+
+    Returns:
+        List of function tools decorated with @function_tool.
+    """
+    from agents import function_tool  # type: ignore[import-not-found]
+
+    # Wrap the async functions with the function_tool decorator
+    return [
+        function_tool(semantic_scholar_snippet_search),
+        function_tool(serper_google_webpage_search),
+        function_tool(serper_fetch_webpage_content),
+    ]
+
 
 DEFAULT_SYSTEM_PROMPT = """\
 You are a helpful assistant that can search for information to answer questions accurately.
@@ -101,14 +288,12 @@ class SimpleQAAgentTask(AgentTask):
         temperature: float = 0.0,
         **kwargs: Any,
     ) -> AsyncGenerator[Any, None]:
-        """Create agent with search tools via MCP."""
+        """Create agent with search tools as direct function tools."""
         from agents import (  # type: ignore[import-not-found]
             Agent,
             ModelSettings,
             OpenAIChatCompletionsModel,
         )
-        from agents.mcp import MCPServerStdio  # type: ignore[import-not-found]
-        from agents.mcp.util import create_static_tool_filter  # type: ignore[import-not-found]
         from openai import AsyncOpenAI  # type: ignore[import-not-found]
 
         s2_api_key = os.getenv("S2_API_KEY")
@@ -125,30 +310,17 @@ class SimpleQAAgentTask(AgentTask):
         llm = OpenAIChatCompletionsModel(openai_client=client, model=model)
         model_settings = ModelSettings(temperature=temperature)
 
-        tool_filter = create_static_tool_filter(allowed_tool_names=list(SEARCH_TOOL_NAMES))
-        env = {
-            "S2_API_KEY": s2_api_key,
-            "SERPER_API_KEY": serper_api_key,
-        }
+        # Create function tools directly instead of using MCP
+        tools = _create_function_tools()
 
-        async with MCPServerStdio(
-            cache_tools_list=True,
-            tool_filter=tool_filter,
-            client_session_timeout_seconds=60,
-            params={
-                "command": "python",
-                "args": ["-m", "dr_agent.mcp_backend.main", "--transport", "stdio"],
-                "env": env,
-            },
-        ) as server:
-            agent = Agent(
-                name="SearchAgent",
-                instructions=system_prompt or DEFAULT_SYSTEM_PROMPT,
-                model=llm,
-                model_settings=model_settings,
-                mcp_servers=[server],
-            )
-            yield agent
+        agent = Agent(
+            name="SearchAgent",
+            instructions=system_prompt or DEFAULT_SYSTEM_PROMPT,
+            model=llm,
+            model_settings=model_settings,
+            tools=tools,
+        )
+        yield agent
 
 
 # =============================================================================
