@@ -119,6 +119,16 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR, DEFAULT_M
     default=False,
     help="Persist results to the configured database",
 )
+@click.option(
+    "--debug-requests",
+    is_flag=True,
+    help="Log HTTP requests/responses to inference providers",
+)
+@click.option(
+    "--debug-vllm",
+    is_flag=True,
+    help="Enable verbose vLLM server/engine logging",
+)
 def launch(
     config: str | None,
     name: str | None,
@@ -150,6 +160,8 @@ def launch(
     s3_endpoint_url: str | None,
     s3_region: str,
     store: bool,
+    debug_requests: bool,
+    debug_vllm: bool,
 ) -> None:
     """Launch an evaluation job on Beaker.
 
@@ -627,9 +639,6 @@ def launch(
                     base_name = f"{base_name}-{short_m}"
                 if multiple_priorities:
                     base_name = f"{base_name}-{t_priority}"
-                # Add suffix for agent tasks to distinguish them
-                if task_category == "agent":
-                    base_name = f"{base_name}-agent"
 
                 splits = calculate_experiment_splits(
                     tasks=category_tasks,
@@ -1119,6 +1128,12 @@ def launch(
         # Credentials are injected via Beaker secrets (PGHOST, PGPORT, etc.)
         if store:
             command.append("--store")
+
+        # Debug logging flags
+        if debug_requests:
+            command.append("--debug-requests")
+        if debug_vllm:
+            command.append("--debug-vllm")
 
         # Get the inference provider for this model group (defaults to vllm)
         # Agent tasks start their own vLLM server, so they need vllm extras

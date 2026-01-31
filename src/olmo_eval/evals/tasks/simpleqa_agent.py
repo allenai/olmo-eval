@@ -5,6 +5,7 @@ tools to answer questions, following the pattern from the OpenAI SimpleQA
 benchmark.
 """
 
+import json
 import logging
 import os
 from collections.abc import AsyncGenerator, Iterator
@@ -21,13 +22,50 @@ from olmo_eval.evals.tasks.core import AgentTask, AgentTaskConfig, register
 
 logger = logging.getLogger(__name__)
 
+# Enable verbose request logging with OLMO_EVAL_DEBUG_REQUESTS=1
+_DEBUG_REQUESTS = os.getenv("OLMO_EVAL_DEBUG_REQUESTS", "").lower() in ("1", "true", "yes")
+
 
 def _log_request(request: httpx.Request) -> None:
-    """Log outgoing HTTP requests for debugging."""
-    logger.debug(f"Request: {request.method} {request.url}")
-    logger.debug(f"Headers: {dict(request.headers)}")
+    """Log outgoing HTTP requests for debugging.
+
+    Enable with OLMO_EVAL_DEBUG_REQUESTS=1 environment variable.
+    """
+    if not _DEBUG_REQUESTS:
+        return
+
+    logger.info(f"Request: {request.method} {request.url}")
     if request.content:
-        logger.debug(f"Body: {request.content.decode()}")
+        try:
+            body = json.loads(request.content.decode())
+            logger.info(f"Body:\n{json.dumps(body, indent=2)}")
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            logger.info(f"Body: {request.content.decode()}")
+
+
+def _log_response(response: httpx.Response) -> None:
+    """Log HTTP responses for debugging, especially errors.
+
+    Enable with OLMO_EVAL_DEBUG_REQUESTS=1 environment variable.
+    """
+    if not _DEBUG_REQUESTS:
+        return
+
+    status = response.status_code
+    if status >= 400:
+        logger.info(f"Response: {status} {response.reason_phrase}")
+        try:
+            # Read response body for error details
+            body = response.read()
+            try:
+                error = json.loads(body.decode())
+                logger.info(f"Error:\n{json.dumps(error, indent=2)}")
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                logger.info(f"Error: {body.decode()}")
+        except Exception as e:
+            logger.info(f"Could not read response body: {e}")
+    else:
+        logger.info(f"Response: {status} {response.reason_phrase}")
 
 
 # =============================================================================
@@ -317,8 +355,11 @@ class SimpleQAAgentTask(AgentTask):
         if not serper_api_key:
             raise ValueError("SERPER_API_KEY environment variable is required.")
 
-        # Create httpx client with request logging for debugging
-        http_client = httpx.AsyncClient(event_hooks={"request": [_log_request]})
+        # Create httpx client with request/response logging for debugging
+        # Enable with OLMO_EVAL_DEBUG_REQUESTS=1
+        http_client = httpx.AsyncClient(
+            event_hooks={"request": [_log_request], "response": [_log_response]}
+        )
 
         client = AsyncOpenAI(
             base_url=model_url or "http://localhost:8000/v1",

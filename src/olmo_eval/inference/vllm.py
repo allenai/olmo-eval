@@ -11,6 +11,13 @@ from olmo_eval.core.types import LMOutput, LMRequest, LogProbEntry, SamplingPara
 
 from .base import InferenceProvider
 
+logger = logging.getLogger(__name__)
+
+# Enable verbose request logging with OLMO_EVAL_DEBUG_REQUESTS=1
+_DEBUG_REQUESTS = os.getenv("OLMO_EVAL_DEBUG_REQUESTS", "").lower() in ("1", "true", "yes")
+# Enable verbose vLLM logging with OLMO_EVAL_DEBUG_VLLM=1
+_DEBUG_VLLM = os.getenv("OLMO_EVAL_DEBUG_VLLM", "").lower() in ("1", "true", "yes")
+
 if TYPE_CHECKING:
     from vllm import LLM
     from vllm.outputs import RequestOutput
@@ -114,8 +121,11 @@ class VLLMProvider(InferenceProvider):
                 will include this identifier.
             **engine_kwargs: Additional arguments passed to vLLM LLM engine.
         """
-        # Suppress verbose vLLM logging by default, but allow override
-        os.environ.setdefault("VLLM_LOGGING_LEVEL", "WARNING")
+        # Set vLLM logging level - DEBUG if OLMO_EVAL_DEBUG_VLLM=1, otherwise WARNING
+        if _DEBUG_VLLM:
+            os.environ["VLLM_LOGGING_LEVEL"] = "DEBUG"
+        else:
+            os.environ.setdefault("VLLM_LOGGING_LEVEL", "WARNING")
 
         # Configure vLLM logger with worker_id if provided
         if worker_id:
@@ -198,6 +208,11 @@ class VLLMProvider(InferenceProvider):
         vllm_params = self._build_sampling_params(params)
 
         prompts = [req.prompt for req in requests]
+
+        if _DEBUG_REQUESTS:
+            for i, prompt in enumerate(prompts):
+                logger.info(f"Prompt {i}:\n{prompt}")
+
         # Disable tqdm progress bar - we use our own worker-scoped logging
         outputs: list[RequestOutput] = self.llm.generate(prompts, vllm_params, use_tqdm=False)
 
@@ -260,6 +275,11 @@ class VLLMProvider(InferenceProvider):
         # Pass as list of dicts with prompt_token_ids key
         # Disable tqdm progress bar - we use our own worker-scoped logging
         prompts = [{"prompt_token_ids": tokens} for tokens in token_inputs]
+
+        if _DEBUG_REQUESTS:
+            logger.info(f"vLLM logprobs: {len(prompts)} continuations")
+            logger.info(f"Sampling params: {vllm_params}")
+
         outputs: list[RequestOutput] = self.llm.generate(prompts, vllm_params, use_tqdm=False)
 
         # Parse results back to per-request structure
@@ -363,7 +383,11 @@ class AsyncVLLMProvider:
                 will include this identifier.
             **engine_kwargs: Additional arguments passed to vLLM engine.
         """
-        os.environ.setdefault("VLLM_LOGGING_LEVEL", "WARNING")
+        # Set vLLM logging level - DEBUG if OLMO_EVAL_DEBUG_VLLM=1, otherwise WARNING
+        if _DEBUG_VLLM:
+            os.environ["VLLM_LOGGING_LEVEL"] = "DEBUG"
+        else:
+            os.environ.setdefault("VLLM_LOGGING_LEVEL", "WARNING")
 
         # Configure vLLM logger with worker_id if provided
         if worker_id:

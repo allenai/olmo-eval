@@ -28,6 +28,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_STARTUP_TIMEOUT = 300  # 5 minutes for large models
 DEFAULT_HEALTH_CHECK_INTERVAL = 2  # seconds
 
+# Enable verbose vLLM server output with OLMO_EVAL_DEBUG_VLLM=1
+_DEBUG_VLLM = os.getenv("OLMO_EVAL_DEBUG_VLLM", "").lower() in ("1", "true", "yes")
+
 
 def _find_free_port() -> int:
     """Find a free port on localhost."""
@@ -225,13 +228,29 @@ class VLLMServerProcess:
 
         # Start the server process
         env = os.environ.copy()
-        self._process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            env=env,
-            preexec_fn=os.setsid if hasattr(os, "setsid") else None,
-        )
+
+        # Enable verbose vLLM logging when debugging
+        if _DEBUG_VLLM:
+            env["VLLM_LOGGING_LEVEL"] = "DEBUG"
+            logger.info("vLLM debug logging enabled (OLMO_EVAL_DEBUG_VLLM=1)")
+
+        # When debugging, stream output to stderr; otherwise capture for error reporting
+        if _DEBUG_VLLM:
+            self._process = subprocess.Popen(
+                cmd,
+                stdout=None,  # Inherit stdout
+                stderr=None,  # Inherit stderr
+                env=env,
+                preexec_fn=os.setsid if hasattr(os, "setsid") else None,
+            )
+        else:
+            self._process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                env=env,
+                preexec_fn=os.setsid if hasattr(os, "setsid") else None,
+            )
 
         # Register cleanup on exit
         atexit.register(self.stop)

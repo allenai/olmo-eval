@@ -148,6 +148,16 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
     default=1,
     help="Number of GPUs for tensor parallelism (used with --agent)",
 )
+@click.option(
+    "--debug-requests",
+    is_flag=True,
+    help="Log HTTP requests/responses to inference providers",
+)
+@click.option(
+    "--debug-vllm",
+    is_flag=True,
+    help="Enable verbose vLLM server/engine logging",
+)
 def run(
     models: tuple[str, ...],
     task: tuple[str, ...],
@@ -180,6 +190,8 @@ def run(
     alias: str | None,
     agent: bool,
     num_gpus: int,
+    debug_requests: bool,
+    debug_vllm: bool,
 ) -> None:
     """Run evaluation on specified tasks.
 
@@ -192,11 +204,19 @@ def run(
         -m model::provider=vllm,tokenizer=allenai/dolma2-tokenizer
         -t task:olmes::temperature=0.6,num_fewshot=5
     """
+    import os
+
     from olmo_eval.core.logging import configure_logging
     from olmo_eval.runners import SyncEvalRunner, ValidationError
 
     # Configure logging for Beaker job visibility
     configure_logging(level="INFO")
+
+    # Set debug environment variables for agent tasks
+    if debug_requests:
+        os.environ["OLMO_EVAL_DEBUG_REQUESTS"] = "1"
+    if debug_vllm:
+        os.environ["OLMO_EVAL_DEBUG_VLLM"] = "1"
 
     # Print runtime environment summary
     print_runtime_environment()
