@@ -179,7 +179,7 @@ from olmo_eval.core import get_model_presets
 presets = get_model_presets()
 # {
 #     "llama3.1-8b": ModelConfig(model="meta-llama/Meta-Llama-3.1-8B"),
-#     "olmo-2-7b": ModelConfig(model="allenai/OLMo-2-1124-7B", trust_remote_code=True),
+#     "olmo-2-7b": ModelConfig(model="allenai/OLMo-2-1124-7B"),
 #     ...
 # }
 ```

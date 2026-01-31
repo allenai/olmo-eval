@@ -98,7 +98,6 @@ def _build_server_command(
     gpu_memory_utilization: float = 0.9,
     dtype: str = "auto",
     tokenizer: str | None = None,
-    trust_remote_code: bool = True,
     **kwargs: Any,
 ) -> list[str]:
     """Build the vLLM server command.
@@ -111,7 +110,6 @@ def _build_server_command(
         gpu_memory_utilization: Fraction of GPU memory to use
         dtype: Data type for model weights
         tokenizer: Custom tokenizer (defaults to model_name)
-        trust_remote_code: Whether to trust remote code in model
         **kwargs: Additional vLLM server arguments
 
     Returns:
@@ -140,9 +138,6 @@ def _build_server_command(
 
     if max_model_len:
         cmd.extend(["--max-model-len", str(max_model_len)])
-
-    if trust_remote_code:
-        cmd.append("--trust-remote-code")
 
     # Add any extra kwargs as CLI args
     for key, value in kwargs.items():

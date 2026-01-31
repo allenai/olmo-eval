@@ -109,13 +109,6 @@ class TestGetModelConfig:
         assert config.model == "meta-llama/Meta-Llama-3.1-8B"
         assert config.provider == "vllm"
 
-    def test_get_preset_with_trust_remote_code(self):
-        """Test preset that requires trust_remote_code."""
-        config = get_model_config("olmo-2-7b")
-
-        assert config.model == "allenai/OLMo-2-1124-7B"
-        assert config.trust_remote_code is True
-
     def test_get_unknown_model_as_hf_path(self):
         """Test that unknown model name is treated as HF path."""
         config = get_model_config("some-org/custom-model")
@@ -148,12 +141,10 @@ class TestGetModelConfig:
         config = get_model_config(
             "custom/model",
             provider="vllm",
-            trust_remote_code=True,
         )
 
         assert config.model == "custom/model"
         assert config.provider == "vllm"
-        assert config.trust_remote_code is True
 
     def test_get_model_extra_args_merged(self):
         """Test that extra_args are merged for presets."""
@@ -186,12 +177,10 @@ class TestGetModelConfig:
         config = get_model_config(
             "custom/my-model",
             tokenizer="custom/my-tokenizer",
-            trust_remote_code=True,
         )
 
         assert config.model == "custom/my-model"
         assert config.tokenizer == "custom/my-tokenizer"
-        assert config.trust_remote_code is True
 
     def test_tokenizer_default_is_none(self):
         """Test that tokenizer defaults to None for models without preset tokenizer."""

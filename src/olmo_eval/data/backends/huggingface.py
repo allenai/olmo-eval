@@ -36,17 +36,22 @@ class HuggingFaceBackend:
         Yields:
             Raw document dictionaries from the dataset.
         """
+        import os
+
         from datasets import load_dataset
 
         # Remove hf:// prefix if present
         path = source.path.removeprefix("hf://")
+
+        # Use HF_TOKEN for authentication if available
+        token = os.getenv("HF_TOKEN")
 
         dataset = load_dataset(
             path,
             name=source.subset,
             split=source.split,
             streaming=streaming,
-            trust_remote_code=True,
+            token=token,
         )
 
         yield from dataset
