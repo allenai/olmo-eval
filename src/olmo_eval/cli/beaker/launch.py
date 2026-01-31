@@ -6,7 +6,6 @@ from rich.pretty import Pretty
 from rich.table import Table
 
 from olmo_eval.cli.utils import (
-    BeakerConfig,
     ExperimentSummary,
     ModelSummary,
     RunnerConfig,
@@ -746,13 +745,6 @@ def launch(
         SyncEvalRunner,
     )
 
-    # Get effective attention backend
-    effective_attention_backend = None
-    if cfg is not None and model_configs:
-        first_model = model_configs[0]
-        model_resources = cfg.get_model_resources(first_model)
-        effective_attention_backend = model_resources.get("attention_backend")
-
     # Build a lookup for task summaries by spec
     task_summary_by_spec: dict[str, TaskSummary] = {}
     for ts in task_summaries:
@@ -762,103 +754,41 @@ def launch(
             full_spec = ts.spec
         task_summary_by_spec[full_spec] = ts
 
-    # Build experiment summaries for display
-    experiment_summaries: list[ExperimentSummary] = []
-    for exp in experiment_plan:
-        exp_model_cfgs = exp["model_cfgs"]
-        exp_model_specs = exp["model_specs"]
-        exp_is_agent = exp.get("is_agent", False)
-        first_model_cfg = exp_model_cfgs[0]
+    # Ensure common secrets exist in Beaker (needed for BeakerJobConfig)
+    from olmo_eval.launch.beaker.secrets import (
+        ensure_common_secrets,
+        ensure_task_secrets,
+        get_local_hf_token,
+        get_local_wandb_api_key,
+    )
 
-        # Build model summaries for this experiment (with full details)
-        exp_model_summaries = []
-        for m_cfg, m_spec in zip(exp_model_cfgs, exp_model_specs, strict=True):
-            model_base_name, model_inline_overrides = parse_model_spec(m_spec)
-            exp_model_summaries.append(
-                ModelSummary(
-                    name=model_base_name,
-                    gpus=m_cfg.gpus or gpus,
-                    parallelism=m_cfg.parallelism or parallelism,
-                    alias=m_cfg.alias,
-                    provider=m_cfg.provider,
-                    overrides=model_inline_overrides if model_inline_overrides else None,
-                )
+    beaker_username = launcher.beaker.user_name
+    if dry_run:
+        common_secrets: list[tuple[str, str]] = []
+        if get_local_hf_token():
+            common_secrets.append(("HF_TOKEN", f"{beaker_username}_HF_TOKEN"))
+        if get_local_wandb_api_key():
+            common_secrets.append(("WANDB_API_KEY", f"{beaker_username}_WANDB_API_KEY"))
+        # In dry-run, assume task secrets exist (just show what would be used)
+        task_secrets: list[tuple[str, str]] = [
+            (s, f"{beaker_username}_{s}") for s in sorted(all_required_secrets)
+        ]
+    else:
+        common_secrets = ensure_common_secrets(workspace=workspace)
+        # Validate and collect task-required secrets (will fail if any are missing)
+        try:
+            task_secrets = ensure_task_secrets(
+                workspace=workspace, required_secrets=all_required_secrets
             )
+        except ValueError as e:
+            console.print(f"[red]Error:[/red] {e}")
+            raise SystemExit(1) from None
 
-        # Build task summaries for this experiment
-        exp_task_summaries = []
-        for task_spec in exp["tasks"]:
-            # Strip priority suffix for lookup
-            base_spec = task_spec.rsplit("@", 1)[0] if "@" in task_spec else task_spec
-            if base_spec in task_summary_by_spec:
-                exp_task_summaries.append(task_summary_by_spec[base_spec])
-            else:
-                # Fallback: create minimal task summary
-                from olmo_eval.evals.tasks import get_task as get_task_instance
-
-                try:
-                    task_instance = get_task_instance(base_spec)
-                    exp_task_summaries.append(TaskSummary(config=task_instance.config))
-                except Exception:
-                    pass  # Skip if task can't be loaded
-
-        # Determine runner for this experiment
-        if exp_is_agent:
-            exp_runner_class = AgentEvalRunner
-        elif use_async_stream:
-            exp_runner_class = StreamingEvalRunner
-        elif use_async:
-            exp_runner_class = AsyncEvalRunner
-        else:
-            exp_runner_class = SyncEvalRunner
-
-        # Build RunnerConfig with full details
-        if use_async_stream or use_async:
-            effective_num_workers = num_workers
-            if effective_num_workers is None and cfg is not None:
-                model_resources = cfg.get_model_resources(first_model_cfg)
-                effective_num_workers = model_resources.get("num_workers")
-            exp_runner_config = RunnerConfig(
-                runner=exp_runner_class,
-                output_dir=BEAKER_RESULT_DIR,
-                attention_backend=effective_attention_backend,
-                num_workers=effective_num_workers if effective_num_workers else "auto",
-                gpus_per_worker=gpus_per_worker,
-            )
-        else:
-            exp_runner_config = RunnerConfig(
-                runner=exp_runner_class,
-                output_dir=BEAKER_RESULT_DIR,
-                attention_backend=effective_attention_backend if not exp_is_agent else None,
-            )
-
-        # Get effective cluster and other job config details
-        exp_cluster = first_model_cfg.cluster or cluster or "ai2/allennlp-cirrascale"
-        exp_preemptible = (
-            first_model_cfg.preemptible if first_model_cfg.preemptible is not None else preemptible
-        )
-        exp_timeout = first_model_cfg.timeout or timeout or "2d"
-        exp_shared_memory = first_model_cfg.shared_memory or "10GiB"
-
-        experiment_summaries.append(
-            ExperimentSummary(
-                name=exp["name"],
-                models=exp_model_summaries,
-                tasks=exp_task_summaries,
-                runner=exp_runner_config,
-                beaker=BeakerConfig(
-                    cluster=str(exp_cluster),
-                    workspace=workspace,
-                    budget=budget,
-                    image=effective_image,
-                    num_gpus=exp["num_gpus"],
-                    priority=exp["priority"],
-                    preemptible=exp_preemptible,
-                    timeout=str(exp_timeout),
-                    shared_memory=str(exp_shared_memory),
-                ),
-            )
-        )
+    # Build store secrets list if --store is enabled
+    store_secrets: list[tuple[str, str]] = []
+    if store:
+        for env_var in ["PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD"]:
+            store_secrets.append((env_var, f"olmo_eval_{env_var}"))
 
     # Print header
     console.print()
@@ -915,65 +845,9 @@ def launch(
 
     console.print()
 
-    # Print per-experiment summaries
-    for exp_summary in experiment_summaries:
-        # Determine border style based on runner type
-        runner_name = exp_summary.runner.runner.__name__
-        if runner_name == "AgentEvalRunner":
-            border_style = "magenta"
-        elif runner_name in ("StreamingEvalRunner", "AsyncEvalRunner"):
-            border_style = "green"
-        else:
-            border_style = "blue"
-
-        console.print(
-            Panel(
-                Pretty(exp_summary, expand_all=True),
-                title=f"[bold]{exp_summary.name}[/bold]",
-                border_style=border_style,
-            )
-        )
-        console.print()
-
-    # Ensure common secrets exist in Beaker
-    from olmo_eval.launch.beaker.secrets import (
-        ensure_common_secrets,
-        ensure_task_secrets,
-        get_local_hf_token,
-        get_local_wandb_api_key,
-    )
-
-    beaker_username = launcher.beaker.user_name
-    if dry_run:
-        common_secrets: list[tuple[str, str]] = []
-        if get_local_hf_token():
-            common_secrets.append(("HF_TOKEN", f"{beaker_username}_HF_TOKEN"))
-        if get_local_wandb_api_key():
-            common_secrets.append(("WANDB_API_KEY", f"{beaker_username}_WANDB_API_KEY"))
-        # In dry-run, assume task secrets exist (just show what would be used)
-        task_secrets: list[tuple[str, str]] = [
-            (s, f"{beaker_username}_{s}") for s in sorted(all_required_secrets)
-        ]
-    else:
-        common_secrets = ensure_common_secrets(workspace=workspace)
-        # Validate and collect task-required secrets (will fail if any are missing)
-        try:
-            task_secrets = ensure_task_secrets(
-                workspace=workspace, required_secrets=all_required_secrets
-            )
-        except ValueError as e:
-            console.print(f"[red]Error:[/red] {e}")
-            raise SystemExit(1) from None
-
-    # Build store secrets list if --store is enabled
-    # User must have manually created these secrets in Beaker (shared, not per-user)
-    store_secrets: list[tuple[str, str]] = []
-    if store:
-        for env_var in ["PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD"]:
-            store_secrets.append((env_var, f"olmo_eval_{env_var}"))
-
-    # Build all BeakerJobConfig objects first
+    # Build all BeakerJobConfig objects and experiment summaries
     job_configs: list[BeakerJobConfig] = []
+    experiment_summaries: list[ExperimentSummary] = []
 
     for exp in experiment_plan:
         exp_model_cfgs = exp["model_cfgs"]
@@ -1192,6 +1066,64 @@ def launch(
             env_secrets=env_secrets,
         )
         job_configs.append(job_config)
+
+        # Build experiment summary with the job config
+        # Get model and task summaries for this experiment
+        exp_model_summaries = []
+        for m_cfg, m_spec in zip(exp_model_cfgs, exp_model_specs, strict=True):
+            model_base_name, model_inline_overrides = parse_model_spec(m_spec)
+            exp_model_summaries.append(
+                ModelSummary(
+                    name=model_base_name,
+                    gpus=m_cfg.gpus or gpus,
+                    parallelism=m_cfg.parallelism or parallelism,
+                    alias=m_cfg.alias,
+                    provider=m_cfg.provider,
+                    overrides=model_inline_overrides if model_inline_overrides else None,
+                )
+            )
+
+        exp_task_summaries = []
+        for task_spec in task_list:
+            base_spec = task_spec.rsplit("@", 1)[0] if "@" in task_spec else task_spec
+            if base_spec in task_summary_by_spec:
+                exp_task_summaries.append(task_summary_by_spec[base_spec])
+
+        # Determine runner class for display
+        if exp_is_agent:
+            exp_runner_class = AgentEvalRunner
+        elif use_async_stream:
+            exp_runner_class = StreamingEvalRunner
+        elif use_async:
+            exp_runner_class = AsyncEvalRunner
+        else:
+            exp_runner_class = SyncEvalRunner
+
+        exp_runner_config = RunnerConfig(
+            runner=exp_runner_class,
+            output_dir=BEAKER_RESULT_DIR,
+        )
+
+        experiment_summaries.append(
+            ExperimentSummary(
+                name=exp_name,
+                models=exp_model_summaries,
+                tasks=exp_task_summaries,
+                runner=exp_runner_config,
+                beaker=job_config,
+            )
+        )
+
+    # Print experiment summaries with full BeakerJobConfig details
+    for exp_summary in experiment_summaries:
+        console.print(
+            Panel(
+                Pretty(exp_summary, expand_all=True),
+                title=f"[bold]{exp_summary.name}[/bold]",
+                border_style="cyan",
+            )
+        )
+        console.print()
 
     # Confirm before launching
     if not dry_run and not yes and not click.confirm("Proceed with launch?", default=True):

@@ -2,9 +2,12 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
+
+if TYPE_CHECKING:
+    from olmo_eval.launch.beaker.launcher import BeakerJobConfig
 
 console = Console()
 
@@ -87,30 +90,6 @@ class RunnerConfig:
 
 
 @dataclass
-class EvalSummary:
-    """Complete launch configuration summary for pretty-printing."""
-
-    models: list[ModelSummary]
-    tasks: list[TaskSummary]
-    runner: RunnerConfig
-
-
-@dataclass
-class BeakerConfig:
-    """Beaker-specific configuration for display."""
-
-    cluster: str
-    workspace: str
-    budget: str
-    image: str
-    num_gpus: int
-    priority: str
-    preemptible: bool = True
-    timeout: str = "2d"
-    shared_memory: str = "10GiB"
-
-
-@dataclass
 class ExperimentSummary:
     """Per-experiment summary for beaker launch display."""
 
@@ -118,7 +97,7 @@ class ExperimentSummary:
     models: list[ModelSummary]
     tasks: list[TaskSummary]
     runner: RunnerConfig
-    beaker: BeakerConfig
+    beaker: "BeakerJobConfig"
 
 
 def parse_model_spec(spec: str) -> tuple[str, dict[str, Any]]:
