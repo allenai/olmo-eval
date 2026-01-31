@@ -952,7 +952,7 @@ def launch(
         # Get the inference provider for this model group (defaults to vllm)
         from olmo_eval.core.constants.infrastructure import BACKEND_OPTIONAL_GROUPS
 
-        config_provider = model_resources.get("provider", "vllm")
+        config_provider = model_resources.get("provider") or "vllm"
         runtime_provider: str = str(config_provider)
         provider_group = BACKEND_OPTIONAL_GROUPS.get(runtime_provider)
         provider_extras = [provider_group] if provider_group else []
