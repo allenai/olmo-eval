@@ -623,18 +623,9 @@ def launch(
         task_cfg = task_instance.config
         task_summaries.append(
             TaskSummary(
-                name=task_cfg.name,
+                config=task_cfg,
                 spec=task_spec if task_spec != task_cfg.name else None,
                 variants=variants if variants else None,
-                formatter=task_cfg.formatter,
-                scorers=task_cfg.scorers,
-                metrics=task_cfg.metrics,
-                num_fewshot=task_cfg.num_fewshot,
-                split=task_cfg.split.value
-                if hasattr(task_cfg.split, "value")
-                else str(task_cfg.split),
-                primary_metric=str(task_cfg.primary_metric) if task_cfg.primary_metric else None,
-                sampling_params=task_cfg.sampling_params,
                 overrides=inline_overrides if inline_overrides else None,
             )
         )

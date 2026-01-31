@@ -41,19 +41,19 @@ class ModelSummary:
 
 @dataclass
 class TaskSummary:
-    """Summary of a task configuration for display."""
+    """Summary of a task configuration for display.
 
-    name: str
+    Holds the task config directly to avoid duplicating fields.
+    """
+
+    config: Any  # TaskConfig or AgentTaskConfig
     spec: str | None = None
     variants: list[str] | None = None
-    formatter: Any = None
-    scorers: tuple = ()
-    metrics: tuple = ()
-    num_fewshot: int = 0
-    split: str = "test"
-    primary_metric: str | None = None
-    sampling_params: Any = None
     overrides: dict[str, Any] | None = None
+
+    @property
+    def name(self) -> str:
+        return self.config.name
 
 
 @dataclass
