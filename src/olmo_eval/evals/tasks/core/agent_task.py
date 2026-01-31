@@ -330,8 +330,12 @@ class AgentTask(Task):
                 output = getattr(item, "output", "")
                 raw_id = ""
                 if raw:
-                    # Match the same logic used for tool_call_item
-                    raw_id = getattr(raw, "id", "") or getattr(raw, "call_id", "")
+                    # Check tool_call_id first (OpenAI format), then id/call_id
+                    raw_id = (
+                        getattr(raw, "tool_call_id", "")
+                        or getattr(raw, "id", "")
+                        or getattr(raw, "call_id", "")
+                    )
                 call_id = get_real_id(raw_id)
                 turns.append(
                     AgentTurn.tool(

@@ -113,10 +113,9 @@ class AgentTurn:
         Returns:
             Dictionary representation of the AgentTurn.
         """
-        result: dict[str, Any] = {
-            "role": self.role,
-            "content": self.content,
-        }
+        result: dict[str, Any] = {"role": self.role}
+        if self.content:
+            result["content"] = self.content
         if self.tool_calls:
             result["tool_calls"] = [tc.to_dict() for tc in self.tool_calls]
         if self.tool_results:
