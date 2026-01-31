@@ -49,16 +49,54 @@ C) NOT_ATTEMPTED - The AI explicitly declined to answer or said it doesn't know.
 
 Respond with only the letter (A, B, or C) corresponding to your grade."""
 
+# Grade type for SimpleQA-style evaluation
+SimpleQAGrade = Literal["CORRECT", "INCORRECT", "NOT_ATTEMPTED"]
+
+
+def _build_openai_judge_fn(model: str = "gpt-4o-mini") -> JudgeFn:
+    """Build a judge function using OpenAI API.
+
+    Raises:
+        ValueError: If OPENAI_API_KEY is not set or openai package is not installed.
+    """
+    import os
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY environment variable is required for LLM judge scoring.")
+
+    try:
+        from openai import OpenAI  # type: ignore[import-not-found]
+    except ImportError:
+        raise ValueError(
+            "openai package is required for LLM judge scoring. Install with: pip install openai"
+        ) from None
+
+    client = OpenAI(api_key=api_key)
+
+    def judge(prompt: str) -> str:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=10,
+        )
+        return response.choices[0].message.content or ""
+
+    return judge
+
 
 @dataclass(frozen=True)
 class LLMJudgeScorer(Scorer):
     """Abstract base class for LLM-as-judge scorers.
 
     Subclasses must implement format_judge_prompt() and parse_judge_response().
+    By default uses OpenAI API with gpt-4o-mini. Requires OPENAI_API_KEY
+    environment variable to be set.
     """
 
     name: ClassVar[str] = "llm_judge"
-    judge_fn: JudgeFn | None = field(default=None)
+    judge_fn: JudgeFn = field(default_factory=_build_openai_judge_fn)
 
     @abstractmethod
     def format_judge_prompt(self, instance: Instance, output: LMOutput) -> str:
@@ -95,43 +133,9 @@ class LLMJudgeScorer(Scorer):
         Returns:
             Score from the judge (0.0 to 1.0).
         """
-        if self.judge_fn is None:
-            return 0.0
-
         prompt = self.format_judge_prompt(instance, output)
         response = self.judge_fn(prompt)
         return self.parse_judge_response(response)
-
-
-# Grade type for SimpleQA-style evaluation
-SimpleQAGrade = Literal["CORRECT", "INCORRECT", "NOT_ATTEMPTED"]
-
-
-def _build_openai_judge_fn(model: str = "gpt-4o-mini") -> JudgeFn | None:
-    """Build a judge function using OpenAI API if OPENAI_API_KEY is set."""
-    import os
-
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        return None
-
-    try:
-        from openai import OpenAI  # type: ignore[import-not-found]
-    except ImportError:
-        return None
-
-    client = OpenAI(api_key=api_key)
-
-    def judge(prompt: str) -> str:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.0,
-            max_tokens=10,
-        )
-        return response.choices[0].message.content or ""
-
-    return judge
 
 
 @dataclass(frozen=True)
@@ -143,25 +147,12 @@ class SimpleQAJudgeScorer(LLMJudgeScorer):
     - B = INCORRECT
     - C = NOT_ATTEMPTED
 
-    If judge_fn is not provided, automatically uses OpenAI API with gpt-4o-mini
-    when OPENAI_API_KEY environment variable is set.
+    By default uses OpenAI API with gpt-4o-mini. Requires OPENAI_API_KEY
+    environment variable to be set.
     """
 
     name: ClassVar[str] = "simpleqa_judge"
-    judge_fn: JudgeFn | None = field(default=None)
     not_attempted_score: float = 0.0
-
-    def score(self, instance: Instance, output: LMOutput) -> float:
-        """Score using the judge function, auto-building from OpenAI if needed."""
-        judge = self.judge_fn
-        if judge is None:
-            judge = _build_openai_judge_fn()
-        if judge is None:
-            return 0.0
-
-        prompt = self.format_judge_prompt(instance, output)
-        response = judge(prompt)
-        return self.parse_judge_response(response)
 
     def format_judge_prompt(self, instance: Instance, output: LMOutput) -> str:
         """Format SimpleQA-style judge prompt."""
@@ -220,10 +211,11 @@ class RubricJudgeScorer(LLMJudgeScorer):
     """LLM judge with custom rubric and configurable score extraction.
 
     Allows defining custom evaluation rubrics and score patterns.
+    By default uses OpenAI API with gpt-4o-mini. Requires OPENAI_API_KEY
+    environment variable to be set.
     """
 
     name: ClassVar[str] = "rubric_judge"
-    judge_fn: JudgeFn | None = field(default=None)
     rubric: str = ""
     score_pattern: str = r"Score:\s*(\d+(?:\.\d+)?)"
     max_score: float = 10.0
