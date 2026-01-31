@@ -855,11 +855,26 @@ def _run_agent_with_vllm_server(
     tokenizer = model_overrides.get("tokenizer")
     max_model_len = model_overrides.get("max_model_len")
 
+    # Determine tool call parser based on model name
+    # Users can override via model_overrides["tool_call_parser"]
+    tool_call_parser = model_overrides.get("tool_call_parser")
+    if tool_call_parser is None:
+        model_lower = model_name.lower()
+        if "llama" in model_lower:
+            tool_call_parser = "llama3_json"
+        elif "mistral" in model_lower:
+            tool_call_parser = "mistral"
+        else:
+            # Default for Qwen, OLMo, and other models
+            tool_call_parser = "hermes"
+
     with vllm_server_context(
         model_name=model_name,
         tensor_parallel_size=num_gpus,
         tokenizer=tokenizer,
         max_model_len=max_model_len,
+        enable_auto_tool_choice=True,
+        tool_call_parser=tool_call_parser,
     ) as server_url:
         if progress_callback:
             progress_callback(f"vLLM server ready at {server_url}")
