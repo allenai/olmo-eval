@@ -199,15 +199,14 @@ def _create_function_tools() -> list[Any]:
     Returns:
         List of function tools decorated with @function_tool.
     """
-    from agents import function_tool  # type: ignore[import-not-found]
 
     # Use strict_mode=False for vLLM compatibility.
     # vLLM doesn't support the 'strict' field in tool schemas.
     # See: https://github.com/vllm-project/vllm/issues/27746
     return [
-        function_tool(strict_mode=False)(semantic_scholar_snippet_search),
-        function_tool(strict_mode=False)(serper_google_webpage_search),
-        function_tool(strict_mode=False)(serper_fetch_webpage_content),
+        # function_tool(strict_mode=False)(semantic_scholar_snippet_search),
+        # function_tool(strict_mode=False)(serper_google_webpage_search),
+        # function_tool(strict_mode=False)(serper_fetch_webpage_content),
     ]
 
 
