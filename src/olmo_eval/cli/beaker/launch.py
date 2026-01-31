@@ -939,23 +939,10 @@ def launch(
         if store:
             command.append("--store")
 
-        # Get the inference provider for this model group (required per-model configuration)
+        # Get the inference provider for this model group (defaults to vllm)
         from olmo_eval.core.constants.infrastructure import BACKEND_OPTIONAL_GROUPS
 
-        config_provider = model_resources.get("provider")
-        if not config_provider:
-            model_name = first_model_cfg.name_or_path
-            console.print(
-                f"[red]Error:[/red] No inference provider specified for model '{model_name}'.\n"
-                "Specify a provider in the config file:\n"
-                "  models:\n"
-                "    - name_or_path: llama3.1-8b\n"
-                "      provider: vllm\n"
-                "\nOr via inline override:\n"
-                "  -m 'llama3.1-8b::provider=vllm'"
-            )
-            raise SystemExit(1)
-
+        config_provider = model_resources.get("provider", "vllm")
         runtime_provider: str = str(config_provider)
         provider_group = BACKEND_OPTIONAL_GROUPS.get(runtime_provider)
         provider_extras = [provider_group] if provider_group else []
