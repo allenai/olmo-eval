@@ -154,9 +154,9 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
     help="Log HTTP requests/responses to inference providers",
 )
 @click.option(
-    "--debug-vllm",
+    "--debug-provider",
     is_flag=True,
-    help="Enable verbose vLLM server/engine logging",
+    help="Enable verbose provider logging",
 )
 def run(
     models: tuple[str, ...],
@@ -191,7 +191,7 @@ def run(
     agent: bool,
     num_gpus: int,
     debug_requests: bool,
-    debug_vllm: bool,
+    debug_provider: bool,
 ) -> None:
     """Run evaluation on specified tasks.
 
@@ -212,11 +212,11 @@ def run(
     # Configure logging for Beaker job visibility
     configure_logging(level="INFO")
 
-    # Set debug environment variables for agent tasks
+    # Set debug environment variables
     if debug_requests:
         os.environ["OLMO_EVAL_DEBUG_REQUESTS"] = "1"
-    if debug_vllm:
-        os.environ["OLMO_EVAL_DEBUG_VLLM"] = "1"
+    if debug_provider:
+        os.environ["OLMO_EVAL_DEBUG_PROVIDER"] = "1"
 
     # Print runtime environment summary
     print_runtime_environment()

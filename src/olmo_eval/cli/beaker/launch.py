@@ -124,9 +124,9 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR, DEFAULT_M
     help="Log HTTP requests/responses to inference providers",
 )
 @click.option(
-    "--debug-vllm",
+    "--debug-provider",
     is_flag=True,
-    help="Enable verbose vLLM server/engine logging",
+    help="Enable verbose provider logging",
 )
 def launch(
     config: str | None,
@@ -160,7 +160,7 @@ def launch(
     s3_region: str,
     store: bool,
     debug_requests: bool,
-    debug_vllm: bool,
+    debug_provider: bool,
 ) -> None:
     """Launch an evaluation job on Beaker.
 
@@ -1006,8 +1006,8 @@ def launch(
         # Debug logging flags
         if debug_requests:
             command.append("--debug-requests")
-        if debug_vllm:
-            command.append("--debug-vllm")
+        if debug_provider:
+            command.append("--debug-provider")
 
         # Get the inference provider for this model group (defaults to vllm)
         # Agent tasks start their own vLLM server, so they need vllm extras

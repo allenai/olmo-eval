@@ -7,16 +7,12 @@ import os
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
+from olmo_eval.core.debug import is_debug_provider, is_debug_requests
 from olmo_eval.core.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
 
 from .base import InferenceProvider
 
 logger = logging.getLogger(__name__)
-
-# Enable verbose request logging with OLMO_EVAL_DEBUG_REQUESTS=1
-_DEBUG_REQUESTS = os.getenv("OLMO_EVAL_DEBUG_REQUESTS", "").lower() in ("1", "true", "yes")
-# Enable verbose vLLM logging with OLMO_EVAL_DEBUG_VLLM=1
-_DEBUG_VLLM = os.getenv("OLMO_EVAL_DEBUG_VLLM", "").lower() in ("1", "true", "yes")
 
 if TYPE_CHECKING:
     from vllm import LLM
@@ -121,8 +117,8 @@ class VLLMProvider(InferenceProvider):
                 will include this identifier.
             **engine_kwargs: Additional arguments passed to vLLM LLM engine.
         """
-        # Set vLLM logging level - DEBUG if OLMO_EVAL_DEBUG_VLLM=1, otherwise WARNING
-        if _DEBUG_VLLM:
+        # Set vLLM logging level - DEBUG if OLMO_EVAL_DEBUG_PROVIDER=1, otherwise WARNING
+        if is_debug_provider():
             os.environ["VLLM_LOGGING_LEVEL"] = "DEBUG"
         else:
             os.environ.setdefault("VLLM_LOGGING_LEVEL", "WARNING")
@@ -209,7 +205,7 @@ class VLLMProvider(InferenceProvider):
 
         prompts = [req.prompt for req in requests]
 
-        if _DEBUG_REQUESTS:
+        if is_debug_requests():
             for i, prompt in enumerate(prompts):
                 logger.info(f"Prompt {i}:\n{prompt}")
 
@@ -276,7 +272,7 @@ class VLLMProvider(InferenceProvider):
         # Disable tqdm progress bar - we use our own worker-scoped logging
         prompts = [{"prompt_token_ids": tokens} for tokens in token_inputs]
 
-        if _DEBUG_REQUESTS:
+        if is_debug_requests():
             logger.info(f"vLLM logprobs: {len(prompts)} continuations")
             logger.info(f"Sampling params: {vllm_params}")
 
@@ -383,8 +379,8 @@ class AsyncVLLMProvider:
                 will include this identifier.
             **engine_kwargs: Additional arguments passed to vLLM engine.
         """
-        # Set vLLM logging level - DEBUG if OLMO_EVAL_DEBUG_VLLM=1, otherwise WARNING
-        if _DEBUG_VLLM:
+        # Set vLLM logging level - DEBUG if OLMO_EVAL_DEBUG_PROVIDER=1, otherwise WARNING
+        if is_debug_provider():
             os.environ["VLLM_LOGGING_LEVEL"] = "DEBUG"
         else:
             os.environ.setdefault("VLLM_LOGGING_LEVEL", "WARNING")

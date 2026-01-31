@@ -19,6 +19,8 @@ from collections.abc import Generator
 from contextlib import contextmanager, suppress
 from typing import TYPE_CHECKING, Any
 
+from olmo_eval.core.debug import is_debug_provider
+
 if TYPE_CHECKING:
     pass
 
@@ -27,9 +29,6 @@ logger = logging.getLogger(__name__)
 # Default timeout for server startup
 DEFAULT_STARTUP_TIMEOUT = 300  # 5 minutes for large models
 DEFAULT_HEALTH_CHECK_INTERVAL = 2  # seconds
-
-# Enable verbose vLLM server output with OLMO_EVAL_DEBUG_VLLM=1
-_DEBUG_VLLM = os.getenv("OLMO_EVAL_DEBUG_VLLM", "").lower() in ("1", "true", "yes")
 
 
 def _find_free_port() -> int:
@@ -230,12 +229,12 @@ class VLLMServerProcess:
         env = os.environ.copy()
 
         # Enable verbose vLLM logging when debugging
-        if _DEBUG_VLLM:
+        if is_debug_provider():
             env["VLLM_LOGGING_LEVEL"] = "DEBUG"
-            logger.info("vLLM debug logging enabled (OLMO_EVAL_DEBUG_VLLM=1)")
+            logger.info("vLLM debug logging enabled (OLMO_EVAL_DEBUG_PROVIDER=1)")
 
         # When debugging, stream output to stderr; otherwise capture for error reporting
-        if _DEBUG_VLLM:
+        if is_debug_provider():
             self._process = subprocess.Popen(
                 cmd,
                 stdout=None,  # Inherit stdout
