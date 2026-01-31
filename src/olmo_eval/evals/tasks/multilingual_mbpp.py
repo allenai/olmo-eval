@@ -154,7 +154,6 @@ def _make_mt_mbpp_config(language: str) -> TaskConfig:
     return TaskConfig(
         name=f"mt_mbpp_{language}",
         data_source=DataSource(path="allenai/multilingual_mbpp", subset=language),
-        scorers=(),
         metrics=(),
         sampling_params=SamplingParams(
             max_tokens=1024,
@@ -169,7 +168,6 @@ def _make_mt_mbpp_v2fix_config(language: str) -> TaskConfig:
     return TaskConfig(
         name=f"mt_mbpp_v2fix_{language}",
         data_source=DataSource(path="allenai/multilingual_mbpp", subset=language),
-        scorers=(),
         metrics=(),
         sampling_params=SamplingParams(
             max_tokens=1024,

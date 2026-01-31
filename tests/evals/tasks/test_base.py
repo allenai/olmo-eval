@@ -44,7 +44,6 @@ class TestTaskConfig:
         """Test that default values are set correctly."""
         config = TaskConfig(name="test", data_source="test/dataset")
         assert config.formatter is None
-        assert config.scorers == ()
         assert config.metrics == ()
         assert config.num_fewshot == 0
         assert config.fewshot_seed == 42
@@ -70,18 +69,15 @@ class TestTaskConfig:
         assert config.limit == 100
         assert config.split == Split.VALIDATION
 
-    def test_config_with_scorers_and_metrics(self):
-        """Test config with scorers and metrics."""
-        scorer = ExactMatchScorer()
+    def test_config_with_metrics(self):
+        """Test config with metrics."""
         metric = AccuracyMetric(scorer=ExactMatchScorer)
 
         config = TaskConfig(
             name="scored",
             data_source="test/dataset",
-            scorers=(scorer,),
             metrics=(metric,),
         )
-        assert len(config.scorers) == 1
         assert len(config.metrics) == 1
 
 
@@ -170,12 +166,12 @@ class TestTaskScoring:
         assert scored[0].outputs[0].extracted_answer == "4"
 
     def test_score_responses_applies_scorers(self):
-        """Test that score_responses applies all scorers."""
-        scorer = ExactMatchScorer()
+        """Test that score_responses applies scorers from metrics."""
+        metric = AccuracyMetric(scorer=ExactMatchScorer)
         config = TaskConfig(
             name="test",
             data_source="test/dataset",
-            scorers=(scorer,),
+            metrics=(metric,),
         )
         task = ConcreteTask(config)
 
@@ -194,11 +190,11 @@ class TestTaskScoring:
 
     def test_score_responses_incorrect_answer(self):
         """Test scoring with incorrect answer."""
-        scorer = ExactMatchScorer()
+        metric = AccuracyMetric(scorer=ExactMatchScorer)
         config = TaskConfig(
             name="test",
             data_source="test/dataset",
-            scorers=(scorer,),
+            metrics=(metric,),
         )
         task = ConcreteTask(config)
 
@@ -216,11 +212,11 @@ class TestTaskScoring:
 
     def test_score_responses_multiple_outputs_takes_max(self):
         """Test that scoring takes max score across multiple outputs."""
-        scorer = ExactMatchScorer()
+        metric = AccuracyMetric(scorer=ExactMatchScorer)
         config = TaskConfig(
             name="test",
             data_source="test/dataset",
-            scorers=(scorer,),
+            metrics=(metric,),
         )
         task = ConcreteTask(config)
 
@@ -250,12 +246,10 @@ class TestTaskMetrics:
 
     def test_compute_metrics(self):
         """Test compute_metrics aggregates scores."""
-        scorer = ExactMatchScorer()
         metric = AccuracyMetric(scorer=ExactMatchScorer)
         config = TaskConfig(
             name="test",
             data_source="test/dataset",
-            scorers=(scorer,),
             metrics=(metric,),
         )
         task = ConcreteTask(config)

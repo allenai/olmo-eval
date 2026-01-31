@@ -170,7 +170,6 @@ def _mbpp_config() -> TaskConfig:
     return TaskConfig(
         name="mbpp",
         data_source=DataSource(path="google-research-datasets/mbpp"),
-        scorers=(),
         metrics=(),
         sampling_params=SamplingParams(
             max_tokens=1024,
@@ -184,7 +183,6 @@ def _mbpp_plus_config() -> TaskConfig:
     return TaskConfig(
         name="mbpp_plus",
         data_source=DataSource(path="evalplus/mbppplus"),
-        scorers=(),
         metrics=(),
         sampling_params=SamplingParams(
             max_tokens=1024,

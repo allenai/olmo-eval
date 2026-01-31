@@ -54,7 +54,6 @@ class TaskConfig:
 
     # Task configuration
     formatter: Formatter | None = None
-    scorers: tuple[Scorer, ...] = ()
     metrics: tuple[Metric, ...] = ()
     num_fewshot: int = 0
     fewshot_seed: int = 42
@@ -139,7 +138,6 @@ class TaskConfig:
             "data_source": serialize_data_source(self.data_source),
             "fewshot_source": serialize_data_source(self.fewshot_source),
             "formatter": self.formatter.to_dict() if self.formatter else None,
-            "scorers": [s.to_dict() for s in self.scorers],
             "metrics": [m.to_dict() for m in self.metrics],
             "num_fewshot": self.num_fewshot,
             "fewshot_seed": self.fewshot_seed,
@@ -162,7 +160,7 @@ class TaskConfig:
         """
         if self.primary_metric is not None:
             # If it's a Metric instance, return it directly
-            if hasattr(self.primary_metric, "name"):
+            if isinstance(self.primary_metric, Metric):
                 return self.primary_metric
             # If it's a MetricName enum, we can't resolve it to an instance here
             return None
@@ -366,14 +364,10 @@ class Task(ABC):
     def score_responses(self, responses: Sequence[Response]) -> Sequence[Response]:
         """Apply all scorers to extract answers and compute scores.
 
-        Scorers are collected from both config.scorers and from metrics that
-        define a scorer. This allows metrics to specify their scorer without
-        needing to duplicate it in config.scorers.
+        Scorers are collected from metrics that define a scorer attribute.
         """
-        # Collect scorers from config and metrics, avoiding duplicates by name
+        # Collect scorers from metrics, avoiding duplicates by name
         scorers_by_name: dict[str, Scorer] = {}
-        for scorer in self.config.scorers:
-            scorers_by_name[scorer.name] = scorer
         for metric in self.config.metrics:
             if hasattr(metric, "scorer") and metric.scorer is not None:
                 scorer_instance = metric.scorer()
