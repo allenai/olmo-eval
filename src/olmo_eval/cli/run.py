@@ -1,15 +1,15 @@
-"""Run command for olmo-eval CLI."""
+"""Run command for olmo-eval CLI.
 
-from typing import Any
+This module provides the main 'run' command for executing evaluations.
+Configuration parsing, storage setup, and runner creation are delegated to:
+- run_config.py: RunConfigBuilder for parsing and validating CLI arguments
+- storage_setup.py: StorageSetup for initializing storage backends
+- runner_factory.py: RunnerFactory for creating appropriate runners
+"""
 
 import click
 
-from olmo_eval.cli.utils import (
-    console,
-    parse_model_spec,
-    parse_task_spec_with_overrides,
-    print_runtime_environment,
-)
+from olmo_eval.cli.utils import console, print_runtime_environment
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 
 
@@ -214,8 +214,11 @@ def run(
     """
     import os
 
+    from olmo_eval.cli.run_config import RunConfigBuilder
+    from olmo_eval.cli.runner_factory import RunnerFactory
+    from olmo_eval.cli.storage_setup import StorageSetup
     from olmo_eval.core.logging import configure_logging
-    from olmo_eval.runners import SyncEvalRunner, ValidationError
+    from olmo_eval.runners import ValidationError
 
     # Configure logging for Beaker job visibility
     configure_logging(level="INFO")
@@ -229,279 +232,79 @@ def run(
     # Print runtime environment summary
     print_runtime_environment()
 
-    # Parse model specs to extract inline overrides
-    parsed_models: list[tuple[str, dict[str, Any]]] = [parse_model_spec(m) for m in models]
-
-    # Parse task specs to extract inline overrides
-    task_overrides: dict[str, dict[str, Any]] = {}
-    task_specs: list[str] = []
-    for t in task:
-        spec_without_overrides, overrides = parse_task_spec_with_overrides(t)
-        task_specs.append(spec_without_overrides)
-        if overrides:
-            task_overrides[spec_without_overrides] = overrides
-
-    # Extract model-level overrides
-    first_model_name, first_model_overrides = parsed_models[0] if parsed_models else ("", {})
-
-    # Model overrides can specify provider/attention_backend
-    if not provider and "provider" in first_model_overrides:
-        provider = first_model_overrides["provider"]
-    if not attention_backend and "attention_backend" in first_model_overrides:
-        attention_backend = first_model_overrides["attention_backend"]
-
-    # Warning for num-workers without async
-    if num_workers is not None and not use_async and not use_async_stream:
-        console.print(
-            "[yellow]Warning:[/yellow] --num-workers has no effect without "
-            "--async or --async-stream"
-        )
-
-    if gpus_per_worker != 1 and not use_async and not use_async_stream:
-        console.print(
-            "[yellow]Warning:[/yellow] --gpus-per-worker has no effect without "
-            "--async or --async-stream"
-        )
-
-    # Warning for conflicting flags
+    # Handle conflicting async flags
+    effective_use_async = use_async
     if use_async and use_async_stream:
-        console.print(
-            "[yellow]Warning:[/yellow] Both --async and --async-stream specified. "
-            "Using --async-stream."
-        )
-        use_async = False
+        effective_use_async = False
 
-    # Warning for provider override with async-stream
-    if use_async_stream and provider and provider != "vllm":
-        console.print(
-            f"[yellow]Warning:[/yellow] --async-stream only supports vLLM provider, "
-            f"ignoring --provider={provider}"
-        )
+    # Build configuration
+    config_builder = RunConfigBuilder(
+        models=models,
+        task=task,
+        output_dir=output_dir,
+        provider=provider,
+        attention_backend=attention_backend,
+        use_async=effective_use_async,
+        use_async_stream=use_async_stream,
+        use_agent=agent,
+        num_workers=num_workers,
+        gpus_per_worker=gpus_per_worker,
+        num_gpus=num_gpus,
+        parallelism=parallelism,
+        store=store,
+        s3_bucket=s3_bucket,
+        s3_prefix=s3_prefix,
+        s3_group=s3_group,
+        s3_endpoint_url=s3_endpoint_url,
+        s3_region=s3_region,
+        db_host=db_host,
+        db_port=db_port,
+        db_name=db_name,
+        db_user=db_user,
+        db_password=db_password,
+        experiment_name=experiment_name,
+        experiment_group=experiment_group,
+        alias=alias,
+        save_predictions=save_predictions,
+        save_requests=save_requests,
+    )
 
-    # Set up storage backend if enabled
-    storages: list = []
-    if store:
-        from olmo_eval.storage import get_backend
+    # Validate CLI flags
+    config_builder.validate_flags()
 
-        try:
-            storage = get_backend(
-                "postgres",
-                host=db_host,
-                port=db_port,
-                database=db_name,
-                user=db_user,
-                password=db_password,
-            )
-            storage.initialize()
-            storages.append(storage)
-            console.print(
-                f"[green]Connected to postgres storage:[/green] {db_host}:{db_port}/{db_name}"
-            )
-        except ImportError as e:
-            console.print(f"[red]Storage backend error:[/red] {e}")
-            raise SystemExit(1) from None
-        except Exception as e:
-            console.print(f"[red]Failed to initialize storage backend:[/red] {e}")
-            raise SystemExit(1) from None
+    # Build configuration
+    run_config = config_builder.build()
 
-    # Set up S3 config if specified
-    s3_config = None
-    if s3_bucket or s3_prefix or s3_group:
-        # Validate that all required S3 options are provided
-        if not s3_bucket:
-            console.print("[red]Error:[/red] --s3-bucket is required for S3 uploads")
-            raise SystemExit(1)
-        if not s3_prefix:
-            console.print("[red]Error:[/red] --s3-prefix is required for S3 uploads")
-            raise SystemExit(1)
-        if not s3_group:
-            console.print("[red]Error:[/red] --s3-group is required for S3 uploads")
-            raise SystemExit(1)
+    # Validate BPB tasks with async-stream
+    config_builder.validate_bpb_tasks(run_config.task_specs)
 
-        from olmo_eval.runners.mixins import S3Config
+    # Set up storage backends
+    storage_setup = StorageSetup(
+        store=store,
+        db_host=db_host,
+        db_port=db_port,
+        db_name=db_name,
+        db_user=db_user,
+        db_password=db_password,
+        s3_bucket=s3_bucket,
+        s3_prefix=s3_prefix,
+        s3_group=s3_group,
+        s3_endpoint_url=s3_endpoint_url,
+        s3_region=s3_region,
+    )
+    storages, s3_config = storage_setup.setup()
 
-        s3_config = S3Config(
-            bucket=s3_bucket,
-            prefix=s3_prefix,
-            group=s3_group,
-            endpoint_url=s3_endpoint_url,
-            region=s3_region,
-        )
-        console.print(
-            f"[green]S3 uploads enabled:[/green] s3://{s3_bucket}/{s3_prefix}/{s3_group}/..."
-        )
+    # Create runner factory
+    factory = RunnerFactory(run_config, storages, s3_config)
 
-    # Check for incompatible task types with --async-stream
-    if use_async_stream:
-        bpb_tasks = [t for t in task_specs if ":bpb" in t]
-        if bpb_tasks:
-            console.print(
-                "\n[bold red]Error:[/bold red] The following :bpb tasks cannot run "
-                "with --async-stream:\n"
-                f"  {', '.join(bpb_tasks)}\n\n"
-                "[yellow]BPB (bits-per-byte) tasks use loglikelihood scoring which "
-                "requires\n"
-                "prompt_logprobs - a feature not supported by the streaming vLLM "
-                "backend.[/yellow]\n\n"
-                "Use [bold]--async[/bold] or the default sequential mode instead:\n"
-                f"  olmo-eval run -m <model> -t {' -t '.join(bpb_tasks)} --async\n"
-            )
-            raise SystemExit(1)
+    # Handle sequential multi-model sync mode separately
+    if not agent and not use_async_stream and not effective_use_async:
+        factory.run_sequential_models(dry_run=dry_run)
+        return
 
-    # Check for incompatible flags with --agent
-    if agent:
-        if use_async or use_async_stream:
-            console.print("[red]Error:[/red] --agent cannot be used with --async or --async-stream")
-            raise SystemExit(1)
-        if len(models) > 1:
-            console.print(
-                "[red]Error:[/red] --agent only supports a single model. "
-                "Use beaker launch for multi-model agent runs."
-            )
-            raise SystemExit(1)
+    # Create and run the appropriate runner
+    runner = factory.create()
 
-    # Extract model names and build per-model overrides dict
-    model_names = [name for name, _overrides in parsed_models]
-    per_model_overrides = {name: overrides for name, overrides in parsed_models if overrides}
-
-    # Choose runner based on flags
-    if agent:
-        # Agent runner for multi-turn agent tasks
-        from olmo_eval.runners import AgentEvalRunner
-
-        console.print("[bold cyan]Using AgentEvalRunner[/bold cyan]")
-
-        model_name, model_overrides = parsed_models[0]
-        runner = AgentEvalRunner(
-            model_name=model_name,
-            task_specs=task_specs,
-            output_dir=output_dir,
-            storages=storages,
-            num_gpus=num_gpus,
-            task_overrides=task_overrides,
-            model_overrides=model_overrides,
-            s3_config=s3_config,
-            experiment_name=experiment_name,
-            experiment_group=experiment_group,
-            alias=alias,
-            save_predictions=save_predictions,
-            save_requests=save_requests,
-        )
-
-        try:
-            runner.validate()
-        except ValidationError as e:
-            console.print(f"[red]Validation error:[/red]\n{e}")
-            raise SystemExit(1) from None
-
-        if dry_run:
-            runner.print_config()
-        else:
-            try:
-                runner.run()
-            except Exception as e:
-                console.print(f"\n[bold red]Evaluation failed:[/bold red] {e}")
-                raise SystemExit(1) from None
-
-        return  # Exit early since we handled everything
-    elif use_async_stream:
-        from olmo_eval.runners.simple import StreamingEvalRunner
-
-        console.print("[bold cyan]Using StreamingEvalRunner[/bold cyan]")
-
-        runner = StreamingEvalRunner(
-            model_names=model_names,
-            task_specs=task_specs,
-            output_dir=output_dir,
-            storages=storages,
-            num_workers=num_workers,
-            gpus_per_worker=gpus_per_worker,
-            attention_backend=attention_backend.upper() if attention_backend else None,
-            task_overrides=task_overrides,
-            model_overrides=per_model_overrides,
-            s3_config=s3_config,
-            experiment_name=experiment_name,
-            experiment_group=experiment_group,
-            alias=alias,
-            save_predictions=save_predictions,
-            save_requests=save_requests,
-        )
-    elif use_async:
-        from olmo_eval.runners.simple import AsyncEvalRunner
-
-        console.print("[bold cyan]Using AsyncEvalRunner[/bold cyan]")
-
-        runner = AsyncEvalRunner(
-            model_names=model_names,
-            task_specs=task_specs,
-            output_dir=output_dir,
-            provider_override=provider,
-            storages=storages,
-            num_workers=num_workers,
-            gpus_per_worker=gpus_per_worker,
-            attention_backend=attention_backend.upper() if attention_backend else None,
-            task_overrides=task_overrides,
-            model_overrides=per_model_overrides,
-            s3_config=s3_config,
-            experiment_name=experiment_name,
-            experiment_group=experiment_group,
-            alias=alias,
-            save_predictions=save_predictions,
-            save_requests=save_requests,
-        )
-    else:
-        # Sequential runner - run each model in sequence
-        if len(model_names) > 1:
-            console.print(f"[bold cyan]Running {len(model_names)} models sequentially[/bold cyan]")
-
-        # For sequential mode with multiple models, run each model separately
-        for i, (model_name, model_overrides) in enumerate(parsed_models):
-            if len(model_names) > 1:
-                console.print(f"\n[bold]Model {i + 1}/{len(model_names)}:[/bold] {model_name}")
-
-            # Apply per-model provider overrides
-            effective_provider = model_overrides.get("provider", provider)
-            effective_attention_backend = model_overrides.get(
-                "attention_backend", attention_backend
-            )
-
-            runner = SyncEvalRunner(
-                model_name=model_name,
-                task_specs=task_specs,
-                output_dir=output_dir,
-                provider_override=effective_provider,
-                storages=storages,
-                attention_backend=effective_attention_backend.upper()
-                if effective_attention_backend
-                else None,
-                task_overrides=task_overrides,
-                model_overrides=model_overrides,
-                s3_config=s3_config,
-                experiment_name=experiment_name,
-                experiment_group=experiment_group,
-                alias=alias,
-                save_predictions=save_predictions,
-                save_requests=save_requests,
-            )
-
-            try:
-                runner.validate()
-            except ValidationError as e:
-                console.print(f"[red]Validation error:[/red]\n{e}")
-                raise SystemExit(1) from None
-
-            if dry_run:
-                runner.print_config()
-            else:
-                try:
-                    runner.run()
-                except Exception as e:
-                    console.print(f"\n[bold red]Evaluation failed:[/bold red] {e}")
-                    raise SystemExit(1) from None
-
-        return  # Exit early since we handled everything in the loop
-
-    # Validate inputs before running (applies to both dry-run and actual runs)
     try:
         runner.validate()
     except ValidationError as e:
