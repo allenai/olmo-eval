@@ -5,6 +5,7 @@ tools to answer questions, following the pattern from the OpenAI SimpleQA
 benchmark.
 """
 
+import logging
 import os
 from collections.abc import AsyncGenerator, Iterator
 from contextlib import asynccontextmanager
@@ -17,6 +18,17 @@ from olmo_eval.core.scorers import SimpleQAJudgeScorer
 from olmo_eval.core.types import SEARCH_TOOLS, Instance, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.core import AgentTask, AgentTaskConfig, register
+
+logger = logging.getLogger(__name__)
+
+
+def _log_request(request: httpx.Request) -> None:
+    """Log outgoing HTTP requests for debugging."""
+    logger.debug(f"Request: {request.method} {request.url}")
+    logger.debug(f"Headers: {dict(request.headers)}")
+    if request.content:
+        logger.debug(f"Body: {request.content.decode()}")
+
 
 # =============================================================================
 # Tool Implementations
@@ -195,11 +207,13 @@ def _create_function_tools() -> list[Any]:
     """
     from agents import function_tool  # type: ignore[import-not-found]
 
-    # Wrap the async functions with the function_tool decorator
+    # Use strict_mode=False for vLLM compatibility.
+    # vLLM doesn't support the 'strict' field in tool schemas.
+    # See: https://github.com/vllm-project/vllm/issues/27746
     return [
-        function_tool(semantic_scholar_snippet_search),
-        function_tool(serper_google_webpage_search),
-        function_tool(serper_fetch_webpage_content),
+        function_tool(strict_mode=False)(semantic_scholar_snippet_search),
+        function_tool(strict_mode=False)(serper_google_webpage_search),
+        function_tool(strict_mode=False)(serper_fetch_webpage_content),
     ]
 
 
@@ -303,9 +317,13 @@ class SimpleQAAgentTask(AgentTask):
         if not serper_api_key:
             raise ValueError("SERPER_API_KEY environment variable is required.")
 
+        # Create httpx client with request logging for debugging
+        http_client = httpx.AsyncClient(event_hooks={"request": [_log_request]})
+
         client = AsyncOpenAI(
             base_url=model_url or "http://localhost:8000/v1",
             api_key=os.getenv("OPENAI_API_KEY", "EMPTY"),
+            http_client=http_client,
         )
         llm = OpenAIChatCompletionsModel(openai_client=client, model=model)
         model_settings = ModelSettings(temperature=temperature)
