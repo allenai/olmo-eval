@@ -353,7 +353,9 @@ def launch(
         try:
             task_instance = get_task_for_classification(task_spec)
             if isinstance(task_instance, AgentTask):
-                agent_task_specs.add(task_spec)
+                # Strip overrides to match how is_agent_spec() checks
+                base_spec = task_spec.split("::", 1)[0]
+                agent_task_specs.add(base_spec)
         except Exception:
             pass  # Skip tasks that can't be loaded - they'll fail validation
 

@@ -126,10 +126,7 @@ class SyncEvalRunner(RunnerResultsMixin):
         agent_tasks = [spec for spec in expanded_tasks if isinstance(get_task(spec), AgentTask)]
         if agent_tasks:
             raise ValidationError(
-                f"Agent tasks found: {', '.join(agent_tasks)}. "
-                "Use AgentEvalRunner for agent tasks. "
-                "When using beaker launch, agent tasks are automatically split "
-                "into separate experiments."
+                f"Agent tasks found: {', '.join(agent_tasks)}. Use AgentEvalRunner for agent tasks."
             )
 
         # vLLM requires 'spawn' multiprocessing start method

@@ -373,6 +373,134 @@ register_regime("my_task", "zero", num_fewshot=0)
 
 Usage: `olmo-eval run -t my_task:3shot:olmes`
 
+## Agent Tasks
+
+Agent tasks support multi-turn evaluations with tool use, enabling evaluation of models' ability to use tools to complete tasks. They use the OpenAI Agents SDK for orchestration and support vLLM as the inference backend.
+
+### Creating an Agent Task
+
+Agent tasks extend `AgentTask` instead of `Task` and use `AgentTaskConfig` instead of `TaskConfig`:
+
+```python
+from collections.abc import AsyncGenerator, Iterator
+from contextlib import asynccontextmanager
+from typing import Any
+
+from olmo_eval.core import AccuracyMetric, Instance
+from olmo_eval.data import DataLoader, DataSource
+from olmo_eval.evals.tasks.core import AgentTask, AgentTaskConfig, register
+
+
+async def my_tool(query: str) -> str:
+    """A tool the agent can use.
+
+    Args:
+        query: The search query.
+
+    Returns:
+        Tool result as a string.
+    """
+    # Tool implementation
+    return f"Result for: {query}"
+
+
+class MyAgentTask(AgentTask):
+    """Agent task with custom tools."""
+
+    @property
+    def instances(self) -> Iterator[Instance]:
+        """Yield instances from the dataset."""
+        if self._instances_cache is None:
+            self._instances_cache = []
+            loader = DataLoader()
+            source = self.config.get_data_source()
+            for idx, doc in enumerate(loader.load(source)):
+                self._instances_cache.append(
+                    Instance(
+                        question=doc["question"],
+                        gold_answer=doc["answer"],
+                        metadata={"id": idx},
+                    )
+                )
+        yield from self._instances_cache
+
+    @asynccontextmanager
+    async def _get_agent(
+        self,
+        model: str,
+        model_url: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.0,
+        **kwargs: Any,
+    ) -> AsyncGenerator[Any, None]:
+        """Create agent with tools."""
+        from agents import Agent, ModelSettings, OpenAIChatCompletionsModel, function_tool
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(base_url=model_url, api_key="EMPTY")
+        llm = OpenAIChatCompletionsModel(openai_client=client, model=model)
+
+        # Create tools using function_tool decorator
+        tools = [function_tool(strict_mode=False)(my_tool)]
+
+        agent = Agent(
+            name="MyAgent",
+            instructions=system_prompt or "You are a helpful assistant.",
+            model=llm,
+            model_settings=ModelSettings(temperature=temperature),
+            tools=tools,
+        )
+        yield agent
+
+
+def _my_agent_config() -> AgentTaskConfig:
+    return AgentTaskConfig(
+        name="my_agent_task",
+        data_source=DataSource(path="my-org/my-dataset", split="test"),
+        scorers=(...),
+        metrics=(AccuracyMetric(),),
+        system_prompt="You are a helpful assistant with tools.",
+        max_turns=10,
+        max_concurrency=1,
+        required_secrets=("MY_API_KEY",),
+    )
+
+
+@register("my_agent_task", _my_agent_config)
+class MyAgent(MyAgentTask):
+    pass
+```
+
+### AgentTaskConfig Reference
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `system_prompt` | `str` | `""` | System prompt for the agent |
+| `max_turns` | `int` | `10` | Maximum agent turns |
+| `max_concurrency` | `int` | `1` | Concurrent agent executions |
+| `required_secrets` | `tuple[str, ...]` | `()` | Required environment variables |
+| `tools` | `tuple[ToolSchema, ...]` | `()` | Tool schemas for display |
+
+### Running Agent Tasks
+
+```bash
+# Local run
+olmo-eval run --task simpleqa_agent --model Qwen/Qwen3-8B --limit 10
+
+# Beaker launch
+olmo-eval beaker launch -n "agent-eval" -m Qwen/Qwen3-8B -t simpleqa_agent::limit=10
+```
+
+### vLLM Configuration
+
+For agent tasks using vLLM, the tool call parser is auto-detected based on model name. You can override it via model overrides:
+
+```bash
+olmo-eval run --task simpleqa_agent -m "my-model::tool_call_parser=hermes"
+```
+
+Supported parsers: `hermes`, `llama3_json`, `mistral`
+
 ## Launching on Beaker
 
 olmo-eval includes built-in support for launching evaluation jobs on [Beaker](https://beaker.org).
