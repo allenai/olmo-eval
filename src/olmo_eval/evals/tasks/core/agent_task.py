@@ -8,6 +8,7 @@ but using olmo-eval's type system.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from abc import abstractmethod
 from collections.abc import AsyncGenerator
@@ -30,6 +31,8 @@ from olmo_eval.core.types import (
 )
 
 from .base import Task, TaskConfig
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from agents import Agent  # type: ignore[import-not-found]
@@ -233,6 +236,7 @@ class AgentTask(Task):
                             success=True,
                         )
                     except Exception as e:
+                        logger.exception(f"Agent execution failed: {e}")
                         return AgentExecutionResult(
                             trajectory=AgentTrajectory(),
                             error=str(e),
