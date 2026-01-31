@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from abc import abstractmethod
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -264,7 +265,19 @@ class AgentTask(Task):
         Returns:
             An AgentTrajectory with the conversation turns.
         """
+        import uuid
+
         turns: list[AgentTurn] = []
+        # Map fake IDs to real IDs to maintain consistency between calls and results
+        id_mapping: dict[str, str] = {}
+
+        def get_real_id(fake_id: str) -> str:
+            """Get or create a real ID for a potentially fake ID."""
+            if not fake_id or fake_id.startswith("__"):
+                if fake_id not in id_mapping:
+                    id_mapping[fake_id] = f"call_{uuid.uuid4().hex[:24]}"
+                return id_mapping[fake_id]
+            return fake_id
 
         for item in result.new_items:
             item_type = getattr(item, "type", None)
@@ -282,14 +295,19 @@ class AgentTask(Task):
                         )
                     else:
                         content = raw.content or ""
-                turns.append(AgentTurn.assistant(content=content, tool_calls=None))
+                turns.append(
+                    AgentTurn.assistant(
+                        content=content, tool_calls=None, timestamp_ms=int(time.time() * 1000)
+                    )
+                )
 
             elif item_type == "tool_call_item":
                 # Tool call - extract function name and arguments
                 raw = getattr(item, "raw_item", None)
                 if raw:
                     tool_calls: list[ToolCall] = []
-                    call_id = getattr(raw, "id", "") or getattr(raw, "call_id", "")
+                    raw_id = getattr(raw, "id", "") or getattr(raw, "call_id", "")
+                    call_id = get_real_id(raw_id)
                     name = getattr(raw, "name", "")
                     arguments = getattr(raw, "arguments", "{}")
 
@@ -300,17 +318,26 @@ class AgentTask(Task):
                             arguments=arguments,
                         )
                     )
-                    turns.append(AgentTurn.assistant(content="", tool_calls=tool_calls))
+                    turns.append(
+                        AgentTurn.assistant(
+                            content="", tool_calls=tool_calls, timestamp_ms=int(time.time() * 1000)
+                        )
+                    )
 
             elif item_type == "tool_call_output_item":
                 # Tool result
                 raw = getattr(item, "raw_item", None)
                 output = getattr(item, "output", "")
-                call_id = ""
+                raw_id = ""
                 if raw:
-                    call_id = getattr(raw, "call_id", "")
+                    # Match the same logic used for tool_call_item
+                    raw_id = getattr(raw, "id", "") or getattr(raw, "call_id", "")
+                call_id = get_real_id(raw_id)
                 turns.append(
-                    AgentTurn.tool([ToolResult(tool_call_id=call_id, content=str(output))])
+                    AgentTurn.tool(
+                        [ToolResult(tool_call_id=call_id, content=str(output))],
+                        timestamp_ms=int(time.time() * 1000),
+                    )
                 )
 
             # Fallback for legacy format with 'role' attribute
@@ -326,6 +353,7 @@ class AgentTask(Task):
                         AgentTurn.assistant(
                             content=getattr(item, "content", "") or "",
                             tool_calls=legacy_tool_calls if legacy_tool_calls else None,
+                            timestamp_ms=int(time.time() * 1000),
                         )
                     )
                 elif item.role == "tool":
@@ -333,10 +361,12 @@ class AgentTask(Task):
                         AgentTurn.tool(
                             [
                                 ToolResult(
-                                    tool_call_id=getattr(item, "tool_call_id", ""),
+                                    tool_call_id=getattr(item, "tool_call_id", "")
+                                    or getattr(item, "id", ""),
                                     content=getattr(item, "content", "") or "",
                                 )
-                            ]
+                            ],
+                            timestamp_ms=int(time.time() * 1000),
                         )
                     )
 

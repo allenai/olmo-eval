@@ -108,18 +108,26 @@ class AgentTurn:
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization.
 
+        Only includes fields with non-empty/non-null values for cleaner output.
+
         Returns:
             Dictionary representation of the AgentTurn.
         """
-        return {
+        result: dict[str, Any] = {
             "role": self.role,
             "content": self.content,
-            "tool_calls": [tc.to_dict() for tc in self.tool_calls],
-            "tool_results": [tr.to_dict() for tr in self.tool_results],
-            "timestamp_ms": self.timestamp_ms,
-            "token_count": self.token_count,
-            "metadata": self.metadata,
         }
+        if self.tool_calls:
+            result["tool_calls"] = [tc.to_dict() for tc in self.tool_calls]
+        if self.tool_results:
+            result["tool_results"] = [tr.to_dict() for tr in self.tool_results]
+        if self.timestamp_ms is not None:
+            result["timestamp_ms"] = self.timestamp_ms
+        if self.token_count is not None:
+            result["token_count"] = self.token_count
+        if self.metadata:
+            result["metadata"] = self.metadata
+        return result
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AgentTurn":
@@ -301,15 +309,21 @@ class AgentTrajectory:
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization.
 
+        Only includes fields with non-empty/non-null values for cleaner output.
+
         Returns:
             Dictionary representation of the AgentTrajectory.
         """
-        return {
+        result: dict[str, Any] = {
             "turns": [t.to_dict() for t in self.turns],
-            "final_answer": self.final_answer,
-            "state_snapshot": self.state_snapshot,
-            "metadata": self.metadata,
         }
+        if self.final_answer is not None:
+            result["final_answer"] = self.final_answer
+        if self.state_snapshot:
+            result["state_snapshot"] = self.state_snapshot
+        if self.metadata:
+            result["metadata"] = self.metadata
+        return result
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AgentTrajectory":

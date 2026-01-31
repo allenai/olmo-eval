@@ -245,8 +245,12 @@ class TestAgentTurnSerialization:
         data = turn.to_dict()
         assert data["role"] == "assistant"
         assert data["content"] == "Hello"
-        assert data["tool_calls"] == []
-        assert data["tool_results"] == []
+        # Empty fields should be omitted
+        assert "tool_calls" not in data
+        assert "tool_results" not in data
+        assert "timestamp_ms" not in data
+        assert "token_count" not in data
+        assert "metadata" not in data
 
     def test_to_dict_with_tool_calls(self):
         """Test converting AgentTurn with tool calls to dict."""
@@ -264,6 +268,8 @@ class TestAgentTurnSerialization:
         assert data["role"] == "tool"
         assert len(data["tool_results"]) == 1
         assert data["tool_results"][0]["content"] == "Result"
+        # Empty tool_calls should be omitted
+        assert "tool_calls" not in data
 
     def test_to_dict_with_metadata(self):
         """Test converting AgentTurn with optional fields to dict."""
@@ -328,9 +334,10 @@ class TestAgentTrajectorySerialization:
         traj = AgentTrajectory()
         data = traj.to_dict()
         assert data["turns"] == []
-        assert data["final_answer"] is None
-        assert data["state_snapshot"] == {}
-        assert data["metadata"] == {}
+        # Empty/null fields should be omitted
+        assert "final_answer" not in data
+        assert "state_snapshot" not in data
+        assert "metadata" not in data
 
     def test_to_dict_with_turns(self):
         """Test converting AgentTrajectory with turns to dict."""
@@ -343,6 +350,10 @@ class TestAgentTrajectorySerialization:
         assert len(data["turns"]) == 2
         assert data["turns"][0]["role"] == "user"
         assert data["turns"][1]["role"] == "assistant"
+        # Empty fields should be omitted
+        assert "final_answer" not in data
+        assert "state_snapshot" not in data
+        assert "metadata" not in data
 
     def test_to_dict_with_final_answer(self):
         """Test converting AgentTrajectory with final answer to dict."""
