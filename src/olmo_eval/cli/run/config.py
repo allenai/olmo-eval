@@ -60,6 +60,7 @@ class RunConfig:
     inspect_instance: bool = False
     inspect_formatted: bool = False
     inspect_tokens: bool = False
+    inspect_response: bool = False
 
     # First model info (for single-model flows)
     first_model_name: str = ""
@@ -102,6 +103,7 @@ class RunConfigBuilder:
         inspect_instance: bool = False,
         inspect_formatted: bool = False,
         inspect_tokens: bool = False,
+        inspect_response: bool = False,
     ):
         """Initialize the builder with raw CLI arguments."""
         self.models = models
@@ -135,6 +137,7 @@ class RunConfigBuilder:
         self.inspect_instance = inspect_instance
         self.inspect_formatted = inspect_formatted
         self.inspect_tokens = inspect_tokens
+        self.inspect_response = inspect_response
 
     def build(self) -> RunConfig:
         """Parse inputs and build configuration.
@@ -205,6 +208,7 @@ class RunConfigBuilder:
             inspect_instance=self.inspect_instance,
             inspect_formatted=self.inspect_formatted,
             inspect_tokens=self.inspect_tokens,
+            inspect_response=self.inspect_response,
             first_model_name=first_model_name,
             first_model_overrides=first_model_overrides,
         )

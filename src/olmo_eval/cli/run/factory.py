@@ -61,6 +61,7 @@ class RunnerFactory:
             inspect_instance=self.config.inspect_instance,
             inspect_formatted=self.config.inspect_formatted,
             inspect_tokens=self.config.inspect_tokens,
+            inspect_response=self.config.inspect_response,
         )
 
     def create_streaming_runner(self) -> Any:
@@ -94,6 +95,7 @@ class RunnerFactory:
             inspect_instance=self.config.inspect_instance,
             inspect_formatted=self.config.inspect_formatted,
             inspect_tokens=self.config.inspect_tokens,
+            inspect_response=self.config.inspect_response,
         )
 
     def create_async_runner(self) -> Any:
@@ -128,6 +130,7 @@ class RunnerFactory:
             inspect_instance=self.config.inspect_instance,
             inspect_formatted=self.config.inspect_formatted,
             inspect_tokens=self.config.inspect_tokens,
+            inspect_response=self.config.inspect_response,
         )
 
     def create_sync_runner(
@@ -172,6 +175,7 @@ class RunnerFactory:
             inspect_instance=self.config.inspect_instance,
             inspect_formatted=self.config.inspect_formatted,
             inspect_tokens=self.config.inspect_tokens,
+            inspect_response=self.config.inspect_response,
         )
 
     def create(self) -> Any:

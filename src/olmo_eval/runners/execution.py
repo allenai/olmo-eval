@@ -293,6 +293,7 @@ def run_task_impl(
     temperature: float | None = None,
     sampling_overrides: dict[str, Any] | None = None,
     requests_callback: Callable[[list[dict]], None] | None = None,
+    response_callback: Callable[[Response], None] | None = None,
 ) -> TaskResult:
     """Execute a single task and return results.
 
@@ -308,6 +309,8 @@ def run_task_impl(
         requests_callback: Optional callback to receive requests early (before generation).
             Called with the list of request dicts immediately after they're built.
             Use this to write requests.jsonl before waiting for generation to complete.
+        response_callback: Optional callback to receive the first scored response.
+            Called after scoring with the first Response object. Useful for inspection/debugging.
 
     Returns:
         TaskResult with metrics and metadata
@@ -389,6 +392,10 @@ def run_task_impl(
         # Score and compute metrics
         scored = task.score_responses(responses)
         metrics = task.compute_metrics(scored)
+
+        # Call the response callback with first scored response if provided
+        if response_callback and scored:
+            response_callback(scored[0])
 
         # Build predictions for per-instance inspection
         predictions = build_predictions(scored)

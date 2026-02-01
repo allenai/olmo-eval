@@ -30,9 +30,9 @@ def task() -> None:
 )
 @click.option(
     "--max-string-length",
-    default=200,
+    default=0,
     type=int,
-    help="Max chars for instance field values (0 for no limit)",
+    help="Max chars for instance field values (0 for no limit, default: no limit)",
 )
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON instead of rich display")
 def inspect(

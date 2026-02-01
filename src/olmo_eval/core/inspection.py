@@ -17,12 +17,12 @@ from rich.table import Table
 from rich.text import Text
 
 if TYPE_CHECKING:
-    from olmo_eval.core.types import Instance, LMRequest
+    from olmo_eval.core.types import Instance, LMRequest, Response
 
 
 def format_value(
     value: Any,
-    max_string_length: int = 200,
+    max_string_length: int = 0,
     max_list_items: int = 5,
 ) -> str:
     """Format any value for display with appropriate truncation.
@@ -39,7 +39,7 @@ def format_value(
         return "[dim]None[/dim]"
 
     if isinstance(value, str):
-        if len(value) > max_string_length:
+        if max_string_length > 0 and len(value) > max_string_length:
             return f'"{value[:max_string_length]}..." [dim]({len(value)} chars)[/dim]'
         return f'"{value}"'
 
@@ -79,17 +79,22 @@ def format_value(
 
     # Fallback: use repr with truncation
     repr_str = repr(value)
-    if len(repr_str) > max_string_length:
+    if max_string_length > 0 and len(repr_str) > max_string_length:
         return repr_str[:max_string_length] + "..."
     return repr_str
 
 
-def _format_simple_value(value: Any, max_length: int = 50) -> str:
-    """Format a value for inline display (no rich markup)."""
+def _format_simple_value(value: Any, max_length: int = 0) -> str:
+    """Format a value for inline display (no rich markup).
+
+    Args:
+        value: The value to format.
+        max_length: Maximum length for string values (0 for no limit).
+    """
     if value is None:
         return "None"
     if isinstance(value, str):
-        if len(value) > max_length:
+        if max_length > 0 and len(value) > max_length:
             return f'"{value[:max_length]}..."'
         return f'"{value}"'
     if isinstance(value, (bool, int, float)):
@@ -101,7 +106,7 @@ def _format_simple_value(value: Any, max_length: int = 50) -> str:
             return "[]" if isinstance(value, list) else "()"
         return "[...]" if isinstance(value, list) else "(...)"
     repr_str = repr(value)
-    if len(repr_str) > max_length:
+    if max_length > 0 and len(repr_str) > max_length:
         return repr_str[:max_length] + "..."
     return repr_str
 
@@ -111,7 +116,7 @@ def inspect_object(
     *,
     console: Console | None = None,
     title: str | None = None,
-    max_string_length: int = 200,
+    max_string_length: int = 0,
     show_none: bool = True,
 ) -> None:
     """Pretty-print any dataclass or object using Rich panels/tables.
@@ -153,7 +158,7 @@ def inspect_instance(
     console: Console | None = None,
     task_name: str | None = None,
     index: int | None = None,
-    max_string_length: int = 200,
+    max_string_length: int = 0,
 ) -> None:
     """Pretty-print an Instance object with task-aware formatting.
 
@@ -246,7 +251,7 @@ def inspect_request(
     *,
     console: Console | None = None,
     title: str | None = None,
-    max_string_length: int = 500,
+    max_string_length: int = 0,
 ) -> None:
     """Pretty-print an LMRequest object.
 
@@ -273,7 +278,11 @@ def inspect_request(
         for msg in request.messages:
             role = msg.get("role", "unknown")
             content = msg.get("content", "")
-            if isinstance(content, str) and len(content) > max_string_length:
+            if (
+                isinstance(content, str)
+                and max_string_length > 0
+                and len(content) > max_string_length
+            ):
                 content = content[:max_string_length] + "..."
             msg_strs.append(f"[{role}]: {content}")
         table.add_row("messages", "\n".join(msg_strs))
@@ -282,10 +291,11 @@ def inspect_request(
         table.add_row("prompt", format_value(request.prompt, max_string_length=max_string_length))
 
     if request.continuations:
-        table.add_row(
-            "continuations",
-            format_value(request.continuations, max_string_length=max_string_length),
-        )
+        # Show each continuation on its own line without tuple syntax
+        cont_strs = [
+            format_value(c, max_string_length=max_string_length) for c in request.continuations
+        ]
+        table.add_row("continuations", "\n".join(cont_strs))
 
     panel_title = title or "[bold]LMRequest[/bold]"
     console.print(Panel(table, title=panel_title, border_style="magenta"))
@@ -626,11 +636,99 @@ def formatted_request_to_dict(
     }
 
 
+def inspect_response(
+    response: Response,
+    *,
+    console: Console | None = None,
+    task_name: str | None = None,
+    index: int | None = None,
+    max_string_length: int = 0,
+) -> None:
+    """Pretty-print a Response object showing instance, outputs, and scores.
+
+    Args:
+        response: The Response to inspect.
+        console: Rich Console to print to. Uses shared console if not provided.
+        task_name: Optional task name for the panel title.
+        index: Optional instance index for the panel title.
+        max_string_length: Maximum length for string values.
+    """
+    import json
+
+    if console is None:
+        from olmo_eval.cli.utils import console as shared_console
+
+        console = shared_console
+
+    renderables: list[Any] = []
+
+    def add_field(name: str, value: Any) -> None:
+        """Add a field with its label and value."""
+        if renderables:
+            renderables.append(Text(""))  # Blank line between fields
+
+        renderables.append(Text(f"{name}:", style="bold cyan"))
+
+        if isinstance(value, dict):
+            # Pretty print dicts as JSON with word wrapping
+            json_str = json.dumps(value, indent=2, ensure_ascii=False)
+            renderables.append(Syntax(json_str, "json", theme="ansi_dark", word_wrap=True))
+        elif isinstance(value, str):
+            if len(value) > max_string_length and max_string_length > 0:
+                renderables.append(Text(value[:max_string_length] + f"... ({len(value)} chars)"))
+            else:
+                renderables.append(Text(value))
+        elif isinstance(value, (list, tuple)):
+            # Format lists/tuples as JSON
+            json_str = json.dumps(list(value), indent=2, ensure_ascii=False, default=str)
+            renderables.append(Syntax(json_str, "json", theme="ansi_dark", word_wrap=True))
+        else:
+            renderables.append(Text(str(value)))
+
+    # Instance summary (question and gold_answer)
+    add_field("question", response.instance.question)
+    if response.instance.gold_answer is not None:
+        add_field("gold_answer", response.instance.gold_answer)
+
+    # Model outputs
+    for i, output in enumerate(response.outputs):
+        output_label = f"output[{i}]" if len(response.outputs) > 1 else "output"
+        add_field(output_label, output.text)
+
+        # Show extracted answer if different from text
+        if output.extracted_answer is not None and output.extracted_answer != output.text:
+            add_field("extracted_answer", str(output.extracted_answer))
+
+        # Show tool calls if present
+        if output.tool_calls:
+            tool_calls_data = [
+                {"name": tc.name, "arguments": tc.arguments} for tc in output.tool_calls
+            ]
+            add_field("tool_calls", tool_calls_data)
+
+    # Scores
+    if response.scores:
+        add_field("scores", response.scores)
+
+    # Build panel title
+    if task_name and index is not None:
+        title = f"[bold]Response #{index + 1}[/bold] ({task_name})"
+    elif task_name:
+        title = f"[bold]Response[/bold] ({task_name})"
+    elif index is not None:
+        title = f"[bold]Response #{index + 1}[/bold]"
+    else:
+        title = "[bold]Response[/bold]"
+
+    console.print(Panel(Group(*renderables), title=title, border_style="green"))
+
+
 __all__ = [
     "format_value",
     "inspect_object",
     "inspect_instance",
     "inspect_request",
+    "inspect_response",
     "instance_to_dict",
     "load_tokenizer",
     "format_with_chat_template",

@@ -261,6 +261,8 @@ class JobConfigAssembler:
             command.append("--inspect-formatted")
         if self.config.inspect_tokens:
             command.append("--inspect-tokens")
+        if self.config.inspect_response:
+            command.append("--inspect-response")
 
         return command
 

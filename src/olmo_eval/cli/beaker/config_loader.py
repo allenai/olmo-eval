@@ -58,6 +58,7 @@ class LaunchConfig:
     inspect_instance: bool = False
     inspect_formatted: bool = False
     inspect_tokens: bool = False
+    inspect_response: bool = False
 
     # Credential injection
     inject_aws_credentials: bool = False
@@ -247,6 +248,7 @@ class LaunchConfigLoader:
             inspect_instance=self.cli_args.get("inspect_instance", False),
             inspect_formatted=self.cli_args.get("inspect_formatted", False),
             inspect_tokens=self.cli_args.get("inspect_tokens", False),
+            inspect_response=self.cli_args.get("inspect_response", False),
         )
 
     def _validate_required(

@@ -67,10 +67,11 @@ class SyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
     save_predictions: bool = True
     save_requests: bool = True
 
-    # Instance inspection options
+    # Instance/response inspection options
     inspect_instance: bool = False
     inspect_formatted: bool = False
     inspect_tokens: bool = False
+    inspect_response: bool = False
 
     def validate(self) -> None:
         """Validate all inputs before running.
@@ -306,6 +307,15 @@ class SyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         # Build overrides from per-task inline overrides
         overrides, sampling_overrides = self._build_task_overrides(spec)
 
+        # Build response callback for inspection if enabled
+        response_callback = None
+        if self.inspect_response:
+            from olmo_eval.core.inspection import inspect_response
+
+            def response_callback(resp: Any) -> None:
+                console.print()
+                inspect_response(resp, console=console, task_name=spec, index=0)
+
         # Standard task - use shared task execution logic
         result = run_task_impl(
             spec=spec,
@@ -313,6 +323,7 @@ class SyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             overrides=overrides or None,
             progress_callback=lambda msg: console.print(f"  {msg}"),
             sampling_overrides=sampling_overrides or None,
+            response_callback=response_callback,
         )
 
         # Check for errors
