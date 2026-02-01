@@ -148,11 +148,27 @@ def inspect(
             if request or formatted or tokens:
                 req = task_obj.format_request(inst)
                 if request:
-                    instance_dict["_request"] = {
+                    request_dict = {
                         "type": req.request_type.name,
                         "messages": list(req.messages) if req.messages else None,
                         "prompt": req.prompt if req.prompt else None,
                         "continuations": (list(req.continuations) if req.continuations else None),
+                        "system_prompt": req.system_prompt if req.system_prompt else None,
+                        "tools": (
+                            [
+                                {
+                                    "name": t.name,
+                                    "description": t.description,
+                                    "parameters": t.parameters,
+                                }
+                                for t in req.tools
+                            ]
+                            if req.tools
+                            else None
+                        ),
+                    }
+                    instance_dict["_request"] = {
+                        k: v for k, v in request_dict.items() if v is not None
                     }
                 if tokenizer_obj and (formatted or tokens):
                     try:
