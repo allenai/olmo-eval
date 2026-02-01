@@ -34,18 +34,32 @@ models=(
 #   aquila-7b
 )
 
-for m in "${models[@]}"; do
-  # Use the model name as the run id / unique suffix
-  RUN_ID="${m}"
-  job_name="c4-${RUN_ID}"
+TASK_SET="c4_100k:ppl"
+CLUSTER="aus80g"
+WORKSPACE="ai2/perplexity-evals"
+BUDGET="ai2/oe-base"
+PRIORITY="high"
 
-  olmo-eval beaker launch \
-    -n "${job_name}" \
-    -m "${m}::provider=vllm" \
-    -t c4_100k:ppl \
-    -c aus80g \
-    -w ai2/perplexity-evals \
-    --budget ai2/oe-base \
-    --priority high \
-    --quiet &
+mkdir -p logs
+
+for m in "${models[@]}"; do
+  (
+    set -euo pipefail
+    run_id="${m}"                 # "run id" = model name (your request)
+    name="c4-${run_id}"           # experiment/run name shown in Beaker
+
+    # Auto-accept "create missing groups?" prompts.
+    yes | olmo-eval beaker launch \
+      -n "${name}" \
+      -m "${m}::provider=vllm" \
+      -t "${TASK_SET}" \
+      -c "${CLUSTER}" \
+      -w "${WORKSPACE}" \
+      --budget "${BUDGET}" \
+      --priority "${PRIORITY}" \
+      >"logs/${name}.log" 2>&1
+  ) &
 done
+
+wait
+echo "Submitted ${#models[@]} launches."
