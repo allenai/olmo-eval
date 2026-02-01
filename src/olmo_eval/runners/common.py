@@ -134,6 +134,34 @@ def compute_task_hash(config: dict) -> str:
     return hashlib.sha256(config_str.encode()).hexdigest()[:16]
 
 
+def log_task_metrics(
+    metrics: dict[str, dict[str, float]],
+    task_spec: str,
+    logger: Any,
+    console: Any | None = None,
+) -> None:
+    """Log task metrics in a consistent format.
+
+    Handles nested metrics structure: {metric_name: {scorer_name: value}}.
+
+    Args:
+        metrics: Nested metrics dictionary.
+        task_spec: Task specification string for the log header.
+        logger: Logger instance to use.
+        console: Optional rich console for formatted output.
+    """
+    if not metrics:
+        return
+
+    logger.info(f"** Task metrics for {task_spec}: **")
+    for metric_name, scorers in metrics.items():
+        for scorer_name, value in scorers.items():
+            line = f"  {metric_name}:{scorer_name}: {value:.4f}"
+            logger.info(line)
+            if console:
+                console.print(line)
+
+
 def make_metric_key(metric_name: str, scorer_name: str) -> str:
     """Create a metric key in "metric:scorer" format.
 

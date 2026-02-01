@@ -278,12 +278,10 @@ class SyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             if self.save_requests and task_result.requests:
                 self._write_requests(display_model_name, spec, task_result.requests, task_hash)
 
-            # Log metrics (for Beaker job details)
-            if task_result.metrics:
-                logger.info(f"** Task metrics for {spec}: **")
-                for metric, value in task_result.metrics.items():
-                    logger.info(f"  {metric}: {value:.4f}")
-                    console.print(f"  {metric}: {value:.4f}")
+            # Log task metrics
+            from olmo_eval.runners.common import log_task_metrics
+
+            log_task_metrics(task_result.metrics, spec, logger, console)
 
         # Compute suite aggregations
         suite_aggs = compute_suite_aggregations(self.task_specs, results["tasks"])
