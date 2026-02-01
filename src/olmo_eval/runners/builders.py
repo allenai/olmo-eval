@@ -65,12 +65,23 @@ def build_predictions(scored: Sequence[Any]) -> list[dict]:
         # Get label from metadata or gold_answer
         label = resp.instance.metadata.get("gold_idx", resp.instance.gold_answer)
 
+        # Build instance_metrics in nested format {metric: {scorer: value}}
+        # resp.scores is {scorer_name: value}, we need to convert to nested
+        # Since instance-level scores are keyed by scorer, we use scorer as inner key
+        instance_metrics: dict[str, dict[str, float]] = {}
+        for scorer_name, value in resp.scores.items():
+            # Each scorer produces scores under its own name
+            # We use scorer_name as both outer and inner key for simplicity
+            if scorer_name not in instance_metrics:
+                instance_metrics[scorer_name] = {}
+            instance_metrics[scorer_name][scorer_name] = value
+
         # Build prediction (doc and context available in requests.jsonl)
         prediction: dict[str, Any] = {
             "doc_id": idx,
             "native_id": resp.instance.metadata.get("id", f"doc_{idx}"),
             "model_output": model_output,
-            "instance_metrics": dict(resp.scores),
+            "instance_metrics": instance_metrics,
             "label": label,
         }
 

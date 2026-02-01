@@ -59,17 +59,20 @@ class ModelConfig:
 
 @dataclass
 class TaskMetricsEntry:
-    """A task entry in the metrics output."""
+    """A task entry in the metrics output.
+
+    Metrics are stored in a nested structure: {metric_name: {scorer_name: score}}.
+    The primary_metric uses "metric_name:scorer_name" format.
+    """
 
     task: str
-    metrics: dict[str, float]
+    metrics: dict[str, dict[str, float]]
     num_instances: int
     model: str | None = None  # Only set for multi-model format
-    primary_metric: str | None = None
+    primary_metric: str | None = None  # Format: "metric_name:scorer_name"
     config: dict[str, Any] | None = None
     duration_seconds: float | None = None
     task_hash: str | None = None
-    metric_scorers: dict[str, str] | None = None  # Maps metric name to scorer name
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dict, excluding None values."""
@@ -88,16 +91,18 @@ class TaskMetricsEntry:
             result["duration_seconds"] = self.duration_seconds
         if self.task_hash is not None:
             result["task_hash"] = self.task_hash
-        if self.metric_scorers is not None:
-            result["metric_scorers"] = self.metric_scorers
         return result
 
 
 @dataclass
 class ScoreSummary:
-    """Summary entry with metric name and score."""
+    """Summary entry with metric:scorer identifier and score.
 
-    metric: str
+    The metric field uses "metric_name:scorer_name" format to uniquely
+    identify which metric and scorer produced this score.
+    """
+
+    metric: str  # Format: "metric_name:scorer_name"
     score: float
 
     def to_dict(self) -> dict[str, Any]:

@@ -14,7 +14,7 @@ from sqlalchemy import and_, delete, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
-from olmo_eval.core.types import AgentMetrics, EvalResult, StoredTaskResult
+from olmo_eval.core.types import EvalResult, StoredTaskResult
 from olmo_eval.storage.backends.postgres.models import Experiment, InstancePrediction, TaskResult
 
 
@@ -90,11 +90,9 @@ class ExperimentRepository:
                 metrics=task_data.metrics,
                 num_instances=task_data.num_instances,
                 primary_metric=task_data.primary_metric,
-                primary_score=task_data.primary_score,
                 s3_metrics_key=task_data.s3_metrics_key,
                 s3_predictions_key=task_data.s3_predictions_key,
                 s3_requests_key=task_data.s3_requests_key,
-                agent_metrics=task_data.agent.to_dict() if task_data.agent else None,
                 duration_seconds=task_data.duration_seconds,
             )
             self.session.add(task_result)
@@ -260,11 +258,9 @@ class ExperimentRepository:
                 task_config=task.task_config,
                 num_instances=task.num_instances,
                 primary_metric=task.primary_metric,
-                primary_score=task.primary_score,
                 s3_metrics_key=task.s3_metrics_key,
                 s3_predictions_key=task.s3_predictions_key,
                 s3_requests_key=task.s3_requests_key,
-                agent=AgentMetrics.from_dict(task.agent_metrics) if task.agent_metrics else None,
                 duration_seconds=task.duration_seconds,
             )
             for task in experiment.task_results

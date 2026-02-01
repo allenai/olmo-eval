@@ -10,11 +10,40 @@ from typing import Any
 class _ChildAverageResult:
     """Result from computing a child average."""
 
-    metrics: dict[str, float]
+    metrics: dict[str, dict[str, float]]  # Nested: {metric: {scorer: value}}
     tasks: list[str]
     # If child was a Suite, include its info for separate reporting
     nested_suite: Any | None = None  # Suite or None
     nested_suite_key: str | None = None  # Key to use in results (with suffixes)
+
+
+def _flatten_nested_metrics(metrics: dict[str, dict[str, float]]) -> dict[str, float]:
+    """Flatten nested metrics to simple dict for aggregation.
+
+    Converts {metric: {scorer: value}} to {"metric:scorer": value}.
+    """
+    result: dict[str, float] = {}
+    for metric_name, scorers in metrics.items():
+        for scorer_name, value in scorers.items():
+            result[f"{metric_name}:{scorer_name}"] = value
+    return result
+
+
+def _unflatten_metrics(flat_metrics: dict[str, float]) -> dict[str, dict[str, float]]:
+    """Convert flat metrics back to nested structure.
+
+    Converts {"metric:scorer": value} to {metric: {scorer: value}}.
+    """
+    result: dict[str, dict[str, float]] = {}
+    for key, value in flat_metrics.items():
+        if ":" in key:
+            metric_name, scorer_name = key.split(":", 1)
+        else:
+            metric_name, scorer_name = key, "default"
+        if metric_name not in result:
+            result[metric_name] = {}
+        result[metric_name][scorer_name] = value
+    return result
 
 
 def _compute_child_average(
@@ -41,20 +70,26 @@ def _compute_child_average(
                 continue
 
             task_data = task_results[full_task_spec]
-            metrics = task_data.get("metrics", {})
-            if not metrics:
+            nested_metrics = task_data.get("metrics", {})
+            if not nested_metrics:
+                continue
+
+            # Flatten nested metrics for averaging
+            flat_metrics = _flatten_nested_metrics(nested_metrics)
+            if not flat_metrics:
                 continue
 
             tasks_included.append(full_task_spec)
-            for metric_name, value in metrics.items():
-                if metric_name not in child_metrics:
-                    child_metrics[metric_name] = []
-                child_metrics[metric_name].append(value)
+            for metric_key, value in flat_metrics.items():
+                if metric_key not in child_metrics:
+                    child_metrics[metric_key] = []
+                child_metrics[metric_key].append(value)
 
         if not child_metrics:
             return None
 
-        averaged = {name: sum(vals) / len(vals) for name, vals in child_metrics.items()}
+        averaged_flat = {name: sum(vals) / len(vals) for name, vals in child_metrics.items()}
+        averaged = _unflatten_metrics(averaged_flat)
         # Build the key for this nested suite (with suffixes)
         nested_key = f"{child.name}{override_suffix}{priority_suffix}"
         return _ChildAverageResult(
@@ -135,7 +170,7 @@ def compute_suite_aggregations(
         if suite.aggregation == AggregationStrategy.AVERAGE_OF_AVERAGES:
             # Average of averages: each child (task or nested suite) gets equal weight
             # Process each child separately, then average the child averages
-            child_averages: dict[str, list[float]] = {}
+            child_averages: dict[str, list[float]] = {}  # Flat "metric:scorer" -> values
             all_tasks_included: list[str] = []
             children_included = 0
             nested_suites_included: list[str] = []
@@ -150,10 +185,12 @@ def compute_suite_aggregations(
                 all_tasks_included.extend(result.tasks)
                 children_included += 1
 
-                for metric_name, value in result.metrics.items():
-                    if metric_name not in child_averages:
-                        child_averages[metric_name] = []
-                    child_averages[metric_name].append(value)
+                # Flatten nested metrics for aggregation
+                flat_metrics = _flatten_nested_metrics(result.metrics)
+                for metric_key, value in flat_metrics.items():
+                    if metric_key not in child_averages:
+                        child_averages[metric_key] = []
+                    child_averages[metric_key].append(value)
 
                 # If this child is a nested Suite, also report its aggregation separately
                 if result.nested_suite is not None and result.nested_suite_key:
@@ -170,9 +207,10 @@ def compute_suite_aggregations(
                 continue
 
             # Average the child averages (each child weighted equally)
-            aggregated_metrics = {
+            averaged_flat = {
                 name: sum(values) / len(values) for name, values in child_averages.items()
             }
+            aggregated_metrics = _unflatten_metrics(averaged_flat)
 
             suite_aggregations[spec] = {
                 "metrics": aggregated_metrics,
@@ -185,7 +223,7 @@ def compute_suite_aggregations(
         else:
             # AVERAGE or DISPLAY_ONLY: simple average of all expanded tasks
             suite_tasks = suite.expand()
-            suite_metrics: dict[str, list[float]] = {}
+            suite_metrics: dict[str, list[float]] = {}  # Flat "metric:scorer" -> values
             tasks_included: list[str] = []
 
             for task_spec in suite_tasks:
@@ -196,26 +234,28 @@ def compute_suite_aggregations(
                     continue
 
                 task_data = task_results[full_task_spec]
-                metrics = task_data.get("metrics", {})
+                nested_metrics = task_data.get("metrics", {})
 
-                if not metrics:
+                if not nested_metrics:
                     continue
 
                 tasks_included.append(full_task_spec)
 
-                # Collect all metrics for averaging
-                for metric_name, value in metrics.items():
-                    if metric_name not in suite_metrics:
-                        suite_metrics[metric_name] = []
-                    suite_metrics[metric_name].append(value)
+                # Flatten nested metrics for averaging
+                flat_metrics = _flatten_nested_metrics(nested_metrics)
+                for metric_key, value in flat_metrics.items():
+                    if metric_key not in suite_metrics:
+                        suite_metrics[metric_key] = []
+                    suite_metrics[metric_key].append(value)
 
             if not suite_metrics:
                 continue
 
-            # Compute averages
-            aggregated_metrics = {
+            # Compute averages and unflatten back to nested structure
+            averaged_flat = {
                 name: sum(values) / len(values) for name, values in suite_metrics.items()
             }
+            aggregated_metrics = _unflatten_metrics(averaged_flat)
 
             suite_aggregations[spec] = {
                 "metrics": aggregated_metrics,

@@ -16,7 +16,7 @@ class InstanceOutput:
     """Single instance prediction for output."""
 
     native_id: str
-    instance_metrics: dict[str, Any]
+    instance_metrics: dict[str, dict[str, float]]  # Nested: {metric: {scorer: value}}
 
 
 @dataclass
@@ -72,14 +72,17 @@ class InstanceCSVRow:
 
 @dataclass
 class ExperimentTaskOutput:
-    """Task result within an experiment."""
+    """Task result within an experiment.
+
+    Note: primary_metric is in "metric:scorer" format. The primary_score can be
+    extracted from metrics[metric][scorer] using the primary_metric identifier.
+    """
 
     task_name: str
     task_hash: str | None
-    primary_metric: str | None
-    primary_score: float | None
+    primary_metric: str | None  # Format: "metric:scorer"
     num_instances: int | None
-    metrics: dict[str, Any] | None
+    metrics: dict[str, dict[str, float]] | None  # Nested: {metric: {scorer: value}}
     instances: list[InstanceOutput] | None = None
 
 
@@ -115,12 +118,14 @@ class ExperimentsOutput:
 
 @dataclass
 class ComparisonTaskOutput:
-    """Task result for comparison output (simpler than ExperimentTaskOutput)."""
+    """Task result for comparison output (simpler than ExperimentTaskOutput).
+
+    Note: primary_metric is in "metric:scorer" format.
+    """
 
     task_name: str
     task_hash: str | None
-    primary_metric: str | None
-    primary_score: float | None
+    primary_metric: str | None  # Format: "metric:scorer"
     instances: list[InstanceOutput] | None = None
 
 

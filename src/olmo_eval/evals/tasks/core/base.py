@@ -383,6 +383,19 @@ class Task(ABC):
                 response.scores[scorer.name] = max(scores) if scores else 0.0
         return responses
 
-    def compute_metrics(self, responses: Sequence[Response]) -> dict[str, float]:
-        """Compute all metrics from scored responses."""
-        return {m.name: m.compute(responses) for m in self.config.metrics}
+    def compute_metrics(self, responses: Sequence[Response]) -> dict[str, dict[str, float]]:
+        """Compute all metrics from scored responses.
+
+        Returns metrics in nested structure: {metric_name: {scorer_name: score}}.
+        This allows multiple scorers to produce the same metric (e.g., accuracy)
+        while preserving which scorer produced which value.
+        """
+        result: dict[str, dict[str, float]] = {}
+        for metric in self.config.metrics:
+            scorer_name = (
+                metric.scorer().name if hasattr(metric, "scorer") and metric.scorer else "default"
+            )
+            if metric.name not in result:
+                result[metric.name] = {}
+            result[metric.name][scorer_name] = metric.compute(responses)
+        return result

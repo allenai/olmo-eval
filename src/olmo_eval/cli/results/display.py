@@ -12,24 +12,25 @@ from rich.table import Table
 from olmo_eval.cli.utils import console, format_timestamp
 
 
-def _get_scorer_for_metric(
-    task_config: dict[str, Any] | None, metric_name: str | None
-) -> str | None:
-    """Extract scorer name from task_config for a given metric.
+def _extract_primary_score(
+    metrics: dict[str, dict[str, float]] | None, primary_metric: str | None
+) -> float | None:
+    """Extract primary score from nested metrics using primary_metric identifier.
 
     Args:
-        task_config: Task configuration dict containing metrics list.
-        metric_name: The metric name to find the scorer for.
+        metrics: Nested metrics dict {metric_name: {scorer_name: score}}.
+        primary_metric: The primary metric in "metric:scorer" format.
 
     Returns:
-        The scorer name if found, None otherwise.
+        The score value if found, None otherwise.
     """
-    if not task_config or not metric_name:
+    if not metrics or not primary_metric:
         return None
-    metrics = task_config.get("metrics", [])
-    for m in metrics:
-        if m.get("name") == metric_name:
-            return m.get("scorer")
+    if ":" not in primary_metric:
+        return None
+    metric_name, scorer_name = primary_metric.split(":", 1)
+    if metric_name in metrics and scorer_name in metrics[metric_name]:
+        return metrics[metric_name][scorer_name]
     return None
 
 
@@ -71,7 +72,9 @@ def print_task_results_table(tasks: list[Any], task_filter: set[str] | None = No
         if task_filter and task.task_name not in task_filter:
             continue
 
-        score_str = f"{task.primary_score:.4f}" if task.primary_score is not None else "-"
+        # Extract primary score from nested metrics
+        primary_score = _extract_primary_score(task.metrics, task.primary_metric)
+        score_str = f"{primary_score:.4f}" if primary_score is not None else "-"
 
         table.add_row(
             task.task_name,
@@ -147,18 +150,26 @@ def _build_model_task_scores(
             task_hash = task.task_hash or ""
             task_key = (task.task_name, task_hash)
 
+            # Extract metric and scorer from primary_metric "metric:scorer" format
+            metric_name = None
+            scorer_name = None
+            if task.primary_metric and ":" in task.primary_metric:
+                metric_name, scorer_name = task.primary_metric.split(":", 1)
+            elif task.primary_metric:
+                metric_name = task.primary_metric
+
             # Build task display info if not already seen
             if task_key not in task_info_map:
-                scorer = _get_scorer_for_metric(task.task_config, task.primary_metric)
                 task_info_map[task_key] = TaskDisplayInfo(
                     task_name=task.task_name,
                     task_hash=task_hash,
-                    primary_metric=task.primary_metric,
-                    scorer=scorer,
+                    primary_metric=metric_name,
+                    scorer=scorer_name,
                 )
 
-            # Store score for this specific (task_name, task_hash)
-            model_scores[model_key][task_key] = task.primary_score
+            # Extract primary score from nested metrics
+            primary_score = _extract_primary_score(task.metrics, task.primary_metric)
+            model_scores[model_key][task_key] = primary_score
 
     # Sort by (task_name, task_hash) for consistent ordering
     sorted_task_infos = sorted(task_info_map.values(), key=lambda t: t.column_key)

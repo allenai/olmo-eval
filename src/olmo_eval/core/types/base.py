@@ -10,7 +10,6 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING, Any, ClassVar, NotRequired, TypedDict
 
 if TYPE_CHECKING:
-    from .agent import AgentMetrics
     from .tools import ToolCall, ToolSchema
     from .trajectory import AgentTrajectory
 
@@ -211,20 +210,33 @@ class StoredTaskResult:
 
     Stores task-level metrics and references to storage locations where
     detailed predictions and metrics files are stored.
+
+    Metrics are stored in a nested structure:
+        metrics = {
+            "metric_name": {
+                "scorer_name": score_value,
+            },
+        }
+    For example:
+        metrics = {
+            "accuracy": {"exact_match": 0.85, "simpleqa_judge": 0.72},
+            "not_attempted_rate": {"simpleqa_judge": 0.15},
+        }
+
+    The primary_metric field uses "metric_name:scorer_name" format to identify
+    the primary score for display purposes.
     """
 
     task_name: str
-    metrics: dict[str, float]
+    metrics: dict[str, dict[str, float]]
     task_hash: str
     task_config: dict[str, Any] | None = None
     num_instances: int | None = None
-    primary_metric: str | None = None
-    primary_score: float | None = None
+    primary_metric: str | None = None  # Format: "metric_name:scorer_name"
     # Storage references for detailed data
     s3_metrics_key: str | None = None
     s3_predictions_key: str | None = None
     s3_requests_key: str | None = None
-    agent: AgentMetrics | None = None
     # Duration tracking
     duration_seconds: float | None = None
 

@@ -113,15 +113,15 @@ class TestSuiteAggregations:
         suite = get_suite("mt_mbpp_v2fix")
         expanded_tasks = suite.expand()
 
-        # Create mock results for each task
+        # Create mock results for each task (nested format)
         task_results = {}
         for task in expanded_tasks:
-            task_results[task] = {"metrics": {"accuracy": 0.75}}
+            task_results[task] = {"metrics": {"accuracy": {"exact_match": 0.75}}}
 
         result = compute_suite_aggregations(["mt_mbpp_v2fix"], task_results)
 
         assert "mt_mbpp_v2fix" in result
-        assert result["mt_mbpp_v2fix"]["metrics"]["accuracy"] == 0.75
+        assert result["mt_mbpp_v2fix"]["metrics"]["accuracy"]["exact_match"] == 0.75
         assert result["mt_mbpp_v2fix"]["num_tasks"] == len(expanded_tasks)
 
     def test_suite_aggregation_with_overrides(self):
@@ -135,14 +135,16 @@ class TestSuiteAggregations:
         # Create mock results with override suffix (as would happen in real run)
         task_results = {}
         for task in expanded_tasks:
-            task_results[f"{task}::temperature=0.6"] = {"metrics": {"accuracy": 0.80}}
+            task_results[f"{task}::temperature=0.6"] = {
+                "metrics": {"accuracy": {"exact_match": 0.80}}
+            }
 
         result = compute_suite_aggregations(["mt_mbpp_v2fix::temperature=0.6"], task_results)
 
         assert "mt_mbpp_v2fix::temperature=0.6" in result
-        assert result["mt_mbpp_v2fix::temperature=0.6"]["metrics"]["accuracy"] == pytest.approx(
-            0.80
-        )
+        assert result["mt_mbpp_v2fix::temperature=0.6"]["metrics"]["accuracy"][
+            "exact_match"
+        ] == pytest.approx(0.80)
         assert result["mt_mbpp_v2fix::temperature=0.6"]["num_tasks"] == len(expanded_tasks)
 
     def test_suite_aggregation_with_priority(self):
@@ -156,12 +158,14 @@ class TestSuiteAggregations:
         # Create mock results with priority suffix
         task_results = {}
         for task in expanded_tasks:
-            task_results[f"{task}@high"] = {"metrics": {"accuracy": 0.85}}
+            task_results[f"{task}@high"] = {"metrics": {"accuracy": {"exact_match": 0.85}}}
 
         result = compute_suite_aggregations(["mt_mbpp_v2fix@high"], task_results)
 
         assert "mt_mbpp_v2fix@high" in result
-        assert result["mt_mbpp_v2fix@high"]["metrics"]["accuracy"] == pytest.approx(0.85)
+        assert result["mt_mbpp_v2fix@high"]["metrics"]["accuracy"]["exact_match"] == pytest.approx(
+            0.85
+        )
 
     def test_suite_aggregation_with_overrides_and_priority(self):
         """Test suite aggregation with both overrides and priority."""
@@ -174,20 +178,22 @@ class TestSuiteAggregations:
         # Create mock results with both suffixes (order: ::overrides@priority)
         task_results = {}
         for task in expanded_tasks:
-            task_results[f"{task}::temperature=0@urgent"] = {"metrics": {"accuracy": 0.90}}
+            task_results[f"{task}::temperature=0@urgent"] = {
+                "metrics": {"accuracy": {"exact_match": 0.90}}
+            }
 
         result = compute_suite_aggregations(["mt_mbpp_v2fix::temperature=0@urgent"], task_results)
 
         assert "mt_mbpp_v2fix::temperature=0@urgent" in result
-        assert result["mt_mbpp_v2fix::temperature=0@urgent"]["metrics"][
-            "accuracy"
+        assert result["mt_mbpp_v2fix::temperature=0@urgent"]["metrics"]["accuracy"][
+            "exact_match"
         ] == pytest.approx(0.90)
 
     def test_suite_aggregation_non_suite_ignored(self):
         """Test that non-suite specs are ignored."""
         from olmo_eval.runners.utils import compute_suite_aggregations
 
-        task_results = {"humaneval": {"metrics": {"accuracy": 0.75}}}
+        task_results = {"humaneval": {"metrics": {"accuracy": {"exact_match": 0.75}}}}
 
         result = compute_suite_aggregations(["humaneval"], task_results)
 
@@ -224,16 +230,16 @@ class TestSuiteAggregations:
         _REGISTRY["_test_aoa"] = aoa_suite
 
         try:
-            # Create task results:
+            # Create task results (nested format):
             # - task_single: 1.0
             # - task_a, task_b, task_c: 0.4, 0.5, 0.6 (average = 0.5)
             # Expected AVERAGE_OF_AVERAGES: (1.0 + 0.5) / 2 = 0.75
             # (NOT simple average: (1.0 + 0.4 + 0.5 + 0.6) / 4 = 0.625)
             task_results = {
-                "task_single": {"metrics": {"bits_per_byte": 1.0}},
-                "task_a": {"metrics": {"bits_per_byte": 0.4}},
-                "task_b": {"metrics": {"bits_per_byte": 0.5}},
-                "task_c": {"metrics": {"bits_per_byte": 0.6}},
+                "task_single": {"metrics": {"bits_per_byte": {"bpb_scorer": 1.0}}},
+                "task_a": {"metrics": {"bits_per_byte": {"bpb_scorer": 0.4}}},
+                "task_b": {"metrics": {"bits_per_byte": {"bpb_scorer": 0.5}}},
+                "task_c": {"metrics": {"bits_per_byte": {"bpb_scorer": 0.6}}},
             }
 
             result = compute_suite_aggregations(["_test_aoa"], task_results)
@@ -241,7 +247,9 @@ class TestSuiteAggregations:
             # Check top-level suite aggregation
             assert "_test_aoa" in result
             # Average of averages: (1.0 + 0.5) / 2 = 0.75
-            assert result["_test_aoa"]["metrics"]["bits_per_byte"] == pytest.approx(0.75)
+            assert result["_test_aoa"]["metrics"]["bits_per_byte"]["bpb_scorer"] == pytest.approx(
+                0.75
+            )
             assert result["_test_aoa"]["num_tasks"] == 4  # All tasks included
             assert result["_test_aoa"]["num_children"] == 2  # 2 children
             assert result["_test_aoa"]["aggregation"] == "average_of_averages"
@@ -250,7 +258,9 @@ class TestSuiteAggregations:
             # Check nested suite aggregation is also reported
             assert "_test_nested" in result
             # Nested suite average: (0.4 + 0.5 + 0.6) / 3 = 0.5
-            assert result["_test_nested"]["metrics"]["bits_per_byte"] == pytest.approx(0.5)
+            assert result["_test_nested"]["metrics"]["bits_per_byte"][
+                "bpb_scorer"
+            ] == pytest.approx(0.5)
             assert result["_test_nested"]["num_tasks"] == 3
             assert result["_test_nested"]["aggregation"] == "average"
             assert result["_test_nested"]["parent_suite"] == "_test_aoa"
@@ -260,45 +270,54 @@ class TestSuiteAggregations:
 
 
 class TestGetPrimaryMetric:
-    """Tests for get_primary_metric function."""
+    """Tests for get_primary_metric function.
+
+    Note: Metrics are now nested: {metric_name: {scorer_name: value}}.
+    The preferred parameter uses "metric:scorer" format, and the result
+    is ("metric:scorer", value).
+    """
 
     def test_preferred_metric_used_when_present(self):
         """Test that preferred metric is used when specified and present."""
         from olmo_eval.runners.utils import get_primary_metric
 
-        metrics = {"accuracy": 0.75, "bits_per_byte": 0.5, "f1": 0.8}
-        result = get_primary_metric(metrics, preferred="bits_per_byte")
+        metrics = {
+            "accuracy": {"exact_match": 0.75},
+            "bits_per_byte": {"bpb_scorer": 0.5},
+            "f1": {"f1_scorer": 0.8},
+        }
+        result = get_primary_metric(metrics, preferred="bits_per_byte:bpb_scorer")
 
-        assert result == ("bits_per_byte", 0.5)
+        assert result == ("bits_per_byte:bpb_scorer", 0.5)
 
     def test_preferred_metric_ignored_when_not_present(self):
         """Test fallback when preferred metric is not in metrics dict."""
         from olmo_eval.runners.utils import get_primary_metric
 
-        metrics = {"accuracy": 0.75, "f1": 0.8}
-        result = get_primary_metric(metrics, preferred="bits_per_byte")
+        metrics = {"accuracy": {"exact_match": 0.75}, "f1": {"f1_scorer": 0.8}}
+        result = get_primary_metric(metrics, preferred="bits_per_byte:bpb_scorer")
 
-        # Falls back to accuracy
-        assert result == ("accuracy", 0.75)
+        # Falls back to accuracy (first scorer alphabetically)
+        assert result == ("accuracy:exact_match", 0.75)
 
     def test_accuracy_fallback_when_no_preferred(self):
         """Test that accuracy is used when no preferred metric specified."""
         from olmo_eval.runners.utils import get_primary_metric
 
-        metrics = {"accuracy": 0.75, "bits_per_byte": 0.5}
+        metrics = {"accuracy": {"exact_match": 0.75}, "bits_per_byte": {"bpb_scorer": 0.5}}
         result = get_primary_metric(metrics)
 
-        assert result == ("accuracy", 0.75)
+        assert result == ("accuracy:exact_match", 0.75)
 
     def test_alphabetical_fallback_when_no_accuracy(self):
         """Test alphabetical fallback when no accuracy and no preferred."""
         from olmo_eval.runners.utils import get_primary_metric
 
-        metrics = {"f1": 0.8, "bits_per_byte": 0.5}
+        metrics = {"f1": {"f1_scorer": 0.8}, "bits_per_byte": {"bpb_scorer": 0.5}}
         result = get_primary_metric(metrics)
 
-        # bits_per_byte comes before f1 alphabetically
-        assert result == ("bits_per_byte", 0.5)
+        # bits_per_byte comes before f1 alphabetically, bpb_scorer is first (only) scorer
+        assert result == ("bits_per_byte:bpb_scorer", 0.5)
 
     def test_empty_metrics_returns_none(self):
         """Test that empty metrics returns None."""
@@ -311,7 +330,7 @@ class TestGetPrimaryMetric:
         """Test that preferred=None behaves same as not specifying."""
         from olmo_eval.runners.utils import get_primary_metric
 
-        metrics = {"accuracy": 0.75, "bits_per_byte": 0.5}
+        metrics = {"accuracy": {"exact_match": 0.75}, "bits_per_byte": {"bpb_scorer": 0.5}}
 
         result_none = get_primary_metric(metrics, preferred=None)
         result_default = get_primary_metric(metrics)

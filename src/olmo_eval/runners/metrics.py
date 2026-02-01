@@ -71,7 +71,6 @@ def build_single_model_metrics(
             config=task_data.get("config"),
             duration_seconds=task_data.get("duration_seconds"),
             task_hash=task_data.get("task_hash"),
-            metric_scorers=task_data.get("metric_scorers"),
         )
         tasks_list.append(entry)
 
@@ -82,8 +81,8 @@ def build_single_model_metrics(
         preferred = task_data.get("primary_metric")
         primary = get_primary_metric(metrics, preferred)
         if primary:
-            metric_name, score = primary
-            summary[task_name] = ScoreSummary(metric=metric_name, score=score)
+            metric_scorer, score = primary
+            summary[task_name] = ScoreSummary(metric=metric_scorer, score=score)
 
     # Add suite summaries
     if "suites" in results:
@@ -91,8 +90,8 @@ def build_single_model_metrics(
             metrics = suite_data.get("metrics", {})
             primary = get_primary_metric(metrics)
             if primary:
-                metric_name, score = primary
-                summary[suite_name] = ScoreSummary(metric=metric_name, score=score)
+                metric_scorer, score = primary
+                summary[suite_name] = ScoreSummary(metric=metric_scorer, score=score)
 
     return MetricsOutput(
         timestamp=results.get("timestamp", ""),
@@ -160,7 +159,6 @@ def build_multi_model_metrics(
                 config=task_data.get("config"),
                 duration_seconds=task_data.get("duration_seconds"),
                 task_hash=task_data.get("task_hash"),
-                metric_scorers=task_data.get("metric_scorers"),
             )
             tasks_list.append(entry)
 
@@ -173,8 +171,8 @@ def build_multi_model_metrics(
             preferred = task_data.get("primary_metric")
             primary = get_primary_metric(metrics, preferred)
             if primary:
-                metric_name, score = primary
-                summary[model_name][task_name] = ScoreSummary(metric=metric_name, score=score)
+                metric_scorer, score = primary
+                summary[model_name][task_name] = ScoreSummary(metric=metric_scorer, score=score)
 
         # Add suite summaries to this model's summary
         if "suites" in model_data:
@@ -182,8 +180,10 @@ def build_multi_model_metrics(
                 metrics = suite_data.get("metrics", {})
                 primary = get_primary_metric(metrics)
                 if primary:
-                    metric_name, score = primary
-                    summary[model_name][suite_name] = ScoreSummary(metric=metric_name, score=score)
+                    metric_scorer, score = primary
+                    summary[model_name][suite_name] = ScoreSummary(
+                        metric=metric_scorer, score=score
+                    )
 
     return MetricsOutput(
         timestamp=results.get("timestamp", ""),
@@ -275,27 +275,27 @@ def log_summary(results: dict[str, Any], multi_model: bool = False) -> None:
                 preferred = task_data.get("primary_metric")
                 primary = get_primary_metric(metrics, preferred)
                 if primary:
-                    metric_name, score = primary
-                    logger.info(f"    {task_name}: {score:.4f} ({metric_name})")
+                    metric_scorer, score = primary
+                    logger.info(f"    {task_name}: {score:.4f} ({metric_scorer})")
 
             for suite_name, suite_data in model_data.get("suites", {}).items():
                 metrics = suite_data.get("metrics", {})
                 primary = get_primary_metric(metrics)
                 if primary:
-                    metric_name, score = primary
-                    logger.info(f"    {suite_name}: {score:.4f} ({metric_name})")
+                    metric_scorer, score = primary
+                    logger.info(f"    {suite_name}: {score:.4f} ({metric_scorer})")
     else:
         for task_name, task_data in results["tasks"].items():
             metrics = task_data.get("metrics", {})
             preferred = task_data.get("primary_metric")
             primary = get_primary_metric(metrics, preferred)
             if primary:
-                metric_name, score = primary
-                logger.info(f"  {task_name}: {score:.4f} ({metric_name})")
+                metric_scorer, score = primary
+                logger.info(f"  {task_name}: {score:.4f} ({metric_scorer})")
 
         for suite_name, suite_data in results.get("suites", {}).items():
             metrics = suite_data.get("metrics", {})
             primary = get_primary_metric(metrics)
             if primary:
-                metric_name, score = primary
-                logger.info(f"  {suite_name}: {score:.4f} ({metric_name})")
+                metric_scorer, score = primary
+                logger.info(f"  {suite_name}: {score:.4f} ({metric_scorer})")

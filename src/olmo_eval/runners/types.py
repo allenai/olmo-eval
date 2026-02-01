@@ -12,18 +12,21 @@ REQUESTS_SUFFIX = "-requests.jsonl"
 
 @dataclass
 class TaskResult:
-    """Result from executing a single task."""
+    """Result from executing a single task.
+
+    Metrics are stored in a nested structure: {metric_name: {scorer_name: score}}.
+    The primary_metric uses "metric_name:scorer_name" format.
+    """
 
     spec: str
     config: dict[str, Any]
     num_instances: int
-    metrics: dict[str, float]
+    metrics: dict[str, dict[str, float]]
     error: str | None = None
     duration_seconds: float = 0.0
     predictions: list[dict] | None = None
     requests: list[dict] | None = None  # oe-eval compatible request objects
-    primary_metric: str | None = None  # Preferred metric name from task config
-    metric_scorers: dict[str, str] | None = None  # Maps metric name to scorer name
+    primary_metric: str | None = None  # Format: "metric_name:scorer_name"
 
     def to_dict(self, include_predictions: bool = False) -> dict[str, Any]:
         """Serialize to dictionary for JSON output.
@@ -43,8 +46,6 @@ class TaskResult:
         }
         if self.primary_metric:
             result["primary_metric"] = self.primary_metric
-        if self.metric_scorers:
-            result["metric_scorers"] = self.metric_scorers
         if include_predictions and self.predictions:
             result["predictions"] = self.predictions
         return result

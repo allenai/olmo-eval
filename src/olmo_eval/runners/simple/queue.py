@@ -212,8 +212,8 @@ def finalize_task(tracker: TaskTracker) -> TaskResult:
     # Get task config for serialization
     task_config = tracker.task.config
 
-    # Extract metric metadata
-    primary_metric_name, metric_scorers = get_metric_metadata(tracker.task)
+    # Extract metric metadata (returns "metric:scorer" format)
+    primary_metric = get_metric_metadata(tracker.task)
 
     return TaskResult(
         spec=tracker.spec,
@@ -222,8 +222,7 @@ def finalize_task(tracker: TaskTracker) -> TaskResult:
         metrics=metrics,
         duration_seconds=duration,
         predictions=predictions,
-        primary_metric=primary_metric_name,
-        metric_scorers=metric_scorers,
+        primary_metric=primary_metric,
     )
 
 

@@ -83,7 +83,6 @@ def experiments_to_dict(
                     task_name=t.task_name,
                     task_hash=t.task_hash,
                     primary_metric=t.primary_metric,
-                    primary_score=t.primary_score,
                     num_instances=t.num_instances,
                     metrics=t.metrics,
                     instances=task_instances,
@@ -230,7 +229,6 @@ def task_comparison_to_dict(
                     task_name=task.task_name,
                     task_hash=task.task_hash,
                     primary_metric=task.primary_metric,
-                    primary_score=task.primary_score,
                     instances=task_instances,
                 )
             )

@@ -129,19 +129,15 @@ class TaskResult(Base):
     task_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     task_config: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
-    # Aggregated metrics (task-level)
-    metrics: Mapped[dict[str, float]] = mapped_column(JSONB, nullable=False)
+    # Aggregated metrics (task-level) - nested structure: {metric_name: {scorer_name: score}}
+    metrics: Mapped[dict[str, dict[str, float]]] = mapped_column(JSONB, nullable=False)
     num_instances: Mapped[int | None] = mapped_column(Integer)
-    primary_metric: Mapped[str | None] = mapped_column(String(100))
-    primary_score: Mapped[float | None] = mapped_column(DOUBLE_PRECISION, index=True)
+    primary_metric: Mapped[str | None] = mapped_column(String(100))  # "metric_name:scorer_name"
 
     # S3 keys for detailed task data
     s3_metrics_key: Mapped[str | None] = mapped_column(String(512))
     s3_predictions_key: Mapped[str | None] = mapped_column(String(512))
     s3_requests_key: Mapped[str | None] = mapped_column(String(512))
-
-    # Agent evaluation metrics (JSONB for nested structure)
-    agent_metrics: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     # Duration tracking
     duration_seconds: Mapped[float | None] = mapped_column(DOUBLE_PRECISION, nullable=True)
@@ -152,7 +148,7 @@ class TaskResult(Base):
     def __repr__(self) -> str:
         return (
             f"<TaskResult(id={self.id}, experiment_pk={self.experiment_pk}, "
-            f"task={self.task_name!r}, score={self.primary_score})>"
+            f"task={self.task_name!r}, primary_metric={self.primary_metric!r})>"
         )
 
 
@@ -189,8 +185,8 @@ class InstancePrediction(Base):
     # Instance identification
     native_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
 
-    # Instance-level metrics
-    instance_metrics: Mapped[dict[str, float]] = mapped_column(JSONB, nullable=False)
+    # Instance-level metrics - nested structure: {metric_name: {scorer_name: score}}
+    instance_metrics: Mapped[dict[str, dict[str, float]]] = mapped_column(JSONB, nullable=False)
 
     # Relationships
     experiment: Mapped[Experiment] = relationship(
@@ -219,7 +215,6 @@ Index("idx_experiments_model_name_ts", Experiment.model_name, Experiment.timesta
 Index("idx_task_results_exp_task", TaskResult.experiment_pk, TaskResult.task_name)
 Index("idx_task_results_model_task", TaskResult.model_hash, TaskResult.task_name)
 Index("idx_task_results_task_hash", TaskResult.task_hash)
-Index("idx_task_results_score_desc", TaskResult.primary_score.desc())
 
 # Instance Predictions Indexes
 Index(

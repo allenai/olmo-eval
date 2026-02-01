@@ -161,8 +161,8 @@ def run_agent_task_impl(
 
         duration = time.time() - start_time
 
-        # Extract metric metadata
-        primary_metric_name, metric_scorers = get_metric_metadata(task)
+        # Extract metric metadata (returns "metric:scorer" format)
+        primary_metric = get_metric_metadata(task)
 
         return TaskResult(
             spec=spec,
@@ -172,8 +172,7 @@ def run_agent_task_impl(
             duration_seconds=duration,
             predictions=predictions,
             requests=request_objects,
-            primary_metric=primary_metric_name,
-            metric_scorers=metric_scorers,
+            primary_metric=primary_metric,
         )
 
     except Exception as e:
@@ -391,8 +390,8 @@ def run_task_impl(
 
         duration = time.time() - start_time
 
-        # Extract metric metadata
-        primary_metric_name, metric_scorers = get_metric_metadata(task)
+        # Extract metric metadata (returns "metric:scorer" format)
+        primary_metric = get_metric_metadata(task)
 
         return TaskResult(
             spec=spec,
@@ -402,8 +401,7 @@ def run_task_impl(
             duration_seconds=duration,
             predictions=predictions,
             requests=request_objects,
-            primary_metric=primary_metric_name,
-            metric_scorers=metric_scorers,
+            primary_metric=primary_metric,
         )
 
     except Exception as e:

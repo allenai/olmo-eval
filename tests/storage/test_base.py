@@ -15,11 +15,11 @@ class TestStoredTaskResult:
         """Test creating with only required fields."""
         result = StoredTaskResult(
             task_name="mmlu",
-            metrics={"accuracy": 0.75},
+            metrics={"accuracy": {"exact_match": 0.75}},
             task_hash="mmlu-hash-001",
         )
         assert result.task_name == "mmlu"
-        assert result.metrics == {"accuracy": 0.75}
+        assert result.metrics == {"accuracy": {"exact_match": 0.75}}
         assert result.task_hash == "mmlu-hash-001"
         assert result.num_instances is None
 
@@ -27,27 +27,31 @@ class TestStoredTaskResult:
         """Test creating with all fields."""
         result = StoredTaskResult(
             task_name="mmlu",
-            metrics={"accuracy": 0.75, "f1": 0.72},
+            metrics={"accuracy": {"exact_match": 0.75}, "f1": {"f1_scorer": 0.72}},
             task_hash="abc123",
             num_instances=1000,
-            primary_metric="accuracy",
-            primary_score=0.75,
+            primary_metric="accuracy:exact_match",
             s3_metrics_key="s3://bucket/metrics.json",
             s3_predictions_key="s3://bucket/predictions.jsonl",
         )
         assert result.task_name == "mmlu"
         assert result.task_hash == "abc123"
         assert result.num_instances == 1000
-        assert result.primary_metric == "accuracy"
-        assert result.primary_score == 0.75
+        assert result.primary_metric == "accuracy:exact_match"
         assert result.s3_metrics_key == "s3://bucket/metrics.json"
         assert result.s3_predictions_key == "s3://bucket/predictions.jsonl"
 
     def test_equality(self):
         """Test dataclass equality."""
-        r1 = StoredTaskResult(task_name="mmlu", metrics={"accuracy": 0.75}, task_hash="hash1")
-        r2 = StoredTaskResult(task_name="mmlu", metrics={"accuracy": 0.75}, task_hash="hash1")
-        r3 = StoredTaskResult(task_name="gsm8k", metrics={"accuracy": 0.75}, task_hash="hash2")
+        r1 = StoredTaskResult(
+            task_name="mmlu", metrics={"accuracy": {"exact_match": 0.75}}, task_hash="hash1"
+        )
+        r2 = StoredTaskResult(
+            task_name="mmlu", metrics={"accuracy": {"exact_match": 0.75}}, task_hash="hash1"
+        )
+        r3 = StoredTaskResult(
+            task_name="gsm8k", metrics={"accuracy": {"exact_match": 0.75}}, task_hash="hash2"
+        )
         assert r1 == r2
         assert r1 != r3
 
@@ -59,9 +63,15 @@ class TestEvalResult:
     def sample_tasks(self):
         """Create sample task results."""
         return [
-            StoredTaskResult(task_name="mmlu", metrics={"accuracy": 0.65}, task_hash="mmlu-hash"),
             StoredTaskResult(
-                task_name="gsm8k", metrics={"exact_match": 0.58}, task_hash="gsm8k-hash"
+                task_name="mmlu",
+                metrics={"accuracy": {"exact_match": 0.65}},
+                task_hash="mmlu-hash",
+            ),
+            StoredTaskResult(
+                task_name="gsm8k",
+                metrics={"exact_match": {"exact_match": 0.58}},
+                task_hash="gsm8k-hash",
             ),
         ]
 
@@ -195,7 +205,7 @@ class TestConvertRunnerResults:
             "timestamp": "2024-01-15T10:30:00",
             "tasks": {
                 "mmlu": {
-                    "metrics": {"accuracy": 0.75},
+                    "metrics": {"accuracy": {"exact_match": 0.75}},
                     "task_hash": "mmlu-hash-001",
                 }
             },
@@ -227,10 +237,10 @@ class TestConvertRunnerResults:
             "timestamp": "2024-06-20T14:00:00",
             "tasks": {
                 "gsm8k": {
-                    "metrics": {"exact_match": 0.58},
+                    "metrics": {"exact_match": {"exact_match": 0.58}},
                     "task_hash": "gsm8k-hash",
                     "num_instances": 1000,
-                    "primary_metric": "exact_match",
+                    "primary_metric": "exact_match:exact_match",
                 },
             },
             "model_config": {"temperature": 0.0},
@@ -255,4 +265,4 @@ class TestConvertRunnerResults:
         assert eval_result.metadata == {"run_id": "abc"}
         assert len(eval_result.tasks) == 1
         assert eval_result.tasks[0].task_name == "gsm8k"
-        assert eval_result.tasks[0].metrics == {"exact_match": 0.58}
+        assert eval_result.tasks[0].metrics == {"exact_match": {"exact_match": 0.58}}

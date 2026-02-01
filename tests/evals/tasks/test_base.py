@@ -276,11 +276,12 @@ class TestTaskMetrics:
         # Score first
         scored = task.score_responses(responses)
 
-        # Compute metrics
+        # Compute metrics (returns nested structure: {metric: {scorer: value}})
         metrics = task.compute_metrics(scored)
 
         assert "accuracy" in metrics
-        assert metrics["accuracy"] == pytest.approx(2 / 3)
+        assert "exact_match" in metrics["accuracy"]
+        assert metrics["accuracy"]["exact_match"] == pytest.approx(2 / 3)
 
     def test_compute_metrics_empty_responses(self):
         """Test compute_metrics with empty responses."""
@@ -294,5 +295,7 @@ class TestTaskMetrics:
 
         metrics = task.compute_metrics([])
 
+        # Returns nested structure: {metric: {scorer: value}}
         assert "accuracy" in metrics
-        assert metrics["accuracy"] == 0.0
+        assert "exact_match" in metrics["accuracy"]
+        assert metrics["accuracy"]["exact_match"] == 0.0

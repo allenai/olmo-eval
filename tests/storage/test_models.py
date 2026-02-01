@@ -87,13 +87,13 @@ class TestTaskResultModel:
             model_hash="model-abc",
             task_name="mmlu",
             task_hash="task-123",
-            metrics={"accuracy": 0.75},
+            metrics={"accuracy": {"exact_match": 0.75}},
         )
         assert task.experiment_pk == 1
         assert task.model_hash == "model-abc"
         assert task.task_name == "mmlu"
         assert task.task_hash == "task-123"
-        assert task.metrics == {"accuracy": 0.75}
+        assert task.metrics == {"accuracy": {"exact_match": 0.75}}
         assert task.num_instances is None
 
     def test_create_full_task_result(self):
@@ -104,10 +104,9 @@ class TestTaskResultModel:
             task_name="gsm8k",
             task_hash="hash123",
             task_config={"shots": 5},
-            metrics={"exact_match": 0.58, "f1": 0.62},
+            metrics={"exact_match": {"exact_match": 0.58}, "f1": {"f1_scorer": 0.62}},
             num_instances=500,
-            primary_metric="exact_match",
-            primary_score=0.58,
+            primary_metric="exact_match:exact_match",
             s3_metrics_key="s3://bucket/metrics.json",
             s3_predictions_key="s3://bucket/predictions.jsonl",
             s3_requests_key="s3://bucket/requests.jsonl",
@@ -115,8 +114,7 @@ class TestTaskResultModel:
         assert task.task_hash == "hash123"
         assert task.task_config == {"shots": 5}
         assert task.num_instances == 500
-        assert task.primary_metric == "exact_match"
-        assert task.primary_score == 0.58
+        assert task.primary_metric == "exact_match:exact_match"
         assert task.s3_requests_key == "s3://bucket/requests.jsonl"
 
     def test_task_result_repr(self):
@@ -126,8 +124,8 @@ class TestTaskResultModel:
             model_hash="model-repr",
             task_name="arc_challenge",
             task_hash="task-repr",
-            metrics={"accuracy": 0.52},
-            primary_score=0.52,
+            metrics={"accuracy": {"exact_match": 0.52}},
+            primary_metric="accuracy:exact_match",
         )
         repr_str = repr(task)
         assert "arc_challenge" in repr_str
@@ -142,12 +140,12 @@ class TestInstancePredictionModel:
             experiment_pk=1,
             task_hash="task-def456",
             native_id="doc_123",
-            instance_metrics={"acc": 1.0},
+            instance_metrics={"acc": {"acc_scorer": 1.0}},
         )
         assert inst.experiment_pk == 1
         assert inst.task_hash == "task-def456"
         assert inst.native_id == "doc_123"
-        assert inst.instance_metrics == {"acc": 1.0}
+        assert inst.instance_metrics == {"acc": {"acc_scorer": 1.0}}
 
     def test_create_full_instance_prediction(self):
         """Test creating an instance prediction with all fields."""
@@ -155,10 +153,13 @@ class TestInstancePredictionModel:
             experiment_pk=2,
             task_hash="task-xyz789",
             native_id="gsm8k_456",
-            instance_metrics={"exact_match": 0.0, "f1": 0.3},
+            instance_metrics={"exact_match": {"exact_match": 0.0}, "f1": {"f1_scorer": 0.3}},
         )
         assert inst.task_hash == "task-xyz789"
-        assert inst.instance_metrics == {"exact_match": 0.0, "f1": 0.3}
+        assert inst.instance_metrics == {
+            "exact_match": {"exact_match": 0.0},
+            "f1": {"f1_scorer": 0.3},
+        }
 
     def test_instance_prediction_repr(self):
         """Test instance prediction string representation."""
@@ -261,7 +262,6 @@ class TestTableMetadata:
 
         # TaskResult indexes
         assert "idx_task_results_exp_task" in index_names
-        assert "idx_task_results_score_desc" in index_names
         assert "idx_task_results_model_task" in index_names
 
         # InstancePrediction indexes
