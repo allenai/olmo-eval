@@ -131,6 +131,7 @@ class JobConfigAssembler:
             "HF_HOME": "/weka/oe-eval-default/oyvindt/hf-cache",
             "HF_HUB_CACHE": "/weka/oe-eval-default/oyvindt/hf-cache",
             "BEAKER_AUTHOR": self.beaker_username,
+            "UV_LINK_MODE": "copy",
         }
         if self.config.uv_cache_dir:
             job_env_vars["UV_CACHE_DIR"] = self.config.uv_cache_dir
