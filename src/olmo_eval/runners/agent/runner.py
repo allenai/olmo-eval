@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -129,6 +130,8 @@ class AgentEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
     def run(self) -> dict[str, Any]:
         """Execute the agent evaluation run."""
+        experiment_start = time.time()
+
         from olmo_eval.evals.tasks import AgentTask, get_task
 
         model_config = get_model_config(self.model_name, **self.model_overrides)
@@ -277,6 +280,9 @@ class AgentEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         experiment_id = generate_experiment_id()
         model_hash = compute_model_hash(results.get("model_config", {}))
 
+        # Compute experiment duration
+        experiment_duration_seconds = time.time() - experiment_start
+
         # Write metrics.json for Beaker (with experiment identification fields)
         self._write_metrics_json(
             results,
@@ -284,6 +290,7 @@ class AgentEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             experiment_name=self.experiment_name,
             experiment_group=self.experiment_group,
             model_hash=model_hash,
+            experiment_duration_seconds=experiment_duration_seconds,
         )
 
         s3_location: str | None = None
@@ -302,6 +309,7 @@ class AgentEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             experiment_id=experiment_id,
             model_hash=model_hash,
             s3_location=s3_location,
+            experiment_duration_seconds=experiment_duration_seconds,
         )
 
         return results
