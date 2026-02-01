@@ -532,6 +532,7 @@ class BeakerLauncher:
         self,
         command: list[str],
         extras: list[str],
+        env_exports: dict[str, str] | None = None,
     ) -> list[str]:
         """Build command with source installation and extras installation prepended.
 
@@ -542,10 +543,16 @@ class BeakerLauncher:
         Args:
             command: The command to run after setup.
             extras: Optional dependency group names from pyproject.toml.
+            env_exports: Optional dict of environment variables to export before running.
         """
         # Build the full command
         # Export UV_PROJECT_ENVIRONMENT so all uv commands use Docker's /opt/venv
         steps = ["export UV_PROJECT_ENVIRONMENT=/opt/venv"]
+
+        # Export additional environment variables (e.g., UV_CACHE_DIR)
+        if env_exports:
+            for key, value in env_exports.items():
+                steps.append(f"export {key}={value}")
 
         # Install olmo-eval from gantry-cloned source with optional extras
         # Generate constraints from pre-installed CUDA packages to prevent uv from changing them
@@ -580,7 +587,12 @@ class BeakerLauncher:
 
         clusters = resolve_clusters(config.cluster)
 
-        final_command = self._build_command_with_extras(config.command, config.extras)
+        # Build env vars that need to be exported in the shell command (before uv runs)
+        env_exports: dict[str, str] = {}
+        if "UV_CACHE_DIR" in config.env_vars:
+            env_exports["UV_CACHE_DIR"] = config.env_vars["UV_CACHE_DIR"]
+
+        final_command = self._build_command_with_extras(config.command, config.extras, env_exports)
 
         # Build weka mounts as tuples: (bucket, mount_path)
         weka_mounts: list[tuple[str, str]] = []

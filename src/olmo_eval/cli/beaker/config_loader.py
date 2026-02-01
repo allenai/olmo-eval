@@ -64,6 +64,9 @@ class LaunchConfig:
     inject_aws_credentials: bool = False
     inject_gcs_credentials: bool = False
 
+    # UV cache directory
+    uv_cache_dir: str | None = None
+
 
 class LaunchConfigLoader:
     """Loads and merges configuration from YAML file and CLI arguments."""
@@ -249,6 +252,7 @@ class LaunchConfigLoader:
             inspect_formatted=self.cli_args.get("inspect_formatted", False),
             inspect_tokens=self.cli_args.get("inspect_tokens", False),
             inspect_response=self.cli_args.get("inspect_response", False),
+            uv_cache_dir=self.cli_args.get("uv_cache_dir"),
         )
 
     def _validate_required(

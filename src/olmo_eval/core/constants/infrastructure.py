@@ -25,6 +25,9 @@ BEAKER_DEFAULT_IMAGE = "ai2-tylerm/olmo-eval-cu1281-trc290-amd64"
 BEAKER_RESULT_DIR = "/results"
 """Default directory for evaluation results in Beaker jobs."""
 
+BEAKER_UV_CACHE_DIR = "/weka/oe-eval-default/olmo-eval-pypi-cache"
+"""Default UV cache directory for Beaker jobs (on Weka shared storage)."""
+
 DEFAULT_MAX_GPUS_PER_NODE = 8
 """Default maximum GPUs available per node for experiment splitting."""
 

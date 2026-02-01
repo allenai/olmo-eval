@@ -23,7 +23,7 @@ from olmo_eval.cli.utils import (
     console,
     parse_model_spec,
 )
-from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
+from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_UV_CACHE_DIR
 
 
 @click.command()
@@ -170,6 +170,12 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
     is_flag=True,
     help="Print the first response of each task after model generation",
 )
+@click.option(
+    "--uv-cache-dir",
+    default=BEAKER_UV_CACHE_DIR,
+    show_default=True,
+    help="UV cache directory for package downloads (on Weka shared storage)",
+)
 def launch(
     config: str | None,
     name: str | None,
@@ -209,6 +215,7 @@ def launch(
     inspect_formatted: bool,
     inspect_tokens: bool,
     inspect_response: bool,
+    uv_cache_dir: str,
 ) -> None:
     """Launch an evaluation job on Beaker.
 
@@ -272,6 +279,7 @@ def launch(
         "inspect_formatted": inspect_formatted,
         "inspect_tokens": inspect_tokens,
         "inspect_response": inspect_response,
+        "uv_cache_dir": uv_cache_dir,
     }
 
     # Load configuration
