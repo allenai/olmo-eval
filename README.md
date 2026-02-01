@@ -1042,6 +1042,97 @@ olmo-eval run --async --num-workers 2 --gpus-per-worker 4 -m llama3.1-70b -t mml
 olmo-eval run --async-stream -m llama3.1-8b -t mmlu -t gsm8k -t arc
 ```
 
+## Debugging and Inspection
+
+olmo-eval provides tools for inspecting tasks, requests, and responses at various stages of evaluation.
+
+### Task Inspection (`olmo-eval task inspect`)
+
+Inspect task instances without running evaluation:
+
+```bash
+# View raw instance data
+olmo-eval task inspect arc_easy
+
+# View multiple instances
+olmo-eval task inspect arc_easy -n 5 --skip 10
+
+# View the LM request that will be sent to the model
+olmo-eval task inspect mmlu:olmes --request
+
+# View formatted prompt with chat template applied
+olmo-eval task inspect humaneval -T meta-llama/Llama-3.1-8B-Instruct --formatted
+
+# View tokenized representation
+olmo-eval task inspect humaneval -T meta-llama/Llama-3.1-8B-Instruct --tokens
+
+# Export as JSON for programmatic use
+olmo-eval task inspect arc_easy --json
+```
+
+| Option | Description |
+|--------|-------------|
+| `-n, --count` | Number of instances to display |
+| `-s, --skip` | Number of instances to skip |
+| `--instance` | Show instance details (default if no other flags) |
+| `--request` | Show the LM request |
+| `-T, --tokenizer` | Tokenizer for formatting/tokenization |
+| `--formatted` | Show prompt after template applied (requires `-T`) |
+| `--tokens` | Show token array (requires `-T`) |
+| `--json` | Output as JSON |
+
+### Runtime Inspection Flags
+
+Inspect data during evaluation runs with `olmo-eval run`:
+
+```bash
+# Inspect the first instance and request before running
+olmo-eval run -m llama3.1-8b -t mmlu --inspect-instance --inspect-request
+
+# Inspect the response after model generation
+olmo-eval run -m llama3.1-8b -t mmlu --inspect-response
+
+# Combine multiple inspection flags
+olmo-eval run -m llama3.1-8b -t mmlu \
+    --inspect-instance \
+    --inspect-request \
+    --inspect-response
+```
+
+| Flag | Description |
+|------|-------------|
+| `--inspect-instance` | Print the first instance of each task before running |
+| `--inspect-request` | Print the first LM request before model generation |
+| `--inspect-formatted` | Show formatted prompt (after chat template applied) |
+| `--inspect-tokens` | Show token array before evaluation |
+| `--inspect-response` | Print the first response after model generation |
+
+### Mock Provider for Testing
+
+Use the `mock` provider to test inspection tools without loading a real model:
+
+```bash
+# Quick inspection without vLLM or PyTorch
+olmo-eval run -m mock -t humaneval:3shot:bpb --inspect-request
+
+# Dry run with mock to preview configuration
+olmo-eval run -m mock -t mmlu --dry-run
+```
+
+### Beaker Job Inspection
+
+The same inspection flags work with Beaker jobs:
+
+```bash
+olmo-eval beaker launch \
+    -n "debug-eval" \
+    -m "Qwen/Qwen3-8B" \
+    -t "mmlu::limit=10" \
+    --inspect-request \
+    --inspect-response \
+    --cluster h100
+```
+
 ## Development
 
 ```bash
