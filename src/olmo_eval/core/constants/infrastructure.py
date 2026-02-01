@@ -25,6 +25,9 @@ BEAKER_DEFAULT_IMAGE = "ai2-tylerm/olmo-eval-cu1281-trc290-amd64"
 BEAKER_RESULT_DIR = "/results"
 """Default directory for evaluation results in Beaker jobs."""
 
+LOCAL_RESULT_DIR = "/tmp/results/"
+"""Default directory for evaluation results when running locally."""
+
 BEAKER_UV_CACHE_DIR = "/weka/oe-eval-default/olmo-eval-pypi-cache"
 """Default UV cache directory for Beaker jobs (on Weka shared storage)."""
 

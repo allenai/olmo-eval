@@ -10,7 +10,7 @@ Configuration parsing, storage setup, and runner creation are delegated to:
 import click
 
 from olmo_eval.cli.utils import console, print_runtime_environment
-from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
+from olmo_eval.core.constants.infrastructure import LOCAL_RESULT_DIR
 
 
 @click.command()
@@ -24,7 +24,7 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 )
 @click.option("--task", "-t", multiple=True, required=True, help="Task spec or suite")
 @click.option("--config", "-c", type=click.Path(exists=True), help="YAML config file")
-@click.option("--output-dir", "-o", default=BEAKER_RESULT_DIR, help="Output directory")
+@click.option("--output-dir", "-o", default=LOCAL_RESULT_DIR, help="Output directory")
 @click.option("--provider", type=click.Choice(["hf", "vllm", "litellm"]), help="Override provider")
 @click.option(
     "--store",

@@ -138,6 +138,8 @@ def get_model_presets() -> dict[str, ModelConfig]:
         ),
         "qwen2.5-7b": ModelConfig(model="Qwen/Qwen2.5-7B"),
         "mistral-7b": ModelConfig(model="mistralai/Mistral-7B-v0.3"),
+        # Mock model for testing (no dependencies required)
+        "mock": ModelConfig(model="mock", provider="mock"),
         # API-based models (for agent tasks - requires API keys)
         "gpt-4o": ModelConfig(
             model="gpt-4o",
