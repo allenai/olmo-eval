@@ -65,6 +65,23 @@ class AgentTaskConfig(TaskConfig):
     required_secrets: tuple[str, ...] = ()
     tools: tuple[ToolSchema, ...] = ()
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize config including agent-specific fields.
+
+        Extends parent to_dict() with agent_settings. Temperature is already
+        captured via sampling_params in the parent's to_dict().
+
+        Note: required_secrets and tools are runtime/infrastructure details,
+        not task configuration, so they are not included.
+        """
+        base = super().to_dict()
+        base["agent_settings"] = {
+            "system_prompt": self.system_prompt,
+            "max_turns": self.max_turns,
+            "max_concurrency": self.max_concurrency,
+        }
+        return base
+
 
 class AgentTask(Task):
     """Base class for agent evaluation tasks.

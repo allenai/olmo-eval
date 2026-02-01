@@ -54,7 +54,7 @@ class FilterType(enum.Enum):
     "-M",
     "model_hashes",
     multiple=True,
-    help="Model hash(es) to query (can specify multiple).",
+    help="Model hash prefix(es) to query (matches start of hash).",
 )
 @click.option(
     "--task",
@@ -66,7 +66,7 @@ class FilterType(enum.Enum):
 @click.option(
     "--task-hash",
     "-T",
-    help="Task hash to filter by (exact match).",
+    help="Task hash prefix to filter by (matches start of hash).",
 )
 @click.option(
     "--experiment-group",
@@ -181,23 +181,8 @@ def query(
             # Comparison mode: no experiment IDs specified
             is_comparison = not experiment_ids
 
-            # Filter experiments by model_hashes if specified
-            if model_hashes:
-                model_hash_set = set(model_hashes)
-                all_experiments = [
-                    exp for exp in all_experiments if exp.model_hash in model_hash_set
-                ]
-
-            # Filter tasks within experiments by task_hash or task_names
-            if task_hash or task_names:
-                task_name_set = set(task_names) if task_names else None
-                for exp in all_experiments:
-                    exp.tasks = [
-                        t
-                        for t in exp.tasks
-                        if (task_hash is None or t.task_hash == task_hash)
-                        and (task_name_set is None or t.task_name in task_name_set)
-                    ]
+            # Note: model_hash and task_hash filtering is done in the database
+            # via _hash_filter which uses prefix matching (startswith)
 
             task_filter = set(task_names) if task_names else None
 

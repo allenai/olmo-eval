@@ -12,9 +12,23 @@ from typing import Any
 
 from sqlalchemy import and_, delete, select
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from olmo_eval.core.types import AgentMetrics, EvalResult, StoredTaskResult
 from olmo_eval.storage.backends.postgres.models import Experiment, InstancePrediction, TaskResult
+
+
+def _hash_filter(column: Any, hash_value: str) -> ColumnElement[bool]:
+    """Create a hash filter using prefix matching.
+
+    Args:
+        column: SQLAlchemy column to filter on.
+        hash_value: Hash prefix to match (any length).
+
+    Returns:
+        SQLAlchemy filter expression using startswith.
+    """
+    return column.startswith(hash_value)
 
 
 class ExperimentRepository:
@@ -182,7 +196,7 @@ class ExperimentRepository:
             stmt = stmt.where(Experiment.model_name == model_name)
 
         if model_hash:
-            stmt = stmt.where(Experiment.model_hash == model_hash)
+            stmt = stmt.where(_hash_filter(Experiment.model_hash, model_hash))
 
         if experiment_group:
             stmt = stmt.where(Experiment.experiment_group == experiment_group)
@@ -210,7 +224,7 @@ class ExperimentRepository:
             stmt = stmt.where(
                 exists()
                 .where(TaskResult.experiment_pk == Experiment.id)
-                .where(TaskResult.task_hash == task_hash)
+                .where(_hash_filter(TaskResult.task_hash, task_hash))
             )
 
         # Order by timestamp descending (most recent first)
@@ -347,7 +361,7 @@ class InstancePredictionRepository:
             stmt = stmt.where(InstancePrediction.experiment_pk == experiment_pk)
 
         if task_hash:
-            stmt = stmt.where(InstancePrediction.task_hash == task_hash)
+            stmt = stmt.where(_hash_filter(InstancePrediction.task_hash, task_hash))
 
         if task_name:
             # JOIN to task_results to filter by task_name
@@ -474,7 +488,7 @@ class InstancePredictionRepository:
             stmt = stmt.where(Experiment.model_name == model_name)
 
         if model_hash:
-            stmt = stmt.where(Experiment.model_hash == model_hash)
+            stmt = stmt.where(_hash_filter(Experiment.model_hash, model_hash))
 
         if task_name:
             if isinstance(task_name, list):
@@ -534,7 +548,7 @@ class InstancePredictionRepository:
             stmt = stmt.where(InstancePrediction.id > after_id)
 
         if task_hash:
-            stmt = stmt.where(InstancePrediction.task_hash == task_hash)
+            stmt = stmt.where(_hash_filter(InstancePrediction.task_hash, task_hash))
 
         if task_name:
             if isinstance(task_name, list):
@@ -639,10 +653,14 @@ class InstancePredictionRepository:
             stmt = stmt.where(Experiment.model_name.in_(model_names))
 
         if model_hashes:
-            stmt = stmt.where(Experiment.model_hash.in_(model_hashes))
+            # Support suffix matching for short hashes
+            from sqlalchemy import or_
+
+            hash_conditions = [_hash_filter(Experiment.model_hash, h) for h in model_hashes]
+            stmt = stmt.where(or_(*hash_conditions))
 
         if task_hash:
-            stmt = stmt.where(InstancePrediction.task_hash == task_hash)
+            stmt = stmt.where(_hash_filter(InstancePrediction.task_hash, task_hash))
 
         if task_names:
             stmt = stmt.where(TaskResult.task_name.in_(task_names))
@@ -692,7 +710,7 @@ class InstancePredictionRepository:
         stmt = select(InstancePrediction).where(InstancePrediction.experiment_pk == experiment_pk)
 
         if task_hash:
-            stmt = stmt.where(InstancePrediction.task_hash == task_hash)
+            stmt = stmt.where(_hash_filter(InstancePrediction.task_hash, task_hash))
 
         stmt = stmt.order_by(InstancePrediction.id)
 
@@ -753,9 +771,17 @@ class InstancePredictionRepository:
         if experiment_pk:
             stmt = stmt.where(InstancePrediction.experiment_pk == experiment_pk)
         if model_hashes:
-            stmt = stmt.where(Experiment.model_hash.in_(model_hashes))
+            # Support suffix matching for short hashes
+            from sqlalchemy import or_
+
+            hash_conditions = [_hash_filter(Experiment.model_hash, h) for h in model_hashes]
+            stmt = stmt.where(or_(*hash_conditions))
         if task_hashes:
-            stmt = stmt.where(InstancePrediction.task_hash.in_(task_hashes))
+            # Support suffix matching for short hashes
+            from sqlalchemy import or_
+
+            hash_conditions = [_hash_filter(InstancePrediction.task_hash, h) for h in task_hashes]
+            stmt = stmt.where(or_(*hash_conditions))
 
         # Sort for single-pass grouping, stream with server-side cursor
         stmt = stmt.order_by(

@@ -3,12 +3,34 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import Any
 
 from rich.panel import Panel
 from rich.table import Table
 
 from olmo_eval.cli.utils import console, format_timestamp
+
+
+def _get_scorer_for_metric(
+    task_config: dict[str, Any] | None, metric_name: str | None
+) -> str | None:
+    """Extract scorer name from task_config for a given metric.
+
+    Args:
+        task_config: Task configuration dict containing metrics list.
+        metric_name: The metric name to find the scorer for.
+
+    Returns:
+        The scorer name if found, None otherwise.
+    """
+    if not task_config or not metric_name:
+        return None
+    metrics = task_config.get("metrics", [])
+    for m in metrics:
+        if m.get("name") == metric_name:
+            return m.get("scorer")
+    return None
 
 
 def print_experiment_detail(experiment: Any) -> None:
@@ -60,9 +82,41 @@ def print_task_results_table(tasks: list[Any], task_filter: set[str] | None = No
     console.print(table)
 
 
+@dataclass
+class TaskDisplayInfo:
+    """Display information for a task column."""
+
+    task_name: str
+    task_hash: str
+    primary_metric: str | None
+    scorer: str | None
+
+    @property
+    def column_key(self) -> tuple[str, str]:
+        """Return the unique key for this task (name, hash)."""
+        return (self.task_name, self.task_hash)
+
+    @property
+    def column_header(self) -> str:
+        """Build the column header with metric/scorer info."""
+        # Build metric/scorer part
+        if self.primary_metric and self.scorer:
+            metric_part = f" [dim][{self.primary_metric}:{self.scorer}][/dim]"
+        elif self.primary_metric:
+            metric_part = f" [dim][{self.primary_metric}][/dim]"
+        else:
+            metric_part = ""
+
+        # Build hash part
+        short_hash = self.task_hash[:4] if self.task_hash else ""
+        hash_part = f" [dim]({short_hash})[/dim]" if short_hash else ""
+
+        return f"{self.task_name}{metric_part}{hash_part}"
+
+
 def _build_model_task_scores(
     experiments: list[Any], task_filter: set[str] | None = None
-) -> tuple[list[str], dict[str, dict[str, float | None]], dict[str, str]]:
+) -> tuple[list[TaskDisplayInfo], dict[str, dict[tuple[str, str], float | None]]]:
     """Build model-task score mapping from experiments.
 
     Args:
@@ -70,17 +124,18 @@ def _build_model_task_scores(
         task_filter: Optional set of task names to include.
 
     Returns:
-        Tuple of (sorted_tasks, model_scores, task_hashes) where model_scores maps
-        model_key -> task_name -> score, and task_hashes maps task_name -> short_hash.
+        Tuple of (task_infos, model_scores) where:
+        - task_infos: List of TaskDisplayInfo for each unique (task_name, task_hash)
+        - model_scores: Maps model_key -> (task_name, task_hash) -> score
     """
-    all_tasks: set[str] = set()
-    model_scores: dict[str, dict[str, float | None]] = {}
-    task_hashes: dict[str, str] = {}
+    # Track unique tasks by (task_name, task_hash)
+    task_info_map: dict[tuple[str, str], TaskDisplayInfo] = {}
+    model_scores: dict[str, dict[tuple[str, str], float | None]] = {}
 
     for exp in experiments:
         model_key = exp.model_name
         if exp.model_hash:
-            model_key += f" [dim]({exp.model_hash[-4:]})[/dim]"
+            model_key += f" [dim]({exp.model_hash[:4]})[/dim]"
 
         if model_key not in model_scores:
             model_scores[model_key] = {}
@@ -88,14 +143,27 @@ def _build_model_task_scores(
         for task in exp.tasks:
             if task_filter and task.task_name not in task_filter:
                 continue
-            all_tasks.add(task.task_name)
-            # Keep the latest score if we see duplicates
-            model_scores[model_key][task.task_name] = task.primary_score
-            # Store task hash (use latest if multiple)
-            if task.task_hash:
-                task_hashes[task.task_name] = task.task_hash[-4:]
 
-    return sorted(all_tasks), model_scores, task_hashes
+            task_hash = task.task_hash or ""
+            task_key = (task.task_name, task_hash)
+
+            # Build task display info if not already seen
+            if task_key not in task_info_map:
+                scorer = _get_scorer_for_metric(task.task_config, task.primary_metric)
+                task_info_map[task_key] = TaskDisplayInfo(
+                    task_name=task.task_name,
+                    task_hash=task_hash,
+                    primary_metric=task.primary_metric,
+                    scorer=scorer,
+                )
+
+            # Store score for this specific (task_name, task_hash)
+            model_scores[model_key][task_key] = task.primary_score
+
+    # Sort by (task_name, task_hash) for consistent ordering
+    sorted_task_infos = sorted(task_info_map.values(), key=lambda t: t.column_key)
+
+    return sorted_task_infos, model_scores
 
 
 def print_task_comparison_matrix(
@@ -107,9 +175,9 @@ def print_task_comparison_matrix(
         experiments: List of experiment results.
         task_filter: Optional set of task names to include.
     """
-    sorted_tasks, model_scores, task_hashes = _build_model_task_scores(experiments, task_filter)
+    task_infos, model_scores = _build_model_task_scores(experiments, task_filter)
 
-    if not sorted_tasks:
+    if not task_infos:
         console.print("[dim]No matching tasks found.[/dim]")
         return
 
@@ -117,18 +185,15 @@ def print_task_comparison_matrix(
     table = Table(title="Results")
     table.add_column("Model", style="cyan")
 
-    for task_name in sorted_tasks:
-        # Include short hash in column header if available (dimmed)
-        short_hash = task_hashes.get(task_name)
-        header = f"{task_name} [dim]({short_hash})[/dim]" if short_hash else task_name
-        table.add_column(header, justify="right")
+    for task_info in task_infos:
+        table.add_column(task_info.column_header, justify="right")
 
     # Add rows for each model
     for model_key in sorted(model_scores.keys()):
         scores = model_scores[model_key]
         row = [model_key]
-        for task_name in sorted_tasks:
-            score = scores.get(task_name)
+        for task_info in task_infos:
+            score = scores.get(task_info.column_key)
             if score is not None:
                 row.append(f"{score:.4f}")
             else:
@@ -186,7 +251,7 @@ def print_experiment_summary(experiments: list[Any]) -> None:
         table.add_row("", "")  # Spacer
         table.add_row("Models", f"[dim]({len(exp_group)} total)[/dim]")
         for exp in exp_group:
-            hash_str = f"[dim]({exp.model_hash[:8]})[/dim]" if exp.model_hash else ""
+            hash_str = f"[dim]({exp.model_hash[:4]})[/dim]" if exp.model_hash else ""
             table.add_row("", f"  {exp.model_name} {hash_str}")
 
         # Tasks section - collect unique tasks across all models
@@ -201,7 +266,7 @@ def print_experiment_summary(experiments: list[Any]) -> None:
             table.add_row("Tasks", f"[dim]({len(tasks_seen)} total)[/dim]")
             for task_name in sorted(tasks_seen.keys()):
                 task_hash = tasks_seen[task_name]
-                hash_str = f"[dim]({task_hash[:8]})[/dim]" if task_hash else ""
+                hash_str = f"[dim]({task_hash[:4]})[/dim]" if task_hash else ""
                 table.add_row("", f"  {task_name} {hash_str}")
 
         console.print(table)

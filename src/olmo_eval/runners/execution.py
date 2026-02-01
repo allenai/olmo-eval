@@ -11,7 +11,7 @@ from olmo_eval.core.types import Response, SamplingParams
 from olmo_eval.evals.tasks import AgentTask, get_task
 from olmo_eval.inference import InferenceProvider
 from olmo_eval.runners.builders import build_predictions, build_requests
-from olmo_eval.runners.common import get_metric_metadata, serialize_sampling_params
+from olmo_eval.runners.common import get_metric_metadata
 from olmo_eval.runners.types import TaskResult
 
 logger = get_logger("runners.execution")
@@ -166,18 +166,7 @@ def run_agent_task_impl(
 
         return TaskResult(
             spec=spec,
-            config={
-                "name": task.config.name,
-                "split": task.config.split.value,
-                "limit": task.config.limit,
-                "agent_settings": {
-                    "model": effective_model,
-                    "model_url": effective_url,
-                    "max_turns": max_turns,
-                    "max_concurrency": max_concurrency,
-                    "temperature": temperature,
-                },
-            },
+            config=task.config.to_dict(),
             num_instances=len(instances),
             metrics=metrics,
             duration_seconds=duration,
@@ -405,17 +394,9 @@ def run_task_impl(
         # Extract metric metadata
         primary_metric_name, metric_scorers = get_metric_metadata(task)
 
-        # Use existing_params (the actual params used for generation)
         return TaskResult(
             spec=spec,
-            config={
-                "name": task.config.name,
-                "split": task.config.split.value,
-                "num_fewshot": task.config.num_fewshot,
-                "fewshot_seed": task.config.fewshot_seed,
-                "limit": task.config.limit,
-                "sampling_params": serialize_sampling_params(existing_params),
-            },
+            config=task.config.to_dict(),
             num_instances=len(instances),
             metrics=metrics,
             duration_seconds=duration,
