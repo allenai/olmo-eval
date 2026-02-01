@@ -484,7 +484,7 @@ def _handle_group_creation(launcher, effective_groups: list[str], dry_run: bool)
                 console.print("[red]Aborted.[/red] Cannot launch without required groups.")
                 raise SystemExit(1) from None
 
-            workspace_obj = launcher.beaker.workspace.get(launcher.workspace)
+            workspace_obj = launcher.beaker.workspace.get(launcher._workspace)
             for grp in missing_groups:
                 try:
                     beaker_group = launcher.beaker.group.create(name=grp, workspace=workspace_obj)
