@@ -37,7 +37,7 @@ models=(
 for m in "${models[@]}"; do
   # Use the model name as the run id / unique suffix
   RUN_ID="${m}"
-  job_name="c4-ppl-${RUN_ID}"
+  job_name="c4-${RUN_ID}"
 
   olmo-eval beaker launch \
     -n "${job_name}" \
@@ -46,5 +46,5 @@ for m in "${models[@]}"; do
     -c aus80g \
     -w ai2/perplexity-evals \
     --budget ai2/oe-base \
-    --priority high
+    --priority high &
 done
