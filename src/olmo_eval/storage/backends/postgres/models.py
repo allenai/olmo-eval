@@ -70,6 +70,12 @@ class Experiment(Base):
     # Flexible storage (JSONB for efficient querying)
     metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSONB)
 
+    # Duration metrics
+    experiment_duration_seconds: Mapped[float | None] = mapped_column(
+        DOUBLE_PRECISION, nullable=True
+    )
+    provider_init_seconds: Mapped[dict[str, float] | None] = mapped_column(JSONB, nullable=True)
+
     # Audit timestamp
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default="NOW()"
@@ -136,6 +142,9 @@ class TaskResult(Base):
 
     # Agent evaluation metrics (JSONB for nested structure)
     agent_metrics: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+
+    # Duration tracking
+    duration_seconds: Mapped[float | None] = mapped_column(DOUBLE_PRECISION, nullable=True)
 
     # Relationships
     experiment: Mapped[Experiment] = relationship("Experiment", back_populates="task_results")

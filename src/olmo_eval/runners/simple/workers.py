@@ -28,6 +28,7 @@ def instance_worker_process(
     max_model_len: int | None = None,
     load_format: str | None = None,
     extra_loader_config: dict[str, Any] | None = None,
+    init_times: dict[str, float] | None = None,
 ) -> None:
     """Worker that collects all items and processes them at once.
 
@@ -77,7 +78,10 @@ def instance_worker_process(
             provider_type, model_name, tokenizer=tokenizer, worker_id=worker_id, **engine_kwargs
         )
 
-        worker_logger.info(f"Engine ready ({time.time() - init_start:.1f}s)")
+        init_time = time.time() - init_start
+        worker_logger.info(f"Engine ready ({init_time:.1f}s)")
+        if init_times is not None:
+            init_times[worker_id] = init_time
 
         # Collect all items from queue
         items: list[QueueItem] = []
@@ -122,6 +126,7 @@ def streaming_worker_process(
     max_model_len: int | None = None,
     load_format: str | None = None,
     extra_loader_config: dict[str, Any] | None = None,
+    init_times: dict[str, float] | None = None,
 ) -> None:
     """Worker using async streaming for true continuous batching.
 
@@ -167,6 +172,7 @@ def streaming_worker_process(
                 max_model_len,
                 load_format,
                 extra_loader_config,
+                init_times,
             )
         )
         worker_logger.info("Processing complete")
@@ -198,6 +204,7 @@ async def _streaming_worker_async(
     max_model_len: int | None = None,
     load_format: str | None = None,
     extra_loader_config: dict[str, Any] | None = None,
+    init_times: dict[str, float] | None = None,
 ) -> None:
     """Async implementation of streaming worker.
 
@@ -229,7 +236,10 @@ async def _streaming_worker_async(
         **engine_kwargs,
     )
 
-    worker_logger.info(f"Async engine ready ({time.time() - init_start:.1f}s)")
+    init_time = time.time() - init_start
+    worker_logger.info(f"Async engine ready ({init_time:.1f}s)")
+    if init_times is not None:
+        init_times[worker_id] = init_time
 
     # Track request_id -> QueueItem mapping
     pending_requests: dict[str, QueueItem] = {}

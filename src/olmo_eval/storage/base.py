@@ -97,6 +97,8 @@ def convert_runner_results(
     tags: list[str] | None = None,
     model_path: str | None = None,
     experiment_group: str | None = None,
+    experiment_duration_seconds: float | None = None,
+    provider_init_seconds: dict[str, float] | None = None,
 ) -> EvalResult:
     """Convert EvalRunner results dict to EvalResult.
 
@@ -161,6 +163,7 @@ def convert_runner_results(
                 s3_metrics_key=s3_metrics_key,
                 s3_predictions_key=s3_predictions_key,
                 s3_requests_key=s3_requests_key,
+                duration_seconds=task_data.get("duration_seconds"),
             )
         )
 
@@ -182,4 +185,6 @@ def convert_runner_results(
         metadata=results.get("metadata"),
         model_path=model_path,
         experiment_group=experiment_group,
+        experiment_duration_seconds=experiment_duration_seconds,
+        provider_init_seconds=provider_init_seconds,
     )

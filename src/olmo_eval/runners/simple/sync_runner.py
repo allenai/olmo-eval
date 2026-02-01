@@ -112,7 +112,12 @@ class SyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
     def run(self) -> dict[str, Any]:
         """Execute the evaluation run."""
+        import time
+
         from olmo_eval.evals.tasks import AgentTask, get_task
+
+        # Track experiment start time
+        experiment_start = time.time()
 
         model_config = get_model_config(self.model_name, **self.model_overrides)
 
@@ -151,6 +156,9 @@ class SyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             extra_kwargs["load_format"] = self.model_overrides["load_format"]
         if self.model_overrides.get("extra_loader_config"):
             extra_kwargs["model_loader_extra_config"] = self.model_overrides["extra_loader_config"]
+
+        # Track provider init time
+        provider_init_start = time.time()
         provider = create_provider(
             provider_type,
             model_config.model,
@@ -160,6 +168,7 @@ class SyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             dtype=model_config.dtype,
             **extra_kwargs,
         )
+        provider_init_time = time.time() - provider_init_start
 
         from olmo_eval.runners.mixins import get_model_display_name
 
@@ -267,6 +276,12 @@ class SyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         # Log summary of all scores
         self._log_summary(results)
 
+        # Compute experiment duration
+        experiment_duration_seconds = time.time() - experiment_start
+
+        # Build provider init times dict
+        provider_init_seconds = {display_model_name: provider_init_time}
+
         # Compute experiment_id and model_hash upfront for both metrics.json and storage
         from olmo_eval.core.types import compute_model_hash
 
@@ -280,6 +295,8 @@ class SyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             experiment_name=self.experiment_name,
             experiment_group=self.experiment_group,
             model_hash=model_hash,
+            experiment_duration_seconds=experiment_duration_seconds,
+            provider_init_seconds=provider_init_seconds,
         )
 
         s3_location: str | None = None
@@ -298,6 +315,8 @@ class SyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             experiment_id=experiment_id,
             model_hash=model_hash,
             s3_location=s3_location,
+            experiment_duration_seconds=experiment_duration_seconds,
+            provider_init_seconds=provider_init_seconds,
         )
 
         return results

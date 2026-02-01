@@ -435,7 +435,12 @@ class AsyncBaseRunner(AsyncRunnerMixin, BaseEvalRunner):
 
         return results_dict
 
-    def _finalize_and_save(self, results_dict: dict[str, Any]) -> dict[str, Any]:
+    def _finalize_and_save(
+        self,
+        results_dict: dict[str, Any],
+        experiment_duration_seconds: float | None = None,
+        provider_init_seconds: dict[str, float] | None = None,
+    ) -> dict[str, Any]:
         """Log summary, write metrics, upload to S3, and save results."""
         from olmo_eval.core.types import compute_model_hash
 
@@ -453,6 +458,8 @@ class AsyncBaseRunner(AsyncRunnerMixin, BaseEvalRunner):
             experiment_id=experiment_id,
             experiment_name=self.experiment_name,
             experiment_group=self.experiment_group,
+            experiment_duration_seconds=experiment_duration_seconds,
+            provider_init_seconds=provider_init_seconds,
         )
 
         for model_name, model_data in results_dict.get("models", {}).items():
@@ -469,7 +476,11 @@ class AsyncBaseRunner(AsyncRunnerMixin, BaseEvalRunner):
             model_data["_experiment_id"] = experiment_id
             model_data["_s3_location"] = s3_location
 
-        self._save_results(results_dict)
+        self._save_results(
+            results_dict,
+            experiment_duration_seconds=experiment_duration_seconds,
+            provider_init_seconds=provider_init_seconds,
+        )
 
         return results_dict
 

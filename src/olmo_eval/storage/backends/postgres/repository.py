@@ -59,6 +59,8 @@ class ExperimentRepository:
             model_path=eval_result.model_path,
             metadata_=eval_result.metadata,
             experiment_group=experiment_group,
+            experiment_duration_seconds=eval_result.experiment_duration_seconds,
+            provider_init_seconds=eval_result.provider_init_seconds,
         )
         self.session.add(experiment)
         self.session.flush()  # Get the auto-generated id
@@ -79,6 +81,7 @@ class ExperimentRepository:
                 s3_predictions_key=task_data.s3_predictions_key,
                 s3_requests_key=task_data.s3_requests_key,
                 agent_metrics=task_data.agent.to_dict() if task_data.agent else None,
+                duration_seconds=task_data.duration_seconds,
             )
             self.session.add(task_result)
 
@@ -248,6 +251,7 @@ class ExperimentRepository:
                 s3_predictions_key=task.s3_predictions_key,
                 s3_requests_key=task.s3_requests_key,
                 agent=AgentMetrics.from_dict(task.agent_metrics) if task.agent_metrics else None,
+                duration_seconds=task.duration_seconds,
             )
             for task in experiment.task_results
         ]
@@ -270,6 +274,8 @@ class ExperimentRepository:
             metadata=experiment.metadata_,
             model_path=experiment.model_path,
             experiment_group=experiment.experiment_group,
+            experiment_duration_seconds=experiment.experiment_duration_seconds,
+            provider_init_seconds=experiment.provider_init_seconds,
         )
 
 

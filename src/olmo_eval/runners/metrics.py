@@ -27,6 +27,8 @@ def build_single_model_metrics(
     experiment_name: str | None = None,
     experiment_group: str | None = None,
     model_hash: str | None = None,
+    experiment_duration_seconds: float | None = None,
+    provider_init_seconds: dict[str, float] | None = None,
 ) -> MetricsOutput:
     """Build metrics output for single-model format.
 
@@ -36,6 +38,8 @@ def build_single_model_metrics(
         experiment_name: Human-readable experiment name.
         experiment_group: Group for related experiments.
         model_hash: Hash of model config.
+        experiment_duration_seconds: Total time for the experiment.
+        provider_init_seconds: Dict mapping model name to provider init time.
 
     Returns:
         MetricsOutput instance ready for serialization.
@@ -99,6 +103,8 @@ def build_single_model_metrics(
         experiment_id=experiment_id,
         experiment_name=experiment_name,
         experiment_group=experiment_group,
+        experiment_duration_seconds=experiment_duration_seconds,
+        provider_init_seconds=provider_init_seconds,
     )
 
 
@@ -107,6 +113,8 @@ def build_multi_model_metrics(
     experiment_id: str | None = None,
     experiment_name: str | None = None,
     experiment_group: str | None = None,
+    experiment_duration_seconds: float | None = None,
+    provider_init_seconds: dict[str, float] | None = None,
 ) -> MetricsOutput:
     """Build metrics output for multi-model format.
 
@@ -115,6 +123,8 @@ def build_multi_model_metrics(
         experiment_id: Unique ID for this experiment run.
         experiment_name: Human-readable experiment name.
         experiment_group: Group for related experiments.
+        experiment_duration_seconds: Total time for the experiment.
+        provider_init_seconds: Dict mapping model name to provider init time.
 
     Returns:
         MetricsOutput instance ready for serialization.
@@ -187,6 +197,8 @@ def build_multi_model_metrics(
         experiment_id=experiment_id,
         experiment_name=experiment_name,
         experiment_group=experiment_group,
+        experiment_duration_seconds=experiment_duration_seconds,
+        provider_init_seconds=provider_init_seconds,
     )
 
 
@@ -198,6 +210,8 @@ def write_metrics_json(
     experiment_name: str | None = None,
     experiment_group: str | None = None,
     model_hash: str | None = None,
+    experiment_duration_seconds: float | None = None,
+    provider_init_seconds: dict[str, float] | None = None,
 ) -> None:
     """Write metrics.json to the output directory.
 
@@ -210,6 +224,8 @@ def write_metrics_json(
         experiment_name: Human-readable experiment name.
         experiment_group: Group for related experiments.
         model_hash: Hash of model config (single-model only).
+        experiment_duration_seconds: Total time for the experiment.
+        provider_init_seconds: Dict mapping model name to provider init time.
     """
     metrics_file = os.path.join(output_dir, "metrics.json")
 
@@ -219,6 +235,8 @@ def write_metrics_json(
             experiment_id=experiment_id,
             experiment_name=experiment_name,
             experiment_group=experiment_group,
+            experiment_duration_seconds=experiment_duration_seconds,
+            provider_init_seconds=provider_init_seconds,
         )
     else:
         metrics_output = build_single_model_metrics(
@@ -227,6 +245,8 @@ def write_metrics_json(
             experiment_name=experiment_name,
             experiment_group=experiment_group,
             model_hash=model_hash,
+            experiment_duration_seconds=experiment_duration_seconds,
+            provider_init_seconds=provider_init_seconds,
         )
 
     os.makedirs(output_dir, exist_ok=True)

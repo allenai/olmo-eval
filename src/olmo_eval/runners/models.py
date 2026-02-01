@@ -118,6 +118,9 @@ class MetricsOutput:
     experiment_id: str | None = None
     experiment_name: str | None = None
     experiment_group: str | None = None
+    # Duration metrics
+    experiment_duration_seconds: float | None = None
+    provider_init_seconds: dict[str, float] | None = None  # model_name -> init_time
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dict for JSON serialization, excluding None values."""
@@ -134,4 +137,8 @@ class MetricsOutput:
             result["experiment_name"] = self.experiment_name
         if self.experiment_group is not None:
             result["experiment_group"] = self.experiment_group
+        if self.experiment_duration_seconds is not None:
+            result["experiment_duration_seconds"] = self.experiment_duration_seconds
+        if self.provider_init_seconds is not None:
+            result["provider_init_seconds"] = self.provider_init_seconds
         return result

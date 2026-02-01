@@ -72,6 +72,11 @@ class AsyncEvalRunner(AsyncBaseRunner):
 
     async def run_async(self) -> dict[str, Any]:
         """Execute evaluations using instance-level queuing with multi-model support."""
+        import time
+
+        # Track experiment start time
+        experiment_start = time.time()
+
         # Prepare tasks
         expanded_tasks, trackers, model_items, model_configs = self._prepare_tasks()
 
@@ -89,6 +94,10 @@ class AsyncEvalRunner(AsyncBaseRunner):
             self._setup_workers(model_items, model_configs, ctx)
         )
         total_gpus = self._get_total_gpus()
+
+        # Create shared dict for tracking worker init times
+        manager = ctx.Manager()
+        init_times: dict[str, float] = manager.dict()
 
         # Shuffle and enqueue items per model
         for model_name, items in model_items.items():
@@ -138,6 +147,7 @@ class AsyncEvalRunner(AsyncBaseRunner):
                         model_config.max_model_len,
                         effective_load_format,
                         effective_extra_loader_config,
+                        init_times,
                     ),
                 )
                 worker.start()
@@ -155,6 +165,9 @@ class AsyncEvalRunner(AsyncBaseRunner):
         wait_for_workers_ready(workers, result_queue, startup_timeout=60.0)
         console.print("[dim]Workers initialized successfully[/dim]")
 
+        # Capture init times from workers (convert manager dict to regular dict)
+        provider_init_seconds = dict(init_times)
+
         # Process results
         results = await self._process_results(
             trackers, result_queue, model_queues, workers, total_pairs, total_instances
@@ -167,6 +180,13 @@ class AsyncEvalRunner(AsyncBaseRunner):
                 worker.terminate()
                 worker.join()
 
+        # Compute experiment duration
+        experiment_duration_seconds = time.time() - experiment_start
+
         # Aggregate and save results
         results_dict = self._aggregate_results(results, expanded_tasks, model_configs, "vllm")
-        return self._finalize_and_save(results_dict)
+        return self._finalize_and_save(
+            results_dict,
+            experiment_duration_seconds=experiment_duration_seconds,
+            provider_init_seconds=provider_init_seconds,
+        )

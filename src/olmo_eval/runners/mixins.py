@@ -149,6 +149,8 @@ class RunnerResultsMixin:
         experiment_id: str | None = None,
         model_hash: str | None = None,
         s3_location: str | None = None,
+        experiment_duration_seconds: float | None = None,
+        provider_init_seconds: dict[str, float] | None = None,
     ) -> None:
         """Save results to all configured storage backends.
 
@@ -167,6 +169,8 @@ class RunnerResultsMixin:
             s3_location=s3_location,
             experiment_name=runner_experiment_name,
             experiment_group=runner_experiment_group,
+            experiment_duration_seconds=experiment_duration_seconds,
+            provider_init_seconds=provider_init_seconds,
         )
 
     def _upload_to_s3(
@@ -207,6 +211,8 @@ class RunnerResultsMixin:
         experiment_name: str | None = None,
         experiment_group: str | None = None,
         model_hash: str | None = None,
+        experiment_duration_seconds: float | None = None,
+        provider_init_seconds: dict[str, float] | None = None,
     ) -> None:
         """Write metrics.json.
 
@@ -220,6 +226,8 @@ class RunnerResultsMixin:
             experiment_name=experiment_name,
             experiment_group=experiment_group,
             model_hash=model_hash,
+            experiment_duration_seconds=experiment_duration_seconds,
+            provider_init_seconds=provider_init_seconds,
         )
 
     def _build_single_model_metrics(
@@ -229,6 +237,8 @@ class RunnerResultsMixin:
         experiment_name: str | None = None,
         experiment_group: str | None = None,
         model_hash: str | None = None,
+        experiment_duration_seconds: float | None = None,
+        provider_init_seconds: dict[str, float] | None = None,
     ) -> MetricsOutput:
         """Build metrics output for single-model format.
 
@@ -240,6 +250,8 @@ class RunnerResultsMixin:
             experiment_name=experiment_name,
             experiment_group=experiment_group,
             model_hash=model_hash,
+            experiment_duration_seconds=experiment_duration_seconds,
+            provider_init_seconds=provider_init_seconds,
         )
 
     def _build_multi_model_metrics(
@@ -248,6 +260,8 @@ class RunnerResultsMixin:
         experiment_id: str | None = None,
         experiment_name: str | None = None,
         experiment_group: str | None = None,
+        experiment_duration_seconds: float | None = None,
+        provider_init_seconds: dict[str, float] | None = None,
     ) -> MetricsOutput:
         """Build metrics output for multi-model format.
 
@@ -258,6 +272,8 @@ class RunnerResultsMixin:
             experiment_id=experiment_id,
             experiment_name=experiment_name,
             experiment_group=experiment_group,
+            experiment_duration_seconds=experiment_duration_seconds,
+            provider_init_seconds=provider_init_seconds,
         )
 
     def _report_task_completion(self, model_name: str, result: TaskResult) -> None:

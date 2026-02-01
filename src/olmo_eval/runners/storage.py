@@ -128,6 +128,8 @@ def save_results(
     s3_location: str | None = None,
     experiment_name: str | None = None,
     experiment_group: str | None = None,
+    experiment_duration_seconds: float | None = None,
+    provider_init_seconds: dict[str, float] | None = None,
 ) -> None:
     """Save results to all configured storage backends.
 
@@ -144,6 +146,8 @@ def save_results(
         s3_location: S3 location where results were uploaded (for single-model only).
         experiment_name: Human-readable experiment name.
         experiment_group: Group for related experiments.
+        experiment_duration_seconds: Total time for the experiment.
+        provider_init_seconds: Dict mapping model name to provider init time.
     """
     if not storages:
         logger.info("No storage backend configured; skipping results save.")
@@ -218,6 +222,8 @@ def save_results(
                 revision=revision,
                 model_path=model_results.get("model_path"),
                 experiment_group=effective_experiment_group,
+                experiment_duration_seconds=experiment_duration_seconds,
+                provider_init_seconds=provider_init_seconds,
             )
             logger.info(f"Converted results for {model_name}, saving to {len(storages)} backend(s)")
         except Exception as e:

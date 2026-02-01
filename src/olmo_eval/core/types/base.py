@@ -221,6 +221,8 @@ class StoredTaskResult:
     s3_predictions_key: str | None = None
     s3_requests_key: str | None = None
     agent: AgentMetrics | None = None
+    # Duration tracking
+    duration_seconds: float | None = None
 
 
 @dataclass
@@ -263,6 +265,9 @@ class EvalResult:
     model_path: str | None = None
     # Experiment group for grouping related experiments
     experiment_group: str | None = None
+    # Duration metrics
+    experiment_duration_seconds: float | None = None
+    provider_init_seconds: dict[str, float] | None = None  # model_name -> init_time
 
     def __post_init__(self) -> None:
         """Compute model_hash from model_config if not provided."""
