@@ -34,10 +34,13 @@ def _unflatten_metrics(flat_metrics: dict[str, float]) -> dict[str, dict[str, fl
 
     Converts {"metric:scorer": value} to {metric: {scorer: value}}.
     """
+    from olmo_eval.runners.common import parse_metric_key
+
     result: dict[str, dict[str, float]] = {}
     for key, value in flat_metrics.items():
-        if ":" in key:
-            metric_name, scorer_name = key.split(":", 1)
+        parsed = parse_metric_key(key)
+        if parsed:
+            metric_name, scorer_name = parsed
         else:
             metric_name, scorer_name = key, "default"
         if metric_name not in result:

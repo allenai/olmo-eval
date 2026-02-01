@@ -134,6 +134,58 @@ def compute_task_hash(config: dict) -> str:
     return hashlib.sha256(config_str.encode()).hexdigest()[:16]
 
 
+def make_metric_key(metric_name: str, scorer_name: str) -> str:
+    """Create a metric key in "metric:scorer" format.
+
+    Args:
+        metric_name: The metric name (e.g., "accuracy").
+        scorer_name: The scorer name (e.g., "exact_match").
+
+    Returns:
+        Combined key in "metric:scorer" format.
+    """
+    return f"{metric_name}:{scorer_name}"
+
+
+def parse_metric_key(key: str) -> tuple[str, str] | None:
+    """Parse a metric key in "metric:scorer" format.
+
+    Args:
+        key: The combined key (e.g., "accuracy:exact_match").
+
+    Returns:
+        Tuple of (metric_name, scorer_name), or None if invalid format.
+    """
+    if not key or ":" not in key:
+        return None
+    parts = key.split(":", 1)
+    return (parts[0], parts[1])
+
+
+def extract_score_from_metrics(
+    metrics: dict[str, dict[str, float]] | None,
+    primary_metric: str | None,
+) -> float | None:
+    """Extract a score from nested metrics using a primary_metric identifier.
+
+    Args:
+        metrics: Nested metrics dict {metric_name: {scorer_name: score}}.
+        primary_metric: The metric identifier in "metric:scorer" format.
+
+    Returns:
+        The score value, or None if not found.
+    """
+    if not metrics or not primary_metric:
+        return None
+    parsed = parse_metric_key(primary_metric)
+    if not parsed:
+        return None
+    metric_name, scorer_name = parsed
+    if metric_name in metrics and scorer_name in metrics[metric_name]:
+        return metrics[metric_name][scorer_name]
+    return None
+
+
 def get_primary_metric(
     metrics: dict[str, dict[str, float]],
     preferred: str | None = None,
@@ -159,10 +211,12 @@ def get_primary_metric(
         return None
 
     # Use preferred if specified and present (format: "metric:scorer")
-    if preferred and ":" in preferred:
-        metric_name, scorer_name = preferred.split(":", 1)
-        if metric_name in metrics and scorer_name in metrics[metric_name]:
-            return (preferred, metrics[metric_name][scorer_name])
+    if preferred:
+        parsed = parse_metric_key(preferred)
+        if parsed:
+            metric_name, scorer_name = parsed
+            if metric_name in metrics and scorer_name in metrics[metric_name]:
+                return (preferred, metrics[metric_name][scorer_name])
 
     # Default fallback: accuracy first (with first scorer alphabetically)
     if "accuracy" in metrics:

@@ -195,12 +195,16 @@ class QueryHelper:
             return {}
 
         exp = experiments[0]
-        results = {}
+        results: dict[str, float | None] = {}
 
         for task in exp.tasks:
             if tasks and task.task_name not in tasks:
                 continue
-            results[task.task_name] = task.primary_score
+            # Extract primary score from nested metrics using primary_metric identifier
+            from olmo_eval.runners.common import extract_score_from_metrics
+
+            primary_score = extract_score_from_metrics(task.metrics, task.primary_metric)
+            results[task.task_name] = primary_score
 
         return results
 

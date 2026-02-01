@@ -284,19 +284,17 @@ def sample_eval_result():
         tasks=[
             StoredTaskResult(
                 task_name="mmlu",
-                metrics={"accuracy": 0.65},
+                metrics={"accuracy": {"exact_match": 0.65}},
                 num_instances=100,
                 task_hash="mmlu-hash-001",
-                primary_metric="accuracy",
-                primary_score=0.65,
+                primary_metric="accuracy:exact_match",
             ),
             StoredTaskResult(
                 task_name="gsm8k",
-                metrics={"exact_match": 0.58},
+                metrics={"exact_match": {"exact_match": 0.58}},
                 num_instances=50,
                 task_hash="gsm8k-hash-001",
-                primary_metric="exact_match",
-                primary_score=0.58,
+                primary_metric="exact_match:exact_match",
             ),
         ],
         experiment_name="integration-test",
@@ -321,14 +319,15 @@ def multiple_eval_results():
 
     results = []
     models = ["llama3.1-8b", "llama3.1-70b", "olmo-2-7b"]
+    # Nested metrics format: {metric_name: {scorer_name: value}}
     tasks_data = [
-        ("mmlu", {"accuracy": 0.65}, "accuracy", 0.65),
-        ("gsm8k", {"exact_match": 0.58}, "exact_match", 0.58),
-        ("arc_challenge", {"accuracy": 0.52}, "accuracy", 0.52),
+        ("mmlu", {"accuracy": {"exact_match": 0.65}}, "accuracy:exact_match"),
+        ("gsm8k", {"exact_match": {"exact_match": 0.58}}, "exact_match:exact_match"),
+        ("arc_challenge", {"accuracy": {"exact_match": 0.52}}, "accuracy:exact_match"),
     ]
 
     for i, model in enumerate(models):
-        for j, (task_name, metrics, primary_metric, primary_score) in enumerate(tasks_data):
+        for j, (task_name, metrics, primary_metric) in enumerate(tasks_data):
             results.append(
                 EvalResult(
                     experiment_id=f"run-{i}-{j}",
@@ -341,7 +340,6 @@ def multiple_eval_results():
                             metrics=metrics,
                             task_hash=f"{task_name}-hash-{i}-{j}",
                             primary_metric=primary_metric,
-                            primary_score=primary_score,
                         )
                     ],
                     experiment_name=f"test-run-{i}-{j}",

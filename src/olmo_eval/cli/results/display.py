@@ -10,28 +10,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from olmo_eval.cli.utils import console, format_timestamp
-
-
-def _extract_primary_score(
-    metrics: dict[str, dict[str, float]] | None, primary_metric: str | None
-) -> float | None:
-    """Extract primary score from nested metrics using primary_metric identifier.
-
-    Args:
-        metrics: Nested metrics dict {metric_name: {scorer_name: score}}.
-        primary_metric: The primary metric in "metric:scorer" format.
-
-    Returns:
-        The score value if found, None otherwise.
-    """
-    if not metrics or not primary_metric:
-        return None
-    if ":" not in primary_metric:
-        return None
-    metric_name, scorer_name = primary_metric.split(":", 1)
-    if metric_name in metrics and scorer_name in metrics[metric_name]:
-        return metrics[metric_name][scorer_name]
-    return None
+from olmo_eval.runners.common import extract_score_from_metrics, parse_metric_key
 
 
 def print_experiment_detail(experiment: Any) -> None:
@@ -73,7 +52,7 @@ def print_task_results_table(tasks: list[Any], task_filter: set[str] | None = No
             continue
 
         # Extract primary score from nested metrics
-        primary_score = _extract_primary_score(task.metrics, task.primary_metric)
+        primary_score = extract_score_from_metrics(task.metrics, task.primary_metric)
         score_str = f"{primary_score:.4f}" if primary_score is not None else "-"
 
         table.add_row(
@@ -153,8 +132,9 @@ def _build_model_task_scores(
             # Extract metric and scorer from primary_metric "metric:scorer" format
             metric_name = None
             scorer_name = None
-            if task.primary_metric and ":" in task.primary_metric:
-                metric_name, scorer_name = task.primary_metric.split(":", 1)
+            parsed = parse_metric_key(task.primary_metric) if task.primary_metric else None
+            if parsed:
+                metric_name, scorer_name = parsed
             elif task.primary_metric:
                 metric_name = task.primary_metric
 
@@ -168,7 +148,7 @@ def _build_model_task_scores(
                 )
 
             # Extract primary score from nested metrics
-            primary_score = _extract_primary_score(task.metrics, task.primary_metric)
+            primary_score = extract_score_from_metrics(task.metrics, task.primary_metric)
             model_scores[model_key][task_key] = primary_score
 
     # Sort by (task_name, task_hash) for consistent ordering

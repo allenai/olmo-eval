@@ -157,22 +157,23 @@ def task_comparison_to_csv(experiments: list[Any], task_filter: set[str] | None 
         experiments: List of experiment results.
         task_filter: Optional set of task names to include.
     """
-    sorted_tasks, model_scores, _ = _build_model_task_scores(experiments, task_filter)
+    task_infos, model_scores = _build_model_task_scores(experiments, task_filter)
 
-    if not sorted_tasks:
+    if not task_infos:
         return
 
     writer = csv.writer(sys.stdout)
 
-    # Header row
-    writer.writerow(["model"] + sorted_tasks)
+    # Header row - use task names from task_infos
+    sorted_task_names = [t.task_name for t in task_infos]
+    writer.writerow(["model"] + sorted_task_names)
 
     # Data rows
     for model_key in sorted(model_scores.keys()):
         scores = model_scores[model_key]
         row = [model_key]
-        for task_name in sorted_tasks:
-            score = scores.get(task_name)
+        for task_info in task_infos:
+            score = scores.get(task_info.column_key)
             row.append(f"{score:.4f}" if score is not None else "")
         writer.writerow(row)
 
