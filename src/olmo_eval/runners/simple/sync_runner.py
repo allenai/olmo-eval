@@ -67,6 +67,11 @@ class SyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
     save_predictions: bool = True
     save_requests: bool = True
 
+    # Instance inspection options
+    inspect_instance: bool = False
+    inspect_formatted: bool = False
+    inspect_tokens: bool = False
+
     def validate(self) -> None:
         """Validate all inputs before running.
 
@@ -174,6 +179,57 @@ class SyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         }
 
         for spec in expanded_tasks:
+            # Optionally inspect first instance before running
+            if self.inspect_instance or self.inspect_formatted or self.inspect_tokens:
+                from olmo_eval.core.inspection import (
+                    format_with_chat_template,
+                    inspect_formatted_request,
+                    inspect_instance,
+                    inspect_tokens,
+                    tokenize_request,
+                )
+                from olmo_eval.evals.tasks import get_task
+
+                task = get_task(spec)
+                first_instance = next(iter(task.instances), None)
+                if first_instance:
+                    if self.inspect_instance:
+                        console.print()
+                        inspect_instance(first_instance, console=console, task_name=spec, index=0)
+
+                    # Get tokenizer from provider for formatted/token inspection
+                    if self.inspect_formatted or self.inspect_tokens:
+                        tokenizer = self._get_provider_tokenizer(provider)
+                        if tokenizer is None:
+                            console.print(
+                                "[yellow]Warning:[/yellow] Cannot inspect formatted/tokens - "
+                                "tokenizer not available from provider"
+                            )
+                        else:
+                            request = task.format_request(first_instance)
+                            if self.inspect_formatted:
+                                try:
+                                    formatted_prompt = format_with_chat_template(request, tokenizer)
+                                    inspect_formatted_request(
+                                        formatted_prompt,
+                                        console=console,
+                                        title=f"[bold]Formatted Prompt[/bold] ({spec})",
+                                    )
+                                except Exception as e:
+                                    console.print(f"[red]Error formatting request:[/red] {e}")
+
+                            if self.inspect_tokens:
+                                try:
+                                    tokens = tokenize_request(request, tokenizer)
+                                    inspect_tokens(
+                                        tokens,
+                                        tokenizer,
+                                        console=console,
+                                        title=f"[bold]Token IDs[/bold] ({spec})",
+                                    )
+                                except Exception as e:
+                                    console.print(f"[red]Error tokenizing request:[/red] {e}")
+
             console.print(f"\n[bold blue]Running {spec}...[/bold blue]")
             task_result = self._run_task(spec, provider)
             task_data = task_result.to_dict(include_predictions=True)
@@ -264,3 +320,7 @@ class SyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             raise RuntimeError(f"Task {spec} failed: {result.error}")
 
         return result
+
+    def _get_provider_tokenizer(self, provider: InferenceProvider) -> Any:
+        """Get tokenizer from provider."""
+        return provider.get_tokenizer()

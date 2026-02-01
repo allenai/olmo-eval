@@ -84,6 +84,7 @@ dev = [
     "ty>=0.0.10",
     "pre-commit>=4.0.0",
     "olmo-eval-internal[storage]",
+    "jinja2>=3.1.6",
 ]
 
 # ty file-based overrides for optional dependencies (inference providers use vllm/litellm)

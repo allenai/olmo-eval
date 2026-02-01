@@ -153,6 +153,10 @@ class VLLMProvider(InferenceProvider):
             self._max_length = self.llm.llm_engine.model_config.max_model_len
         return self._max_length
 
+    def get_tokenizer(self) -> Any:
+        """Get the tokenizer for this provider."""
+        return self.llm.get_tokenizer()
+
     def _encode_pair(self, context: str, continuation: str) -> tuple[list[int], list[int]]:
         """Encode context and continuation separately (robust to non-additive tokenization).
 

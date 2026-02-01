@@ -55,6 +55,9 @@ class LaunchConfig:
     debug_provider: bool = False
     save_predictions: bool = True
     save_requests: bool = True
+    inspect_instance: bool = False
+    inspect_formatted: bool = False
+    inspect_tokens: bool = False
 
     # Credential injection
     inject_aws_credentials: bool = False
@@ -241,6 +244,9 @@ class LaunchConfigLoader:
             debug_provider=self.cli_args.get("debug_provider", False),
             save_predictions=self.cli_args.get("save_predictions", True),
             save_requests=self.cli_args.get("save_requests", True),
+            inspect_instance=self.cli_args.get("inspect_instance", False),
+            inspect_formatted=self.cli_args.get("inspect_formatted", False),
+            inspect_tokens=self.cli_args.get("inspect_tokens", False),
         )
 
     def _validate_required(

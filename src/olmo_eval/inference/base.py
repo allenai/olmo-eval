@@ -1,6 +1,7 @@
 """Inference provider base class and protocol definition."""
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 from olmo_eval.core.types import LMOutput, LMRequest, SamplingParams
 
@@ -59,3 +60,11 @@ class InferenceProvider(ABC):
     def _default_sampling_params(self, sampling_params: SamplingParams | None) -> SamplingParams:
         """Return sampling params with defaults applied."""
         return sampling_params or SamplingParams()
+
+    def get_tokenizer(self) -> Any:
+        """Get the tokenizer for this provider.
+
+        Returns:
+            The tokenizer instance if available, None otherwise.
+        """
+        return None  # Default: no tokenizer

@@ -255,6 +255,12 @@ class JobConfigAssembler:
             command.append("--no-save-predictions")
         if not self.config.save_requests:
             command.append("--no-save-requests")
+        if self.config.inspect_instance:
+            command.append("--inspect-instance")
+        if self.config.inspect_formatted:
+            command.append("--inspect-formatted")
+        if self.config.inspect_tokens:
+            command.append("--inspect-tokens")
 
         return command
 

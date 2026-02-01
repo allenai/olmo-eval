@@ -150,6 +150,21 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
     default=True,
     help="Save per-instance requests to JSONL (default: enabled)",
 )
+@click.option(
+    "--inspect-instance",
+    is_flag=True,
+    help="Print the first instance of each task before running evaluation",
+)
+@click.option(
+    "--inspect-formatted",
+    is_flag=True,
+    help="Show formatted prompt (after template applied) before evaluation",
+)
+@click.option(
+    "--inspect-tokens",
+    is_flag=True,
+    help="Show token array before evaluation",
+)
 def launch(
     config: str | None,
     name: str | None,
@@ -185,6 +200,9 @@ def launch(
     debug_provider: bool,
     save_predictions: bool,
     save_requests: bool,
+    inspect_instance: bool,
+    inspect_formatted: bool,
+    inspect_tokens: bool,
 ) -> None:
     """Launch an evaluation job on Beaker.
 
@@ -244,6 +262,9 @@ def launch(
         "debug_provider": debug_provider,
         "save_predictions": save_predictions,
         "save_requests": save_requests,
+        "inspect_instance": inspect_instance,
+        "inspect_formatted": inspect_formatted,
+        "inspect_tokens": inspect_tokens,
     }
 
     # Load configuration

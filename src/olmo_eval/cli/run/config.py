@@ -56,6 +56,11 @@ class RunConfig:
     save_predictions: bool = True
     save_requests: bool = True
 
+    # Debug/inspection options
+    inspect_instance: bool = False
+    inspect_formatted: bool = False
+    inspect_tokens: bool = False
+
     # First model info (for single-model flows)
     first_model_name: str = ""
     first_model_overrides: dict[str, Any] = field(default_factory=dict)
@@ -94,6 +99,9 @@ class RunConfigBuilder:
         alias: str | None = None,
         save_predictions: bool = True,
         save_requests: bool = True,
+        inspect_instance: bool = False,
+        inspect_formatted: bool = False,
+        inspect_tokens: bool = False,
     ):
         """Initialize the builder with raw CLI arguments."""
         self.models = models
@@ -124,6 +132,9 @@ class RunConfigBuilder:
         self.alias = alias
         self.save_predictions = save_predictions
         self.save_requests = save_requests
+        self.inspect_instance = inspect_instance
+        self.inspect_formatted = inspect_formatted
+        self.inspect_tokens = inspect_tokens
 
     def build(self) -> RunConfig:
         """Parse inputs and build configuration.
@@ -191,6 +202,9 @@ class RunConfigBuilder:
             alias=self.alias,
             save_predictions=self.save_predictions,
             save_requests=self.save_requests,
+            inspect_instance=self.inspect_instance,
+            inspect_formatted=self.inspect_formatted,
+            inspect_tokens=self.inspect_tokens,
             first_model_name=first_model_name,
             first_model_overrides=first_model_overrides,
         )

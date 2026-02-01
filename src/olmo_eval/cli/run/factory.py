@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from rich.console import Console
 
 if TYPE_CHECKING:
-    from olmo_eval.cli.run_config import RunConfig
+    from olmo_eval.cli.run.config import RunConfig
     from olmo_eval.runners.models import S3Config
     from olmo_eval.storage import StorageBackend
 
@@ -58,6 +58,9 @@ class RunnerFactory:
             alias=self.config.alias,
             save_predictions=self.config.save_predictions,
             save_requests=self.config.save_requests,
+            inspect_instance=self.config.inspect_instance,
+            inspect_formatted=self.config.inspect_formatted,
+            inspect_tokens=self.config.inspect_tokens,
         )
 
     def create_streaming_runner(self) -> Any:
@@ -88,6 +91,9 @@ class RunnerFactory:
             alias=self.config.alias,
             save_predictions=self.config.save_predictions,
             save_requests=self.config.save_requests,
+            inspect_instance=self.config.inspect_instance,
+            inspect_formatted=self.config.inspect_formatted,
+            inspect_tokens=self.config.inspect_tokens,
         )
 
     def create_async_runner(self) -> Any:
@@ -119,6 +125,9 @@ class RunnerFactory:
             alias=self.config.alias,
             save_predictions=self.config.save_predictions,
             save_requests=self.config.save_requests,
+            inspect_instance=self.config.inspect_instance,
+            inspect_formatted=self.config.inspect_formatted,
+            inspect_tokens=self.config.inspect_tokens,
         )
 
     def create_sync_runner(
@@ -160,6 +169,9 @@ class RunnerFactory:
             alias=self.config.alias,
             save_predictions=self.config.save_predictions,
             save_requests=self.config.save_requests,
+            inspect_instance=self.config.inspect_instance,
+            inspect_formatted=self.config.inspect_formatted,
+            inspect_tokens=self.config.inspect_tokens,
         )
 
     def create(self) -> Any:

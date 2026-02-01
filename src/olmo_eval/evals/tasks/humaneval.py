@@ -3,7 +3,7 @@
 from collections.abc import Iterator, Sequence
 from typing import Any
 
-from olmo_eval.core.formatters import PPLFormatter
+from olmo_eval.core.formatters import CompletionFormatter, PPLFormatter
 from olmo_eval.core.metrics import BPBMetric
 from olmo_eval.core.types import (
     Instance,
@@ -184,6 +184,7 @@ register_variant(
     "3shot",
     num_fewshot=3,
     fewshot_seed=1234,
+    formatter=CompletionFormatter(),
 )
 
 register_variant(
@@ -191,4 +192,5 @@ register_variant(
     "3shot",
     num_fewshot=3,
     fewshot_seed=1234,
+    formatter=CompletionFormatter(),
 )

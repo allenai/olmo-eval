@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from olmo_eval.core.types import LMOutput, LMRequest, SamplingParams
 
@@ -49,6 +49,10 @@ class HuggingFaceProvider(InferenceProvider):
         self.device = _get_device()
         self.model.to(self.device)
         self.model.eval()
+
+    def get_tokenizer(self) -> Any:
+        """Get the tokenizer for this provider."""
+        return self.tokenizer
 
     def _build_generate_kwargs(self, params: SamplingParams) -> dict:
         """Convert SamplingParams to HuggingFace generate kwargs."""
