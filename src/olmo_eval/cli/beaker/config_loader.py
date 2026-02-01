@@ -59,6 +59,7 @@ class LaunchConfig:
     inspect_formatted: bool = False
     inspect_tokens: bool = False
     inspect_response: bool = False
+    inspect_request: bool = False
 
     # Credential injection
     inject_aws_credentials: bool = False
@@ -252,6 +253,7 @@ class LaunchConfigLoader:
             inspect_formatted=self.cli_args.get("inspect_formatted", False),
             inspect_tokens=self.cli_args.get("inspect_tokens", False),
             inspect_response=self.cli_args.get("inspect_response", False),
+            inspect_request=self.cli_args.get("inspect_request", False),
             uv_cache_dir=self.cli_args.get("uv_cache_dir"),
         )
 

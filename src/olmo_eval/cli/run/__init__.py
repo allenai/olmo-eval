@@ -187,6 +187,11 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
     is_flag=True,
     help="Print the first response of each task after model generation",
 )
+@click.option(
+    "--inspect-request",
+    is_flag=True,
+    help="Print the first request of each task before model generation",
+)
 def run(
     models: tuple[str, ...],
     task: tuple[str, ...],
@@ -224,6 +229,7 @@ def run(
     inspect_formatted: bool,
     inspect_tokens: bool,
     inspect_response: bool,
+    inspect_request: bool,
 ) -> None:
     """Run evaluation on specified tasks.
 
@@ -295,6 +301,7 @@ def run(
         inspect_formatted=inspect_formatted,
         inspect_tokens=inspect_tokens,
         inspect_response=inspect_response,
+        inspect_request=inspect_request,
     )
 
     # Validate CLI flags

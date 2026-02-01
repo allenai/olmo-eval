@@ -83,6 +83,7 @@ class AsyncBaseRunner(AsyncRunnerMixin, BaseEvalRunner):
     inspect_instance: bool = False
     inspect_formatted: bool = False
     inspect_tokens: bool = False
+    inspect_request: bool = False
 
     # Configuration for print_config display
     _mode_name: str = "Async Mode"
@@ -171,11 +172,17 @@ class AsyncBaseRunner(AsyncRunnerMixin, BaseEvalRunner):
                         self._write_requests(model_name, spec, request_objects, task_hash)
 
         # Optionally inspect first instance of each task
-        if self.inspect_instance or self.inspect_formatted or self.inspect_tokens:
+        if (
+            self.inspect_instance
+            or self.inspect_formatted
+            or self.inspect_tokens
+            or self.inspect_request
+        ):
             from olmo_eval.core.inspection import (
                 format_with_chat_template,
                 inspect_formatted_request,
                 inspect_instance,
+                inspect_request,
                 inspect_tokens,
                 load_tokenizer,
                 tokenize_request,
@@ -210,10 +217,20 @@ class AsyncBaseRunner(AsyncRunnerMixin, BaseEvalRunner):
                                 first_instance, console=console, task_name=spec, index=0
                             )
 
-                        if tokenizer and (self.inspect_formatted or self.inspect_tokens):
+                        # Get request for inspection
+                        if self.inspect_request or (
+                            tokenizer and (self.inspect_formatted or self.inspect_tokens)
+                        ):
                             request = tracker.task.format_request(first_instance)
 
-                            if self.inspect_formatted:
+                            if self.inspect_request:
+                                inspect_request(
+                                    request,
+                                    console=console,
+                                    title=f"[bold]Request[/bold] ({spec})",
+                                )
+
+                            if tokenizer and self.inspect_formatted:
                                 try:
                                     formatted_prompt = format_with_chat_template(request, tokenizer)
                                     inspect_formatted_request(
@@ -224,7 +241,7 @@ class AsyncBaseRunner(AsyncRunnerMixin, BaseEvalRunner):
                                 except Exception as e:
                                     console.print(f"[red]Error formatting request:[/red] {e}")
 
-                            if self.inspect_tokens:
+                            if tokenizer and self.inspect_tokens:
                                 try:
                                     tokens = tokenize_request(request, tokenizer)
                                     inspect_tokens(

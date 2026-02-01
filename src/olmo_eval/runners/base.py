@@ -51,6 +51,7 @@ class BaseEvalRunner(ABC):
     inspect_formatted: bool = False
     inspect_tokens: bool = False
     inspect_response: bool = False
+    inspect_request: bool = False
 
     @abstractmethod
     def validate(self) -> None:

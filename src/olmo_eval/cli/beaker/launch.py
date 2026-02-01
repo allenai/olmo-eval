@@ -171,6 +171,11 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_UV
     help="Print the first response of each task after model generation",
 )
 @click.option(
+    "--inspect-request",
+    is_flag=True,
+    help="Print the first request of each task before model generation",
+)
+@click.option(
     "--uv-cache-dir",
     default=BEAKER_UV_CACHE_DIR,
     show_default=True,
@@ -215,6 +220,7 @@ def launch(
     inspect_formatted: bool,
     inspect_tokens: bool,
     inspect_response: bool,
+    inspect_request: bool,
     uv_cache_dir: str,
 ) -> None:
     """Launch an evaluation job on Beaker.
@@ -279,6 +285,7 @@ def launch(
         "inspect_formatted": inspect_formatted,
         "inspect_tokens": inspect_tokens,
         "inspect_response": inspect_response,
+        "inspect_request": inspect_request,
         "uv_cache_dir": uv_cache_dir,
     }
 

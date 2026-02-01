@@ -265,6 +265,8 @@ class JobConfigAssembler:
             command.append("--inspect-tokens")
         if self.config.inspect_response:
             command.append("--inspect-response")
+        if self.config.inspect_request:
+            command.append("--inspect-request")
 
         return command
 
