@@ -1,13 +1,13 @@
 
-The following groups do not exist: c4-yi-1.5-9b-20260131-234024
-Would you like to create these groups? [Y/n]:   Created c4-yi-1.5-9b-20260131-234024: 
-https://beaker.org/gr/01KGC2AMC6T9NR50CMMEWGT44N
+The following groups do not exist: c4-olmo-7b-twin-2t-20260131-234024
+Would you like to create these groups? [Y/n]:   Created c4-olmo-7b-twin-2t-20260131-234024: 
+https://beaker.org/gr/01KGC2AMCAMH7E45Q9GGE7WXYB
 
 ╭──────────────────────────── Launch Configuration ────────────────────────────╮
 │ EvalSummary(                                                                 │
 │     models=[                                                                 │
 │         ModelSummary(                                                        │
-│             name='yi-1.5-9b',                                                │
+│             name='olmo-7b-twin-2t',                                          │
 │             gpus=1,                                                          │
 │             parallelism=1,                                                   │
 │             alias=None,                                                      │
@@ -50,20 +50,20 @@ https://beaker.org/gr/01KGC2AMC6T9NR50CMMEWGT44N
 Experiments: 1 experiment(s), 1 task(s)
 
 No Weights & Biases API key found. Set WANDB_API_KEY environment variable or run 'wandb login' to enable W&B logging.
-╭─────────────────────── BeakerJobConfig: c4-yi-1.5-9b ────────────────────────╮
+╭──────────────────── BeakerJobConfig: c4-olmo-7b-twin-2t ─────────────────────╮
 │ BeakerJobConfig(                                                             │
-│     name='c4-yi-1.5-9b',                                                     │
+│     name='c4-olmo-7b-twin-2t',                                               │
 │     command=[                                                                │
 │         'olmo-eval',                                                         │
 │         'run',                                                               │
 │         '-m',                                                                │
-│         'yi-1.5-9b::provider=vllm',                                          │
+│         'olmo-7b-twin-2t::provider=vllm',                                    │
 │         '-t',                                                                │
 │         'c4:ppl',                                                            │
 │         '--experiment-group',                                                │
-│         'c4-yi-1.5-9b-20260131-234024',                                      │
+│         'c4-olmo-7b-twin-2t-20260131-234024',                                │
 │         '--experiment-name',                                                 │
-│         'c4-yi-1.5-9b'                                                       │
+│         'c4-olmo-7b-twin-2t'                                                 │
 │     ],                                                                       │
 │     cluster='aus80g',                                                        │
 │     workspace='ai2/perplexity-evals',                                        │
@@ -103,7 +103,7 @@ No Weights & Biases API key found. Set WANDB_API_KEY environment variable or run
 │         'vllm'                                                               │
 │     ],                                                                       │
 │     groups=[                                                                 │
-│         'c4-yi-1.5-9b-20260131-234024'                                       │
+│         'c4-olmo-7b-twin-2t-20260131-234024'                                 │
 │     ],                                                                       │
 │     inject_aws_credentials=False,                                            │
 │     inject_gcs_credentials=False                                             │

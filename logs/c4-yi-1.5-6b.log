@@ -1,7 +1,7 @@
 
-The following groups do not exist: c4-yi-1.5-6b-20260131-213721
-Would you like to create these groups? [Y/n]:   Created c4-yi-1.5-6b-20260131-213721: 
-https://beaker.org/gr/01KGBV99ZV86YYFPCJDMRW37TQ
+The following groups do not exist: c4-yi-1.5-6b-20260131-234024
+Would you like to create these groups? [Y/n]:   Created c4-yi-1.5-6b-20260131-234024: 
+https://beaker.org/gr/01KGC2AMBY0MFKN7G6CAHM0DRB
 
 ╭──────────────────────────── Launch Configuration ────────────────────────────╮
 │ EvalSummary(                                                                 │
@@ -19,8 +19,8 @@ https://beaker.org/gr/01KGBV99ZV86YYFPCJDMRW37TQ
 │     ],                                                                       │
 │     tasks=[                                                                  │
 │         TaskSummary(                                                         │
-│             name='c4_100k',                                                  │
-│             spec='c4_100k:ppl',                                              │
+│             name='c4',                                                       │
+│             spec='c4:ppl',                                                   │
 │             variants=[                                                       │
 │                 'ppl'                                                        │
 │             ],                                                               │
@@ -59,9 +59,9 @@ No Weights & Biases API key found. Set WANDB_API_KEY environment variable or run
 │         '-m',                                                                │
 │         'yi-1.5-6b::provider=vllm',                                          │
 │         '-t',                                                                │
-│         'c4_100k:ppl',                                                       │
+│         'c4:ppl',                                                            │
 │         '--experiment-group',                                                │
-│         'c4-yi-1.5-6b-20260131-213721',                                      │
+│         'c4-yi-1.5-6b-20260131-234024',                                      │
 │         '--experiment-name',                                                 │
 │         'c4-yi-1.5-6b'                                                       │
 │     ],                                                                       │
@@ -103,355 +103,40 @@ No Weights & Biases API key found. Set WANDB_API_KEY environment variable or run
 │         'vllm'                                                               │
 │     ],                                                                       │
 │     groups=[                                                                 │
-│         'c4-yi-1.5-6b-20260131-213721'                                       │
+│         'c4-yi-1.5-6b-20260131-234024'                                       │
 │     ],                                                                       │
 │     inject_aws_credentials=False,                                            │
 │     inject_gcs_credentials=False                                             │
 │ )                                                                            │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-Proceed with launch? [Y/n]: Experiment: valentinh/c4-yi-1.5-6b → 
-https://beaker.org/ex/01KGBV9CX1AXHNX77WT9PEH4E2
-Workspace: ai2/perplexity-evals → https://beaker.org/ws/ai2/perplexity-evals
-Groups:
- ❯ valentinh/c4-yi-1.5-6b-20260131-213721 → 
-https://beaker.org/orgs/ai2/workspaces/perplexity-evals/groups/01KGBV99ZV86YYFPC
-JDMRW37TQ
-Commit: 51fcf9d Added run script → 
-https://github.com/allenai/olmo-eval-internal/commit/51fcf9d
-Branch: store-logprobs → 
-https://github.com/allenai/olmo-eval-internal/tree/store-logprobs
-Launched: https://beaker.org/ex/01KGBV9CX1AXHNX77WT9PEH4E2
-
-Logs:
-[36m[1m
-##########################################
-### [GANTRY] Validating environment... ###  
-##########################################
-[0m
-[36m[1m❯ [GANTRY INFO][0m Shell is GNU bash, version 5.1.16(1)-release (x86_64-pc-linux-gnu).
-[36m[1m❯ [GANTRY INFO][0m Running on Beaker node 'saturn-cs-aus-254.reviz.ai2.in' (01JREAQZTWVW7GV4761N35ZZ8A)
-[36m[1m❯ [GANTRY INFO][0m Results dataset [94m[4mhttps://beaker.org/ds/01KGBV9D5CJGY98QBHDW8G6VF0[0m mounted to '/results'.
-[36m[1m❯ [GANTRY INFO][0m Checking for required tools...
-[36m[1m❯ [GANTRY INFO][0m Using git version 2.34.1.
-[36m[1m❯ [GANTRY INFO][0m Using curl 7.81.0 (x86_64-pc-linux-gnu) libcurl/7.81.0 OpenSSL/3.0.2 zlib/1.2.11 brotli/1.0.9 zstd/1.4.8 libidn2/2.3.2 libpsl/0.21.0 (+libidn2/2.3.2) libssh/0.9.6/openssl/zlib nghttp2/1.43.0 librtmp/2.3 OpenLDAP/2.5.18.
-[36m[1m❯ [GANTRY INFO][0m Done.
-[36m[1m❯ [GANTRY INFO][0m Installing GitHub CLI...
-[36m[1m❯ [GANTRY INFO][0m Done. Installed gh version 2.86.0 (2026-01-21).
-[36m[1m❯ [GANTRY INFO][0m Configuring git to use GitHub token for authentication...
-[36m[1m❯ [GANTRY INFO][0m Done.
-[36m[1m
-#######################################
-### [GANTRY] Cloning source code... ###  
-#######################################
-[0m
-[36m[1m❯ [GANTRY INFO][0m Cloning source from 'allenai/olmo-eval-internal' @ '51fcf9dd5e4baba01024076f998f0ae334ed57b7'...
-[36m[1m❯ [GANTRY INFO][0m Done.
-[36m[1m❯ [GANTRY INFO][0m Initializing git submodules...
-[36m[1m❯ [GANTRY INFO][0m Done.
-[36m[1m
-#####################################
-### [GANTRY] NVIDIA system status ###  
-#####################################
-[0m
-Sun Feb  1 05:37:47 2026       
-+-----------------------------------------------------------------------------------------+
-| NVIDIA-SMI 570.124.06             Driver Version: 570.124.06     CUDA Version: 12.8     |
-|-----------------------------------------+------------------------+----------------------+
-| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
-| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
-|                                         |                        |               MIG M. |
-|=========================================+========================+======================|
-|   0  NVIDIA A100-SXM4-80GB          On  |   00000000:46:00.0 Off |                    0 |
-| N/A   31C    P0             61W /  400W |       1MiB /  81920MiB |      0%      Default |
-|                                         |                        |             Disabled |
-+-----------------------------------------+------------------------+----------------------+
-                                                                                         
-+-----------------------------------------------------------------------------------------+
-| Processes:                                                                              |
-|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
-|        ID   ID                                                               Usage      |
-|=========================================================================================|
-|  No running processes found                                                             |
-+-----------------------------------------------------------------------------------------+
-[36m[1m
-###############################
-### [GANTRY] Setup complete ###  (finished in 4 seconds)
-###############################
-[0m
-Using Python 3.12.12 environment at: /opt/venv
-Resolved 190 packages in 1.56s
-   Building olmo-eval-internal @ file:///gantry-runtime
-Downloading botocore (13.9MiB)
-Downloading pillow (6.7MiB)
-Downloading hf-xet (3.2MiB)
-Downloading pygments (1.2MiB)
-Downloading tiktoken (1.1MiB)
-Downloading openai (1.0MiB)
-Downloading aiohttp (1.7MiB)
-Downloading opencv-python-headless (51.5MiB)
-Downloading llvmlite (40.4MiB)
-Downloading torchaudio (2.0MiB)
-Downloading numba (3.7MiB)
-Downloading pydantic-core (2.0MiB)
-Downloading flashinfer-python (6.7MiB)
-Downloading xgrammar (8.5MiB)
-Downloading uvloop (4.2MiB)
-Downloading vllm (452.9MiB)
-Downloading torchvision (7.7MiB)
-Downloading pyarrow (45.4MiB)
-Downloading pandas (10.4MiB)
-Downloading cryptography (4.2MiB)
-Downloading runai-model-streamer-s3 (5.6MiB)
-Downloading pycountry (6.0MiB)
-Downloading scipy (33.4MiB)
-Downloading cupy-cuda12x (107.7MiB)
-Downloading ray (69.0MiB)
-Downloading transformers (11.4MiB)
-Downloading numpy (15.8MiB)
-Downloading cuda-bindings (15.4MiB)
-Downloading tokenizers (3.1MiB)
-Downloading nvidia-cudnn-frontend (2.1MiB)
-Downloading mistral-common (6.2MiB)
-Downloading sentencepiece (1.3MiB)
-Downloading runai-model-streamer-gcs (4.2MiB)
-Downloading llguidance (2.9MiB)
-Downloading nvidia-cutlass-dsl (55.9MiB)
-Downloading openai-harmony (2.8MiB)
-Downloading outlines-core (2.2MiB)
-Downloading apache-tvm-ffi (1.9MiB)
-      Built olmo-eval-internal @ file:///gantry-runtime
- Downloaded tiktoken
- Downloaded sentencepiece
- Downloaded aiohttp
- Downloaded pygments
- Downloaded pydantic-core
- Downloaded torchaudio
- Downloaded apache-tvm-ffi
- Downloaded outlines-core
- Downloaded nvidia-cudnn-frontend
-   Building antlr4-python3-runtime==4.9.3
- Downloaded llguidance
- Downloaded openai-harmony
- Downloaded tokenizers
- Downloaded hf-xet
-      Built antlr4-python3-runtime==4.9.3
- Downloaded runai-model-streamer-gcs
- Downloaded uvloop
- Downloaded cryptography
- Downloaded numba
- Downloaded openai
- Downloaded runai-model-streamer-s3
- Downloaded pycountry
- Downloaded mistral-common
- Downloaded pillow
- Downloaded torchvision
- Downloaded xgrammar
- Downloaded flashinfer-python
- Downloaded pandas
- Downloaded transformers
- Downloaded botocore
- Downloaded cuda-bindings
- Downloaded numpy
- Downloaded scipy
- Downloaded llvmlite
- Downloaded opencv-python-headless
- Downloaded nvidia-cutlass-dsl
- Downloaded pyarrow
- Downloaded cupy-cuda12x
- Downloaded ray
- Downloaded vllm
-Prepared 163 packages in 11.08s
-Uninstalled 2 packages in 77ms
-Installed 163 packages in 347ms
- + aiohappyeyeballs==2.6.1
- + aiohttp==3.13.3
- + aiosignal==1.4.0
- + annotated-doc==0.0.4
- + annotated-types==0.7.0
- + anthropic==0.71.0
- + antlr4-python3-runtime==4.9.3
- + anyio==4.12.1
- + apache-tvm-ffi==0.1.8.post2
- + astor==0.8.1
- + attrs==25.4.0
- + blake3==1.0.8
- + boto3==1.42.39
- + botocore==1.42.39
- + cachetools==6.2.6
- + cbor2==5.8.0
- + certifi==2026.1.4
- + cffi==2.0.0
- + charset-normalizer==3.4.4
- + click==8.3.1
- + cloudpickle==3.1.2
- + compressed-tensors==0.12.2
- + cryptography==46.0.4
- + cuda-bindings==13.1.1
- + cuda-pathfinder==1.3.3
- + cuda-python==13.1.1
- + cupy-cuda12x==13.6.0
- + datasets==4.5.0
- + depyf==0.20.0
- + dill==0.4.0
- + diskcache==5.6.3
- + distro==1.9.0
- + dnspython==2.8.0
- + docstring-parser==0.17.0
- + einops==0.8.2
- + email-validator==2.3.0
- + fastapi==0.128.0
- + fastapi-cli==0.0.20
- + fastapi-cloud-cli==0.11.0
- + fastar==0.8.0
- + fastrlock==0.8.3
- + flashinfer-python==0.5.3
- + frozenlist==1.8.0
- - fsspec==2025.12.0
- + fsspec==2025.10.0
- + gguf==0.17.1
- + google-api-core==2.29.0
- + google-auth==2.48.0
- + google-cloud-core==2.5.0
- + google-cloud-storage==3.8.0
- + google-crc32c==1.8.0
- + google-resumable-media==2.8.0
- + googleapis-common-protos==1.72.0
- + h11==0.16.0
- + hf-xet==1.2.0
- + httpcore==1.0.9
- + httptools==0.7.1
- + httpx==0.28.1
- + httpx-sse==0.4.3
- + huggingface-hub==0.36.0
- + humanize==4.15.0
- + idna==3.11
- + ijson==3.4.0.post0
- + interegular==0.3.3
- + jiter==0.12.0
- + jmespath==1.1.0
- + jsonschema==4.26.0
- + jsonschema-specifications==2025.9.1
- + lark==1.2.2
- + llguidance==1.3.0
- + llvmlite==0.44.0
- + lm-format-enforcer==0.11.3
- + loguru==0.7.3
- + markdown-it-py==4.0.0
- + mcp==1.26.0
- + mdurl==0.1.2
- + mistral-common==1.9.0
- + model-hosting-container-standards==0.1.13
- + msgpack==1.1.2
- + msgspec==0.20.0
- + multidict==6.7.1
- + multiprocess==0.70.18
- + numba==0.61.2
- - numpy==2.4.1
- + numpy==2.2.6
- + nvidia-cudnn-frontend==1.18.0
- + nvidia-cutlass-dsl==4.3.5
- + nvidia-ml-py==13.590.48
- + olmo-eval-internal==0.1.0 (from file:///gantry-runtime)
- + omegaconf==2.3.0
- + openai==2.16.0
- + openai-harmony==0.0.8
- + opencv-python-headless==4.12.0.88
- + outlines-core==0.2.11
- + pandas==3.0.0
- + partial-json-parser==0.2.1.1.post7
- + pillow==12.1.0
- + prometheus-client==0.24.1
- + prometheus-fastapi-instrumentator==7.1.0
- + propcache==0.4.1
- + proto-plus==1.27.0
- + protobuf==6.33.5
- + psutil==7.2.2
- + py-cpuinfo==9.0.0
- + pyarrow==23.0.0
- + pyasn1==0.6.2
- + pyasn1-modules==0.4.2
- + pybase64==1.4.3
- + pycountry==24.6.1
- + pycparser==3.0
- + pydantic==2.12.5
- + pydantic-core==2.41.5
- + pydantic-extra-types==2.11.0
- + pydantic-settings==2.12.0
- + pygments==2.19.2
- + pyjwt==2.11.0
- + python-dateutil==2.9.0.post0
- + python-dotenv==1.2.1
- + python-json-logger==4.0.0
- + python-multipart==0.0.22
- + pyyaml==6.0.3
- + pyzmq==27.1.0
- + ray==2.53.0
- + referencing==0.37.0
- + regex==2026.1.15
- + requests==2.32.5
- + rich==14.3.1
- + rich-toolkit==0.18.0
- + rignore==0.7.6
- + rpds-py==0.30.0
- + rsa==4.9.1
- + runai-model-streamer==0.15.5
- + runai-model-streamer-gcs==0.15.5
- + runai-model-streamer-s3==0.15.5
- + s3transfer==0.16.0
- + safetensors==0.7.0
- + scipy==1.17.0
- + sentencepiece==0.2.1
- + sentry-sdk==2.51.0
- + setproctitle==1.3.7
- + shellingham==1.5.4
- + six==1.17.0
- + sniffio==1.3.1
- + sse-starlette==3.2.0
- + starlette==0.50.0
- + supervisor==4.3.0
- + tabulate==0.9.0
- + tiktoken==0.12.0
- + tokenizers==0.22.2
- + torch-c-dlpack-ext==0.1.5
- + torchaudio==2.9.0
- + torchvision==0.24.0
- + tqdm==4.67.2
- + transformers==4.57.6
- + typer==0.21.1
- + typing-inspection==0.4.2
- + urllib3==2.6.3
- + uvicorn==0.40.0
- + uvloop==0.22.1
- + vllm==0.13.0
- + watchfiles==1.1.1
- + websockets==16.0
- + xgrammar==0.1.27
- + xxhash==3.6.0
- + yarl==1.22.0
-============================================================
-RUNTIME ENVIRONMENT SUMMARY
-============================================================
-Python:          3.12.12
-PyTorch:         2.9.0+cu128
-CUDA available:  True
-CUDA version:    12.8
-cuDNN version:   91002
-GPU count:       1
-  GPU 0:         NVIDIA A100-SXM4-80GB
-Transformers:    4.57.6
-vLLM:            0.13.0
-============================================================
-Initializing vllm provider...
-[0;36m(EngineCore_DP0 pid=1110)[0;0m Loading safetensors checkpoint shards:   0% Completed | 0/3 [00:00<?, ?it/s]
-[0;36m(EngineCore_DP0 pid=1110)[0;0m Loading safetensors checkpoint shards:  33% Completed | 1/3 [00:00<00:01,  1.95it/s]
-[0;36m(EngineCore_DP0 pid=1110)[0;0m Loading safetensors checkpoint shards:  67% Completed | 2/3 [00:01<00:00,  1.25it/s]
-[0;36m(EngineCore_DP0 pid=1110)[0;0m Loading safetensors checkpoint shards: 100% Completed | 3/3 [00:02<00:00,  1.07s/it]
-[0;36m(EngineCore_DP0 pid=1110)[0;0m Loading safetensors checkpoint shards: 100% Completed | 3/3 [00:02<00:00,  1.04it/s]
-[0;36m(EngineCore_DP0 pid=1110)[0;0m 
-[0;36m(EngineCore_DP0 pid=1110)[0;0m Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):   0%|          | 0/51 [00:00<?, ?it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):   4%|▍         | 2/51 [00:00<00:02, 18.14it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):   8%|▊         | 4/51 [00:00<00:02, 17.40it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  12%|█▏        | 6/51 [00:00<00:02, 17.76it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  16%|█▌        | 8/51 [00:00<00:02, 18.15it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  22%|██▏       | 11/51 [00:00<00:02, 19.65it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  27%|██▋       | 14/51 [00:00<00:01, 20.38it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  33%|███▎      | 17/51 [00:00<00:01, 20.93it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  39%|███▉      | 20/51 [00:00<00:01, 21.81it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  45%|████▌     | 23/51 [00:01<00:01, 22.53it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  51%|█████     | 26/51 [00:01<00:01, 23.42it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  57%|█████▋    | 29/51 [00:01<00:00, 23.52it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  63%|██████▎   | 32/51 [00:01<00:00, 24.35it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  69%|██████▊   | 35/51 [00:01<00:00, 24.14it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  75%|███████▍  | 38/51 [00:01<00:00, 23.57it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  80%|████████  | 41/51 [00:01<00:00, 23.16it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  86%|████████▋ | 44/51 [00:01<00:00, 23.02it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  92%|█████████▏| 47/51 [00:02<00:00, 22.88it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  98%|█████████▊| 50/51 [00:02<00:00, 23.51it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE): 100%|██████████| 51/51 [00:02<00:00, 22.18it/s]
-[0;36m(EngineCore_DP0 pid=1110)[0;0m Capturing CUDA graphs (decode, FULL):   0%|          | 0/35 [00:00<?, ?it/s]Capturing CUDA graphs (decode, FULL):   9%|▊         | 3/35 [00:00<00:01, 22.21it/s]Capturing CUDA graphs (decode, FULL):  17%|█▋        | 6/35 [00:00<00:01, 24.09it/s]Capturing CUDA graphs (decode, FULL):  26%|██▌       | 9/35 [00:00<00:01, 24.24it/s]Capturing CUDA graphs (decode, FULL):  34%|███▍      | 12/35 [00:00<00:00, 24.61it/s]Capturing CUDA graphs (decode, FULL):  43%|████▎     | 15/35 [00:00<00:00, 24.77it/s]Capturing CUDA graphs (decode, FULL):  51%|█████▏    | 18/35 [00:00<00:00, 24.47it/s]Capturing CUDA graphs (decode, FULL):  60%|██████    | 21/35 [00:00<00:00, 24.12it/s]Capturing CUDA graphs (decode, FULL):  69%|██████▊   | 24/35 [00:00<00:00, 24.30it/s]Capturing CUDA graphs (decode, FULL):  77%|███████▋  | 27/35 [00:01<00:00, 24.43it/s]Capturing CUDA graphs (decode, FULL):  86%|████████▌ | 30/35 [00:01<00:00, 24.43it/s]Capturing CUDA graphs (decode, FULL):  94%|█████████▍| 33/35 [00:01<00:00, 23.84it/s]Capturing CUDA graphs (decode, FULL): 100%|██████████| 35/35 [00:01<00:00, 24.05it/s]
-Running c4_100k:ppl...
-  Evaluating 100000 instances...
-
-Interrupted. Experiment continues running.
-View at: https://beaker.org/ex/01KGBV9CX1AXHNX77WT9PEH4E2
+Proceed with launch? [Y/n]: Traceback (most recent call last):
+  File "/home/valentin/anaconda3/envs/olmo-eval-dev/bin/olmo-eval", line 7, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/valentin/anaconda3/envs/olmo-eval-dev/lib/python3.12/site-packages/click/core.py", line 1485, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/valentin/anaconda3/envs/olmo-eval-dev/lib/python3.12/site-packages/click/core.py", line 1406, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/home/valentin/anaconda3/envs/olmo-eval-dev/lib/python3.12/site-packages/click/core.py", line 1873, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/valentin/anaconda3/envs/olmo-eval-dev/lib/python3.12/site-packages/click/core.py", line 1873, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/valentin/anaconda3/envs/olmo-eval-dev/lib/python3.12/site-packages/click/core.py", line 1269, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/valentin/anaconda3/envs/olmo-eval-dev/lib/python3.12/site-packages/click/core.py", line 824, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/valen/Documents/Research/selective-perplexity/olmo-eval-internal/src/olmo_eval/cli/beaker/launch.py", line 1049, in launch
+    experiment = launcher.launch(job_config)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/valen/Documents/Research/selective-perplexity/olmo-eval-internal/src/olmo_eval/launch/beaker/launcher.py", line 657, in launch
+    workload = launch_experiment(
+               ^^^^^^^^^^^^^^^^^^
+  File "/home/valentin/anaconda3/envs/olmo-eval-dev/lib/python3.12/site-packages/gantry/launch.py", line 165, in launch_experiment
+    raise DirtyRepoError(
+gantry.exceptions.DirtyRepoError: You have uncommitted changes! Use 'allow_dirty' to force.
