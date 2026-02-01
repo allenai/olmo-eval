@@ -266,11 +266,16 @@ def inspect_request(
 
         console = shared_console
 
-    table = Table(show_header=False, box=None, padding=(0, 1))
-    table.add_column("Field", style="cyan", no_wrap=True, width=15)
-    table.add_column("Value", style="white")
+    renderables: list[Any] = []
 
-    table.add_row("request_type", request.request_type.name)
+    def add_field(name: str, value: str) -> None:
+        """Add a field with its label and value."""
+        if renderables:
+            renderables.append(Text(""))  # Blank line between fields
+        renderables.append(Text(f"{name}:", style="bold cyan"))
+        renderables.append(Text(value))
+
+    add_field("request_type", request.request_type.name)
 
     if request.messages:
         # Format messages nicely
@@ -285,20 +290,41 @@ def inspect_request(
             ):
                 content = content[:max_string_length] + "..."
             msg_strs.append(f"[{role}]: {content}")
-        table.add_row("messages", "\n".join(msg_strs))
+        add_field("messages", "\n".join(msg_strs))
 
     if request.prompt:
-        table.add_row("prompt", format_value(request.prompt, max_string_length=max_string_length))
+        prompt_val = request.prompt
+        if max_string_length > 0 and len(prompt_val) > max_string_length:
+            prompt_val = prompt_val[:max_string_length] + f"... ({len(request.prompt)} chars)"
+        add_field("prompt", prompt_val)
 
     if request.continuations:
-        # Show each continuation on its own line without tuple syntax
-        cont_strs = [
-            format_value(c, max_string_length=max_string_length) for c in request.continuations
-        ]
-        table.add_row("continuations", "\n".join(cont_strs))
+        # Show each continuation on its own line
+        cont_strs = []
+        for c in request.continuations:
+            if max_string_length > 0 and len(c) > max_string_length:
+                cont_strs.append(c[:max_string_length] + "...")
+            else:
+                cont_strs.append(c)
+        add_field("continuations", "\n".join(cont_strs))
+
+    # Agent-specific fields
+    if request.system_prompt:
+        prompt_val = request.system_prompt
+        if max_string_length > 0 and len(prompt_val) > max_string_length:
+            prompt_val = (
+                prompt_val[:max_string_length] + f"... ({len(request.system_prompt)} chars)"
+            )
+        add_field("system_prompt", prompt_val)
+
+    if request.tools:
+        tool_strs = []
+        for tool in request.tools:
+            tool_strs.append(f"• {tool.name}: {tool.description}")
+        add_field("tools", "\n".join(tool_strs))
 
     panel_title = title or "[bold]LMRequest[/bold]"
-    console.print(Panel(table, title=panel_title, border_style="magenta"))
+    console.print(Panel(Group(*renderables), title=panel_title, border_style="magenta"))
 
 
 def instance_to_dict(instance: Instance) -> dict[str, Any]:

@@ -1,5 +1,13 @@
 """Task inspection and debugging commands."""
 
+# Suppress HuggingFace logging before any imports that might trigger it
+import os
+
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+os.environ.setdefault("HF_DATASETS_VERBOSITY", "error")
+os.environ.setdefault("HF_HUB_VERBOSITY", "error")
+os.environ.setdefault("HF_DATASETS_DISABLE_PROGRESS_BAR", "1")
+
 import json
 
 import click
@@ -89,6 +97,14 @@ def inspect(
         console.print(f"[red]Error:[/red] Task '{base_name}' not found")
         console.print("\n[dim]Use 'olmo-eval tasks' to list available tasks[/dim]")
         raise SystemExit(1)
+
+    # Suppress datasets logging programmatically (for cached dataset messages)
+    try:
+        import datasets.utils.logging as datasets_logging
+
+        datasets_logging.set_verbosity_error()
+    except ImportError:
+        pass
 
     try:
         task_obj = get_task(task_spec)

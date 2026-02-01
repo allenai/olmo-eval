@@ -135,6 +135,7 @@ class LMRequest:
 
     For CHAT requests: use `messages`
     For COMPLETION requests: use `prompt` and optionally `continuations`
+    For AGENT requests: additionally include `tools` and `system_prompt`
     """
 
     request_type: RequestType
@@ -143,6 +144,9 @@ class LMRequest:
     # Completion-style fields
     prompt: str = ""
     continuations: tuple[str, ...] | None = None
+    # Agent-specific fields (optional)
+    tools: tuple[ToolSchema, ...] | None = None
+    system_prompt: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

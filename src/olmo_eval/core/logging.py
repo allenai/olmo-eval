@@ -9,6 +9,13 @@ LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
 # Package-wide logger
 PACKAGE_LOGGER_NAME = "olmo_eval"
 
+# Suppress noisy third-party library output BEFORE they are imported.
+# These must be set at module load time to take effect.
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+os.environ.setdefault("HF_DATASETS_VERBOSITY", "error")
+os.environ.setdefault("HF_HUB_VERBOSITY", "error")
+os.environ.setdefault("HF_DATASETS_DISABLE_PROGRESS_BAR", "1")
+
 
 def configure_logging(level: LogLevel = "INFO") -> None:
     """Configure root logging for olmo-eval.

@@ -1,5 +1,14 @@
 """olmo-eval CLI entry point."""
 
+# Suppress noisy third-party library output BEFORE any imports.
+# Must be at the very top to take effect before transformers/datasets load.
+import os
+
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+os.environ.setdefault("HF_DATASETS_VERBOSITY", "error")
+os.environ.setdefault("HF_HUB_VERBOSITY", "error")
+os.environ.setdefault("HF_DATASETS_DISABLE_PROGRESS_BAR", "1")
+
 import click
 from rich.table import Table
 

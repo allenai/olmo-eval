@@ -160,12 +160,21 @@ class AgentTask(Task):
     def format_request(self, instance: Instance) -> LMRequest:
         """Format an instance into an LM request.
 
-        For agent tasks, this creates a simple chat request with the question.
+        For agent tasks, this creates a simple chat request with the question,
+        along with tools and system_prompt for inspection purposes.
         The actual multi-turn interaction is handled by _run_agent_loop.
         """
+        # Get tools from instance or config
+        tools = instance.tools or self.config.tools or None
+
+        # Get system prompt from config
+        system_prompt = self.config.system_prompt if self.config.system_prompt else None
+
         return LMRequest(
             request_type=RequestType.CHAT,
             messages=({"role": "user", "content": instance.question},),
+            tools=tools if tools else None,
+            system_prompt=system_prompt,
         )
 
     def extract_answer(self, output: LMOutput) -> Any:
