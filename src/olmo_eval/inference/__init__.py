@@ -4,6 +4,12 @@ from enum import Enum
 
 from .base import InferenceProvider
 from .mock import MockProvider
+from .tokenizer_utils import (
+    encode_context_and_continuation,
+    get_bos_token_ids,
+    get_context_token_ids,
+    has_bos_token,
+)
 
 __all__ = [
     "InferenceProvider",
@@ -13,6 +19,11 @@ __all__ = [
     "VLLMProvider",
     "LiteLLMProvider",
     "create_provider",
+    # Tokenizer utilities
+    "encode_context_and_continuation",
+    "get_bos_token_ids",
+    "get_context_token_ids",
+    "has_bos_token",
 ]
 
 

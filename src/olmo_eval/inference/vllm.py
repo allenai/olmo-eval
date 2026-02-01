@@ -11,6 +11,7 @@ from olmo_eval.core.debug import is_debug_provider, is_debug_requests
 from olmo_eval.core.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
 
 from .base import InferenceProvider
+from .tokenizer_utils import encode_context_and_continuation
 
 logger = logging.getLogger(__name__)
 
@@ -249,15 +250,9 @@ class VLLMProvider(InferenceProvider):
         for request in requests:
             continuations = request.continuations or ()
             for continuation in continuations:
-                # Handle empty context: use BOS token as context
-                if request.prompt == "":
-                    bos_id = tokenizer.bos_token_id
-                    if bos_id is None:
-                        bos_id = tokenizer.eos_token_id
-                    context_enc = [bos_id] if bos_id is not None else []
-                    continuation_enc = tokenizer.encode(continuation, add_special_tokens=False)
-                else:
-                    context_enc, continuation_enc = self._encode_pair(request.prompt, continuation)
+                context_enc, continuation_enc = encode_context_and_continuation(
+                    tokenizer, request.prompt, continuation
+                )
 
                 # Calculate overflow and left-truncate to max_length - 1
                 full_len = len(context_enc) + len(continuation_enc)
