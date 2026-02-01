@@ -10,8 +10,9 @@ import re
 from dataclasses import fields, is_dataclass
 from typing import TYPE_CHECKING, Any
 
-from rich.console import Console
+from rich.console import Console, Group
 from rich.panel import Panel
+from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
@@ -68,14 +69,10 @@ def format_value(
         if len(value) == 0:
             return "{}"
 
-        # For small dicts, show inline
-        if len(value) <= 3:
-            items = [f"{k}: {_format_simple_value(v, 50)}" for k, v in value.items()]
-            return "{" + ", ".join(items) + "}"
+        # Pretty print as JSON
+        import json
 
-        # For larger dicts, show truncated
-        items = [f"{k}: {_format_simple_value(v, 50)}" for k, v in list(value.items())[:3]]
-        return "{" + ", ".join(items) + f", ...}} [dim]({len(value)} keys)[/dim]"
+        return json.dumps(value, indent=2, ensure_ascii=False)
 
     if is_dataclass(value) and not isinstance(value, type):
         return f"<{type(value).__name__}>"
@@ -167,64 +164,69 @@ def inspect_instance(
         index: Optional instance index for the panel title.
         max_string_length: Maximum length for string values.
     """
+    import json
+
     if console is None:
         from olmo_eval.cli.utils import console as shared_console
 
         console = shared_console
 
-    table = Table(show_header=False, box=None, padding=(0, 1))
-    table.add_column("Field", style="cyan", no_wrap=True, width=20)
-    table.add_column("Value", style="white")
+    renderables: list[Any] = []
+
+    def add_field(name: str, value: Any) -> None:
+        """Add a field with its label and value."""
+        if renderables:
+            renderables.append(Text(""))  # Blank line between fields
+
+        renderables.append(Text(f"{name}:", style="bold cyan"))
+
+        if isinstance(value, dict):
+            # Pretty print dicts as JSON with word wrapping
+            json_str = json.dumps(value, indent=2, ensure_ascii=False)
+            renderables.append(Syntax(json_str, "json", theme="ansi_dark", word_wrap=True))
+        elif isinstance(value, str):
+            if len(value) > max_string_length and max_string_length > 0:
+                renderables.append(Text(value[:max_string_length] + f"... ({len(value)} chars)"))
+            else:
+                renderables.append(Text(value))
+        elif isinstance(value, (list, tuple)):
+            # Format lists/tuples as JSON
+            json_str = json.dumps(list(value), indent=2, ensure_ascii=False)
+            renderables.append(Syntax(json_str, "json", theme="ansi_dark", word_wrap=True))
+        else:
+            renderables.append(Text(str(value)))
 
     # Core fields first
-    table.add_row("question", format_value(instance.question, max_string_length=max_string_length))
+    add_field("question", instance.question)
 
     if instance.gold_answer is not None:
-        table.add_row(
-            "gold_answer", format_value(instance.gold_answer, max_string_length=max_string_length)
-        )
+        add_field("gold_answer", instance.gold_answer)
 
     if instance.choices is not None:
-        table.add_row(
-            "choices", format_value(instance.choices, max_string_length=max_string_length)
-        )
+        add_field("choices", instance.choices)
 
     if instance.metadata:
-        table.add_row(
-            "metadata", format_value(instance.metadata, max_string_length=max_string_length)
-        )
+        add_field("metadata", instance.metadata)
 
     # Tool-related fields (only show if present)
     if instance.tools is not None:
         tool_names = [t.name for t in instance.tools] if instance.tools else []
-        table.add_row("tools", format_value(tool_names, max_string_length=max_string_length))
+        add_field("tools", tool_names)
 
     if instance.expected_tool_calls is not None:
-        table.add_row(
-            "expected_tool_calls",
-            format_value(instance.expected_tool_calls, max_string_length=max_string_length),
-        )
+        add_field("expected_tool_calls", list(instance.expected_tool_calls))
 
     if instance.should_abstain is not None:
-        table.add_row("should_abstain", str(instance.should_abstain))
+        add_field("should_abstain", instance.should_abstain)
 
     if instance.required_trajectory is not None:
-        table.add_row(
-            "required_trajectory",
-            format_value(instance.required_trajectory, max_string_length=max_string_length),
-        )
+        add_field("required_trajectory", list(instance.required_trajectory))
 
     if instance.initial_state is not None:
-        table.add_row(
-            "initial_state",
-            format_value(instance.initial_state, max_string_length=max_string_length),
-        )
+        add_field("initial_state", instance.initial_state)
 
     if instance.expected_final_state is not None:
-        table.add_row(
-            "expected_final_state",
-            format_value(instance.expected_final_state, max_string_length=max_string_length),
-        )
+        add_field("expected_final_state", instance.expected_final_state)
 
     # Build panel title
     if task_name and index is not None:
@@ -236,7 +238,7 @@ def inspect_instance(
     else:
         title = "[bold]Instance[/bold]"
 
-    console.print(Panel(table, title=title, border_style="cyan"))
+    console.print(Panel(Group(*renderables), title=title, border_style="cyan"))
 
 
 def inspect_request(
@@ -382,6 +384,16 @@ def format_with_chat_template(
     if request.request_type == RequestType.COMPLETION:
         return request.prompt or ""
 
+    # For LOGLIKELIHOOD requests, return prompt + first continuation
+    if request.request_type == RequestType.LOGLIKELIHOOD:
+        prompt = request.prompt or ""
+        if request.continuations:
+            # Show the prompt followed by the first continuation
+            continuation_text = request.continuations[0] if request.continuations else ""
+            return prompt + continuation_text
+        return prompt
+
+    # CHAT requests - apply chat template
     if not request.messages:
         raise ValueError("Request has no messages to format")
 
@@ -415,6 +427,16 @@ def tokenize_request(
     if request.request_type == RequestType.COMPLETION or not apply_chat_template:
         # For COMPLETION or if explicitly not applying template, tokenize prompt directly
         text = request.prompt or ""
+        return tokenizer.encode(text, add_special_tokens=True)
+
+    if request.request_type == RequestType.LOGLIKELIHOOD:
+        # For LOGLIKELIHOOD, tokenize prompt + first continuation
+        prompt = request.prompt or ""
+        if request.continuations:
+            continuation_text = request.continuations[0] if request.continuations else ""
+            text = prompt + continuation_text
+        else:
+            text = prompt
         return tokenizer.encode(text, add_special_tokens=True)
 
     if request.messages and hasattr(tokenizer, "apply_chat_template"):

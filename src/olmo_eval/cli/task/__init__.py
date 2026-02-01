@@ -28,6 +28,12 @@ def task() -> None:
 @click.option(
     "--max-chars", default=0, type=int, help="Max chars for formatted prompt (0 for no limit)"
 )
+@click.option(
+    "--max-string-length",
+    default=200,
+    type=int,
+    help="Max chars for instance field values (0 for no limit)",
+)
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON instead of rich display")
 def inspect(
     task_spec: str,
@@ -40,6 +46,7 @@ def inspect(
     tokens: bool,
     max_tokens: int,
     max_chars: int,
+    max_string_length: int,
     as_json: bool,
 ) -> None:
     """Inspect instances from a task without running evaluation.
@@ -156,6 +163,7 @@ def inspect(
                     console=console,
                     task_name=task_spec,
                     index=skip + i,
+                    max_string_length=max_string_length if max_string_length > 0 else 10000,
                 )
 
             if request or formatted or tokens:
