@@ -1,0 +1,37 @@
+olmo-eval beaker launch \
+-n 'c4-ppl' \
+-m 'yi-1.5-6b::provider=vllm' \
+-m 'yi-1.5-9b::provider=vllm' \
+-m 'yi-6b::provider=vllm' \
+-m 'yi-9b::provider=vllm' \
+-m 'deepseek-llm-7b-base::provider=vllm' \
+-m 'gemma2-9b::provider=vllm' \
+-m 'gemma-7b::provider=vllm' \
+-m 'marin-8b-base::provider=vllm' \
+-m 'llama3-8b::provider=vllm' \
+-m 'orca-2-7b::provider=vllm' \
+-m 'mathstral-7b::provider=vllm' \
+-m 'mistral-7b-v0.1::provider=vllm' \
+-m 'codeqwen1.5-7b::provider=vllm' \
+-m 'qwen1.5-7b::provider=vllm' \
+-m 'qwen2-7b::provider=vllm' \
+-m 'qwen3-8b::provider=vllm' \
+-m 'stablelm-base-alpha-7b::provider=vllm' \
+-m 'falcon3-7b::provider=vllm' \
+-m 'falcon3-10b::provider=vllm' \
+-m 'olmo-7b-0424::provider=vllm' \
+-m 'olmo-7b-0724::provider=vllm' \
+-m 'olmo-7b-hf::provider=vllm' \
+-m 'olmo-7b-twin-2t::provider=vllm' \
+-m 'olmo-2-7b-stage1-step928646::provider=vllm' \
+-m 'olmo-2-7b-stage2-ingredient1::provider=vllm' \
+-m 'olmo-2-7b-stage2-ingredient2::provider=vllm' \
+-m 'olmo-2-7b-stage2-ingredient3::provider=vllm' \
+-m 'pythia-6.9b::provider=vllm' \
+-m 'llama-7b::provider=vllm' \
+-m 'aquila-7b::provider=vllm' \
+-t c4_100k:ppl \
+-c aus80g \
+-w ai2/perplexity-evals \
+--budget ai2/oe-base \
+--priority high
