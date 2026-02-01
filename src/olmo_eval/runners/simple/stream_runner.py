@@ -92,7 +92,7 @@ class StreamingEvalRunner(AsyncBaseRunner):
 
         # Create shared dict for tracking worker init times
         manager = ctx.Manager()
-        init_times: dict[str, float] = manager.dict()
+        init_times = manager.dict()  # DictProxy[str, float]
 
         # Start streaming workers for each model
         workers: list[mp.process.BaseProcess] = []

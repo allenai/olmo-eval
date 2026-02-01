@@ -702,7 +702,8 @@ def inspect_response(
         # Show tool calls if present
         if output.tool_calls:
             tool_calls_data = [
-                {"name": tc.name, "arguments": tc.arguments} for tc in output.tool_calls
+                {"name": tc.function.name, "arguments": tc.function.arguments}
+                for tc in output.tool_calls
             ]
             add_field("tool_calls", tool_calls_data)
 

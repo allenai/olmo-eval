@@ -97,7 +97,7 @@ class AsyncEvalRunner(AsyncBaseRunner):
 
         # Create shared dict for tracking worker init times
         manager = ctx.Manager()
-        init_times: dict[str, float] = manager.dict()
+        init_times = manager.dict()  # DictProxy[str, float]
 
         # Shuffle and enqueue items per model
         for model_name, items in model_items.items():
