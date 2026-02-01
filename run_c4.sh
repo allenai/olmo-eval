@@ -46,5 +46,6 @@ for m in "${models[@]}"; do
     -c aus80g \
     -w ai2/perplexity-evals \
     --budget ai2/oe-base \
-    --priority high &
+    --priority high \
+    --quiet &
 done
