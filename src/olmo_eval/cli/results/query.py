@@ -55,12 +55,16 @@ from olmo_eval.cli.utils import console
 @click.option(
     "--task-hash",
     "-T",
-    help="Task hash prefix to filter by.",
+    "task_hashes",
+    multiple=True,
+    help="Task hash prefix(es) to filter by.",
 )
 @click.option(
     "--experiment-group",
     "-G",
-    help="Experiment group prefix to filter by.",
+    "experiment_groups",
+    multiple=True,
+    help="Experiment group prefix(es) to filter by.",
 )
 @click.option(
     "--instances/--no-instances",
@@ -95,8 +99,8 @@ def query(
     model_names: tuple[str, ...],
     model_hashes: tuple[str, ...],
     task_names: tuple[str, ...],
-    task_hash: str | None,
-    experiment_group: str | None,
+    task_hashes: tuple[str, ...],
+    experiment_groups: tuple[str, ...],
     instances: bool,
     limit: int,
     after_id: int | None,
@@ -128,7 +132,14 @@ def query(
         # Get instances for an experiment group (cross-model analysis)
         olmo-eval results query -G my-benchmark --instances --format json
     """
-    filters = [experiment_ids, model_names, model_hashes, task_names, task_hash, experiment_group]
+    filters = [
+        experiment_ids,
+        model_names,
+        model_hashes,
+        task_names,
+        task_hashes,
+        experiment_groups,
+    ]
     if not any(filters):
         raise click.UsageError(
             "At least one filter is required: "
@@ -146,9 +157,9 @@ def query(
             repo = ExperimentRepository(session)
 
             # Experiment group with instances uses streaming (early return)
-            if experiment_group and instances:
+            if experiment_groups and instances:
                 _stream_experiment_group_instances(
-                    session, experiment_group, model_hashes, task_hash, output_format
+                    session, experiment_groups, model_hashes, task_hashes, output_format
                 )
                 return
 
@@ -159,8 +170,8 @@ def query(
                 model_names,
                 model_hashes,
                 task_names,
-                task_hash,
-                experiment_group=experiment_group,
+                task_hashes,
+                experiment_groups,
             )
             if not all_experiments:
                 console.print("[dim]No results found.[/dim]")
@@ -179,7 +190,7 @@ def query(
                     model_names,
                     model_hashes,
                     task_names,
-                    task_hash,
+                    task_hashes,
                     limit,
                     after_id,
                 )
@@ -203,12 +214,12 @@ def query(
 
 def _stream_experiment_group_instances(
     session: Any,
-    experiment_group: str,
+    experiment_groups: tuple[str, ...],
     model_hashes: tuple[str, ...],
-    task_hash: str | None,
+    task_hashes: tuple[str, ...],
     output_format: str,
 ) -> None:
-    """Stream instances for an experiment group directly to output."""
+    """Stream instances for experiment group(s) directly to output."""
     from olmo_eval.storage.backends.postgres.repository import InstancePredictionRepository
     from olmo_eval.storage.formatters import (
         stream_instances_to_csv,
@@ -217,15 +228,18 @@ def _stream_experiment_group_instances(
 
     instance_repo = InstancePredictionRepository(session)
     instance_stream = instance_repo.stream_instances_with_metadata(
-        experiment_group=experiment_group,
+        experiment_groups=list(experiment_groups) if experiment_groups else None,
         model_hashes=list(model_hashes) if model_hashes else None,
-        task_hashes=[task_hash] if task_hash else None,
+        task_hashes=list(task_hashes) if task_hashes else None,
     )
 
+    # Use first experiment group for display label, or generic label if multiple
+    display_label = experiment_groups[0] if len(experiment_groups) == 1 else "experiment_groups"
+
     if output_format == "csv":
-        stream_instances_to_csv(instance_stream, sys.stdout, experiment_group)
+        stream_instances_to_csv(instance_stream, sys.stdout, display_label)
     elif output_format == "json":
-        stream_instances_to_nested_json(instance_stream, sys.stdout, experiment_group)
+        stream_instances_to_nested_json(instance_stream, sys.stdout, display_label)
     else:
         console.print(
             "[yellow]Note:[/yellow] Use --format json or --format csv "
@@ -239,8 +253,8 @@ def _query_experiments(
     model_names: tuple[str, ...],
     model_hashes: tuple[str, ...],
     task_names: tuple[str, ...],
-    task_hash: str | None = None,
-    experiment_group: str | None = None,
+    task_hashes: tuple[str, ...],
+    experiment_groups: tuple[str, ...],
 ) -> list[Any]:
     """Query experiments with all filters combined (AND logic)."""
     return repo.query(
@@ -248,8 +262,8 @@ def _query_experiments(
         model_names=list(model_names) if model_names else None,
         model_hashes=list(model_hashes) if model_hashes else None,
         task_names=list(task_names) if task_names else None,
-        task_hash=task_hash,
-        experiment_group=experiment_group,
+        task_hashes=list(task_hashes) if task_hashes else None,
+        experiment_groups=list(experiment_groups) if experiment_groups else None,
     )
 
 
@@ -259,7 +273,7 @@ def _query_instances(
     model_names: tuple[str, ...],
     model_hashes: tuple[str, ...],
     task_names: tuple[str, ...],
-    task_hash: str | None,
+    task_hashes: tuple[str, ...],
     limit: int,
     after_id: int | None,
 ) -> list[dict[str, Any]]:
@@ -269,7 +283,7 @@ def _query_instances(
         model_names=list(model_names) or None,
         model_hashes=list(model_hashes) or None,
         task_names=list(task_names) or None,
-        task_hash=task_hash,
+        task_hashes=list(task_hashes) or None,
         limit=limit,
         after_id=after_id,
     )

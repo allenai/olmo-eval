@@ -145,8 +145,8 @@ class PostgresBackend(StorageBackend):
         """Query evaluation results by filters.
 
         Args:
-            model_name: Filter by model name.
-            task_name: Filter by task name (results containing this task).
+            model_name: Filter by model name prefix.
+            task_name: Filter by task name prefix.
             start_time: Filter by timestamp >= start_time.
             end_time: Filter by timestamp <= end_time.
             limit: Maximum number of results to return.
@@ -157,8 +157,8 @@ class PostgresBackend(StorageBackend):
         with self.db.session() as session:
             helper = QueryHelper(session)
             return helper.query(
-                model_name=model_name,
-                task_name=task_name,
+                model_names=[model_name] if model_name else None,
+                task_names=[task_name] if task_name else None,
                 start_time=start_time,
                 end_time=end_time,
                 limit=limit,

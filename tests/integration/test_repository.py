@@ -110,7 +110,7 @@ class TestExperimentRepository:
 
         with postgres_backend.db.session() as session:
             repo = ExperimentRepository(session)
-            results = repo.query(model_name="llama3.1-8b")
+            results = repo.query(model_names=["llama3.1-8b"])
 
         assert len(results) == 3
         for r in results:
@@ -126,7 +126,7 @@ class TestExperimentRepository:
 
         with postgres_backend.db.session() as session:
             repo = ExperimentRepository(session)
-            results = repo.query(task_name="mmlu")
+            results = repo.query(task_names=["mmlu"])
 
         assert len(results) > 0
         # Verify all have mmlu task

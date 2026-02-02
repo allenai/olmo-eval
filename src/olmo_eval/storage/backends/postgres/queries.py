@@ -113,8 +113,8 @@ class QueryHelper:
         model_names: list[str] | None = None,
         model_hashes: list[str] | None = None,
         task_names: list[str] | None = None,
-        task_hash: str | None = None,
-        experiment_group: str | None = None,
+        task_hashes: list[str] | None = None,
+        experiment_groups: list[str] | None = None,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
         latest: bool = False,
@@ -130,8 +130,8 @@ class QueryHelper:
             model_names: Filter by model name prefixes.
             model_hashes: Filter by model hash prefixes.
             task_names: Filter by task name prefixes.
-            task_hash: Filter by task hash prefix.
-            experiment_group: Filter by experiment group prefix.
+            task_hashes: Filter by task hash prefixes (OR within list).
+            experiment_groups: Filter by experiment group prefixes (OR within list).
             start_time: Filter by timestamp >= start_time.
             end_time: Filter by timestamp <= end_time.
             latest: If True, return only the most recent result.
@@ -146,8 +146,8 @@ class QueryHelper:
             model_names=model_names,
             model_hashes=model_hashes,
             task_names=task_names,
-            task_hash=task_hash,
-            experiment_group=experiment_group,
+            task_hashes=task_hashes,
+            experiment_groups=experiment_groups,
             start_time=start_time,
             end_time=end_time,
             latest=latest,
@@ -328,7 +328,7 @@ class QueryHelper:
         model_names: list[str] | None = None,
         model_hashes: list[str] | None = None,
         task_names: list[str] | None = None,
-        task_hash: str | None = None,
+        task_hashes: list[str] | None = None,
         limit: int | None = None,
         after_id: int | None = None,
     ) -> list[dict[str, Any]]:
@@ -343,7 +343,7 @@ class QueryHelper:
             model_names: Filter by model names.
             model_hashes: Filter by model hashes.
             task_names: Filter by task names.
-            task_hash: Filter by exact task hash.
+            task_hashes: Filter by task hash prefixes (OR within list).
             limit: Maximum number of results.
             after_id: Return instances with id > after_id (keyset pagination).
 
@@ -355,7 +355,7 @@ class QueryHelper:
             model_names=model_names,
             model_hashes=model_hashes,
             task_names=task_names,
-            task_hash=task_hash,
+            task_hashes=task_hashes,
             limit=limit,
             after_id=after_id,
         )
