@@ -157,7 +157,7 @@ def inspect_instance(
     *,
     console: Console | None = None,
     task_name: str | None = None,
-    index: int | None = None,
+    native_id: str | None = None,
     max_string_length: int = 0,
 ) -> None:
     """Pretty-print an Instance object with task-aware formatting.
@@ -166,9 +166,13 @@ def inspect_instance(
         instance: The Instance to inspect.
         console: Rich Console to print to. Uses shared console if not provided.
         task_name: Optional task name for the panel title.
-        index: Optional instance index for the panel title.
+        native_id: Optional native_id for the panel title. If not provided,
+            attempts to extract from instance.metadata["id"].
         max_string_length: Maximum length for string values.
     """
+    # Try to get native_id from metadata if not provided
+    if native_id is None:
+        native_id = instance.metadata.get("id")
     import json
 
     if console is None:
@@ -234,12 +238,12 @@ def inspect_instance(
         add_field("expected_final_state", instance.expected_final_state)
 
     # Build panel title
-    if task_name and index is not None:
-        title = f"[bold]Instance #{index + 1}[/bold] ({task_name})"
+    if task_name and native_id is not None:
+        title = f"[bold]Instance #{native_id}[/bold] ({task_name})"
     elif task_name:
         title = f"[bold]Instance[/bold] ({task_name})"
-    elif index is not None:
-        title = f"[bold]Instance #{index + 1}[/bold]"
+    elif native_id is not None:
+        title = f"[bold]Instance #{native_id}[/bold]"
     else:
         title = "[bold]Instance[/bold]"
 
@@ -250,7 +254,8 @@ def inspect_request(
     request: LMRequest,
     *,
     console: Console | None = None,
-    title: str | None = None,
+    task_name: str | None = None,
+    native_id: str | None = None,
     max_string_length: int = 0,
 ) -> None:
     """Pretty-print an LMRequest object.
@@ -258,7 +263,8 @@ def inspect_request(
     Args:
         request: The LMRequest to inspect.
         console: Rich Console to print to. Uses shared console if not provided.
-        title: Optional title for the panel.
+        task_name: Optional task name for the panel title.
+        native_id: Optional native_id for the panel title.
         max_string_length: Maximum length for string values.
     """
     if console is None:
@@ -323,7 +329,16 @@ def inspect_request(
             tool_strs.append(f"• {tool.name}: {tool.description}")
         add_field("tools", "\n".join(tool_strs))
 
-    panel_title = title or "[bold]LMRequest[/bold]"
+    # Build panel title
+    if task_name and native_id is not None:
+        panel_title = f"[bold]Request #{native_id}[/bold] ({task_name})"
+    elif task_name:
+        panel_title = f"[bold]Request[/bold] ({task_name})"
+    elif native_id is not None:
+        panel_title = f"[bold]Request #{native_id}[/bold]"
+    else:
+        panel_title = "[bold]Request[/bold]"
+
     console.print(Panel(Group(*renderables), title=panel_title, border_style="magenta"))
 
 
@@ -492,7 +507,8 @@ def inspect_formatted_request(
     formatted_prompt: str,
     *,
     console: Console | None = None,
-    title: str | None = None,
+    task_name: str | None = None,
+    native_id: str | None = None,
     max_chars: int = 2000,
 ) -> None:
     """Pretty-print formatted prompt with special token highlighting.
@@ -500,7 +516,8 @@ def inspect_formatted_request(
     Args:
         formatted_prompt: The formatted prompt string to display.
         console: Rich Console to print to. Uses shared console if not provided.
-        title: Optional title for the panel.
+        task_name: Optional task name for the panel title.
+        native_id: Optional native_id for the panel title.
         max_chars: Max characters to display (0 for no limit, default 2000).
     """
     if console is None:
@@ -542,7 +559,16 @@ def inspect_formatted_request(
     else:
         text.append(f"\n\n({len(formatted_prompt)} characters)", style="dim")
 
-    panel_title = title or "[bold]Formatted Prompt[/bold]"
+    # Build panel title
+    if task_name and native_id is not None:
+        panel_title = f"[bold]Formatted Prompt #{native_id}[/bold] ({task_name})"
+    elif task_name:
+        panel_title = f"[bold]Formatted Prompt[/bold] ({task_name})"
+    elif native_id is not None:
+        panel_title = f"[bold]Formatted Prompt #{native_id}[/bold]"
+    else:
+        panel_title = "[bold]Formatted Prompt[/bold]"
+
     console.print(Panel(text, title=panel_title, border_style="green"))
 
 
@@ -551,7 +577,8 @@ def inspect_tokens(
     tokenizer: Any,
     *,
     console: Console | None = None,
-    title: str | None = None,
+    task_name: str | None = None,
+    native_id: str | None = None,
     max_tokens: int = 100,
     show_decoded: bool = True,
 ) -> None:
@@ -561,7 +588,8 @@ def inspect_tokens(
         tokens: List of token IDs to display.
         tokenizer: A HuggingFace tokenizer for decoding.
         console: Rich Console to print to. Uses shared console if not provided.
-        title: Optional title for the panel.
+        task_name: Optional task name for the panel title.
+        native_id: Optional native_id for the panel title.
         max_tokens: Max tokens to display (0 for no limit, default 100).
         show_decoded: Whether to show decoded token values.
     """
@@ -613,7 +641,16 @@ def inspect_tokens(
     if truncated:
         lines.append(f"\n[dim](showing {max_tokens} of {len(tokens)} tokens)[/dim]")
 
-    panel_title = title or "[bold]Token IDs[/bold]"
+    # Build panel title
+    if task_name and native_id is not None:
+        panel_title = f"[bold]Tokens #{native_id}[/bold] ({task_name})"
+    elif task_name:
+        panel_title = f"[bold]Tokens[/bold] ({task_name})"
+    elif native_id is not None:
+        panel_title = f"[bold]Tokens #{native_id}[/bold]"
+    else:
+        panel_title = "[bold]Tokens[/bold]"
+
     console.print(Panel("\n".join(lines), title=panel_title, border_style="yellow"))
 
 
@@ -667,7 +704,7 @@ def inspect_response(
     *,
     console: Console | None = None,
     task_name: str | None = None,
-    index: int | None = None,
+    native_id: str | None = None,
     max_string_length: int = 0,
 ) -> None:
     """Pretty-print a Response object showing instance, outputs, and scores.
@@ -676,9 +713,13 @@ def inspect_response(
         response: The Response to inspect.
         console: Rich Console to print to. Uses shared console if not provided.
         task_name: Optional task name for the panel title.
-        index: Optional instance index for the panel title.
+        native_id: Optional native_id for the panel title. If not provided,
+            attempts to extract from response.instance.metadata["id"].
         max_string_length: Maximum length for string values.
     """
+    # Try to get native_id from instance metadata if not provided
+    if native_id is None:
+        native_id = response.instance.metadata.get("id")
     import json
 
     if console is None:
@@ -738,12 +779,12 @@ def inspect_response(
         add_field("scores", response.scores)
 
     # Build panel title
-    if task_name and index is not None:
-        title = f"[bold]Response #{index + 1}[/bold] ({task_name})"
+    if task_name and native_id is not None:
+        title = f"[bold]Response #{native_id}[/bold] ({task_name})"
     elif task_name:
         title = f"[bold]Response[/bold] ({task_name})"
-    elif index is not None:
-        title = f"[bold]Response #{index + 1}[/bold]"
+    elif native_id is not None:
+        title = f"[bold]Response #{native_id}[/bold]"
     else:
         title = "[bold]Response[/bold]"
 

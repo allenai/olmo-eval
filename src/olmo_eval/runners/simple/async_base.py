@@ -211,10 +211,13 @@ class AsyncBaseRunner(AsyncRunnerMixin, BaseEvalRunner):
                 if spec not in inspected_tasks and tracker.task and not tracker.error:
                     first_instance = next(iter(tracker.task.instances), None)
                     if first_instance:
+                        # Get native_id from instance metadata
+                        native_id = first_instance.metadata.get("id", "0")
+
                         if self.inspect_instance:
                             console.print()
                             inspect_instance(
-                                first_instance, console=console, task_name=spec, index=0
+                                first_instance, console=console, task_name=spec, native_id=native_id
                             )
 
                         # Get request for inspection
@@ -227,7 +230,8 @@ class AsyncBaseRunner(AsyncRunnerMixin, BaseEvalRunner):
                                 inspect_request(
                                     request,
                                     console=console,
-                                    title=f"[bold]Request[/bold] ({spec})",
+                                    task_name=spec,
+                                    native_id=native_id,
                                 )
 
                             if tokenizer and self.inspect_formatted:
@@ -236,7 +240,8 @@ class AsyncBaseRunner(AsyncRunnerMixin, BaseEvalRunner):
                                     inspect_formatted_request(
                                         formatted_prompt,
                                         console=console,
-                                        title=f"[bold]Formatted Prompt[/bold] ({spec})",
+                                        task_name=spec,
+                                        native_id=native_id,
                                     )
                                 except Exception as e:
                                     console.print(f"[red]Error formatting request:[/red] {e}")
@@ -248,7 +253,8 @@ class AsyncBaseRunner(AsyncRunnerMixin, BaseEvalRunner):
                                         tokens,
                                         tokenizer,
                                         console=console,
-                                        title=f"[bold]Token IDs[/bold] ({spec})",
+                                        task_name=spec,
+                                        native_id=native_id,
                                     )
                                 except Exception as e:
                                     console.print(f"[red]Error tokenizing request:[/red] {e}")

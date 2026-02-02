@@ -189,12 +189,15 @@ def inspect(
         console.print(f"[dim]Showing instances {skip + 1}-{end_idx} of {len(instances)}[/dim]\n")
 
         for i, inst in enumerate(selected_instances):
+            # Get native_id from instance metadata, fallback to index
+            native_id = inst.metadata.get("id", str(skip + i))
+
             if show_instance:
                 inspect_instance(
                     inst,
                     console=console,
                     task_name=task_spec,
-                    index=skip + i,
+                    native_id=native_id,
                     max_string_length=max_string_length if max_string_length > 0 else 10000,
                 )
 
@@ -205,7 +208,8 @@ def inspect(
                     inspect_request(
                         req,
                         console=console,
-                        title=f"[bold]Request #{skip + i + 1}[/bold]",
+                        task_name=task_spec,
+                        native_id=native_id,
                     )
 
                 if tokenizer_obj:
@@ -215,7 +219,8 @@ def inspect(
                             inspect_formatted_request(
                                 formatted_prompt,
                                 console=console,
-                                title=f"[bold]Formatted Prompt[/bold] ({task_spec})",
+                                task_name=task_spec,
+                                native_id=native_id,
                                 max_chars=max_chars,
                             )
                         except Exception as e:
@@ -228,7 +233,8 @@ def inspect(
                                 token_ids,
                                 tokenizer_obj,
                                 console=console,
-                                title=f"[bold]Token IDs[/bold] ({task_spec})",
+                                task_name=task_spec,
+                                native_id=native_id,
                                 max_tokens=max_tokens,
                             )
                         except Exception as e:

@@ -198,9 +198,14 @@ class AgentEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 task = get_task(spec)
                 first_instance = next(iter(task.instances), None)
                 if first_instance:
+                    # Get native_id from instance metadata
+                    native_id = first_instance.metadata.get("id", "0")
+
                     if self.inspect_instance:
                         console.print()
-                        inspect_instance(first_instance, console=console, task_name=spec, index=0)
+                        inspect_instance(
+                            first_instance, console=console, task_name=spec, native_id=native_id
+                        )
 
                     # Get request for inspection
                     if self.inspect_request or (
@@ -212,7 +217,8 @@ class AgentEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                             inspect_request(
                                 request,
                                 console=console,
-                                title=f"[bold]Request[/bold] ({spec})",
+                                task_name=spec,
+                                native_id=native_id,
                             )
 
                         if tokenizer and self.inspect_formatted:
@@ -221,7 +227,8 @@ class AgentEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                                 inspect_formatted_request(
                                     formatted_prompt,
                                     console=console,
-                                    title=f"[bold]Formatted Prompt[/bold] ({spec})",
+                                    task_name=spec,
+                                    native_id=native_id,
                                 )
                             except Exception as e:
                                 console.print(f"[red]Error formatting request:[/red] {e}")
@@ -233,7 +240,8 @@ class AgentEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                                     tokens,
                                     tokenizer,
                                     console=console,
-                                    title=f"[bold]Token IDs[/bold] ({spec})",
+                                    task_name=spec,
+                                    native_id=native_id,
                                 )
                             except Exception as e:
                                 console.print(f"[red]Error tokenizing request:[/red] {e}")

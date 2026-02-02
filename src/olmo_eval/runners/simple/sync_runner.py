@@ -210,9 +210,14 @@ class SyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 task = get_task(spec)
                 first_instance = next(iter(task.instances), None)
                 if first_instance:
+                    # Get native_id from instance metadata
+                    native_id = first_instance.metadata.get("id", "0")
+
                     if self.inspect_instance:
                         console.print()
-                        inspect_instance(first_instance, console=console, task_name=spec, index=0)
+                        inspect_instance(
+                            first_instance, console=console, task_name=spec, native_id=native_id
+                        )
 
                     # Get request for inspection
                     if self.inspect_request or self.inspect_formatted or self.inspect_tokens:
@@ -222,7 +227,8 @@ class SyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                             inspect_request(
                                 request,
                                 console=console,
-                                title=f"[bold]Request[/bold] ({spec})",
+                                task_name=spec,
+                                native_id=native_id,
                             )
 
                     # Get tokenizer from provider for formatted/token inspection
@@ -240,7 +246,8 @@ class SyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                                     inspect_formatted_request(
                                         formatted_prompt,
                                         console=console,
-                                        title=f"[bold]Formatted Prompt[/bold] ({spec})",
+                                        task_name=spec,
+                                        native_id=native_id,
                                     )
                                 except Exception as e:
                                     console.print(f"[red]Error formatting request:[/red] {e}")
@@ -252,7 +259,8 @@ class SyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                                         tokens,
                                         tokenizer,
                                         console=console,
-                                        title=f"[bold]Token IDs[/bold] ({spec})",
+                                        task_name=spec,
+                                        native_id=native_id,
                                     )
                                 except Exception as e:
                                     console.print(f"[red]Error tokenizing request:[/red] {e}")
@@ -348,7 +356,7 @@ class SyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
             def response_callback(resp: Any) -> None:
                 console.print()
-                inspect_response(resp, console=console, task_name=spec, index=0)
+                inspect_response(resp, console=console, task_name=spec)
 
         # Standard task - use shared task execution logic
         result = run_task_impl(
