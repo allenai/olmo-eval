@@ -494,6 +494,115 @@ class TestCalculateExperimentSplits:
         assert result[0]["parallelism"] == 1
 
 
+class TestBeakerJobConfigTaskPackages:
+    """Tests for BeakerJobConfig task_packages field."""
+
+    def test_task_packages_default_none(self):
+        """Test that task_packages defaults to None."""
+        config = BeakerJobConfig(
+            name="test",
+            command=["echo"],
+            cluster="h100",
+            workspace="ai2/oe-data",
+            budget="ai2/oe-base",
+        )
+        assert config.task_packages is None
+
+    def test_task_packages_can_be_set(self):
+        """Test that task_packages can be set."""
+        config = BeakerJobConfig(
+            name="test",
+            command=["echo"],
+            cluster="h100",
+            workspace="ai2/oe-data",
+            budget="ai2/oe-base",
+            task_packages=["special-lib==1.0", "git+https://github.com/user/repo"],
+        )
+        assert config.task_packages == ["special-lib==1.0", "git+https://github.com/user/repo"]
+
+
+class TestBuildCommandWithTaskPackages:
+    """Tests for command building with task packages."""
+
+    def test_command_includes_task_packages(self):
+        """Test that task packages are installed in the generated command."""
+        from olmo_eval.launch import BeakerLauncher
+
+        launcher = BeakerLauncher()
+        command = launcher._build_command_with_extras(
+            command=["olmo-eval", "run"],
+            extras=[],
+            env_exports=None,
+            provider_package=None,
+            task_packages=["special-lib==1.0", "another-pkg"],
+        )
+
+        # The command should be a bash -c with the full script
+        assert command[0] == "bash"
+        assert command[1] == "-c"
+        script = command[2]
+
+        # Check that task packages are being installed
+        assert "uv pip install 'special-lib==1.0'" in script
+        assert "uv pip install 'another-pkg'" in script
+
+    def test_task_packages_installed_after_provider(self):
+        """Test that task packages are installed after provider package."""
+        from olmo_eval.launch import BeakerLauncher
+
+        launcher = BeakerLauncher()
+        command = launcher._build_command_with_extras(
+            command=["olmo-eval", "run"],
+            extras=[],
+            env_exports=None,
+            provider_package="vllm==0.14.0",
+            task_packages=["task-dep==1.0"],
+        )
+
+        script = command[2]
+
+        # Provider should be installed before task packages
+        provider_pos = script.find("uv pip install 'vllm==0.14.0'")
+        task_pos = script.find("uv pip install 'task-dep==1.0'")
+        assert provider_pos < task_pos
+
+    def test_no_task_packages_if_none(self):
+        """Test that no extra install steps if task_packages is None."""
+        from olmo_eval.launch import BeakerLauncher
+
+        launcher = BeakerLauncher()
+        command = launcher._build_command_with_extras(
+            command=["olmo-eval", "run"],
+            extras=[],
+            env_exports=None,
+            provider_package=None,
+            task_packages=None,
+        )
+
+        script = command[2]
+        # Should only have the base install, not any extra pip install for task packages
+        # Count occurrences of 'uv pip install' - should only be the base install
+        install_count = script.count("uv pip install")
+        assert install_count == 1  # Only the base olmo-eval install
+
+    def test_task_packages_git_url_normalized(self):
+        """Test that git URLs in task packages are normalized."""
+        from olmo_eval.launch import BeakerLauncher
+
+        launcher = BeakerLauncher()
+        command = launcher._build_command_with_extras(
+            command=["olmo-eval", "run"],
+            extras=[],
+            env_exports=None,
+            provider_package=None,
+            task_packages=["https://github.com/user/repo@v1.0"],
+        )
+
+        script = command[2]
+        # GitHub URL should get git+ prefix
+        assert "uv pip install 'git+https://github.com/user/repo@v1.0'" in script
+
+
 class TestNormalizeProviderPackage:
     """Tests for normalize_provider_package function."""
 
@@ -774,6 +883,51 @@ class TestModelPackingAndGrouping:
         assert experiments[0].num_gpus == 6
 
 
+@pytest.fixture
+def mock_tasks():
+    """Register mock tasks for testing JobConfigAssembler."""
+    from collections.abc import Iterator
+
+    from olmo_eval.core.types import Instance, LMOutput, LMRequest, RequestType
+    from olmo_eval.evals.tasks import Task, TaskConfig, clear_registry, register
+    from olmo_eval.evals.tasks.core.registry import _configs, _regimes, _tasks, _variants
+
+    # Save original state
+    original_tasks = _tasks.copy()
+    original_configs = _configs.copy()
+    original_regimes = {k: v.copy() for k, v in _regimes.items()}
+    original_variants = {k: v.copy() for k, v in _variants.items()}
+
+    class MockTask(Task):
+        @property
+        def instances(self) -> Iterator[Instance]:
+            yield Instance(question="test", gold_answer="test")
+
+        def format_request(self, instance: Instance) -> LMRequest:
+            return LMRequest(request_type=RequestType.COMPLETION, prompt="test")
+
+        def extract_answer(self, output: LMOutput) -> str:
+            return output.text.strip()
+
+    # Register mock tasks used in tests
+    @register("mmlu", lambda: TaskConfig(name="mmlu", data_source="test/dataset"))
+    class MMLUTask(MockTask):
+        pass
+
+    @register("gsm8k", lambda: TaskConfig(name="gsm8k", data_source="test/dataset"))
+    class GSM8KTask(MockTask):
+        pass
+
+    yield
+
+    # Restore original state
+    clear_registry()
+    _tasks.update(original_tasks)
+    _configs.update(original_configs)
+    _regimes.update(original_regimes)
+    _variants.update(original_variants)
+
+
 class TestTaskOverrideHandling:
     """Tests for task override extraction and command generation."""
 
@@ -850,7 +1004,7 @@ class TestTaskOverrideHandling:
         # Both overrides should be in task_overrides
         assert experiments[0].task_overrides == {"mmlu": ["limit=100", "num_fewshot=5"]}
 
-    def test_task_overrides_in_command(self):
+    def test_task_overrides_in_command(self, mock_tasks):
         """Task overrides are included in the generated command."""
         from olmo_eval.cli.beaker.config_loader import LaunchConfig
         from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan
@@ -910,7 +1064,7 @@ class TestTaskOverrideHandling:
         assert cmd[gsm8k_idx + 3] == "-o"
         assert cmd[gsm8k_idx + 4] == "num_fewshot=3"
 
-    def test_priority_override_not_in_command(self):
+    def test_priority_override_not_in_command(self, mock_tasks):
         """Priority override should not appear in the run command."""
         from olmo_eval.cli.beaker.config_loader import LaunchConfig
         from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan

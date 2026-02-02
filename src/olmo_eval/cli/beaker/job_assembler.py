@@ -118,6 +118,9 @@ class JobConfigAssembler:
         if self.config.uv_cache_dir:
             job_env_vars["UV_CACHE_DIR"] = self.config.uv_cache_dir
 
+        # Extract task dependencies
+        task_packages = self._extract_task_dependencies(exp.tasks)
+
         return BeakerJobConfig(
             name=exp.name,
             command=command,
@@ -138,7 +141,22 @@ class JobConfigAssembler:
             env_vars=job_env_vars,
             env_secrets=env_secrets,
             provider_package=model_resources.get("provider_package"),
+            task_packages=task_packages,
         )
+
+    def _extract_task_dependencies(self, task_specs: list[str]) -> list[str] | None:
+        """Extract dependencies from task specs.
+
+        Args:
+            task_specs: List of task specification strings.
+
+        Returns:
+            List of package dependencies to install, or None if no dependencies.
+        """
+        from olmo_eval.evals.tasks import get_task_dependencies
+
+        deps = get_task_dependencies(task_specs)
+        return deps if deps else None
 
     def _get_model_resources(self, m_cfg: BeakerModelSpec) -> dict:
         """Get model resources from config or defaults."""

@@ -158,6 +158,15 @@ def parse_overrides(override_str: str) -> dict[str, Any]:
                 value = int(value_str)
             elif key in {"temperature", "top_p"}:
                 value = float(value_str)
+            elif key == "dependencies":
+                # Dependencies should be parsed as JSON list
+                import json as json_module
+
+                try:
+                    value = json_module.loads(value_str)
+                except json_module.JSONDecodeError:
+                    # If not valid JSON, treat as single dependency
+                    value = [value_str]
             else:
                 value = value_str
 
@@ -374,3 +383,28 @@ def clear_registry() -> None:
     _configs.clear()
     _variants.clear()
     _regimes.clear()
+
+
+def get_task_dependencies(specs: list[str]) -> list[str]:
+    """Extract and merge dependencies from multiple task specs.
+
+    Collects all runtime dependencies from the specified tasks, merges them,
+    and removes duplicates while preserving order.
+
+    Args:
+        specs: List of task specifications (e.g., ["my_task", "other_task:variant"]).
+
+    Returns:
+        Deduplicated list of package dependencies (preserving order of first occurrence).
+
+    Examples:
+        >>> get_task_dependencies(["task_with_deps", "task_without_deps"])
+        ["special-lib==1.0", "another-pkg"]
+    """
+    all_deps: list[str] = []
+    for spec in specs:
+        task = get_task(spec)
+        if task.config.dependencies:
+            all_deps.extend(task.config.dependencies)
+    # Dedupe preserving order
+    return list(dict.fromkeys(all_deps))

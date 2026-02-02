@@ -44,7 +44,13 @@ class TaskConfig:
     """
 
     #: Fields that can be overridden via inline task specs (e.g., task::num_fewshot=5)
-    OVERRIDE_KEYS: ClassVar[set[str]] = {"num_fewshot", "limit", "fewshot_seed", "sampling_params"}
+    OVERRIDE_KEYS: ClassVar[set[str]] = {
+        "num_fewshot",
+        "limit",
+        "fewshot_seed",
+        "sampling_params",
+        "dependencies",
+    }
 
     name: str
 
@@ -61,6 +67,9 @@ class TaskConfig:
     split: Split = Split.TEST
     primary_metric: MetricName | Metric | None = None
     sampling_params: SamplingParams | None = None
+
+    #: Runtime dependencies to install for this task (package specs like "pkg==1.0" or git URLs)
+    dependencies: list[str] | None = None
 
     def get_data_source(self, split: str | None = None) -> DataSource:
         """Get the data source for a specific split.
@@ -145,6 +154,7 @@ class TaskConfig:
             "split": self.split.value,
             "primary_metric": serialize_primary_metric(self.get_primary_metric()),
             "sampling_params": asdict(self.sampling_params) if self.sampling_params else None,
+            "dependencies": self.dependencies,
         }
 
     def get_primary_metric(self) -> Metric | None:

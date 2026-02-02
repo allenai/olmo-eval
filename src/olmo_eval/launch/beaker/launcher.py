@@ -427,6 +427,9 @@ class BeakerJobConfig:
     # Custom provider package to install (overrides default from pyproject.toml extras)
     provider_package: str | None = None
 
+    # Task-specific packages to install at runtime
+    task_packages: list[str] | None = None
+
 
 def resolve_clusters(cluster: str | list[str]) -> list[str]:
     """Resolve cluster aliases to full cluster names.
@@ -560,19 +563,22 @@ class BeakerLauncher:
         extras: list[str],
         env_exports: dict[str, str] | None = None,
         provider_package: str | None = None,
+        task_packages: list[str] | None = None,
     ) -> list[str]:
         """Build command with source installation and extras installation prepended.
 
         Gantry clones the source code to /gantry-runtime, so we:
         1. Install olmo-eval from the cloned source with optional extras
         2. Optionally install a custom provider package to override the default
-        3. Run the actual command
+        3. Optionally install task-specific dependencies
+        4. Run the actual command
 
         Args:
             command: The command to run after setup.
             extras: Optional dependency group names from pyproject.toml.
             env_exports: Optional dict of environment variables to export before running.
             provider_package: Optional custom provider package to install (overrides default).
+            task_packages: Optional list of task-specific packages to install.
         """
         # Build the full command
         # Export UV_PROJECT_ENVIRONMENT so all uv commands use Docker's /opt/venv
@@ -598,6 +604,12 @@ class BeakerLauncher:
         if provider_package:
             install_spec = normalize_provider_package(provider_package)
             steps.append(f"uv pip install '{install_spec}' -c {constraints}")
+
+        # Install task-specific dependencies
+        if task_packages:
+            for pkg in task_packages:
+                install_spec = normalize_provider_package(pkg)
+                steps.append(f"uv pip install '{install_spec}' -c {constraints}")
 
         # Run the actual command (use shlex.join to properly quote special characters)
         import shlex
@@ -627,7 +639,11 @@ class BeakerLauncher:
             env_exports["UV_CACHE_DIR"] = config.env_vars["UV_CACHE_DIR"]
 
         final_command = self._build_command_with_extras(
-            config.command, config.extras, env_exports, config.provider_package
+            config.command,
+            config.extras,
+            env_exports,
+            config.provider_package,
+            config.task_packages,
         )
 
         # Build weka mounts as tuples: (bucket, mount_path)

@@ -11,12 +11,15 @@ from olmo_eval.evals.tasks import (
     clear_registry,
     get_base_task_name,
     get_task,
+    get_task_dependencies,
     list_regimes,
     list_tasks,
+    parse_overrides,
     register,
     register_regime,
+    register_variant,
 )
-from olmo_eval.evals.tasks.core.registry import _configs, _regimes, _tasks
+from olmo_eval.evals.tasks.core.registry import _configs, _regimes, _tasks, _variants
 
 
 class DummyTask(Task):
@@ -44,6 +47,7 @@ def clean_registry():
     original_tasks = _tasks.copy()
     original_configs = _configs.copy()
     original_regimes = {k: v.copy() for k, v in _regimes.items()}
+    original_variants = {k: v.copy() for k, v in _variants.items()}
 
     clear_registry()
     yield
@@ -53,6 +57,7 @@ def clean_registry():
     _tasks.update(original_tasks)
     _configs.update(original_configs)
     _regimes.update(original_regimes)
+    _variants.update(original_variants)
 
 
 class TestRegister:
@@ -326,3 +331,229 @@ class TestGetBaseTaskName:
         assert get_base_task_name("humaneval:bpb") == "humaneval:bpb"
         assert get_base_task_name("humaneval:bpb@high") == "humaneval:bpb"
         assert get_base_task_name("humaneval:bpb::limit=10") == "humaneval:bpb"
+
+
+class TestGetTaskDependencies:
+    """Tests for get_task_dependencies function."""
+
+    def test_empty_dependencies_returns_empty_list(self):
+        """Test that tasks without dependencies return empty list."""
+
+        @register(
+            "no_deps_task",
+            lambda: TaskConfig(name="no_deps_task", data_source="test/dataset"),
+        )
+        class NoDepTask(DummyTask):
+            pass
+
+        result = get_task_dependencies(["no_deps_task"])
+        assert result == []
+
+    def test_single_task_with_dependencies(self):
+        """Test extracting dependencies from a single task."""
+
+        @register(
+            "deps_task",
+            lambda: TaskConfig(
+                name="deps_task",
+                data_source="test/dataset",
+                dependencies=["pkg1==1.0", "pkg2>=2.0"],
+            ),
+        )
+        class DepsTask(DummyTask):
+            pass
+
+        result = get_task_dependencies(["deps_task"])
+        assert result == ["pkg1==1.0", "pkg2>=2.0"]
+
+    def test_multiple_tasks_merge_dependencies(self):
+        """Test that dependencies from multiple tasks are merged."""
+
+        @register(
+            "task_a",
+            lambda: TaskConfig(
+                name="task_a",
+                data_source="test/dataset",
+                dependencies=["pkg1==1.0"],
+            ),
+        )
+        class TaskA(DummyTask):
+            pass
+
+        @register(
+            "task_b",
+            lambda: TaskConfig(
+                name="task_b",
+                data_source="test/dataset",
+                dependencies=["pkg2==2.0"],
+            ),
+        )
+        class TaskB(DummyTask):
+            pass
+
+        result = get_task_dependencies(["task_a", "task_b"])
+        assert result == ["pkg1==1.0", "pkg2==2.0"]
+
+    def test_dependencies_deduplicated(self):
+        """Test that duplicate dependencies are removed."""
+
+        @register(
+            "dup_task_a",
+            lambda: TaskConfig(
+                name="dup_task_a",
+                data_source="test/dataset",
+                dependencies=["pkg1==1.0", "pkg2==2.0"],
+            ),
+        )
+        class DupTaskA(DummyTask):
+            pass
+
+        @register(
+            "dup_task_b",
+            lambda: TaskConfig(
+                name="dup_task_b",
+                data_source="test/dataset",
+                dependencies=["pkg1==1.0", "pkg3==3.0"],  # pkg1 is duplicate
+            ),
+        )
+        class DupTaskB(DummyTask):
+            pass
+
+        result = get_task_dependencies(["dup_task_a", "dup_task_b"])
+        # pkg1==1.0 appears in first task, should only appear once
+        assert result == ["pkg1==1.0", "pkg2==2.0", "pkg3==3.0"]
+
+    def test_preserves_order(self):
+        """Test that order is preserved (first occurrence wins)."""
+
+        @register(
+            "order_task_a",
+            lambda: TaskConfig(
+                name="order_task_a",
+                data_source="test/dataset",
+                dependencies=["c-pkg", "a-pkg"],
+            ),
+        )
+        class OrderTaskA(DummyTask):
+            pass
+
+        @register(
+            "order_task_b",
+            lambda: TaskConfig(
+                name="order_task_b",
+                data_source="test/dataset",
+                dependencies=["b-pkg"],
+            ),
+        )
+        class OrderTaskB(DummyTask):
+            pass
+
+        result = get_task_dependencies(["order_task_a", "order_task_b"])
+        # Order should be preserved: c-pkg, a-pkg from task_a, then b-pkg from task_b
+        assert result == ["c-pkg", "a-pkg", "b-pkg"]
+
+    def test_mixed_tasks_with_and_without_deps(self):
+        """Test mixing tasks with and without dependencies."""
+
+        @register(
+            "with_deps",
+            lambda: TaskConfig(
+                name="with_deps",
+                data_source="test/dataset",
+                dependencies=["special-lib"],
+            ),
+        )
+        class WithDeps(DummyTask):
+            pass
+
+        @register(
+            "without_deps",
+            lambda: TaskConfig(name="without_deps", data_source="test/dataset"),
+        )
+        class WithoutDeps(DummyTask):
+            pass
+
+        result = get_task_dependencies(["without_deps", "with_deps"])
+        assert result == ["special-lib"]
+
+    def test_empty_task_list(self):
+        """Test with empty task list."""
+        result = get_task_dependencies([])
+        assert result == []
+
+    def test_task_with_variant_inherits_base_dependencies(self):
+        """Test that variants can override dependencies."""
+
+        @register(
+            "base_deps",
+            lambda: TaskConfig(
+                name="base_deps",
+                data_source="test/dataset",
+                dependencies=["base-pkg"],
+            ),
+        )
+        class BaseDepsTask(DummyTask):
+            pass
+
+        # Register variant that adds to dependencies
+        register_variant("base_deps", "extra", dependencies=["extra-pkg"])
+
+        # Base task should have base dependencies
+        base_result = get_task_dependencies(["base_deps"])
+        assert base_result == ["base-pkg"]
+
+        # Variant should have overridden dependencies (replace, not merge)
+        variant_result = get_task_dependencies(["base_deps:extra"])
+        assert variant_result == ["extra-pkg"]
+
+    def test_git_url_dependencies(self):
+        """Test tasks with git URL dependencies."""
+
+        @register(
+            "git_deps_task",
+            lambda: TaskConfig(
+                name="git_deps_task",
+                data_source="test/dataset",
+                dependencies=[
+                    "git+https://github.com/user/repo@v1.0",
+                    "https://github.com/user/another-repo",
+                ],
+            ),
+        )
+        class GitDepsTask(DummyTask):
+            pass
+
+        result = get_task_dependencies(["git_deps_task"])
+        assert result == [
+            "git+https://github.com/user/repo@v1.0",
+            "https://github.com/user/another-repo",
+        ]
+
+
+class TestParseOverridesDependencies:
+    """Tests for parse_overrides handling of dependencies field."""
+
+    def test_parse_dependencies_json_list(self):
+        """Test parsing dependencies as JSON list."""
+        result = parse_overrides('dependencies=["pkg1==1.0", "pkg2>=2.0"]')
+        assert result == {"dependencies": ["pkg1==1.0", "pkg2>=2.0"]}
+
+    def test_parse_dependencies_single_value(self):
+        """Test parsing single dependency value (not JSON) becomes list."""
+        result = parse_overrides("dependencies=special-lib")
+        assert result == {"dependencies": ["special-lib"]}
+
+    def test_parse_dependencies_with_other_overrides(self):
+        """Test parsing dependencies alongside other overrides."""
+        result = parse_overrides('num_fewshot=5,dependencies=["pkg1"]')
+        assert result == {"num_fewshot": 5, "dependencies": ["pkg1"]}
+
+    def test_parse_dependencies_empty_list(self):
+        """Test parsing empty dependencies list."""
+        result = parse_overrides("dependencies=[]")
+        assert result == {"dependencies": []}
+
+    def test_parse_dependencies_git_urls(self):
+        """Test parsing dependencies with git URLs."""
+        result = parse_overrides('dependencies=["git+https://github.com/user/repo@v1.0"]')
+        assert result == {"dependencies": ["git+https://github.com/user/repo@v1.0"]}
