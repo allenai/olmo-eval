@@ -456,7 +456,7 @@ class EvalConfig:
         if (use_async or use_async_stream) and num_workers is not None:
             gpus_per_model = num_workers * gpus_per_worker
         else:
-            gpus_per_model = model.gpus  # Model always has a value (default 1)
+            gpus_per_model = model.gpus
 
         # Parallelism is always per-model (default 1)
         parallelism = model.parallelism

@@ -44,7 +44,6 @@ class ModelGrouper:
             m_cluster = self.config.cluster or m_resources.get("cluster")
             m_provider = m_resources.get("provider")
         else:
-            # Model always has gpus and parallelism (default 1)
             m_gpus = m_cfg.gpus
             m_parallelism = m_cfg.parallelism
             m_cluster = m_cfg.cluster or self.config.cluster
