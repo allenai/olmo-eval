@@ -44,14 +44,15 @@ class RunnerFactory:
 
         console.print("[bold cyan]Using AgentEvalRunner[/bold cyan]")
 
+        model_name = self.config.model_names[0]
         return AgentEvalRunner(
-            model_name=self.config.first_model_name,
+            model_name=model_name,
             task_specs=self.config.task_specs,
             output_dir=self.config.output_dir,
             storages=self.storages,
             num_gpus=self.config.num_gpus,
             task_overrides=self.config.task_overrides,
-            model_overrides=self.config.first_model_overrides,
+            model_overrides=self.config.per_model_overrides.get(model_name, {}),
             s3_config=self.s3_config,
             experiment_name=self.config.experiment_name,
             experiment_group=self.config.experiment_group,
@@ -196,9 +197,10 @@ class RunnerFactory:
             return self.create_async_runner()
         else:
             # For sync mode, return first sync runner (multi-model handled separately)
+            model_name = self.config.model_names[0]
             return self.create_sync_runner(
-                self.config.first_model_name,
-                self.config.first_model_overrides,
+                model_name,
+                self.config.per_model_overrides.get(model_name, {}),
             )
 
     def run_sequential_models(self, dry_run: bool = False) -> None:

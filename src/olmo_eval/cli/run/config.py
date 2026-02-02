@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from rich.console import Console
@@ -62,10 +62,6 @@ class RunConfig:
     inspect_tokens: bool = False
     inspect_response: bool = False
     inspect_request: bool = False
-
-    # First model info (for single-model flows)
-    first_model_name: str = ""
-    first_model_overrides: dict[str, Any] = field(default_factory=dict)
 
 
 class RunConfigBuilder:
@@ -177,23 +173,17 @@ class RunConfigBuilder:
             if overrides:
                 task_overrides[spec_without_overrides] = overrides
 
-        # Extract model names and per-model overrides (from inline :: syntax)
+        # Extract model names
         model_names = [name for name, _overrides in parsed_models]
-        per_model_overrides = {
-            name: dict(overrides) for name, overrides in parsed_models if overrides
-        }
 
-        # Merge CLI -O overrides with inline overrides (CLI takes precedence)
+        # Build per-model overrides from CLI -O flags
+        per_model_overrides: dict[str, dict[str, Any]] = {}
         for model_name, cli_overrides in self.cli_model_overrides.items():
             if cli_overrides:
                 override_config = OmegaConf.from_dotlist(cli_overrides)
-                override_dict = OmegaConf.to_container(override_config)
-                if model_name in per_model_overrides:
-                    per_model_overrides[model_name].update(override_dict)  # type: ignore[arg-type]
-                else:
-                    per_model_overrides[model_name] = override_dict  # type: ignore[assignment]
+                per_model_overrides[model_name] = OmegaConf.to_container(override_config)  # type: ignore[assignment]
 
-        # Merge CLI -O task overrides with inline overrides
+        # Build task overrides from CLI -O flags
         for task_spec, cli_overrides in self.cli_task_overrides.items():
             if cli_overrides:
                 override_config = OmegaConf.from_dotlist(cli_overrides)
@@ -203,19 +193,15 @@ class RunConfigBuilder:
                 else:
                     task_overrides[task_spec] = override_dict  # type: ignore[assignment]
 
-        # Get first model info
-        first_model_name, first_model_overrides = parsed_models[0] if parsed_models else ("", {})
-        # Also merge any CLI overrides for first model
-        if first_model_name and first_model_name in per_model_overrides:
-            first_model_overrides = per_model_overrides[first_model_name]
-
-        # Apply model-level provider/attention_backend overrides
+        # Apply first model's provider/attention_backend as defaults if not specified globally
         provider = self.provider
         attention_backend = self.attention_backend
-        if not provider and "provider" in first_model_overrides:
-            provider = first_model_overrides["provider"]
-        if not attention_backend and "attention_backend" in first_model_overrides:
-            attention_backend = first_model_overrides["attention_backend"]
+        if model_names:
+            first_overrides = per_model_overrides.get(model_names[0], {})
+            if not provider and "provider" in first_overrides:
+                provider = first_overrides["provider"]
+            if not attention_backend and "attention_backend" in first_overrides:
+                attention_backend = first_overrides["attention_backend"]
 
         return RunConfig(
             model_names=model_names,
@@ -253,8 +239,6 @@ class RunConfigBuilder:
             inspect_tokens=self.inspect_tokens,
             inspect_response=self.inspect_response,
             inspect_request=self.inspect_request,
-            first_model_name=first_model_name,
-            first_model_overrides=first_model_overrides,
         )
 
     def validate_flags(self) -> bool:
