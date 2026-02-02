@@ -10,7 +10,11 @@ from rich.panel import Panel
 from rich.table import Table
 
 from olmo_eval.cli.utils import console, format_timestamp
-from olmo_eval.runners.common import extract_score_from_metrics, parse_metric_key
+from olmo_eval.runners.common import (
+    extract_score_from_metrics,
+    get_primary_metric,
+    parse_metric_key,
+)
 
 
 def print_experiment_detail(experiment: Any) -> None:
@@ -137,6 +141,14 @@ def _build_model_task_scores(
                 metric_name, scorer_name = parsed
             elif task.primary_metric:
                 metric_name = task.primary_metric
+
+            # Fallback: derive from metrics dict if primary_metric not set
+            if not metric_name and task.metrics:
+                derived = get_primary_metric(task.metrics)
+                if derived:
+                    derived_parsed = parse_metric_key(derived[0])
+                    if derived_parsed:
+                        metric_name, scorer_name = derived_parsed
 
             # Build task display info if not already seen
             if task_key not in task_info_map:

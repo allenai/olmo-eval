@@ -14,10 +14,11 @@ import time
 from abc import abstractmethod
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.core.agents import AgentExecutionResult
+from olmo_eval.core.formatters import ChatFormatter, Formatter
 from olmo_eval.core.types import (
     AgentTrajectory,
     AgentTurn,
@@ -64,6 +65,8 @@ class AgentTaskConfig(TaskConfig):
     max_concurrency: int = 1
     required_secrets: tuple[str, ...] = ()
     tools: tuple[ToolSchema, ...] = ()
+    # Override parent's None default with ChatFormatter for consistent serialization
+    formatter: Formatter | None = field(default_factory=ChatFormatter)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize config including agent-specific fields.
@@ -180,11 +183,27 @@ class AgentTask(Task):
         For agent tasks, this creates a simple chat request with the question,
         along with tools and system_prompt for inspection purposes.
         The actual multi-turn interaction is handled by _run_agent_loop.
-        """
-        # Get tools from instance or config
-        tools = instance.tools or self.config.tools or None
 
-        # Get system prompt from config
+        If a formatter is configured, uses it for formatting. Otherwise falls
+        back to basic chat-style formatting.
+        """
+        # Use formatter if set
+        if self.config.formatter:
+            request = self.config.formatter.format(instance, self.get_fewshot())
+            # Add tools and system_prompt if not already set by formatter
+            tools = instance.tools or self.config.tools or None
+            system_prompt = self.config.system_prompt if self.config.system_prompt else None
+            return LMRequest(
+                request_type=request.request_type,
+                messages=request.messages,
+                prompt=request.prompt,
+                continuations=request.continuations,
+                tools=request.tools or (tools if tools else None),
+                system_prompt=request.system_prompt or system_prompt,
+            )
+
+        # Fallback: basic chat-style formatting
+        tools = instance.tools or self.config.tools or None
         system_prompt = self.config.system_prompt if self.config.system_prompt else None
 
         return LMRequest(
