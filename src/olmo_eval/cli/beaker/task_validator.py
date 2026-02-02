@@ -52,7 +52,7 @@ class TaskValidator:
             console.print(f"[red]Error:[/red] {e}")
             raise SystemExit(1) from None
 
-        # Get all specs (without @priority suffix, but with ::overrides)
+        # Get all specs (without @priority suffix)
         all_task_specs = [t for tasks in tasks_by_priority.values() for t in tasks]
 
         # Expand for validation only
@@ -65,8 +65,7 @@ class TaskValidator:
             try:
                 task_instance = get_task_for_classification(task_spec)
                 if isinstance(task_instance, AgentTask):
-                    base_spec = task_spec.split("::", 1)[0]
-                    agent_task_specs.add(base_spec)
+                    agent_task_specs.add(task_spec)
             except Exception:
                 pass
 

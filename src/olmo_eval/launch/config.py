@@ -6,14 +6,15 @@ evaluation experiments from YAML files.
 Example config (eval_config.yaml):
     name: eval-llama-suite
     models:
-      - llama3.1-8b
-      - olmo-2-7b
+      - name_or_path: llama3.1-8b
+        gpus: 1
+      - name_or_path: olmo-2-7b
+        gpus: 1
     tasks:
       - mmlu
       - gsm8k
       - hellaswag
     cluster: h100
-    gpus: 1
     priority: normal
 
 Example with per-model resources:
@@ -32,7 +33,7 @@ Example with per-model resources:
 Example usage:
     config = EvalConfig.from_yaml("eval_config.yaml")
     # Or with CLI overrides:
-    config = EvalConfig.from_yaml("eval_config.yaml", overrides=["gpus=4", "priority=high"])
+    config = EvalConfig.from_yaml("eval_config.yaml", overrides=["priority=high"])
 """
 
 from __future__ import annotations
@@ -62,7 +63,7 @@ class ProviderConfig:
 
 @dataclass
 class ModelConfig:
-    """Configuration for a single model with optional resource overrides for Beaker launch.
+    """Configuration for a single model with resource settings for Beaker launch.
 
     This allows specifying per-model resources for mixed-size evaluations.
 
@@ -75,9 +76,9 @@ class ModelConfig:
         name_or_path: Model name, HuggingFace path, or local checkpoint path (required).
         alias: Optional short name for experiment naming. If not set, a short name
             is derived from name_or_path (last path component, or last 16 chars for long paths).
-        gpus: Number of GPUs per model instance (overrides default).
+        gpus: Number of GPUs per model instance. Defaults to 1.
         parallelism: Number of model instances to run in parallel. Total GPUs
-            requested will be gpus × parallelism.
+            requested will be gpus × parallelism. Defaults to 1.
         cluster: Cluster for this model (overrides default).
         preemptible: Whether this model's jobs can be preempted.
         timeout: Timeout for this model's jobs.
@@ -121,8 +122,8 @@ class ModelConfig:
 
     name_or_path: str = MISSING
     alias: str | None = None
-    gpus: int | None = None
-    parallelism: int | None = None
+    gpus: int = 1
+    parallelism: int = 1
     cluster: str | None = None
     preemptible: bool | None = None
     timeout: str | None = None
@@ -349,7 +350,7 @@ class EvalConfig:
 
     Models can be specified as simple strings or with per-model resource overrides:
 
-        # Simple format
+        # Simple format (uses default gpus=1, parallelism=1)
         models:
           - llama3.1-8b
           - olmo-2-7b
@@ -366,12 +367,11 @@ class EvalConfig:
         name: Experiment name (required).
         models: List of model names/paths or ModelConfig dicts (required).
             Each model can specify its own inference provider via the 'provider' field.
+            GPU and parallelism settings are per-model (default 1 each).
         tasks: List of task specs, optionally with @priority suffix (required).
         cluster: Default cluster alias or full name.
-        gpus: Default number of GPUs per model instance.
-        parallelism: Default number of model instances to run in parallel.
         max_gpus_per_node: Maximum GPUs available per node. When total GPUs
-            (gpus × parallelism) exceeds this, tasks are split across experiments.
+            exceeds this, models are split across experiments.
         priority: Default job priority for tasks without @priority suffix.
         preemptible: Default preemption setting.
         timeout: Default job timeout (e.g., "24h", "48h").
@@ -385,6 +385,8 @@ class EvalConfig:
         use_async_stream: Enable streaming async with vLLM's AsyncLLMEngine (vLLM only).
         num_workers: Number of workers for async modes.
         gpus_per_worker: GPUs per worker for async modes.
+        pack_models: Pack multiple models into single experiments when they fit.
+            Default False: each model runs in its own experiment for easier scheduling.
     """
 
     # Required fields
@@ -392,11 +394,10 @@ class EvalConfig:
     models: list[Any] = MISSING  # list[str] or list[dict] for ModelConfig
     tasks: list[str] = MISSING
 
-    # Default cluster and resources (can be overridden per-model)
+    # Default cluster and resources
     cluster: str | None = None
-    gpus: int = 1
-    parallelism: int = 1
     max_gpus_per_node: int = DEFAULT_MAX_GPUS_PER_NODE
+    pack_models: bool = False
 
     # Default job settings (can be overridden per-model)
     priority: str = "normal"
@@ -432,7 +433,7 @@ class EvalConfig:
         """Get effective resources for a model, merging defaults with overrides.
 
         Args:
-            model: ModelConfig with optional resource overrides.
+            model: ModelConfig with resource settings.
 
         Returns:
             Dict with effective resource values including:
@@ -451,13 +452,14 @@ class EvalConfig:
         )
 
         # Calculate GPUs per model instance
+        # For async modes, GPUs are calculated from workers
         if (use_async or use_async_stream) and num_workers is not None:
             gpus_per_model = num_workers * gpus_per_worker
         else:
-            gpus_per_model = model.gpus if model.gpus is not None else self.gpus
+            gpus_per_model = model.gpus  # Model always has a value (default 1)
 
-        # Determine parallelism
-        parallelism = model.parallelism if model.parallelism is not None else self.parallelism
+        # Parallelism is always per-model (default 1)
+        parallelism = model.parallelism
 
         # Extract provider name and package from ProviderConfig
         provider_name = model.provider.name if model.provider else None
@@ -490,13 +492,14 @@ class EvalConfig:
 
         Args:
             path: Path to YAML configuration file.
-            overrides: Optional list of dotlist overrides (e.g., ["gpus=4", "priority=high"]).
+            overrides: Optional list of dotlist overrides (e.g., ["priority=high"]).
 
         Returns:
             EvalConfig instance with merged configuration.
 
         Raises:
             FileNotFoundError: If the config file doesn't exist.
+            ValueError: If deprecated top-level gpus/parallelism fields are used.
             omegaconf.errors.MissingMandatoryValue: If required fields are missing.
 
         Example:
@@ -506,7 +509,7 @@ class EvalConfig:
             # Load with overrides
             config = EvalConfig.from_yaml(
                 "eval_config.yaml",
-                overrides=["gpus=4", "cluster=a100"]
+                overrides=["priority=high", "cluster=a100"]
             )
         """
         path = Path(path)
@@ -515,6 +518,26 @@ class EvalConfig:
 
         # Load YAML file
         file_config = OmegaConf.load(path)
+
+        # Check for deprecated top-level gpus/parallelism fields
+        file_dict = OmegaConf.to_container(file_config) if file_config else {}
+        if isinstance(file_dict, dict):
+            if "gpus" in file_dict:
+                raise ValueError(
+                    "Top-level 'gpus' is no longer supported. "
+                    "Specify gpus per-model instead:\n\n"
+                    "  models:\n"
+                    "    - name_or_path: your-model\n"
+                    "      gpus: 4\n"
+                )
+            if "parallelism" in file_dict:
+                raise ValueError(
+                    "Top-level 'parallelism' is no longer supported. "
+                    "Specify parallelism per-model instead:\n\n"
+                    "  models:\n"
+                    "    - name_or_path: your-model\n"
+                    "      parallelism: 4\n"
+                )
 
         # Create structured config with defaults
         schema = OmegaConf.structured(cls)
@@ -563,31 +586,28 @@ class EvalConfig:
 
 
 # Pre-defined configuration templates
+# Note: gpus and parallelism are per-model settings, not template defaults
 TEMPLATES: dict[str, dict[str, Any]] = {
     "quick": {
         "cluster": "h100",
-        "gpus": 1,
         "priority": "normal",
         "timeout": "4h",
         "preemptible": True,
     },
     "standard": {
         "cluster": "h100",
-        "gpus": 1,
         "priority": "normal",
         "timeout": "24h",
         "preemptible": True,
     },
     "large-model": {
         "cluster": "h100",
-        "gpus": 4,
         "priority": "high",
         "timeout": "48h",
         "preemptible": False,
     },
     "urgent": {
         "cluster": "h100",
-        "gpus": 1,
         "priority": "urgent",
         "timeout": "24h",
         "preemptible": False,

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import json as json_module
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 
 if TYPE_CHECKING:
     from olmo_eval.cli.beaker.config_loader import LaunchConfig
+    from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan
     from olmo_eval.launch import BeakerJobConfig, EvalConfig, ModelConfig
 
 
@@ -53,11 +53,11 @@ class JobConfigAssembler:
         self.inject_aws_credentials = inject_aws_credentials
         self.inject_gcs_credentials = inject_gcs_credentials
 
-    def assemble(self, exp: dict[str, Any]) -> BeakerJobConfig:
+    def assemble(self, exp: ExperimentPlan) -> BeakerJobConfig:
         """Assemble a BeakerJobConfig for an experiment.
 
         Args:
-            exp: Experiment plan dictionary.
+            exp: Experiment plan object.
 
         Returns:
             Configured BeakerJobConfig.
@@ -67,16 +67,7 @@ class JobConfigAssembler:
         )
         from olmo_eval.launch import BeakerEnvSecret, BeakerJobConfig
 
-        exp_model_cfgs: list[ModelConfig] = exp["model_cfgs"]
-        exp_model_specs: list[str] = exp["model_specs"]
-        exp_name: str = exp["name"]
-        task_list: list[str] = exp["tasks"]
-        exp_num_gpus: int = exp["num_gpus"]
-        exp_parallelism: int = exp["parallelism"]
-        effective_priority: str = exp["priority"]
-        exp_is_agent: bool = exp.get("is_agent", False)
-
-        first_model_cfg = exp_model_cfgs[0]
+        first_model_cfg = exp.model_cfgs[0]
 
         # Get effective resources
         model_resources = self._get_model_resources(first_model_cfg)
@@ -92,19 +83,10 @@ class JobConfigAssembler:
         effective_shared_memory = str(model_resources.get("shared_memory") or "10GiB")
 
         # Build command
-        command = self._build_command(
-            exp_model_cfgs,
-            exp_model_specs,
-            task_list,
-            exp_name,
-            exp_parallelism,
-            exp_num_gpus,
-            exp_is_agent,
-            model_resources,
-        )
+        command = self._build_command(exp, model_resources)
 
         # Determine provider extras
-        if exp_is_agent:
+        if exp.is_agent:
             provider_extras = ["vllm", "agents"]
         else:
             config_provider = model_resources.get("provider") or "vllm"
@@ -137,11 +119,11 @@ class JobConfigAssembler:
             job_env_vars["UV_CACHE_DIR"] = self.config.uv_cache_dir
 
         return BeakerJobConfig(
-            name=exp_name,
+            name=exp.name,
             command=command,
             cluster=effective_cluster,
-            num_gpus=exp_num_gpus,
-            priority=effective_priority,
+            num_gpus=exp.num_gpus,
+            priority=exp.priority,
             preemptible=effective_preemptible,
             timeout=effective_timeout,
             shared_memory=effective_shared_memory,
@@ -158,7 +140,7 @@ class JobConfigAssembler:
             provider_package=model_resources.get("provider_package"),
         )
 
-    def _get_model_resources(self, m_cfg: ModelConfig) -> dict[str, Any]:
+    def _get_model_resources(self, m_cfg: ModelConfig) -> dict:
         """Get model resources from config or defaults."""
         if self.eval_config is not None:
             return self.eval_config.get_model_resources(m_cfg)
@@ -167,9 +149,10 @@ class JobConfigAssembler:
         provider_name = m_cfg.provider.name if m_cfg.provider else None
         provider_package = m_cfg.provider.package if m_cfg.provider else None
 
+        # Model always has gpus and parallelism (default 1)
         return {
-            "gpus": m_cfg.gpus or self.config.gpus,
-            "parallelism": m_cfg.parallelism or self.config.parallelism,
+            "gpus": m_cfg.gpus,
+            "parallelism": m_cfg.parallelism,
             "cluster": m_cfg.cluster or self.config.cluster,
             "preemptible": m_cfg.preemptible if m_cfg.preemptible is not None else True,
             "timeout": m_cfg.timeout or self.config.timeout,
@@ -180,65 +163,46 @@ class JobConfigAssembler:
 
     def _build_command(
         self,
-        exp_model_cfgs: list[ModelConfig],
-        exp_model_specs: list[str],
-        task_list: list[str],
-        exp_name: str,
-        exp_parallelism: int,
-        exp_num_gpus: int,
-        exp_is_agent: bool,
-        model_resources: dict[str, Any],
+        exp: ExperimentPlan,
+        model_resources: dict,
     ) -> list[str]:
         """Build the olmo-eval run command."""
         command: list[str] = ["olmo-eval", "run"]
 
-        # Set output directory for Beaker (defaults to /tmp/results locally)
-        command.extend(["-o", BEAKER_RESULT_DIR])
+        # Set output directory for Beaker (use -O short form)
+        command.extend(["-O", BEAKER_RESULT_DIR])
 
-        # Add models
-        for m_cfg, m_spec in zip(exp_model_cfgs, exp_model_specs, strict=True):
-            m_resources = (
-                self.eval_config.get_model_resources(m_cfg)
-                if self.eval_config is not None
-                else model_resources
-            )
+        # Add models with their overrides using -o flags
+        for i, (m_cfg, m_spec) in enumerate(zip(exp.model_cfgs, exp.model_specs, strict=True)):
+            # Add the model
+            command.extend(["-m", m_spec])
 
-            final_model_spec = m_spec
-            config_inline_overrides: list[str] = []
+            # Add per-model overrides using -o flags
+            if i < len(exp.model_overrides):
+                for override in exp.model_overrides[i]:
+                    command.extend(["-o", override])
 
-            if m_resources.get("load_format"):
-                config_inline_overrides.append(f"load_format={m_resources['load_format']}")
-
-            if m_resources.get("extra_loader_config"):
-                json_config = json_module.dumps(
-                    m_resources["extra_loader_config"], separators=(",", ":")
-                )
-                config_inline_overrides.append(f"extra_loader_config={json_config}")
-
-            if config_inline_overrides:
-                if "::" in final_model_spec:
-                    final_model_spec = f"{final_model_spec},{','.join(config_inline_overrides)}"
-                else:
-                    final_model_spec = f"{final_model_spec}::{','.join(config_inline_overrides)}"
-
-            command.extend(["-m", final_model_spec])
-
+            # Add alias if present
             if m_cfg.alias:
                 command.extend(["--alias", m_cfg.alias])
 
-        # Add tasks
-        for t in task_list:
+        # Add tasks with their overrides
+        for t in exp.tasks:
             command.extend(["-t", t])
+            # Add per-task overrides using -o flags
+            if t in exp.task_overrides:
+                for override in exp.task_overrides[t]:
+                    command.extend(["-o", override])
 
         # Add parallelism
-        if exp_parallelism > 1:
-            command.extend(["--parallelism", str(exp_parallelism)])
+        if exp.parallelism > 1:
+            command.extend(["--parallelism", str(exp.parallelism)])
 
         # Agent-specific or async flags
-        if exp_is_agent:
+        if exp.is_agent:
             command.append("--agent")
-            if exp_num_gpus > 1:
-                command.extend(["--num-gpus", str(exp_num_gpus)])
+            if exp.num_gpus > 1:
+                command.extend(["--num-gpus", str(exp.num_gpus)])
         else:
             self._add_async_flags(command, model_resources)
 
@@ -257,7 +221,7 @@ class JobConfigAssembler:
         if self.effective_groups:
             command.extend(["--experiment-group", self.effective_groups[0]])
 
-        command.extend(["--experiment-name", exp_name])
+        command.extend(["--experiment-name", exp.name])
 
         if self.config.store:
             command.append("--store")
@@ -283,7 +247,7 @@ class JobConfigAssembler:
 
         return command
 
-    def _add_async_flags(self, command: list[str], model_resources: dict[str, Any]) -> None:
+    def _add_async_flags(self, command: list[str], model_resources: dict) -> None:
         """Add async-related flags to command."""
         effective_use_async = self.config.use_async or model_resources.get("use_async", False)
         effective_use_async_stream = self.config.use_async_stream or model_resources.get(

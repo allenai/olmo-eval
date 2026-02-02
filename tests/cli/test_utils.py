@@ -3,7 +3,12 @@
 import click
 import pytest
 
-from olmo_eval.cli.utils import FlaggedArg, process_ordered_args, reconstruct_ordered_args
+from olmo_eval.cli.utils import (
+    FlaggedArg,
+    extract_priority_from_overrides,
+    process_ordered_args,
+    reconstruct_ordered_args,
+)
 
 
 class TestFlaggedArg:
@@ -113,14 +118,14 @@ class TestProcessOrderedArgs:
     def test_empty_list(self):
         """Test with empty list."""
         model_overrides, task_overrides = process_ordered_args([])
-        assert model_overrides == {}
+        assert model_overrides == []
         assert task_overrides == {}
 
     def test_single_model_no_overrides(self):
         """Test single model without overrides."""
         ordered = [FlaggedArg("m", "llama3.1-8b")]
         model_overrides, task_overrides = process_ordered_args(ordered)
-        assert model_overrides == {"llama3.1-8b": []}
+        assert model_overrides == [[]]  # Positional list with one empty override list
         assert task_overrides == {}
 
     def test_single_model_with_overrides(self):
@@ -131,7 +136,7 @@ class TestProcessOrderedArgs:
             FlaggedArg("o", "gpus=4"),
         ]
         model_overrides, task_overrides = process_ordered_args(ordered)
-        assert model_overrides == {"llama3.1-8b": ["provider.name=vllm", "gpus=4"]}
+        assert model_overrides == [["provider.name=vllm", "gpus=4"]]
         assert task_overrides == {}
 
     def test_multiple_models_with_overrides(self):
@@ -143,10 +148,11 @@ class TestProcessOrderedArgs:
             FlaggedArg("o", "provider.name=litellm"),
         ]
         model_overrides, task_overrides = process_ordered_args(ordered)
-        assert model_overrides == {
-            "llama3.1-8b": ["provider.name=vllm"],
-            "gpt-4o": ["provider.name=litellm"],
-        }
+        # Positional: first model gets vllm, second gets litellm
+        assert model_overrides == [
+            ["provider.name=vllm"],
+            ["provider.name=litellm"],
+        ]
         assert task_overrides == {}
 
     def test_model_without_overrides_between_others(self):
@@ -159,11 +165,8 @@ class TestProcessOrderedArgs:
             FlaggedArg("o", "gpus=4"),
         ]
         model_overrides, task_overrides = process_ordered_args(ordered)
-        assert model_overrides == {
-            "model1": ["gpus=2"],
-            "model2": [],
-            "model3": ["gpus=4"],
-        }
+        # Positional: [model1 overrides, model2 overrides, model3 overrides]
+        assert model_overrides == [["gpus=2"], [], ["gpus=4"]]
 
     def test_single_task_with_overrides(self):
         """Test single task with overrides."""
@@ -172,7 +175,7 @@ class TestProcessOrderedArgs:
             FlaggedArg("o", "limit=100"),
         ]
         model_overrides, task_overrides = process_ordered_args(ordered)
-        assert model_overrides == {}
+        assert model_overrides == []  # No models
         assert task_overrides == {"mmlu": ["limit=100"]}
 
     def test_mixed_models_and_tasks(self):
@@ -187,10 +190,11 @@ class TestProcessOrderedArgs:
             FlaggedArg("t", "gsm8k"),  # No overrides
         ]
         model_overrides, task_overrides = process_ordered_args(ordered)
-        assert model_overrides == {
-            "llama3.1-8b": ["provider.name=vllm", "provider.package=vllm==0.14.0"],
-            "other-model": [],
-        }
+        # Positional: first model gets vllm overrides, second has none
+        assert model_overrides == [
+            ["provider.name=vllm", "provider.package=vllm==0.14.0"],
+            [],
+        ]
         assert task_overrides == {
             "mmlu": ["limit=100"],
             "gsm8k": [],
@@ -201,6 +205,60 @@ class TestProcessOrderedArgs:
         ordered = [FlaggedArg("o", "gpus=4")]
         with pytest.raises(click.UsageError, match="-o/--override must follow"):
             process_ordered_args(ordered)
+
+
+class TestExtractPriorityFromOverrides:
+    """Tests for extract_priority_from_overrides function."""
+
+    def test_empty_overrides(self):
+        """Test with empty overrides dict."""
+        priority, filtered = extract_priority_from_overrides({})
+        assert priority is None
+        assert filtered == {}
+
+    def test_no_priority_override(self):
+        """Test with no priority in overrides."""
+        task_overrides = {"mmlu": ["limit=100", "batch_size=8"]}
+        priority, filtered = extract_priority_from_overrides(task_overrides)
+        assert priority is None
+        assert filtered == {"mmlu": ["limit=100", "batch_size=8"]}
+
+    def test_priority_extracted(self):
+        """Test priority is extracted from overrides."""
+        task_overrides = {"mmlu": ["priority=urgent", "limit=100"]}
+        priority, filtered = extract_priority_from_overrides(task_overrides)
+        assert priority == "urgent"
+        assert filtered == {"mmlu": ["limit=100"]}
+
+    def test_priority_only_override(self):
+        """Test when only priority is in overrides - task not in filtered result."""
+        task_overrides = {"mmlu": ["priority=high"]}
+        priority, filtered = extract_priority_from_overrides(task_overrides)
+        assert priority == "high"
+        assert filtered == {}  # No other overrides left
+
+    def test_multiple_tasks_with_priority(self):
+        """Test priority from multiple tasks - last one wins."""
+        task_overrides = {
+            "mmlu": ["priority=normal", "limit=100"],
+            "gsm8k": ["priority=urgent"],
+        }
+        priority, filtered = extract_priority_from_overrides(task_overrides)
+        assert priority == "urgent"  # Last one wins
+        assert filtered == {"mmlu": ["limit=100"]}
+
+    def test_preserves_non_priority_overrides(self):
+        """Test that non-priority overrides are preserved."""
+        task_overrides = {
+            "mmlu": ["limit=100", "priority=high", "batch_size=8"],
+            "gsm8k": ["limit=50"],
+        }
+        priority, filtered = extract_priority_from_overrides(task_overrides)
+        assert priority == "high"
+        assert filtered == {
+            "mmlu": ["limit=100", "batch_size=8"],
+            "gsm8k": ["limit=50"],
+        }
 
 
 class TestEndToEndOrdering:
@@ -233,10 +291,11 @@ class TestEndToEndOrdering:
         ordered = reconstruct_ordered_args(args)
         model_overrides, task_overrides = process_ordered_args(ordered)
 
-        assert model_overrides == {
-            "llama3.1-8b": ["provider.name=vllm", "provider.package=vllm==0.14.0"],
-            "gpt-4o": ["provider.name=litellm"],
-        }
+        # Positional: first model (llama) gets vllm overrides, second (gpt-4o) gets litellm
+        assert model_overrides == [
+            ["provider.name=vllm", "provider.package=vllm==0.14.0"],
+            ["provider.name=litellm"],
+        ]
         assert task_overrides == {
             "mmlu": ["limit=100"],
             "gsm8k": [],

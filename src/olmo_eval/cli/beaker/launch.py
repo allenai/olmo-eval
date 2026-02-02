@@ -10,19 +10,22 @@ Configuration loading, validation, and job assembly are delegated to:
 - job_assembler.py: JobConfigAssembler for assembling BeakerJobConfig
 """
 
+from typing import TYPE_CHECKING
+
 import click
+
+if TYPE_CHECKING:
+    from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan
 from rich.panel import Panel
 from rich.pretty import Pretty
 from rich.table import Table
 
 from olmo_eval.cli.utils import (
     ExperimentSummary,
-    ModelSummary,
     OrderedMultiOption,
     RunnerConfig,
-    TaskSummary,
     console,
-    parse_model_spec,
+    extract_priority_from_overrides,
     process_ordered_args,
     reconstruct_ordered_args,
 )
@@ -62,19 +65,24 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_UV
     help="Override for preceding -m or -t (e.g., -o provider.name=vllm -o limit=100)",
 )
 @click.option("--cluster", "-c", default=None, help="Cluster alias (h100, a100, aus) or full name")
-@click.option("--gpus", "-G", default=None, type=int, help="Number of GPUs per model instance")
-@click.option(
-    "--parallelism",
-    "-P",
-    default=None,
-    type=int,
-    help="Number of model instances to run in parallel",
-)
 @click.option(
     "--max-gpus-per-node",
     default=None,
     type=int,
-    help="Maximum GPUs per node (default: 8). Tasks are split across experiments if exceeded.",
+    help="Maximum GPUs per node (default: 8). Models are split across experiments if exceeded.",
+)
+@click.option(
+    "--pack/--no-pack",
+    default=None,
+    help="Pack multiple models into single experiments when they fit. "
+    "Default is --no-pack: each model runs in its own experiment for easier resource acquisition.",
+)
+@click.option(
+    "--priority",
+    "-p",
+    type=click.Choice(["low", "normal", "high", "urgent"]),
+    default=None,
+    help="Job priority level (low, normal, high, urgent). Can also use @priority suffix on tasks.",
 )
 @click.option("--preemptible/--no-preemptible", default=None, help="Allow preemption")
 @click.option("--timeout", "-T", default=None, help="Job timeout (e.g., 24h, 30m)")
@@ -196,9 +204,9 @@ def launch(
     task: tuple[str, ...],
     override: tuple[str, ...],
     cluster: str | None,
-    gpus: int | None,
-    parallelism: int | None,
     max_gpus_per_node: int | None,
+    pack: bool | None,
+    priority: str | None,
     preemptible: bool | None,
     timeout: str | None,
     retries: int | None,
@@ -269,7 +277,11 @@ def launch(
     from olmo_eval.core.constants.infrastructure import BEAKER_DEFAULT_IMAGE
 
     ordered_args = reconstruct_ordered_args(sys.argv[1:])
-    model_overrides, task_overrides = process_ordered_args(ordered_args)
+    model_overrides, raw_task_overrides = process_ordered_args(ordered_args)
+
+    # Extract priority from task overrides (e.g., -o priority=urgent after -t)
+    # This is done once here and the filtered overrides are used everywhere
+    override_priority, task_overrides = extract_priority_from_overrides(raw_task_overrides)
 
     # Build CLI args dict
     cli_args = {
@@ -277,11 +289,11 @@ def launch(
         "model": model,
         "task": task,
         "model_overrides": model_overrides,
-        "task_overrides": task_overrides,
+        "task_overrides": task_overrides,  # Already filtered (priority extracted)
         "cluster": cluster,
-        "gpus": gpus,
-        "parallelism": parallelism,
         "max_gpus_per_node": max_gpus_per_node,
+        "pack_models": pack,
+        "priority": priority,
         "preemptible": preemptible,
         "timeout": timeout,
         "retries": retries,
@@ -323,10 +335,12 @@ def launch(
             eval_config = EvalConfig.from_yaml(config)
 
     # Validate tasks and group by priority
+    # Use override_priority from -o priority=X if specified, else use config priority
+    effective_priority = override_priority or launch_config.priority
     task_validator = TaskValidator(
         launch_config.task_specs,
         cli_priority=None,
-        default_priority=launch_config.priority,
+        default_priority=effective_priority,
     )
     tasks_by_priority, valid_tasks, agent_task_specs = task_validator.validate_and_group()
 
@@ -379,22 +393,19 @@ def launch(
     # Group models and build experiment plan
     model_grouper = ModelGrouper(launch_config, eval_config)
     experiment_builder = ExperimentPlanBuilder(
-        launch_config, model_grouper, tasks_by_priority, agent_task_specs
+        launch_config, model_grouper, tasks_by_priority, agent_task_specs, override_priority
     )
     experiment_plan, split_models = experiment_builder.build()
 
-    # Get task summaries
-    task_summaries = _get_task_summaries(valid_tasks)
-    task_summary_by_spec = {
-        (ts.spec if ts.spec and ts.spec != ts.config.name else ts.config.name): ts
-        for ts in task_summaries
-    }
+    # Get task configs with overrides applied
+    # (task_overrides is already filtered - priority extracted above)
+    task_configs_by_spec = _get_task_configs(valid_tasks, launch_config.task_overrides)
 
     # Collect required secrets
     all_required_secrets: set[str] = set()
-    for ts in task_summaries:
-        if hasattr(ts.config, "required_secrets") and ts.config.required_secrets:
-            all_required_secrets.update(ts.config.required_secrets)
+    for task_cfg in task_configs_by_spec.values():
+        if hasattr(task_cfg, "required_secrets") and task_cfg.required_secrets:
+            all_required_secrets.update(task_cfg.required_secrets)
 
     # Ensure secrets
     common_secrets, store_secrets, task_secrets = _ensure_secrets(
@@ -442,7 +453,7 @@ def launch(
         job_configs.append(job_config)
 
         exp_summary = _build_experiment_summary(
-            exp, job_config, task_summary_by_spec, use_async_stream, use_async, launch_config
+            exp, job_config, task_configs_by_spec, use_async_stream, use_async, launch_config
         )
         experiment_summaries.append(exp_summary)
 
@@ -516,12 +527,27 @@ def _handle_group_creation(launcher, effective_groups: list[str], dry_run: bool)
                     raise SystemExit(1) from None
 
 
-def _get_task_summaries(valid_tasks: list[str]) -> list[TaskSummary]:
-    """Get task summaries for display."""
+def _get_task_configs(
+    valid_tasks: list[str], task_overrides: dict[str, list[str]] | None = None
+) -> dict:
+    """Get task configs with overrides applied.
+
+    Args:
+        valid_tasks: List of task specifications.
+        task_overrides: Optional dict of task_spec -> override strings from CLI
+                       (already filtered - priority extracted).
+
+    Returns:
+        Dict mapping task_spec -> TaskConfig (with overrides applied).
+    """
+    from copy import deepcopy
+
     from olmo_eval.evals.tasks import get_task as get_task_instance
     from olmo_eval.evals.tasks.core.registry import parse_task_spec
 
-    task_summaries = []
+    task_overrides = task_overrides or {}
+    task_configs = {}
+
     for task_spec in valid_tasks:
         task_name, variants, inline_overrides = parse_task_spec(task_spec)
         try:
@@ -529,16 +555,39 @@ def _get_task_summaries(valid_tasks: list[str]) -> list[TaskSummary]:
         except ValueError as e:
             console.print(f"[red]Error loading task '{task_spec}':[/red] {e}")
             raise SystemExit(1) from None
-        task_cfg = task_instance.config
-        task_summaries.append(
-            TaskSummary(
-                config=task_cfg,
-                spec=task_spec if task_spec != task_cfg.name else None,
-                variants=variants if variants else None,
-                overrides=inline_overrides if inline_overrides else None,
-            )
-        )
-    return task_summaries
+
+        # Deep copy the config so we can apply overrides directly
+        task_cfg = deepcopy(task_instance.config)
+
+        # Apply inline overrides directly to config
+        if inline_overrides:
+            for key, value in inline_overrides.items():
+                if hasattr(task_cfg, key):
+                    setattr(task_cfg, key, value)
+
+        # Apply CLI overrides directly to config
+        cli_overrides = task_overrides.get(task_spec, [])
+        for override_str in cli_overrides:
+            if "=" in override_str:
+                key, value = override_str.split("=", 1)
+                # Try to parse value as int/float/bool if applicable
+                parsed_value: str | int | float | bool = value
+                try:
+                    if value.lower() in ("true", "false"):
+                        parsed_value = value.lower() == "true"
+                    elif "." in value:
+                        parsed_value = float(value)
+                    else:
+                        parsed_value = int(value)
+                except ValueError:
+                    parsed_value = value
+
+                if hasattr(task_cfg, key):
+                    setattr(task_cfg, key, parsed_value)
+
+        task_configs[task_spec] = task_cfg
+
+    return task_configs
 
 
 def _ensure_secrets(
@@ -580,30 +629,42 @@ def _ensure_secrets(
 
 
 def _print_experiment_matrix(
-    experiment_plan: list[dict], use_async_stream: bool, use_async: bool
+    experiment_plan: list["ExperimentPlan"], use_async_stream: bool, use_async: bool
 ) -> None:
     """Print experiment matrix table."""
     matrix_table = Table(show_header=True, title="Experiment Plan")
     matrix_table.add_column("Name", style="cyan")
     matrix_table.add_column("Models", style="blue")
+    matrix_table.add_column("Provider", style="white")
+    matrix_table.add_column("Tasks", style="dim")
     matrix_table.add_column("Runner", style="magenta")
     matrix_table.add_column("Priority", style="yellow")
-    matrix_table.add_column("Tasks", justify="right")
     matrix_table.add_column("GPUs", style="green", justify="right")
 
     for exp in experiment_plan:
-        task_count = len(exp["tasks"])
-        total_tasks = exp["total_expanded_tasks"]
-        task_display = (
-            f"{task_count}/{total_tasks}" if exp["split_index"] is not None else str(task_count)
-        )
-        model_cfgs = exp["model_cfgs"]
+        # Model display
         model_display = (
-            model_cfgs[0].name_or_path if len(model_cfgs) == 1 else f"{len(model_cfgs)} models"
+            exp.model_cfgs[0].name_or_path
+            if len(exp.model_cfgs) == 1
+            else f"{len(exp.model_cfgs)} models"
         )
 
-        exp_is_agent = exp.get("is_agent", False)
-        if exp_is_agent:
+        # Provider display
+        if len(exp.model_cfgs) == 1:
+            provider = exp.model_cfgs[0].provider
+            provider_display = provider.name if provider else "default"
+        else:
+            providers = {m.provider.name if m.provider else "default" for m in exp.model_cfgs}
+            provider_display = ", ".join(sorted(providers))
+
+        # Task display - show actual task names
+        if len(exp.tasks) <= 3:
+            task_display = ", ".join(exp.tasks)
+        else:
+            task_display = f"{exp.tasks[0]}, ... ({len(exp.tasks)} total)"
+
+        # Runner display
+        if exp.is_agent:
             runner_display = "AgentEvalRunner"
         elif use_async_stream:
             runner_display = "StreamingEvalRunner"
@@ -613,21 +674,22 @@ def _print_experiment_matrix(
             runner_display = "SyncEvalRunner"
 
         matrix_table.add_row(
-            exp["name"],
+            exp.name,
             model_display,
-            runner_display,
-            exp["priority"],
+            provider_display,
             task_display,
-            str(exp["num_gpus"]),
+            runner_display,
+            exp.priority,
+            str(exp.num_gpus),
         )
 
     console.print(matrix_table)
 
 
 def _build_experiment_summary(
-    exp: dict,
+    exp: "ExperimentPlan",
     job_config,
-    task_summary_by_spec: dict,
+    task_configs_by_spec: dict,
     use_async_stream: bool,
     use_async: bool,
     launch_config,
@@ -640,35 +702,15 @@ def _build_experiment_summary(
         SyncEvalRunner,
     )
 
-    exp_model_cfgs = exp["model_cfgs"]
-    exp_model_specs = exp["model_specs"]
-    task_list = exp["tasks"]
-    exp_is_agent = exp.get("is_agent", False)
-
-    # Build model summaries
-    exp_model_summaries = []
-    for m_cfg, m_spec in zip(exp_model_cfgs, exp_model_specs, strict=True):
-        model_base_name, model_inline_overrides = parse_model_spec(m_spec)
-        exp_model_summaries.append(
-            ModelSummary(
-                name=model_base_name,
-                gpus=m_cfg.gpus or launch_config.gpus,
-                parallelism=m_cfg.parallelism or launch_config.parallelism,
-                alias=m_cfg.alias,
-                provider=m_cfg.provider.name if m_cfg.provider else None,
-                overrides=model_inline_overrides if model_inline_overrides else None,
-            )
-        )
-
-    # Build task summaries
-    exp_task_summaries = []
-    for task_spec in task_list:
+    # Build task configs list (with overrides already applied)
+    exp_task_configs = []
+    for task_spec in exp.tasks:
         base_spec = task_spec.rsplit("@", 1)[0] if "@" in task_spec else task_spec
-        if base_spec in task_summary_by_spec:
-            exp_task_summaries.append(task_summary_by_spec[base_spec])
+        if base_spec in task_configs_by_spec:
+            exp_task_configs.append(task_configs_by_spec[base_spec])
 
     # Determine runner class
-    if exp_is_agent:
+    if exp.is_agent:
         exp_runner_class = AgentEvalRunner
     elif use_async_stream:
         exp_runner_class = StreamingEvalRunner
@@ -683,9 +725,9 @@ def _build_experiment_summary(
     )
 
     return ExperimentSummary(
-        name=exp["name"],
-        models=exp_model_summaries,
-        tasks=exp_task_summaries,
+        name=exp.name,
+        models=list(exp.model_cfgs),
+        tasks=exp_task_configs,
         runner=exp_runner_config,
         beaker=job_config,
     )

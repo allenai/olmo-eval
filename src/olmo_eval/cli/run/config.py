@@ -102,7 +102,7 @@ class RunConfigBuilder:
         inspect_tokens: bool = False,
         inspect_response: bool = False,
         inspect_request: bool = False,
-        cli_model_overrides: dict[str, list[str]] | None = None,
+        cli_model_overrides: list[list[str]] | None = None,
         cli_task_overrides: dict[str, list[str]] | None = None,
     ):
         """Initialize the builder with raw CLI arguments.
@@ -111,7 +111,7 @@ class RunConfigBuilder:
             models: Tuple of model names/paths from -m flags.
             task: Tuple of task specs from -t flags.
             output_dir: Output directory for results.
-            cli_model_overrides: Per-model overrides from -o flags (model_name -> [overrides]).
+            cli_model_overrides: Per-model overrides from -o flags (positional list).
             cli_task_overrides: Per-task overrides from -o flags (task_spec -> [overrides]).
             ... (other standard args)
         """
@@ -148,7 +148,7 @@ class RunConfigBuilder:
         self.inspect_tokens = inspect_tokens
         self.inspect_response = inspect_response
         self.inspect_request = inspect_request
-        self.cli_model_overrides = cli_model_overrides or {}
+        self.cli_model_overrides = cli_model_overrides or []
         self.cli_task_overrides = cli_task_overrides or {}
 
     def build(self) -> RunConfig:
@@ -176,10 +176,11 @@ class RunConfigBuilder:
         # Extract model names
         model_names = [name for name, _overrides in parsed_models]
 
-        # Build per-model overrides from CLI -o flags
+        # Build per-model overrides from CLI -o flags (positional)
         per_model_overrides: dict[str, dict[str, Any]] = {}
-        for model_name, cli_overrides in self.cli_model_overrides.items():
-            if cli_overrides:
+        for i, cli_overrides in enumerate(self.cli_model_overrides):
+            if cli_overrides and i < len(model_names):
+                model_name = model_names[i]
                 override_config = OmegaConf.from_dotlist(cli_overrides)
                 per_model_overrides[model_name] = OmegaConf.to_container(override_config)  # type: ignore[assignment]
 

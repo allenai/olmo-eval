@@ -541,3 +541,424 @@ class TestNormalizeProviderPackage:
         """Test package name only passes through unchanged."""
         result = normalize_provider_package("vllm")
         assert result == "vllm"
+
+
+class TestModelPackingAndGrouping:
+    """Tests for model packing and GPU grouping behavior."""
+
+    def test_runtime_signature_excludes_gpus(self):
+        """Models with different gpus but same provider/cluster are grouped together."""
+        from olmo_eval.cli.beaker.config_loader import LaunchConfig
+        from olmo_eval.cli.beaker.model_grouper import ModelGrouper
+        from olmo_eval.launch import ModelConfig
+
+        # Create models with different GPUs but same cluster/provider
+        model1 = ModelConfig(name_or_path="model1", gpus=1)
+        model2 = ModelConfig(name_or_path="model2", gpus=4)
+        model3 = ModelConfig(name_or_path="model3", gpus=2)
+
+        config = LaunchConfig(
+            name="test",
+            model_configs=[model1, model2, model3],
+            model_specs=["model1", "model2", "model3"],
+            task_specs=["mmlu"],
+            cluster="h100",
+            workspace="test",
+            budget="test",
+        )
+
+        grouper = ModelGrouper(config, eval_config=None)
+
+        # All models should be in the same group (same signature)
+        groups = grouper.group()
+        assert len(groups) == 1
+        assert len(groups[0]) == 3  # All 3 models in one group
+
+    def test_runtime_signature_splits_by_cluster(self):
+        """Models with different clusters are in separate groups."""
+        from olmo_eval.cli.beaker.config_loader import LaunchConfig
+        from olmo_eval.cli.beaker.model_grouper import ModelGrouper
+        from olmo_eval.launch import ModelConfig
+
+        model1 = ModelConfig(name_or_path="model1", gpus=1, cluster="h100")
+        model2 = ModelConfig(name_or_path="model2", gpus=1, cluster="a100")
+
+        config = LaunchConfig(
+            name="test",
+            model_configs=[model1, model2],
+            model_specs=["model1", "model2"],
+            task_specs=["mmlu"],
+            cluster="h100",  # Default
+            workspace="test",
+            budget="test",
+        )
+
+        grouper = ModelGrouper(config, eval_config=None)
+        groups = grouper.group()
+
+        # Should be 2 groups (different clusters)
+        assert len(groups) == 2
+
+    def test_no_pack_creates_separate_experiments(self):
+        """Default (pack_models=False) creates separate experiment per model."""
+        from olmo_eval.cli.beaker.config_loader import LaunchConfig
+        from olmo_eval.cli.beaker.experiment_builder import ExperimentPlanBuilder
+        from olmo_eval.cli.beaker.model_grouper import ModelGrouper
+        from olmo_eval.launch import ModelConfig
+
+        model1 = ModelConfig(name_or_path="model1", gpus=1)
+        model2 = ModelConfig(name_or_path="model2", gpus=1)
+
+        config = LaunchConfig(
+            name="test",
+            model_configs=[model1, model2],
+            model_specs=["model1", "model2"],
+            task_specs=["mmlu"],
+            cluster="h100",
+            workspace="test",
+            budget="test",
+            pack_models=False,  # Default
+        )
+
+        grouper = ModelGrouper(config, eval_config=None)
+        builder = ExperimentPlanBuilder(
+            config, grouper, tasks_by_priority={"normal": ["mmlu"]}, agent_task_specs=set()
+        )
+
+        experiments, _ = builder.build()
+
+        # Should have 2 experiments, one per model
+        assert len(experiments) == 2
+        assert len(experiments[0].model_cfgs) == 1
+        assert len(experiments[1].model_cfgs) == 1
+        assert experiments[0].num_gpus == 1
+        assert experiments[1].num_gpus == 1
+
+    def test_pack_groups_models_together(self):
+        """With pack_models=True, compatible models are grouped together."""
+        from olmo_eval.cli.beaker.config_loader import LaunchConfig
+        from olmo_eval.cli.beaker.experiment_builder import ExperimentPlanBuilder
+        from olmo_eval.cli.beaker.model_grouper import ModelGrouper
+        from olmo_eval.launch import ModelConfig
+
+        model1 = ModelConfig(name_or_path="model1", gpus=1)
+        model2 = ModelConfig(name_or_path="model2", gpus=1)
+
+        config = LaunchConfig(
+            name="test",
+            model_configs=[model1, model2],
+            model_specs=["model1", "model2"],
+            task_specs=["mmlu"],
+            cluster="h100",
+            workspace="test",
+            budget="test",
+            pack_models=True,
+            max_gpus_per_node=8,
+        )
+
+        grouper = ModelGrouper(config, eval_config=None)
+        builder = ExperimentPlanBuilder(
+            config, grouper, tasks_by_priority={"normal": ["mmlu"]}, agent_task_specs=set()
+        )
+
+        experiments, _ = builder.build()
+
+        # Should have 1 experiment with both models
+        assert len(experiments) == 1
+        assert len(experiments[0].model_cfgs) == 2
+        assert experiments[0].num_gpus == 2  # 1 + 1
+
+    def test_pack_mixed_gpu_counts(self):
+        """Packed models with different GPU counts in single experiment."""
+        from olmo_eval.cli.beaker.config_loader import LaunchConfig
+        from olmo_eval.cli.beaker.experiment_builder import ExperimentPlanBuilder
+        from olmo_eval.cli.beaker.model_grouper import ModelGrouper
+        from olmo_eval.launch import ModelConfig
+
+        # 1 + 1 + 6 = 8 GPUs total
+        model1 = ModelConfig(name_or_path="model1", gpus=1)
+        model2 = ModelConfig(name_or_path="model2", gpus=1)
+        model3 = ModelConfig(name_or_path="model3", gpus=6)
+
+        config = LaunchConfig(
+            name="test",
+            model_configs=[model1, model2, model3],
+            model_specs=["model1", "model2", "model3"],
+            task_specs=["mmlu"],
+            cluster="h100",
+            workspace="test",
+            budget="test",
+            pack_models=True,
+            max_gpus_per_node=8,
+        )
+
+        grouper = ModelGrouper(config, eval_config=None)
+        builder = ExperimentPlanBuilder(
+            config, grouper, tasks_by_priority={"normal": ["mmlu"]}, agent_task_specs=set()
+        )
+
+        experiments, _ = builder.build()
+
+        # Should fit in 1 experiment (8 GPUs total)
+        assert len(experiments) == 1
+        assert experiments[0].num_gpus == 8
+        assert experiments[0].model_gpu_counts == [1, 1, 6]
+
+    def test_pack_splits_when_exceeds_max(self):
+        """Packed models split when total exceeds max_gpus_per_node."""
+        from olmo_eval.cli.beaker.config_loader import LaunchConfig
+        from olmo_eval.cli.beaker.experiment_builder import ExperimentPlanBuilder
+        from olmo_eval.cli.beaker.model_grouper import ModelGrouper
+        from olmo_eval.launch import ModelConfig
+
+        # 4 + 6 = 10 GPUs, exceeds max of 8
+        model1 = ModelConfig(name_or_path="model1", gpus=4)
+        model2 = ModelConfig(name_or_path="model2", gpus=6)
+
+        config = LaunchConfig(
+            name="test",
+            model_configs=[model1, model2],
+            model_specs=["model1", "model2"],
+            task_specs=["mmlu"],
+            cluster="h100",
+            workspace="test",
+            budget="test",
+            pack_models=True,
+            max_gpus_per_node=8,
+        )
+
+        grouper = ModelGrouper(config, eval_config=None)
+        builder = ExperimentPlanBuilder(
+            config, grouper, tasks_by_priority={"normal": ["mmlu"]}, agent_task_specs=set()
+        )
+
+        experiments, split_models = builder.build()
+
+        # Should split into 2 experiments
+        assert len(experiments) == 2
+        assert experiments[0].num_gpus == 4
+        assert experiments[1].num_gpus == 6
+        assert len(split_models) > 0  # At least one model was split
+
+    def test_model_gpu_counts_in_experiment(self):
+        """Experiment plan includes model_gpu_counts for each model."""
+        from olmo_eval.cli.beaker.config_loader import LaunchConfig
+        from olmo_eval.cli.beaker.experiment_builder import ExperimentPlanBuilder
+        from olmo_eval.cli.beaker.model_grouper import ModelGrouper
+        from olmo_eval.launch import ModelConfig
+
+        model1 = ModelConfig(name_or_path="model1", gpus=2)
+        model2 = ModelConfig(name_or_path="model2", gpus=4)
+
+        config = LaunchConfig(
+            name="test",
+            model_configs=[model1, model2],
+            model_specs=["model1", "model2"],
+            task_specs=["mmlu"],
+            cluster="h100",
+            workspace="test",
+            budget="test",
+            pack_models=True,
+            max_gpus_per_node=8,
+        )
+
+        grouper = ModelGrouper(config, eval_config=None)
+        builder = ExperimentPlanBuilder(
+            config, grouper, tasks_by_priority={"normal": ["mmlu"]}, agent_task_specs=set()
+        )
+
+        experiments, _ = builder.build()
+
+        assert len(experiments) == 1
+        assert experiments[0].model_gpu_counts == [2, 4]
+        assert experiments[0].num_gpus == 6
+
+
+class TestTaskOverrideHandling:
+    """Tests for task override extraction and command generation."""
+
+    def test_priority_extracted_from_task_overrides(self):
+        """Priority in task overrides sets experiment priority."""
+        from olmo_eval.cli.beaker.config_loader import LaunchConfig
+        from olmo_eval.cli.beaker.experiment_builder import ExperimentPlanBuilder
+        from olmo_eval.cli.beaker.model_grouper import ModelGrouper
+        from olmo_eval.cli.utils import extract_priority_from_overrides
+        from olmo_eval.launch import ModelConfig
+
+        # Raw task overrides include priority
+        raw_task_overrides = {"mmlu": ["priority=urgent", "limit=10"]}
+
+        # Extract priority before creating builder (as done in launch.py)
+        override_priority, filtered_task_overrides = extract_priority_from_overrides(
+            raw_task_overrides
+        )
+
+        config = LaunchConfig(
+            name="test",
+            model_configs=[ModelConfig(name_or_path="model1")],
+            model_specs=["model1"],
+            task_specs=["mmlu"],
+            cluster="h100",
+            workspace="test",
+            budget="test",
+            task_overrides=filtered_task_overrides,  # Already filtered
+        )
+
+        grouper = ModelGrouper(config, eval_config=None)
+        builder = ExperimentPlanBuilder(
+            config,
+            grouper,
+            tasks_by_priority={"normal": ["mmlu"]},
+            agent_task_specs=set(),
+            override_priority=override_priority,  # Pass extracted priority
+        )
+
+        experiments, _ = builder.build()
+
+        # Priority should be extracted and used for experiment
+        assert experiments[0].priority == "urgent"
+        # Task overrides should NOT include priority (it's not a task config field)
+        assert "priority=urgent" not in experiments[0].task_overrides.get("mmlu", [])
+        # Other overrides should be preserved
+        assert "limit=10" in experiments[0].task_overrides.get("mmlu", [])
+
+    def test_task_overrides_passed_to_experiment(self):
+        """Non-priority task overrides are passed through to experiment."""
+        from olmo_eval.cli.beaker.config_loader import LaunchConfig
+        from olmo_eval.cli.beaker.experiment_builder import ExperimentPlanBuilder
+        from olmo_eval.cli.beaker.model_grouper import ModelGrouper
+        from olmo_eval.launch import ModelConfig
+
+        config = LaunchConfig(
+            name="test",
+            model_configs=[ModelConfig(name_or_path="model1")],
+            model_specs=["model1"],
+            task_specs=["mmlu"],
+            cluster="h100",
+            workspace="test",
+            budget="test",
+            task_overrides={"mmlu": ["limit=100", "num_fewshot=5"]},
+        )
+
+        grouper = ModelGrouper(config, eval_config=None)
+        builder = ExperimentPlanBuilder(
+            config, grouper, tasks_by_priority={"normal": ["mmlu"]}, agent_task_specs=set()
+        )
+
+        experiments, _ = builder.build()
+
+        # Both overrides should be in task_overrides
+        assert experiments[0].task_overrides == {"mmlu": ["limit=100", "num_fewshot=5"]}
+
+    def test_task_overrides_in_command(self):
+        """Task overrides are included in the generated command."""
+        from olmo_eval.cli.beaker.config_loader import LaunchConfig
+        from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan
+        from olmo_eval.cli.beaker.job_assembler import JobConfigAssembler
+        from olmo_eval.launch import ModelConfig
+
+        model = ModelConfig(name_or_path="model1")
+        exp = ExperimentPlan(
+            name="test-exp",
+            model_cfgs=[model],
+            model_specs=["model1"],
+            priority="normal",
+            tasks=["mmlu", "gsm8k"],
+            original_task_specs=["mmlu", "gsm8k"],
+            total_expanded_tasks=2,
+            model_gpu_counts=[1],
+            num_gpus=1,
+            task_overrides={"mmlu": ["limit=10"], "gsm8k": ["limit=20", "num_fewshot=3"]},
+        )
+
+        config = LaunchConfig(
+            name="test",
+            model_configs=[model],
+            model_specs=["model1"],
+            task_specs=["mmlu", "gsm8k"],
+            cluster="h100",
+            workspace="test",
+            budget="test",
+        )
+
+        assembler = JobConfigAssembler(
+            config=config,
+            eval_config=None,
+            effective_image="test-image",
+            effective_groups=[],
+            beaker_username="test-user",
+            common_secrets=[],
+            store_secrets=[],
+            task_secrets=[],
+            inject_aws_credentials=False,
+            inject_gcs_credentials=False,
+        )
+
+        job_config = assembler.assemble(exp)
+
+        # Command should include task overrides
+        cmd = job_config.command
+        # Find position of -t mmlu and check -o limit=10 follows
+        mmlu_idx = cmd.index("mmlu")
+        assert cmd[mmlu_idx + 1] == "-o"
+        assert cmd[mmlu_idx + 2] == "limit=10"
+
+        # Find position of -t gsm8k and check both overrides follow
+        gsm8k_idx = cmd.index("gsm8k")
+        assert cmd[gsm8k_idx + 1] == "-o"
+        assert cmd[gsm8k_idx + 2] == "limit=20"
+        assert cmd[gsm8k_idx + 3] == "-o"
+        assert cmd[gsm8k_idx + 4] == "num_fewshot=3"
+
+    def test_priority_override_not_in_command(self):
+        """Priority override should not appear in the run command."""
+        from olmo_eval.cli.beaker.config_loader import LaunchConfig
+        from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan
+        from olmo_eval.cli.beaker.job_assembler import JobConfigAssembler
+        from olmo_eval.launch import ModelConfig
+
+        model = ModelConfig(name_or_path="model1")
+        # Simulate already-filtered overrides (priority removed)
+        exp = ExperimentPlan(
+            name="test-exp",
+            model_cfgs=[model],
+            model_specs=["model1"],
+            priority="urgent",  # Priority was extracted to here
+            tasks=["mmlu"],
+            original_task_specs=["mmlu"],
+            total_expanded_tasks=1,
+            model_gpu_counts=[1],
+            num_gpus=1,
+            task_overrides={"mmlu": ["limit=10"]},  # No priority here
+        )
+
+        config = LaunchConfig(
+            name="test",
+            model_configs=[model],
+            model_specs=["model1"],
+            task_specs=["mmlu"],
+            cluster="h100",
+            workspace="test",
+            budget="test",
+        )
+
+        assembler = JobConfigAssembler(
+            config=config,
+            eval_config=None,
+            effective_image="test-image",
+            effective_groups=[],
+            beaker_username="test-user",
+            common_secrets=[],
+            store_secrets=[],
+            task_secrets=[],
+            inject_aws_credentials=False,
+            inject_gcs_credentials=False,
+        )
+
+        job_config = assembler.assemble(exp)
+
+        # Command should NOT include priority=urgent as a task override
+        cmd = job_config.command
+        assert "priority=urgent" not in cmd
+        # But experiment priority should be urgent (used for Beaker job)
+        assert job_config.priority == "urgent"

@@ -49,7 +49,7 @@ from olmo_eval.core.constants.infrastructure import LOCAL_RESULT_DIR
     save_to="_ordered",
     help="Override for preceding -m or -t (e.g., -o provider.name=vllm -o limit=100)",
 )
-@click.option("--output-dir", default=LOCAL_RESULT_DIR, help="Output directory")
+@click.option("--output-dir", "-O", default=LOCAL_RESULT_DIR, help="Output directory")
 @click.option("--provider", type=click.Choice(["hf", "vllm", "litellm"]), help="Override provider")
 @click.option(
     "--store",

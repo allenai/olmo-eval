@@ -8,7 +8,9 @@ import click
 from rich.console import Console
 
 if TYPE_CHECKING:
+    from olmo_eval.evals.tasks.core.base import TaskConfig
     from olmo_eval.launch.beaker.launcher import BeakerJobConfig
+    from olmo_eval.launch.config import ModelConfig
 
 console = Console()
 
@@ -81,30 +83,31 @@ def reconstruct_ordered_args(args: list[str]) -> list[FlaggedArg]:
 
 def process_ordered_args(
     ordered: list[FlaggedArg],
-) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+) -> tuple[list[list[str]], dict[str, list[str]]]:
     """Associate -o overrides with preceding -m or -t.
 
     Args:
         ordered: List of FlaggedArg with flag type and value.
 
     Returns:
-        Tuple of (model_overrides, task_overrides) where each is a dict
-        mapping model/task name to list of override strings.
+        Tuple of (model_overrides, task_overrides) where:
+        - model_overrides is a list of override lists, one per model (positional)
+        - task_overrides is a dict mapping task name to list of override strings
 
     Raises:
         click.UsageError: If -o appears without a preceding -m or -t.
     """
-    model_overrides: dict[str, list[str]] = {}  # model_name -> [override_strs]
+    model_overrides: list[list[str]] = []  # Positional: one list per model
     task_overrides: dict[str, list[str]] = {}
 
-    current_model: str | None = None
+    current_model_index: int = -1
     current_task: str | None = None
     last_flag: str | None = None
 
     for arg in ordered:
         if arg.flag == "m":
-            current_model = arg.value
-            model_overrides.setdefault(current_model, [])
+            model_overrides.append([])
+            current_model_index = len(model_overrides) - 1
             last_flag = "m"
         elif arg.flag == "t":
             current_task = arg.value
@@ -112,8 +115,8 @@ def process_ordered_args(
             last_flag = "t"
         elif arg.flag == "o":
             # Apply to last model or task
-            if last_flag == "m" and current_model:
-                model_overrides[current_model].append(arg.value)
+            if last_flag == "m" and current_model_index >= 0:
+                model_overrides[current_model_index].append(arg.value)
             elif last_flag == "t" and current_task:
                 task_overrides[current_task].append(arg.value)
             else:
@@ -122,58 +125,43 @@ def process_ordered_args(
     return model_overrides, task_overrides
 
 
+def extract_priority_from_overrides(
+    task_overrides: dict[str, list[str]],
+) -> tuple[str | None, dict[str, list[str]]]:
+    """Extract priority from task overrides and return filtered overrides.
+
+    If any task has a 'priority=X' override, it's used to set the job priority.
+    The priority override is removed from the returned task overrides (it's not
+    a valid task config field).
+
+    Args:
+        task_overrides: Dict of task_spec -> override strings.
+
+    Returns:
+        Tuple of (extracted_priority, filtered_task_overrides).
+    """
+    extracted_priority: str | None = None
+    filtered: dict[str, list[str]] = {}
+
+    for task_spec, overrides in task_overrides.items():
+        new_overrides = []
+        for override in overrides:
+            if override.startswith("priority="):
+                # Extract priority value
+                extracted_priority = override.split("=", 1)[1]
+            else:
+                new_overrides.append(override)
+        if new_overrides:
+            filtered[task_spec] = new_overrides
+
+    return extracted_priority, filtered
+
+
 def format_timestamp(ts: datetime | None) -> str:
     """Format a timestamp for display."""
     if ts is None:
         return "-"
     return ts.strftime("%Y-%m-%d %H:%M:%S")
-
-
-# Keys that apply to model/provider config
-MODEL_KEYS = {
-    "provider",
-    "attention_backend",
-    "gpus_per_worker",
-    "tokenizer",
-    "max_model_len",
-    "load_format",
-}
-
-
-@dataclass
-class ModelSummary:
-    """Summary of a model configuration."""
-
-    name: str
-    gpus: int = 1
-    parallelism: int = 1
-    alias: str | None = None
-    provider: str | None = None
-    overrides: dict[str, Any] | None = None
-
-
-@dataclass
-class TaskSummary:
-    """Summary of a task configuration for display.
-
-    Holds the task config directly to avoid duplicating fields.
-    """
-
-    config: Any  # TaskConfig or AgentTaskConfig
-    spec: str | None = None
-    variants: list[str] | None = None
-    overrides: dict[str, Any] | None = None
-
-    @property
-    def name(self) -> str:
-        return self.config.name
-
-    @property
-    def tool_names(self) -> list[str] | None:
-        """Return tool names if this is an agent task with tools."""
-        if hasattr(self.config, "tools") and self.config.tools:
-            return [t.name for t in self.config.tools]
-        return None
 
 
 @dataclass
@@ -204,8 +192,8 @@ class ExperimentSummary:
     """Per-experiment summary for beaker launch display."""
 
     name: str
-    models: list[ModelSummary]
-    tasks: list[TaskSummary]
+    models: list["ModelConfig"]
+    tasks: list["TaskConfig"]
     runner: RunnerConfig
     beaker: "BeakerJobConfig"
 

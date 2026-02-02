@@ -24,7 +24,8 @@ class TestModelConfig:
         config = ModelConfig(name_or_path="llama3.1-8b")
         assert config.name_or_path == "llama3.1-8b"
         assert config.alias is None
-        assert config.gpus is None
+        assert config.gpus == 1  # Default
+        assert config.parallelism == 1  # Default
         assert config.cluster is None
         assert config.preemptible is None
         assert config.timeout is None
@@ -67,7 +68,7 @@ class TestParseModelConfig:
         config = parse_model_config("llama3.1-8b")
         assert isinstance(config, ModelConfig)
         assert config.name_or_path == "llama3.1-8b"
-        assert config.gpus is None
+        assert config.gpus == 1  # Default
 
     def test_parse_dict_model(self):
         """Test parsing a dict model config."""
@@ -247,7 +248,7 @@ class TestEvalConfigModelConfigs:
 
         assert len(model_configs) == 2
         assert model_configs[0].name_or_path == "llama3.1-8b"
-        assert model_configs[0].gpus is None
+        assert model_configs[0].gpus == 1  # Default
         assert model_configs[1].name_or_path == "olmo-2-7b"
 
     def test_get_model_configs_from_dicts(self):
@@ -283,7 +284,7 @@ class TestEvalConfigModelConfigs:
 
         assert len(model_configs) == 2
         assert model_configs[0].name_or_path == "llama3.1-8b"
-        assert model_configs[0].gpus is None
+        assert model_configs[0].gpus == 1  # Default
         assert model_configs[1].name_or_path == "llama3.1-70b"
         assert model_configs[1].gpus == 4
 
@@ -291,20 +292,20 @@ class TestEvalConfigModelConfigs:
 class TestEvalConfigGetModelResources:
     """Tests for EvalConfig.get_model_resources method."""
 
-    def test_get_model_resources_no_overrides(self):
-        """Test get_model_resources returns defaults when no model overrides."""
+    def test_get_model_resources_defaults(self):
+        """Test get_model_resources returns model defaults (gpus/parallelism are per-model)."""
         config = EvalConfig(
             name="test",
             models=["llama3.1-8b"],
             tasks=["mmlu"],
-            gpus=2,
             cluster="a100",
             timeout="12h",
         )
         model = ModelConfig(name_or_path="llama3.1-8b")
         resources = config.get_model_resources(model)
 
-        assert resources["gpus"] == 2
+        assert resources["gpus"] == 1  # Model default
+        assert resources["parallelism"] == 1  # Model default
         assert resources["cluster"] == "a100"
         assert resources["timeout"] == "12h"
 
@@ -314,7 +315,6 @@ class TestEvalConfigGetModelResources:
             name="test",
             models=["llama3.1-8b"],
             tasks=["mmlu"],
-            gpus=1,
             cluster="h100",
             timeout="24h",
         )
@@ -325,8 +325,8 @@ class TestEvalConfigGetModelResources:
         )
         resources = config.get_model_resources(model)
 
-        assert resources["gpus"] == 4  # Model override
-        assert resources["cluster"] == "h100"  # Default (no override)
+        assert resources["gpus"] == 4  # Model value
+        assert resources["cluster"] == "h100"  # Config default
         assert resources["timeout"] == "48h"  # Model override
 
     def test_get_model_resources_partial_overrides(self):
@@ -335,7 +335,6 @@ class TestEvalConfigGetModelResources:
             name="test",
             models=["llama3.1-8b"],
             tasks=["mmlu"],
-            gpus=1,
             cluster="h100",
             preemptible=True,
         )
@@ -346,7 +345,7 @@ class TestEvalConfigGetModelResources:
         )
         resources = config.get_model_resources(model)
 
-        assert resources["gpus"] == 2  # Model override
+        assert resources["gpus"] == 2  # Model value
         assert resources["cluster"] == "h100"  # Default
         assert resources["preemptible"] is True  # Default
 
@@ -366,25 +365,23 @@ class TestEvalConfigGetModelResources:
         assert resources["shared_memory"] == "10GiB"
 
     def test_get_model_resources_parallelism_default(self):
-        """Test get_model_resources returns default parallelism."""
+        """Test get_model_resources returns model's parallelism (per-model setting)."""
         config = EvalConfig(
             name="test",
             models=["llama3.1-8b"],
             tasks=["mmlu"],
-            parallelism=4,
         )
         model = ModelConfig(name_or_path="llama3.1-8b")
         resources = config.get_model_resources(model)
 
-        assert resources["parallelism"] == 4
+        assert resources["parallelism"] == 1  # Model default
 
     def test_get_model_resources_parallelism_override(self):
-        """Test get_model_resources applies model parallelism override."""
+        """Test get_model_resources uses model's parallelism value."""
         config = EvalConfig(
             name="test",
             models=["llama3.1-8b"],
             tasks=["mmlu"],
-            parallelism=2,
         )
         model = ModelConfig(
             name_or_path="llama3.1-8b",
@@ -392,7 +389,7 @@ class TestEvalConfigGetModelResources:
         )
         resources = config.get_model_resources(model)
 
-        assert resources["parallelism"] == 8  # Model override wins
+        assert resources["parallelism"] == 8  # Model value
 
 
 class TestEvalConfigFromYaml:
@@ -409,7 +406,6 @@ tasks:
   - mmlu
   - gsm8k
 cluster: h100
-gpus: 1
 """
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write(yaml_content)
@@ -424,7 +420,7 @@ gpus: 1
 
             model_configs = config.get_model_configs()
             assert model_configs[0].name_or_path == "llama3.1-8b"
-            assert model_configs[0].gpus is None
+            assert model_configs[0].gpus == 1  # Default
 
     def test_from_yaml_per_model_resources(self):
         """Test loading YAML with per-model resource overrides."""
@@ -441,7 +437,6 @@ tasks:
   - mmlu@high
   - gsm8k@normal
 cluster: h100
-gpus: 1
 priority: normal
 """
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -482,7 +477,7 @@ tasks:
             model_configs = config.get_model_configs()
 
             assert model_configs[0].name_or_path == "llama3.1-8b"
-            assert model_configs[0].gpus is None
+            assert model_configs[0].gpus == 1  # Default
             assert model_configs[1].name_or_path == "llama3.1-70b"
             assert model_configs[1].gpus == 4
 
@@ -494,16 +489,52 @@ models:
   - llama3.1-8b
 tasks:
   - mmlu
-gpus: 1
 """
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write(yaml_content)
             f.flush()
 
-            config = EvalConfig.from_yaml(f.name, overrides=["gpus=4", "priority=high"])
+            config = EvalConfig.from_yaml(f.name, overrides=["priority=high"])
 
-            assert config.gpus == 4
             assert config.priority == "high"
+
+    def test_from_yaml_rejects_top_level_gpus(self):
+        """Test that top-level gpus field raises error."""
+        yaml_content = """
+name: test-eval
+models:
+  - llama3.1-8b
+tasks:
+  - mmlu
+gpus: 4
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+
+            import pytest
+
+            with pytest.raises(ValueError, match="Top-level 'gpus' is no longer supported"):
+                EvalConfig.from_yaml(f.name)
+
+    def test_from_yaml_rejects_top_level_parallelism(self):
+        """Test that top-level parallelism field raises error."""
+        yaml_content = """
+name: test-eval
+models:
+  - llama3.1-8b
+tasks:
+  - mmlu
+parallelism: 4
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+
+            import pytest
+
+            with pytest.raises(ValueError, match="Top-level 'parallelism' is no longer supported"):
+                EvalConfig.from_yaml(f.name)
 
 
 class TestGetTemplate:
@@ -514,6 +545,7 @@ class TestGetTemplate:
         template = get_template("quick")
         assert template["timeout"] == "4h"
         assert template["preemptible"] is True
+        assert "gpus" not in template  # gpus is per-model, not in templates
 
     def test_get_standard_template(self):
         """Test getting standard template."""
@@ -523,10 +555,10 @@ class TestGetTemplate:
     def test_get_large_model_template(self):
         """Test getting large-model template."""
         template = get_template("large-model")
-        assert template["gpus"] == 4
         assert template["priority"] == "high"
         assert template["timeout"] == "48h"
         assert template["preemptible"] is False
+        assert "gpus" not in template  # gpus is per-model, not in templates
 
     def test_get_urgent_template(self):
         """Test getting urgent template."""
@@ -542,10 +574,10 @@ class TestGetTemplate:
     def test_template_is_copy(self):
         """Test that returned template is a copy (not mutable)."""
         template1 = get_template("quick")
-        template1["gpus"] = 999
+        template1["priority"] = "urgent"
 
         template2 = get_template("quick")
-        assert template2["gpus"] == 1  # Original value
+        assert template2["priority"] == "normal"  # Original value
 
 
 class TestProviderConfig:
@@ -571,7 +603,7 @@ class TestApplyOverridesToModel:
         """Test with no overrides."""
         config = apply_overrides_to_model("llama3.1-8b", [])
         assert config.name_or_path == "llama3.1-8b"
-        assert config.gpus is None
+        assert config.gpus == 1  # Default
         assert config.provider is None
 
     def test_simple_overrides(self):
