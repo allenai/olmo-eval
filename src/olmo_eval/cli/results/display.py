@@ -10,6 +10,7 @@ from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
+from olmo_eval.cli.results.transformers import _matches_prefix_filter
 from olmo_eval.cli.utils import console, format_timestamp
 from olmo_eval.runners.common import (
     extract_score_from_metrics,
@@ -52,7 +53,7 @@ def print_task_results_table(tasks: list[Any], task_filter: set[str] | None = No
 
     for task in tasks:
         # Apply filter if provided
-        if task_filter and task.task_name not in task_filter:
+        if task_filter and not _matches_prefix_filter(task.task_name, task_filter):
             continue
 
         # Extract primary score from nested metrics
@@ -128,7 +129,7 @@ def _build_model_task_scores(
             model_scores[model_key] = {}
 
         for task in exp.tasks:
-            if task_filter and task.task_name not in task_filter:
+            if task_filter and not _matches_prefix_filter(task.task_name, task_filter):
                 continue
 
             task_hash = task.task_hash or ""

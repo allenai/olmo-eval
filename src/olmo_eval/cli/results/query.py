@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import enum
 import json
 import sys
-from collections.abc import Callable
 from typing import Any
 
 import click
@@ -25,15 +23,6 @@ from olmo_eval.cli.results.options import db_options, get_database_session
 from olmo_eval.cli.utils import console
 
 
-class FilterType(enum.Enum):
-    """Filter types for experiment queries."""
-
-    EXPERIMENT_ID = "experiment_id"
-    MODEL_NAME = "model_name"
-    MODEL_HASH = "model_hash"
-    TASK_NAME = "task_name"
-
-
 @click.command()
 @click.option(
     "--experiment",
@@ -47,7 +36,7 @@ class FilterType(enum.Enum):
     "-m",
     "model_names",
     multiple=True,
-    help="Model name(s) to query (can specify multiple).",
+    help="Model name prefix(es) to query.",
 )
 @click.option(
     "--model-hash",
@@ -61,7 +50,7 @@ class FilterType(enum.Enum):
     "-t",
     "task_names",
     multiple=True,
-    help="Task name(s) to filter (can specify multiple).",
+    help="Task name prefix(es) to filter.",
 )
 @click.option(
     "--task-hash",
@@ -71,7 +60,7 @@ class FilterType(enum.Enum):
 @click.option(
     "--experiment-group",
     "-G",
-    help="Filter by experiment group.",
+    help="Experiment group prefix to filter by.",
 )
 @click.option(
     "--instances/--no-instances",
@@ -163,9 +152,8 @@ def query(
                 )
                 return
 
-            # Fetch experiments based on filters
+            # Fetch experiments based on filters (all combined with AND)
             all_experiments = _query_experiments(
-                helper,
                 repo,
                 experiment_ids,
                 model_names,
@@ -180,9 +168,6 @@ def query(
 
             # Comparison mode: no experiment IDs specified
             is_comparison = not experiment_ids
-
-            # Note: model_hash and task_hash filtering is done in the database
-            # via _hash_filter which uses prefix matching (startswith)
 
             task_filter = set(task_names) if task_names else None
 
@@ -249,7 +234,6 @@ def _stream_experiment_group_instances(
 
 
 def _query_experiments(
-    helper: Any,
     repo: Any,
     experiment_ids: tuple[str, ...],
     model_names: tuple[str, ...],
@@ -258,48 +242,15 @@ def _query_experiments(
     task_hash: str | None = None,
     experiment_group: str | None = None,
 ) -> list[Any]:
-    """Query experiments based on provided filters."""
-    results: list[Any] = []
-
-    def query_with_warning(
-        items: tuple[str, ...], query_fn: Callable[[str], list[Any]], filter_type: FilterType
-    ) -> None:
-        for item in items:
-            exps = query_fn(item)
-            if not exps:
-                msg = f"No experiments found with {filter_type.value}='{item}'"
-                console.print(f"[yellow]Warning:[/yellow] {msg}")
-            results.extend(exps)
-
-    # Experiment group query (standalone filter)
-    if experiment_group:
-        exps = repo.query(experiment_group=experiment_group)
-        if not exps:
-            msg = f"No experiments found with experiment_group='{experiment_group}'"
-            console.print(f"[yellow]Warning:[/yellow] {msg}")
-        results.extend(exps)
-
-    # Query by each filter type
-    query_with_warning(experiment_ids, helper.get_by_experiment_id, FilterType.EXPERIMENT_ID)
-    query_with_warning(model_names, lambda x: repo.query(model_name=x), FilterType.MODEL_NAME)
-    query_with_warning(
-        model_hashes, lambda x: repo.query(model_hash=x, latest=True), FilterType.MODEL_HASH
+    """Query experiments with all filters combined (AND logic)."""
+    return repo.query(
+        experiment_ids=list(experiment_ids) if experiment_ids else None,
+        model_names=list(model_names) if model_names else None,
+        model_hashes=list(model_hashes) if model_hashes else None,
+        task_names=list(task_names) if task_names else None,
+        task_hash=task_hash,
+        experiment_group=experiment_group,
     )
-
-    # Task-only query (no model filters)
-    if task_names and not model_names and not model_hashes and not experiment_group:
-        query_with_warning(task_names, lambda x: repo.query(task_name=x), FilterType.TASK_NAME)
-
-    # Task hash query (if no results yet from other filters)
-    if task_hash and not results:
-        exps = repo.query(task_hash=task_hash)
-        if not exps:
-            console.print(
-                f"[yellow]Warning:[/yellow] No experiments found with task_hash='{task_hash}'"
-            )
-        results.extend(exps)
-
-    return results
 
 
 def _query_instances(

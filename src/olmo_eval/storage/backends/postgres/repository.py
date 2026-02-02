@@ -18,17 +18,17 @@ from olmo_eval.core.types import EvalResult, StoredTaskResult
 from olmo_eval.storage.backends.postgres.models import Experiment, InstancePrediction, TaskResult
 
 
-def _hash_filter(column: Any, hash_value: str) -> ColumnElement[bool]:
-    """Create a hash filter using prefix matching.
+def _prefix_filter(column: Any, value: str) -> ColumnElement[bool]:
+    """Create a prefix filter using startswith matching.
 
     Args:
         column: SQLAlchemy column to filter on.
-        hash_value: Hash prefix to match (any length).
+        value: Prefix to match.
 
     Returns:
         SQLAlchemy filter expression using startswith.
     """
-    return column.startswith(hash_value)
+    return column.startswith(value)
 
 
 class ExperimentRepository:
@@ -159,9 +159,10 @@ class ExperimentRepository:
 
     def query(
         self,
-        model_name: str | None = None,
-        model_hash: str | None = None,
-        task_name: str | None = None,
+        experiment_ids: list[str] | None = None,
+        model_names: list[str] | None = None,
+        model_hashes: list[str] | None = None,
+        task_names: list[str] | None = None,
         task_hash: str | None = None,
         experiment_group: str | None = None,
         start_time: datetime | None = None,
@@ -170,14 +171,20 @@ class ExperimentRepository:
         limit: int | None = None,
         offset: int = 0,
     ) -> list[EvalResult]:
-        """Query evaluation experiments with filters.
+        """Query evaluation experiments with filters (AND logic).
+
+        All filters are combined with AND. Within a list filter, items are OR'd.
+        For example: model_names=['llama', 'qwen'] AND task_names=['mmlu']
+        matches experiments where (model starts with 'llama' OR 'qwen') AND
+        (has task starting with 'mmlu').
 
         Args:
-            model_name: Filter by model name (exact match).
-            model_hash: Filter by model hash (hash of model config).
-            task_name: Filter by task name (experiments containing this task).
-            task_hash: Filter by task hash (experiments containing this task config).
-            experiment_group: Filter by experiment group (exact match).
+            experiment_ids: Filter by experiment IDs (exact match, OR within list).
+            model_names: Filter by model name prefixes (OR within list).
+            model_hashes: Filter by model hash prefixes (OR within list).
+            task_names: Filter by task name prefixes (OR within list).
+            task_hash: Filter by task hash prefix.
+            experiment_group: Filter by experiment group prefix.
             start_time: Filter by timestamp >= start_time.
             end_time: Filter by timestamp <= end_time.
             latest: If True, return only the most recent result (limit=1).
@@ -187,17 +194,24 @@ class ExperimentRepository:
         Returns:
             List of matching EvalResult objects.
         """
+        from sqlalchemy import exists, or_
+
         stmt = select(Experiment)
 
-        # Apply filters
-        if model_name:
-            stmt = stmt.where(Experiment.model_name == model_name)
+        # Apply filters (all combined with AND, prefix matching for strings)
+        if experiment_ids:
+            stmt = stmt.where(Experiment.experiment_id.in_(experiment_ids))
 
-        if model_hash:
-            stmt = stmt.where(_hash_filter(Experiment.model_hash, model_hash))
+        if model_names:
+            conditions = [_prefix_filter(Experiment.model_name, n) for n in model_names]
+            stmt = stmt.where(or_(*conditions))
+
+        if model_hashes:
+            conditions = [_prefix_filter(Experiment.model_hash, h) for h in model_hashes]
+            stmt = stmt.where(or_(*conditions))
 
         if experiment_group:
-            stmt = stmt.where(Experiment.experiment_group == experiment_group)
+            stmt = stmt.where(_prefix_filter(Experiment.experiment_group, experiment_group))
 
         if start_time:
             stmt = stmt.where(Experiment.timestamp >= start_time)
@@ -205,24 +219,18 @@ class ExperimentRepository:
         if end_time:
             stmt = stmt.where(Experiment.timestamp <= end_time)
 
-        if task_name:
-            # Subquery to find experiment ids that have this task
-            from sqlalchemy import exists
-
+        if task_names:
+            # Subquery: experiment has ANY of these tasks (OR within list)
+            conditions = [_prefix_filter(TaskResult.task_name, t) for t in task_names]
             stmt = stmt.where(
-                exists()
-                .where(TaskResult.experiment_pk == Experiment.id)
-                .where(TaskResult.task_name == task_name)
+                exists().where(TaskResult.experiment_pk == Experiment.id).where(or_(*conditions))
             )
 
         if task_hash:
-            # Subquery to find experiment ids that have this task hash
-            from sqlalchemy import exists
-
             stmt = stmt.where(
                 exists()
                 .where(TaskResult.experiment_pk == Experiment.id)
-                .where(_hash_filter(TaskResult.task_hash, task_hash))
+                .where(_prefix_filter(TaskResult.task_hash, task_hash))
             )
 
         # Order by timestamp descending (most recent first)
@@ -357,19 +365,22 @@ class InstancePredictionRepository:
             stmt = stmt.where(InstancePrediction.experiment_pk == experiment_pk)
 
         if task_hash:
-            stmt = stmt.where(_hash_filter(InstancePrediction.task_hash, task_hash))
+            stmt = stmt.where(_prefix_filter(InstancePrediction.task_hash, task_hash))
 
         if task_name:
             # JOIN to task_results to filter by task_name
+            from sqlalchemy import or_
+
             stmt = stmt.join(
                 TaskResult,
                 (TaskResult.experiment_pk == InstancePrediction.experiment_pk)
                 & (TaskResult.task_hash == InstancePrediction.task_hash),
             )
             if isinstance(task_name, list):
-                stmt = stmt.where(TaskResult.task_name.in_(task_name))
+                conditions = [_prefix_filter(TaskResult.task_name, t) for t in task_name]
+                stmt = stmt.where(or_(*conditions))
             else:
-                stmt = stmt.where(TaskResult.task_name == task_name)
+                stmt = stmt.where(_prefix_filter(TaskResult.task_name, task_name))
 
         stmt = stmt.order_by(InstancePrediction.id)
 
@@ -417,10 +428,13 @@ class InstancePredictionRepository:
             stmt = stmt.where(InstancePrediction.id > after_id)
 
         if task_name:
+            from sqlalchemy import or_
+
             if isinstance(task_name, list):
-                stmt = stmt.where(TaskResult.task_name.in_(task_name))
+                conditions = [_prefix_filter(TaskResult.task_name, t) for t in task_name]
+                stmt = stmt.where(or_(*conditions))
             else:
-                stmt = stmt.where(TaskResult.task_name == task_name)
+                stmt = stmt.where(_prefix_filter(TaskResult.task_name, task_name))
 
         stmt = stmt.order_by(InstancePrediction.id)
 
@@ -481,16 +495,19 @@ class InstancePredictionRepository:
             stmt = stmt.where(InstancePrediction.id > after_id)
 
         if model_name:
-            stmt = stmt.where(Experiment.model_name == model_name)
+            stmt = stmt.where(_prefix_filter(Experiment.model_name, model_name))
 
         if model_hash:
-            stmt = stmt.where(_hash_filter(Experiment.model_hash, model_hash))
+            stmt = stmt.where(_prefix_filter(Experiment.model_hash, model_hash))
 
         if task_name:
+            from sqlalchemy import or_
+
             if isinstance(task_name, list):
-                stmt = stmt.where(TaskResult.task_name.in_(task_name))
+                conditions = [_prefix_filter(TaskResult.task_name, t) for t in task_name]
+                stmt = stmt.where(or_(*conditions))
             else:
-                stmt = stmt.where(TaskResult.task_name == task_name)
+                stmt = stmt.where(_prefix_filter(TaskResult.task_name, task_name))
 
         stmt = stmt.order_by(InstancePrediction.id)
 
@@ -544,13 +561,16 @@ class InstancePredictionRepository:
             stmt = stmt.where(InstancePrediction.id > after_id)
 
         if task_hash:
-            stmt = stmt.where(_hash_filter(InstancePrediction.task_hash, task_hash))
+            stmt = stmt.where(_prefix_filter(InstancePrediction.task_hash, task_hash))
 
         if task_name:
+            from sqlalchemy import or_
+
             if isinstance(task_name, list):
-                stmt = stmt.where(TaskResult.task_name.in_(task_name))
+                conditions = [_prefix_filter(TaskResult.task_name, t) for t in task_name]
+                stmt = stmt.where(or_(*conditions))
             else:
-                stmt = stmt.where(TaskResult.task_name == task_name)
+                stmt = stmt.where(_prefix_filter(TaskResult.task_name, task_name))
 
         stmt = stmt.order_by(InstancePrediction.id)
 
@@ -646,20 +666,25 @@ class InstancePredictionRepository:
             stmt = stmt.where(Experiment.experiment_id.in_(experiment_ids))
 
         if model_names:
-            stmt = stmt.where(Experiment.model_name.in_(model_names))
-
-        if model_hashes:
-            # Support suffix matching for short hashes
             from sqlalchemy import or_
 
-            hash_conditions = [_hash_filter(Experiment.model_hash, h) for h in model_hashes]
+            name_conditions = [_prefix_filter(Experiment.model_name, n) for n in model_names]
+            stmt = stmt.where(or_(*name_conditions))
+
+        if model_hashes:
+            from sqlalchemy import or_
+
+            hash_conditions = [_prefix_filter(Experiment.model_hash, h) for h in model_hashes]
             stmt = stmt.where(or_(*hash_conditions))
 
         if task_hash:
-            stmt = stmt.where(_hash_filter(InstancePrediction.task_hash, task_hash))
+            stmt = stmt.where(_prefix_filter(InstancePrediction.task_hash, task_hash))
 
         if task_names:
-            stmt = stmt.where(TaskResult.task_name.in_(task_names))
+            from sqlalchemy import or_
+
+            task_conditions = [_prefix_filter(TaskResult.task_name, t) for t in task_names]
+            stmt = stmt.where(or_(*task_conditions))
 
         stmt = stmt.order_by(InstancePrediction.id)
 
@@ -706,7 +731,7 @@ class InstancePredictionRepository:
         stmt = select(InstancePrediction).where(InstancePrediction.experiment_pk == experiment_pk)
 
         if task_hash:
-            stmt = stmt.where(_hash_filter(InstancePrediction.task_hash, task_hash))
+            stmt = stmt.where(_prefix_filter(InstancePrediction.task_hash, task_hash))
 
         stmt = stmt.order_by(InstancePrediction.id)
 
@@ -763,20 +788,20 @@ class InstancePredictionRepository:
 
         # Apply filters
         if experiment_group:
-            stmt = stmt.where(InstancePrediction.experiment_group == experiment_group)
+            stmt = stmt.where(_prefix_filter(InstancePrediction.experiment_group, experiment_group))
         if experiment_pk:
             stmt = stmt.where(InstancePrediction.experiment_pk == experiment_pk)
         if model_hashes:
             # Support suffix matching for short hashes
             from sqlalchemy import or_
 
-            hash_conditions = [_hash_filter(Experiment.model_hash, h) for h in model_hashes]
+            hash_conditions = [_prefix_filter(Experiment.model_hash, h) for h in model_hashes]
             stmt = stmt.where(or_(*hash_conditions))
         if task_hashes:
             # Support suffix matching for short hashes
             from sqlalchemy import or_
 
-            hash_conditions = [_hash_filter(InstancePrediction.task_hash, h) for h in task_hashes]
+            hash_conditions = [_prefix_filter(InstancePrediction.task_hash, h) for h in task_hashes]
             stmt = stmt.where(or_(*hash_conditions))
 
         # Sort for single-pass grouping, stream with server-side cursor

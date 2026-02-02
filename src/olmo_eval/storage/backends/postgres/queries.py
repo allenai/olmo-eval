@@ -109,9 +109,11 @@ class QueryHelper:
 
     def query(
         self,
-        model_name: str | None = None,
-        model_hash: str | None = None,
-        task_name: str | None = None,
+        experiment_ids: list[str] | None = None,
+        model_names: list[str] | None = None,
+        model_hashes: list[str] | None = None,
+        task_names: list[str] | None = None,
+        task_hash: str | None = None,
         experiment_group: str | None = None,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
@@ -119,13 +121,17 @@ class QueryHelper:
         limit: int = 100,
         offset: int = 0,
     ) -> list[EvalResult]:
-        """Query evaluation results by filters.
+        """Query evaluation results with filters (AND logic).
+
+        All filters are combined with AND. Within a list filter, items are OR'd.
 
         Args:
-            model_name: Filter by model name.
-            model_hash: Filter by model hash.
-            task_name: Filter by task name (results containing this task).
-            experiment_group: Filter by experiment group.
+            experiment_ids: Filter by experiment IDs.
+            model_names: Filter by model name prefixes.
+            model_hashes: Filter by model hash prefixes.
+            task_names: Filter by task name prefixes.
+            task_hash: Filter by task hash prefix.
+            experiment_group: Filter by experiment group prefix.
             start_time: Filter by timestamp >= start_time.
             end_time: Filter by timestamp <= end_time.
             latest: If True, return only the most recent result.
@@ -136,9 +142,11 @@ class QueryHelper:
             List of matching evaluation results.
         """
         return self.experiment_repo.query(
-            model_name=model_name,
-            model_hash=model_hash,
-            task_name=task_name,
+            experiment_ids=experiment_ids,
+            model_names=model_names,
+            model_hashes=model_hashes,
+            task_names=task_names,
+            task_hash=task_hash,
             experiment_group=experiment_group,
             start_time=start_time,
             end_time=end_time,
@@ -178,16 +186,16 @@ class QueryHelper:
         """Get task metrics for a model.
 
         Args:
-            model_name: Model name filter.
-            model_hash: Model hash filter.
+            model_name: Model name prefix filter.
+            model_hash: Model hash prefix filter.
             tasks: Optional list of tasks to include.
 
         Returns:
             Dict mapping task_name -> primary_score.
         """
         experiments = self.experiment_repo.query(
-            model_name=model_name,
-            model_hash=model_hash,
+            model_names=[model_name] if model_name else None,
+            model_hashes=[model_hash] if model_hash else None,
             latest=True,
         )
 

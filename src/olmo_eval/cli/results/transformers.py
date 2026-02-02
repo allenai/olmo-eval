@@ -6,6 +6,11 @@ from dataclasses import dataclass
 from typing import Any
 
 
+def _matches_prefix_filter(value: str, prefixes: set[str]) -> bool:
+    """Check if value starts with any of the given prefixes."""
+    return any(value.startswith(prefix) for prefix in prefixes)
+
+
 @dataclass
 class TaskRun:
     """A single task run with its metadata."""
@@ -52,7 +57,7 @@ def group_experiments_by_model(
             model_tasks[model_key] = []
 
         for task in exp.tasks:
-            if task_filter and task.task_name not in task_filter:
+            if task_filter and not _matches_prefix_filter(task.task_name, task_filter):
                 continue
 
             model_tasks[model_key].append(
