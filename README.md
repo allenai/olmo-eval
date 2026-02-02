@@ -66,7 +66,6 @@ from olmo_eval.evals.tasks import Task, TaskConfig, register
     name="my_task",
     data_source="hf://dataset/path",
     formatter=MultipleChoiceFormatter(),
-    scorers=(MultipleChoiceScorer(),),
     metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
 ))
 class MyTask(Task): ...
@@ -281,7 +280,6 @@ def _my_task_config() -> TaskConfig:
         name="my_task",
         data_source=DataSource(path="my-org/my-dataset"),
         formatter=MultipleChoiceFormatter(template="Q: {question}\n\nA:"),
-        scorers=(MultipleChoiceScorer(),),
         metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
     )
 
@@ -351,14 +349,12 @@ TaskConfig(
 **Multiple Choice Tasks:**
 ```python
 formatter=MultipleChoiceFormatter(template="Question: {question}\n\nAnswer:")
-scorers=(MultipleChoiceScorer(),)
 metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),)
 ```
 
 **Generation Tasks (exact match):**
 ```python
 formatter=CompletionFormatter(template="{question}")
-scorers=(ExactMatchScorer(),)
 metrics=(AccuracyMetric(scorer=ExactMatchScorer),)
 ```
 
@@ -383,7 +379,7 @@ class MMLUAnatomy(MMLUTask):
 from olmo_eval.evals.tasks import register_variant
 
 # Register after task is defined
-register_variant("my_task", "bpb", formatter=PPLFormatter(), scorers=(BitsPerByteScorer(),))
+register_variant("my_task", "bpb", formatter=PPLFormatter(), metrics=(BPBMetric(scorer=BitsPerByteScorer),))
 ```
 
 **Regimes** are configuration presets (e.g., `:olmes`, `:zero`):
@@ -480,8 +476,7 @@ def _my_agent_config() -> AgentTaskConfig:
     return AgentTaskConfig(
         name="my_agent_task",
         data_source=DataSource(path="my-org/my-dataset", split="test"),
-        scorers=(...),
-        metrics=(AccuracyMetric(),),
+        metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
         system_prompt="You are a helpful assistant with tools.",
         max_turns=10,
         max_concurrency=1,
