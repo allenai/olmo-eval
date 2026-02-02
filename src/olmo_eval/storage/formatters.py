@@ -126,6 +126,7 @@ class ComparisonTaskOutput:
     task_name: str
     task_hash: str | None
     primary_metric: str | None  # Format: "metric:scorer"
+    timestamp: str | None = None  # ISO format string (from parent experiment)
     metrics: dict[str, dict[str, float]] | None = None  # Nested: {metric: {scorer: value}}
     instances: list[InstanceOutput] | None = None
 
