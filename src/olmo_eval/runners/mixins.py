@@ -71,7 +71,7 @@ class RunnerResultsMixin:
     # Optional S3 upload configuration
     s3_config: S3Config | None
 
-    # Per-task overrides from inline spec (e.g., task::temperature=0.6)
+    # Per-task overrides
     task_overrides: dict[str, dict[str, Any]]
 
     def _build_task_overrides(self, spec: str) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -80,18 +80,24 @@ class RunnerResultsMixin:
         Returns:
             Tuple of (task_overrides, sampling_overrides)
         """
+        from dataclasses import fields
+
         from olmo_eval.core.types import SamplingParams
         from olmo_eval.evals.tasks.core.base import TaskConfig
 
         task_overrides: dict[str, Any] = {}
         sampling_overrides: dict[str, Any] = {}
 
-        # Apply per-task inline overrides
+        # Get field names from dataclasses
+        task_fields = {f.name for f in fields(TaskConfig)}
+        sampling_fields = {f.name for f in fields(SamplingParams)}
+
+        # Apply per-task overrides
         per_task = getattr(self, "task_overrides", {}).get(spec, {})
         for key, value in per_task.items():
-            if key in TaskConfig.OVERRIDE_KEYS:
+            if key in task_fields:
                 task_overrides[key] = value
-            elif key in SamplingParams.OVERRIDE_KEYS:
+            elif key in sampling_fields:
                 sampling_overrides[key] = value
 
         return task_overrides, sampling_overrides
@@ -115,7 +121,7 @@ class RunnerResultsMixin:
             if suite_exists(spec):
                 continue
 
-            # Parse task_name[:variant1[:variant2...]][::key=value,...] format
+            # Parse task_name[:variant1[:variant2...]] format
             task_name, variants, _overrides = parse_task_spec(spec)
 
             if task_name not in available_tasks:

@@ -549,7 +549,7 @@ def _get_task_configs(
     task_configs = {}
 
     for task_spec in valid_tasks:
-        task_name, variants, inline_overrides = parse_task_spec(task_spec)
+        task_name, variants, _overrides = parse_task_spec(task_spec)
         try:
             task_instance = get_task_instance(task_spec)
         except ValueError as e:
@@ -558,12 +558,6 @@ def _get_task_configs(
 
         # Deep copy the config so we can apply overrides directly
         task_cfg = deepcopy(task_instance.config)
-
-        # Apply inline overrides directly to config
-        if inline_overrides:
-            for key, value in inline_overrides.items():
-                if hasattr(task_cfg, key):
-                    setattr(task_cfg, key, value)
 
         # Apply CLI overrides directly to config
         cli_overrides = task_overrides.get(task_spec, [])

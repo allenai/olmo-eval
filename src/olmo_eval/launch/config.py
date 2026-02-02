@@ -271,17 +271,15 @@ def get_model_short_name(model: BeakerModelSpec) -> str:
 def _shorten_task_name(task: str, max_len: int = 8) -> str:
     """Shorten a single task name for use in experiment naming.
 
-    Removes common suffixes and prefixes, strips variants (after ':' or '::'),
+    Removes common suffixes and prefixes, strips variants (after ':'),
     and truncates to max_len characters.
     """
     # Strip @priority suffix if present
     if "@" in task:
         task = task.split("@")[0]
 
-    # Strip variant/regime suffix (e.g., "mmlu::olmes" -> "mmlu", "arc:mc" -> "arc")
-    if "::" in task:
-        task = task.split("::")[0]
-    elif ":" in task:
+    # Strip variant suffix (e.g., "arc:mc" -> "arc")
+    if ":" in task:
         task = task.split(":")[0]
 
     # Remove common suffixes/prefixes
@@ -303,7 +301,7 @@ def get_tasks_short_name(tasks: list[str], max_total_len: int = 24) -> str:
     - 4+ tasks: uses first task name + count (e.g., "mmlu_3more")
 
     Args:
-        tasks: List of task names (may include @priority or ::variant suffixes).
+        tasks: List of task names (may include @priority or :variant suffixes).
         max_total_len: Maximum length of the returned string.
 
     Returns:

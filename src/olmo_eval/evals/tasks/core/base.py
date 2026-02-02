@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 from olmo_eval.core.formatters import Formatter
 from olmo_eval.core.metrics import Metric
@@ -42,15 +42,6 @@ class TaskConfig:
         ...     data_source="hf://cais/mmlu?subset=abstract_algebra",
         ... )
     """
-
-    #: Fields that can be overridden via inline task specs (e.g., task::num_fewshot=5)
-    OVERRIDE_KEYS: ClassVar[set[str]] = {
-        "num_fewshot",
-        "limit",
-        "fewshot_seed",
-        "sampling_params",
-        "dependencies",
-    }
 
     name: str
 

@@ -81,18 +81,16 @@ def sanitize_spec_for_filename(spec: str) -> str:
     - ' ' -> '_' (spaces)
 
     Args:
-        spec: Task specification string (e.g., "arc_challenge:bpb::olmes")
+        spec: Task specification string (e.g., "arc_challenge:bpb")
 
     Returns:
-        Sanitized string safe for use in filenames (e.g., "arc_challenge_bpb__olmes")
+        Sanitized string safe for use in filenames (e.g., "arc_challenge_bpb")
 
     Examples:
         >>> sanitize_spec_for_filename("arc_challenge:bpb")
         'arc_challenge_bpb'
         >>> sanitize_spec_for_filename("mmlu/history")
         'mmlu_history'
-        >>> sanitize_spec_for_filename("task::key=value")
-        'task__key=value'
     """
     # Replace problematic characters with underscores
     result = spec.replace(":", "_").replace("/", "_").replace("\\", "_").replace(" ", "_")

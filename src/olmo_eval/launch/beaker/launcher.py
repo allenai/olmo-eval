@@ -143,12 +143,12 @@ VALID_PRIORITIES = ("low", "normal", "high", "urgent")
 def parse_task_with_priority(task_spec: str, default_priority: str = "normal") -> tuple[str, str]:
     """Parse task spec with optional @priority suffix.
 
-    Format: task_name[@priority] or task_name::regime[@priority]
+    Format: task_name[@priority] or task_name:variant[@priority]
 
     Examples:
         - "mmlu" -> ("mmlu", "normal")
         - "mmlu@high" -> ("mmlu", "high")
-        - "mmlu::olmes@high" -> ("mmlu::olmes", "high")
+        - "mmlu:olmes@high" -> ("mmlu:olmes", "high")
 
     Args:
         task_spec: Task specification, optionally with @priority suffix.

@@ -269,20 +269,20 @@ class TestFormatTasks:
     def test_format_tasks_basic(self):
         """Test basic task formatting."""
         categories = ("cat1", "cat2", "cat3")
-        template = "{}:mc::olmes"
+        template = "{}:mc:olmes"
 
         result = format_tasks(categories, template)
 
-        assert result == ("cat1:mc::olmes", "cat2:mc::olmes", "cat3:mc::olmes")
+        assert result == ("cat1:mc:olmes", "cat2:mc:olmes", "cat3:mc:olmes")
 
     def test_format_tasks_complex_template(self):
         """Test formatting with more complex template."""
         categories = ("arc", "hellaswag")
-        template = "eval_{}:rc::full"
+        template = "eval_{}:rc:full"
 
         result = format_tasks(categories, template)
 
-        assert result == ("eval_arc:rc::full", "eval_hellaswag:rc::full")
+        assert result == ("eval_arc:rc:full", "eval_hellaswag:rc:full")
 
     def test_format_tasks_empty_categories(self):
         """Test formatting with empty categories."""

@@ -28,7 +28,7 @@ class BaseEvalRunner(ABC):
     output_dir: str = BEAKER_RESULT_DIR
     storages: list[StorageBackend] = field(default_factory=list)
 
-    # Per-task overrides from inline spec (e.g., task::temperature=0.6)
+    # Per-task overrides
     task_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     # Per-model overrides (maps model name -> overrides dict)
@@ -101,15 +101,21 @@ class BaseEvalRunner(ABC):
         Returns:
             Tuple of (task_overrides, sampling_overrides)
         """
+        from dataclasses import fields
+
         task_ovr: dict[str, Any] = {}
         sampling_ovr: dict[str, Any] = {}
 
-        # Apply per-task inline overrides
+        # Get field names from dataclasses
+        task_fields = {f.name for f in fields(TaskConfig)}
+        sampling_fields = {f.name for f in fields(SamplingParams)}
+
+        # Apply per-task overrides
         per_task = self.task_overrides.get(spec, {})
         for key, value in per_task.items():
-            if key in TaskConfig.OVERRIDE_KEYS:
+            if key in task_fields:
                 task_ovr[key] = value
-            elif key in SamplingParams.OVERRIDE_KEYS:
+            elif key in sampling_fields:
                 sampling_ovr[key] = value
 
         return task_ovr, sampling_ovr

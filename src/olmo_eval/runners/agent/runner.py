@@ -51,10 +51,10 @@ class AgentEvalRunner(RunnerResultsMixin, BaseEvalRunner):
     # vLLM config for agent server
     num_gpus: int = 1  # Number of GPUs for tensor parallelism
 
-    # Per-task overrides from inline spec (e.g., task::temperature=0.6)
+    # Per-task overrides
     task_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
 
-    # Model overrides from inline spec (e.g., model::tokenizer=..., model::load_format=...)
+    # Model overrides
     model_overrides: dict[str, Any] = field(default_factory=dict)
 
     # S3 upload configuration (optional)
@@ -324,7 +324,7 @@ class AgentEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         """Run a single agent task and return results."""
         from olmo_eval.evals.tasks import AgentTask, get_task
 
-        # Build overrides from per-task inline overrides
+        # Build overrides from per-task overrides
         overrides, _sampling_overrides = self._build_task_overrides(spec)
 
         # Get the task

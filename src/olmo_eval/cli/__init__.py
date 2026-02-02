@@ -126,12 +126,12 @@ def suite_info(suite_name: str) -> None:
     table.add_column("Regime", style="yellow")
 
     for idx, task_spec in enumerate(suite.expanded_tasks, 1):
-        if "::" in task_spec:
-            task_name, regime = task_spec.split("::", 1)
+        if ":" in task_spec:
+            task_name, variant = task_spec.split(":", 1)
         else:
             task_name = task_spec
-            regime = "(default)"
-        table.add_row(str(idx), task_name, regime)
+            variant = "(default)"
+        table.add_row(str(idx), task_name, variant)
 
     console.print(table)
     console.print(f"\n[dim]Total: {len(suite.expanded_tasks)} tasks[/dim]")

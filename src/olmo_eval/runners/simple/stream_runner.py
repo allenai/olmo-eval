@@ -48,10 +48,10 @@ class StreamingEvalRunner(AsyncBaseRunner):
     # vLLM config
     attention_backend: str | None = None
 
-    # Per-task overrides from inline spec (e.g., task::temperature=0.6)
+    # Per-task overrides
     task_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
 
-    # Per-model overrides from inline spec
+    # Per-model overrides
     model_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     # S3 upload configuration (optional)

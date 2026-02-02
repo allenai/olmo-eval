@@ -161,10 +161,10 @@ class RunConfigBuilder:
 
         from olmo_eval.cli.utils import parse_model_spec, parse_task_spec_with_overrides
 
-        # Parse model specs to extract inline overrides (deprecated :: syntax)
+        # Parse model specs to extract overrides
         parsed_models: list[tuple[str, dict[str, Any]]] = [parse_model_spec(m) for m in self.models]
 
-        # Parse task specs to extract inline overrides
+        # Parse task specs to extract overrides
         task_overrides: dict[str, dict[str, Any]] = {}
         task_specs: list[str] = []
         for t in self.task:

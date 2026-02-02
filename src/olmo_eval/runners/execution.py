@@ -77,7 +77,7 @@ def run_agent_task_impl(
         if overrides:
             task.config = replace(task.config, **overrides)
 
-        # Get model configuration (handles presets and inline overrides)
+        # Get model configuration (handles presets and overrides)
         model_config = get_model_config(model_name, **(model_overrides or {}))
 
         # Collect instances

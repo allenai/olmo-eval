@@ -49,14 +49,6 @@ class TestExpandTasks:
         assert result[0] == "arc_easy"
         assert result[1] == "arc_challenge"
 
-    def test_expand_suite_with_overrides(self):
-        """Test expanding a suite with inline overrides."""
-        result = expand_tasks(["mt_mbpp_v2fix::temperature=0.6"])
-
-        # All expanded tasks should have the override suffix
-        assert len(result) > 1
-        assert all("::temperature=0.6" in t for t in result)
-
     def test_expand_suite_with_priority(self):
         """Test expanding a suite with priority suffix."""
         result = expand_tasks(["mt_mbpp_v2fix@high"])
@@ -64,38 +56,6 @@ class TestExpandTasks:
         # All expanded tasks should have the priority suffix
         assert len(result) > 1
         assert all(t.endswith("@high") for t in result)
-
-    def test_expand_suite_with_overrides_and_priority(self):
-        """Test expanding a suite with both overrides and priority."""
-        result = expand_tasks(["mt_mbpp_v2fix::temperature=0@urgent"])
-
-        # All expanded tasks should have both suffixes in correct order
-        assert len(result) > 1
-        for task in result:
-            assert "::temperature=0" in task
-            assert task.endswith("@urgent")
-
-    def test_expand_task_with_overrides_unchanged(self):
-        """Test that non-suite tasks with overrides are unchanged."""
-        result = expand_tasks(["arc_challenge::temperature=0.5@high"])
-
-        assert result == ["arc_challenge::temperature=0.5@high"]
-
-    def test_expand_mixed_with_overrides(self):
-        """Test mix of tasks and suites with various suffixes."""
-        result = expand_tasks(
-            [
-                "humaneval::limit=10",
-                "mt_mbpp_v2fix::temperature=0@high",
-            ]
-        )
-
-        # First task should be unchanged
-        assert result[0] == "humaneval::limit=10"
-        # Rest should be expanded suite tasks with overrides and priority
-        for task in result[1:]:
-            assert "::temperature=0" in task
-            assert task.endswith("@high")
 
 
 class TestGetModelConfig:

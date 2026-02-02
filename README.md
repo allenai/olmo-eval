@@ -90,7 +90,7 @@ from olmo_eval.evals.suites import Suite, register
 
 register(Suite(
     name="my_suite",
-    tasks=("task_a::olmes", "task_b::olmes", "task_c::olmes"),
+    tasks=("task_a:olmes", "task_b:olmes", "task_c:olmes"),
 ))
 ```
 

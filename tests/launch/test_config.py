@@ -191,8 +191,8 @@ class TestGetTasksShortName:
         assert get_tasks_short_name(["arc:mc"]) == "arc"
 
     def test_single_task_with_regime(self):
-        """Test single task strips ::regime suffix."""
-        assert get_tasks_short_name(["mmlu::olmes"]) == "mmlu"
+        """Test single task strips :regime suffix."""
+        assert get_tasks_short_name(["mmlu:olmes"]) == "mmlu"
 
     def test_two_tasks(self):
         """Test two tasks joined with underscore."""
@@ -228,7 +228,7 @@ class TestGetTasksShortName:
 
     def test_mixed_priorities_and_variants(self):
         """Test tasks with mixed priorities and variants."""
-        tasks = ["mmlu@high", "gsm8k::olmes", "arc:mc@low"]
+        tasks = ["mmlu@high", "gsm8k:olmes", "arc:mc@low"]
         result = get_tasks_short_name(tasks)
         assert result == "mmlu_gsm8k_arc"
 

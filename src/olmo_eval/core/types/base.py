@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Any, ClassVar, NotRequired, TypedDict
+from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
 
 if TYPE_CHECKING:
     from .tools import ToolCall, ToolSchema
@@ -151,15 +151,6 @@ class LMRequest:
 @dataclass(frozen=True, slots=True)
 class SamplingParams:
     """Parameters for language model sampling."""
-
-    #: Fields that can be overridden via inline task specs (e.g., task::temperature=0.5)
-    OVERRIDE_KEYS: ClassVar[set[str]] = {
-        "temperature",
-        "max_tokens",
-        "top_p",
-        "top_k",
-        "num_samples",
-    }
 
     max_tokens: int = 512
     temperature: float = 0.0

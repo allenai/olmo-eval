@@ -62,41 +62,34 @@ def expand_tasks(tasks: list[str]) -> list[str]:
     """Expand suites and specs to individual task names.
 
     Supports both Suite names from the named_tasks registry
-    and individual task specs. Preserves inline overrides (::key=value)
-    and priority suffixes (@priority) when expanding suites.
+    and individual task specs. Preserves priority suffixes (@priority)
+    when expanding suites.
 
     Args:
         tasks: List of task specs or suite names, optionally with
-               overrides (::key=value) and/or priority (@priority).
+               priority (@priority).
 
     Returns:
         Flattened list with suites expanded to their constituent tasks,
-        with overrides and priorities propagated to each expanded task.
+        with priorities propagated to each expanded task.
     """
     from olmo_eval.evals.suites import get_suite, suite_exists
 
     result = []
     for t in tasks:
-        # Parse out priority suffix first (e.g., "suite::temp=0@high" -> "suite::temp=0", "high")
+        # Parse out priority suffix (e.g., "suite@high" -> "suite", "high")
         priority_suffix = ""
-        spec_without_priority = t
+        base_spec = t
         if "@" in t:
-            spec_without_priority, priority = t.rsplit("@", 1)
+            base_spec, priority = t.rsplit("@", 1)
             priority_suffix = f"@{priority}"
 
-        # Parse out overrides (e.g., "suite:variant::temp=0" -> "suite:variant", "temp=0")
-        override_suffix = ""
-        base_spec = spec_without_priority
-        if "::" in spec_without_priority:
-            base_spec, overrides = spec_without_priority.split("::", 1)
-            override_suffix = f"::{overrides}"
-
-        # Check if the base spec (without overrides/priority) is a suite
+        # Check if the base spec (without priority) is a suite
         if suite_exists(base_spec):
             suite = get_suite(base_spec)
-            # Propagate overrides and priority to each expanded task
+            # Propagate priority to each expanded task
             for expanded_task in suite.expand():
-                result.append(f"{expanded_task}{override_suffix}{priority_suffix}")
+                result.append(f"{expanded_task}{priority_suffix}")
         else:
             result.append(t)
     return result
@@ -107,7 +100,7 @@ def validate_tasks(tasks: list[str]) -> tuple[list[str], list[str]]:
 
     Args:
         tasks: List of task specs or suite names, optionally with
-               overrides (::key=value) and/or priority (@priority).
+               priority (@priority).
 
     Returns:
         Tuple of (valid_tasks, invalid_tasks). valid_tasks is the expanded list
@@ -122,13 +115,12 @@ def validate_tasks(tasks: list[str]) -> tuple[list[str], list[str]]:
     expanded = expand_tasks(tasks)
 
     for spec in expanded:
-        # Strip priority suffix first (e.g., "task::temp=0@high" -> "task::temp=0")
+        # Strip priority suffix (e.g., "task@high" -> "task")
         task_spec = spec.rsplit("@", 1)[0] if "@" in spec else spec
 
-        # task_exists handles ::overrides internally via parse_task_spec
         if task_exists(task_spec):
             valid_tasks.append(spec)
-        elif suite_exists(task_spec.split("::")[0] if "::" in task_spec else task_spec):
+        elif suite_exists(task_spec):
             # It's a suite that wasn't expanded (shouldn't happen but handle it)
             valid_tasks.append(spec)
         else:

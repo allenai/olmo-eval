@@ -124,29 +124,6 @@ class TestSuiteAggregations:
         assert result["mt_mbpp_v2fix"]["metrics"]["accuracy"]["exact_match"] == 0.75
         assert result["mt_mbpp_v2fix"]["num_tasks"] == len(expanded_tasks)
 
-    def test_suite_aggregation_with_overrides(self):
-        """Test suite aggregation with inline overrides."""
-        from olmo_eval.evals.suites import get_suite
-        from olmo_eval.runners.utils import compute_suite_aggregations
-
-        suite = get_suite("mt_mbpp_v2fix")
-        expanded_tasks = suite.expand()
-
-        # Create mock results with override suffix (as would happen in real run)
-        task_results = {}
-        for task in expanded_tasks:
-            task_results[f"{task}::temperature=0.6"] = {
-                "metrics": {"accuracy": {"exact_match": 0.80}}
-            }
-
-        result = compute_suite_aggregations(["mt_mbpp_v2fix::temperature=0.6"], task_results)
-
-        assert "mt_mbpp_v2fix::temperature=0.6" in result
-        assert result["mt_mbpp_v2fix::temperature=0.6"]["metrics"]["accuracy"][
-            "exact_match"
-        ] == pytest.approx(0.80)
-        assert result["mt_mbpp_v2fix::temperature=0.6"]["num_tasks"] == len(expanded_tasks)
-
     def test_suite_aggregation_with_priority(self):
         """Test suite aggregation with priority suffix."""
         from olmo_eval.evals.suites import get_suite
@@ -166,28 +143,6 @@ class TestSuiteAggregations:
         assert result["mt_mbpp_v2fix@high"]["metrics"]["accuracy"]["exact_match"] == pytest.approx(
             0.85
         )
-
-    def test_suite_aggregation_with_overrides_and_priority(self):
-        """Test suite aggregation with both overrides and priority."""
-        from olmo_eval.evals.suites import get_suite
-        from olmo_eval.runners.utils import compute_suite_aggregations
-
-        suite = get_suite("mt_mbpp_v2fix")
-        expanded_tasks = suite.expand()
-
-        # Create mock results with both suffixes (order: ::overrides@priority)
-        task_results = {}
-        for task in expanded_tasks:
-            task_results[f"{task}::temperature=0@urgent"] = {
-                "metrics": {"accuracy": {"exact_match": 0.90}}
-            }
-
-        result = compute_suite_aggregations(["mt_mbpp_v2fix::temperature=0@urgent"], task_results)
-
-        assert "mt_mbpp_v2fix::temperature=0@urgent" in result
-        assert result["mt_mbpp_v2fix::temperature=0@urgent"]["metrics"]["accuracy"][
-            "exact_match"
-        ] == pytest.approx(0.90)
 
     def test_suite_aggregation_non_suite_ignored(self):
         """Test that non-suite specs are ignored."""

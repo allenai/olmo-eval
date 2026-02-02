@@ -51,7 +51,6 @@ def _unflatten_metrics(flat_metrics: dict[str, float]) -> dict[str, dict[str, fl
 
 def _compute_child_average(
     child: str | Any,  # str or Suite
-    override_suffix: str,
     priority_suffix: str,
     task_results: dict[str, dict[str, Any]],
 ) -> _ChildAverageResult | None:
@@ -68,7 +67,7 @@ def _compute_child_average(
         tasks_included = []
 
         for task_spec in child.expand():
-            full_task_spec = f"{task_spec}{override_suffix}{priority_suffix}"
+            full_task_spec = f"{task_spec}{priority_suffix}"
             if full_task_spec not in task_results:
                 continue
 
@@ -93,8 +92,8 @@ def _compute_child_average(
 
         averaged_flat = {name: sum(vals) / len(vals) for name, vals in child_metrics.items()}
         averaged = _unflatten_metrics(averaged_flat)
-        # Build the key for this nested suite (with suffixes)
-        nested_key = f"{child.name}{override_suffix}{priority_suffix}"
+        # Build the key for this nested suite (with suffix)
+        nested_key = f"{child.name}{priority_suffix}"
         return _ChildAverageResult(
             metrics=averaged,
             tasks=tasks_included,
@@ -103,7 +102,7 @@ def _compute_child_average(
         )
     else:
         # Child is a task string - get its metrics directly
-        full_task_spec = f"{child}{override_suffix}{priority_suffix}"
+        full_task_spec = f"{child}{priority_suffix}"
         if full_task_spec not in task_results:
             return None
 
@@ -132,11 +131,11 @@ def compute_suite_aggregations(
     - AVERAGE_OF_AVERAGES: Average over children, where nested suites are
       averaged first (each child gets equal weight)
 
-    Handles specs with inline overrides (::key=value) and priority suffixes (@priority).
+    Handles specs with priority suffixes (@priority).
     When a suite has these suffixes, they are propagated to expanded task lookups.
 
     Args:
-        task_specs: Original task specs (may include suite names with overrides/priority)
+        task_specs: Original task specs (may include suite names with priority)
         task_results: Dict mapping task spec -> {"metrics": {...}, ...}
 
     Returns:
@@ -148,21 +147,14 @@ def compute_suite_aggregations(
     suite_aggregations: dict[str, dict[str, Any]] = {}
 
     for spec in task_specs:
-        # Parse out priority suffix first (e.g., "suite::temp=0@high" -> "suite::temp=0", "@high")
+        # Parse out priority suffix (e.g., "suite@high" -> "suite", "@high")
         priority_suffix = ""
-        spec_without_priority = spec
+        base_spec = spec
         if "@" in spec:
-            spec_without_priority, priority = spec.rsplit("@", 1)
+            base_spec, priority = spec.rsplit("@", 1)
             priority_suffix = f"@{priority}"
 
-        # Parse out overrides (e.g., "suite:variant::temp=0" -> "suite:variant", "::temp=0")
-        override_suffix = ""
-        base_spec = spec_without_priority
-        if "::" in spec_without_priority:
-            base_spec, overrides = spec_without_priority.split("::", 1)
-            override_suffix = f"::{overrides}"
-
-        # Check if the base spec (without suffixes) is a suite
+        # Check if the base spec (without priority) is a suite
         if not suite_exists(base_spec):
             continue
 
@@ -179,9 +171,7 @@ def compute_suite_aggregations(
             nested_suites_included: list[str] = []
 
             for child in suite.tasks:
-                result = _compute_child_average(
-                    child, override_suffix, priority_suffix, task_results
-                )
+                result = _compute_child_average(child, priority_suffix, task_results)
                 if result is None:
                     continue
 
@@ -230,8 +220,8 @@ def compute_suite_aggregations(
             tasks_included: list[str] = []
 
             for task_spec in suite_tasks:
-                # Build the full task spec with the same suffixes as the suite
-                full_task_spec = f"{task_spec}{override_suffix}{priority_suffix}"
+                # Build the full task spec with the same suffix as the suite
+                full_task_spec = f"{task_spec}{priority_suffix}"
 
                 if full_task_spec not in task_results:
                     continue

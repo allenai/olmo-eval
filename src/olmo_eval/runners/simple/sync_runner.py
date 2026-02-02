@@ -45,10 +45,10 @@ class SyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
     # vLLM config
     attention_backend: str | None = None  # e.g., "FLASHINFER", "FLASH_ATTN"
 
-    # Per-task overrides from inline spec (e.g., task::temperature=0.6)
+    # Per-task overrides
     task_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
 
-    # Model overrides from inline spec (e.g., model::tokenizer=..., model::load_format=...)
+    # Model overrides
     model_overrides: dict[str, Any] = field(default_factory=dict)
 
     # S3 upload configuration (optional)
@@ -152,7 +152,7 @@ class SyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             extra_kwargs["attention_backend"] = self.attention_backend
         if model_config.max_model_len:
             extra_kwargs["max_model_len"] = model_config.max_model_len
-        # Per-model vLLM loading options from inline spec (e.g., model::load_format=runai_streamer)
+        # Per-model vLLM loading options
         if self.model_overrides.get("load_format"):
             extra_kwargs["load_format"] = self.model_overrides["load_format"]
         if self.model_overrides.get("extra_loader_config"):
@@ -346,7 +346,7 @@ class SyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
     def _run_task(self, spec: str, provider: InferenceProvider) -> TaskResult:
         """Run a single task and return results."""
-        # Build overrides from per-task inline overrides
+        # Build overrides from per-task overrides
         overrides, sampling_overrides = self._build_task_overrides(spec)
 
         # Build response callback for inspection if enabled

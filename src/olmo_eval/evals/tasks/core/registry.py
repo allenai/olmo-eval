@@ -1,6 +1,6 @@
 """Task registry for registering and retrieving tasks by name.
 
-Task specs follow the format: task_name[:variant1[:variant2...]][::key=value,...]
+Task specs follow the format: task_name[:variant1[:variant2...]]
 
 Examples:
     - "arc_easy" - base task
@@ -8,8 +8,6 @@ Examples:
     - "arc_easy:olmes" - task with olmes regime (regimes are now variants)
     - "arc_easy:mc:olmes" - task with variant and regime
     - "mbpp:3shot:bpb:none" - task with stacked variants and regime
-    - "gsm8k:olmes::temperature=0.6" - task with regime and override
-    - "gsm8k::temperature=0.6,max_tokens=512" - task with overrides only
 """
 
 from collections.abc import Callable
@@ -75,7 +73,7 @@ def register_regime(task_name: str, regime: str, **overrides: Any) -> None:
     """Register a regime (configuration preset) for a task.
 
     Regimes are configuration presets that define evaluation settings
-    (e.g., ::olmes for OLMo-style evaluation). They are applied after variants.
+    (e.g., :olmes for OLMo-style evaluation). They are applied after variants.
 
     Args:
         task_name: Name of the base task (must already be registered).
@@ -178,17 +176,16 @@ def parse_overrides(override_str: str) -> dict[str, Any]:
 def parse_task_spec(spec: str) -> tuple[str, list[str], dict[str, Any]]:
     """Parse a task spec into (task_name, variants, overrides).
 
-    Spec format: task_name[:variant1[:variant2...]][::key=value,...]
+    Spec format: task_name[:variant1[:variant2...]]
 
-    Note: Regimes are now treated as variants (no special :: delimiter for regimes).
-    The :: delimiter is used exclusively for inline overrides.
+    Note: Regimes are now treated as variants.
 
     Args:
         spec: Task specification string.
 
     Returns:
         Tuple of (task_name, variants, overrides). Variants is a list (may be empty).
-        Overrides is a dict (may be empty).
+        Overrides is always an empty dict (kept for API compatibility).
 
     Examples:
         >>> parse_task_spec("arc_easy")
@@ -199,36 +196,26 @@ def parse_task_spec(spec: str) -> tuple[str, list[str], dict[str, Any]]:
         ("arc_easy", ["olmes"], {})
         >>> parse_task_spec("arc_easy:mc:olmes")
         ("arc_easy", ["mc", "olmes"], {})
-        >>> parse_task_spec("gsm8k:olmes::temperature=0.6")
-        ("gsm8k", ["olmes"], {"temperature": 0.6})
-        >>> parse_task_spec("gsm8k::temperature=0.6,max_tokens=512")
-        ("gsm8k", [], {"temperature": 0.6, "max_tokens": 512})
     """
-    # Split on :: to separate overrides
-    main_part, _, override_str = spec.partition("::")
-
-    # Parse overrides
-    overrides = parse_overrides(override_str)
-
-    # Split main part on : to get task name and variants
-    parts = main_part.split(":")
+    # Split on : to get task name and variants
+    parts = spec.split(":")
     task_name = parts[0]
     variants = parts[1:] if len(parts) > 1 else []
 
-    return task_name, variants, overrides
+    return task_name, variants, {}
 
 
 def get_base_task_name(spec: str) -> str:
-    """Extract the base task name from a spec, stripping priority and overrides.
+    """Extract the base task name from a spec, stripping priority suffix.
 
     This is useful for validation when you need to check if a task exists
-    without caring about the priority suffix (@high) or inline overrides (::key=val).
+    without caring about the priority suffix (@high).
 
     Args:
-        spec: Task specification string (e.g., "arc_easy@high::limit=5")
+        spec: Task specification string (e.g., "arc_easy@high")
 
     Returns:
-        Base task name with variants but without priority or overrides
+        Base task name with variants but without priority
         (e.g., "arc_easy" or "arc_easy:mc")
 
     Examples:
@@ -238,22 +225,18 @@ def get_base_task_name(spec: str) -> str:
         "arc_easy:mc"
         >>> get_base_task_name("arc_easy@high")
         "arc_easy"
-        >>> get_base_task_name("arc_easy::limit=5")
-        "arc_easy"
-        >>> get_base_task_name("arc_easy:mc@high::limit=5,temperature=0.5")
+        >>> get_base_task_name("arc_easy:mc@high")
         "arc_easy:mc"
     """
-    # Strip priority suffix first (e.g., "@high")
+    # Strip priority suffix (e.g., "@high")
     base = spec.rsplit("@", 1)[0] if "@" in spec else spec
-    # Strip inline overrides (e.g., "::limit=5")
-    base = base.split("::", 1)[0] if "::" in base else base
     return base
 
 
 def get_task(spec: str, config_overrides: dict[str, Any] | None = None) -> Task:
     """Instantiate a task by spec.
 
-    Spec format: task_name[:variant1[:variant2...]][::key=value,...]
+    Spec format: task_name[:variant1[:variant2...]]
 
     Note: Regimes are now treated as variants. When looking up a variant,
     we check both the variants and regimes registries.
@@ -262,22 +245,18 @@ def get_task(spec: str, config_overrides: dict[str, Any] | None = None) -> Task:
     parsing as base_task:variant.
 
     Args:
-        spec: Task specification (e.g., "arc_easy", "arc_easy:mc:olmes", "gsm8k::temperature=0.6").
+        spec: Task specification (e.g., "arc_easy", "arc_easy:mc:olmes").
         config_overrides: Additional config overrides to apply (highest priority).
 
     Returns:
-        Instantiated Task with config (and variant/override if specified).
+        Instantiated Task with config (and variant if specified).
 
     Raises:
         KeyError: If task_name is not registered.
     """
-    # First, check if the spec (or spec without inline overrides) is a directly registered task
-    main_part, _, override_str = spec.partition("::")
-    inline_overrides = parse_overrides(override_str)
-
     # Try progressively shorter prefixes to find a registered task with colons in its name
     # e.g., for "humaneval:bpb:mc", check "humaneval:bpb:mc", then "humaneval:bpb", then "humaneval"
-    parts = main_part.split(":")
+    parts = spec.split(":")
     task_name = None
     variants: list[str] = []
 
@@ -315,14 +294,6 @@ def get_task(spec: str, config_overrides: dict[str, Any] | None = None) -> Task:
                 f"Unknown variant '{variant}' for task '{task_name}'. "
                 f"Available: {', '.join(available) if available else 'none'}"
             )
-
-    # Apply inline overrides from spec (e.g., ::temperature=0.6)
-    if inline_overrides:
-        # Only apply TaskConfig fields, not sampling params
-        taskconfig_fields = {"num_fewshot", "limit", "fewshot_seed"}
-        for key, value in inline_overrides.items():
-            if key in taskconfig_fields:
-                config = replace(config, **{key: value})
 
     # Apply additional config overrides (highest priority)
     if config_overrides:
