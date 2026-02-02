@@ -84,15 +84,13 @@ register_regime("my_task", "olmes", num_fewshot=5, fewshot_seed=42)
 **Runtime Dependencies** allow tasks to specify packages installed at job startup:
 
 ```python
-@register("my_task", lambda: TaskConfig(
-    name="my_task",
-    data_source="hf://dataset/path",
-    dependencies=["special-lib==1.0", "git+https://github.com/user/repo@v2.0"],
+@register("code_eval", lambda: TaskConfig(
+    name="code_eval",
+    data_source="my-org/code-dataset",
+    dependencies=["code-sandbox==1.0", "git+https://github.com/user/repo@v2.0"],
 ))
-class MyTask(Task): ...
+class CodeEvalTask(Task): ...
 ```
-
-Dependencies are merged and deduplicated across all tasks in an experiment. They are installed via `uv pip install` after the inference provider but before evaluation begins.
 
 ### Suites
 
@@ -976,6 +974,23 @@ olmo-eval beaker launch -n "eval" -m llama3.1-8b -o provider.name=vllm -t mmlu
 
 # Manual installation inside container
 uv pip install -e '.[vllm]'  # includes vllm[runai]
+```
+
+### Task-Specific Dependencies
+
+Tasks can declare runtime dependencies that are installed at job startup (see [Tasks](#tasks)). Dependencies are automatically merged, deduplicated, and installed after the inference provider.
+
+You can also add or override dependencies via the CLI:
+
+```bash
+# Add dependencies to a task via -o flag
+olmo-eval beaker launch -n "eval" -m llama3.1-8b \
+    -t code_eval -o 'dependencies=["code-sandbox==1.0", "git+https://github.com/user/repo@v2.0"]'
+
+# Dependencies from multiple tasks are merged
+olmo-eval beaker launch -n "eval" -m llama3.1-8b \
+    -t task_a -o 'dependencies=["pkg1"]' \
+    -t task_b -o 'dependencies=["pkg2"]'
 ```
 
 ### Pushing to Beaker
