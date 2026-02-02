@@ -9,7 +9,13 @@ Configuration parsing, storage setup, and runner creation are delegated to:
 
 import click
 
-from olmo_eval.cli.utils import console, print_runtime_environment
+from olmo_eval.cli.utils import (
+    OrderedMultiOption,
+    console,
+    print_runtime_environment,
+    process_ordered_args,
+    reconstruct_ordered_args,
+)
 from olmo_eval.core.constants.infrastructure import LOCAL_RESULT_DIR
 
 
@@ -20,11 +26,30 @@ from olmo_eval.core.constants.infrastructure import LOCAL_RESULT_DIR
     "models",
     multiple=True,
     required=True,
-    help="Model name or preset. Can specify multiple times for multi-model runs.",
+    cls=OrderedMultiOption,
+    save_to="_ordered",
+    help="Model name or preset. Can specify multiple times. Use --override after to add overrides.",
 )
-@click.option("--task", "-t", multiple=True, required=True, help="Task spec or suite")
+@click.option(
+    "--task",
+    "-t",
+    multiple=True,
+    required=True,
+    cls=OrderedMultiOption,
+    save_to="_ordered",
+    help="Task spec or suite. Use --override after to add overrides.",
+)
 @click.option("--config", "-c", type=click.Path(exists=True), help="YAML config file")
-@click.option("--output-dir", "-o", default=LOCAL_RESULT_DIR, help="Output directory")
+@click.option(
+    "--override",
+    "-o",
+    "cli_override",
+    multiple=True,
+    cls=OrderedMultiOption,
+    save_to="_ordered",
+    help="Override for preceding -m or -t (e.g., -o provider.name=vllm -o limit=100)",
+)
+@click.option("--output-dir", "-O", default=LOCAL_RESULT_DIR, help="Output directory")
 @click.option("--provider", type=click.Choice(["hf", "vllm", "litellm"]), help="Override provider")
 @click.option(
     "--store",
@@ -196,6 +221,7 @@ def run(
     models: tuple[str, ...],
     task: tuple[str, ...],
     config: str | None,
+    cli_override: tuple[str, ...],
     output_dir: str,
     provider: str | None,
     store: bool,
@@ -238,13 +264,19 @@ def run(
     With --async-stream, uses vLLM's AsyncLLMEngine for true continuous batching.
     Without --async or --async-stream, runs sequentially for each model.
 
-    Inline overrides can be specified in -m and -t flags:
-        -m model::provider=vllm,tokenizer=allenai/dolma2-tokenizer
-        -t task:olmes::temperature=0.6,num_fewshot=5
+    Use -o/--override after -m or -t to apply overrides:
+
+        olmo-eval run -m llama3.1-8b -o provider.name=vllm -t mmlu -o limit=100
     """
     import os
 
+    # Process ordered args to associate overrides with models/tasks
+    import sys
+
     from olmo_eval.cli.run.config import RunConfigBuilder
+
+    ordered_args = reconstruct_ordered_args(sys.argv[1:])
+    model_overrides, task_overrides = process_ordered_args(ordered_args)
     from olmo_eval.cli.run.factory import RunnerFactory
     from olmo_eval.cli.run.storage import StorageSetup
     from olmo_eval.core.logging import configure_logging
@@ -302,6 +334,8 @@ def run(
         inspect_tokens=inspect_tokens,
         inspect_response=inspect_response,
         inspect_request=inspect_request,
+        cli_model_overrides=model_overrides,
+        cli_task_overrides=task_overrides,
     )
 
     # Validate CLI flags

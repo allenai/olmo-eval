@@ -5,32 +5,34 @@ import tempfile
 import pytest
 
 from olmo_eval.launch.config import (
+    BeakerModelSpec,
     EvalConfig,
-    ModelConfig,
+    ProviderConfig,
+    apply_overrides_to_model,
     get_model_short_name,
     get_tasks_short_name,
-    get_template,
     parse_model_config,
 )
 
 
-class TestModelConfig:
-    """Tests for ModelConfig dataclass."""
+class TestBeakerModelSpec:
+    """Tests for BeakerModelSpec dataclass."""
 
     def test_model_config_creation(self):
-        """Test creating a ModelConfig with name_or_path only."""
-        config = ModelConfig(name_or_path="llama3.1-8b")
+        """Test creating a BeakerModelSpec with name_or_path only."""
+        config = BeakerModelSpec(name_or_path="llama3.1-8b")
         assert config.name_or_path == "llama3.1-8b"
         assert config.alias is None
-        assert config.gpus is None
+        assert config.gpus == 1  # Default
+        assert config.parallelism == 1  # Default
         assert config.cluster is None
         assert config.preemptible is None
         assert config.timeout is None
         assert config.shared_memory is None
 
     def test_model_config_with_alias(self):
-        """Test creating a ModelConfig with an alias."""
-        config = ModelConfig(
+        """Test creating a BeakerModelSpec with an alias."""
+        config = BeakerModelSpec(
             name_or_path="/weka/checkpoints/my-model/step1000-hf",
             alias="my-model-1k",
             gpus=4,
@@ -40,8 +42,8 @@ class TestModelConfig:
         assert config.gpus == 4
 
     def test_model_config_with_overrides(self):
-        """Test creating a ModelConfig with resource overrides."""
-        config = ModelConfig(
+        """Test creating a BeakerModelSpec with resource overrides."""
+        config = BeakerModelSpec(
             name_or_path="llama3.1-70b",
             gpus=4,
             cluster="h100",
@@ -63,14 +65,14 @@ class TestParseModelConfig:
     def test_parse_string_model(self):
         """Test parsing a simple string model name."""
         config = parse_model_config("llama3.1-8b")
-        assert isinstance(config, ModelConfig)
+        assert isinstance(config, BeakerModelSpec)
         assert config.name_or_path == "llama3.1-8b"
-        assert config.gpus is None
+        assert config.gpus == 1  # Default
 
     def test_parse_dict_model(self):
         """Test parsing a dict model config."""
         config = parse_model_config({"name_or_path": "llama3.1-70b", "gpus": 4})
-        assert isinstance(config, ModelConfig)
+        assert isinstance(config, BeakerModelSpec)
         assert config.name_or_path == "llama3.1-70b"
         assert config.gpus == 4
 
@@ -94,8 +96,8 @@ class TestParseModelConfig:
         assert config.shared_memory == "20GiB"
 
     def test_parse_model_config_passthrough(self):
-        """Test that ModelConfig passes through unchanged."""
-        original = ModelConfig(name_or_path="test", gpus=2)
+        """Test that BeakerModelSpec passes through unchanged."""
+        original = BeakerModelSpec(name_or_path="test", gpus=2)
         parsed = parse_model_config(original)
         assert parsed is original
 
@@ -123,27 +125,27 @@ class TestGetModelShortName:
 
     def test_simple_model_name(self):
         """Test simple model name returns as-is (lowercased)."""
-        config = ModelConfig(name_or_path="llama3.1-8b")
+        config = BeakerModelSpec(name_or_path="llama3.1-8b")
         assert get_model_short_name(config) == "llama3.1-8b"
 
     def test_huggingface_path(self):
         """Test HuggingFace path returns last component."""
-        config = ModelConfig(name_or_path="meta-llama/Llama-3.1-8B")
+        config = BeakerModelSpec(name_or_path="meta-llama/Llama-3.1-8B")
         assert get_model_short_name(config) == "llama-3.1-8b"
 
     def test_local_path(self):
         """Test local path returns last component."""
-        config = ModelConfig(name_or_path="/weka/checkpoints/model/step1000-hf")
+        config = BeakerModelSpec(name_or_path="/weka/checkpoints/model/step1000-hf")
         assert get_model_short_name(config) == "step1000-hf"
 
     def test_local_path_with_trailing_slash(self):
         """Test local path with trailing slash returns last non-empty component."""
-        config = ModelConfig(name_or_path="/weka/checkpoints/model/step1000-hf/")
+        config = BeakerModelSpec(name_or_path="/weka/checkpoints/model/step1000-hf/")
         assert get_model_short_name(config) == "step1000-hf"
 
     def test_alias_overrides_name(self):
         """Test alias is used when provided."""
-        config = ModelConfig(
+        config = BeakerModelSpec(
             name_or_path="/weka/checkpoints/model/step1000-hf/",
             alias="my-model-1k",
         )
@@ -151,7 +153,7 @@ class TestGetModelShortName:
 
     def test_alias_is_lowercased(self):
         """Test alias is lowercased."""
-        config = ModelConfig(
+        config = BeakerModelSpec(
             name_or_path="some-model",
             alias="My-Model-Name",
         )
@@ -161,14 +163,14 @@ class TestGetModelShortName:
         """Test very long last component uses last 16 chars of full path."""
         # Create a path where the last component is > 32 chars
         long_component = "a" * 40
-        config = ModelConfig(name_or_path=f"/weka/checkpoints/{long_component}")
+        config = BeakerModelSpec(name_or_path=f"/weka/checkpoints/{long_component}")
         result = get_model_short_name(config)
         assert len(result) == 16
         assert result == "a" * 16
 
     def test_empty_last_component_uses_last_16_chars(self):
         """Test path ending with just slashes uses last 16 chars."""
-        config = ModelConfig(name_or_path="/weka/checkpoints/my-model-name")
+        config = BeakerModelSpec(name_or_path="/weka/checkpoints/my-model-name")
         # Last component is "my-model-name" which is fine
         assert get_model_short_name(config) == "my-model-name"
 
@@ -245,7 +247,7 @@ class TestEvalConfigModelConfigs:
 
         assert len(model_configs) == 2
         assert model_configs[0].name_or_path == "llama3.1-8b"
-        assert model_configs[0].gpus is None
+        assert model_configs[0].gpus == 1  # Default
         assert model_configs[1].name_or_path == "olmo-2-7b"
 
     def test_get_model_configs_from_dicts(self):
@@ -281,7 +283,7 @@ class TestEvalConfigModelConfigs:
 
         assert len(model_configs) == 2
         assert model_configs[0].name_or_path == "llama3.1-8b"
-        assert model_configs[0].gpus is None
+        assert model_configs[0].gpus == 1  # Default
         assert model_configs[1].name_or_path == "llama3.1-70b"
         assert model_configs[1].gpus == 4
 
@@ -289,20 +291,20 @@ class TestEvalConfigModelConfigs:
 class TestEvalConfigGetModelResources:
     """Tests for EvalConfig.get_model_resources method."""
 
-    def test_get_model_resources_no_overrides(self):
-        """Test get_model_resources returns defaults when no model overrides."""
+    def test_get_model_resources_defaults(self):
+        """Test get_model_resources returns model defaults (gpus/parallelism are per-model)."""
         config = EvalConfig(
             name="test",
             models=["llama3.1-8b"],
             tasks=["mmlu"],
-            gpus=2,
             cluster="a100",
             timeout="12h",
         )
-        model = ModelConfig(name_or_path="llama3.1-8b")
+        model = BeakerModelSpec(name_or_path="llama3.1-8b")
         resources = config.get_model_resources(model)
 
-        assert resources["gpus"] == 2
+        assert resources["gpus"] == 1  # Model default
+        assert resources["parallelism"] == 1  # Model default
         assert resources["cluster"] == "a100"
         assert resources["timeout"] == "12h"
 
@@ -312,19 +314,18 @@ class TestEvalConfigGetModelResources:
             name="test",
             models=["llama3.1-8b"],
             tasks=["mmlu"],
-            gpus=1,
             cluster="h100",
             timeout="24h",
         )
-        model = ModelConfig(
+        model = BeakerModelSpec(
             name_or_path="llama3.1-70b",
             gpus=4,
             timeout="48h",
         )
         resources = config.get_model_resources(model)
 
-        assert resources["gpus"] == 4  # Model override
-        assert resources["cluster"] == "h100"  # Default (no override)
+        assert resources["gpus"] == 4  # Model value
+        assert resources["cluster"] == "h100"  # Config default
         assert resources["timeout"] == "48h"  # Model override
 
     def test_get_model_resources_partial_overrides(self):
@@ -333,18 +334,17 @@ class TestEvalConfigGetModelResources:
             name="test",
             models=["llama3.1-8b"],
             tasks=["mmlu"],
-            gpus=1,
             cluster="h100",
             preemptible=True,
         )
-        model = ModelConfig(
+        model = BeakerModelSpec(
             name_or_path="llama3.1-13b",
             gpus=2,
             # No cluster, preemptible overrides
         )
         resources = config.get_model_resources(model)
 
-        assert resources["gpus"] == 2  # Model override
+        assert resources["gpus"] == 2  # Model value
         assert resources["cluster"] == "h100"  # Default
         assert resources["preemptible"] is True  # Default
 
@@ -355,7 +355,7 @@ class TestEvalConfigGetModelResources:
             models=["llama3.1-8b"],
             tasks=["mmlu"],
         )
-        model = ModelConfig(
+        model = BeakerModelSpec(
             name_or_path="llama3.1-8b",
             shared_memory="10GiB",
         )
@@ -364,33 +364,31 @@ class TestEvalConfigGetModelResources:
         assert resources["shared_memory"] == "10GiB"
 
     def test_get_model_resources_parallelism_default(self):
-        """Test get_model_resources returns default parallelism."""
+        """Test get_model_resources returns model's parallelism (per-model setting)."""
         config = EvalConfig(
             name="test",
             models=["llama3.1-8b"],
             tasks=["mmlu"],
-            parallelism=4,
         )
-        model = ModelConfig(name_or_path="llama3.1-8b")
+        model = BeakerModelSpec(name_or_path="llama3.1-8b")
         resources = config.get_model_resources(model)
 
-        assert resources["parallelism"] == 4
+        assert resources["parallelism"] == 1  # Model default
 
     def test_get_model_resources_parallelism_override(self):
-        """Test get_model_resources applies model parallelism override."""
+        """Test get_model_resources uses model's parallelism value."""
         config = EvalConfig(
             name="test",
             models=["llama3.1-8b"],
             tasks=["mmlu"],
-            parallelism=2,
         )
-        model = ModelConfig(
+        model = BeakerModelSpec(
             name_or_path="llama3.1-8b",
             parallelism=8,
         )
         resources = config.get_model_resources(model)
 
-        assert resources["parallelism"] == 8  # Model override wins
+        assert resources["parallelism"] == 8  # Model value
 
 
 class TestEvalConfigFromYaml:
@@ -407,7 +405,6 @@ tasks:
   - mmlu
   - gsm8k
 cluster: h100
-gpus: 1
 """
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write(yaml_content)
@@ -422,7 +419,7 @@ gpus: 1
 
             model_configs = config.get_model_configs()
             assert model_configs[0].name_or_path == "llama3.1-8b"
-            assert model_configs[0].gpus is None
+            assert model_configs[0].gpus == 1  # Default
 
     def test_from_yaml_per_model_resources(self):
         """Test loading YAML with per-model resource overrides."""
@@ -439,7 +436,6 @@ tasks:
   - mmlu@high
   - gsm8k@normal
 cluster: h100
-gpus: 1
 priority: normal
 """
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -480,7 +476,7 @@ tasks:
             model_configs = config.get_model_configs()
 
             assert model_configs[0].name_or_path == "llama3.1-8b"
-            assert model_configs[0].gpus is None
+            assert model_configs[0].gpus == 1  # Default
             assert model_configs[1].name_or_path == "llama3.1-70b"
             assert model_configs[1].gpus == 4
 
@@ -492,55 +488,327 @@ models:
   - llama3.1-8b
 tasks:
   - mmlu
-gpus: 1
 """
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write(yaml_content)
             f.flush()
 
-            config = EvalConfig.from_yaml(f.name, overrides=["gpus=4", "priority=high"])
+            config = EvalConfig.from_yaml(f.name, overrides=["priority=high"])
 
-            assert config.gpus == 4
             assert config.priority == "high"
 
+    def test_from_yaml_rejects_top_level_gpus(self):
+        """Test that top-level gpus field raises error."""
+        yaml_content = """
+name: test-eval
+models:
+  - llama3.1-8b
+tasks:
+  - mmlu
+gpus: 4
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
 
-class TestGetTemplate:
-    """Tests for get_template function."""
+            import pytest
 
-    def test_get_quick_template(self):
-        """Test getting quick template."""
-        template = get_template("quick")
-        assert template["timeout"] == "4h"
-        assert template["preemptible"] is True
+            with pytest.raises(ValueError, match="Top-level 'gpus' is no longer supported"):
+                EvalConfig.from_yaml(f.name)
 
-    def test_get_standard_template(self):
-        """Test getting standard template."""
-        template = get_template("standard")
-        assert template["timeout"] == "24h"
+    def test_from_yaml_rejects_top_level_parallelism(self):
+        """Test that top-level parallelism field raises error."""
+        yaml_content = """
+name: test-eval
+models:
+  - llama3.1-8b
+tasks:
+  - mmlu
+parallelism: 4
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
 
-    def test_get_large_model_template(self):
-        """Test getting large-model template."""
-        template = get_template("large-model")
-        assert template["gpus"] == 4
-        assert template["priority"] == "high"
-        assert template["timeout"] == "48h"
-        assert template["preemptible"] is False
+            import pytest
 
-    def test_get_urgent_template(self):
-        """Test getting urgent template."""
-        template = get_template("urgent")
-        assert template["priority"] == "urgent"
-        assert template["preemptible"] is False
+            with pytest.raises(ValueError, match="Top-level 'parallelism' is no longer supported"):
+                EvalConfig.from_yaml(f.name)
 
-    def test_get_unknown_template_raises(self):
-        """Test that unknown template name raises ValueError."""
-        with pytest.raises(ValueError, match="Unknown template"):
-            get_template("nonexistent")
 
-    def test_template_is_copy(self):
-        """Test that returned template is a copy (not mutable)."""
-        template1 = get_template("quick")
-        template1["gpus"] = 999
+class TestProviderConfig:
+    """Tests for ProviderConfig dataclass."""
 
-        template2 = get_template("quick")
-        assert template2["gpus"] == 1  # Original value
+    def test_default_values(self):
+        """Test ProviderConfig default values."""
+        config = ProviderConfig()
+        assert config.name == "vllm"
+        assert config.package is None
+
+    def test_custom_name_and_package(self):
+        """Test ProviderConfig with custom name and package."""
+        config = ProviderConfig(name="litellm", package="litellm==1.0.0")
+        assert config.name == "litellm"
+        assert config.package == "litellm==1.0.0"
+
+
+class TestApplyOverridesToModel:
+    """Tests for apply_overrides_to_model function."""
+
+    def test_no_overrides(self):
+        """Test with no overrides."""
+        config = apply_overrides_to_model("llama3.1-8b", [])
+        assert config.name_or_path == "llama3.1-8b"
+        assert config.gpus == 1  # Default
+        assert config.provider is None
+
+    def test_simple_overrides(self):
+        """Test with simple key=value overrides."""
+        config = apply_overrides_to_model("llama3.1-8b", ["gpus=4", "timeout=48h"])
+        assert config.name_or_path == "llama3.1-8b"
+        assert config.gpus == 4
+        assert config.timeout == "48h"
+
+    def test_nested_provider_overrides(self):
+        """Test with nested provider overrides."""
+        config = apply_overrides_to_model(
+            "llama3.1-8b",
+            ["provider.name=vllm", "provider.package=vllm==0.14.0"],
+        )
+        assert config.name_or_path == "llama3.1-8b"
+        assert config.provider is not None
+        assert config.provider.name == "vllm"
+        assert config.provider.package == "vllm==0.14.0"
+
+    def test_github_url_package(self):
+        """Test with GitHub URL as provider package."""
+        config = apply_overrides_to_model(
+            "llama3.1-8b",
+            ["provider.name=vllm", "provider.package=https://github.com/user/vllm@branch"],
+        )
+        assert config.provider is not None
+        assert config.provider.package == "https://github.com/user/vllm@branch"
+
+    def test_mixed_overrides(self):
+        """Test with mix of simple and nested overrides."""
+        config = apply_overrides_to_model(
+            "llama3.1-8b",
+            ["gpus=4", "provider.name=vllm", "load_format=auto"],
+        )
+        assert config.gpus == 4
+        assert config.provider is not None
+        assert config.provider.name == "vllm"
+        assert config.load_format == "auto"
+
+
+class TestParseModelConfigWithOverridesParam:
+    """Tests for parse_model_config with overrides parameter (new -o syntax)."""
+
+    def test_string_with_overrides_param(self):
+        """Test parsing string model with overrides parameter."""
+        config = parse_model_config(
+            "llama3.1-8b",
+            overrides=["provider.name=vllm", "gpus=4"],
+        )
+        assert config.name_or_path == "llama3.1-8b"
+        assert config.gpus == 4
+        assert config.provider is not None
+        assert config.provider.name == "vllm"
+
+    def test_dict_with_overrides_param(self):
+        """Test parsing dict model with overrides parameter."""
+        config = parse_model_config(
+            {"name_or_path": "llama3.1-8b", "gpus": 2},
+            overrides=["gpus=4", "timeout=48h"],
+        )
+        assert config.name_or_path == "llama3.1-8b"
+        assert config.gpus == 4  # Override wins
+        assert config.timeout == "48h"
+
+    def test_model_config_with_overrides_param(self):
+        """Test that BeakerModelSpec with overrides param gets new values applied."""
+        original = BeakerModelSpec(name_or_path="llama3.1-8b", gpus=2)
+        config = parse_model_config(original, overrides=["gpus=4"])
+        assert config.gpus == 4
+        # Original should be unchanged
+        assert original.gpus == 2
+
+
+class TestParseModelConfigWithProvider:
+    """Tests for parse_model_config with ProviderConfig."""
+
+    def test_parse_string_with_nested_provider(self):
+        """Test parsing model string with nested provider config via overrides."""
+        config = parse_model_config(
+            "llama3.1-8b",
+            overrides=["provider.name=vllm", "provider.package=vllm==0.14.0"],
+        )
+        assert config.name_or_path == "llama3.1-8b"
+        assert config.provider is not None
+        assert config.provider.name == "vllm"
+        assert config.provider.package == "vllm==0.14.0"
+
+    def test_parse_string_with_provider_github_url(self):
+        """Test parsing model string with GitHub URL as provider package."""
+        config = parse_model_config(
+            "llama3.1-8b",
+            overrides=[
+                "provider.name=vllm",
+                "provider.package=https://github.com/user/vllm@branch",
+            ],
+        )
+        assert config.provider is not None
+        assert config.provider.name == "vllm"
+        assert config.provider.package == "https://github.com/user/vllm@branch"
+
+    def test_parse_string_with_provider_name_only(self):
+        """Test parsing model string with only provider name (no package)."""
+        config = parse_model_config("llama3.1-8b", overrides=["provider.name=litellm"])
+        assert config.provider is not None
+        assert config.provider.name == "litellm"
+        assert config.provider.package is None
+
+    def test_parse_dict_with_nested_provider(self):
+        """Test parsing dict with nested provider config."""
+        config = parse_model_config(
+            {
+                "name_or_path": "llama3.1-8b",
+                "provider": {
+                    "name": "vllm",
+                    "package": "vllm==0.14.0",
+                },
+            }
+        )
+        assert config.name_or_path == "llama3.1-8b"
+        assert config.provider is not None
+        assert config.provider.name == "vllm"
+        assert config.provider.package == "vllm==0.14.0"
+
+    def test_parse_dict_with_provider_name_only(self):
+        """Test parsing dict with provider name only."""
+        config = parse_model_config(
+            {
+                "name_or_path": "llama3.1-8b",
+                "provider": {
+                    "name": "litellm",
+                },
+            }
+        )
+        assert config.provider is not None
+        assert config.provider.name == "litellm"
+        assert config.provider.package is None
+
+    def test_parse_string_with_mixed_overrides(self):
+        """Test parsing model string with provider and other overrides."""
+        config = parse_model_config(
+            "llama3.1-8b",
+            overrides=["provider.name=vllm", "load_format=auto"],
+        )
+        assert config.name_or_path == "llama3.1-8b"
+        assert config.provider is not None
+        assert config.provider.name == "vllm"
+        assert config.load_format == "auto"
+
+
+class TestEvalConfigWithProvider:
+    """Tests for EvalConfig with ProviderConfig."""
+
+    def test_get_model_resources_with_provider(self):
+        """Test get_model_resources extracts provider name and package."""
+        config = EvalConfig(
+            name="test",
+            models=["llama3.1-8b"],
+            tasks=["mmlu"],
+        )
+        model = BeakerModelSpec(
+            name_or_path="llama3.1-8b",
+            provider=ProviderConfig(name="vllm", package="vllm==0.14.0"),
+        )
+        resources = config.get_model_resources(model)
+
+        assert resources["provider"] == "vllm"
+        assert resources["provider_package"] == "vllm==0.14.0"
+
+    def test_get_model_resources_without_provider(self):
+        """Test get_model_resources with no provider config."""
+        config = EvalConfig(
+            name="test",
+            models=["llama3.1-8b"],
+            tasks=["mmlu"],
+        )
+        model = BeakerModelSpec(name_or_path="llama3.1-8b")
+        resources = config.get_model_resources(model)
+
+        assert resources["provider"] is None
+        assert resources["provider_package"] is None
+
+    def test_from_yaml_with_nested_provider(self):
+        """Test loading YAML with nested provider config."""
+        yaml_content = """
+name: test-eval
+models:
+  - name_or_path: llama3.1-8b
+    provider:
+      name: vllm
+      package: vllm==0.14.0
+tasks:
+  - mmlu
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+
+            config = EvalConfig.from_yaml(f.name)
+            model_configs = config.get_model_configs()
+
+            assert len(model_configs) == 1
+            assert model_configs[0].provider is not None
+            assert model_configs[0].provider.name == "vllm"
+            assert model_configs[0].provider.package == "vllm==0.14.0"
+
+    def test_from_yaml_with_github_provider(self):
+        """Test loading YAML with GitHub URL provider package."""
+        yaml_content = """
+name: test-eval
+models:
+  - name_or_path: llama3.1-8b
+    provider:
+      name: vllm
+      package: https://github.com/davidheineman/vllm@my-branch
+tasks:
+  - mmlu
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+
+            config = EvalConfig.from_yaml(f.name)
+            model_configs = config.get_model_configs()
+
+            assert model_configs[0].provider is not None
+            assert (
+                model_configs[0].provider.package
+                == "https://github.com/davidheineman/vllm@my-branch"
+            )
+
+    def test_from_yaml_with_provider_name_only(self):
+        """Test loading YAML with provider name only (no custom package)."""
+        yaml_content = """
+name: test-eval
+models:
+  - name_or_path: gpt-4o
+    provider:
+      name: litellm
+tasks:
+  - mmlu
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+
+            config = EvalConfig.from_yaml(f.name)
+            model_configs = config.get_model_configs()
+
+            assert model_configs[0].provider is not None
+            assert model_configs[0].provider.name == "litellm"
+            assert model_configs[0].provider.package is None

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from rich.console import Console
 
 if TYPE_CHECKING:
-    from olmo_eval.launch import EvalConfig, ModelConfig
+    from olmo_eval.launch import BeakerModelSpec, EvalConfig
 
 console = Console()
 
@@ -19,17 +19,21 @@ class LaunchConfig:
 
     # Required fields
     name: str
-    model_configs: list[ModelConfig]
-    model_specs: list[str]  # Original specs with ::overrides
+    model_configs: list[BeakerModelSpec]
+    model_specs: list[str]  # Original specs (without -o overrides applied via CLI)
     task_specs: list[str]
     cluster: str
     workspace: str
     budget: str
 
+    # Per-model and per-task overrides from -o flag
+    # model_overrides is positional (list index corresponds to model index)
+    model_overrides: list[list[str]] = field(default_factory=list)
+    task_overrides: dict[str, list[str]] = field(default_factory=dict)
+
     # Optional fields with defaults
-    gpus: int = 1
-    parallelism: int = 1
     max_gpus_per_node: int = 8
+    pack_models: bool = False  # Default: each model in own experiment for easier scheduling
     priority: str = "normal"
     preemptible: bool = True
     timeout: str = "24h"
@@ -117,10 +121,11 @@ class LaunchConfigLoader:
         cli_name = self.cli_args.get("name")
         cli_model = self.cli_args.get("model", ())
         cli_task = self.cli_args.get("task", ())
+        cli_model_overrides: list[list[str]] = self.cli_args.get("model_overrides", [])
+        cli_task_overrides: dict[str, list[str]] = self.cli_args.get("task_overrides", {})
         cli_cluster = self.cli_args.get("cluster")
-        cli_gpus = self.cli_args.get("gpus")
-        cli_parallelism = self.cli_args.get("parallelism")
         cli_max_gpus_per_node = self.cli_args.get("max_gpus_per_node")
+        cli_pack_models = self.cli_args.get("pack_models")
         cli_priority = self.cli_args.get("priority")
         cli_preemptible = self.cli_args.get("preemptible")
         cli_timeout = self.cli_args.get("timeout")
@@ -143,16 +148,21 @@ class LaunchConfigLoader:
                 model_specs = [m.name_or_path for m in model_configs]
             else:
                 model_specs = list(cli_model)
-                model_configs = [parse_model_config(m) for m in cli_model]
+                model_configs = [
+                    parse_model_config(
+                        m,
+                        overrides=cli_model_overrides[i] if i < len(cli_model_overrides) else [],
+                    )
+                    for i, m in enumerate(cli_model)
+                ]
 
             cluster = cli_cluster if cli_cluster is not None else cfg.cluster
-            gpus = cli_gpus if cli_gpus is not None else cfg.gpus
-            parallelism = cli_parallelism if cli_parallelism is not None else cfg.parallelism
             max_gpus_per_node = (
                 cli_max_gpus_per_node
                 if cli_max_gpus_per_node is not None
                 else cfg.max_gpus_per_node
             )
+            pack_models = cli_pack_models if cli_pack_models is not None else cfg.pack_models
             priority = cli_priority if cli_priority is not None else cfg.priority
             preemptible = cli_preemptible if cli_preemptible is not None else cfg.preemptible
             timeout = cli_timeout if cli_timeout is not None else cfg.timeout
@@ -175,12 +185,21 @@ class LaunchConfigLoader:
             workspace = cli_workspace
             budget = cli_budget
             model_specs = list(cli_model) if cli_model else []
-            model_configs = [parse_model_config(m) for m in cli_model] if cli_model else []
+            model_configs = (
+                [
+                    parse_model_config(
+                        m,
+                        overrides=cli_model_overrides[i] if i < len(cli_model_overrides) else [],
+                    )
+                    for i, m in enumerate(cli_model)
+                ]
+                if cli_model
+                else []
+            )
             cluster = cli_cluster
-            gpus = cli_gpus
-            parallelism = cli_parallelism
             max_gpus_per_node = cli_max_gpus_per_node
-            priority = cli_priority
+            pack_models = cli_pack_models
+            priority = cli_priority  # Will default to "normal" if None
             preemptible = cli_preemptible
             timeout = cli_timeout
             use_async = self.cli_args.get("use_async", False)
@@ -189,11 +208,10 @@ class LaunchConfigLoader:
             image = cli_image
 
         # Apply defaults
-        gpus = gpus if gpus is not None else 1
-        parallelism = parallelism if parallelism is not None else 1
         max_gpus_per_node = (
             max_gpus_per_node if max_gpus_per_node is not None else DEFAULT_MAX_GPUS_PER_NODE
         )
+        pack_models = pack_models if pack_models is not None else False
         priority = priority or "normal"
         preemptible = preemptible if preemptible is not None else True
         timeout = timeout or "24h"
@@ -227,9 +245,10 @@ class LaunchConfigLoader:
             cluster=cluster,
             workspace=workspace,
             budget=budget,
-            gpus=gpus,
-            parallelism=parallelism,
+            model_overrides=cli_model_overrides,
+            task_overrides=cli_task_overrides,
             max_gpus_per_node=max_gpus_per_node,
+            pack_models=pack_models,
             priority=priority,
             preemptible=preemptible,
             timeout=timeout,

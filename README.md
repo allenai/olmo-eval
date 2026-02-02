@@ -496,10 +496,10 @@ class MyAgent(MyAgentTask):
 
 ```bash
 # Local run
-olmo-eval run --task simpleqa_agent --model Qwen/Qwen3-8B --limit 10
+olmo-eval run --task simpleqa_agent --model Qwen/Qwen3-8B -o limit=10
 
 # Beaker launch
-olmo-eval beaker launch -n "agent-eval" -m Qwen/Qwen3-8B -t simpleqa_agent::limit=10
+olmo-eval beaker launch -n "agent-eval" -m Qwen/Qwen3-8B -t simpleqa_agent -o limit=10
 ```
 
 ### vLLM Configuration
@@ -507,7 +507,7 @@ olmo-eval beaker launch -n "agent-eval" -m Qwen/Qwen3-8B -t simpleqa_agent::limi
 For agent tasks using vLLM, the tool call parser is auto-detected based on model name. You can override it via model overrides:
 
 ```bash
-olmo-eval run --task simpleqa_agent -m "my-model::tool_call_parser=hermes"
+olmo-eval run --task simpleqa_agent -m my-model -o tool_call_parser=hermes
 ```
 
 Supported parsers: `hermes`, `llama3_json`, `mistral`
@@ -544,7 +544,6 @@ olmo-eval beaker launch \
     --task mmlu --task gsm8k --task arc \
     --cluster h100 \
     --gpus 4 \
-    --priority high \
     --timeout 48h
 
 # Preview the Beaker spec without launching
@@ -568,8 +567,8 @@ olmo-eval beaker launch -n "eval-compare" \
 
 # Models with different providers get separate experiments
 olmo-eval beaker launch -n "eval-mixed" \
-    -m "llama3.1-8b::provider=vllm" \
-    -m "gpt-4o::provider=litellm" \
+    -m llama3.1-8b -o provider.name=vllm \
+    -m gpt-4o -o provider.name=litellm \
     -t mmlu -t gsm8k
 
 # Creates 2 experiments (different inference providers)
@@ -592,11 +591,10 @@ olmo-eval beaker launch -n "eval-suite" -m llama3.1-8b \
 #   eval-suite-normal: runs gsm8k at normal priority
 #   eval-suite-low:    runs arc at low priority
 
-# With task regimes (@ comes after ::)
-olmo-eval beaker launch -n "eval" -m llama3.1-8b -t "mmlu::olmes@high"
+# With task regimes (@ comes after regime)
+olmo-eval beaker launch -n "eval" -m llama3.1-8b -t "mmlu:olmes@high"
 
-# Tasks without @priority use the --priority flag (default: normal)
-olmo-eval beaker launch -n "eval" -m llama3.1-8b -t mmlu -t gsm8k --priority high
+# Tasks without @priority use the config file priority (default: normal)
 ```
 
 ### Experiment Groups
@@ -652,10 +650,10 @@ tasks:
 cluster: h100
 ```
 
-**Via CLI inline override:**
+**Via CLI override flag:**
 
 ```bash
-olmo-eval beaker launch -n "eval" -m "llama3.1-8b::provider=vllm" -t mmlu
+olmo-eval beaker launch -n "eval" -m llama3.1-8b -o provider.name=vllm -t mmlu
 ```
 
 Models with the same provider (and other compatible settings) are grouped into the same experiment.
@@ -674,11 +672,11 @@ Available inference providers:
 | `--name` | `-n` | required | Experiment name |
 | `--model` | `-m` | required | Model name or HuggingFace path (can specify multiple) |
 | `--task` | `-t` | required | Task name with optional `@priority` suffix (can specify multiple) |
+| `--override` | `-o` | none | Override for preceding `-m` or `-t` (can specify multiple) |
 | `--cluster` | `-c` | required | Cluster alias (`h100`, `a100`, `aus`) or full name |
 | `--gpus` | `-G` | `1` | Number of GPUs per model instance |
 | `--parallelism` | `-P` | `1` | Number of model instances to run in parallel |
 | `--max-gpus-per-node` | | `8` | Maximum GPUs per node (tasks split if exceeded) |
-| `--priority` | `-p` | `normal` | Job priority (`low`, `normal`, `high`, `urgent`) |
 | `--preemptible` | | `true` | Allow preemption |
 | `--timeout` | `-T` | `24h` | Job timeout (e.g., `24h`, `30m`) |
 | `--retries` | `-r` | none | Number of retries on failure |
@@ -691,6 +689,48 @@ Available inference providers:
 | `--gpus-per-worker` | | `1` | GPUs per worker for async mode |
 | `--dry-run` | `-d` | `false` | Print spec without launching |
 | `--follow/--no-follow` | | `true` | Follow logs after launch |
+
+### Per-Model and Per-Task Overrides
+
+Use the `-o/--override` flag to apply configuration overrides to the preceding `-m` or `-t`:
+
+```bash
+# Model overrides (apply to the preceding -m)
+olmo-eval beaker launch -n "eval" \
+    -m llama3.1-8b -o provider.name=vllm -o provider.package=vllm==0.14.0 \
+    -m gpt-4o -o provider.name=litellm \
+    -t mmlu -t gsm8k
+
+# Task overrides (apply to the preceding -t)
+olmo-eval beaker launch -n "eval" \
+    -m llama3.1-8b \
+    -t mmlu -o limit=100 -o num_fewshot=5 \
+    -t gsm8k -o limit=50
+
+# Mixed model and task overrides
+olmo-eval beaker launch -n "eval" \
+    -m llama3.1-8b -o provider.name=vllm \
+    -m gpt-4o -o provider.name=litellm \
+    -t mmlu -o limit=100 \
+    -t gsm8k
+```
+
+The `-o` flag uses OmegaConf dotlist syntax, supporting:
+
+| Type | Syntax | Example |
+|------|--------|---------|
+| String | `key=value` | `-o provider.name=vllm` |
+| Number | `key=123` | `-o limit=100` |
+| Boolean | `key=true` | `-o preemptible=false` |
+| Nested | `a.b.c=val` | `-o provider.package=vllm==0.14.0` |
+| List | `key=[a,b]` | `-o 'args=[--flag1, --flag2]'` |
+| Dict | `key={a: 1}` | `-o 'config={distributed: true}'` |
+
+**Note:** Quote complex values to prevent shell interpretation:
+```bash
+# Good - single quotes protect the value
+-o 'extra_config={key: value, nested: {a: 1}}'
+```
 
 ### YAML Configuration
 
@@ -723,7 +763,7 @@ timeout: 24h
 olmo-eval beaker launch -f eval_config.yaml --dry-run
 
 # Override specific values
-olmo-eval beaker launch -f eval_config.yaml --gpus 4 --priority high
+olmo-eval beaker launch -f eval_config.yaml --gpus 4
 
 # Add additional models via CLI
 olmo-eval beaker launch -f eval_config.yaml -m olmo-2-7b
@@ -917,8 +957,8 @@ models:
 ```
 
 ```bash
-# Or via CLI inline override
-olmo-eval beaker launch -n "eval" -m "llama3.1-8b::provider=vllm" -t mmlu
+# Or via CLI override flag
+olmo-eval beaker launch -n "eval" -m llama3.1-8b -o provider.name=vllm -t mmlu
 
 # Manual installation inside container
 uv pip install -e '.[vllm]'  # includes vllm[runai]
@@ -1126,8 +1166,8 @@ The same inspection flags work with Beaker jobs:
 ```bash
 olmo-eval beaker launch \
     -n "debug-eval" \
-    -m "Qwen/Qwen3-8B" \
-    -t "mmlu::limit=10" \
+    -m Qwen/Qwen3-8B \
+    -t mmlu -o limit=10 \
     --inspect-request \
     --inspect-response \
     --cluster h100

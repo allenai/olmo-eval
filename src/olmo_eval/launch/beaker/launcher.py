@@ -48,6 +48,7 @@ __all__ = [
     "BeakerJobConfig",
     "BeakerLauncher",
     "calculate_experiment_splits",
+    "normalize_provider_package",
     "parse_task_with_priority",
     "validate_priority_configuration",
     "print_experiment_config",
@@ -176,23 +177,22 @@ def validate_priority_configuration(
 ) -> dict[str, list[str]]:
     """Validate priority configuration and group tasks by priority.
 
-    Detects conflicting priority specifications where --priority CLI flag
-    is used together with @priority suffixes on tasks.
+    Tasks can specify priority via @priority suffix (e.g., "mmlu@high").
+    Tasks without @priority use the default_priority from the config file.
 
     Args:
         tasks: Task specifications (may include @priority suffixes).
-        cli_priority: Priority from --priority CLI flag, or None.
+        cli_priority: Global priority override (typically None, kept for API compatibility).
         default_priority: Default priority for tasks without @priority suffix.
 
     Returns:
         Dictionary mapping priority levels to lists of task names.
 
     Raises:
-        ValueError: If conflicting priority specifications detected
-            (--priority used with @priority suffixes).
+        ValueError: If cli_priority is set while tasks have @priority suffixes.
 
     Examples:
-        # Tasks without @priority suffix, no CLI flag
+        # Tasks without @priority suffix use default
         >>> validate_priority_configuration(["mmlu", "gsm8k"], None)
         {"normal": ["mmlu", "gsm8k"]}
 
@@ -200,13 +200,9 @@ def validate_priority_configuration(
         >>> validate_priority_configuration(["mmlu@high", "gsm8k@normal"], None)
         {"high": ["mmlu"], "normal": ["gsm8k"]}
 
-        # CLI flag with no @priority suffixes
-        >>> validate_priority_configuration(["mmlu", "gsm8k"], "high")
+        # Custom default priority
+        >>> validate_priority_configuration(["mmlu", "gsm8k"], None, "high")
         {"high": ["mmlu", "gsm8k"]}
-
-        # CLI flag WITH @priority suffixes - raises error
-        >>> validate_priority_configuration(["mmlu@high"], "normal")
-        ValueError: Conflicting priority specification...
     """
     from collections import defaultdict
 
@@ -223,14 +219,12 @@ def validate_priority_configuration(
             effective_priority = cli_priority if cli_priority is not None else default_priority
             tasks_by_priority[effective_priority].append(task_spec)
 
-    # Conflict check: --priority used with @priority suffixes
+    # Conflict check: global priority used with @priority suffixes
     if cli_priority is not None and tasks_with_priority_suffix:
         raise ValueError(
-            f"Conflicting priority specification: --priority={cli_priority} "
+            f"Conflicting priority specification: cli_priority={cli_priority} "
             f"cannot be used together with @priority suffixes on tasks.\n\n"
-            f"Either:\n"
-            f"  1. Use --priority to set priority for ALL tasks, or\n"
-            f"  2. Use @priority suffixes to set priority per-task\n\n"
+            f"Use @priority suffixes to set priority per-task.\n\n"
             f"Tasks with @priority suffixes:\n"
             + "\n".join(f"  - {t}" for t in tasks_with_priority_suffix)
         )
@@ -430,6 +424,9 @@ class BeakerJobConfig:
     # GCS access - when True, injects user's GCS credentials as env secret
     inject_gcs_credentials: bool = False
 
+    # Custom provider package to install (overrides default from pyproject.toml extras)
+    provider_package: str | None = None
+
 
 def resolve_clusters(cluster: str | list[str]) -> list[str]:
     """Resolve cluster aliases to full cluster names.
@@ -460,6 +457,35 @@ def resolve_clusters(cluster: str | list[str]) -> list[str]:
             resolved.append(c)
 
     return list(set(resolved))  # Deduplicate
+
+
+def normalize_provider_package(package: str) -> str:
+    """Normalize a provider package specifier for pip installation.
+
+    Handles various package formats:
+    - GitHub URL: https://github.com/user/repo -> git+https://github.com/user/repo
+    - GitHub URL with branch: https://github.com/user/repo@branch -> git+https://github.com/user/repo@branch
+    - Git URL (explicit): git+https://github.com/user/repo@tag (unchanged)
+    - Local path: /path/to/local/package (unchanged)
+    - PyPI version: vllm==0.14.0 (unchanged)
+    - PyPI with extras: vllm[runai]==0.14.0 (unchanged)
+
+    Args:
+        package: Package specifier string.
+
+    Returns:
+        Normalized package specifier suitable for pip install.
+    """
+    # Already a git+ URL, return as-is
+    if package.startswith("git+"):
+        return package
+
+    # GitHub or GitLab URLs need git+ prefix
+    if "github.com" in package or "gitlab.com" in package:
+        return f"git+{package}"
+
+    # Everything else (local paths, PyPI specs) passes through unchanged
+    return package
 
 
 def _parse_timeout(timeout: str) -> int:
@@ -533,17 +559,20 @@ class BeakerLauncher:
         command: list[str],
         extras: list[str],
         env_exports: dict[str, str] | None = None,
+        provider_package: str | None = None,
     ) -> list[str]:
         """Build command with source installation and extras installation prepended.
 
         Gantry clones the source code to /gantry-runtime, so we:
         1. Install olmo-eval from the cloned source with optional extras
-        2. Run the actual command
+        2. Optionally install a custom provider package to override the default
+        3. Run the actual command
 
         Args:
             command: The command to run after setup.
             extras: Optional dependency group names from pyproject.toml.
             env_exports: Optional dict of environment variables to export before running.
+            provider_package: Optional custom provider package to install (overrides default).
         """
         # Build the full command
         # Export UV_PROJECT_ENVIRONMENT so all uv commands use Docker's /opt/venv
@@ -564,6 +593,11 @@ class BeakerLauncher:
             steps.append(f"cd /gantry-runtime && {install_cmd}")
         else:
             steps.append(f"cd /gantry-runtime && uv pip install -e . -c {constraints}")
+
+        # Install custom provider package to override default version from extras
+        if provider_package:
+            install_spec = normalize_provider_package(provider_package)
+            steps.append(f"uv pip install '{install_spec}' -c {constraints}")
 
         # Run the actual command (use shlex.join to properly quote special characters)
         import shlex
@@ -592,7 +626,9 @@ class BeakerLauncher:
         if "UV_CACHE_DIR" in config.env_vars:
             env_exports["UV_CACHE_DIR"] = config.env_vars["UV_CACHE_DIR"]
 
-        final_command = self._build_command_with_extras(config.command, config.extras, env_exports)
+        final_command = self._build_command_with_extras(
+            config.command, config.extras, env_exports, config.provider_package
+        )
 
         # Build weka mounts as tuples: (bucket, mount_path)
         weka_mounts: list[tuple[str, str]] = []

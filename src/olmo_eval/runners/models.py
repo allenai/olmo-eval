@@ -25,14 +25,8 @@ class S3Config:
 
 
 @dataclass
-class ModelConfig:
-    """Model configuration for metrics.json output format.
-
-    Note: There are multiple ModelConfig classes with different purposes:
-    - core/configs.py:ModelConfig - Core model config for inference
-    - launch/config.py:ModelConfig - Beaker launch config with resource settings
-    - runners/models.py:ModelConfig (this one) - Metrics output format for JSON serialization
-    """
+class ModelMetadata:
+    """Model metadata for metrics.json output format."""
 
     model: str
     provider: str
