@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/allenai/olmo-eval-internal/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/allenai/olmo-eval-internal/actions/workflows/ci.yml)
 ![Alpha](https://img.shields.io/badge/status-alpha-orange)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/allenai/olmo-eval-internal/blob/main/LICENSE)
 
 Evaluation toolkit for OLMo and other language models.
 
