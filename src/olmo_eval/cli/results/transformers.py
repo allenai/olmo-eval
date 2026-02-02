@@ -14,7 +14,7 @@ class TaskRun:
     task_hash: str | None
     primary_metric: str | None
     metrics: dict[str, dict[str, float]] | None
-    timestamp: str | None  # ISO format from experiment
+    timestamp: str | None
     num_instances: int | None = None
 
 

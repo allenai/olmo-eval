@@ -216,7 +216,6 @@ def task_comparison_to_dict(
                 )
             )
 
-    # Use transformer for grouping
     grouped_models = group_experiments_by_model(experiments, task_filter)
 
     models = []

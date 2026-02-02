@@ -54,7 +54,7 @@ class FilterType(enum.Enum):
     "-M",
     "model_hashes",
     multiple=True,
-    help="Model hash prefix(es) to query (matches start of hash).",
+    help="Model hash prefix(es) to query.",
 )
 @click.option(
     "--task",
@@ -66,7 +66,7 @@ class FilterType(enum.Enum):
 @click.option(
     "--task-hash",
     "-T",
-    help="Task hash prefix to filter by (matches start of hash).",
+    help="Task hash prefix to filter by.",
 )
 @click.option(
     "--experiment-group",
