@@ -29,8 +29,8 @@ class TestSimpleQAAgentRegistration:
         task = get_task("simpleqa_agent")
         assert task.config.max_turns == 10
         assert task.config.max_concurrency == 1
-        assert task.config.system_prompt is not None
-        assert "helpful assistant" in task.config.system_prompt
+        assert task.system_prompt is not None
+        assert "helpful assistant" in task.system_prompt
 
     def test_simpleqa_agent_required_secrets(self):
         """Test that simpleqa_agent has required secrets configured."""

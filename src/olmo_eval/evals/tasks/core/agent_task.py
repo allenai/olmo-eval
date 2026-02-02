@@ -48,7 +48,6 @@ class AgentTaskConfig(TaskConfig):
     are always provided via CLI, not in the config.
 
     Attributes:
-        system_prompt: System prompt for the agent. Empty string means use task default.
         max_turns: Maximum number of agent turns before stopping.
         max_concurrency: Maximum number of concurrent agent executions.
         required_secrets: Environment variable names required for this task.
@@ -57,10 +56,10 @@ class AgentTaskConfig(TaskConfig):
             instance creation. The actual tool implementations are created
             in _get_agent().
 
-    Note: temperature and max_tokens come from sampling_params.
+    Note: System prompt should be configured via the formatter (ChatFormatter).
+    Temperature and max_tokens come from sampling_params.
     """
 
-    system_prompt: str = ""
     max_turns: int = 10
     max_concurrency: int = 1
     required_secrets: tuple[str, ...] = ()
@@ -79,7 +78,6 @@ class AgentTaskConfig(TaskConfig):
         """
         base = super().to_dict()
         base["agent_settings"] = {
-            "system_prompt": self.system_prompt,
             "max_turns": self.max_turns,
             "max_concurrency": self.max_concurrency,
         }
@@ -120,6 +118,15 @@ class AgentTask(Task):
 
     def __init__(self, config: AgentTaskConfig) -> None:
         super().__init__(config)
+
+    @property
+    def system_prompt(self) -> str | None:
+        """Get system prompt from the formatter, if configured."""
+        if self.config.formatter and hasattr(self.config.formatter, "system_prompt"):
+            prompt = self.config.formatter.system_prompt
+            if isinstance(prompt, str) and prompt:
+                return prompt
+        return None
 
     # -------------------------------------------------------------------------
     # Abstract methods - subclasses must implement
@@ -190,27 +197,24 @@ class AgentTask(Task):
         # Use formatter if set
         if self.config.formatter:
             request = self.config.formatter.format(instance, self.get_fewshot())
-            # Add tools and system_prompt if not already set by formatter
+            # Add tools if not already set by formatter
             tools = instance.tools or self.config.tools or None
-            system_prompt = self.config.system_prompt if self.config.system_prompt else None
             return LMRequest(
                 request_type=request.request_type,
                 messages=request.messages,
                 prompt=request.prompt,
                 continuations=request.continuations,
                 tools=request.tools or (tools if tools else None),
-                system_prompt=request.system_prompt or system_prompt,
+                system_prompt=request.system_prompt,
             )
 
         # Fallback: basic chat-style formatting
         tools = instance.tools or self.config.tools or None
-        system_prompt = self.config.system_prompt if self.config.system_prompt else None
 
         return LMRequest(
             request_type=RequestType.CHAT,
             messages=({"role": "user", "content": instance.question},),
             tools=tools if tools else None,
-            system_prompt=system_prompt,
         )
 
     def extract_answer(self, output: LMOutput) -> Any:

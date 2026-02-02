@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 
 from olmo_eval.core.debug import create_debug_http_client
+from olmo_eval.core.formatters import ChatFormatter
 from olmo_eval.core.metrics import AccuracyMetric
 from olmo_eval.core.scorers import SimpleQAJudgeScorer
 from olmo_eval.core.types import SEARCH_TOOLS, Instance, SamplingParams
@@ -355,9 +356,11 @@ class SimpleQAAgentTask(AgentTask):
         # Create function tools directly instead of using MCP
         tools = _create_function_tools()
 
+        # Use provided system_prompt, or fall back to task's formatter, or default
+        effective_prompt = system_prompt or self.system_prompt or DEFAULT_SYSTEM_PROMPT
         agent = Agent(
             name="SearchAgent",
-            instructions=system_prompt or DEFAULT_SYSTEM_PROMPT,
+            instructions=effective_prompt,
             model=llm,
             model_settings=model_settings,
             tools=tools,
@@ -375,9 +378,9 @@ def _simpleqa_agent_config() -> AgentTaskConfig:
     return AgentTaskConfig(
         name="simpleqa_agent",
         data_source=DataSource(path="allenai/simpleqa_full", split="test"),
+        formatter=ChatFormatter(system_prompt=DEFAULT_SYSTEM_PROMPT),
         metrics=(AccuracyMetric(scorer=SimpleQAJudgeScorer),),
         sampling_params=SamplingParams(max_tokens=2048, temperature=0.0),
-        system_prompt=DEFAULT_SYSTEM_PROMPT,
         max_turns=10,
         max_concurrency=1,
         required_secrets=("OPENAI_API_KEY", "S2_API_KEY", "SERPER_API_KEY"),

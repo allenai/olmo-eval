@@ -78,13 +78,14 @@ class TestAgentTaskConfigToDict:
 
     def test_agent_task_config_to_dict_includes_agent_settings(self):
         """AgentTaskConfig.to_dict() should include agent-specific fields."""
+        from olmo_eval.core.formatters import ChatFormatter
         from olmo_eval.evals.tasks.core.agent_task import AgentTaskConfig
 
         config = AgentTaskConfig(
             name="test_agent",
             max_turns=15,
             max_concurrency=8,
-            system_prompt="Test prompt",
+            formatter=ChatFormatter(system_prompt="Test prompt"),
         )
 
         config_dict = config.to_dict()
@@ -92,7 +93,7 @@ class TestAgentTaskConfigToDict:
         assert "agent_settings" in config_dict
         assert config_dict["agent_settings"]["max_turns"] == 15
         assert config_dict["agent_settings"]["max_concurrency"] == 8
-        assert config_dict["agent_settings"]["system_prompt"] == "Test prompt"
+        assert config_dict["formatter"]["system_prompt"] == "Test prompt"
 
     def test_same_agent_config_same_hash(self):
         """Same AgentTaskConfig should always produce same hash."""

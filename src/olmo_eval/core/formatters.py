@@ -31,7 +31,14 @@ class Formatter(ABC):
 
 @dataclass(slots=True)
 class ChatFormatter(Formatter):
-    """Format instances as chat messages."""
+    """Format instances as chat messages.
+
+    Attributes:
+        system_prompt: System prompt to include. Added both as a system message
+            in the messages list and as the system_prompt field on LMRequest.
+        user_template: Template for user messages (uses {question}).
+        assistant_template: Template for assistant messages (uses {answer}).
+    """
 
     system_prompt: str = ""
     user_template: str = "{question}"
@@ -64,7 +71,11 @@ class ChatFormatter(Formatter):
                 "content": self.user_template.format(question=instance.question),
             }
         )
-        return LMRequest(request_type=RequestType.CHAT, messages=tuple(messages))
+        return LMRequest(
+            request_type=RequestType.CHAT,
+            messages=tuple(messages),
+            system_prompt=self.system_prompt if self.system_prompt else None,
+        )
 
 
 @dataclass(slots=True)
@@ -147,7 +158,11 @@ class MCQAChatFormatter(Formatter):
 
         messages.append({"role": "user", "content": question_text})
 
-        return LMRequest(request_type=RequestType.CHAT, messages=tuple(messages))
+        return LMRequest(
+            request_type=RequestType.CHAT,
+            messages=tuple(messages),
+            system_prompt=self.system_prompt if self.system_prompt else None,
+        )
 
 
 @dataclass(slots=True)

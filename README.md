@@ -406,6 +406,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from olmo_eval.core import AccuracyMetric, Instance
+from olmo_eval.core.formatters import ChatFormatter
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.core import AgentTask, AgentTaskConfig, register
 
@@ -476,8 +477,8 @@ def _my_agent_config() -> AgentTaskConfig:
     return AgentTaskConfig(
         name="my_agent_task",
         data_source=DataSource(path="my-org/my-dataset", split="test"),
+        formatter=ChatFormatter(system_prompt="You are a helpful assistant with tools."),
         metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
-        system_prompt="You are a helpful assistant with tools.",
         max_turns=10,
         max_concurrency=1,
         required_secrets=("MY_API_KEY",),
@@ -493,7 +494,7 @@ class MyAgent(MyAgentTask):
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `system_prompt` | `str` | `""` | System prompt for the agent |
+| `formatter` | `Formatter` | `ChatFormatter()` | Formatter with system prompt (use `ChatFormatter(system_prompt="...")`) |
 | `max_turns` | `int` | `10` | Maximum agent turns |
 | `max_concurrency` | `int` | `1` | Concurrent agent executions |
 | `required_secrets` | `tuple[str, ...]` | `()` | Required environment variables |
