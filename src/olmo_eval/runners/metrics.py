@@ -12,7 +12,7 @@ from olmo_eval.core.logging import get_logger
 from olmo_eval.runners.common import get_primary_metric
 from olmo_eval.runners.models import (
     MetricsOutput,
-    ModelConfig,
+    ModelMetadata,
     ScoreSummary,
     TaskMetricsEntry,
 )
@@ -46,7 +46,7 @@ def build_single_model_metrics(
     """
     # Build config from stored model config
     model_cfg = results.get("model_config", {})
-    config = ModelConfig(
+    config = ModelMetadata(
         model=model_cfg.get("model", results.get("model", "")),
         provider=model_cfg.get("provider", results.get("provider", "")),
         dtype=model_cfg.get("dtype", "auto"),
@@ -132,7 +132,7 @@ def build_multi_model_metrics(
     models_config: dict[str, dict[str, Any]] = {}
     for model_name, model_data in results.get("models", {}).items():
         model_cfg = model_data.get("model_config", {})
-        config = ModelConfig(
+        config = ModelMetadata(
             model=model_cfg.get("model", model_data.get("model", "")),
             provider=model_cfg.get("provider", model_data.get("provider", "")),
             dtype=model_cfg.get("dtype", "auto"),

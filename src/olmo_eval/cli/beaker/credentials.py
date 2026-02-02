@@ -9,7 +9,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 if TYPE_CHECKING:
-    from olmo_eval.launch import BeakerLauncher, ModelConfig
+    from olmo_eval.launch import BeakerLauncher, BeakerModelSpec
 
 console = Console()
 
@@ -19,7 +19,7 @@ class CredentialManager:
 
     def __init__(
         self,
-        model_configs: list[ModelConfig],
+        model_configs: list[BeakerModelSpec],
         store: bool,
         aws_credentials: bool | None,
         gcs_credentials: bool | None,

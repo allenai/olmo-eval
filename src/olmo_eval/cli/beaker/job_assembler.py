@@ -9,7 +9,7 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 if TYPE_CHECKING:
     from olmo_eval.cli.beaker.config_loader import LaunchConfig
     from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan
-    from olmo_eval.launch import BeakerJobConfig, EvalConfig, ModelConfig
+    from olmo_eval.launch import BeakerJobConfig, BeakerModelSpec, EvalConfig
 
 
 class JobConfigAssembler:
@@ -140,7 +140,7 @@ class JobConfigAssembler:
             provider_package=model_resources.get("provider_package"),
         )
 
-    def _get_model_resources(self, m_cfg: ModelConfig) -> dict:
+    def _get_model_resources(self, m_cfg: BeakerModelSpec) -> dict:
         """Get model resources from config or defaults."""
         if self.eval_config is not None:
             return self.eval_config.get_model_resources(m_cfg)

@@ -15,11 +15,6 @@ from olmo_eval.core.literals import DtypeLiteral, ProviderLiteral
 class ModelConfig:
     """Core model configuration for inference.
 
-    Note: There are multiple ModelConfig classes with different purposes:
-    - core/configs.py:ModelConfig (this one) - Core model config for inference
-    - launch/config.py:ModelConfig - Beaker launch config with resource settings
-    - runners/mixins.py:ModelConfig - Metrics output format for JSON serialization
-
     For agent tasks, models can be specified in two ways:
     1. HuggingFace model/path with provider="vllm" - starts local vLLM server
     2. API endpoint with model_url - uses OpenAI-compatible API directly
@@ -144,7 +139,13 @@ def validate_tasks(tasks: list[str]) -> tuple[list[str], list[str]]:
 
 # Keys that are vLLM/backend-specific and should not be passed to ModelConfig
 # These are handled separately by the runners
-_BACKEND_ONLY_KEYS = {"load_format", "extra_loader_config", "attention_backend", "gpus_per_worker"}
+_BACKEND_ONLY_KEYS = {
+    "load_format",
+    "extra_loader_config",
+    "attention_backend",
+    "gpus_per_worker",
+    "gpus",
+}
 
 
 def get_model_config(name: str, **overrides: Any) -> ModelConfig:

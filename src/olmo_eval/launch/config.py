@@ -62,15 +62,10 @@ class ProviderConfig:
 
 
 @dataclass
-class ModelConfig:
-    """Configuration for a single model with resource settings for Beaker launch.
+class BeakerModelSpec:
+    """Specification for a single model with resource settings for Beaker launch.
 
     This allows specifying per-model resources for mixed-size evaluations.
-
-    Note: There are multiple ModelConfig classes with different purposes:
-    - core/configs.py:ModelConfig - Core model config for inference
-    - launch/config.py:ModelConfig (this one) - Beaker launch config with resource settings
-    - runners/mixins.py:ModelConfig - Metrics output format for JSON serialization
 
     Attributes:
         name_or_path: Model name, HuggingFace path, or local checkpoint path (required).
@@ -143,8 +138,8 @@ class ModelConfig:
     extra_loader_config: dict[str, Any] | None = None  # e.g., {"distributed": true}
 
 
-def apply_overrides_to_model(name_or_path: str, overrides: list[str]) -> ModelConfig:
-    """Create ModelConfig with OmegaConf overrides.
+def apply_overrides_to_model(name_or_path: str, overrides: list[str]) -> BeakerModelSpec:
+    """Create BeakerModelSpec with OmegaConf overrides.
 
     This is the preferred way to apply overrides from the -o CLI flag.
 
@@ -153,11 +148,11 @@ def apply_overrides_to_model(name_or_path: str, overrides: list[str]) -> ModelCo
         overrides: List of override strings in dotlist format (e.g., ["provider.name=vllm"]).
 
     Returns:
-        ModelConfig instance with overrides applied.
+        BeakerModelSpec instance with overrides applied.
 
     Examples:
         >>> apply_overrides_to_model("llama3.1-8b", ["provider.name=vllm", "gpus=4"])
-        ModelConfig(name_or_path='llama3.1-8b', provider=ProviderConfig(name='vllm'), gpus=4)
+        BeakerModelSpec(name_or_path='llama3.1-8b', provider=ProviderConfig(name='vllm'), gpus=4)
     """
     config_dict: dict[str, Any] = {"name_or_path": name_or_path}
 
@@ -167,40 +162,40 @@ def apply_overrides_to_model(name_or_path: str, overrides: list[str]) -> ModelCo
         override_dict = OmegaConf.to_container(override_config)
         config_dict.update(override_dict)  # type: ignore[arg-type]
 
-    schema = OmegaConf.structured(ModelConfig)
+    schema = OmegaConf.structured(BeakerModelSpec)
     merged = OmegaConf.merge(schema, OmegaConf.create(config_dict))
     return OmegaConf.to_object(merged)  # type: ignore[return-value]
 
 
 def parse_model_config(
-    model: str | dict[str, Any] | ModelConfig,
+    model: str | dict[str, Any] | BeakerModelSpec,
     overrides: list[str] | None = None,
-) -> ModelConfig:
-    """Parse a model specification into ModelConfig.
+) -> BeakerModelSpec:
+    """Parse a model specification into BeakerModelSpec.
 
-    Handles simple string format, dict format, or existing ModelConfig.
+    Handles simple string format, dict format, or existing BeakerModelSpec.
     Use the `overrides` parameter to apply CLI overrides from the -o flag.
 
     Args:
-        model: Model name/path string, dict with model config, or ModelConfig.
+        model: Model name/path string, dict with model config, or BeakerModelSpec.
         overrides: Optional list of override strings in dotlist format
             (e.g., ["provider.name=vllm"]).
 
     Returns:
-        ModelConfig instance with any overrides applied.
+        BeakerModelSpec instance with any overrides applied.
 
     Examples:
         parse_model_config("llama3.1-8b")
         parse_model_config("llama3.1-8b", overrides=["provider.name=vllm", "gpus=4"])
         parse_model_config({"name_or_path": "llama3.1-70b", "gpus": 4})
     """
-    if isinstance(model, ModelConfig):
+    if isinstance(model, BeakerModelSpec):
         if overrides:
             config_dict = OmegaConf.to_container(OmegaConf.structured(model))
             override_config = OmegaConf.from_dotlist(overrides)
             override_dict = OmegaConf.to_container(override_config)
             config_dict.update(override_dict)  # type: ignore[union-attr]
-            schema = OmegaConf.structured(ModelConfig)
+            schema = OmegaConf.structured(BeakerModelSpec)
             merged = OmegaConf.merge(schema, OmegaConf.create(config_dict))
             return OmegaConf.to_object(merged)  # type: ignore[return-value]
         return model
@@ -211,7 +206,7 @@ def parse_model_config(
             override_config = OmegaConf.from_dotlist(overrides)
             override_dict = OmegaConf.to_container(override_config)
             config_dict.update(override_dict)  # type: ignore[arg-type]
-        schema = OmegaConf.structured(ModelConfig)
+        schema = OmegaConf.structured(BeakerModelSpec)
         merged = OmegaConf.merge(schema, OmegaConf.create(config_dict))
         return OmegaConf.to_object(merged)  # type: ignore[return-value]
 
@@ -221,14 +216,14 @@ def parse_model_config(
             override_config = OmegaConf.from_dotlist(overrides)
             override_dict = OmegaConf.to_container(override_config)
             config_dict.update(override_dict)  # type: ignore[arg-type]
-        schema = OmegaConf.structured(ModelConfig)
+        schema = OmegaConf.structured(BeakerModelSpec)
         merged = OmegaConf.merge(schema, OmegaConf.create(config_dict))
         return OmegaConf.to_object(merged)  # type: ignore[return-value]
 
     raise TypeError(f"Invalid model specification: {type(model)}")
 
 
-def get_model_short_name(model: ModelConfig) -> str:
+def get_model_short_name(model: BeakerModelSpec) -> str:
     """Get a short display name for a model suitable for experiment naming.
 
     If alias is set, returns the alias. Otherwise derives a short name from
@@ -236,20 +231,22 @@ def get_model_short_name(model: ModelConfig) -> str:
     or longer than 32 characters, takes the last 16 characters of the path.
 
     Args:
-        model: ModelConfig instance.
+        model: BeakerModelSpec instance.
 
     Returns:
         Short name suitable for use in experiment names.
 
     Examples:
-        >>> get_model_short_name(ModelConfig(name_or_path="llama3.1-8b"))
+        >>> get_model_short_name(BeakerModelSpec(name_or_path="llama3.1-8b"))
         'llama3.1-8b'
-        >>> get_model_short_name(ModelConfig(name_or_path="meta-llama/Llama-3.1-8B"))
+        >>> get_model_short_name(BeakerModelSpec(name_or_path="meta-llama/Llama-3.1-8B"))
         'llama-3.1-8b'
-        >>> get_model_short_name(ModelConfig(name_or_path="/weka/checkpoints/model/step1000-hf/"))
+        >>> get_model_short_name(
+        ...     BeakerModelSpec(name_or_path="/weka/checkpoints/model/step1000-hf/")
+        ... )
         'step1000-hf'
         >>> get_model_short_name(
-        ...     ModelConfig(name_or_path="/weka/checkpoints/model/", alias="my-model")
+        ...     BeakerModelSpec(name_or_path="/weka/checkpoints/model/", alias="my-model")
         ... )
         'my-model'
     """
@@ -365,7 +362,7 @@ class EvalConfig:
 
     Attributes:
         name: Experiment name (required).
-        models: List of model names/paths or ModelConfig dicts (required).
+        models: List of model names/paths or BeakerModelSpec dicts (required).
             Each model can specify its own inference provider via the 'provider' field.
             GPU and parallelism settings are per-model (default 1 each).
         tasks: List of task specs, optionally with @priority suffix (required).
@@ -391,7 +388,7 @@ class EvalConfig:
 
     # Required fields
     name: str = MISSING
-    models: list[Any] = MISSING  # list[str] or list[dict] for ModelConfig
+    models: list[Any] = MISSING  # list[str] or list[dict] for BeakerModelSpec
     tasks: list[str] = MISSING
 
     # Default cluster and resources
@@ -418,22 +415,22 @@ class EvalConfig:
     description: str | None = None
     groups: list[str] | None = None  # Groups to add experiments to
 
-    def get_model_configs(self) -> list[ModelConfig]:
-        """Get parsed ModelConfig objects for all models.
+    def get_model_configs(self) -> list[BeakerModelSpec]:
+        """Get parsed BeakerModelSpec objects for all models.
 
-        Returns a list of ModelConfig objects, parsing simple strings
-        into ModelConfig with just the name set.
+        Returns a list of BeakerModelSpec objects, parsing simple strings
+        into BeakerModelSpec with just the name set.
 
         Returns:
-            List of ModelConfig objects.
+            List of BeakerModelSpec objects.
         """
         return [parse_model_config(m) for m in self.models]
 
-    def get_model_resources(self, model: ModelConfig) -> dict[str, Any]:
+    def get_model_resources(self, model: BeakerModelSpec) -> dict[str, Any]:
         """Get effective resources for a model, merging defaults with overrides.
 
         Args:
-            model: ModelConfig with resource settings.
+            model: BeakerModelSpec with resource settings.
 
         Returns:
             Dict with effective resource values including:

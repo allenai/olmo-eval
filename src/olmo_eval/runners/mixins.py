@@ -30,7 +30,7 @@ from olmo_eval.runners.metrics import (
 )
 from olmo_eval.runners.models import (
     MetricsOutput,
-    ModelConfig,
+    ModelMetadata,
     S3Config,
     ScoreSummary,
     TaskMetricsEntry,
@@ -52,7 +52,7 @@ __all__ = [
     "sanitize_model_name",
     "get_model_display_name",
     "build_s3_prefix",
-    "ModelConfig",
+    "ModelMetadata",
     "TaskMetricsEntry",
     "ScoreSummary",
     "MetricsOutput",

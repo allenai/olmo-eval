@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from olmo_eval.cli.beaker.config_loader import LaunchConfig
-    from olmo_eval.launch import EvalConfig, ModelConfig
+    from olmo_eval.launch import BeakerModelSpec, EvalConfig
 
 
 class ModelGrouper:
@@ -27,7 +27,7 @@ class ModelGrouper:
         self.config = config
         self.eval_config = eval_config
 
-    def get_model_resources(self, m_cfg: ModelConfig, m_spec: str) -> dict[str, Any]:
+    def get_model_resources(self, m_cfg: BeakerModelSpec, m_spec: str) -> dict[str, Any]:
         """Get runtime-critical resources for a model.
 
         Args:
@@ -55,7 +55,7 @@ class ModelGrouper:
             "provider": m_provider,
         }
 
-    def get_runtime_signature(self, m_cfg: ModelConfig, m_spec: str) -> tuple:
+    def get_runtime_signature(self, m_cfg: BeakerModelSpec, m_spec: str) -> tuple:
         """Get a hashable runtime signature for grouping compatible models.
 
         Models with different GPU counts can be grouped together since they
@@ -64,7 +64,7 @@ class ModelGrouper:
 
         Args:
             m_cfg: Model configuration.
-            m_spec: Model specification string (unused, overrides come from ModelConfig).
+            m_spec: Model specification string (unused, overrides come from BeakerModelSpec).
 
         Returns:
             Tuple that can be used as a grouping key.
@@ -82,7 +82,7 @@ class ModelGrouper:
             provider_str,
         )
 
-    def group(self) -> list[list[tuple[ModelConfig, str, int]]]:
+    def group(self) -> list[list[tuple[BeakerModelSpec, str, int]]]:
         """Group models by runtime signature.
 
         Returns:

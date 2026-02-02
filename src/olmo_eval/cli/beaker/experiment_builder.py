@@ -10,7 +10,7 @@ from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan
 if TYPE_CHECKING:
     from olmo_eval.cli.beaker.config_loader import LaunchConfig
     from olmo_eval.cli.beaker.model_grouper import ModelGrouper
-    from olmo_eval.launch import ModelConfig
+    from olmo_eval.launch import BeakerModelSpec
 
 
 class ExperimentPlanBuilder:
@@ -49,7 +49,7 @@ class ExperimentPlanBuilder:
         return all(t in self.agent_task_specs for t in expanded)
 
     def _get_model_gpu_needs(
-        self, model_cfgs: list[ModelConfig], model_specs: list[str]
+        self, model_cfgs: list[BeakerModelSpec], model_specs: list[str]
     ) -> list[int]:
         """Get GPU needs (gpus * parallelism) for each model."""
         gpu_needs = []
@@ -59,7 +59,7 @@ class ExperimentPlanBuilder:
         return gpu_needs
 
     def _build_model_overrides(
-        self, m_cfg: ModelConfig, m_spec: str, gpus: int, original_index: int
+        self, m_cfg: BeakerModelSpec, m_spec: str, gpus: int, original_index: int
     ) -> list[str]:
         """Build list of -o override strings for a model."""
         overrides: list[str] = []
@@ -92,7 +92,7 @@ class ExperimentPlanBuilder:
 
     def _build_experiments_no_pack(
         self,
-        model_cfgs: list[ModelConfig],
+        model_cfgs: list[BeakerModelSpec],
         model_specs: list[str],
         model_indices: list[int],
         tasks: list[str],
@@ -147,7 +147,7 @@ class ExperimentPlanBuilder:
 
     def _build_experiments_packed(
         self,
-        model_cfgs: list[ModelConfig],
+        model_cfgs: list[BeakerModelSpec],
         model_specs: list[str],
         model_indices: list[int],
         tasks: list[str],
@@ -213,7 +213,9 @@ class ExperimentPlanBuilder:
         else:
             # Need to split - use greedy bin packing
             # Each bin: (model_cfgs, model_specs, model_gpu_counts, model_overrides, total_gpus)
-            bins: list[tuple[list[ModelConfig], list[str], list[int], list[list[str]], int]] = []
+            bins: list[
+                tuple[list[BeakerModelSpec], list[str], list[int], list[list[str]], int]
+            ] = []
 
             for m_cfg, m_spec, gpu_need, m_gpus, m_overrides in zip(
                 model_cfgs,

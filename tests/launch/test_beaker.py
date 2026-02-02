@@ -550,12 +550,12 @@ class TestModelPackingAndGrouping:
         """Models with different gpus but same provider/cluster are grouped together."""
         from olmo_eval.cli.beaker.config_loader import LaunchConfig
         from olmo_eval.cli.beaker.model_grouper import ModelGrouper
-        from olmo_eval.launch import ModelConfig
+        from olmo_eval.launch import BeakerModelSpec
 
         # Create models with different GPUs but same cluster/provider
-        model1 = ModelConfig(name_or_path="model1", gpus=1)
-        model2 = ModelConfig(name_or_path="model2", gpus=4)
-        model3 = ModelConfig(name_or_path="model3", gpus=2)
+        model1 = BeakerModelSpec(name_or_path="model1", gpus=1)
+        model2 = BeakerModelSpec(name_or_path="model2", gpus=4)
+        model3 = BeakerModelSpec(name_or_path="model3", gpus=2)
 
         config = LaunchConfig(
             name="test",
@@ -578,10 +578,10 @@ class TestModelPackingAndGrouping:
         """Models with different clusters are in separate groups."""
         from olmo_eval.cli.beaker.config_loader import LaunchConfig
         from olmo_eval.cli.beaker.model_grouper import ModelGrouper
-        from olmo_eval.launch import ModelConfig
+        from olmo_eval.launch import BeakerModelSpec
 
-        model1 = ModelConfig(name_or_path="model1", gpus=1, cluster="h100")
-        model2 = ModelConfig(name_or_path="model2", gpus=1, cluster="a100")
+        model1 = BeakerModelSpec(name_or_path="model1", gpus=1, cluster="h100")
+        model2 = BeakerModelSpec(name_or_path="model2", gpus=1, cluster="a100")
 
         config = LaunchConfig(
             name="test",
@@ -604,10 +604,10 @@ class TestModelPackingAndGrouping:
         from olmo_eval.cli.beaker.config_loader import LaunchConfig
         from olmo_eval.cli.beaker.experiment_builder import ExperimentPlanBuilder
         from olmo_eval.cli.beaker.model_grouper import ModelGrouper
-        from olmo_eval.launch import ModelConfig
+        from olmo_eval.launch import BeakerModelSpec
 
-        model1 = ModelConfig(name_or_path="model1", gpus=1)
-        model2 = ModelConfig(name_or_path="model2", gpus=1)
+        model1 = BeakerModelSpec(name_or_path="model1", gpus=1)
+        model2 = BeakerModelSpec(name_or_path="model2", gpus=1)
 
         config = LaunchConfig(
             name="test",
@@ -639,10 +639,10 @@ class TestModelPackingAndGrouping:
         from olmo_eval.cli.beaker.config_loader import LaunchConfig
         from olmo_eval.cli.beaker.experiment_builder import ExperimentPlanBuilder
         from olmo_eval.cli.beaker.model_grouper import ModelGrouper
-        from olmo_eval.launch import ModelConfig
+        from olmo_eval.launch import BeakerModelSpec
 
-        model1 = ModelConfig(name_or_path="model1", gpus=1)
-        model2 = ModelConfig(name_or_path="model2", gpus=1)
+        model1 = BeakerModelSpec(name_or_path="model1", gpus=1)
+        model2 = BeakerModelSpec(name_or_path="model2", gpus=1)
 
         config = LaunchConfig(
             name="test",
@@ -673,12 +673,12 @@ class TestModelPackingAndGrouping:
         from olmo_eval.cli.beaker.config_loader import LaunchConfig
         from olmo_eval.cli.beaker.experiment_builder import ExperimentPlanBuilder
         from olmo_eval.cli.beaker.model_grouper import ModelGrouper
-        from olmo_eval.launch import ModelConfig
+        from olmo_eval.launch import BeakerModelSpec
 
         # 1 + 1 + 6 = 8 GPUs total
-        model1 = ModelConfig(name_or_path="model1", gpus=1)
-        model2 = ModelConfig(name_or_path="model2", gpus=1)
-        model3 = ModelConfig(name_or_path="model3", gpus=6)
+        model1 = BeakerModelSpec(name_or_path="model1", gpus=1)
+        model2 = BeakerModelSpec(name_or_path="model2", gpus=1)
+        model3 = BeakerModelSpec(name_or_path="model3", gpus=6)
 
         config = LaunchConfig(
             name="test",
@@ -709,11 +709,11 @@ class TestModelPackingAndGrouping:
         from olmo_eval.cli.beaker.config_loader import LaunchConfig
         from olmo_eval.cli.beaker.experiment_builder import ExperimentPlanBuilder
         from olmo_eval.cli.beaker.model_grouper import ModelGrouper
-        from olmo_eval.launch import ModelConfig
+        from olmo_eval.launch import BeakerModelSpec
 
         # 4 + 6 = 10 GPUs, exceeds max of 8
-        model1 = ModelConfig(name_or_path="model1", gpus=4)
-        model2 = ModelConfig(name_or_path="model2", gpus=6)
+        model1 = BeakerModelSpec(name_or_path="model1", gpus=4)
+        model2 = BeakerModelSpec(name_or_path="model2", gpus=6)
 
         config = LaunchConfig(
             name="test",
@@ -745,10 +745,10 @@ class TestModelPackingAndGrouping:
         from olmo_eval.cli.beaker.config_loader import LaunchConfig
         from olmo_eval.cli.beaker.experiment_builder import ExperimentPlanBuilder
         from olmo_eval.cli.beaker.model_grouper import ModelGrouper
-        from olmo_eval.launch import ModelConfig
+        from olmo_eval.launch import BeakerModelSpec
 
-        model1 = ModelConfig(name_or_path="model1", gpus=2)
-        model2 = ModelConfig(name_or_path="model2", gpus=4)
+        model1 = BeakerModelSpec(name_or_path="model1", gpus=2)
+        model2 = BeakerModelSpec(name_or_path="model2", gpus=4)
 
         config = LaunchConfig(
             name="test",
@@ -783,7 +783,7 @@ class TestTaskOverrideHandling:
         from olmo_eval.cli.beaker.experiment_builder import ExperimentPlanBuilder
         from olmo_eval.cli.beaker.model_grouper import ModelGrouper
         from olmo_eval.cli.utils import extract_priority_from_overrides
-        from olmo_eval.launch import ModelConfig
+        from olmo_eval.launch import BeakerModelSpec
 
         # Raw task overrides include priority
         raw_task_overrides = {"mmlu": ["priority=urgent", "limit=10"]}
@@ -795,7 +795,7 @@ class TestTaskOverrideHandling:
 
         config = LaunchConfig(
             name="test",
-            model_configs=[ModelConfig(name_or_path="model1")],
+            model_configs=[BeakerModelSpec(name_or_path="model1")],
             model_specs=["model1"],
             task_specs=["mmlu"],
             cluster="h100",
@@ -827,11 +827,11 @@ class TestTaskOverrideHandling:
         from olmo_eval.cli.beaker.config_loader import LaunchConfig
         from olmo_eval.cli.beaker.experiment_builder import ExperimentPlanBuilder
         from olmo_eval.cli.beaker.model_grouper import ModelGrouper
-        from olmo_eval.launch import ModelConfig
+        from olmo_eval.launch import BeakerModelSpec
 
         config = LaunchConfig(
             name="test",
-            model_configs=[ModelConfig(name_or_path="model1")],
+            model_configs=[BeakerModelSpec(name_or_path="model1")],
             model_specs=["model1"],
             task_specs=["mmlu"],
             cluster="h100",
@@ -855,9 +855,9 @@ class TestTaskOverrideHandling:
         from olmo_eval.cli.beaker.config_loader import LaunchConfig
         from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan
         from olmo_eval.cli.beaker.job_assembler import JobConfigAssembler
-        from olmo_eval.launch import ModelConfig
+        from olmo_eval.launch import BeakerModelSpec
 
-        model = ModelConfig(name_or_path="model1")
+        model = BeakerModelSpec(name_or_path="model1")
         exp = ExperimentPlan(
             name="test-exp",
             model_cfgs=[model],
@@ -915,9 +915,9 @@ class TestTaskOverrideHandling:
         from olmo_eval.cli.beaker.config_loader import LaunchConfig
         from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan
         from olmo_eval.cli.beaker.job_assembler import JobConfigAssembler
-        from olmo_eval.launch import ModelConfig
+        from olmo_eval.launch import BeakerModelSpec
 
-        model = ModelConfig(name_or_path="model1")
+        model = BeakerModelSpec(name_or_path="model1")
         # Simulate already-filtered overrides (priority removed)
         exp = ExperimentPlan(
             name="test-exp",

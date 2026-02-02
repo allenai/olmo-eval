@@ -10,7 +10,7 @@ from rich.console import Console
 if TYPE_CHECKING:
     from olmo_eval.evals.tasks.core.base import TaskConfig
     from olmo_eval.launch.beaker.launcher import BeakerJobConfig
-    from olmo_eval.launch.config import ModelConfig
+    from olmo_eval.launch.config import BeakerModelSpec
 
 console = Console()
 
@@ -192,7 +192,7 @@ class ExperimentSummary:
     """Per-experiment summary for beaker launch display."""
 
     name: str
-    models: list["ModelConfig"]
+    models: list["BeakerModelSpec"]
     tasks: list["TaskConfig"]
     runner: RunnerConfig
     beaker: "BeakerJobConfig"

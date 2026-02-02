@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from rich.console import Console
 
 if TYPE_CHECKING:
-    from olmo_eval.launch import EvalConfig, ModelConfig
+    from olmo_eval.launch import BeakerModelSpec, EvalConfig
 
 console = Console()
 
@@ -19,7 +19,7 @@ class LaunchConfig:
 
     # Required fields
     name: str
-    model_configs: list[ModelConfig]
+    model_configs: list[BeakerModelSpec]
     model_specs: list[str]  # Original specs (without -o overrides applied via CLI)
     task_specs: list[str]
     cluster: str

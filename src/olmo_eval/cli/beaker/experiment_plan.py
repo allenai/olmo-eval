@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from olmo_eval.launch import ModelConfig
+    from olmo_eval.launch import BeakerModelSpec
 
 
 @dataclass
@@ -18,7 +18,7 @@ class ExperimentPlan:
 
     Attributes:
         name: Experiment name for Beaker.
-        model_cfgs: List of ModelConfig objects for models in this experiment.
+        model_cfgs: List of BeakerModelSpec objects for models in this experiment.
         model_specs: List of model specification strings (names/paths).
         priority: Job priority level (low, normal, high, urgent).
         tasks: List of task specs to run.
@@ -33,7 +33,7 @@ class ExperimentPlan:
     """
 
     name: str
-    model_cfgs: list[ModelConfig]
+    model_cfgs: list[BeakerModelSpec]
     model_specs: list[str]
     priority: str
     tasks: list[str]
