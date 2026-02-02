@@ -42,12 +42,12 @@ from olmo_eval.core.constants.infrastructure import LOCAL_RESULT_DIR
 @click.option("--config", "-c", type=click.Path(exists=True), help="YAML config file")
 @click.option(
     "--override",
-    "-O",
+    "-o",
     "cli_override",
     multiple=True,
     cls=OrderedMultiOption,
     save_to="_ordered",
-    help="Override for preceding -m or -t (e.g., -O provider.name=vllm -O limit=100)",
+    help="Override for preceding -m or -t (e.g., -o provider.name=vllm -o limit=100)",
 )
 @click.option("--output-dir", default=LOCAL_RESULT_DIR, help="Output directory")
 @click.option("--provider", type=click.Choice(["hf", "vllm", "litellm"]), help="Override provider")
@@ -264,9 +264,9 @@ def run(
     With --async-stream, uses vLLM's AsyncLLMEngine for true continuous batching.
     Without --async or --async-stream, runs sequentially for each model.
 
-    Use -O/--override after -m or -t to apply overrides:
+    Use -o/--override after -m or -t to apply overrides:
 
-        olmo-eval run -m llama3.1-8b -O provider.name=vllm -t mmlu -O limit=100
+        olmo-eval run -m llama3.1-8b -o provider.name=vllm -t mmlu -o limit=100
     """
     import os
 

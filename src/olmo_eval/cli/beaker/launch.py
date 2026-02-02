@@ -76,13 +76,6 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_UV
     type=int,
     help="Maximum GPUs per node (default: 8). Tasks are split across experiments if exceeded.",
 )
-@click.option(
-    "--priority",
-    "-p",
-    default=None,
-    type=click.Choice(["low", "normal", "high", "urgent"]),
-    help="Job priority",
-)
 @click.option("--preemptible/--no-preemptible", default=None, help="Allow preemption")
 @click.option("--timeout", "-T", default=None, help="Job timeout (e.g., 24h, 30m)")
 @click.option("--retries", "-r", type=int, help="Number of retries on failure")
@@ -206,7 +199,6 @@ def launch(
     gpus: int | None,
     parallelism: int | None,
     max_gpus_per_node: int | None,
-    priority: str | None,
     preemptible: bool | None,
     timeout: str | None,
     retries: int | None,
@@ -290,7 +282,6 @@ def launch(
         "gpus": gpus,
         "parallelism": parallelism,
         "max_gpus_per_node": max_gpus_per_node,
-        "priority": priority,
         "preemptible": preemptible,
         "timeout": timeout,
         "retries": retries,
@@ -334,7 +325,7 @@ def launch(
     # Validate tasks and group by priority
     task_validator = TaskValidator(
         launch_config.task_specs,
-        cli_priority=priority,
+        cli_priority=None,
         default_priority=launch_config.priority,
     )
     tasks_by_priority, valid_tasks, agent_task_specs = task_validator.validate_and_group()

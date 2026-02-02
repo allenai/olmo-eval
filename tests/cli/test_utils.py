@@ -106,20 +106,6 @@ class TestReconstructOrderedArgs:
         assert result[0] == FlaggedArg("m", "model1")
         assert result[1] == FlaggedArg("t", "task1")
 
-    def test_uppercase_override_flag(self):
-        """Test that -O (uppercase) also works for overrides."""
-        result = reconstruct_ordered_args(
-            [
-                "-m",
-                "model1",
-                "-O",
-                "gpus=4",
-            ]
-        )
-        assert len(result) == 2
-        assert result[0] == FlaggedArg("m", "model1")
-        assert result[1] == FlaggedArg("o", "gpus=4")
-
 
 class TestProcessOrderedArgs:
     """Tests for process_ordered_args function."""

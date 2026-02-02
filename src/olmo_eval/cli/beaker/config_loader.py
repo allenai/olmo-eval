@@ -127,7 +127,6 @@ class LaunchConfigLoader:
         cli_gpus = self.cli_args.get("gpus")
         cli_parallelism = self.cli_args.get("parallelism")
         cli_max_gpus_per_node = self.cli_args.get("max_gpus_per_node")
-        cli_priority = self.cli_args.get("priority")
         cli_preemptible = self.cli_args.get("preemptible")
         cli_timeout = self.cli_args.get("timeout")
         cli_retries = self.cli_args.get("retries")
@@ -162,7 +161,7 @@ class LaunchConfigLoader:
                 if cli_max_gpus_per_node is not None
                 else cfg.max_gpus_per_node
             )
-            priority = cli_priority if cli_priority is not None else cfg.priority
+            priority = cfg.priority
             preemptible = cli_preemptible if cli_preemptible is not None else cfg.preemptible
             timeout = cli_timeout if cli_timeout is not None else cfg.timeout
             use_async = self.cli_args.get("use_async", False) or cfg.use_async
@@ -193,7 +192,7 @@ class LaunchConfigLoader:
             gpus = cli_gpus
             parallelism = cli_parallelism
             max_gpus_per_node = cli_max_gpus_per_node
-            priority = cli_priority
+            priority = None  # Will default to "normal"
             preemptible = cli_preemptible
             timeout = cli_timeout
             use_async = self.cli_args.get("use_async", False)

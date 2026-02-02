@@ -177,23 +177,22 @@ def validate_priority_configuration(
 ) -> dict[str, list[str]]:
     """Validate priority configuration and group tasks by priority.
 
-    Detects conflicting priority specifications where --priority CLI flag
-    is used together with @priority suffixes on tasks.
+    Tasks can specify priority via @priority suffix (e.g., "mmlu@high").
+    Tasks without @priority use the default_priority from the config file.
 
     Args:
         tasks: Task specifications (may include @priority suffixes).
-        cli_priority: Priority from --priority CLI flag, or None.
+        cli_priority: Global priority override (typically None, kept for API compatibility).
         default_priority: Default priority for tasks without @priority suffix.
 
     Returns:
         Dictionary mapping priority levels to lists of task names.
 
     Raises:
-        ValueError: If conflicting priority specifications detected
-            (--priority used with @priority suffixes).
+        ValueError: If cli_priority is set while tasks have @priority suffixes.
 
     Examples:
-        # Tasks without @priority suffix, no CLI flag
+        # Tasks without @priority suffix use default
         >>> validate_priority_configuration(["mmlu", "gsm8k"], None)
         {"normal": ["mmlu", "gsm8k"]}
 
@@ -201,13 +200,9 @@ def validate_priority_configuration(
         >>> validate_priority_configuration(["mmlu@high", "gsm8k@normal"], None)
         {"high": ["mmlu"], "normal": ["gsm8k"]}
 
-        # CLI flag with no @priority suffixes
-        >>> validate_priority_configuration(["mmlu", "gsm8k"], "high")
+        # Custom default priority
+        >>> validate_priority_configuration(["mmlu", "gsm8k"], None, "high")
         {"high": ["mmlu", "gsm8k"]}
-
-        # CLI flag WITH @priority suffixes - raises error
-        >>> validate_priority_configuration(["mmlu@high"], "normal")
-        ValueError: Conflicting priority specification...
     """
     from collections import defaultdict
 
@@ -224,14 +219,12 @@ def validate_priority_configuration(
             effective_priority = cli_priority if cli_priority is not None else default_priority
             tasks_by_priority[effective_priority].append(task_spec)
 
-    # Conflict check: --priority used with @priority suffixes
+    # Conflict check: global priority used with @priority suffixes
     if cli_priority is not None and tasks_with_priority_suffix:
         raise ValueError(
-            f"Conflicting priority specification: --priority={cli_priority} "
+            f"Conflicting priority specification: cli_priority={cli_priority} "
             f"cannot be used together with @priority suffixes on tasks.\n\n"
-            f"Either:\n"
-            f"  1. Use --priority to set priority for ALL tasks, or\n"
-            f"  2. Use @priority suffixes to set priority per-task\n\n"
+            f"Use @priority suffixes to set priority per-task.\n\n"
             f"Tasks with @priority suffixes:\n"
             + "\n".join(f"  - {t}" for t in tasks_with_priority_suffix)
         )

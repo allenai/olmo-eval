@@ -111,8 +111,8 @@ class RunConfigBuilder:
             models: Tuple of model names/paths from -m flags.
             task: Tuple of task specs from -t flags.
             output_dir: Output directory for results.
-            cli_model_overrides: Per-model overrides from -O flags (model_name -> [overrides]).
-            cli_task_overrides: Per-task overrides from -O flags (task_spec -> [overrides]).
+            cli_model_overrides: Per-model overrides from -o flags (model_name -> [overrides]).
+            cli_task_overrides: Per-task overrides from -o flags (task_spec -> [overrides]).
             ... (other standard args)
         """
         self.models = models
@@ -176,14 +176,14 @@ class RunConfigBuilder:
         # Extract model names
         model_names = [name for name, _overrides in parsed_models]
 
-        # Build per-model overrides from CLI -O flags
+        # Build per-model overrides from CLI -o flags
         per_model_overrides: dict[str, dict[str, Any]] = {}
         for model_name, cli_overrides in self.cli_model_overrides.items():
             if cli_overrides:
                 override_config = OmegaConf.from_dotlist(cli_overrides)
                 per_model_overrides[model_name] = OmegaConf.to_container(override_config)  # type: ignore[assignment]
 
-        # Build task overrides from CLI -O flags
+        # Build task overrides from CLI -o flags
         for task_spec, cli_overrides in self.cli_task_overrides.items():
             if cli_overrides:
                 override_config = OmegaConf.from_dotlist(cli_overrides)
