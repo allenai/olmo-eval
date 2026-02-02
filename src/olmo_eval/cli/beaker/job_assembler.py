@@ -155,12 +155,18 @@ class JobConfigAssembler:
             inject_gcs_credentials=self.inject_gcs_credentials,
             env_vars=job_env_vars,
             env_secrets=env_secrets,
+            provider_package=model_resources.get("provider_package"),
         )
 
     def _get_model_resources(self, m_cfg: ModelConfig) -> dict[str, Any]:
         """Get model resources from config or defaults."""
         if self.eval_config is not None:
             return self.eval_config.get_model_resources(m_cfg)
+
+        # Extract provider name and package from ProviderConfig
+        provider_name = m_cfg.provider.name if m_cfg.provider else None
+        provider_package = m_cfg.provider.package if m_cfg.provider else None
+
         return {
             "gpus": m_cfg.gpus or self.config.gpus,
             "parallelism": m_cfg.parallelism or self.config.parallelism,
@@ -168,7 +174,8 @@ class JobConfigAssembler:
             "preemptible": m_cfg.preemptible if m_cfg.preemptible is not None else True,
             "timeout": m_cfg.timeout or self.config.timeout,
             "shared_memory": m_cfg.shared_memory,
-            "provider": m_cfg.provider,
+            "provider": provider_name,
+            "provider_package": provider_package,
         }
 
     def _build_command(

@@ -8,6 +8,7 @@ from olmo_eval.launch.beaker import (
     BeakerWekaBucket,
     _parse_timeout,
     calculate_experiment_splits,
+    normalize_provider_package,
     parse_task_with_priority,
     resolve_clusters,
     validate_priority_configuration,
@@ -491,3 +492,52 @@ class TestCalculateExperimentSplits:
         assert len(result) == 2
         assert result[0]["num_gpus"] == 16
         assert result[0]["parallelism"] == 1
+
+
+class TestNormalizeProviderPackage:
+    """Tests for normalize_provider_package function."""
+
+    def test_github_url_gets_git_prefix(self):
+        """Test GitHub URL gets git+ prefix."""
+        result = normalize_provider_package("https://github.com/user/vllm")
+        assert result == "git+https://github.com/user/vllm"
+
+    def test_github_url_with_branch_gets_git_prefix(self):
+        """Test GitHub URL with branch gets git+ prefix."""
+        result = normalize_provider_package("https://github.com/user/vllm@my-branch")
+        assert result == "git+https://github.com/user/vllm@my-branch"
+
+    def test_gitlab_url_gets_git_prefix(self):
+        """Test GitLab URL gets git+ prefix."""
+        result = normalize_provider_package("https://gitlab.com/user/package")
+        assert result == "git+https://gitlab.com/user/package"
+
+    def test_git_plus_url_unchanged(self):
+        """Test git+ URL passes through unchanged."""
+        result = normalize_provider_package("git+https://github.com/user/vllm@v0.14.0")
+        assert result == "git+https://github.com/user/vllm@v0.14.0"
+
+    def test_pypi_version_unchanged(self):
+        """Test PyPI version spec passes through unchanged."""
+        result = normalize_provider_package("vllm==0.14.0")
+        assert result == "vllm==0.14.0"
+
+    def test_pypi_version_range_unchanged(self):
+        """Test PyPI version range passes through unchanged."""
+        result = normalize_provider_package("vllm>=0.13.0,<0.15.0")
+        assert result == "vllm>=0.13.0,<0.15.0"
+
+    def test_pypi_with_extras_unchanged(self):
+        """Test PyPI with extras passes through unchanged."""
+        result = normalize_provider_package("vllm[runai]==0.14.0")
+        assert result == "vllm[runai]==0.14.0"
+
+    def test_local_path_unchanged(self):
+        """Test local path passes through unchanged."""
+        result = normalize_provider_package("/path/to/local/vllm")
+        assert result == "/path/to/local/vllm"
+
+    def test_package_name_only_unchanged(self):
+        """Test package name only passes through unchanged."""
+        result = normalize_provider_package("vllm")
+        assert result == "vllm"

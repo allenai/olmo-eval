@@ -18,10 +18,13 @@ from rich.table import Table
 from olmo_eval.cli.utils import (
     ExperimentSummary,
     ModelSummary,
+    OrderedMultiOption,
     RunnerConfig,
     TaskSummary,
     console,
     parse_model_spec,
+    process_ordered_args,
+    reconstruct_ordered_args,
 )
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_UV_CACHE_DIR
 
@@ -38,13 +41,25 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_UV
     "--model",
     "-m",
     multiple=True,
-    help="Model name or preset (can specify multiple)",
+    cls=OrderedMultiOption,
+    save_to="_ordered",
+    help="Model name or preset (can specify multiple). Use -o after to add overrides.",
 )
 @click.option(
     "--task",
     "-t",
     multiple=True,
-    help="Task name with optional @priority suffix (e.g., mmlu, mmlu@high)",
+    cls=OrderedMultiOption,
+    save_to="_ordered",
+    help="Task name with optional @priority suffix. Use -o after to add overrides.",
+)
+@click.option(
+    "--override",
+    "-o",
+    multiple=True,
+    cls=OrderedMultiOption,
+    save_to="_ordered",
+    help="Override for preceding -m or -t (e.g., -o provider.name=vllm -o limit=100)",
 )
 @click.option("--cluster", "-c", default=None, help="Cluster alias (h100, a100, aus) or full name")
 @click.option("--gpus", "-G", default=None, type=int, help="Number of GPUs per model instance")
@@ -186,6 +201,7 @@ def launch(
     name: str | None,
     model: tuple[str, ...],
     task: tuple[str, ...],
+    override: tuple[str, ...],
     cluster: str | None,
     gpus: int | None,
     parallelism: int | None,
@@ -231,6 +247,12 @@ def launch(
     Models with compatible runtime configurations (GPUs, provider, etc.) are grouped together.
     Use --config/-f to load settings from a YAML file; CLI arguments override config values.
     Use --group/-g to organize experiments into a Beaker group for result aggregation.
+
+    Use -o/--override after -m or -t to apply overrides to that model or task:
+
+        olmo-eval beaker launch -n eval \\
+            -m llama3.1-8b -o provider.name=vllm -o provider.package=vllm==0.14.0 \\
+            -t mmlu -o limit=100
     """
     from datetime import datetime
 
@@ -243,6 +265,9 @@ def launch(
         )
         raise SystemExit(1) from None
 
+    # Process ordered args to associate overrides with models/tasks
+    import sys
+
     from olmo_eval.cli.beaker.config_loader import LaunchConfigLoader
     from olmo_eval.cli.beaker.credentials import CredentialManager
     from olmo_eval.cli.beaker.experiment_builder import ExperimentPlanBuilder
@@ -251,11 +276,16 @@ def launch(
     from olmo_eval.cli.beaker.task_validator import TaskValidator
     from olmo_eval.core.constants.infrastructure import BEAKER_DEFAULT_IMAGE
 
+    ordered_args = reconstruct_ordered_args(sys.argv[1:])
+    model_overrides, task_overrides = process_ordered_args(ordered_args)
+
     # Build CLI args dict
     cli_args = {
         "name": name,
         "model": model,
         "task": task,
+        "model_overrides": model_overrides,
+        "task_overrides": task_overrides,
         "cluster": cluster,
         "gpus": gpus,
         "parallelism": parallelism,
@@ -634,7 +664,7 @@ def _build_experiment_summary(
                 gpus=m_cfg.gpus or launch_config.gpus,
                 parallelism=m_cfg.parallelism or launch_config.parallelism,
                 alias=m_cfg.alias,
-                provider=m_cfg.provider,
+                provider=m_cfg.provider.name if m_cfg.provider else None,
                 overrides=model_inline_overrides if model_inline_overrides else None,
             )
         )

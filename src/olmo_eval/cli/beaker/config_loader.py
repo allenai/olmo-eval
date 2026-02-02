@@ -20,11 +20,15 @@ class LaunchConfig:
     # Required fields
     name: str
     model_configs: list[ModelConfig]
-    model_specs: list[str]  # Original specs with ::overrides
+    model_specs: list[str]  # Original specs (without -o overrides applied via CLI)
     task_specs: list[str]
     cluster: str
     workspace: str
     budget: str
+
+    # Per-model and per-task overrides from -o flag
+    model_overrides: dict[str, list[str]] = field(default_factory=dict)
+    task_overrides: dict[str, list[str]] = field(default_factory=dict)
 
     # Optional fields with defaults
     gpus: int = 1
@@ -117,6 +121,8 @@ class LaunchConfigLoader:
         cli_name = self.cli_args.get("name")
         cli_model = self.cli_args.get("model", ())
         cli_task = self.cli_args.get("task", ())
+        cli_model_overrides: dict[str, list[str]] = self.cli_args.get("model_overrides", {})
+        cli_task_overrides: dict[str, list[str]] = self.cli_args.get("task_overrides", {})
         cli_cluster = self.cli_args.get("cluster")
         cli_gpus = self.cli_args.get("gpus")
         cli_parallelism = self.cli_args.get("parallelism")
@@ -143,7 +149,10 @@ class LaunchConfigLoader:
                 model_specs = [m.name_or_path for m in model_configs]
             else:
                 model_specs = list(cli_model)
-                model_configs = [parse_model_config(m) for m in cli_model]
+                model_configs = [
+                    parse_model_config(m, overrides=cli_model_overrides.get(m, []))
+                    for m in cli_model
+                ]
 
             cluster = cli_cluster if cli_cluster is not None else cfg.cluster
             gpus = cli_gpus if cli_gpus is not None else cfg.gpus
@@ -175,7 +184,11 @@ class LaunchConfigLoader:
             workspace = cli_workspace
             budget = cli_budget
             model_specs = list(cli_model) if cli_model else []
-            model_configs = [parse_model_config(m) for m in cli_model] if cli_model else []
+            model_configs = (
+                [parse_model_config(m, overrides=cli_model_overrides.get(m, [])) for m in cli_model]
+                if cli_model
+                else []
+            )
             cluster = cli_cluster
             gpus = cli_gpus
             parallelism = cli_parallelism
@@ -227,6 +240,8 @@ class LaunchConfigLoader:
             cluster=cluster,
             workspace=workspace,
             budget=budget,
+            model_overrides=cli_model_overrides,
+            task_overrides=cli_task_overrides,
             gpus=gpus,
             parallelism=parallelism,
             max_gpus_per_node=max_gpus_per_node,

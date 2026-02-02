@@ -4,12 +4,123 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+import click
 from rich.console import Console
 
 if TYPE_CHECKING:
     from olmo_eval.launch.beaker.launcher import BeakerJobConfig
 
 console = Console()
+
+
+@dataclass
+class FlaggedArg:
+    """Argument with its flag type for order tracking."""
+
+    flag: str  # 'm', 't', or 'o'
+    value: str
+
+
+class OrderedMultiOption(click.Option):
+    """Option that tracks order across multiple option types.
+
+    This is a marker class - the actual order tracking is done by
+    reconstruct_ordered_args() which parses the original command line.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.save_to: str = kwargs.pop("save_to", "_ordered_args")
+        super().__init__(*args, **kwargs)
+
+
+def reconstruct_ordered_args(args: list[str]) -> list[FlaggedArg]:
+    """Reconstruct ordered args from command line arguments.
+
+    Parses the argument list to determine the order in which
+    -m, -t, and -o options appeared on the command line.
+
+    Args:
+        args: List of command line arguments (e.g., sys.argv[1:]).
+
+    Returns:
+        List of FlaggedArg in the order they appeared.
+    """
+    # Map option flags to their short flag character
+    flag_map = {
+        "-m": "m",
+        "--model": "m",
+        "-t": "t",
+        "--task": "t",
+        "-o": "o",
+        "--override": "o",
+        "-O": "o",
+    }
+
+    ordered: list[FlaggedArg] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+
+        # Handle -m=value syntax
+        if "=" in arg:
+            opt, _, value = arg.partition("=")
+            if opt in flag_map:
+                ordered.append(FlaggedArg(flag_map[opt], value))
+            i += 1
+        # Handle -m value syntax
+        elif arg in flag_map:
+            if i + 1 < len(args) and not args[i + 1].startswith("-"):
+                ordered.append(FlaggedArg(flag_map[arg], args[i + 1]))
+                i += 2
+            else:
+                i += 1
+        else:
+            i += 1
+
+    return ordered
+
+
+def process_ordered_args(
+    ordered: list[FlaggedArg],
+) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """Associate -o overrides with preceding -m or -t.
+
+    Args:
+        ordered: List of FlaggedArg with flag type and value.
+
+    Returns:
+        Tuple of (model_overrides, task_overrides) where each is a dict
+        mapping model/task name to list of override strings.
+
+    Raises:
+        click.UsageError: If -o appears without a preceding -m or -t.
+    """
+    model_overrides: dict[str, list[str]] = {}  # model_name -> [override_strs]
+    task_overrides: dict[str, list[str]] = {}
+
+    current_model: str | None = None
+    current_task: str | None = None
+    last_flag: str | None = None
+
+    for arg in ordered:
+        if arg.flag == "m":
+            current_model = arg.value
+            model_overrides.setdefault(current_model, [])
+            last_flag = "m"
+        elif arg.flag == "t":
+            current_task = arg.value
+            task_overrides.setdefault(current_task, [])
+            last_flag = "t"
+        elif arg.flag == "o":
+            # Apply to last model or task
+            if last_flag == "m" and current_model:
+                model_overrides[current_model].append(arg.value)
+            elif last_flag == "t" and current_task:
+                task_overrides[current_task].append(arg.value)
+            else:
+                raise click.UsageError("-o/--override must follow -m/--model or -t/--task")
+
+    return model_overrides, task_overrides
 
 
 def format_timestamp(ts: datetime | None) -> str:
@@ -103,25 +214,19 @@ class ExperimentSummary:
 def parse_model_spec(spec: str) -> tuple[str, dict[str, Any]]:
     """Parse model spec into (model_name, overrides).
 
-    Format: model[::key=value,...]
+    Returns the model name and an empty overrides dict.
+    Use -o flag for overrides instead.
     """
-    from olmo_eval.evals.tasks.core.registry import parse_overrides
-
-    main_part, _, override_str = spec.partition("::")
-    overrides = parse_overrides(override_str) if override_str else {}
-    return main_part, overrides
+    return spec, {}
 
 
 def parse_task_spec_with_overrides(spec: str) -> tuple[str, dict[str, Any]]:
-    """Parse task spec with inline overrides.
+    """Parse task spec into (task_spec, overrides).
 
-    Format: task[:variant...][::key=value,...]
+    Returns the task spec and an empty overrides dict.
+    Use -o flag for overrides instead.
     """
-    from olmo_eval.evals.tasks.core.registry import parse_overrides
-
-    spec_part, _, override_str = spec.partition("::")
-    overrides = parse_overrides(override_str) if override_str else {}
-    return spec_part, overrides
+    return spec, {}
 
 
 def print_runtime_environment() -> None:

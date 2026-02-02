@@ -106,8 +106,19 @@ class RunConfigBuilder:
         inspect_tokens: bool = False,
         inspect_response: bool = False,
         inspect_request: bool = False,
+        cli_model_overrides: dict[str, list[str]] | None = None,
+        cli_task_overrides: dict[str, list[str]] | None = None,
     ):
-        """Initialize the builder with raw CLI arguments."""
+        """Initialize the builder with raw CLI arguments.
+
+        Args:
+            models: Tuple of model names/paths from -m flags.
+            task: Tuple of task specs from -t flags.
+            output_dir: Output directory for results.
+            cli_model_overrides: Per-model overrides from -O flags (model_name -> [overrides]).
+            cli_task_overrides: Per-task overrides from -O flags (task_spec -> [overrides]).
+            ... (other standard args)
+        """
         self.models = models
         self.task = task
         self.output_dir = output_dir
@@ -141,6 +152,8 @@ class RunConfigBuilder:
         self.inspect_tokens = inspect_tokens
         self.inspect_response = inspect_response
         self.inspect_request = inspect_request
+        self.cli_model_overrides = cli_model_overrides or {}
+        self.cli_task_overrides = cli_task_overrides or {}
 
     def build(self) -> RunConfig:
         """Parse inputs and build configuration.
@@ -148,9 +161,11 @@ class RunConfigBuilder:
         Returns:
             RunConfig with parsed and validated settings.
         """
+        from omegaconf import OmegaConf
+
         from olmo_eval.cli.utils import parse_model_spec, parse_task_spec_with_overrides
 
-        # Parse model specs to extract inline overrides
+        # Parse model specs to extract inline overrides (deprecated :: syntax)
         parsed_models: list[tuple[str, dict[str, Any]]] = [parse_model_spec(m) for m in self.models]
 
         # Parse task specs to extract inline overrides
@@ -162,12 +177,37 @@ class RunConfigBuilder:
             if overrides:
                 task_overrides[spec_without_overrides] = overrides
 
-        # Extract model names and per-model overrides
+        # Extract model names and per-model overrides (from inline :: syntax)
         model_names = [name for name, _overrides in parsed_models]
-        per_model_overrides = {name: overrides for name, overrides in parsed_models if overrides}
+        per_model_overrides = {
+            name: dict(overrides) for name, overrides in parsed_models if overrides
+        }
+
+        # Merge CLI -O overrides with inline overrides (CLI takes precedence)
+        for model_name, cli_overrides in self.cli_model_overrides.items():
+            if cli_overrides:
+                override_config = OmegaConf.from_dotlist(cli_overrides)
+                override_dict = OmegaConf.to_container(override_config)
+                if model_name in per_model_overrides:
+                    per_model_overrides[model_name].update(override_dict)  # type: ignore[arg-type]
+                else:
+                    per_model_overrides[model_name] = override_dict  # type: ignore[assignment]
+
+        # Merge CLI -O task overrides with inline overrides
+        for task_spec, cli_overrides in self.cli_task_overrides.items():
+            if cli_overrides:
+                override_config = OmegaConf.from_dotlist(cli_overrides)
+                override_dict = OmegaConf.to_container(override_config)
+                if task_spec in task_overrides:
+                    task_overrides[task_spec].update(override_dict)  # type: ignore[arg-type]
+                else:
+                    task_overrides[task_spec] = override_dict  # type: ignore[assignment]
 
         # Get first model info
         first_model_name, first_model_overrides = parsed_models[0] if parsed_models else ("", {})
+        # Also merge any CLI overrides for first model
+        if first_model_name and first_model_name in per_model_overrides:
+            first_model_overrides = per_model_overrides[first_model_name]
 
         # Apply model-level provider/attention_backend overrides
         provider = self.provider

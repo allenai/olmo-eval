@@ -7,6 +7,8 @@ import pytest
 from olmo_eval.launch.config import (
     EvalConfig,
     ModelConfig,
+    ProviderConfig,
+    apply_overrides_to_model,
     get_model_short_name,
     get_tasks_short_name,
     get_template,
@@ -544,3 +546,281 @@ class TestGetTemplate:
 
         template2 = get_template("quick")
         assert template2["gpus"] == 1  # Original value
+
+
+class TestProviderConfig:
+    """Tests for ProviderConfig dataclass."""
+
+    def test_default_values(self):
+        """Test ProviderConfig default values."""
+        config = ProviderConfig()
+        assert config.name == "vllm"
+        assert config.package is None
+
+    def test_custom_name_and_package(self):
+        """Test ProviderConfig with custom name and package."""
+        config = ProviderConfig(name="litellm", package="litellm==1.0.0")
+        assert config.name == "litellm"
+        assert config.package == "litellm==1.0.0"
+
+
+class TestApplyOverridesToModel:
+    """Tests for apply_overrides_to_model function."""
+
+    def test_no_overrides(self):
+        """Test with no overrides."""
+        config = apply_overrides_to_model("llama3.1-8b", [])
+        assert config.name_or_path == "llama3.1-8b"
+        assert config.gpus is None
+        assert config.provider is None
+
+    def test_simple_overrides(self):
+        """Test with simple key=value overrides."""
+        config = apply_overrides_to_model("llama3.1-8b", ["gpus=4", "timeout=48h"])
+        assert config.name_or_path == "llama3.1-8b"
+        assert config.gpus == 4
+        assert config.timeout == "48h"
+
+    def test_nested_provider_overrides(self):
+        """Test with nested provider overrides."""
+        config = apply_overrides_to_model(
+            "llama3.1-8b",
+            ["provider.name=vllm", "provider.package=vllm==0.14.0"],
+        )
+        assert config.name_or_path == "llama3.1-8b"
+        assert config.provider is not None
+        assert config.provider.name == "vllm"
+        assert config.provider.package == "vllm==0.14.0"
+
+    def test_github_url_package(self):
+        """Test with GitHub URL as provider package."""
+        config = apply_overrides_to_model(
+            "llama3.1-8b",
+            ["provider.name=vllm", "provider.package=https://github.com/user/vllm@branch"],
+        )
+        assert config.provider is not None
+        assert config.provider.package == "https://github.com/user/vllm@branch"
+
+    def test_mixed_overrides(self):
+        """Test with mix of simple and nested overrides."""
+        config = apply_overrides_to_model(
+            "llama3.1-8b",
+            ["gpus=4", "provider.name=vllm", "load_format=auto"],
+        )
+        assert config.gpus == 4
+        assert config.provider is not None
+        assert config.provider.name == "vllm"
+        assert config.load_format == "auto"
+
+
+class TestParseModelConfigWithOverridesParam:
+    """Tests for parse_model_config with overrides parameter (new -o syntax)."""
+
+    def test_string_with_overrides_param(self):
+        """Test parsing string model with overrides parameter."""
+        config = parse_model_config(
+            "llama3.1-8b",
+            overrides=["provider.name=vllm", "gpus=4"],
+        )
+        assert config.name_or_path == "llama3.1-8b"
+        assert config.gpus == 4
+        assert config.provider is not None
+        assert config.provider.name == "vllm"
+
+    def test_dict_with_overrides_param(self):
+        """Test parsing dict model with overrides parameter."""
+        config = parse_model_config(
+            {"name_or_path": "llama3.1-8b", "gpus": 2},
+            overrides=["gpus=4", "timeout=48h"],
+        )
+        assert config.name_or_path == "llama3.1-8b"
+        assert config.gpus == 4  # Override wins
+        assert config.timeout == "48h"
+
+    def test_model_config_with_overrides_param(self):
+        """Test that ModelConfig with overrides param gets new values applied."""
+        original = ModelConfig(name_or_path="llama3.1-8b", gpus=2)
+        config = parse_model_config(original, overrides=["gpus=4"])
+        assert config.gpus == 4
+        # Original should be unchanged
+        assert original.gpus == 2
+
+
+class TestParseModelConfigWithProvider:
+    """Tests for parse_model_config with ProviderConfig."""
+
+    def test_parse_string_with_nested_provider(self):
+        """Test parsing model string with nested provider config via overrides."""
+        config = parse_model_config(
+            "llama3.1-8b",
+            overrides=["provider.name=vllm", "provider.package=vllm==0.14.0"],
+        )
+        assert config.name_or_path == "llama3.1-8b"
+        assert config.provider is not None
+        assert config.provider.name == "vllm"
+        assert config.provider.package == "vllm==0.14.0"
+
+    def test_parse_string_with_provider_github_url(self):
+        """Test parsing model string with GitHub URL as provider package."""
+        config = parse_model_config(
+            "llama3.1-8b",
+            overrides=[
+                "provider.name=vllm",
+                "provider.package=https://github.com/user/vllm@branch",
+            ],
+        )
+        assert config.provider is not None
+        assert config.provider.name == "vllm"
+        assert config.provider.package == "https://github.com/user/vllm@branch"
+
+    def test_parse_string_with_provider_name_only(self):
+        """Test parsing model string with only provider name (no package)."""
+        config = parse_model_config("llama3.1-8b", overrides=["provider.name=litellm"])
+        assert config.provider is not None
+        assert config.provider.name == "litellm"
+        assert config.provider.package is None
+
+    def test_parse_dict_with_nested_provider(self):
+        """Test parsing dict with nested provider config."""
+        config = parse_model_config(
+            {
+                "name_or_path": "llama3.1-8b",
+                "provider": {
+                    "name": "vllm",
+                    "package": "vllm==0.14.0",
+                },
+            }
+        )
+        assert config.name_or_path == "llama3.1-8b"
+        assert config.provider is not None
+        assert config.provider.name == "vllm"
+        assert config.provider.package == "vllm==0.14.0"
+
+    def test_parse_dict_with_provider_name_only(self):
+        """Test parsing dict with provider name only."""
+        config = parse_model_config(
+            {
+                "name_or_path": "llama3.1-8b",
+                "provider": {
+                    "name": "litellm",
+                },
+            }
+        )
+        assert config.provider is not None
+        assert config.provider.name == "litellm"
+        assert config.provider.package is None
+
+    def test_parse_string_with_mixed_overrides(self):
+        """Test parsing model string with provider and other overrides."""
+        config = parse_model_config(
+            "llama3.1-8b",
+            overrides=["provider.name=vllm", "load_format=auto"],
+        )
+        assert config.name_or_path == "llama3.1-8b"
+        assert config.provider is not None
+        assert config.provider.name == "vllm"
+        assert config.load_format == "auto"
+
+
+class TestEvalConfigWithProvider:
+    """Tests for EvalConfig with ProviderConfig."""
+
+    def test_get_model_resources_with_provider(self):
+        """Test get_model_resources extracts provider name and package."""
+        config = EvalConfig(
+            name="test",
+            models=["llama3.1-8b"],
+            tasks=["mmlu"],
+        )
+        model = ModelConfig(
+            name_or_path="llama3.1-8b",
+            provider=ProviderConfig(name="vllm", package="vllm==0.14.0"),
+        )
+        resources = config.get_model_resources(model)
+
+        assert resources["provider"] == "vllm"
+        assert resources["provider_package"] == "vllm==0.14.0"
+
+    def test_get_model_resources_without_provider(self):
+        """Test get_model_resources with no provider config."""
+        config = EvalConfig(
+            name="test",
+            models=["llama3.1-8b"],
+            tasks=["mmlu"],
+        )
+        model = ModelConfig(name_or_path="llama3.1-8b")
+        resources = config.get_model_resources(model)
+
+        assert resources["provider"] is None
+        assert resources["provider_package"] is None
+
+    def test_from_yaml_with_nested_provider(self):
+        """Test loading YAML with nested provider config."""
+        yaml_content = """
+name: test-eval
+models:
+  - name_or_path: llama3.1-8b
+    provider:
+      name: vllm
+      package: vllm==0.14.0
+tasks:
+  - mmlu
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+
+            config = EvalConfig.from_yaml(f.name)
+            model_configs = config.get_model_configs()
+
+            assert len(model_configs) == 1
+            assert model_configs[0].provider is not None
+            assert model_configs[0].provider.name == "vllm"
+            assert model_configs[0].provider.package == "vllm==0.14.0"
+
+    def test_from_yaml_with_github_provider(self):
+        """Test loading YAML with GitHub URL provider package."""
+        yaml_content = """
+name: test-eval
+models:
+  - name_or_path: llama3.1-8b
+    provider:
+      name: vllm
+      package: https://github.com/davidheineman/vllm@my-branch
+tasks:
+  - mmlu
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+
+            config = EvalConfig.from_yaml(f.name)
+            model_configs = config.get_model_configs()
+
+            assert model_configs[0].provider is not None
+            assert (
+                model_configs[0].provider.package
+                == "https://github.com/davidheineman/vllm@my-branch"
+            )
+
+    def test_from_yaml_with_provider_name_only(self):
+        """Test loading YAML with provider name only (no custom package)."""
+        yaml_content = """
+name: test-eval
+models:
+  - name_or_path: gpt-4o
+    provider:
+      name: litellm
+tasks:
+  - mmlu
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+
+            config = EvalConfig.from_yaml(f.name)
+            model_configs = config.get_model_configs()
+
+            assert model_configs[0].provider is not None
+            assert model_configs[0].provider.name == "litellm"
+            assert model_configs[0].provider.package is None
