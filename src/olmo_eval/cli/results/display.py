@@ -6,6 +6,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any
 
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
@@ -85,11 +86,12 @@ class TaskDisplayInfo:
     @property
     def column_header(self) -> str:
         """Build the column header with metric/scorer info."""
-        # Build metric/scorer part
+        # Build metric/scorer part - escape brackets for Rich markup
         if self.primary_metric and self.scorer:
-            metric_part = f" [dim][{self.primary_metric}:{self.scorer}][/dim]"
+            metric_text = f"[{self.primary_metric}:{self.scorer}]"
+            metric_part = f" [dim]{escape(metric_text)}[/dim]"
         elif self.primary_metric:
-            metric_part = f" [dim][{self.primary_metric}][/dim]"
+            metric_part = f" [dim]{escape(f'[{self.primary_metric}]')}[/dim]"
         else:
             metric_part = ""
 

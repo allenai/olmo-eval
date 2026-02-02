@@ -230,6 +230,7 @@ def task_comparison_to_dict(
                     task_name=task.task_name,
                     task_hash=task.task_hash,
                     primary_metric=task.primary_metric,
+                    metrics=task.metrics,
                     instances=task_instances,
                 )
             )
