@@ -6,6 +6,7 @@ import json as json_module
 from typing import TYPE_CHECKING
 
 from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan
+from olmo_eval.core.types import RunnerType
 
 if TYPE_CHECKING:
     from olmo_eval.cli.beaker.config_loader import LaunchConfig
@@ -97,7 +98,7 @@ class ExperimentPlanBuilder:
         model_indices: list[int],
         tasks: list[str],
         priority: str,
-        is_agent: bool,
+        runner_type: RunnerType,
         total_expanded_tasks: int,
         multiple_models: bool,
         multiple_priorities: bool,
@@ -138,7 +139,7 @@ class ExperimentPlanBuilder:
                     parallelism=m_parallelism,
                     split_index=None,
                     total_splits=None,
-                    is_agent=is_agent,
+                    runner_type=runner_type,
                     model_overrides=model_overrides,
                     task_overrides=task_overrides,
                 )
@@ -152,7 +153,7 @@ class ExperimentPlanBuilder:
         model_indices: list[int],
         tasks: list[str],
         priority: str,
-        is_agent: bool,
+        runner_type: RunnerType,
         total_expanded_tasks: int,
         multiple_models: bool,
         multiple_priorities: bool,
@@ -205,7 +206,7 @@ class ExperimentPlanBuilder:
                     parallelism=1,  # With packed models, parallelism is per-model
                     split_index=None,
                     total_splits=None,
-                    is_agent=is_agent,
+                    runner_type=runner_type,
                     model_overrides=model_overrides,
                     task_overrides=task_overrides,
                 )
@@ -266,7 +267,7 @@ class ExperimentPlanBuilder:
                         parallelism=1,
                         split_index=i + 1 if total_splits > 1 else None,
                         total_splits=total_splits if total_splits > 1 else None,
-                        is_agent=is_agent,
+                        runner_type=runner_type,
                         model_overrides=bin_overrides,
                         task_overrides=task_overrides,
                     )
@@ -316,7 +317,10 @@ class ExperimentPlanBuilder:
                         continue
 
                     category_expanded = len(expand_tasks(category_tasks))
-                    is_agent = task_category == "agent"
+                    # Agent tasks always use AGENT runner, others use config's runner_type
+                    effective_runner = (
+                        RunnerType.AGENT if task_category == "agent" else self.config.runner_type
+                    )
 
                     if self.config.pack_models:
                         # Pack models together when they fit
@@ -326,7 +330,7 @@ class ExperimentPlanBuilder:
                             group_model_indices,
                             category_tasks,
                             effective_priority,
-                            is_agent,
+                            effective_runner,
                             category_expanded,
                             multiple_models,
                             multiple_priorities,
@@ -342,7 +346,7 @@ class ExperimentPlanBuilder:
                             group_model_indices,
                             category_tasks,
                             effective_priority,
-                            is_agent,
+                            effective_runner,
                             category_expanded,
                             multiple_models,
                             multiple_priorities,

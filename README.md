@@ -695,10 +695,9 @@ Available inference providers:
 | `--workspace` | `-w` | required | Beaker workspace |
 | `--budget` | `-B` | required | Beaker budget |
 | `--group` | `-g` | none | Add experiments to Beaker group(s) (can specify multiple) |
-| `--async` | `-a` | `false` | Enable parallel task execution |
-| `--async-stream` | | `false` | Use vLLM's AsyncLLMEngine for continuous batching |
-| `--num-workers` | `-W` | auto | Number of workers for async mode |
-| `--gpus-per-worker` | | `1` | GPUs per worker for async mode |
+| `--runner-type` | `-R` | `sync` | Runner type: `sync`, `async`, `async-stream`, `agent` |
+| `--num-workers` | `-W` | auto | Number of workers for async/async-stream modes |
+| `--gpus-per-worker` | | `1` | GPUs per worker for async/async-stream modes |
 | `--dry-run` | `-d` | `false` | Print spec without launching |
 | `--follow/--no-follow` | | `true` | Follow logs after launch |
 
@@ -1076,39 +1075,46 @@ Configure via environment variables:
 
 ## Advanced Usage
 
-### Parallel Execution
+### Runner Types
 
-By default, tasks run sequentially. Two parallel execution modes are available for faster evaluation:
+By default, tasks run sequentially. Different runner types are available for various use cases:
 
-| Mode | Flag | Backend | Best For |
-|------|------|---------|----------|
-| Sequential | (default) | Any | Simple runs, debugging |
-| Async | `--async` | Any | Multi-GPU batch processing |
-| Streaming | `--async-stream` | vLLM only | Generative tasks only |
+| Runner | Flag | Backend | Best For |
+|--------|------|---------|----------|
+| Sync | (default) | Any | Simple runs, debugging |
+| Async | `--runner-type async` | Any | Multi-GPU batch processing |
+| Async-Stream | `--runner-type async-stream` | vLLM only | Generative tasks only |
+| Agent | `--runner-type agent` | vLLM | Multi-turn agent tasks |
 
-**Sequential Mode (Default)** - Runs one task at a time:
+**Sync Mode (Default)** - Runs one task at a time:
 
 ```bash
 olmo-eval run -m llama3.1-8b -t mmlu -t gsm8k -t arc
 ```
 
-**Async Mode (`--async`)** - Spawns worker processes that each load the model and process batches in parallel:
+**Async Mode** - Spawns worker processes that each load the model and process batches in parallel:
 
 ```bash
 # Auto-detect workers from available GPUs
-olmo-eval run --async -m llama3.1-8b -t mmlu -t gsm8k -t arc
+olmo-eval run --runner-type async -m llama3.1-8b -t mmlu -t gsm8k -t arc
 
 # Specify number of workers
-olmo-eval run --async --num-workers 4 -m llama3.1-8b -t mmlu -t gsm8k
+olmo-eval run --runner-type async --num-workers 4 -m llama3.1-8b -t mmlu -t gsm8k
 
 # Multi-GPU models (e.g., 70B on 4 GPUs per worker)
-olmo-eval run --async --num-workers 2 --gpus-per-worker 4 -m llama3.1-70b -t mmlu
+olmo-eval run --runner-type async --num-workers 2 --gpus-per-worker 4 -m llama3.1-70b -t mmlu
 ```
 
-**Streaming Mode (`--async-stream`)** - Uses vLLM's AsyncLLMEngine for true continuous batching:
+**Async-Stream Mode** - Uses vLLM's AsyncLLMEngine for true continuous batching:
 
 ```bash
-olmo-eval run --async-stream -m llama3.1-8b -t mmlu -t gsm8k -t arc
+olmo-eval run --runner-type async-stream -m llama3.1-8b -t mmlu -t gsm8k -t arc
+```
+
+**Agent Mode** - For multi-turn agent tasks with tool use:
+
+```bash
+olmo-eval run --runner-type agent -m llama3.1-8b -t simpleqa_agent
 ```
 
 ## Debugging and Inspection

@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
 
+from olmo_eval.core.types import RunnerType
+
 if TYPE_CHECKING:
     from olmo_eval.cli.run.config import RunConfig
     from olmo_eval.runners.models import S3Config
@@ -189,11 +191,11 @@ class RunnerFactory:
         Returns:
             Configured runner instance (agent, streaming, async, or sync).
         """
-        if self.config.use_agent:
+        if self.config.runner_type == RunnerType.AGENT:
             return self.create_agent_runner()
-        elif self.config.use_async_stream:
+        elif self.config.runner_type == RunnerType.ASYNC_STREAM:
             return self.create_streaming_runner()
-        elif self.config.use_async:
+        elif self.config.runner_type == RunnerType.ASYNC:
             return self.create_async_runner()
         else:
             # For sync mode, return first sync runner (multi-model handled separately)

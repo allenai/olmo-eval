@@ -7,6 +7,8 @@ from typing import Any
 
 from rich.console import Console
 
+from olmo_eval.core.types import RunnerType
+
 console = Console()
 
 
@@ -26,9 +28,7 @@ class RunConfig:
     output_dir: str
     provider: str | None = None
     attention_backend: str | None = None
-    use_async: bool = False
-    use_async_stream: bool = False
-    use_agent: bool = False
+    runner_type: RunnerType = RunnerType.SYNC
     num_workers: int | None = None
     gpus_per_worker: int = 1
     num_gpus: int = 1
@@ -74,9 +74,7 @@ class RunConfigBuilder:
         output_dir: str,
         provider: str | None = None,
         attention_backend: str | None = None,
-        use_async: bool = False,
-        use_async_stream: bool = False,
-        use_agent: bool = False,
+        runner_type: RunnerType = RunnerType.SYNC,
         num_workers: int | None = None,
         gpus_per_worker: int = 1,
         num_gpus: int = 1,
@@ -111,6 +109,7 @@ class RunConfigBuilder:
             models: Tuple of model names/paths from -m flags.
             task: Tuple of task specs from -t flags.
             output_dir: Output directory for results.
+            runner_type: Type of runner to use (sync, async, async-stream, agent).
             cli_model_overrides: Per-model overrides from -o flags (positional list).
             cli_task_overrides: Per-task overrides from -o flags (task_spec -> [overrides]).
             ... (other standard args)
@@ -120,9 +119,7 @@ class RunConfigBuilder:
         self.output_dir = output_dir
         self.provider = provider
         self.attention_backend = attention_backend
-        self.use_async = use_async
-        self.use_async_stream = use_async_stream
-        self.use_agent = use_agent
+        self.runner_type = runner_type
         self.num_workers = num_workers
         self.gpus_per_worker = gpus_per_worker
         self.num_gpus = num_gpus
@@ -212,9 +209,7 @@ class RunConfigBuilder:
             output_dir=self.output_dir,
             provider=provider,
             attention_backend=attention_backend,
-            use_async=self.use_async,
-            use_async_stream=self.use_async_stream,
-            use_agent=self.use_agent,
+            runner_type=self.runner_type,
             num_workers=self.num_workers,
             gpus_per_worker=self.gpus_per_worker,
             num_gpus=self.num_gpus,
@@ -248,72 +243,69 @@ class RunConfigBuilder:
         Returns:
             True if validation passes, raises SystemExit on fatal errors.
         """
-        # Warning for num-workers without async
-        if self.num_workers is not None and not self.use_async and not self.use_async_stream:
+        # Warning for num-workers without async runner types
+        if self.num_workers is not None and self.runner_type not in (
+            RunnerType.ASYNC,
+            RunnerType.ASYNC_STREAM,
+        ):
             console.print(
                 "[yellow]Warning:[/yellow] --num-workers has no effect without "
-                "--async or --async-stream"
+                "--runner-type async or async-stream"
             )
 
-        if self.gpus_per_worker != 1 and not self.use_async and not self.use_async_stream:
+        if self.gpus_per_worker != 1 and self.runner_type not in (
+            RunnerType.ASYNC,
+            RunnerType.ASYNC_STREAM,
+        ):
             console.print(
                 "[yellow]Warning:[/yellow] --gpus-per-worker has no effect without "
-                "--async or --async-stream"
-            )
-
-        # Warning for conflicting flags
-        if self.use_async and self.use_async_stream:
-            console.print(
-                "[yellow]Warning:[/yellow] Both --async and --async-stream specified. "
-                "Using --async-stream."
+                "--runner-type async or async-stream"
             )
 
         # Warning for provider override with async-stream
-        if self.use_async_stream and self.provider and self.provider != "vllm":
+        if (
+            self.runner_type == RunnerType.ASYNC_STREAM
+            and self.provider
+            and self.provider != "vllm"
+        ):
             console.print(
-                f"[yellow]Warning:[/yellow] --async-stream only supports vLLM provider, "
-                f"ignoring --provider={self.provider}"
+                "[yellow]Warning:[/yellow] --runner-type async-stream only supports "
+                f"vLLM provider, ignoring --provider={self.provider}"
             )
 
-        # Check for incompatible flags with --agent
-        if self.use_agent:
-            if self.use_async or self.use_async_stream:
-                console.print(
-                    "[red]Error:[/red] --agent cannot be used with --async or --async-stream"
-                )
-                raise SystemExit(1)
-            if len(self.models) > 1:
-                console.print(
-                    "[red]Error:[/red] --agent only supports a single model. "
-                    "Use beaker launch for multi-model agent runs."
-                )
-                raise SystemExit(1)
+        # Check for incompatible flags with agent runner
+        if self.runner_type == RunnerType.AGENT and len(self.models) > 1:
+            console.print(
+                "[red]Error:[/red] --runner-type agent only supports a single model. "
+                "Use beaker launch for multi-model agent runs."
+            )
+            raise SystemExit(1)
 
         return True
 
     def validate_bpb_tasks(self, task_specs: list[str]) -> None:
-        """Check for incompatible task types with --async-stream.
+        """Check for incompatible task types with async-stream runner.
 
         Args:
             task_specs: List of task specifications to check.
 
         Raises:
-            SystemExit: If BPB tasks are used with --async-stream.
+            SystemExit: If BPB tasks are used with async-stream runner.
         """
-        if not self.use_async_stream:
+        if self.runner_type != RunnerType.ASYNC_STREAM:
             return
 
         bpb_tasks = [t for t in task_specs if ":bpb" in t]
         if bpb_tasks:
             console.print(
                 "\n[bold red]Error:[/bold red] The following :bpb tasks cannot run "
-                "with --async-stream:\n"
+                "with --runner-type async-stream:\n"
                 f"  {', '.join(bpb_tasks)}\n\n"
                 "[yellow]BPB (bits-per-byte) tasks use loglikelihood scoring which "
                 "requires\n"
                 "prompt_logprobs - a feature not supported by the streaming vLLM "
                 "backend.[/yellow]\n\n"
-                "Use [bold]--async[/bold] or the default sequential mode instead:\n"
-                f"  olmo-eval run -m <model> -t {' -t '.join(bpb_tasks)} --async\n"
+                "Use [bold]--runner-type async[/bold] or the default sync mode instead:\n"
+                f"  olmo-eval run -m <model> -t {' -t '.join(bpb_tasks)} --runner-type async\n"
             )
             raise SystemExit(1)

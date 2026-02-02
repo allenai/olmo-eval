@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
 
+from olmo_eval.core.types import RunnerType
+
 if TYPE_CHECKING:
     from olmo_eval.launch import BeakerModelSpec, EvalConfig
 
@@ -41,9 +43,8 @@ class LaunchConfig:
     image: str | None = None
     groups: list[str] = field(default_factory=list)
 
-    # Async options
-    use_async: bool = False
-    use_async_stream: bool = False
+    # Runner type and worker options
+    runner_type: RunnerType = RunnerType.SYNC
     num_workers: int | None = None
     gpus_per_worker: int = 1
 
@@ -166,7 +167,11 @@ class LaunchConfigLoader:
             priority = cli_priority if cli_priority is not None else cfg.priority
             preemptible = cli_preemptible if cli_preemptible is not None else cfg.preemptible
             timeout = cli_timeout if cli_timeout is not None else cfg.timeout
-            use_async = self.cli_args.get("use_async", False) or cfg.use_async
+            # CLI runner_type takes precedence over config
+            cli_runner_type = self.cli_args.get("runner_type")
+            runner_type = (
+                RunnerType(cli_runner_type) if cli_runner_type else RunnerType(cfg.runner_type)
+            )
             num_workers = (
                 self.cli_args.get("num_workers")
                 if self.cli_args.get("num_workers") is not None
@@ -202,7 +207,8 @@ class LaunchConfigLoader:
             priority = cli_priority  # Will default to "normal" if None
             preemptible = cli_preemptible
             timeout = cli_timeout
-            use_async = self.cli_args.get("use_async", False)
+            cli_runner_type = self.cli_args.get("runner_type")
+            runner_type = RunnerType(cli_runner_type) if cli_runner_type else RunnerType.SYNC
             num_workers = self.cli_args.get("num_workers")
             gpus_per_worker = self.cli_args.get("gpus_per_worker", 1)
             image = cli_image
@@ -255,8 +261,7 @@ class LaunchConfigLoader:
             retries=retries,
             image=image,
             groups=effective_groups,
-            use_async=use_async,
-            use_async_stream=self.cli_args.get("use_async_stream", False),
+            runner_type=runner_type,
             num_workers=num_workers,
             gpus_per_worker=gpus_per_worker,
             s3_bucket=s3_bucket,

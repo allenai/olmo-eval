@@ -17,6 +17,7 @@ from olmo_eval.cli.utils import (
     reconstruct_ordered_args,
 )
 from olmo_eval.core.constants.infrastructure import LOCAL_RESULT_DIR
+from olmo_eval.core.types import RunnerType
 
 
 @click.command()
@@ -58,22 +59,17 @@ from olmo_eval.core.constants.infrastructure import LOCAL_RESULT_DIR
 )
 @click.option("--dry-run", is_flag=True, help="Print config and exit without running")
 @click.option(
-    "--async",
-    "use_async",
-    is_flag=True,
-    help="Use async runner for parallel task execution",
-)
-@click.option(
-    "--async-stream",
-    "use_async_stream",
-    is_flag=True,
-    help="Use streaming async runner with vLLM's AsyncLLMEngine for true continuous batching",
+    "--runner-type",
+    "-R",
+    type=click.Choice([e.value for e in RunnerType], case_sensitive=False),
+    default=RunnerType.SYNC.value,
+    help="Runner type: sync (default), async, async-stream, or agent",
 )
 @click.option(
     "--num-workers",
     type=int,
     default=None,
-    help="Number of workers for async mode (default: auto-detect from GPUs)",
+    help="Number of workers for async modes (default: auto-detect from GPUs)",
 )
 @click.option(
     "--gpus-per-worker",
@@ -160,15 +156,10 @@ from olmo_eval.core.constants.infrastructure import LOCAL_RESULT_DIR
     help="Short name for model (used as model_name in DB, original path stored as model_path)",
 )
 @click.option(
-    "--agent",
-    is_flag=True,
-    help="Use agent runner for multi-turn agent tasks (e.g., simpleqa_agent)",
-)
-@click.option(
     "--num-gpus",
     type=int,
     default=1,
-    help="Number of GPUs for tensor parallelism (used with --agent)",
+    help="Number of GPUs for tensor parallelism (used with --runner-type agent)",
 )
 @click.option(
     "--debug-requests",
@@ -226,8 +217,7 @@ def run(
     provider: str | None,
     store: bool,
     dry_run: bool,
-    use_async: bool,
-    use_async_stream: bool,
+    runner_type: str,
     num_workers: int | None,
     gpus_per_worker: int,
     attention_backend: str | None,
@@ -245,7 +235,6 @@ def run(
     experiment_name: str | None,
     experiment_group: str | None,
     alias: str | None,
-    agent: bool,
     num_gpus: int,
     debug_requests: bool,
     debug_provider: bool,
@@ -260,27 +249,29 @@ def run(
     """Run evaluation on specified tasks.
 
     Supports multiple models: use -m multiple times for multi-model runs.
-    With --async, runs all (model, task) pairs with per-model workers.
-    With --async-stream, uses vLLM's AsyncLLMEngine for true continuous batching.
-    Without --async or --async-stream, runs sequentially for each model.
+
+    Runner types:
+      - sync (default): Sequential execution, one task at a time
+      - async: Parallel execution with multiple worker processes
+      - async-stream: Streaming with vLLM's AsyncLLMEngine (vLLM only)
+      - agent: Multi-turn agent tasks with tool use
 
     Use -o/--override after -m or -t to apply overrides:
 
         olmo-eval run -m llama3.1-8b -o provider.name=vllm -t mmlu -o limit=100
     """
     import os
-
-    # Process ordered args to associate overrides with models/tasks
     import sys
 
     from olmo_eval.cli.run.config import RunConfigBuilder
-
-    ordered_args = reconstruct_ordered_args(sys.argv[1:])
-    model_overrides, task_overrides = process_ordered_args(ordered_args)
     from olmo_eval.cli.run.factory import RunnerFactory
     from olmo_eval.cli.run.storage import StorageSetup
     from olmo_eval.core.logging import configure_logging
     from olmo_eval.runners import ValidationError
+
+    # Process ordered args to associate overrides with models/tasks
+    ordered_args = reconstruct_ordered_args(sys.argv[1:])
+    model_overrides, task_overrides = process_ordered_args(ordered_args)
 
     # Configure logging for Beaker job visibility
     configure_logging(level="INFO")
@@ -294,10 +285,8 @@ def run(
     # Print runtime environment summary
     print_runtime_environment()
 
-    # Handle conflicting async flags
-    effective_use_async = use_async
-    if use_async and use_async_stream:
-        effective_use_async = False
+    # Convert string to RunnerType enum
+    runner_type_enum = RunnerType(runner_type)
 
     # Build configuration
     config_builder = RunConfigBuilder(
@@ -306,9 +295,7 @@ def run(
         output_dir=output_dir,
         provider=provider,
         attention_backend=attention_backend,
-        use_async=effective_use_async,
-        use_async_stream=use_async_stream,
-        use_agent=agent,
+        runner_type=runner_type_enum,
         num_workers=num_workers,
         gpus_per_worker=gpus_per_worker,
         num_gpus=num_gpus,
@@ -367,7 +354,7 @@ def run(
     factory = RunnerFactory(run_config, storages, s3_config)
 
     # Handle sequential multi-model sync mode separately
-    if not agent and not use_async_stream and not effective_use_async:
+    if runner_type_enum == RunnerType.SYNC:
         factory.run_sequential_models(dry_run=dry_run)
         return
 

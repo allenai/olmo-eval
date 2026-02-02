@@ -77,6 +77,22 @@ class MetricName(str, Enum):
     F1 = "f1"
 
 
+class RunnerType(str, Enum):
+    """Runner type for evaluation execution.
+
+    Determines which evaluation runner to use:
+    - SYNC: Sequential execution, one task at a time (default)
+    - ASYNC: Parallel execution with multiple worker processes
+    - ASYNC_STREAM: Streaming async with vLLM's AsyncLLMEngine (vLLM only)
+    - AGENT: Agent runner for multi-turn tasks with tool use
+    """
+
+    SYNC = "sync"
+    ASYNC = "async"
+    ASYNC_STREAM = "async-stream"
+    AGENT = "agent"
+
+
 class RequestType(Enum):
     """Type of request to send to the LM."""
 

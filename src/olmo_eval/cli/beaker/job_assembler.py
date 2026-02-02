@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
+from olmo_eval.core.types import RunnerType
 
 if TYPE_CHECKING:
     from olmo_eval.cli.beaker.config_loader import LaunchConfig
@@ -86,7 +87,7 @@ class JobConfigAssembler:
         command = self._build_command(exp, model_resources)
 
         # Determine provider extras
-        if exp.is_agent:
+        if exp.runner_type == RunnerType.AGENT:
             provider_extras = ["vllm", "agents"]
         else:
             config_provider = model_resources.get("provider") or "vllm"
@@ -118,8 +119,8 @@ class JobConfigAssembler:
         if self.config.uv_cache_dir:
             job_env_vars["UV_CACHE_DIR"] = self.config.uv_cache_dir
 
-        # Extract task dependencies
-        task_packages = self._extract_task_dependencies(exp.tasks)
+        # Extract task dependencies (from both registered configs and CLI overrides)
+        task_packages = self._extract_task_dependencies(exp.tasks, exp.task_overrides)
 
         return BeakerJobConfig(
             name=exp.name,
@@ -144,18 +145,37 @@ class JobConfigAssembler:
             task_packages=task_packages,
         )
 
-    def _extract_task_dependencies(self, task_specs: list[str]) -> list[str] | None:
-        """Extract dependencies from task specs.
+    def _extract_task_dependencies(
+        self, task_specs: list[str], task_overrides: dict[str, list[str]]
+    ) -> list[str] | None:
+        """Extract dependencies from task specs and CLI overrides.
 
         Args:
             task_specs: List of task specification strings.
+            task_overrides: Dict mapping task specs to lists of override strings.
 
         Returns:
             List of package dependencies to install, or None if no dependencies.
         """
         from olmo_eval.evals.tasks import get_task_dependencies
+        from olmo_eval.evals.tasks.core.registry import parse_overrides
 
+        # Get dependencies from registered task configs
         deps = get_task_dependencies(task_specs)
+
+        # Also extract dependencies from CLI overrides
+        for _task_spec, overrides in task_overrides.items():
+            for override_str in overrides:
+                parsed = parse_overrides(override_str)
+                if "dependencies" in parsed:
+                    override_deps = parsed["dependencies"]
+                    if isinstance(override_deps, list):
+                        deps.extend(override_deps)
+                    else:
+                        deps.append(override_deps)
+
+        # Deduplicate while preserving order
+        deps = list(dict.fromkeys(deps))
         return deps if deps else None
 
     def _get_model_resources(self, m_cfg: BeakerModelSpec) -> dict:
@@ -216,13 +236,8 @@ class JobConfigAssembler:
         if exp.parallelism > 1:
             command.extend(["--parallelism", str(exp.parallelism)])
 
-        # Agent-specific or async flags
-        if exp.is_agent:
-            command.append("--agent")
-            if exp.num_gpus > 1:
-                command.extend(["--num-gpus", str(exp.num_gpus)])
-        else:
-            self._add_async_flags(command, model_resources)
+        # Add runner type and related flags
+        self._add_runner_flags(command, exp, model_resources)
 
         # Add S3 options
         if self.config.s3_bucket and self.config.s3_prefix:
@@ -265,31 +280,36 @@ class JobConfigAssembler:
 
         return command
 
-    def _add_async_flags(self, command: list[str], model_resources: dict) -> None:
-        """Add async-related flags to command."""
-        effective_use_async = self.config.use_async or model_resources.get("use_async", False)
-        effective_use_async_stream = self.config.use_async_stream or model_resources.get(
-            "use_async_stream", False
-        )
-        effective_num_workers = (
-            self.config.num_workers
-            if self.config.num_workers is not None
-            else model_resources.get("num_workers")
-        )
-        effective_gpus_per_worker = (
-            self.config.gpus_per_worker
-            if self.config.gpus_per_worker != 1
-            else model_resources.get("gpus_per_worker", 1)
-        )
+    def _add_runner_flags(
+        self, command: list[str], exp: ExperimentPlan, model_resources: dict
+    ) -> None:
+        """Add runner type and related flags to command."""
 
-        if effective_use_async_stream:
-            command.append("--async-stream")
-            if effective_num_workers is not None:
-                command.extend(["--num-workers", str(effective_num_workers)])
-            if effective_gpus_per_worker and effective_gpus_per_worker != 1:
-                command.extend(["--gpus-per-worker", str(effective_gpus_per_worker)])
-        elif effective_use_async:
-            command.append("--async")
+        runner_type = exp.runner_type
+
+        # Add runner type flag (only if not sync, since sync is the default)
+        if runner_type != RunnerType.SYNC:
+            command.extend(["--runner-type", runner_type.value])
+
+        # Agent-specific flags
+        if runner_type == RunnerType.AGENT:
+            if exp.num_gpus > 1:
+                command.extend(["--num-gpus", str(exp.num_gpus)])
+            return
+
+        # Async/async-stream worker flags
+        if runner_type in (RunnerType.ASYNC, RunnerType.ASYNC_STREAM):
+            effective_num_workers = (
+                self.config.num_workers
+                if self.config.num_workers is not None
+                else model_resources.get("num_workers")
+            )
+            effective_gpus_per_worker = (
+                self.config.gpus_per_worker
+                if self.config.gpus_per_worker != 1
+                else model_resources.get("gpus_per_worker", 1)
+            )
+
             if effective_num_workers is not None:
                 command.extend(["--num-workers", str(effective_num_workers)])
             if effective_gpus_per_worker and effective_gpus_per_worker != 1:

@@ -30,6 +30,7 @@ from olmo_eval.cli.utils import (
     reconstruct_ordered_args,
 )
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_UV_CACHE_DIR
+from olmo_eval.core.types import RunnerType
 
 
 @click.command()
@@ -96,14 +97,14 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_UV
     multiple=True,
     help="Add experiments to Beaker group(s) (can specify multiple, creates if needed)",
 )
-@click.option("--async", "-a", "use_async", is_flag=True, help="Enable parallel task execution")
 @click.option(
-    "--async-stream",
-    "use_async_stream",
-    is_flag=True,
-    help="Enable streaming async with vLLM's AsyncLLMEngine for true continuous batching",
+    "--runner-type",
+    "-R",
+    type=click.Choice([e.value for e in RunnerType], case_sensitive=False),
+    default=None,
+    help="Runner type: sync (default), async, async-stream, or agent",
 )
-@click.option("--num-workers", "-W", type=int, help="Number of workers for async mode")
+@click.option("--num-workers", "-W", type=int, help="Number of workers for async modes")
 @click.option("--gpus-per-worker", type=int, default=1, help="GPUs per worker for async mode")
 @click.option("--dry-run", "-d", is_flag=True, help="Print spec without launching")
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
@@ -214,8 +215,7 @@ def launch(
     budget: str | None,
     image: str | None,
     group: tuple[str, ...],
-    use_async: bool,
-    use_async_stream: bool,
+    runner_type: str | None,
     num_workers: int | None,
     gpus_per_worker: int,
     dry_run: bool,
@@ -301,8 +301,7 @@ def launch(
         "budget": budget,
         "image": image,
         "group": group,
-        "use_async": use_async,
-        "use_async_stream": use_async_stream,
+        "runner_type": runner_type,
         "num_workers": num_workers,
         "gpus_per_worker": gpus_per_worker,
         "s3_bucket": s3_bucket,
@@ -427,7 +426,7 @@ def launch(
 
     # Show experiment matrix if multiple experiments
     if total_experiments > 1:
-        _print_experiment_matrix(experiment_plan, use_async_stream, use_async)
+        _print_experiment_matrix(experiment_plan, launch_config.runner_type)
 
     console.print()
 
@@ -453,7 +452,7 @@ def launch(
         job_configs.append(job_config)
 
         exp_summary = _build_experiment_summary(
-            exp, job_config, task_configs_by_spec, use_async_stream, use_async, launch_config
+            exp, job_config, task_configs_by_spec, launch_config.runner_type
         )
         experiment_summaries.append(exp_summary)
 
@@ -623,7 +622,7 @@ def _ensure_secrets(
 
 
 def _print_experiment_matrix(
-    experiment_plan: list["ExperimentPlan"], use_async_stream: bool, use_async: bool
+    experiment_plan: list["ExperimentPlan"], runner_type: RunnerType
 ) -> None:
     """Print experiment matrix table."""
     matrix_table = Table(show_header=True, title="Experiment Plan")
@@ -658,14 +657,13 @@ def _print_experiment_matrix(
             task_display = f"{exp.tasks[0]}, ... ({len(exp.tasks)} total)"
 
         # Runner display
-        if exp.is_agent:
-            runner_display = "AgentEvalRunner"
-        elif use_async_stream:
-            runner_display = "StreamingEvalRunner"
-        elif use_async:
-            runner_display = "AsyncEvalRunner"
-        else:
-            runner_display = "SyncEvalRunner"
+        runner_names = {
+            RunnerType.SYNC: "SyncEvalRunner",
+            RunnerType.ASYNC: "AsyncEvalRunner",
+            RunnerType.ASYNC_STREAM: "StreamingEvalRunner",
+            RunnerType.AGENT: "AgentEvalRunner",
+        }
+        runner_display = runner_names.get(exp.runner_type, "SyncEvalRunner")
 
         matrix_table.add_row(
             exp.name,
@@ -684,9 +682,7 @@ def _build_experiment_summary(
     exp: "ExperimentPlan",
     job_config,
     task_configs_by_spec: dict,
-    use_async_stream: bool,
-    use_async: bool,
-    launch_config,
+    runner_type: RunnerType,
 ) -> ExperimentSummary:
     """Build experiment summary for display."""
     from olmo_eval.runners import (
@@ -704,14 +700,13 @@ def _build_experiment_summary(
             exp_task_configs.append(task_configs_by_spec[base_spec])
 
     # Determine runner class
-    if exp.is_agent:
-        exp_runner_class = AgentEvalRunner
-    elif use_async_stream:
-        exp_runner_class = StreamingEvalRunner
-    elif use_async:
-        exp_runner_class = AsyncEvalRunner
-    else:
-        exp_runner_class = SyncEvalRunner
+    runner_classes = {
+        RunnerType.SYNC: SyncEvalRunner,
+        RunnerType.ASYNC: AsyncEvalRunner,
+        RunnerType.ASYNC_STREAM: StreamingEvalRunner,
+        RunnerType.AGENT: AgentEvalRunner,
+    }
+    exp_runner_class = runner_classes.get(exp.runner_type, SyncEvalRunner)
 
     exp_runner_config = RunnerConfig(
         runner=exp_runner_class,

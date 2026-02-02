@@ -918,6 +918,15 @@ def mock_tasks():
     class GSM8KTask(MockTask):
         pass
 
+    @register(
+        "task_with_deps",
+        lambda: TaskConfig(
+            name="task_with_deps", data_source="test/dataset", dependencies=["base-pkg"]
+        ),
+    )
+    class TaskWithDeps(MockTask):
+        pass
+
     yield
 
     # Restore original state
@@ -1116,3 +1125,103 @@ class TestTaskOverrideHandling:
         assert "priority=urgent" not in cmd
         # But experiment priority should be urgent (used for Beaker job)
         assert job_config.priority == "urgent"
+
+    def test_task_packages_from_cli_overrides(self, mock_tasks):
+        """Test that task_packages are extracted from CLI dependency overrides."""
+        from olmo_eval.cli.beaker.config_loader import LaunchConfig
+        from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan
+        from olmo_eval.cli.beaker.job_assembler import JobConfigAssembler
+        from olmo_eval.launch import BeakerModelSpec
+
+        model = BeakerModelSpec(name_or_path="model1")
+        exp = ExperimentPlan(
+            name="test-exp",
+            model_cfgs=[model],
+            model_specs=["model1"],
+            priority="normal",
+            tasks=["mmlu"],
+            original_task_specs=["mmlu"],
+            total_expanded_tasks=1,
+            model_gpu_counts=[1],
+            num_gpus=1,
+            task_overrides={"mmlu": ['dependencies=["ai2-olmo-eval", "special-pkg==1.0"]']},
+        )
+
+        config = LaunchConfig(
+            name="test",
+            model_configs=[model],
+            model_specs=["model1"],
+            task_specs=["mmlu"],
+            cluster="h100",
+            workspace="test",
+            budget="test",
+        )
+
+        assembler = JobConfigAssembler(
+            config=config,
+            eval_config=None,
+            effective_image="test-image",
+            effective_groups=[],
+            beaker_username="test-user",
+            common_secrets=[],
+            store_secrets=[],
+            task_secrets=[],
+            inject_aws_credentials=False,
+            inject_gcs_credentials=False,
+        )
+
+        job_config = assembler.assemble(exp)
+
+        # Dependencies from CLI overrides should be in task_packages
+        assert job_config.task_packages == ["ai2-olmo-eval", "special-pkg==1.0"]
+
+    def test_task_packages_merged_from_config_and_cli(self, mock_tasks):
+        """Test that task_packages from config and CLI are merged."""
+        from olmo_eval.cli.beaker.config_loader import LaunchConfig
+        from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan
+        from olmo_eval.cli.beaker.job_assembler import JobConfigAssembler
+        from olmo_eval.launch import BeakerModelSpec
+
+        model = BeakerModelSpec(name_or_path="model1")
+        # task_with_deps has dependencies=["base-pkg"] registered
+        exp = ExperimentPlan(
+            name="test-exp",
+            model_cfgs=[model],
+            model_specs=["model1"],
+            priority="normal",
+            tasks=["task_with_deps"],
+            original_task_specs=["task_with_deps"],
+            total_expanded_tasks=1,
+            model_gpu_counts=[1],
+            num_gpus=1,
+            task_overrides={"task_with_deps": ['dependencies=["cli-pkg==2.0"]']},
+        )
+
+        config = LaunchConfig(
+            name="test",
+            model_configs=[model],
+            model_specs=["model1"],
+            task_specs=["task_with_deps"],
+            cluster="h100",
+            workspace="test",
+            budget="test",
+        )
+
+        assembler = JobConfigAssembler(
+            config=config,
+            eval_config=None,
+            effective_image="test-image",
+            effective_groups=[],
+            beaker_username="test-user",
+            common_secrets=[],
+            store_secrets=[],
+            task_secrets=[],
+            inject_aws_credentials=False,
+            inject_gcs_credentials=False,
+        )
+
+        job_config = assembler.assemble(exp)
+
+        # Both registered deps (base-pkg) and CLI deps (cli-pkg==2.0) should be present
+        assert "base-pkg" in job_config.task_packages
+        assert "cli-pkg==2.0" in job_config.task_packages

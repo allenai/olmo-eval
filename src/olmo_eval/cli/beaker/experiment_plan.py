@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from olmo_eval.core.types import RunnerType
+
 if TYPE_CHECKING:
     from olmo_eval.launch import BeakerModelSpec
 
@@ -29,7 +31,7 @@ class ExperimentPlan:
         parallelism: Number of parallel instances (for parallelism mode).
         split_index: If experiment was split, the 1-based index of this split.
         total_splits: If experiment was split, total number of splits.
-        is_agent: Whether this experiment runs agent tasks.
+        runner_type: The runner type for this experiment (agent tasks force AGENT).
     """
 
     name: str
@@ -44,7 +46,7 @@ class ExperimentPlan:
     parallelism: int = 1
     split_index: int | None = None
     total_splits: int | None = None
-    is_agent: bool = False
+    runner_type: RunnerType = RunnerType.SYNC
 
     # Per-model overrides to pass via -o flags (parallel to model_cfgs)
     # Each entry is a list of override strings like ["gpus=4", "load_format=auto"]
