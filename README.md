@@ -81,6 +81,19 @@ register_regime("my_task", "olmes", num_fewshot=5, fewshot_seed=42)
 # Usage: olmo-eval run -m model -t my_task:olmes
 ```
 
+**Runtime Dependencies** allow tasks to specify packages installed at job startup:
+
+```python
+@register("my_task", lambda: TaskConfig(
+    name="my_task",
+    data_source="hf://dataset/path",
+    dependencies=["special-lib==1.0", "git+https://github.com/user/repo@v2.0"],
+))
+class MyTask(Task): ...
+```
+
+Dependencies are merged and deduplicated across all tasks in an experiment. They are installed via `uv pip install` after the inference provider but before evaluation begins.
+
 ### Suites
 
 Suites group multiple tasks for batch evaluation:
@@ -307,6 +320,7 @@ class MyTaskImpl(MyTask):
 | `fewshot_seed` | `int` | `42` | Random seed for few-shot |
 | `limit` | `int \| None` | `None` | Max instances to evaluate |
 | `split` | `Split` | `Split.TEST` | Dataset split to use |
+| `dependencies` | `list[str] \| None` | `None` | Runtime packages to install (e.g., `["pkg==1.0"]`) |
 
 ### Data Sources
 
