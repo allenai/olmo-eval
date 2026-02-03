@@ -91,7 +91,7 @@ class SyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         table.add_column("Value", style="white")
 
         model_config = get_model_config(self.model_name, **self.model_overrides)
-        provider_str = self.provider_override or model_config.get_provider_name()
+        provider_str = model_config.get_provider_name(self.provider_override)
 
         table.add_row("Model", model_config.model)
         if model_config.tokenizer:
@@ -123,7 +123,7 @@ class SyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         model_config = get_model_config(self.model_name, **self.model_overrides)
 
         # Determine provider
-        provider_str = self.provider_override or model_config.get_provider_name()
+        provider_str = model_config.get_provider_name(self.provider_override)
         provider_type = ProviderType(provider_str)
 
         # Expand tasks first

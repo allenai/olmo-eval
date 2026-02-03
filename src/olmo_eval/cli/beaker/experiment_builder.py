@@ -65,7 +65,7 @@ class ExperimentPlanBuilder:
         """Build list of -o override strings for a model."""
         overrides: list[str] = []
 
-        # Include CLI overrides first (e.g., provider.name=vllm)
+        # Include CLI overrides first (e.g., provider.kind=vllm)
         # Use original_index to look up positional overrides
         cli_overrides: list[str] = []
         if original_index < len(self.config.model_overrides):

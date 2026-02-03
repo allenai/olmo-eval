@@ -1,6 +1,17 @@
 """Literal type definitions for constrained string values."""
 
+from enum import Enum
 from typing import Literal
+
+
+class ProviderKind(str, Enum):
+    """Provider types for inference backends."""
+
+    VLLM = "vllm"
+    HF = "hf"
+    MOCK = "mock"
+    LITELLM = "litellm"
+
 
 ProviderLiteral = Literal["vllm", "hf", "mock", "litellm"]
 DtypeLiteral = Literal["auto", "float16", "bfloat16", "float32"]

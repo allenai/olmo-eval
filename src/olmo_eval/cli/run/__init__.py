@@ -48,7 +48,7 @@ from olmo_eval.core.types import RunnerType
     multiple=True,
     cls=OrderedMultiOption,
     save_to="_ordered",
-    help="Override for preceding -m or -t (e.g., -o provider.name=vllm -o limit=100)",
+    help="Override for preceding -m or -t (e.g., -o provider.kind=vllm -o limit=100)",
 )
 @click.option("--output-dir", "-O", default=LOCAL_RESULT_DIR, help="Output directory")
 @click.option("--provider", type=click.Choice(["hf", "vllm", "litellm"]), help="Override provider")
@@ -258,7 +258,7 @@ def run(
 
     Use -o/--override after -m or -t to apply overrides:
 
-        olmo-eval run -m llama3.1-8b -o provider.name=vllm -t mmlu -o limit=100
+        olmo-eval run -m llama3.1-8b -o provider.kind=vllm -t mmlu -o limit=100
     """
     import os
     import sys

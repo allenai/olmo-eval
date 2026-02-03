@@ -184,7 +184,7 @@ class JobConfigAssembler:
             return self.eval_config.get_model_resources(m_cfg)
 
         # Extract provider name and package from ProviderConfig
-        provider_name = m_cfg.provider.name if m_cfg.provider else None
+        provider_name = m_cfg.provider.kind if m_cfg.provider else None
         provider_package = m_cfg.provider.package if m_cfg.provider else None
 
         # Model always has gpus and parallelism (default 1)
@@ -226,7 +226,7 @@ class JobConfigAssembler:
 
             # Add provider config if specified
             if m_cfg.provider:
-                command.extend(["--provider", m_cfg.provider.name])
+                command.extend(["--provider", m_cfg.provider.kind])
                 # Pass other provider config fields via overrides
                 from dataclasses import fields
 

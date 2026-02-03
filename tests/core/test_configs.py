@@ -79,7 +79,7 @@ class TestGetModelConfig:
 
     def test_get_model_with_override(self):
         """Test getting model with field override."""
-        config = get_model_config("llama3.1-8b", provider=ProviderConfig(name="hf"))
+        config = get_model_config("llama3.1-8b", provider=ProviderConfig(kind="hf"))
 
         assert config.model == "meta-llama/Meta-Llama-3.1-8B"
         assert config.get_provider_name() == "hf"
@@ -88,7 +88,7 @@ class TestGetModelConfig:
         """Test getting model with multiple overrides."""
         config = get_model_config(
             "llama3.1-8b",
-            provider=ProviderConfig(name="hf"),
+            provider=ProviderConfig(kind="hf"),
             dtype="float16",
             revision="main",
         )
@@ -101,7 +101,7 @@ class TestGetModelConfig:
         """Test unknown model with overrides."""
         config = get_model_config(
             "custom/model",
-            provider=ProviderConfig(name="hf"),
+            provider=ProviderConfig(kind="hf"),
         )
 
         assert config.model == "custom/model"
@@ -121,7 +121,7 @@ class TestGetModelConfig:
     def test_preset_not_mutated(self):
         """Test that getting with overrides doesn't mutate preset."""
         original = get_model_config("llama3.1-8b")
-        _ = get_model_config("llama3.1-8b", provider=ProviderConfig(name="hf"))
+        _ = get_model_config("llama3.1-8b", provider=ProviderConfig(kind="hf"))
         after = get_model_config("llama3.1-8b")
 
         assert original.get_provider_name() == after.get_provider_name() == "vllm"

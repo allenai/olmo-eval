@@ -63,7 +63,7 @@ from olmo_eval.core.types import RunnerType
     multiple=True,
     cls=OrderedMultiOption,
     save_to="_ordered",
-    help="Override for preceding -m or -t (e.g., -o provider.name=vllm -o limit=100)",
+    help="Override for preceding -m or -t (e.g., -o provider.kind=vllm -o limit=100)",
 )
 @click.option("--cluster", "-c", default=None, help="Cluster alias (h100, a100, aus) or full name")
 @click.option(
@@ -251,7 +251,7 @@ def launch(
     Use -o/--override after -m or -t to apply overrides to that model or task:
 
         olmo-eval beaker launch -n eval \\
-            -m llama3.1-8b -o provider.name=vllm -o provider.package=vllm==0.14.0 \\
+            -m llama3.1-8b -o provider.kind=vllm -o provider.package=vllm==0.14.0 \\
             -t mmlu -o limit=100
     """
     from datetime import datetime
@@ -650,9 +650,9 @@ def _print_experiment_matrix(
         # Provider display
         if len(exp.model_cfgs) == 1:
             provider = exp.model_cfgs[0].provider
-            provider_display = provider.name if provider else "default"
+            provider_display = provider.kind if provider else "default"
         else:
-            providers = {m.provider.name if m.provider else "default" for m in exp.model_cfgs}
+            providers = {m.provider.kind if m.provider else "default" for m in exp.model_cfgs}
             provider_display = ", ".join(sorted(providers))
 
         # Task display - show actual task names

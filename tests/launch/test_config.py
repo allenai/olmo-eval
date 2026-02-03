@@ -542,13 +542,13 @@ class TestProviderConfig:
     def test_default_values(self):
         """Test ProviderConfig default values."""
         config = ProviderConfig()
-        assert config.name == "vllm"
+        assert config.kind == "vllm"
         assert config.package is None
 
-    def test_custom_name_and_package(self):
-        """Test ProviderConfig with custom name and package."""
-        config = ProviderConfig(name="litellm", package="litellm==1.0.0")
-        assert config.name == "litellm"
+    def test_custom_kind_and_package(self):
+        """Test ProviderConfig with custom kind and package."""
+        config = ProviderConfig(kind="litellm", package="litellm==1.0.0")
+        assert config.kind == "litellm"
         assert config.package == "litellm==1.0.0"
 
 
@@ -573,18 +573,18 @@ class TestApplyOverridesToModel:
         """Test with nested provider overrides."""
         config = apply_overrides_to_model(
             "llama3.1-8b",
-            ["provider.name=vllm", "provider.package=vllm==0.14.0"],
+            ["provider.kind=vllm", "provider.package=vllm==0.14.0"],
         )
         assert config.name_or_path == "llama3.1-8b"
         assert config.provider is not None
-        assert config.provider.name == "vllm"
+        assert config.provider.kind == "vllm"
         assert config.provider.package == "vllm==0.14.0"
 
     def test_github_url_package(self):
         """Test with GitHub URL as provider package."""
         config = apply_overrides_to_model(
             "llama3.1-8b",
-            ["provider.name=vllm", "provider.package=https://github.com/user/vllm@branch"],
+            ["provider.kind=vllm", "provider.package=https://github.com/user/vllm@branch"],
         )
         assert config.provider is not None
         assert config.provider.package == "https://github.com/user/vllm@branch"
@@ -593,11 +593,11 @@ class TestApplyOverridesToModel:
         """Test with mix of simple and nested overrides."""
         config = apply_overrides_to_model(
             "llama3.1-8b",
-            ["gpus=4", "provider.name=vllm", "load_format=auto"],
+            ["gpus=4", "provider.kind=vllm", "load_format=auto"],
         )
         assert config.gpus == 4
         assert config.provider is not None
-        assert config.provider.name == "vllm"
+        assert config.provider.kind == "vllm"
         assert config.load_format == "auto"
 
 
@@ -608,12 +608,12 @@ class TestParseModelConfigWithOverridesParam:
         """Test parsing string model with overrides parameter."""
         config = parse_model_config(
             "llama3.1-8b",
-            overrides=["provider.name=vllm", "gpus=4"],
+            overrides=["provider.kind=vllm", "gpus=4"],
         )
         assert config.name_or_path == "llama3.1-8b"
         assert config.gpus == 4
         assert config.provider is not None
-        assert config.provider.name == "vllm"
+        assert config.provider.kind == "vllm"
 
     def test_dict_with_overrides_param(self):
         """Test parsing dict model with overrides parameter."""
@@ -641,11 +641,11 @@ class TestParseModelConfigWithProvider:
         """Test parsing model string with nested provider config via overrides."""
         config = parse_model_config(
             "llama3.1-8b",
-            overrides=["provider.name=vllm", "provider.package=vllm==0.14.0"],
+            overrides=["provider.kind=vllm", "provider.package=vllm==0.14.0"],
         )
         assert config.name_or_path == "llama3.1-8b"
         assert config.provider is not None
-        assert config.provider.name == "vllm"
+        assert config.provider.kind == "vllm"
         assert config.provider.package == "vllm==0.14.0"
 
     def test_parse_string_with_provider_github_url(self):
@@ -653,19 +653,19 @@ class TestParseModelConfigWithProvider:
         config = parse_model_config(
             "llama3.1-8b",
             overrides=[
-                "provider.name=vllm",
+                "provider.kind=vllm",
                 "provider.package=https://github.com/user/vllm@branch",
             ],
         )
         assert config.provider is not None
-        assert config.provider.name == "vllm"
+        assert config.provider.kind == "vllm"
         assert config.provider.package == "https://github.com/user/vllm@branch"
 
     def test_parse_string_with_provider_name_only(self):
         """Test parsing model string with only provider name (no package)."""
-        config = parse_model_config("llama3.1-8b", overrides=["provider.name=litellm"])
+        config = parse_model_config("llama3.1-8b", overrides=["provider.kind=litellm"])
         assert config.provider is not None
-        assert config.provider.name == "litellm"
+        assert config.provider.kind == "litellm"
         assert config.provider.package is None
 
     def test_parse_dict_with_nested_provider(self):
@@ -674,39 +674,39 @@ class TestParseModelConfigWithProvider:
             {
                 "name_or_path": "llama3.1-8b",
                 "provider": {
-                    "name": "vllm",
+                    "kind": "vllm",
                     "package": "vllm==0.14.0",
                 },
             }
         )
         assert config.name_or_path == "llama3.1-8b"
         assert config.provider is not None
-        assert config.provider.name == "vllm"
+        assert config.provider.kind == "vllm"
         assert config.provider.package == "vllm==0.14.0"
 
-    def test_parse_dict_with_provider_name_only(self):
-        """Test parsing dict with provider name only."""
+    def test_parse_dict_with_provider_type_only(self):
+        """Test parsing dict with provider type only."""
         config = parse_model_config(
             {
                 "name_or_path": "llama3.1-8b",
                 "provider": {
-                    "name": "litellm",
+                    "kind": "litellm",
                 },
             }
         )
         assert config.provider is not None
-        assert config.provider.name == "litellm"
+        assert config.provider.kind == "litellm"
         assert config.provider.package is None
 
     def test_parse_string_with_mixed_overrides(self):
         """Test parsing model string with provider and other overrides."""
         config = parse_model_config(
             "llama3.1-8b",
-            overrides=["provider.name=vllm", "load_format=auto"],
+            overrides=["provider.kind=vllm", "load_format=auto"],
         )
         assert config.name_or_path == "llama3.1-8b"
         assert config.provider is not None
-        assert config.provider.name == "vllm"
+        assert config.provider.kind == "vllm"
         assert config.load_format == "auto"
 
 
@@ -722,7 +722,7 @@ class TestEvalConfigWithProvider:
         )
         model = BeakerModelSpec(
             name_or_path="llama3.1-8b",
-            provider=ProviderConfig(name="vllm", package="vllm==0.14.0"),
+            provider=ProviderConfig(kind="vllm", package="vllm==0.14.0"),
         )
         resources = config.get_model_resources(model)
 
@@ -749,7 +749,7 @@ name: test-eval
 models:
   - name_or_path: llama3.1-8b
     provider:
-      name: vllm
+      kind: vllm
       package: vllm==0.14.0
 tasks:
   - mmlu
@@ -763,7 +763,7 @@ tasks:
 
             assert len(model_configs) == 1
             assert model_configs[0].provider is not None
-            assert model_configs[0].provider.name == "vllm"
+            assert model_configs[0].provider.kind == "vllm"
             assert model_configs[0].provider.package == "vllm==0.14.0"
 
     def test_from_yaml_with_github_provider(self):
@@ -773,7 +773,7 @@ name: test-eval
 models:
   - name_or_path: llama3.1-8b
     provider:
-      name: vllm
+      kind: vllm
       package: https://github.com/davidheineman/vllm@my-branch
 tasks:
   - mmlu
@@ -791,14 +791,14 @@ tasks:
                 == "https://github.com/davidheineman/vllm@my-branch"
             )
 
-    def test_from_yaml_with_provider_name_only(self):
-        """Test loading YAML with provider name only (no custom package)."""
+    def test_from_yaml_with_provider_kind_only(self):
+        """Test loading YAML with provider kind only (no custom package)."""
         yaml_content = """
 name: test-eval
 models:
   - name_or_path: gpt-4o
     provider:
-      name: litellm
+      kind: litellm
 tasks:
   - mmlu
 """
@@ -810,5 +810,5 @@ tasks:
             model_configs = config.get_model_configs()
 
             assert model_configs[0].provider is not None
-            assert model_configs[0].provider.name == "litellm"
+            assert model_configs[0].provider.kind == "litellm"
             assert model_configs[0].provider.package is None

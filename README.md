@@ -576,8 +576,8 @@ olmo-eval beaker launch -n "eval-compare" \
 
 # Models with different providers get separate experiments
 olmo-eval beaker launch -n "eval-mixed" \
-    -m llama3.1-8b -o provider.name=vllm \
-    -m gpt-4o -o provider.name=litellm \
+    -m llama3.1-8b -o provider.kind=vllm \
+    -m gpt-4o -o provider.kind=litellm \
     -t mmlu -t gsm8k
 
 # Creates 2 experiments (different inference providers)
@@ -662,7 +662,7 @@ cluster: h100
 **Via CLI override flag:**
 
 ```bash
-olmo-eval beaker launch -n "eval" -m llama3.1-8b -o provider.name=vllm -t mmlu
+olmo-eval beaker launch -n "eval" -m llama3.1-8b -o provider.kind=vllm -t mmlu
 ```
 
 Models with the same provider (and other compatible settings) are grouped into the same experiment.
@@ -705,8 +705,8 @@ Use the `-o/--override` flag to apply configuration overrides to the preceding `
 ```bash
 # Model overrides (apply to the preceding -m)
 olmo-eval beaker launch -n "eval" \
-    -m llama3.1-8b -o provider.name=vllm -o provider.package=vllm==0.14.0 \
-    -m gpt-4o -o provider.name=litellm \
+    -m llama3.1-8b -o provider.kind=vllm -o provider.package=vllm==0.14.0 \
+    -m gpt-4o -o provider.kind=litellm \
     -t mmlu -t gsm8k
 
 # Task overrides (apply to the preceding -t)
@@ -717,8 +717,8 @@ olmo-eval beaker launch -n "eval" \
 
 # Mixed model and task overrides
 olmo-eval beaker launch -n "eval" \
-    -m llama3.1-8b -o provider.name=vllm \
-    -m gpt-4o -o provider.name=litellm \
+    -m llama3.1-8b -o provider.kind=vllm \
+    -m gpt-4o -o provider.kind=litellm \
     -t mmlu -o limit=100 \
     -t gsm8k
 ```
@@ -727,7 +727,7 @@ The `-o` flag uses OmegaConf dotlist syntax, supporting:
 
 | Type | Syntax | Example |
 |------|--------|---------|
-| String | `key=value` | `-o provider.name=vllm` |
+| String | `key=value` | `-o provider.kind=vllm` |
 | Number | `key=123` | `-o limit=100` |
 | Boolean | `key=true` | `-o preemptible=false` |
 | Nested | `a.b.c=val` | `-o provider.package=vllm==0.14.0` |
@@ -966,7 +966,7 @@ models:
 
 ```bash
 # Or via CLI override flag
-olmo-eval beaker launch -n "eval" -m llama3.1-8b -o provider.name=vllm -t mmlu
+olmo-eval beaker launch -n "eval" -m llama3.1-8b -o provider.kind=vllm -t mmlu
 
 # Manual installation inside container
 uv pip install -e '.[vllm]'  # includes vllm[runai]

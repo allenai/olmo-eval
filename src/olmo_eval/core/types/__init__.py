@@ -29,6 +29,7 @@ from .literals import (
     DtypeLiteral,
     LoadFormatLiteral,
     PriorityLiteral,
+    ProviderKind,
     ProviderLiteral,
 )
 from .tools import (
@@ -84,6 +85,7 @@ __all__ = [
     "LogProbEntry",
     "MetricName",
     "PriorityLiteral",
+    "ProviderKind",
     "ProviderLiteral",
     "register_tool_type",
     "ReliabilityMetrics",

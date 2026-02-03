@@ -8,7 +8,7 @@ from typing import Any, Literal
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
-from olmo_eval.core.types import DtypeLiteral
+from olmo_eval.core.types import DtypeLiteral, ProviderKind
 from olmo_eval.launch.config import ProviderConfig
 
 
@@ -27,7 +27,7 @@ class ModelConfig:
 
     model: str
     tokenizer: str | None = None  # Tokenizer path/identifier, defaults to model if None
-    provider: ProviderConfig = field(default_factory=lambda: ProviderConfig(name="vllm"))
+    provider: ProviderConfig = field(default_factory=lambda: ProviderConfig(kind=ProviderKind.VLLM))
     revision: str | None = None
     trust_remote_code: bool = False
     dtype: DtypeLiteral = "auto"
@@ -37,13 +37,19 @@ class ModelConfig:
     # When set, agent tasks use this URL directly instead of starting vLLM
     model_url: str | None = None
 
-    def get_provider_name(self) -> str:
-        """Get the provider name as a string.
+    def get_provider_name(self, override: str | None = None) -> str:
+        """Get the effective provider name as a string.
+
+        Args:
+            override: Optional provider name override. If provided, this takes
+                precedence over the configured provider.
 
         Returns:
             Provider name string (e.g., "vllm", "litellm", "hf").
         """
-        return self.provider.name
+        if override:
+            return override
+        return self.provider.kind
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary for JSON output."""

@@ -79,11 +79,6 @@ class AsyncEvalRunner(AsyncBaseRunner):
         # Prepare tasks
         expanded_tasks, trackers, model_items, model_configs = self._prepare_tasks()
 
-        # Apply provider override if specified
-        for model_name in self.model_names:
-            if self.provider_override:
-                model_configs[model_name].provider = self.provider_override
-
         total_pairs = len(self.model_names) * len(expanded_tasks)
         total_instances = sum(len(items) for items in model_items.values())
 
@@ -115,7 +110,7 @@ class AsyncEvalRunner(AsyncBaseRunner):
 
         for model_name in self.model_names:
             model_config = model_configs[model_name]
-            provider_type = ProviderType(model_config.get_provider_name())
+            provider_type = ProviderType(model_config.get_provider_name(self.provider_override))
 
             # Get per-model vLLM loading options
             per_model_overrides = self.model_overrides.get(model_name, {})

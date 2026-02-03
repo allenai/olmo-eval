@@ -74,7 +74,7 @@ class TestReconstructOrderedArgs:
                 "-m",
                 "llama3.1-8b",
                 "-o",
-                "provider.name=vllm",
+                "provider.kind=vllm",
                 "-o",
                 "gpus=4",
                 "-m",
@@ -87,7 +87,7 @@ class TestReconstructOrderedArgs:
         )
         assert len(result) == 6
         assert result[0] == FlaggedArg("m", "llama3.1-8b")
-        assert result[1] == FlaggedArg("o", "provider.name=vllm")
+        assert result[1] == FlaggedArg("o", "provider.kind=vllm")
         assert result[2] == FlaggedArg("o", "gpus=4")
         assert result[3] == FlaggedArg("m", "other-model")
         assert result[4] == FlaggedArg("t", "mmlu")
@@ -132,26 +132,26 @@ class TestProcessOrderedArgs:
         """Test single model with overrides."""
         ordered = [
             FlaggedArg("m", "llama3.1-8b"),
-            FlaggedArg("o", "provider.name=vllm"),
+            FlaggedArg("o", "provider.kind=vllm"),
             FlaggedArg("o", "gpus=4"),
         ]
         model_overrides, task_overrides = process_ordered_args(ordered)
-        assert model_overrides == [["provider.name=vllm", "gpus=4"]]
+        assert model_overrides == [["provider.kind=vllm", "gpus=4"]]
         assert task_overrides == {}
 
     def test_multiple_models_with_overrides(self):
         """Test multiple models with different overrides."""
         ordered = [
             FlaggedArg("m", "llama3.1-8b"),
-            FlaggedArg("o", "provider.name=vllm"),
+            FlaggedArg("o", "provider.kind=vllm"),
             FlaggedArg("m", "gpt-4o"),
-            FlaggedArg("o", "provider.name=litellm"),
+            FlaggedArg("o", "provider.kind=litellm"),
         ]
         model_overrides, task_overrides = process_ordered_args(ordered)
         # Positional: first model gets vllm, second gets litellm
         assert model_overrides == [
-            ["provider.name=vllm"],
-            ["provider.name=litellm"],
+            ["provider.kind=vllm"],
+            ["provider.kind=litellm"],
         ]
         assert task_overrides == {}
 
@@ -182,7 +182,7 @@ class TestProcessOrderedArgs:
         """Test mixed models and tasks with overrides."""
         ordered = [
             FlaggedArg("m", "llama3.1-8b"),
-            FlaggedArg("o", "provider.name=vllm"),
+            FlaggedArg("o", "provider.kind=vllm"),
             FlaggedArg("o", "provider.package=vllm==0.14.0"),
             FlaggedArg("m", "other-model"),
             FlaggedArg("t", "mmlu"),
@@ -192,7 +192,7 @@ class TestProcessOrderedArgs:
         model_overrides, task_overrides = process_ordered_args(ordered)
         # Positional: first model gets vllm overrides, second has none
         assert model_overrides == [
-            ["provider.name=vllm", "provider.package=vllm==0.14.0"],
+            ["provider.kind=vllm", "provider.package=vllm==0.14.0"],
             [],
         ]
         assert task_overrides == {
@@ -272,13 +272,13 @@ class TestEndToEndOrdering:
             "-m",
             "llama3.1-8b",
             "-o",
-            "provider.name=vllm",
+            "provider.kind=vllm",
             "-o",
             "provider.package=vllm==0.14.0",
             "-m",
             "gpt-4o",
             "-o",
-            "provider.name=litellm",
+            "provider.kind=litellm",
             "-t",
             "mmlu",
             "-o",
@@ -293,8 +293,8 @@ class TestEndToEndOrdering:
 
         # Positional: first model (llama) gets vllm overrides, second (gpt-4o) gets litellm
         assert model_overrides == [
-            ["provider.name=vllm", "provider.package=vllm==0.14.0"],
-            ["provider.name=litellm"],
+            ["provider.kind=vllm", "provider.package=vllm==0.14.0"],
+            ["provider.kind=litellm"],
         ]
         assert task_overrides == {
             "mmlu": ["limit=100"],
