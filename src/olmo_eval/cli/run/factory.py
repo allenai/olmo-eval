@@ -155,8 +155,9 @@ class RunnerFactory:
         """
         from olmo_eval.runners import SyncEvalRunner
 
-        # Apply per-model provider overrides
-        effective_provider = model_overrides.get("provider", self.config.provider)
+        provider_override = model_overrides.get("provider", self.config.provider)
+        if isinstance(provider_override, dict):
+            provider_override = provider_override.get("name")
         effective_attention_backend = model_overrides.get(
             "attention_backend", self.config.attention_backend
         )
@@ -165,7 +166,7 @@ class RunnerFactory:
             model_name=model_name,
             task_specs=self.config.task_specs,
             output_dir=self.config.output_dir,
-            provider_override=effective_provider,
+            provider_override=provider_override,
             storages=self.storages,
             attention_backend=effective_attention_backend.upper()
             if effective_attention_backend
