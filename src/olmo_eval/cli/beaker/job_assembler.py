@@ -239,7 +239,7 @@ class JobConfigAssembler:
                 from dataclasses import fields
 
                 for f in fields(m_cfg.provider):
-                    if f.name == "name":
+                    if f.name == "kind":
                         continue  # Already passed via --provider
                     value = getattr(m_cfg.provider, f.name)
                     if value:
