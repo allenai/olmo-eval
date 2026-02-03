@@ -53,7 +53,15 @@ class ModelGrouper:
             m_provider = m_cfg.provider
 
         # Remote API providers don't need GPUs
-        provider_name = m_provider.kind if m_provider else None
+        # m_provider may be a string (from EvalConfig.get_model_resources) or ProviderConfig
+        if m_provider:
+            if hasattr(m_provider, "kind"):
+                kind = m_provider.kind
+                provider_name = kind.value if hasattr(kind, "value") else kind
+            else:
+                provider_name = m_provider  # Already a string
+        else:
+            provider_name = None
         if provider_name in self._NO_GPU_PROVIDERS:
             m_gpus = 0
             m_parallelism = 1
@@ -82,8 +90,16 @@ class ModelGrouper:
         resources = self.get_model_resources(m_cfg, m_spec)
 
         # Convert provider to string for comparison (ProviderConfig is not sortable)
+        # provider may be a ProviderConfig or already a string
         provider = resources["provider"]
-        provider_str = provider.kind if provider else "default"
+        if provider:
+            if hasattr(provider, "kind"):
+                kind = provider.kind
+                provider_str = kind.value if hasattr(kind, "value") else kind
+            else:
+                provider_str = provider  # Already a string
+        else:
+            provider_str = "default"
 
         # gpus and parallelism are NOT part of signature - models with different
         # GPU counts can run together if they fit on the same node

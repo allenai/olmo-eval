@@ -648,11 +648,16 @@ def _print_experiment_matrix(
         )
 
         # Provider display
+        def _get_provider_str(p):
+            if not p:
+                return "default"
+            kind = p.kind
+            return kind.value if hasattr(kind, "value") else kind
+
         if len(exp.model_cfgs) == 1:
-            provider = exp.model_cfgs[0].provider
-            provider_display = provider.kind if provider else "default"
+            provider_display = _get_provider_str(exp.model_cfgs[0].provider)
         else:
-            providers = {m.provider.kind if m.provider else "default" for m in exp.model_cfgs}
+            providers = {_get_provider_str(m.provider) for m in exp.model_cfgs}
             provider_display = ", ".join(sorted(providers))
 
         # Task display - show actual task names

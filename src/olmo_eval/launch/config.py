@@ -480,7 +480,11 @@ class EvalConfig:
         parallelism = model.parallelism
 
         # Extract provider type, package, and max_concurrency from ProviderConfig
-        provider_name = model.provider.kind if model.provider else None
+        if model.provider:
+            kind = model.provider.kind
+            provider_name = kind.value if hasattr(kind, "value") else kind
+        else:
+            provider_name = None
         provider_package = model.provider.package if model.provider else None
         provider_max_concurrency = model.provider.max_concurrency if model.provider else None
 

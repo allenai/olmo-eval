@@ -49,7 +49,8 @@ class ModelConfig:
         """
         if override:
             return override
-        return self.provider.kind
+        kind = self.provider.kind
+        return kind.value if hasattr(kind, "value") else kind
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary for JSON output."""
