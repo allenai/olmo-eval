@@ -45,7 +45,7 @@ vllm = [
     "torch-c-dlpack-ext",  # Required for TVM tensor allocation in vLLM
 ]
 litellm = [
-    "litellm~=1.80.11",
+    "litellm~=1.81.7",
 ]
 agents = [
     "openai-agents~=0.7.0",
