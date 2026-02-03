@@ -412,7 +412,7 @@ class AsyncBaseRunner(AsyncRunnerMixin, BaseEvalRunner):
         for model_name in self.model_names:
             model_config = model_configs[model_name]
             try:
-                provider_type = ProviderType(model_config.provider)
+                provider_type = ProviderType(model_config.get_provider_name())
                 provider_str = provider_type.value
             except ValueError:
                 provider_str = provider_name

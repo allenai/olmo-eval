@@ -5,12 +5,11 @@ from __future__ import annotations
 import multiprocessing as mp
 import random
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
 
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
-from olmo_eval.core.literals import ProviderLiteral
 from olmo_eval.core.logging import get_logger, get_worker_id
 from olmo_eval.inference import ProviderType
 from olmo_eval.runners.mixins import S3Config
@@ -83,7 +82,7 @@ class AsyncEvalRunner(AsyncBaseRunner):
         # Apply provider override if specified
         for model_name in self.model_names:
             if self.provider_override:
-                model_configs[model_name].provider = cast(ProviderLiteral, self.provider_override)
+                model_configs[model_name].provider = self.provider_override
 
         total_pairs = len(self.model_names) * len(expanded_tasks)
         total_instances = sum(len(items) for items in model_items.values())
@@ -116,7 +115,7 @@ class AsyncEvalRunner(AsyncBaseRunner):
 
         for model_name in self.model_names:
             model_config = model_configs[model_name]
-            provider_type = ProviderType(model_config.provider)
+            provider_type = ProviderType(model_config.get_provider_name())
 
             # Get per-model vLLM loading options
             per_model_overrides = self.model_overrides.get(model_name, {})

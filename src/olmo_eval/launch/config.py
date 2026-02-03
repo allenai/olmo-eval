@@ -57,11 +57,13 @@ class ProviderConfig:
         package: Optional custom package specifier (URL, path, or PyPI version).
                  If set, installed after base extras to override default version.
         max_concurrency: Maximum concurrent API requests (for litellm and other API providers).
+        required_secrets: Environment variables required by this provider (e.g., API keys).
     """
 
     name: str = "vllm"
     package: str | None = None
     max_concurrency: int | None = None
+    required_secrets: tuple[str, ...] = ()
 
 
 @dataclass

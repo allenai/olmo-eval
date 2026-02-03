@@ -9,6 +9,7 @@ from omegaconf import DictConfig, ListConfig, OmegaConf
 
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.core.literals import DtypeLiteral, ProviderLiteral
+from olmo_eval.launch.config import ProviderConfig
 
 
 @dataclass
@@ -26,7 +27,7 @@ class ModelConfig:
 
     model: str
     tokenizer: str | None = None  # Tokenizer path/identifier, defaults to model if None
-    provider: ProviderLiteral = "vllm"
+    provider: ProviderConfig | ProviderLiteral = "vllm"
     revision: str | None = None
     trust_remote_code: bool = False
     dtype: DtypeLiteral = "auto"
@@ -35,6 +36,16 @@ class ModelConfig:
     # API endpoint for OpenAI-compatible APIs (agent tasks only)
     # When set, agent tasks use this URL directly instead of starting vLLM
     model_url: str | None = None
+
+    def get_provider_name(self) -> str:
+        """Get the provider name as a string.
+
+        Returns:
+            Provider name string (e.g., "vllm", "litellm", "hf").
+        """
+        if isinstance(self.provider, str):
+            return self.provider
+        return self.provider.name
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary for JSON output."""

@@ -119,6 +119,7 @@ def get_model_presets() -> dict[str, ModelConfig]:
     2. API-based models with model_url (for agent tasks or LiteLLM)
     """
     from olmo_eval.core.configs import ModelConfig
+    from olmo_eval.launch.config import ProviderConfig
 
     return {
         # HuggingFace models (vLLM inference)
@@ -144,26 +145,26 @@ def get_model_presets() -> dict[str, ModelConfig]:
         "gpt-4o": ModelConfig(
             model="gpt-4o",
             model_url="https://api.openai.com/v1",
-            provider="litellm",
+            provider=ProviderConfig(name="litellm", required_secrets=("OPENAI_API_KEY",)),
         ),
         "gpt-4o-mini": ModelConfig(
             model="gpt-4o-mini",
             model_url="https://api.openai.com/v1",
-            provider="litellm",
+            provider=ProviderConfig(name="litellm", required_secrets=("OPENAI_API_KEY",)),
         ),
         "gpt-4-turbo": ModelConfig(
             model="gpt-4-turbo",
             model_url="https://api.openai.com/v1",
-            provider="litellm",
+            provider=ProviderConfig(name="litellm", required_secrets=("OPENAI_API_KEY",)),
         ),
         "claude-3-opus": ModelConfig(
             model="claude-3-opus-20240229",
             model_url="https://api.anthropic.com",
-            provider="litellm",
+            provider=ProviderConfig(name="litellm", required_secrets=("ANTHROPIC_API_KEY",)),
         ),
         "claude-3-sonnet": ModelConfig(
             model="claude-3-sonnet-20240229",
             model_url="https://api.anthropic.com",
-            provider="litellm",
+            provider=ProviderConfig(name="litellm", required_secrets=("ANTHROPIC_API_KEY",)),
         ),
     }
