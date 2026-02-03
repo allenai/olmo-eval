@@ -374,4 +374,5 @@ def run(
             runner.run()
         except Exception as e:
             console.print(f"\n[bold red]Evaluation failed:[/bold red] {e}")
+            console.print_exception()
             raise SystemExit(1) from None

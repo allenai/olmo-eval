@@ -49,7 +49,11 @@ class ModelConfig:
         """
         if override:
             return override
-        kind = self.provider.kind
+        # Handle both ProviderConfig object and dict (from YAML/dict deserialization)
+        if isinstance(self.provider, dict):
+            kind = self.provider.get("kind", "vllm")
+        else:
+            kind = self.provider.kind
         return kind.value if hasattr(kind, "value") else kind
 
     def to_dict(self) -> dict[str, Any]:
