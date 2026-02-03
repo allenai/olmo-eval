@@ -123,24 +123,47 @@ def get_model_presets() -> dict[str, ModelConfig]:
 
     return {
         # HuggingFace models (vLLM inference)
-        "llama3.1-8b": ModelConfig(model="meta-llama/Meta-Llama-3.1-8B"),
-        "llama3.1-8b-instruct": ModelConfig(model="meta-llama/Llama-3.1-8B-Instruct"),
-        "llama3.1-70b": ModelConfig(model="meta-llama/Meta-Llama-3.1-70B"),
-        "llama3.1-70b-instruct": ModelConfig(model="meta-llama/Llama-3.1-70B-Instruct"),
+        "llama3.1-8b": ModelConfig(
+            model="meta-llama/Meta-Llama-3.1-8B",
+            provider=ProviderConfig(name="vllm"),
+        ),
+        "llama3.1-8b-instruct": ModelConfig(
+            model="meta-llama/Llama-3.1-8B-Instruct",
+            provider=ProviderConfig(name="vllm"),
+        ),
+        "llama3.1-70b": ModelConfig(
+            model="meta-llama/Meta-Llama-3.1-70B",
+            provider=ProviderConfig(name="vllm"),
+        ),
+        "llama3.1-70b-instruct": ModelConfig(
+            model="meta-llama/Llama-3.1-70B-Instruct",
+            provider=ProviderConfig(name="vllm"),
+        ),
         "olmo-2-7b": ModelConfig(
             model="allenai/OLMo-2-1124-7B",
             tokenizer=DEFAULT_OLMO2_TOKENIZER,
             trust_remote_code=True,
+            provider=ProviderConfig(name="vllm"),
         ),
         "olmo-2-13b": ModelConfig(
             model="allenai/OLMo-2-1124-13B",
             tokenizer=DEFAULT_OLMO2_TOKENIZER,
             trust_remote_code=True,
+            provider=ProviderConfig(name="vllm"),
         ),
-        "qwen2.5-7b": ModelConfig(model="Qwen/Qwen2.5-7B"),
-        "mistral-7b": ModelConfig(model="mistralai/Mistral-7B-v0.3"),
+        "qwen2.5-7b": ModelConfig(
+            model="Qwen/Qwen2.5-7B",
+            provider=ProviderConfig(name="vllm"),
+        ),
+        "mistral-7b": ModelConfig(
+            model="mistralai/Mistral-7B-v0.3",
+            provider=ProviderConfig(name="vllm"),
+        ),
         # Mock model for testing (no dependencies required)
-        "mock": ModelConfig(model="mock", provider="mock"),
+        "mock": ModelConfig(
+            model="mock",
+            provider=ProviderConfig(name="mock"),
+        ),
         # API-based models (for agent tasks - requires API keys)
         "gpt-4o": ModelConfig(
             model="gpt-4o",

@@ -274,7 +274,6 @@ def launch(
     from olmo_eval.cli.beaker.job_assembler import JobConfigAssembler
     from olmo_eval.cli.beaker.model_grouper import ModelGrouper
     from olmo_eval.cli.beaker.task_validator import TaskValidator
-    from olmo_eval.core.configs import get_model_config
     from olmo_eval.core.constants.infrastructure import BEAKER_DEFAULT_IMAGE
 
     ordered_args = reconstruct_ordered_args(sys.argv[1:])
@@ -409,12 +408,8 @@ def launch(
 
     # Collect provider-required secrets from model configs
     for model_cfg in launch_config.model_configs:
-        model_config = get_model_config(model_cfg.name_or_path)
-        if (
-            hasattr(model_config.provider, "required_secrets")
-            and model_config.provider.required_secrets
-        ):
-            all_required_secrets.update(model_config.provider.required_secrets)
+        if model_cfg.provider and model_cfg.provider.required_secrets:
+            all_required_secrets.update(model_cfg.provider.required_secrets)
 
     # Ensure secrets
     common_secrets, store_secrets, task_secrets = _ensure_secrets(

@@ -170,6 +170,24 @@ def apply_overrides_to_model(name_or_path: str, overrides: list[str]) -> BeakerM
     return OmegaConf.to_object(merged)  # type: ignore[return-value]
 
 
+def _get_provider_for_model(model_name: str) -> ProviderConfig:
+    """Get provider config for a model, checking presets first then defaulting to vllm.
+
+    Args:
+        model_name: Model name or path.
+
+    Returns:
+        ProviderConfig from preset if available, otherwise default vllm config.
+    """
+    from olmo_eval.core.constants.models import get_model_presets
+
+    presets = get_model_presets()
+    if model_name in presets:
+        return presets[model_name].provider
+    # Not a preset - default to vllm
+    return ProviderConfig(name="vllm")
+
+
 def parse_model_config(
     model: str | dict[str, Any] | BeakerModelSpec,
     overrides: list[str] | None = None,
@@ -205,6 +223,8 @@ def parse_model_config(
 
     if isinstance(model, str):
         config_dict: dict[str, Any] = {"name_or_path": model}
+        # Get provider from preset or default to vllm
+        config_dict["provider"] = _get_provider_for_model(model)
         if overrides:
             override_config = OmegaConf.from_dotlist(overrides)
             override_dict = OmegaConf.to_container(override_config)
@@ -215,6 +235,9 @@ def parse_model_config(
 
     if isinstance(model, dict):
         config_dict = dict(model)
+        # Get provider from preset or default to vllm if not already specified
+        if "provider" not in config_dict and "name_or_path" in config_dict:
+            config_dict["provider"] = _get_provider_for_model(config_dict["name_or_path"])
         if overrides:
             override_config = OmegaConf.from_dotlist(overrides)
             override_dict = OmegaConf.to_container(override_config)

@@ -8,7 +8,7 @@ from typing import Any, Literal
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
-from olmo_eval.core.literals import DtypeLiteral, ProviderLiteral
+from olmo_eval.core.types import DtypeLiteral
 from olmo_eval.launch.config import ProviderConfig
 
 
@@ -27,7 +27,7 @@ class ModelConfig:
 
     model: str
     tokenizer: str | None = None  # Tokenizer path/identifier, defaults to model if None
-    provider: ProviderConfig | ProviderLiteral = "vllm"
+    provider: ProviderConfig = field(default_factory=lambda: ProviderConfig(name="vllm"))
     revision: str | None = None
     trust_remote_code: bool = False
     dtype: DtypeLiteral = "auto"
@@ -43,8 +43,6 @@ class ModelConfig:
         Returns:
             Provider name string (e.g., "vllm", "litellm", "hf").
         """
-        if isinstance(self.provider, str):
-            return self.provider
         return self.provider.name
 
     def to_dict(self) -> dict[str, Any]:

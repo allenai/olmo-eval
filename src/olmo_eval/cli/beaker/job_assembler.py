@@ -224,6 +224,19 @@ class JobConfigAssembler:
             if m_cfg.alias:
                 command.extend(["--alias", m_cfg.alias])
 
+            # Add provider config if specified
+            if m_cfg.provider:
+                command.extend(["--provider", m_cfg.provider.name])
+                # Pass other provider config fields via overrides
+                from dataclasses import fields
+
+                for f in fields(m_cfg.provider):
+                    if f.name == "name":
+                        continue  # Already passed via --provider
+                    value = getattr(m_cfg.provider, f.name)
+                    if value:
+                        command.extend(["-o", f"provider.{f.name}={value}"])
+
         # Add tasks with their overrides
         for t in exp.tasks:
             command.extend(["-t", t])
