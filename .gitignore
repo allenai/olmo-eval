@@ -79,3 +79,4 @@ Thumbs.db
 
 # uv
 uv.lock
+logs/
