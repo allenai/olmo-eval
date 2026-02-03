@@ -19,6 +19,27 @@ console = Console()
 # -----------------------------------------------------------------------------
 
 
+def terminate_workers(
+    workers: list[mp.process.BaseProcess],
+    timeout: float = 5.0,
+) -> None:
+    """Terminate all worker processes and wait for them to exit.
+
+    Args:
+        workers: List of worker processes to terminate.
+        timeout: Maximum time to wait for each worker to terminate.
+    """
+    for worker in workers:
+        if worker.is_alive():
+            worker.terminate()
+    for worker in workers:
+        worker.join(timeout=timeout)
+        if worker.is_alive():
+            # Force kill if still alive
+            worker.kill()
+            worker.join(timeout=1)
+
+
 def check_workers_alive(
     workers: list[mp.process.BaseProcess],
     result_queue: mp.Queue,
