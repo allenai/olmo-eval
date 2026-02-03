@@ -28,6 +28,7 @@ def instance_worker_process(
     max_model_len: int | None = None,
     load_format: str | None = None,
     extra_loader_config: dict[str, Any] | None = None,
+    max_concurrency: int | None = None,
     init_times: dict[str, float] | None = None,
 ) -> None:
     """Worker that collects all items and processes them at once.
@@ -47,6 +48,8 @@ def instance_worker_process(
         max_model_len: Maximum model context length (overrides model's default)
         load_format: vLLM model loading format (e.g., "runai_streamer")
         extra_loader_config: Extra config for model loader (e.g., {"distributed": true})
+        max_concurrency: Maximum concurrent API requests (for litellm and other API providers)
+        init_times: Shared dict for tracking worker initialization times
     """
     import sys
 
@@ -73,6 +76,8 @@ def instance_worker_process(
             engine_kwargs["load_format"] = load_format
         if extra_loader_config:
             engine_kwargs["model_loader_extra_config"] = extra_loader_config
+        if max_concurrency:
+            engine_kwargs["max_concurrency"] = max_concurrency
         # Pass worker_id for scoped logging in vLLM
         provider = create_provider(
             provider_type, model_name, tokenizer=tokenizer, worker_id=worker_id, **engine_kwargs

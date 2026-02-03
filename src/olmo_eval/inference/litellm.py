@@ -3,15 +3,25 @@
 from __future__ import annotations
 
 import os
+import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import Any, TypeVar
 
+from olmo_eval.core.logging import get_logger
 from olmo_eval.core.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
 
 from .base import InferenceProvider
 
 # Maximum stop sequences supported by OpenAI-compatible APIs
 _MAX_STOP_SEQUENCES = 4
+
+# HTTP status codes that should trigger a retry
+_RETRYABLE_STATUS_CODES = {429, 502, 503, 504}
+
+logger = get_logger(__name__)
+
+T = TypeVar("T")
 
 
 class LiteLLMProvider(InferenceProvider):
@@ -28,11 +38,21 @@ class LiteLLMProvider(InferenceProvider):
         "AZURE_API_VERSION": "azure_api_version",
     }
 
-    def __init__(self, model_name: str, **api_kwargs) -> None:
+    def __init__(
+        self,
+        model_name: str,
+        max_concurrency: int = 32,
+        max_retries: int = 3,
+        retry_delay: float = 1.0,
+        **api_kwargs,
+    ) -> None:
         """Initialize the provider.
 
         Args:
             model_name: Model identifier (e.g., "gpt-4", "claude-3-opus").
+            max_concurrency: Maximum number of concurrent API requests.
+            max_retries: Maximum number of retries for transient errors.
+            retry_delay: Base delay in seconds between retries (exponential backoff).
             **api_kwargs: Additional arguments passed to litellm.completion.
         """
         try:
@@ -44,6 +64,9 @@ class LiteLLMProvider(InferenceProvider):
 
         super().__init__(model_name)
         self._litellm = litellm
+        self.max_concurrency = max_concurrency
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
         self.api_kwargs = api_kwargs
         self._setup_api_keys()
 
@@ -53,6 +76,66 @@ class LiteLLMProvider(InferenceProvider):
             value = os.getenv(env_var)
             if value:
                 setattr(self._litellm, litellm_attr, value)
+
+    def _retry_with_backoff(self, func: Callable[[], T]) -> T:
+        """Execute with exponential backoff for retryable errors.
+
+        Retries on rate limits (429) and transient server errors (502, 503, 504, timeout).
+
+        Args:
+            func: Callable to execute.
+
+        Returns:
+            Result of the function call.
+
+        Raises:
+            Exception: If all retries are exhausted or non-retryable error occurs.
+        """
+        last_exception: Exception | None = None
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                return func()
+            except Exception as e:
+                last_exception = e
+
+                # Check if this is a retryable error
+                is_retryable = False
+                error_str = str(e).lower()
+
+                # Check for rate limit or timeout in error message
+                if "rate" in error_str or "timeout" in error_str or "timed out" in error_str:
+                    is_retryable = True
+
+                # Check for HTTP status codes in error
+                for status_code in _RETRYABLE_STATUS_CODES:
+                    if str(status_code) in str(e):
+                        is_retryable = True
+                        break
+
+                # Check for litellm-specific exceptions
+                if hasattr(self._litellm, "RateLimitError") and isinstance(
+                    e, self._litellm.RateLimitError
+                ):
+                    is_retryable = True
+                if hasattr(self._litellm, "Timeout") and isinstance(e, self._litellm.Timeout):
+                    is_retryable = True
+
+                if not is_retryable or attempt >= self.max_retries:
+                    raise
+
+                # Exponential backoff with jitter
+                delay = self.retry_delay * (2**attempt)
+                logger.warning(
+                    f"Retryable error (attempt {attempt + 1}/{self.max_retries + 1}): {e}. "
+                    f"Retrying in {delay:.1f}s..."
+                )
+                time.sleep(delay)
+
+        # Should not reach here, but raise last exception if we do
+        if last_exception:
+            raise last_exception
+        raise RuntimeError("Unexpected retry loop exit")
 
     def _generate_single(self, request: LMRequest, params: SamplingParams) -> list[LMOutput]:
         """Generate completions for a single request."""
@@ -107,8 +190,11 @@ class LiteLLMProvider(InferenceProvider):
     ) -> list[list[LMOutput]]:
         params = self._default_sampling_params(sampling_params)
 
-        with ThreadPoolExecutor() as executor:
-            results = list(executor.map(lambda req: self._generate_single(req, params), requests))
+        def generate_with_retry(req: LMRequest) -> list[LMOutput]:
+            return self._retry_with_backoff(lambda: self._generate_single(req, params))
+
+        with ThreadPoolExecutor(max_workers=self.max_concurrency) as executor:
+            results = list(executor.map(generate_with_retry, requests))
 
         return results
 
@@ -169,7 +255,10 @@ class LiteLLMProvider(InferenceProvider):
 
             return outputs
 
-        with ThreadPoolExecutor() as executor:
-            results = list(executor.map(_logprobs_single, requests))
+        def logprobs_with_retry(req: LMRequest) -> list[LMOutput]:
+            return self._retry_with_backoff(lambda: _logprobs_single(req))
+
+        with ThreadPoolExecutor(max_workers=self.max_concurrency) as executor:
+            results = list(executor.map(logprobs_with_retry, requests))
 
         return results

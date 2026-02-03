@@ -56,10 +56,12 @@ class ProviderConfig:
         name: Provider name ("vllm", "hf", "litellm"). Maps to pyproject.toml extras.
         package: Optional custom package specifier (URL, path, or PyPI version).
                  If set, installed after base extras to override default version.
+        max_concurrency: Maximum concurrent API requests (for litellm and other API providers).
     """
 
     name: str = "vllm"
     package: str | None = None
+    max_concurrency: int | None = None
 
 
 @dataclass
@@ -452,9 +454,10 @@ class EvalConfig:
         # Parallelism is always per-model (default 1)
         parallelism = model.parallelism
 
-        # Extract provider name and package from ProviderConfig
+        # Extract provider name, package, and max_concurrency from ProviderConfig
         provider_name = model.provider.name if model.provider else None
         provider_package = model.provider.package if model.provider else None
+        provider_max_concurrency = model.provider.max_concurrency if model.provider else None
 
         return {
             "gpus": gpus_per_model,
@@ -468,6 +471,7 @@ class EvalConfig:
             "gpus_per_worker": gpus_per_worker,
             "provider": provider_name,
             "provider_package": provider_package,
+            "provider_max_concurrency": provider_max_concurrency,
             "load_format": model.load_format,
             "extra_loader_config": model.extra_loader_config,
         }
