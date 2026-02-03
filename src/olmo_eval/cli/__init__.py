@@ -65,19 +65,63 @@ def tasks(filter: str) -> None:
     console.print(table)
 
 
+def _format_value(value: object) -> str:
+    """Format a config value for display."""
+    from dataclasses import fields, is_dataclass
+
+    if value is None:
+        return ""
+    if is_dataclass(value):
+        parts = []
+        for f in fields(value):
+            v = getattr(value, f.name)
+            formatted = _format_value(v)
+            if formatted:
+                parts.append(f"{f.name}={formatted}")
+        return "\n".join(parts) if parts else ""
+    if isinstance(value, dict):
+        if not value:
+            return ""
+        return "\n".join(f"{k}={v}" for k, v in value.items())
+    if isinstance(value, (list, tuple)):
+        return "\n".join(str(v) for v in value) if value else ""
+    if isinstance(value, bool):
+        return str(value) if value else ""
+    return str(value) if value else ""
+
+
 @main.command()
 @click.option("--filter", "-f", default="", help="Filter by name substring")
 def models(filter: str) -> None:
     """List available model presets."""
-    table = Table(title="Model Presets")
-    table.add_column("Name", style="cyan")
-    table.add_column("Model", style="dim")
+    from dataclasses import fields
 
-    for name, cfg in sorted(get_model_presets().items()):
+    from rich.panel import Panel
+
+    presets = get_model_presets()
+    if not presets:
+        console.print("[dim]No model presets registered.[/dim]")
+        return
+
+    # Get field names from first config
+    first_cfg = next(iter(presets.values()))
+    field_names = [f.name for f in fields(first_cfg)]
+    max_field_width = max(len(f) for f in field_names)
+
+    for name, cfg in sorted(presets.items()):
         if filter.lower() in name.lower():
-            table.add_row(name, cfg.model)
+            table = Table(show_header=False, box=None, padding=(0, 1))
+            table.add_column("Field", style="dim", width=max_field_width)
+            table.add_column("Value", overflow="fold")
 
-    console.print(table)
+            for f in fields(cfg):
+                value = getattr(cfg, f.name)
+                formatted = _format_value(value)
+                if formatted:
+                    table.add_row(f.name, formatted)
+
+            console.print(Panel(table, title=f"[cyan]{name}[/cyan]", title_align="left"))
+            console.print()
 
 
 @main.command()
