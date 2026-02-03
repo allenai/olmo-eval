@@ -681,41 +681,11 @@ class BeakerLauncher:
         # Build group names list if groups are specified
         group_names: list[str] | None = config.groups if config.groups else None
 
-        # If doing a dry run, print config summary and return
+        # Print config summary for dry run
         if dry_run:
             self._print_dry_run_config(config, clusters)
-            # Still call launch_experiment with dry_run=True to show full spec
-            # Pass groups so they appear in the spec output (the CLI handles
-            # checking which groups exist and informing the user)
-            launch_experiment(
-                args=config.command,
-                name=config.name,
-                description=config.description,
-                workspace=config.workspace,
-                group_names=group_names,
-                clusters=clusters,
-                gpus=config.num_gpus,
-                shared_memory=config.shared_memory,
-                priority=config.priority,
-                preemptible=config.preemptible,
-                task_timeout=config.timeout,
-                retries=config.retries,
-                budget=config.budget,
-                beaker_image=config.beaker_image,
-                weka=weka_mounts if weka_mounts else None,
-                env_vars=env_vars if env_vars else None,
-                env_secrets=env_secrets if env_secrets else None,
-                google_credentials_secret=google_credentials_secret,
-                mounts=mounts,
-                results=config.result_path,
-                install_cmd=install_cmd,
-                no_python=True,  # Use pre-built image, skip Python setup
-                dry_run=True,
-                yes=True,  # Skip confirmation prompts
-            )
-            return None
 
-        # Launch the experiment
+        # Launch the experiment (or show spec if dry_run)
         workload = launch_experiment(
             args=config.command,
             name=config.name,
@@ -737,13 +707,17 @@ class BeakerLauncher:
             google_credentials_secret=google_credentials_secret,
             mounts=mounts,
             results=config.result_path,
-            install_cmd=install_cmd,
+            install=install_cmd,
             no_python=True,  # Use pre-built image, skip Python setup
+            dry_run=dry_run,
             timeout=(
                 99999999 if config.follow else 0
             ),  # only way to follow the experiment without canceling
             yes=True,  # Skip confirmation prompts
         )
+
+        if dry_run:
+            return None
 
         if workload is None:
             log.warning("Gantry returned None workload - experiment may not have been created")
