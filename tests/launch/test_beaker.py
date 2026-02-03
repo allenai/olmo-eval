@@ -524,46 +524,37 @@ class TestBeakerJobConfigTaskPackages:
 class TestBuildCommandWithTaskPackages:
     """Tests for command building with task packages."""
 
-    def test_command_includes_task_packages(self):
-        """Test that task packages are installed in the generated command."""
+    def test_install_cmd_includes_task_packages(self):
+        """Test that task packages are installed in the generated install command."""
         from olmo_eval.launch import BeakerLauncher
 
         launcher = BeakerLauncher()
-        command = launcher._build_command_with_extras(
-            command=["olmo-eval", "run"],
+        install_cmd = launcher._build_install_cmd(
             extras=[],
             env_exports=None,
             provider_package=None,
             task_packages=["special-lib==1.0", "another-pkg"],
         )
 
-        # The command should be a bash -c with the full script
-        assert command[0] == "bash"
-        assert command[1] == "-c"
-        script = command[2]
-
         # Check that task packages are being installed
-        assert "uv pip install 'special-lib==1.0'" in script
-        assert "uv pip install 'another-pkg'" in script
+        assert "uv pip install 'special-lib==1.0'" in install_cmd
+        assert "uv pip install 'another-pkg'" in install_cmd
 
     def test_task_packages_installed_after_provider(self):
         """Test that task packages are installed after provider package."""
         from olmo_eval.launch import BeakerLauncher
 
         launcher = BeakerLauncher()
-        command = launcher._build_command_with_extras(
-            command=["olmo-eval", "run"],
+        install_cmd = launcher._build_install_cmd(
             extras=[],
             env_exports=None,
             provider_package="vllm==0.14.0",
             task_packages=["task-dep==1.0"],
         )
 
-        script = command[2]
-
         # Provider should be installed before task packages
-        provider_pos = script.find("uv pip install 'vllm==0.14.0'")
-        task_pos = script.find("uv pip install 'task-dep==1.0'")
+        provider_pos = install_cmd.find("uv pip install 'vllm==0.14.0'")
+        task_pos = install_cmd.find("uv pip install 'task-dep==1.0'")
         assert provider_pos < task_pos
 
     def test_no_task_packages_if_none(self):
@@ -571,18 +562,16 @@ class TestBuildCommandWithTaskPackages:
         from olmo_eval.launch import BeakerLauncher
 
         launcher = BeakerLauncher()
-        command = launcher._build_command_with_extras(
-            command=["olmo-eval", "run"],
+        install_cmd = launcher._build_install_cmd(
             extras=[],
             env_exports=None,
             provider_package=None,
             task_packages=None,
         )
 
-        script = command[2]
         # Should only have the base install, not any extra pip install for task packages
         # Count occurrences of 'uv pip install' - should only be the base install
-        install_count = script.count("uv pip install")
+        install_count = install_cmd.count("uv pip install")
         assert install_count == 1  # Only the base olmo-eval install
 
     def test_task_packages_git_url_normalized(self):
@@ -590,17 +579,15 @@ class TestBuildCommandWithTaskPackages:
         from olmo_eval.launch import BeakerLauncher
 
         launcher = BeakerLauncher()
-        command = launcher._build_command_with_extras(
-            command=["olmo-eval", "run"],
+        install_cmd = launcher._build_install_cmd(
             extras=[],
             env_exports=None,
             provider_package=None,
             task_packages=["https://github.com/user/repo@v1.0"],
         )
 
-        script = command[2]
         # GitHub URL should get git+ prefix
-        assert "uv pip install 'git+https://github.com/user/repo@v1.0'" in script
+        assert "uv pip install 'git+https://github.com/user/repo@v1.0'" in install_cmd
 
 
 class TestNormalizeProviderPackage:
