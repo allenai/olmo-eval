@@ -27,6 +27,9 @@ class ModelGrouper:
         self.config = config
         self.eval_config = eval_config
 
+    # Providers that don't require GPUs (remote API or mock)
+    _NO_GPU_PROVIDERS = {"litellm", "mock"}
+
     def get_model_resources(self, m_cfg: BeakerModelSpec, m_spec: str) -> dict[str, Any]:
         """Get runtime-critical resources for a model.
 
@@ -48,6 +51,15 @@ class ModelGrouper:
             m_parallelism = m_cfg.parallelism
             m_cluster = m_cfg.cluster or self.config.cluster
             m_provider = m_cfg.provider
+
+        # Remote API providers don't need GPUs
+        provider_name = (
+            m_provider.name if m_provider and hasattr(m_provider, "name") else m_provider
+        )
+        if provider_name in self._NO_GPU_PROVIDERS:
+            m_gpus = 0
+            m_parallelism = 1
+
         return {
             "gpus": m_gpus,
             "parallelism": m_parallelism,
