@@ -37,13 +37,17 @@ class ProviderType(str, Enum):
 
 
 def create_provider(
-    provider_type: ProviderType | str, model_name: str, **kwargs
+    provider_type: ProviderType | str,
+    model_name: str,
+    worker_id: str | None = None,
+    **kwargs,
 ) -> InferenceProvider:
     """Create a provider instance.
 
     Args:
         provider_type: Type of provider to create.
         model_name: Model identifier or path.
+        worker_id: Optional worker identifier for logging (only used by vLLM).
         **kwargs: Additional arguments passed to provider constructor.
 
     Returns:
@@ -64,7 +68,7 @@ def create_provider(
         case ProviderType.VLLM:
             from .vllm import VLLMProvider
 
-            return VLLMProvider(model_name, **kwargs)
+            return VLLMProvider(model_name, worker_id=worker_id, **kwargs)
         case ProviderType.LITELLM:
             from .litellm import LiteLLMProvider
 

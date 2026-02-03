@@ -62,6 +62,9 @@ class LiteLLMProvider(InferenceProvider):
                 "litellm is required for LiteLLMProvider. Install with: uv pip install litellm"
             ) from e
 
+        # Suppress verbose litellm debug info messages
+        litellm.suppress_debug_info = True
+
         super().__init__(model_name)
         self._litellm = litellm
         self.max_concurrency = max_concurrency

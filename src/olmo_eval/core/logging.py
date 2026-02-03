@@ -42,14 +42,6 @@ def configure_logging(level: LogLevel = "INFO") -> None:
     os.environ.setdefault("DATASETS_VERBOSITY", "error")
     os.environ.setdefault("VLLM_LOGGING_LEVEL", "WARNING")
 
-    # Suppress LiteLLM's print-based debug output
-    try:
-        import litellm  # type: ignore[import-not-found]
-
-        litellm.suppress_debug_info = True
-    except ImportError:
-        pass
-
 
 def get_logger(name: str) -> logging.Logger:
     """Get a logger under the olmo_eval namespace."""
