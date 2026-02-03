@@ -263,7 +263,8 @@ class ToolAccuracyMetric(Metric):
 class CorpusPerplexityMetric(Metric):
     """Corpus-level (token-weighted) perplexity.
 
-    This is the standard token-weighted aggregation across docs.
+    This is the standard token-weighted aggregation across documents.
+    Documents that exceed the model's context length are truncated.
     """
 
     name: str = "corpus_perplexity"

@@ -17,6 +17,7 @@ from olmo_eval.evals.tasks.core import Task, TaskConfig, register, register_vari
 class C4Task(Task):
     """C4 perplexity task."""
 
+    # This is a version of C4 where the 5% longest documents have been removed
     default_source: str = "valentinhofmann/c4_short"
     default_split = "validation"
     default_subset = "full"  # Options are "full", "1k", "10k", "100k"
