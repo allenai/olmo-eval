@@ -5,7 +5,7 @@ from __future__ import annotations
 import multiprocessing as mp
 import random
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from rich.console import Console
 
@@ -16,9 +16,7 @@ from olmo_eval.runners.mixins import S3Config
 from olmo_eval.runners.simple.async_base import AsyncBaseRunner
 from olmo_eval.runners.simple.helpers import terminate_workers, wait_for_workers_ready
 from olmo_eval.runners.simple.workers import instance_worker_process
-
-if TYPE_CHECKING:
-    from olmo_eval.storage import StorageBackend
+from olmo_eval.storage import StorageBackend
 
 console = Console()
 logger = get_logger(__name__)

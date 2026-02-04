@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from rich.console import Console
 from rich.table import Table
@@ -24,9 +24,7 @@ from olmo_eval.runners.utils import (
     generate_experiment_id,
     run_task_impl,
 )
-
-if TYPE_CHECKING:
-    from olmo_eval.storage import StorageBackend
+from olmo_eval.storage import StorageBackend
 
 console = Console()
 logger = get_logger(__name__)
