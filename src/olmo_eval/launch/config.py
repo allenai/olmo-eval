@@ -230,10 +230,17 @@ def parse_model_config(
             return OmegaConf.to_object(merged)  # type: ignore[return-value]
         return model
 
+    # Providers that don't require GPUs (remote API or mock)
+    no_gpu_providers = {"litellm", "mock"}
+
     if isinstance(model, str):
         config_dict: dict[str, Any] = {"name_or_path": model}
         # Get provider from preset or default to vllm
-        config_dict["provider"] = _get_provider_for_model(model)
+        provider = _get_provider_for_model(model)
+        config_dict["provider"] = provider
+        # Set gpus=0 for API-based providers
+        if provider.kind in no_gpu_providers:
+            config_dict["gpus"] = 0
         if overrides:
             override_config = OmegaConf.from_dotlist(overrides)
             override_dict = OmegaConf.to_container(override_config)
@@ -246,7 +253,11 @@ def parse_model_config(
         config_dict = dict(model)
         # Get provider from preset or default to vllm if not already specified
         if "provider" not in config_dict and "name_or_path" in config_dict:
-            config_dict["provider"] = _get_provider_for_model(config_dict["name_or_path"])
+            provider = _get_provider_for_model(config_dict["name_or_path"])
+            config_dict["provider"] = provider
+            # Set gpus=0 for API-based providers (if not explicitly set)
+            if "gpus" not in config_dict and provider.kind in no_gpu_providers:
+                config_dict["gpus"] = 0
         if overrides:
             override_config = OmegaConf.from_dotlist(overrides)
             override_dict = OmegaConf.to_container(override_config)
