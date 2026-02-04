@@ -359,7 +359,7 @@ class LiteLLMProvider(InferenceProvider):
         """
         from tqdm import tqdm
 
-        async def _run() -> list[list[LMOutput]]:
+        async def arun() -> list[list[LMOutput]]:
             semaphore = asyncio.Semaphore(self.max_concurrency)
             pbar = tqdm(total=len(requests), desc="Processing instances", unit="inst")
 
@@ -376,4 +376,4 @@ class LiteLLMProvider(InferenceProvider):
             pbar.close()
             return list(results)
 
-        return asyncio.run(_run())
+        return asyncio.run(arun())
