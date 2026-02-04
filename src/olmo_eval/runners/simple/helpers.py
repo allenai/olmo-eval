@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import multiprocessing as mp
 import queue
 import time
@@ -166,11 +167,12 @@ def process_batch(
     from olmo_eval.core.types import RequestType
 
     # Group items that share the same request type and sampling params.
-    # Items from the same task share the same sampling_params object, so
-    # id() is a cheap, correct grouping key.
+    # We use value-based comparison (astuple) because items are
+    # pickled/unpickled through mp.Queue, giving each a new object.
     groups: dict[tuple, list[QueueItem]] = {}
     for item in batch:
-        key = (item.request.request_type, id(item.sampling_params))
+        sp_key = dataclasses.astuple(item.sampling_params) if item.sampling_params else None
+        key = (item.request.request_type, sp_key)
         groups.setdefault(key, []).append(item)
 
     for (_req_type, _), group in groups.items():

@@ -20,6 +20,23 @@ _MAX_STOP_SEQUENCES = 4
 # HTTP status codes that should trigger a retry
 _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
+# litellm exception type names that should never be retried
+_NEVER_RETRY_TYPES = (
+    "AuthenticationError",  # 401 – bad API key
+    "BadRequestError",  # 400 – invalid params, content policy, etc.
+    "NotFoundError",  # 404 – wrong model / endpoint
+    "UnprocessableEntityError",  # 422 – semantic validation failure
+)
+
+# litellm exception type names that are always transient and should be retried
+_ALWAYS_RETRY_TYPES = (
+    "RateLimitError",  # 429
+    "Timeout",  # request timed out
+    "APIConnectionError",  # connection-level failure
+    "ServiceUnavailableError",  # 503
+    "InternalServerError",  # 500
+)
+
 logger = get_logger(__name__)
 
 T = TypeVar("T")
@@ -85,24 +102,31 @@ class LiteLLMProvider(InferenceProvider):
                 setattr(self._litellm, litellm_attr, value)
 
     def _is_retryable(self, exc: Exception) -> bool:
-        """Determine whether *exc* should be retried."""
-        # litellm exception types that are always transient
-        for attr in ("RateLimitError", "Timeout", "APIConnectionError", "ServiceUnavailableError"):
+        """Determine whether *exc* should be retried.
+
+        Uses litellm's typed exception hierarchy to classify errors:
+        - Never retry: AuthenticationError, BadRequestError, NotFoundError,
+          UnprocessableEntityError
+        - Always retry: RateLimitError, Timeout, APIConnectionError,
+          ServiceUnavailableError, InternalServerError
+        - Falls back to HTTP status code for unknown subtypes.
+        """
+        # Never retry these – the request itself is wrong
+        for attr in _NEVER_RETRY_TYPES:
+            cls = getattr(self._litellm, attr, None)
+            if cls is not None and isinstance(exc, cls):
+                return False
+
+        # Always retry these – transient server/network issues
+        for attr in _ALWAYS_RETRY_TYPES:
             cls = getattr(self._litellm, attr, None)
             if cls is not None and isinstance(exc, cls):
                 return True
 
-        # HTTP status code on the exception object (litellm sets this)
+        # Fall back to HTTP status code for any litellm error subtypes
+        # not explicitly listed above; unknown / non-litellm exceptions are not retried
         status = getattr(exc, "status_code", None)
-        if status is not None and int(status) in _RETRYABLE_STATUS_CODES:
-            return True
-
-        # Fall back to string matching for wrapped / generic errors
-        error_str = str(exc).lower()
-        return any(
-            kw in error_str
-            for kw in ("rate", "timeout", "timed out", "connection", "connection error")
-        )
+        return status is not None and int(status) in _RETRYABLE_STATUS_CODES
 
     @staticmethod
     def _format_error(exc: Exception) -> str:
@@ -152,8 +176,27 @@ class LiteLLMProvider(InferenceProvider):
                 return func()
             except Exception as e:
                 last_exception = e
-                retryable = self._is_retryable(e)
                 detail = self._format_error(e)
+
+                # Authentication errors: fail immediately with actionable guidance
+                auth_cls = getattr(self._litellm, "AuthenticationError", None)
+                if auth_cls is not None and isinstance(e, auth_cls):
+                    logger.error(
+                        f"Authentication failed{ctx}:\n{detail}\n"
+                        f"  Verify the API key environment variable is set correctly."
+                    )
+                    raise
+
+                # Not-found errors: fail immediately with actionable guidance
+                not_found_cls = getattr(self._litellm, "NotFoundError", None)
+                if not_found_cls is not None and isinstance(e, not_found_cls):
+                    logger.error(
+                        f"Resource not found{ctx}:\n{detail}\n"
+                        f"  Verify the model name and API endpoint are correct."
+                    )
+                    raise
+
+                retryable = self._is_retryable(e)
 
                 if not retryable or attempt >= self.max_retries:
                     if retryable:
