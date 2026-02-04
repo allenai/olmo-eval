@@ -76,9 +76,7 @@ class MathExtractor:
 
 
 def is_equiv(gen, correct):
-    if hendrycks_is_equiv(gen, correct):  # or minerva_is_equiv(gen, correct):
-        return True
-    return False
+    return hendrycks_is_equiv(gen, correct)  # or minerva_is_equiv(gen, correct)
 
 
 def extract_math_answer(result: str) -> list[str]:
@@ -155,12 +153,7 @@ def last_boxed_only_string(string: str) -> str | None:
                 break
         i += 1
 
-    if right_brace_idx is None:
-        retval = None
-    else:
-        retval = string[idx : right_brace_idx + 1]
-
-    return retval
+    return None if right_brace_idx is None else string[idx : right_brace_idx + 1]
 
 
 def remove_boxed(s: str) -> str:
@@ -217,10 +210,7 @@ def minerva_is_equiv(x1: str, x2: str) -> bool:
                 return False
 
             try:
-                if sympy.simplify(diff) == 0:
-                    return True
-                else:
-                    return False
+                return sympy.simplify(diff) == 0
             except ValueError:
                 log.debug(f"Had some trouble simplifying when comparing {x1} and {x2}")
     except TimeoutError:
@@ -389,7 +379,8 @@ def strip_string(string):
     string = string.replace("\\%", "")
     string = string.replace(r"\%", "")  # noqa: W605
 
-    # " 0." equivalent to " ." and "{0." equivalent to "{." Alternatively, add "0" if "." is the start of the string
+    # " 0." equivalent to " ." and "{0." equivalent to "{."
+    # Alternatively, add "0" if "." is the start of the string
     string = string.replace(" .", " 0.")
     string = string.replace("{.", "{0.")
     # if empty, return empty string
@@ -399,9 +390,8 @@ def strip_string(string):
         string = "0" + string
 
     # to consider: get rid of e.g. "k = " or "q = " at beginning
-    if len(string.split("=")) == 2:
-        if len(string.split("=")[0]) <= 2:
-            string = string.split("=")[1]
+    if len(string.split("=")) == 2 and len(string.split("=")[0]) <= 2:
+        string = string.split("=")[1]
 
     # fix sqrt3 --> sqrt{3}
     string = fix_sqrt(string)
@@ -409,14 +399,16 @@ def strip_string(string):
     # remove spaces
     string = string.replace(" ", "")
 
-    # \frac1b or \frac12 --> \frac{1}{b} and \frac{1}{2}, etc. Even works with \frac1{72} (but not \frac{72}1). Also does a/b --> \\frac{a}{b}
+    # \frac1b or \frac12 --> \frac{1}{b} and \frac{1}{2}, etc.
+    # Even works with \frac1{72} (but not \frac{72}1). Also does a/b --> \\frac{a}{b}
     string = fix_fracs(string)
 
     # manually change 0.5 --> \frac{1}{2}
     if string == "0.5":
         string = "\\frac{1}{2}"
 
-    # NOTE: X/Y changed to \frac{X}{Y} in dataset, but in simple cases fix in case the model output is X/Y
+    # NOTE: X/Y changed to \frac{X}{Y} in dataset, but in simple cases fix
+    # in case the model output is X/Y
     string = fix_a_slash_b(string)
 
     return string
