@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
@@ -39,7 +39,8 @@ class ModelConfig:
 
     def __post_init__(self) -> None:
         if isinstance(self.provider, dict):
-            kind = self.provider.get("kind", "vllm")
+            provider_dict = cast(dict[str, Any], self.provider)
+            kind = provider_dict.get("kind", "vllm")
             if isinstance(kind, str):
                 kind = ProviderKind(kind)
             object.__setattr__(
@@ -47,9 +48,9 @@ class ModelConfig:
                 "provider",
                 ProviderConfig(
                     kind=kind,
-                    package=self.provider.get("package"),
-                    max_concurrency=self.provider.get("max_concurrency"),
-                    required_secrets=tuple(self.provider.get("required_secrets", ())),
+                    package=provider_dict.get("package"),
+                    max_concurrency=provider_dict.get("max_concurrency"),
+                    required_secrets=tuple(provider_dict.get("required_secrets", ())),
                 ),
             )
 
