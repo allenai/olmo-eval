@@ -149,6 +149,14 @@ for _subset in MATH_SUBSETS:
 
     register_variant(
         _task_name,
+        "olmo3",
+        sampling_params=SamplingParams(
+            max_tokens=1024, temperature=0.6, top_p=0.6, stop_sequences=["Problem:", "\n\n"]
+        ),
+    )
+
+    register_variant(
+        _task_name,
         "bpb",
         formatter=PPLFormatter(),
         metrics=(BPBMetric(),),
