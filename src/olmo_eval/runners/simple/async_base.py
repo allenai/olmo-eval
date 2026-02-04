@@ -287,8 +287,6 @@ class AsyncBaseRunner(AsyncRunnerMixin, BaseEvalRunner):
         gpus_per_model = max(0, total_gpus // num_models) if total_gpus > 0 else 0
 
         console.print(f"[bold]Total workers:[/bold] {total_workers}")
-        console.print(f"[bold]Workers per model:[/bold] {workers_per_model}")
-        console.print(f"[bold]GPUs per model:[/bold] {gpus_per_model}")
 
         return model_queues, result_queue, total_workers, workers_per_model, gpus_per_model
 
