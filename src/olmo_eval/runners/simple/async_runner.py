@@ -190,3 +190,10 @@ class AsyncEvalRunner(AsyncBaseRunner):
         finally:
             # Ensure all workers are terminated on any exit (success or failure)
             terminate_workers(workers)
+
+            # Cancel queue feeder threads so they don't block process exit
+            for q in list(model_queues.values()) + [result_queue]:
+                q.cancel_join_thread()
+
+            # Shut down the Manager server process
+            manager.shutdown()
