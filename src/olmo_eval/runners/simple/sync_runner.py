@@ -160,15 +160,20 @@ class SyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         if model_config.provider.max_concurrency:
             extra_kwargs["max_concurrency"] = model_config.provider.max_concurrency
 
+        # Only pass local-provider args (tokenizer, revision, dtype, trust_remote_code)
+        # to providers that run models locally (vLLM, HuggingFace). API providers
+        # like litellm reject these as unrecognized request arguments.
+        if provider_type in (ProviderType.VLLM, ProviderType.HUGGINGFACE):
+            extra_kwargs["tokenizer"] = model_config.tokenizer
+            extra_kwargs["revision"] = model_config.revision
+            extra_kwargs["trust_remote_code"] = model_config.trust_remote_code
+            extra_kwargs["dtype"] = model_config.dtype
+
         # Track provider init time
         provider_init_start = time.time()
         provider = create_provider(
             provider_type,
             model_config.model,
-            tokenizer=model_config.tokenizer,
-            revision=model_config.revision,
-            trust_remote_code=model_config.trust_remote_code,
-            dtype=model_config.dtype,
             **extra_kwargs,
         )
         provider_init_time = time.time() - provider_init_start
