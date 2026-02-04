@@ -153,6 +153,11 @@ def process_batch(
 ) -> None:
     """Process a batch of instances through the provider.
 
+    Items are grouped by ``(request_type, sampling_params)`` so that each
+    provider call receives a homogeneous set of requests.  This is necessary
+    because the async worker mixes items from different tasks (which may have
+    different request types or sampling parameters) into a single batch.
+
     Args:
         batch: List of QueueItems to process
         provider: InferenceProvider instance
@@ -160,44 +165,52 @@ def process_batch(
     """
     from olmo_eval.core.types import RequestType
 
-    requests = [item.request for item in batch]
-    sampling_params = batch[0].sampling_params if batch else None
+    # Group items that share the same request type and sampling params.
+    # Items from the same task share the same sampling_params object, so
+    # id() is a cheap, correct grouping key.
+    groups: dict[tuple, list[QueueItem]] = {}
+    for item in batch:
+        key = (item.request.request_type, id(item.sampling_params))
+        groups.setdefault(key, []).append(item)
 
-    try:
-        # Use logprobs for LOGLIKELIHOOD requests (e.g., BPB tasks)
-        if requests and requests[0].request_type == RequestType.LOGLIKELIHOOD:
-            outputs_list = provider.logprobs(requests)
-        else:
-            outputs_list = provider.generate(requests, sampling_params)
+    for (_req_type, _), group in groups.items():
+        requests = [item.request for item in group]
+        sampling_params = group[0].sampling_params
+        request_type = group[0].request.request_type
 
-        for item, outputs in zip(batch, outputs_list, strict=True):
-            result_queue.put(
-                ResultItem(
-                    model_name=item.model_name,
-                    task_id=item.task_id,
-                    instance_idx=item.instance_idx,
-                    instance=item.instance,
-                    request=item.request,
-                    outputs=outputs,
-                    error=None,
-                    attempt=item.attempt,
+        try:
+            if request_type == RequestType.LOGLIKELIHOOD:
+                outputs_list = provider.logprobs(requests)
+            else:
+                outputs_list = provider.generate(requests, sampling_params)
+
+            for item, outputs in zip(group, outputs_list, strict=True):
+                result_queue.put(
+                    ResultItem(
+                        model_name=item.model_name,
+                        task_id=item.task_id,
+                        instance_idx=item.instance_idx,
+                        instance=item.instance,
+                        request=item.request,
+                        outputs=outputs,
+                        error=None,
+                        attempt=item.attempt,
+                    )
                 )
-            )
-    except Exception as e:
-        # On batch failure, report error for all items
-        for item in batch:
-            result_queue.put(
-                ResultItem(
-                    model_name=item.model_name,
-                    task_id=item.task_id,
-                    instance_idx=item.instance_idx,
-                    instance=item.instance,
-                    request=item.request,
-                    outputs=[],
-                    error=str(e),
-                    attempt=item.attempt,
+        except Exception as e:
+            for item in group:
+                result_queue.put(
+                    ResultItem(
+                        model_name=item.model_name,
+                        task_id=item.task_id,
+                        instance_idx=item.instance_idx,
+                        instance=item.instance,
+                        request=item.request,
+                        outputs=[],
+                        error=str(e),
+                        attempt=item.attempt,
+                    )
                 )
-            )
 
 
 __all__ = [

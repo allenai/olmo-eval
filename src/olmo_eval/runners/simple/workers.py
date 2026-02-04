@@ -53,7 +53,11 @@ def instance_worker_process(
     """
     import sys
 
-    from olmo_eval.core.logging import configure_worker_logging
+    from olmo_eval.core.logging import configure_logging, configure_worker_logging
+
+    # Set up root logger so third-party loggers (e.g. litellm) have a
+    # handler to propagate to.  Must happen before provider init.
+    configure_logging()
 
     worker_logger = configure_worker_logging(worker_id)
     worker_logger.info(f"Starting on GPUs {gpu_ids}")
@@ -62,7 +66,7 @@ def instance_worker_process(
         if gpu_ids:
             os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in gpu_ids)
 
-        worker_logger.info("Initializing vLLM engine...")
+        worker_logger.info("Initializing provider...")
         init_start = time.time()
 
         provider_type = ProviderType(provider_type_str)
@@ -154,7 +158,9 @@ def streaming_worker_process(
     """
     import sys
 
-    from olmo_eval.core.logging import configure_worker_logging
+    from olmo_eval.core.logging import configure_logging, configure_worker_logging
+
+    configure_logging()
 
     worker_logger = configure_worker_logging(worker_id)
     worker_logger.info(f"Starting on GPUs {gpu_ids}")
