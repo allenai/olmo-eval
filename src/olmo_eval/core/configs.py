@@ -37,6 +37,22 @@ class ModelConfig:
     # When set, agent tasks use this URL directly instead of starting vLLM
     model_url: str | None = None
 
+    def __post_init__(self) -> None:
+        if isinstance(self.provider, dict):
+            kind = self.provider.get("kind", "vllm")
+            if isinstance(kind, str):
+                kind = ProviderKind(kind)
+            object.__setattr__(
+                self,
+                "provider",
+                ProviderConfig(
+                    kind=kind,
+                    package=self.provider.get("package"),
+                    max_concurrency=self.provider.get("max_concurrency"),
+                    required_secrets=tuple(self.provider.get("required_secrets", ())),
+                ),
+            )
+
     def get_provider_name(self, override: str | None = None) -> str:
         """Get the effective provider name as a string.
 
