@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
-import time
-from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
 
 from olmo_eval.core.debug import is_debug_provider
@@ -154,11 +153,13 @@ class LiteLLMProvider(InferenceProvider):
 
         return "\n".join(parts)
 
-    def _retry_with_backoff(self, func: Callable[[], T], *, context: str = "") -> T:
+    async def _retry_with_backoff_async(
+        self, func: Callable[[], Awaitable[T]], *, context: str = ""
+    ) -> T:
         """Execute with exponential backoff for retryable errors.
 
         Args:
-            func: Callable to execute.
+            func: Async callable to execute.
             context: Optional human-readable label (e.g. ``"generate model=gpt-4"``)
                      included in log messages.
 
@@ -173,7 +174,7 @@ class LiteLLMProvider(InferenceProvider):
 
         for attempt in range(self.max_retries + 1):
             try:
-                return func()
+                return await func()
             except Exception as e:
                 last_exception = e
                 detail = self._format_error(e)
@@ -213,14 +214,16 @@ class LiteLLMProvider(InferenceProvider):
                     f"(attempt {attempt + 1}/{self.max_retries + 1}):\n{detail}\n"
                     f"  retrying in {delay:.1f}s …"
                 )
-                time.sleep(delay)
+                await asyncio.sleep(delay)
 
         # Should not reach here, but raise last exception if we do
         if last_exception:
             raise last_exception
         raise RuntimeError("Unexpected retry loop exit")
 
-    def _generate_single(self, request: LMRequest, params: SamplingParams) -> list[LMOutput]:
+    async def _generate_single_async(
+        self, request: LMRequest, params: SamplingParams
+    ) -> list[LMOutput]:
         """Generate completions for a single request."""
         # Build messages from request
         if request.messages:
@@ -244,7 +247,7 @@ class LiteLLMProvider(InferenceProvider):
         if params.logprobs is not None:
             kwargs["logprobs"] = True
 
-        response = self._litellm.completion(**kwargs)
+        response = await self._litellm.acompletion(**kwargs)
 
         outputs = []
         for choice in response.choices:
@@ -273,25 +276,76 @@ class LiteLLMProvider(InferenceProvider):
     ) -> list[list[LMOutput]]:
         from tqdm import tqdm
 
+        logger.info(
+            f"Sending {len(requests)} requests for {self.model_name}"
+            f" with max_concurrency {self.max_concurrency}"
+        )
+
         params = self._default_sampling_params(sampling_params)
 
-        def generate_with_retry(req: LMRequest) -> list[LMOutput]:
-            return self._retry_with_backoff(
-                lambda: self._generate_single(req, params),
-                context=f"generate model={self.model_name}",
-            )
+        async def arun() -> list[list[LMOutput]]:
+            semaphore = asyncio.Semaphore(self.max_concurrency)
+            pbar = tqdm(total=len(requests), desc="Processing instances", unit="inst")
 
-        with ThreadPoolExecutor(max_workers=self.max_concurrency) as executor:
-            results = list(
-                tqdm(
-                    executor.map(generate_with_retry, requests),
-                    total=len(requests),
-                    desc="Processing instances",
-                    unit="inst",
+            async def process(req: LMRequest) -> list[LMOutput]:
+                async with semaphore:
+                    result = await self._retry_with_backoff_async(
+                        lambda r=req: self._generate_single_async(r, params),
+                        context=f"generate model={self.model_name}",
+                    )
+                    pbar.update(1)
+                    return result
+
+            results = await asyncio.gather(*[process(r) for r in requests])
+            pbar.close()
+            return list(results)
+
+        return asyncio.run(arun())
+
+    async def _logprobs_single_async(self, request: LMRequest) -> list[LMOutput]:
+        """Compute logprobs for a single request."""
+        if request.messages:
+            content = request.messages[0].get("content", "") if request.messages else ""
+        else:
+            content = request.prompt
+
+        response = await self._litellm.acompletion(
+            model=self.model_name,
+            messages=[{"role": "user", "content": content}],
+            max_completion_tokens=50,
+            temperature=0.0,
+            logprobs=True,
+            **self.api_kwargs,
+        )
+
+        # Extract logprobs from response
+        completion_logprobs: list[LogProbEntry] = []
+        if response.choices:
+            choice = response.choices[0]
+            logprobs_data = getattr(choice, "logprobs", None)
+            if logprobs_data and hasattr(logprobs_data, "content") and logprobs_data.content:
+                for lp in logprobs_data.content:
+                    entry: LogProbEntry = {"token": lp.token, "logprob": lp.logprob}
+                    lp_bytes = getattr(lp, "bytes", None)
+                    if lp_bytes is not None:
+                        entry["bytes"] = lp_bytes
+                    completion_logprobs.append(entry)
+
+        # Map to continuations
+        outputs = []
+        for continuation in request.continuations or ():
+            total = (
+                sum(lp["logprob"] for lp in completion_logprobs[:5]) if completion_logprobs else 0.0
+            )
+            outputs.append(
+                LMOutput(
+                    text=continuation,
+                    logprobs=completion_logprobs[:5] if completion_logprobs else None,
+                    metadata={"total_logprob": total},
                 )
             )
 
-        return results
+        return outputs
 
     def logprobs(
         self,
@@ -303,69 +357,23 @@ class LiteLLMProvider(InferenceProvider):
         This implementation provides an approximation by generating a response
         and returning those logprobs.
         """
-
-        def _logprobs_single(request: LMRequest) -> list[LMOutput]:
-            if request.messages:
-                content = request.messages[0].get("content", "") if request.messages else ""
-            else:
-                content = request.prompt
-
-            response = self._litellm.completion(
-                model=self.model_name,
-                messages=[{"role": "user", "content": content}],
-                max_completion_tokens=50,
-                temperature=0.0,
-                logprobs=True,
-                **self.api_kwargs,
-            )
-
-            # Extract logprobs from response
-            completion_logprobs: list[LogProbEntry] = []
-            if response.choices:
-                choice = response.choices[0]
-                logprobs_data = getattr(choice, "logprobs", None)
-                if logprobs_data and hasattr(logprobs_data, "content") and logprobs_data.content:
-                    for lp in logprobs_data.content:
-                        entry: LogProbEntry = {"token": lp.token, "logprob": lp.logprob}
-                        lp_bytes = getattr(lp, "bytes", None)
-                        if lp_bytes is not None:
-                            entry["bytes"] = lp_bytes
-                        completion_logprobs.append(entry)
-
-            # Map to continuations
-            outputs = []
-            for continuation in request.continuations or ():
-                total = (
-                    sum(lp["logprob"] for lp in completion_logprobs[:5])
-                    if completion_logprobs
-                    else 0.0
-                )
-                outputs.append(
-                    LMOutput(
-                        text=continuation,
-                        logprobs=completion_logprobs[:5] if completion_logprobs else None,
-                        metadata={"total_logprob": total},
-                    )
-                )
-
-            return outputs
-
-        def logprobs_with_retry(req: LMRequest) -> list[LMOutput]:
-            return self._retry_with_backoff(
-                lambda: _logprobs_single(req),
-                context=f"logprobs model={self.model_name}",
-            )
-
         from tqdm import tqdm
 
-        with ThreadPoolExecutor(max_workers=self.max_concurrency) as executor:
-            results = list(
-                tqdm(
-                    executor.map(logprobs_with_retry, requests),
-                    total=len(requests),
-                    desc="Processing instances",
-                    unit="inst",
-                )
-            )
+        async def _run() -> list[list[LMOutput]]:
+            semaphore = asyncio.Semaphore(self.max_concurrency)
+            pbar = tqdm(total=len(requests), desc="Processing instances", unit="inst")
 
-        return results
+            async def process(req: LMRequest) -> list[LMOutput]:
+                async with semaphore:
+                    result = await self._retry_with_backoff_async(
+                        lambda r=req: self._logprobs_single_async(r),
+                        context=f"logprobs model={self.model_name}",
+                    )
+                    pbar.update(1)
+                    return result
+
+            results = await asyncio.gather(*[process(r) for r in requests])
+            pbar.close()
+            return list(results)
+
+        return asyncio.run(_run())
