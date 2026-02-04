@@ -407,7 +407,9 @@ def run(
                 try:
                     runner.run()
                 except Exception as e:
+                    import traceback
                     console.print(f"\n[bold red]Evaluation failed:[/bold red] {e}")
+                    traceback.print_exc()
                     raise SystemExit(1) from None
 
         return  # Exit early since we handled everything in the loop
@@ -425,5 +427,7 @@ def run(
         try:
             runner.run()
         except Exception as e:
+            import traceback
             console.print(f"\n[bold red]Evaluation failed:[/bold red] {e}")
+            traceback.print_exc()
             raise SystemExit(1) from None

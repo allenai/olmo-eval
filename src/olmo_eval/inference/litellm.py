@@ -6,8 +6,13 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+import litellm
+
 # Limit concurrent requests to avoid connection errors
-_MAX_WORKERS = 10
+_MAX_WORKERS = 4
+
+# Number of retries for transient connection errors
+_NUM_RETRIES = 3
 
 from olmo_eval.core import LMOutput, LMRequest, SamplingParams
 from olmo_eval.core.types import LogProbEntry
@@ -82,7 +87,7 @@ class LiteLLMProvider(InferenceProvider):
         if params.logprobs is not None:
             kwargs["logprobs"] = True
 
-        response = self._litellm.completion(**kwargs)
+        response = self._litellm.completion(num_retries=_NUM_RETRIES, **kwargs)
 
         outputs = []
         for choice in response.choices:
@@ -140,6 +145,7 @@ class LiteLLMProvider(InferenceProvider):
                 max_completion_tokens=50,
                 temperature=0.0,
                 logprobs=True,
+                num_retries=_NUM_RETRIES,
                 **self.api_kwargs,
             )
 

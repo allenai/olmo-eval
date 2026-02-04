@@ -58,6 +58,9 @@ postgres = [
     "sqlalchemy>=2.0.46",
     "alembic>=1.18.1",
 ]
+math-verify = [
+    "math-verify>=0.7.0",
+]
 storage = [
     "olmo-eval-internal[s3,postgres]",
 ]

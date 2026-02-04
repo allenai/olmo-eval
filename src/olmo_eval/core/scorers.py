@@ -37,17 +37,77 @@ class ExactMatchScorer(Scorer):
     name: str = "exact_match"
     case_sensitive: bool = False
     strip_whitespace: bool = True
+    remove_whitespace: bool = False
+
+    def _normalize(self, text: str) -> str:
+        """Normalize text for comparison."""
+        if self.remove_whitespace:
+            text = "".join(text.split())
+        elif self.strip_whitespace:
+            text = text.strip()
+        if not self.case_sensitive:
+            text = text.lower()
+        return text
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         if instance.gold_answer is None or output.extracted_answer is None:
             return 0.0
-        gold = instance.gold_answer
-        pred = str(output.extracted_answer)
-        if self.strip_whitespace:
-            gold, pred = gold.strip(), pred.strip()
-        if not self.case_sensitive:
-            gold, pred = gold.lower(), pred.lower()
+        gold = self._normalize(instance.gold_answer)
+        pred = self._normalize(str(output.extracted_answer))
         return 1.0 if gold == pred else 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class ExactMatchFlexScorer(Scorer):
+    """Score 1.0 if ANY extracted answer matches ANY gold answer, else 0.0.
+
+    This scorer is more flexible than ExactMatchScorer:
+    - Checks all extracted answers from the generation (via output.metadata["all_extracted_answers"])
+    - Checks against all gold answers (via instance.metadata["all_gold_answers"])
+    - Returns 1.0 if any combination matches
+
+    Falls back to single gold_answer/extracted_answer if metadata is not available.
+    """
+
+    name: str = "exact_match_flex"
+    case_sensitive: bool = False
+    strip_whitespace: bool = True
+    remove_whitespace: bool = False
+
+    def _normalize(self, text: str) -> str:
+        """Normalize text for comparison."""
+        if self.remove_whitespace:
+            text = "".join(text.split())
+        elif self.strip_whitespace:
+            text = text.strip()
+        if not self.case_sensitive:
+            text = text.lower()
+        return text
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        # Get all gold answers from metadata, or fall back to single gold_answer
+        all_gold: list[str] = instance.metadata.get("all_gold_answers", [])
+        if not all_gold:
+            if instance.gold_answer is None:
+                return 0.0
+            all_gold = [instance.gold_answer]
+
+        # Get all extracted answers from metadata, or fall back to extracted_answer
+        all_extracted: list[str] = output.metadata.get("all_extracted_answers", [])
+        if not all_extracted:
+            if output.extracted_answer is None:
+                return 0.0
+            all_extracted = [str(output.extracted_answer)]
+
+        # Check if ANY extracted answer matches ANY gold answer
+        for pred in all_extracted:
+            pred_norm = self._normalize(str(pred))
+            for gold in all_gold:
+                gold_norm = self._normalize(str(gold))
+                if pred_norm == gold_norm:
+                    return 1.0
+
+        return 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,3 +276,108 @@ class CodeExecutionScorer(Scorer):
 
         success, _ = _execute_code_unsafe(full_code, self.timeout)
         return 1.0 if success else 0.0
+
+
+@dataclass(frozen=True)
+class MathVerifyScorer(Scorer):
+    """Score math answers using HuggingFace's Math-Verify library.
+
+    This scorer uses symbolic verification to compare mathematical expressions,
+    handling LaTeX notation, algebraic expressions, and numerical equivalence.
+
+    See: https://github.com/huggingface/Math-Verify
+
+    Note: Requires the 'math-verify' optional dependency.
+    """
+
+    name: str = "math_verify"
+    use_latex: bool = True
+    use_expr: bool = True
+    timeout: int = 10
+
+    def __post_init__(self) -> None:
+        if not self.use_latex and not self.use_expr:
+            raise ValueError("At least one extraction method must be enabled")
+
+    def _get_extraction_configs(self) -> list:
+        """Build extraction configs lazily to avoid import at class definition time."""
+        try:
+            from math_verify import ExprExtractionConfig, LatexExtractionConfig
+        except ImportError as e:
+            raise ImportError(
+                "MathVerifyScorer requires the 'math-verify' package. "
+                "Install it with: pip install math-verify"
+            ) from e
+
+        configs = []
+        if self.use_latex:
+            configs.append(LatexExtractionConfig())
+        if self.use_expr:
+            configs.append(ExprExtractionConfig())
+        return configs
+
+    def _parse_answer(self, text: str) -> list[Any] | None:
+        """Parse a text string into a list of mathematical expressions."""
+        try:
+            from math_verify import parse
+        except ImportError as e:
+            raise ImportError(
+                "MathVerifyScorer requires the 'math-verify' package. "
+                "Install it with: pip install math-verify"
+            ) from e
+
+        try:
+            return parse(
+                text,
+                extraction_config=self._get_extraction_configs(),
+                parsing_timeout=-1,  # timeout handled at verification level
+            )
+        except Exception:
+            return None
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        """Score by comparing parsed mathematical expressions.
+
+        Uses the generated text directly (not extracted_answer) to allow
+        Math-Verify to handle its own extraction logic.
+
+        If the instance metadata contains 'all_gold_answers', checks if the
+        generated answer matches ANY of them. Otherwise falls back to the
+        single gold_answer.
+        """
+        try:
+            from math_verify import verify
+        except ImportError as e:
+            raise ImportError(
+                "MathVerifyScorer requires the 'math-verify' package. "
+                "Install it with: pip install math-verify"
+            ) from e
+
+        # Get all gold answers from metadata, or fall back to single gold_answer
+        all_gold_answers: list[str] = instance.metadata.get("all_gold_answers", [])
+        if not all_gold_answers:
+            if instance.gold_answer is None:
+                return 0.0
+            all_gold_answers = [str(instance.gold_answer)]
+
+        generated_text = output.text
+
+        # Parse the generated answer
+        parsed_generated = self._parse_answer(generated_text)
+        if parsed_generated is None:
+            return 0.0
+
+        # Check if generated answer matches ANY of the gold answers
+        for gold_text in all_gold_answers:
+            parsed_gold = self._parse_answer(str(gold_text))
+            if parsed_gold is None:
+                continue
+
+            # Use Math-Verify's verify function to compare
+            try:
+                if verify(parsed_gold, parsed_generated):
+                    return 1.0
+            except Exception:
+                continue
+
+        return 0.0
