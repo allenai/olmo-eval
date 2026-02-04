@@ -15,6 +15,12 @@ class Formatter(ABC):
         - format(): method to convert an instance to an LMRequest
     """
 
+    @property
+    @abstractmethod
+    def request_type(self) -> RequestType:
+        """The type of request this formatter produces."""
+        ...
+
     @abstractmethod
     def format(
         self,
@@ -44,6 +50,10 @@ class ChatFormatter(Formatter):
     user_template: str = "{question}"
     assistant_template: str = "{answer}"
 
+    @property
+    def request_type(self) -> RequestType:
+        return RequestType.CHAT
+
     def format(
         self,
         instance: Instance,
@@ -72,7 +82,7 @@ class ChatFormatter(Formatter):
             }
         )
         return LMRequest(
-            request_type=RequestType.CHAT,
+            request_type=self.request_type,
             messages=tuple(messages),
             system_prompt=self.system_prompt if self.system_prompt else None,
         )
@@ -85,6 +95,10 @@ class CompletionFormatter(Formatter):
     template: str = "{question}"
     fewshot_separator: str = "\n\n"
     answer_prefix: str = ""
+
+    @property
+    def request_type(self) -> RequestType:
+        return RequestType.COMPLETION
 
     def format(
         self,
@@ -99,7 +113,7 @@ class CompletionFormatter(Formatter):
             parts.append(example)
         parts.append(self.template.format(question=instance.question) + self.answer_prefix)
         prompt = self.fewshot_separator.join(parts)
-        return LMRequest(request_type=RequestType.COMPLETION, prompt=prompt)
+        return LMRequest(request_type=self.request_type, prompt=prompt)
 
 
 @dataclass(slots=True)
@@ -109,6 +123,10 @@ class MultipleChoiceFormatter(Formatter):
     template: str = "{question}"
     choice_template: str = "{choice}"
     include_choices_in_prompt: bool = True
+
+    @property
+    def request_type(self) -> RequestType:
+        return RequestType.COMPLETION
 
     def format(
         self,
@@ -126,7 +144,7 @@ class MultipleChoiceFormatter(Formatter):
                 prompt = f"{prompt}\n\n{choices_text}"
             continuations = tuple(self.choice_template.format(choice=c) for c in instance.choices)
         return LMRequest(
-            request_type=RequestType.COMPLETION,
+            request_type=self.request_type,
             prompt=prompt,
             continuations=continuations,
         )
@@ -137,6 +155,10 @@ class MCQAChatFormatter(Formatter):
     """Format multiple choice questions for chat-based CoT generation."""
 
     system_prompt: str = ""
+
+    @property
+    def request_type(self) -> RequestType:
+        return RequestType.CHAT
 
     def format(
         self,
@@ -159,7 +181,7 @@ class MCQAChatFormatter(Formatter):
         messages.append({"role": "user", "content": question_text})
 
         return LMRequest(
-            request_type=RequestType.CHAT,
+            request_type=self.request_type,
             messages=tuple(messages),
             system_prompt=self.system_prompt if self.system_prompt else None,
         )
@@ -184,6 +206,10 @@ class PPLFormatter(Formatter):
     # has "\n\n" before the current doc's text (due to: join(...) + "\n\n" + text).
     always_prepend_separator: bool = False
     answer_prefix: str = ""
+
+    @property
+    def request_type(self) -> RequestType:
+        return RequestType.LOGLIKELIHOOD
 
     def format(
         self,
@@ -234,7 +260,7 @@ class PPLFormatter(Formatter):
             gold_text = " " + gold_text
 
         return LMRequest(
-            request_type=RequestType.LOGLIKELIHOOD,
+            request_type=self.request_type,
             prompt=prompt,
             continuations=(gold_text,),
         )

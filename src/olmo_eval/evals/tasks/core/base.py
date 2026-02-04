@@ -15,6 +15,7 @@ from olmo_eval.core.types import (
     LMOutput,
     LMRequest,
     MetricName,
+    RequestType,
     Response,
     SamplingParams,
     Split,
@@ -201,6 +202,13 @@ class Task(ABC):
         self.config = config
         self._fewshot_cache: list[Instance] | None = None
         self._instances_cache: list[Instance] | None = None
+
+    @property
+    def request_type(self) -> RequestType:
+        """The type of request this task produces."""
+        if self.config.formatter is not None:
+            return self.config.formatter.request_type
+        return RequestType.COMPLETION
 
     @property
     @abstractmethod

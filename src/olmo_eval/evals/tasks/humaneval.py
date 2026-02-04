@@ -9,7 +9,6 @@ from olmo_eval.core.types import (
     Instance,
     LMOutput,
     LMRequest,
-    RequestType,
     Response,
     SamplingParams,
 )
@@ -71,7 +70,7 @@ class HumanEvalTask(Task):
             return self.config.formatter.format(instance, self.get_fewshot())
 
         return LMRequest(
-            request_type=RequestType.COMPLETION,
+            request_type=self.request_type,
             prompt=instance.question,
         )
 

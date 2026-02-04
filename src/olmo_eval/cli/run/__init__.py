@@ -331,8 +331,8 @@ def run(
     # Build configuration
     run_config = config_builder.build()
 
-    # Validate BPB tasks with async-stream
-    config_builder.validate_bpb_tasks(run_config.task_specs)
+    # Validate task compatibility with async-stream
+    config_builder.validate_task_compatibility(run_config.task_specs)
 
     # Set up storage backends
     storage_setup = StorageSetup(

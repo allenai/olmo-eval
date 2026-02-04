@@ -120,6 +120,12 @@ class AgentTask(Task):
         super().__init__(config)
 
     @property
+    def request_type(self) -> RequestType:
+        if self.config.formatter is not None:
+            return self.config.formatter.request_type
+        return RequestType.CHAT
+
+    @property
     def system_prompt(self) -> str | None:
         """Get system prompt from the formatter, if configured."""
         if self.config.formatter and hasattr(self.config.formatter, "system_prompt"):
@@ -212,7 +218,7 @@ class AgentTask(Task):
         tools = instance.tools or self.config.tools or None
 
         return LMRequest(
-            request_type=RequestType.CHAT,
+            request_type=self.request_type,
             messages=({"role": "user", "content": instance.question},),
             tools=tools if tools else None,
         )

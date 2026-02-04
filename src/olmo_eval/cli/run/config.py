@@ -7,7 +7,7 @@ from typing import Any
 
 from rich.console import Console
 
-from olmo_eval.core.types import RunnerType
+from olmo_eval.core.types import RequestType, RunnerType
 
 console = Console()
 
@@ -285,29 +285,59 @@ class RunConfigBuilder:
 
         return True
 
-    def validate_bpb_tasks(self, task_specs: list[str]) -> None:
-        """Check for incompatible task types with async-stream runner.
+    #: (runner_type, request_type) pairs that are known to be incompatible,
+    #: mapped to a human-readable reason shown in the error message.
+    INCOMPATIBLE_RUNNER_REQUEST: dict[tuple[RunnerType, RequestType], str] = {
+        (RunnerType.ASYNC_STREAM, RequestType.LOGLIKELIHOOD): (
+            "Loglikelihood scoring requires prompt_logprobs, which is not "
+            "supported by the streaming vLLM backend."
+        ),
+    }
+
+    def validate_task_compatibility(self, task_specs: list[str]) -> None:
+        """Check that every task's request type is compatible with the runner.
+
+        Uses :attr:`INCOMPATIBLE_RUNNER_REQUEST` to decide which
+        (runner_type, request_type) combinations are invalid.
 
         Args:
             task_specs: List of task specifications to check.
 
         Raises:
-            SystemExit: If BPB tasks are used with async-stream runner.
+            SystemExit: If any task produces a request type incompatible with the runner.
         """
-        if self.runner_type != RunnerType.ASYNC_STREAM:
+        from olmo_eval.evals.tasks import get_task
+
+        # Collect the request types that are blocked for the current runner.
+        blocked: dict[RequestType, str] = {
+            req: reason
+            for (runner, req), reason in self.INCOMPATIBLE_RUNNER_REQUEST.items()
+            if runner == self.runner_type
+        }
+        if not blocked:
             return
 
-        bpb_tasks = [t for t in task_specs if ":bpb" in t]
-        if bpb_tasks:
+        # Group incompatible tasks by reason so each reason is reported once.
+        by_reason: dict[str, list[str]] = {}
+        for spec in task_specs:
+            try:
+                task = get_task(spec)
+            except KeyError:
+                continue  # Unknown tasks caught later by runner.validate()
+            reason = blocked.get(task.request_type)
+            if reason is not None:
+                by_reason.setdefault(reason, []).append(spec)
+
+        if not by_reason:
+            return
+
+        for reason, specs in by_reason.items():
             console.print(
-                "\n[bold red]Error:[/bold red] The following :bpb tasks cannot run "
-                "with --runner-type async-stream:\n"
-                f"  {', '.join(bpb_tasks)}\n\n"
-                "[yellow]BPB (bits-per-byte) tasks use loglikelihood scoring which "
-                "requires\n"
-                "prompt_logprobs - a feature not supported by the streaming vLLM "
-                "backend.[/yellow]\n\n"
-                "Use [bold]--runner-type async[/bold] or the default sync mode instead:\n"
-                f"  olmo-eval run -m <model> -t {' -t '.join(bpb_tasks)} --runner-type async\n"
+                f"\n[bold red]Error:[/bold red] The following tasks cannot run "
+                f"with --runner-type {self.runner_type.value}:\n"
+                f"  {', '.join(specs)}\n\n"
+                f"[yellow]{reason}[/yellow]\n\n"
+                f"Use [bold]--runner-type async[/bold] or the default sync mode instead:\n"
+                f"  olmo-eval run -m <model> -t {' -t '.join(specs)} --runner-type async\n"
             )
-            raise SystemExit(1)
+        raise SystemExit(1)

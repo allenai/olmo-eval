@@ -26,6 +26,12 @@ class C4Task(Task):
         super().__init__(config)
 
     @property
+    def request_type(self) -> RequestType:
+        if self.config.formatter is not None:
+            return self.config.formatter.request_type
+        return RequestType.LOGLIKELIHOOD
+
+    @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the test split."""
         if self._instances_cache is None:
@@ -65,7 +71,7 @@ class C4Task(Task):
         gold = instance.gold_answer
         continuations = (gold,) if gold is not None else None
         return LMRequest(
-            request_type=RequestType.LOGLIKELIHOOD,
+            request_type=self.request_type,
             prompt=instance.question,
             continuations=continuations,
         )
