@@ -23,8 +23,10 @@ from olmo_eval.core.constants.infrastructure import (
     OE_EVAL_COMMIT_HASH,
     OE_EVAL_GIT_URL,
     OE_EVAL_LAUNCH_COMMAND,
+    WEKA_CLUSTERS,
     WEKA_MOUNTS,
     BeakerPriority,
+    cluster_has_weka,
 )
 
 # Model constants
@@ -67,7 +69,9 @@ __all__ = [
     "OE_EVAL_COMMIT_HASH",
     "OE_EVAL_GIT_URL",
     "OE_EVAL_LAUNCH_COMMAND",
+    "WEKA_CLUSTERS",
     "WEKA_MOUNTS",
+    "cluster_has_weka",
     # Models
     "AI2_OLMO_CORE_GIT_URL",
     "AI2_OLMO_GIT_URL",

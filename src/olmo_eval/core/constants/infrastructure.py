@@ -117,6 +117,16 @@ NEW_CLUSTER_ALIASES: dict[str, str] = {
 # Weka Storage Mounts
 # =============================================================================
 
+WEKA_CLUSTERS: set[str] = {
+    # Add canonical cluster names (e.g. "ai2/jupiter") that have Weka storage.
+}
+"""Clusters with Weka storage available.
+
+Uses canonical cluster names (the short form from NEW_CLUSTER_ALIASES values
+and BEAKER_KNOWN_CLUSTERS entries, e.g. ``"ai2/jupiter"``).
+"""
+
+
 WEKA_MOUNTS: tuple[str, ...] = (
     "ai1-default",
     "climate-default",
@@ -133,6 +143,24 @@ WEKA_MOUNTS: tuple[str, ...] = (
     "skylight-default",
 )
 """Available Weka storage mount points for Beaker jobs."""
+
+
+def cluster_has_weka(cluster: str) -> bool:
+    """Check whether a cluster has Weka storage available.
+
+    Handles aliases (e.g. ``"aus"``), legacy names
+    (e.g. ``"ai2/jupiter-cirrascale-2"``), and canonical names
+    (e.g. ``"ai2/jupiter"``).  If *cluster* is an alias that maps to
+    multiple clusters, returns ``True`` only when **all** of them have Weka.
+    """
+    # Resolve legacy name → canonical
+    canonical = NEW_CLUSTER_ALIASES.get(cluster, cluster)
+
+    # Alias that expands to a group of clusters
+    if canonical in BEAKER_KNOWN_CLUSTERS:
+        return all(c in WEKA_CLUSTERS for c in BEAKER_KNOWN_CLUSTERS[canonical])
+
+    return canonical in WEKA_CLUSTERS
 
 
 # =============================================================================

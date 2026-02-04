@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
+from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR, cluster_has_weka
 from olmo_eval.core.types import RunnerType
 
 if TYPE_CHECKING:
@@ -110,14 +110,21 @@ class JobConfigAssembler:
         )
 
         # Build env vars
-        job_env_vars = {
-            "HF_HOME": "/weka/oe-eval-default/oyvindt/hf-cache",
-            "HF_HUB_CACHE": "/weka/oe-eval-default/oyvindt/hf-cache",
+        job_env_vars: dict[str, str] = {
             "BEAKER_AUTHOR": self.beaker_username,
-            "UV_LINK_MODE": "copy",
         }
-        if self.config.uv_cache_dir:
-            job_env_vars["UV_CACHE_DIR"] = self.config.uv_cache_dir
+
+        # Weka-dependent paths are only useful on clusters with Weka storage
+        if cluster_has_weka(effective_cluster):
+            job_env_vars.update(
+                {
+                    "HF_HOME": "/weka/oe-eval-default/oyvindt/hf-cache",
+                    "HF_HUB_CACHE": "/weka/oe-eval-default/oyvindt/hf-cache",
+                    "UV_LINK_MODE": "copy",
+                }
+            )
+            if self.config.uv_cache_dir:
+                job_env_vars["UV_CACHE_DIR"] = self.config.uv_cache_dir
 
         # Extract task dependencies (from both registered configs and CLI overrides)
         task_packages = self._extract_task_dependencies(exp.tasks, exp.task_overrides)
