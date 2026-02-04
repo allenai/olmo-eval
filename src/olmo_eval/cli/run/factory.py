@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from rich.console import Console
 
+from olmo_eval.cli.run.config import RunConfig
 from olmo_eval.core.types import RunnerType
-
-if TYPE_CHECKING:
-    from olmo_eval.cli.run.config import RunConfig
-    from olmo_eval.runners.models import S3Config
-    from olmo_eval.storage import StorageBackend
+from olmo_eval.runners.models import S3Config
+from olmo_eval.storage import StorageBackend
 
 console = Console()
 
