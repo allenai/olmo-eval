@@ -191,13 +191,22 @@ class LiteLLMProvider(InferenceProvider):
         requests: list[LMRequest],
         sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
+        from tqdm import tqdm
+
         params = self._default_sampling_params(sampling_params)
 
         def generate_with_retry(req: LMRequest) -> list[LMOutput]:
             return self._retry_with_backoff(lambda: self._generate_single(req, params))
 
         with ThreadPoolExecutor(max_workers=self.max_concurrency) as executor:
-            results = list(executor.map(generate_with_retry, requests))
+            results = list(
+                tqdm(
+                    executor.map(generate_with_retry, requests),
+                    total=len(requests),
+                    desc="Processing instances",
+                    unit="inst",
+                )
+            )
 
         return results
 
@@ -261,7 +270,16 @@ class LiteLLMProvider(InferenceProvider):
         def logprobs_with_retry(req: LMRequest) -> list[LMOutput]:
             return self._retry_with_backoff(lambda: _logprobs_single(req))
 
+        from tqdm import tqdm
+
         with ThreadPoolExecutor(max_workers=self.max_concurrency) as executor:
-            results = list(executor.map(logprobs_with_retry, requests))
+            results = list(
+                tqdm(
+                    executor.map(logprobs_with_retry, requests),
+                    total=len(requests),
+                    desc="Processing instances",
+                    unit="inst",
+                )
+            )
 
         return results
