@@ -7,11 +7,11 @@ with LiteLLM and OpenAI's API format.
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any, ClassVar, Literal
 
 
-class ToolCategory(str, Enum):
+class ToolCategory(StrEnum):
     """Categories of tools for classification and filtering."""
 
     SEARCH = "search"

@@ -49,12 +49,8 @@ class ModelConfig:
         """
         if override:
             return override
-        # Handle both ProviderConfig object and dict (from YAML/dict deserialization)
-        if isinstance(self.provider, dict):
-            kind = self.provider.get("kind", "vllm")
-        else:
-            kind = self.provider.kind
-        return kind.value if hasattr(kind, "value") else kind
+        kind = self.provider.kind
+        return str(kind.value) if hasattr(kind, "value") else str(kind)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary for JSON output."""

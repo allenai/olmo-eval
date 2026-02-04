@@ -1,6 +1,6 @@
 """Language model inference providers."""
 
-from enum import Enum
+from enum import StrEnum
 
 from .base import InferenceProvider
 from .mock import MockProvider
@@ -27,7 +27,7 @@ __all__ = [
 ]
 
 
-class ProviderType(str, Enum):
+class ProviderType(StrEnum):
     """Supported provider types."""
 
     MOCK = "mock"

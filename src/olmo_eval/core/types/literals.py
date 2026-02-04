@@ -1,10 +1,10 @@
 """Literal type definitions for constrained string values."""
 
-from enum import Enum
+from enum import StrEnum
 from typing import Literal
 
 
-class ProviderKind(str, Enum):
+class ProviderKind(StrEnum):
     """Provider types for inference backends."""
 
     VLLM = "vllm"

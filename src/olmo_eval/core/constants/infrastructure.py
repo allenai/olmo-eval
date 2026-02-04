@@ -4,7 +4,7 @@ This module contains configuration constants for AI2's compute infrastructure,
 including Beaker workspace settings, cluster definitions, and Weka storage mounts.
 """
 
-from enum import Enum
+from enum import StrEnum
 
 # =============================================================================
 # Beaker Configuration
@@ -35,7 +35,7 @@ DEFAULT_MAX_GPUS_PER_NODE = 8
 """Default maximum GPUs available per node for experiment splitting."""
 
 
-class BeakerPriority(str, Enum):
+class BeakerPriority(StrEnum):
     """Valid Beaker job priority levels."""
 
     LOW = "low"

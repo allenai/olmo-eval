@@ -7,14 +7,14 @@ and model presets for evaluation.
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from olmo_eval.core.configs import ModelConfig
 
 
-class OlmoModelType(str, Enum):
+class OlmoModelType(StrEnum):
     """Supported OLMo model architecture types."""
 
     OLMOE = "olmoe"
@@ -91,7 +91,7 @@ OLMO_CORE_CONVERT_FROM_HF_SCRIPT = "src/examples/huggingface/convert_checkpoint_
 """Path to script for converting HuggingFace checkpoints to OLMo-core format."""
 
 
-class OlmoCoreDtype(str, Enum):
+class OlmoCoreDtype(StrEnum):
     """Supported data types for OLMo-core checkpoint conversion."""
 
     FLOAT32 = "float32"

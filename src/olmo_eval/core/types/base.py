@@ -6,7 +6,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum, auto
+from enum import Enum, StrEnum, auto
 from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
 
 if TYPE_CHECKING:
@@ -57,7 +57,7 @@ def compute_task_hash(config: dict[str, Any] | None) -> str | None:
     return hashlib.sha256(config_str.encode()).hexdigest()[:16]
 
 
-class Split(str, Enum):
+class Split(StrEnum):
     """Dataset split identifiers."""
 
     TRAIN = "train"
@@ -65,7 +65,7 @@ class Split(str, Enum):
     TEST = "test"
 
 
-class MetricName(str, Enum):
+class MetricName(StrEnum):
     """Standard metric identifiers."""
 
     ACCURACY = "accuracy"
@@ -77,7 +77,7 @@ class MetricName(str, Enum):
     F1 = "f1"
 
 
-class RunnerType(str, Enum):
+class RunnerType(StrEnum):
     """Runner type for evaluation execution.
 
     Determines which evaluation runner to use:

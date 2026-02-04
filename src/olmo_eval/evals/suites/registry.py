@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from functools import lru_cache
 
 
@@ -24,7 +24,7 @@ def _expand_tasks(suite: Suite) -> tuple[str, ...]:
     return tuple(expanded)
 
 
-class AggregationStrategy(str, Enum):
+class AggregationStrategy(StrEnum):
     """How to combine results from tasks in a suite.
 
     Attributes:
