@@ -157,9 +157,8 @@ class SyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             extra_kwargs["model_loader_extra_config"] = self.model_overrides["extra_loader_config"]
 
         # API concurrency from provider config (for litellm and other API-based providers)
-        provider_config = self.model_overrides.get("provider", {})
-        if isinstance(provider_config, dict) and provider_config.get("max_concurrency"):
-            extra_kwargs["max_concurrency"] = provider_config["max_concurrency"]
+        if model_config.provider.max_concurrency:
+            extra_kwargs["max_concurrency"] = model_config.provider.max_concurrency
 
         # Track provider init time
         provider_init_start = time.time()

@@ -199,7 +199,7 @@ class RunConfigBuilder:
             if not provider and "provider" in first_overrides:
                 provider = first_overrides["provider"]
                 if isinstance(provider, dict):
-                    provider = provider.get("name")
+                    provider = provider.get("kind")
             if not attention_backend and "attention_backend" in first_overrides:
                 attention_backend = first_overrides["attention_backend"]
 

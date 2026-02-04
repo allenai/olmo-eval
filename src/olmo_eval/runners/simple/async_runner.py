@@ -116,13 +116,8 @@ class AsyncEvalRunner(AsyncBaseRunner):
                 effective_load_format = per_model_overrides.get("load_format")
                 effective_extra_loader_config = per_model_overrides.get("extra_loader_config")
 
-                # Get max_concurrency from provider config
-                provider_config = per_model_overrides.get("provider", {})
-                effective_max_concurrency = (
-                    provider_config.get("max_concurrency")
-                    if isinstance(provider_config, dict)
-                    else None
-                )
+                # Get max_concurrency from the resolved model config
+                effective_max_concurrency = model_config.provider.max_concurrency
 
                 for i in range(workers_per_model):
                     worker_id = get_worker_id(model_config.model, i)
