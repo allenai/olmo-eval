@@ -42,10 +42,7 @@ logger = get_logger(__name__)
 
 @dataclass
 class AsyncBaseRunner(AsyncRunnerMixin, BaseEvalRunner):
-    """Base class for async evaluation runners.
-
-    Provides common infrastructure for AsyncEvalRunner and StreamingEvalRunner.
-    """
+    """Base class for async evaluation runners."""
 
     model_names: list[str] = field(default_factory=list)
     task_specs: list[str] = field(default_factory=list)

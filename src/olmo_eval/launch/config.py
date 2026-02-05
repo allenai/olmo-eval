@@ -83,7 +83,7 @@ class BeakerModelSpec:
         preemptible: Whether this model's jobs can be preempted.
         timeout: Timeout for this model's jobs.
         shared_memory: Shared memory size (e.g., "10GiB").
-        runner_type: Runner type (sync, async, async-stream, agent). Overrides default.
+        runner_type: Runner type (async or agent). Overrides default.
         num_workers: Number of workers for async modes (overrides default).
         gpus_per_worker: GPUs per worker for async modes (overrides default).
         provider: Inference provider configuration (ProviderConfig with name and optional package).
@@ -128,7 +128,7 @@ class BeakerModelSpec:
     timeout: str | None = None
     shared_memory: str | None = None
 
-    # Runner type (sync, async, async-stream, agent)
+    # Runner type (async or agent)
     runner_type: str | None = None  # String for OmegaConf compatibility
     num_workers: int | None = None
     gpus_per_worker: int | None = None
@@ -422,7 +422,7 @@ class EvalConfig:
         beaker_image: Container image to use.
         description: Optional experiment description.
         groups: List of Beaker groups to add experiments to.
-        runner_type: Default runner type (sync, async, async-stream, agent).
+        runner_type: Default runner type (async or agent).
         num_workers: Number of workers for async modes.
         gpus_per_worker: GPUs per worker for async modes.
         pack_models: Pack multiple models into single experiments when they fit.
@@ -446,7 +446,7 @@ class EvalConfig:
     retries: int | None = None
 
     # Runner type and worker settings
-    runner_type: str = RunnerType.SYNC.value  # String for OmegaConf compatibility
+    runner_type: str = RunnerType.ASYNC.value  # String for OmegaConf compatibility
     num_workers: int | None = None
     gpus_per_worker: int = 1
 
@@ -491,7 +491,7 @@ class EvalConfig:
 
         # Calculate GPUs per model instance
         # For async modes, GPUs are calculated from workers
-        if runner_type in (RunnerType.ASYNC, RunnerType.ASYNC_STREAM) and num_workers is not None:
+        if runner_type == RunnerType.ASYNC and num_workers is not None:
             gpus_per_model = num_workers * gpus_per_worker
         else:
             gpus_per_model = model.gpus

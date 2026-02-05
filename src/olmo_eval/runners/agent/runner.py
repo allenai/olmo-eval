@@ -38,7 +38,7 @@ class AgentEvalRunner(RunnerResultsMixin, BaseEvalRunner):
     internally, so this runner does not initialize an inference provider.
 
     Use this runner when all tasks are AgentTask instances. For standard tasks,
-    use SyncEvalRunner, AsyncEvalRunner, or StreamingEvalRunner instead.
+    use AsyncEvalRunner instead.
     """
 
     model_name: str = ""
@@ -93,7 +93,7 @@ class AgentEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             task = get_task(spec)
             if not isinstance(task, AgentTask):
                 errors.append(
-                    f"Task '{spec}' is not an agent task. Use SyncEvalRunner for standard tasks."
+                    f"Task '{spec}' is not an agent task. Use AsyncEvalRunner for standard tasks."
                 )
 
         if errors:
@@ -144,7 +144,7 @@ class AgentEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 raise ValidationError(
                     f"Task '{spec}' is not an agent task. "
                     "AgentEvalRunner only supports AgentTask instances. "
-                    "Use SyncEvalRunner for standard tasks."
+                    "Use AsyncEvalRunner for standard tasks."
                 )
 
         from olmo_eval.runners.mixins import get_model_display_name

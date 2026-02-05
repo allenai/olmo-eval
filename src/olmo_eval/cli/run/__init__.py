@@ -62,8 +62,8 @@ from olmo_eval.core.types import RunnerType
     "--runner-type",
     "-R",
     type=click.Choice([e.value for e in RunnerType], case_sensitive=False),
-    default=RunnerType.SYNC.value,
-    help="Runner type: sync (default), async, async-stream, or agent",
+    default=RunnerType.ASYNC.value,
+    help="Runner type: async (default) or agent",
 )
 @click.option(
     "--num-workers",
@@ -251,9 +251,7 @@ def run(
     Supports multiple models: use -m multiple times for multi-model runs.
 
     Runner types:
-      - sync (default): Sequential execution, one task at a time
-      - async: Parallel execution with multiple worker processes
-      - async-stream: Streaming with vLLM's AsyncLLMEngine (vLLM only)
+      - async (default): Parallel execution with multiple worker processes
       - agent: Multi-turn agent tasks with tool use
 
     Use -o/--override after -m or -t to apply overrides:
@@ -331,7 +329,7 @@ def run(
     # Build configuration
     run_config = config_builder.build()
 
-    # Validate task compatibility with async-stream
+    # Validate task compatibility with runner type
     config_builder.validate_task_compatibility(run_config.task_specs)
 
     # Set up storage backends
@@ -352,11 +350,6 @@ def run(
 
     # Create runner factory
     factory = RunnerFactory(run_config, storages, s3_config)
-
-    # Handle sequential multi-model sync mode separately
-    if runner_type_enum == RunnerType.SYNC:
-        factory.run_sequential_models(dry_run=dry_run)
-        return
 
     # Create and run the appropriate runner
     runner = factory.create()

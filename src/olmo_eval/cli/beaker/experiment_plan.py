@@ -46,7 +46,7 @@ class ExperimentPlan:
     parallelism: int = 1
     split_index: int | None = None
     total_splits: int | None = None
-    runner_type: RunnerType = RunnerType.SYNC
+    runner_type: RunnerType = RunnerType.ASYNC
 
     # Per-model overrides to pass via -o flags (parallel to model_cfgs)
     # Each entry is a list of override strings like ["gpus=4", "load_format=auto"]

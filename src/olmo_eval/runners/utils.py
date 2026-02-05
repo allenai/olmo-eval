@@ -1,4 +1,4 @@
-"""Shared task execution utilities for sync and async runners.
+"""Shared task execution utilities for evaluation runners.
 
 This module re-exports symbols from the decomposed modules for backward compatibility.
 New code should import directly from the specific modules:

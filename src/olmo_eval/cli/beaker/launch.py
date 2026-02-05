@@ -102,7 +102,7 @@ from olmo_eval.core.types import RunnerType
     "-R",
     type=click.Choice([e.value for e in RunnerType], case_sensitive=False),
     default=None,
-    help="Runner type: sync (default), async, async-stream, or agent",
+    help="Runner type: async (default) or agent",
 )
 @click.option("--num-workers", "-W", type=int, help="Number of workers for async modes")
 @click.option("--gpus-per-worker", type=int, default=1, help="GPUs per worker for async mode")
@@ -668,12 +668,10 @@ def _print_experiment_matrix(
 
         # Runner display
         runner_names = {
-            RunnerType.SYNC: "SyncEvalRunner",
             RunnerType.ASYNC: "AsyncEvalRunner",
-            RunnerType.ASYNC_STREAM: "StreamingEvalRunner",
             RunnerType.AGENT: "AgentEvalRunner",
         }
-        runner_display = runner_names.get(exp.runner_type, "SyncEvalRunner")
+        runner_display = runner_names.get(exp.runner_type, "AsyncEvalRunner")
 
         matrix_table.add_row(
             exp.name,
@@ -698,8 +696,6 @@ def _build_experiment_summary(
     from olmo_eval.runners import (
         AgentEvalRunner,
         AsyncEvalRunner,
-        StreamingEvalRunner,
-        SyncEvalRunner,
     )
 
     # Build task configs list (with overrides already applied)
@@ -711,12 +707,10 @@ def _build_experiment_summary(
 
     # Determine runner class
     runner_classes = {
-        RunnerType.SYNC: SyncEvalRunner,
         RunnerType.ASYNC: AsyncEvalRunner,
-        RunnerType.ASYNC_STREAM: StreamingEvalRunner,
         RunnerType.AGENT: AgentEvalRunner,
     }
-    exp_runner_class = runner_classes.get(exp.runner_type, SyncEvalRunner)
+    exp_runner_class = runner_classes.get(exp.runner_type, AsyncEvalRunner)
 
     exp_runner_config = RunnerConfig(
         runner=exp_runner_class,

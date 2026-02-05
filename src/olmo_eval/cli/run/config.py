@@ -28,7 +28,7 @@ class RunConfig:
     output_dir: str
     provider: str | None = None
     attention_backend: str | None = None
-    runner_type: RunnerType = RunnerType.SYNC
+    runner_type: RunnerType = RunnerType.ASYNC
     num_workers: int | None = None
     gpus_per_worker: int = 1
     num_gpus: int = 1
@@ -74,7 +74,7 @@ class RunConfigBuilder:
         output_dir: str,
         provider: str | None = None,
         attention_backend: str | None = None,
-        runner_type: RunnerType = RunnerType.SYNC,
+        runner_type: RunnerType = RunnerType.ASYNC,
         num_workers: int | None = None,
         gpus_per_worker: int = 1,
         num_gpus: int = 1,
@@ -109,7 +109,7 @@ class RunConfigBuilder:
             models: Tuple of model names/paths from -m flags.
             task: Tuple of task specs from -t flags.
             output_dir: Output directory for results.
-            runner_type: Type of runner to use (sync, async, async-stream, agent).
+            runner_type: Type of runner to use (async or agent).
             cli_model_overrides: Per-model overrides from -o flags (positional list).
             cli_task_overrides: Per-task overrides from -o flags (task_spec -> [overrides]).
             ... (other standard args)
@@ -245,34 +245,16 @@ class RunConfigBuilder:
         Returns:
             True if validation passes, raises SystemExit on fatal errors.
         """
-        # Warning for num-workers without async runner types
-        if self.num_workers is not None and self.runner_type not in (
-            RunnerType.ASYNC,
-            RunnerType.ASYNC_STREAM,
-        ):
+        # Warning for num-workers without async runner type
+        if self.num_workers is not None and self.runner_type != RunnerType.ASYNC:
             console.print(
-                "[yellow]Warning:[/yellow] --num-workers has no effect without "
-                "--runner-type async or async-stream"
+                "[yellow]Warning:[/yellow] --num-workers has no effect without --runner-type async"
             )
 
-        if self.gpus_per_worker != 1 and self.runner_type not in (
-            RunnerType.ASYNC,
-            RunnerType.ASYNC_STREAM,
-        ):
+        if self.gpus_per_worker != 1 and self.runner_type != RunnerType.ASYNC:
             console.print(
                 "[yellow]Warning:[/yellow] --gpus-per-worker has no effect without "
-                "--runner-type async or async-stream"
-            )
-
-        # Warning for provider override with async-stream
-        if (
-            self.runner_type == RunnerType.ASYNC_STREAM
-            and self.provider
-            and self.provider != "vllm"
-        ):
-            console.print(
-                "[yellow]Warning:[/yellow] --runner-type async-stream only supports "
-                f"vLLM provider, ignoring --provider={self.provider}"
+                "--runner-type async"
             )
 
         # Check for incompatible flags with agent runner
@@ -287,12 +269,7 @@ class RunConfigBuilder:
 
     #: (runner_type, request_type) pairs that are known to be incompatible,
     #: mapped to a human-readable reason shown in the error message.
-    INCOMPATIBLE_RUNNER_REQUEST: dict[tuple[RunnerType, RequestType], str] = {
-        (RunnerType.ASYNC_STREAM, RequestType.LOGLIKELIHOOD): (
-            "Loglikelihood scoring requires prompt_logprobs, which is not "
-            "supported by the streaming vLLM backend."
-        ),
-    }
+    INCOMPATIBLE_RUNNER_REQUEST: dict[tuple[RunnerType, RequestType], str] = {}
 
     def validate_task_compatibility(self, task_specs: list[str]) -> None:
         """Check that every task's request type is compatible with the runner.
@@ -337,7 +314,7 @@ class RunConfigBuilder:
                 f"with --runner-type {self.runner_type.value}:\n"
                 f"  {', '.join(specs)}\n\n"
                 f"[yellow]{reason}[/yellow]\n\n"
-                f"Use [bold]--runner-type async[/bold] or the default sync mode instead:\n"
-                f"  olmo-eval run -m <model> -t {' -t '.join(specs)} --runner-type async\n"
+                f"Use [bold]--runner-type async[/bold] (the default) instead:\n"
+                f"  olmo-eval run -m <model> -t {' -t '.join(specs)}\n"
             )
         raise SystemExit(1)

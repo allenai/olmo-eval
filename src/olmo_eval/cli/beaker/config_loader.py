@@ -44,7 +44,7 @@ class LaunchConfig:
     groups: list[str] = field(default_factory=list)
 
     # Runner type and worker options
-    runner_type: RunnerType = RunnerType.SYNC
+    runner_type: RunnerType = RunnerType.ASYNC
     num_workers: int | None = None
     gpus_per_worker: int = 1
 
@@ -208,7 +208,7 @@ class LaunchConfigLoader:
             preemptible = cli_preemptible
             timeout = cli_timeout
             cli_runner_type = self.cli_args.get("runner_type")
-            runner_type = RunnerType(cli_runner_type) if cli_runner_type else RunnerType.SYNC
+            runner_type = RunnerType(cli_runner_type) if cli_runner_type else RunnerType.ASYNC
             num_workers = self.cli_args.get("num_workers")
             gpus_per_worker = self.cli_args.get("gpus_per_worker", 1)
             image = cli_image

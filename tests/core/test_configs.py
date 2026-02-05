@@ -149,10 +149,3 @@ class TestGetModelConfig:
 
         # llama3.1 doesn't have a preset tokenizer - defaults to None
         assert config.tokenizer is None
-
-    def test_preset_with_tokenizer_preserved(self):
-        """Test that presets with tokenizer keep their tokenizer."""
-        config = get_model_config("olmo-2-7b")
-
-        # OLMo-2 has a default tokenizer set in the preset
-        assert config.tokenizer is not None

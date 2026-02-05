@@ -315,8 +315,8 @@ class JobConfigAssembler:
 
         runner_type = exp.runner_type
 
-        # Add runner type flag (only if not sync, since sync is the default)
-        if runner_type != RunnerType.SYNC:
+        # Add runner type flag (only if not async, since async is the default)
+        if runner_type != RunnerType.ASYNC:
             command.extend(["--runner-type", runner_type.value])
 
         # Agent-specific flags
@@ -325,8 +325,8 @@ class JobConfigAssembler:
                 command.extend(["--num-gpus", str(exp.num_gpus)])
             return
 
-        # Async/async-stream worker flags
-        if runner_type in (RunnerType.ASYNC, RunnerType.ASYNC_STREAM):
+        # Async worker flags
+        if runner_type == RunnerType.ASYNC:
             effective_num_workers = (
                 self.config.num_workers
                 if self.config.num_workers is not None

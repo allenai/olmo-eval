@@ -66,41 +66,6 @@ class RunnerFactory:
             inspect_request=self.config.inspect_request,
         )
 
-    def create_streaming_runner(self) -> Any:
-        """Create a StreamingEvalRunner for async streaming.
-
-        Returns:
-            Configured StreamingEvalRunner instance.
-        """
-        from olmo_eval.runners.simple import StreamingEvalRunner
-
-        console.print("[bold cyan]Using StreamingEvalRunner[/bold cyan]")
-
-        return StreamingEvalRunner(
-            model_names=self.config.model_names,
-            task_specs=self.config.task_specs,
-            output_dir=self.config.output_dir,
-            storages=self.storages,
-            num_workers=self.config.num_workers,
-            gpus_per_worker=self.config.gpus_per_worker,
-            attention_backend=self.config.attention_backend.upper()
-            if self.config.attention_backend
-            else None,
-            task_overrides=self.config.task_overrides,
-            model_overrides=self.config.per_model_overrides,
-            s3_config=self.s3_config,
-            experiment_name=self.config.experiment_name,
-            experiment_group=self.config.experiment_group,
-            alias=self.config.alias,
-            save_predictions=self.config.save_predictions,
-            save_requests=self.config.save_requests,
-            inspect_instance=self.config.inspect_instance,
-            inspect_formatted=self.config.inspect_formatted,
-            inspect_tokens=self.config.inspect_tokens,
-            inspect_response=self.config.inspect_response,
-            inspect_request=self.config.inspect_request,
-        )
-
     def create_async_runner(self) -> Any:
         """Create an AsyncEvalRunner for parallel task execution.
 
@@ -137,110 +102,13 @@ class RunnerFactory:
             inspect_request=self.config.inspect_request,
         )
 
-    def create_sync_runner(
-        self,
-        model_name: str,
-        model_overrides: dict[str, Any],
-    ) -> Any:
-        """Create a SyncEvalRunner for sequential execution.
-
-        Args:
-            model_name: Model name for this runner.
-            model_overrides: Model-specific overrides.
-
-        Returns:
-            Configured SyncEvalRunner instance.
-        """
-        from olmo_eval.runners import SyncEvalRunner
-
-        provider_override = self.config.provider
-        if not provider_override:
-            provider_from_overrides = model_overrides.get("provider")
-            if isinstance(provider_from_overrides, dict):
-                provider_override = provider_from_overrides.get("kind")
-            elif isinstance(provider_from_overrides, str):
-                provider_override = provider_from_overrides
-        effective_attention_backend = model_overrides.get(
-            "attention_backend", self.config.attention_backend
-        )
-
-        return SyncEvalRunner(
-            model_name=model_name,
-            task_specs=self.config.task_specs,
-            output_dir=self.config.output_dir,
-            provider_override=provider_override,
-            storages=self.storages,
-            attention_backend=effective_attention_backend.upper()
-            if effective_attention_backend
-            else None,
-            task_overrides=self.config.task_overrides,
-            model_overrides=model_overrides,
-            s3_config=self.s3_config,
-            experiment_name=self.config.experiment_name,
-            experiment_group=self.config.experiment_group,
-            alias=self.config.alias,
-            save_predictions=self.config.save_predictions,
-            save_requests=self.config.save_requests,
-            inspect_instance=self.config.inspect_instance,
-            inspect_formatted=self.config.inspect_formatted,
-            inspect_tokens=self.config.inspect_tokens,
-            inspect_response=self.config.inspect_response,
-            inspect_request=self.config.inspect_request,
-        )
-
     def create(self) -> Any:
         """Create the appropriate runner based on configuration.
 
         Returns:
-            Configured runner instance (agent, streaming, async, or sync).
+            Configured runner instance (agent or async).
         """
         if self.config.runner_type == RunnerType.AGENT:
             return self.create_agent_runner()
-        elif self.config.runner_type == RunnerType.ASYNC_STREAM:
-            return self.create_streaming_runner()
-        elif self.config.runner_type == RunnerType.ASYNC:
-            return self.create_async_runner()
         else:
-            # For sync mode, return first sync runner (multi-model handled separately)
-            model_name = self.config.model_names[0]
-            return self.create_sync_runner(
-                model_name,
-                self.config.per_model_overrides.get(model_name, {}),
-            )
-
-    def run_sequential_models(self, dry_run: bool = False) -> None:
-        """Run all models sequentially for sync mode.
-
-        Args:
-            dry_run: If True, print config instead of running.
-        """
-        from olmo_eval.runners import ValidationError
-
-        model_names = self.config.model_names
-        if len(model_names) > 1:
-            console.print(f"[bold cyan]Running {len(model_names)} models sequentially[/bold cyan]")
-
-        # Re-parse to get per-model overrides (since we need both name and overrides together)
-        for i, model_name in enumerate(model_names):
-            model_overrides = self.config.per_model_overrides.get(model_name, {})
-
-            if len(model_names) > 1:
-                console.print(f"\n[bold]Model {i + 1}/{len(model_names)}:[/bold] {model_name}")
-
-            runner = self.create_sync_runner(model_name, model_overrides)
-
-            try:
-                runner.validate()
-            except ValidationError as e:
-                console.print(f"[red]Validation error:[/red]\n{e}")
-                raise SystemExit(1) from None
-
-            if dry_run:
-                runner.print_config()
-            else:
-                try:
-                    runner.run()
-                except Exception as e:
-                    console.print(f"\n[bold red]Evaluation failed:[/bold red] {e}")
-                    console.print_exception()
-                    raise SystemExit(1) from None
+            return self.create_async_runner()
