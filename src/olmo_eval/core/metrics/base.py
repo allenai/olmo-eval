@@ -115,8 +115,7 @@ class BPBMetric(Metric):
             if output.logprobs is None:
                 continue
 
-            # Get byte count for weighting
-            num_bytes = sum(len(tok.get("bytes", ())) for tok in output.logprobs)
+            num_bytes = len(output.text.encode("utf-8")) if output.text else 0
             if num_bytes == 0:
                 continue
 

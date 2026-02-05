@@ -25,11 +25,7 @@ def build_predictions(scored: Sequence[Any]) -> list[dict]:
         for out in resp.outputs:
             # Get values from metadata (set by backend) or compute from logprobs
             meta = out.metadata or {}
-            # Use pre-computed bytes from logprobs
-            if out.logprobs:
-                num_bytes = sum(len(tok["bytes"]) for tok in out.logprobs if "bytes" in tok)
-            else:
-                num_bytes = 0
+            num_bytes = len(out.text.encode("utf-8")) if out.text else 0
             num_chars = len(out.text)
 
             # Use metadata values if available (from vLLM backend), else compute

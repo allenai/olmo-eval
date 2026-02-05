@@ -129,15 +129,13 @@ class BitsPerByteScorer(Scorer):
         if output.logprobs is None:
             return 0.0
 
-        total_logprob, num_bytes = 0.0, 0
-        for tok in output.logprobs:
-            total_logprob += tok.get("logprob", 0.0)
-            num_bytes += len(tok.get("bytes", ()))
+        total_logprob = sum(tok.get("logprob", 0.0) for tok in output.logprobs)
+
+        num_bytes = len(output.text.encode("utf-8")) if output.text else 0
 
         if num_bytes == 0:
             return 0.0
 
-        # Compute bits per byte
         bits_per_byte = -total_logprob / (num_bytes * math.log(2))
 
         return bits_per_byte
