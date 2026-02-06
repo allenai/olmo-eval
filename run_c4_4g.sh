@@ -37,7 +37,7 @@ for m in "${models[@]}"; do
       -w "${WORKSPACE}" \
       --budget "${BUDGET}" \
       --priority "${PRIORITY}" \
-      --num_gpus 4 \
+      --gpus_per_worker 4 \
       >"logs/${name}.log" 2>&1
   ) &
 done
