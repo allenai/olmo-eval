@@ -97,7 +97,7 @@ class TestTool:
         assert t.name == "custom_name"
         assert t.description == "Custom description"
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_tool_call(self):
         """Test calling a Tool."""
 
@@ -114,7 +114,7 @@ class TestTool:
         result = await t(a=5, b=3)
         assert result == "8"
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_tool_call_sync_function(self):
         """Test calling a Tool with a sync execute function."""
 

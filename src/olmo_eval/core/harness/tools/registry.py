@@ -131,8 +131,8 @@ def registered_tool(
         name = None
         from ..tool import Tool
 
-        t = Tool.from_function(fn)
-        return register_tool(t)
+        t = Tool.from_function(fn)  # type: ignore[arg-type]
+        return register_tool(t)  # type: ignore[return-value]
 
     return decorator
 

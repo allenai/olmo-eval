@@ -59,7 +59,7 @@ class Harness:
         """
         self.provider = provider
         self.config = config
-        self._backend = get_backend(config.backend)
+        self.backend = get_backend(config.backend)
 
     @property
     def model_name(self) -> str:
@@ -131,7 +131,7 @@ class Harness:
         Returns:
             HarnessResult with trajectory and final output.
         """
-        return await self._backend.run(self, request, sampling_params)
+        return await self.backend.run(self, request, sampling_params)
 
     async def run_batch(
         self,
@@ -226,9 +226,12 @@ def create_harness(
     Returns:
         Configured Harness instance.
     """
+    resolved: HarnessConfig
     if config is None:
-        config = HarnessConfig(name="default")
+        resolved = HarnessConfig(name="default")
     elif isinstance(config, dict):
-        config = HarnessConfig.from_dict(config)
+        resolved = HarnessConfig.from_dict(config)  # type: ignore[arg-type]
+    else:
+        resolved = config
 
-    return Harness(provider, config)
+    return Harness(provider, resolved)

@@ -81,7 +81,7 @@ class TestGetBackend:
 class TestInternalBackend:
     """Tests for InternalBackend."""
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_run_no_tool_calls(self, mock_provider):
         """Test run completes when response has no tool calls."""
         mock_provider.generate.return_value = [[LMOutput(text="Done", tool_calls=None)]]
@@ -102,7 +102,7 @@ class TestInternalBackend:
         assert result.max_turns_reached is False
         assert result.trajectory.total_tool_calls == 0
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_run_with_tool_call(self, mock_provider, simple_tool):
         """Test run executes tool and continues."""
         # First call: model requests tool
@@ -138,7 +138,7 @@ class TestInternalBackend:
         assert len(tool_results) == 1
         assert "Echo: test" in tool_results[0].content
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_run_max_turns_reached(self, mock_provider, simple_tool):
         """Test run stops when max_turns is reached."""
         # Model always requests a tool call
@@ -165,7 +165,7 @@ class TestInternalBackend:
         assert result.max_turns_reached is True
         assert result.num_turns <= 3 * 2  # assistant + tool turns
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_run_unknown_tool(self, mock_provider):
         """Test run handles unknown tool call gracefully."""
         tool_call = ToolCall.create("call_1", "unknown_tool", {})
@@ -194,7 +194,7 @@ class TestInternalBackend:
         assert tool_results[0].is_error is True
         assert "Unknown tool" in tool_results[0].content
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_run_tool_error(self, mock_provider):
         """Test run handles tool execution errors."""
 
@@ -230,7 +230,7 @@ class TestInternalBackend:
         assert tool_results[0].is_error is True
         assert "Tool error" in tool_results[0].content
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_run_invalid_json_arguments(self, mock_provider, simple_tool):
         """Test run handles invalid JSON in tool arguments."""
         from olmo_eval.core.types.tools import Function

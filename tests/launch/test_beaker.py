@@ -717,9 +717,7 @@ class TestModelPackingAndGrouping:
         )
 
         grouper = ModelGrouper(config, eval_config=None)
-        builder = ExperimentPlanBuilder(
-            config, grouper, tasks_by_priority={"normal": ["mmlu"]}, agent_task_specs=set()
-        )
+        builder = ExperimentPlanBuilder(config, grouper, tasks_by_priority={"normal": ["mmlu"]})
 
         experiments, _ = builder.build()
 
@@ -753,9 +751,7 @@ class TestModelPackingAndGrouping:
         )
 
         grouper = ModelGrouper(config, eval_config=None)
-        builder = ExperimentPlanBuilder(
-            config, grouper, tasks_by_priority={"normal": ["mmlu"]}, agent_task_specs=set()
-        )
+        builder = ExperimentPlanBuilder(config, grouper, tasks_by_priority={"normal": ["mmlu"]})
 
         experiments, _ = builder.build()
 
@@ -789,9 +785,7 @@ class TestModelPackingAndGrouping:
         )
 
         grouper = ModelGrouper(config, eval_config=None)
-        builder = ExperimentPlanBuilder(
-            config, grouper, tasks_by_priority={"normal": ["mmlu"]}, agent_task_specs=set()
-        )
+        builder = ExperimentPlanBuilder(config, grouper, tasks_by_priority={"normal": ["mmlu"]})
 
         experiments, _ = builder.build()
 
@@ -824,9 +818,7 @@ class TestModelPackingAndGrouping:
         )
 
         grouper = ModelGrouper(config, eval_config=None)
-        builder = ExperimentPlanBuilder(
-            config, grouper, tasks_by_priority={"normal": ["mmlu"]}, agent_task_specs=set()
-        )
+        builder = ExperimentPlanBuilder(config, grouper, tasks_by_priority={"normal": ["mmlu"]})
 
         experiments, split_models = builder.build()
 
@@ -859,9 +851,7 @@ class TestModelPackingAndGrouping:
         )
 
         grouper = ModelGrouper(config, eval_config=None)
-        builder = ExperimentPlanBuilder(
-            config, grouper, tasks_by_priority={"normal": ["mmlu"]}, agent_task_specs=set()
-        )
+        builder = ExperimentPlanBuilder(config, grouper, tasks_by_priority={"normal": ["mmlu"]})
 
         experiments, _ = builder.build()
 
@@ -959,7 +949,6 @@ class TestTaskOverrideHandling:
             config,
             grouper,
             tasks_by_priority={"normal": ["mmlu"]},
-            agent_task_specs=set(),
             override_priority=override_priority,  # Pass extracted priority
         )
 
@@ -991,9 +980,7 @@ class TestTaskOverrideHandling:
         )
 
         grouper = ModelGrouper(config, eval_config=None)
-        builder = ExperimentPlanBuilder(
-            config, grouper, tasks_by_priority={"normal": ["mmlu"]}, agent_task_specs=set()
-        )
+        builder = ExperimentPlanBuilder(config, grouper, tasks_by_priority={"normal": ["mmlu"]})
 
         experiments, _ = builder.build()
 

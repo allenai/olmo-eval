@@ -2,6 +2,9 @@
 
 import pytest
 
+# Register anyio plugin for async tests
+pytest_plugins = ["anyio"]
+
 
 def pytest_addoption(parser):
     """Add custom command line options."""

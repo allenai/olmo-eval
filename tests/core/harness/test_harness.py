@@ -200,7 +200,7 @@ class TestCreateHarness:
 class TestHarnessRun:
     """Tests for Harness.run() multi-turn execution."""
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_harness_run_no_tools(self, mock_provider):
         """Test run completes immediately when no tools used."""
         # Configure mock to return response without tool calls
@@ -220,7 +220,7 @@ class TestHarnessRun:
         assert result.num_turns == 1
         assert result.max_turns_reached is False
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_harness_run_batch(self, mock_provider):
         """Test run_batch processes multiple requests."""
         mock_provider.generate.return_value = [[LMOutput(text="Answer", tool_calls=None)]]

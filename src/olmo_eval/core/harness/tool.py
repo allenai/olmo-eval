@@ -153,9 +153,10 @@ class Tool:
         Returns:
             String result from the tool execution.
         """
-        if asyncio.iscoroutinefunction(self.execute):
-            return await self.execute(**kwargs)
-        return self.execute(**kwargs)
+        result = self.execute(**kwargs)
+        if asyncio.iscoroutine(result):
+            return await result  # type: ignore[return-value]
+        return result  # type: ignore[return-value]
 
     @classmethod
     def from_function(
@@ -176,7 +177,7 @@ class Tool:
         Returns:
             A new Tool instance.
         """
-        tool_name = name or fn.__name__
+        tool_name = name or fn.__name__  # type: ignore[union-attr]
         tool_description = description or fn.__doc__ or ""
 
         # Clean up docstring - remove excess whitespace
@@ -250,6 +251,6 @@ def tool(
     if callable(name):
         fn = name
         name = None
-        return Tool.from_function(fn)
+        return Tool.from_function(fn)  # type: ignore[arg-type, return-value]
 
     return decorator

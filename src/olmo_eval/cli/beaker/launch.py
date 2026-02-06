@@ -693,10 +693,7 @@ def _build_experiment_summary(
     runner_type: RunnerType,
 ) -> ExperimentSummary:
     """Build experiment summary for display."""
-    from olmo_eval.runners import (
-        AgentEvalRunner,
-        AsyncEvalRunner,
-    )
+    from olmo_eval.runners import AsyncEvalRunner
 
     # Build task configs list (with overrides already applied)
     exp_task_configs = []
@@ -705,12 +702,8 @@ def _build_experiment_summary(
         if base_spec in task_configs_by_spec:
             exp_task_configs.append(task_configs_by_spec[base_spec])
 
-    # Determine runner class
-    runner_classes = {
-        RunnerType.ASYNC: AsyncEvalRunner,
-        RunnerType.AGENT: AgentEvalRunner,
-    }
-    exp_runner_class = runner_classes.get(exp.runner_type, AsyncEvalRunner)
+    # Runner class is always AsyncEvalRunner
+    exp_runner_class = AsyncEvalRunner
 
     exp_runner_config = RunnerConfig(
         runner=exp_runner_class,

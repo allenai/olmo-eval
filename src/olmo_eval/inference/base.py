@@ -10,7 +10,6 @@ class InferenceProvider(ABC):
     """Abstract base class for language model inference providers.
 
     All providers must implement `generate` and `logprobs` methods.
-    Common functionality like model name storage is handled here.
     """
 
     model_name: str

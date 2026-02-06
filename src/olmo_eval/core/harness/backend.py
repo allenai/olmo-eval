@@ -287,8 +287,13 @@ class OpenAIAgentsBackend(Backend):
             HarnessResult with trajectory from SDK execution.
         """
         try:
-            from agents import Agent, OpenAIChatCompletionsModel, Runner, function_tool
-            from openai import AsyncOpenAI
+            from agents import (  # type: ignore[import-not-found]
+                Agent,
+                OpenAIChatCompletionsModel,
+                Runner,
+                function_tool,
+            )
+            from openai import AsyncOpenAI  # type: ignore[import-not-found]
         except ImportError as e:
             raise ImportError(
                 "OpenAI Agents SDK not installed. Install with: pip install openai-agents"
