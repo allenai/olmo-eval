@@ -17,7 +17,6 @@ from olmo_eval.cli.utils import (
     reconstruct_ordered_args,
 )
 from olmo_eval.core.constants.infrastructure import LOCAL_RESULT_DIR
-from olmo_eval.core.types import RunnerType
 
 
 @click.command()
@@ -58,13 +57,6 @@ from olmo_eval.core.types import RunnerType
     help="Persist results to the configured database",
 )
 @click.option("--dry-run", is_flag=True, help="Print config and exit without running")
-@click.option(
-    "--runner-type",
-    "-R",
-    type=click.Choice([e.value for e in RunnerType], case_sensitive=False),
-    default=RunnerType.ASYNC.value,
-    help="Runner type: async (default) or agent",
-)
 @click.option(
     "--num-workers",
     type=int,
@@ -159,7 +151,7 @@ from olmo_eval.core.types import RunnerType
     "--num-gpus",
     type=int,
     default=1,
-    help="Number of GPUs for tensor parallelism (used with --runner-type agent)",
+    help="Number of GPUs for tensor parallelism",
 )
 @click.option(
     "--debug-requests",
@@ -229,7 +221,6 @@ def run(
     provider: str | None,
     store: bool,
     dry_run: bool,
-    runner_type: str,
     num_workers: int | None,
     gpus_per_worker: int,
     attention_backend: str | None,
@@ -264,10 +255,6 @@ def run(
 
     Supports multiple models: use -m multiple times for multi-model runs.
 
-    Runner types:
-      - async (default): Parallel execution with multiple worker processes
-      - agent: Multi-turn agent tasks with tool use
-
     Use -o/--override after -m or -t to apply overrides:
 
         olmo-eval run -m llama3.1-8b -o provider.kind=vllm -t mmlu -o limit=100
@@ -297,9 +284,6 @@ def run(
     # Print runtime environment summary
     print_runtime_environment()
 
-    # Convert string to RunnerType enum
-    runner_type_enum = RunnerType(runner_type)
-
     # Build configuration
     config_builder = RunConfigBuilder(
         models=models,
@@ -307,7 +291,6 @@ def run(
         output_dir=output_dir,
         provider=provider,
         attention_backend=attention_backend,
-        runner_type=runner_type_enum,
         num_workers=num_workers,
         gpus_per_worker=gpus_per_worker,
         num_gpus=num_gpus,
@@ -344,9 +327,6 @@ def run(
 
     # Build configuration
     run_config = config_builder.build()
-
-    # Validate task compatibility with runner type
-    config_builder.validate_task_compatibility(run_config.task_specs)
 
     # Set up storage backends
     storage_setup = StorageSetup(

@@ -1,8 +1,4 @@
-"""Pre-built harness configurations for common use cases.
-
-This module provides ready-to-use HarnessConfig presets:
-- default: No tools, standard model behavior
-- search: Web and academic search tools for factual QA
+"""Pre-built harness configurations.
 
 Presets are registered using the @harness_preset decorator.
 """
@@ -11,7 +7,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from .config import HarnessBackend, HarnessConfig
+from .config import HarnessConfig
+from .constants import DR_TULU_SYSTEM_PROMPT
 
 # ─────────────────────────────────────────────────────────
 # Registry
@@ -92,62 +89,36 @@ def list_harness_presets() -> list[str]:
 
 
 # ─────────────────────────────────────────────────────────
-# System Prompts
-# ─────────────────────────────────────────────────────────
-
-SEARCH_SYSTEM_PROMPT = """\
-You are a helpful assistant that can search for information to answer questions accurately.
-
-When answering questions:
-1. If you're unsure about a fact, use the available search tools to find accurate information.
-2. Provide concise, accurate answers based on the information you find.
-3. If you cannot find reliable information, say so rather than guessing.
-
-Always strive to give factually correct answers."""
-
-# ─────────────────────────────────────────────────────────
 # Preset Definitions
 # ─────────────────────────────────────────────────────────
 
-# Default preset: no tools, single turn
+# Default preset: no tools, standard model behavior
 register_harness_preset(
     "default",
     HarnessConfig(
         name="default",
-        tool_names=(),
-        system_prompt=None,
-        max_turns=1,
     ),
 )
 
 
-@harness_preset("search")
-def _search_preset() -> HarnessConfig:
-    """Search preset with web and academic search tools.
+@harness_preset("dr_tulu")
+def _dr_tulu_preset() -> HarnessConfig:
+    """Dr. Tulu preset with web and academic search tools.
 
     Lazily imports search tools to avoid loading httpx etc unless needed.
     """
-    # Import triggers @registered_tool decorators
     from .tools import search as _  # noqa: F401
 
     return HarnessConfig(
-        name="search",
+        name="dr_tulu",
         tool_names=(
             "semantic_scholar_snippet_search",
             "serper_google_webpage_search",
             "serper_fetch_webpage_content",
         ),
-        system_prompt=SEARCH_SYSTEM_PROMPT,
+        system_prompt=DR_TULU_SYSTEM_PROMPT,
         max_turns=10,
         max_concurrency=8,
-        backend=HarnessBackend.OPENAI_AGENTS,
+        backend="openai_agents",
         required_secrets=("S2_API_KEY", "SERPER_API_KEY"),
     )
-
-
-# ─────────────────────────────────────────────────────────
-# Backwards Compatibility
-# ─────────────────────────────────────────────────────────
-
-# Expose registry for tests that directly access HARNESS_PRESETS
-HARNESS_PRESETS = _PRESET_REGISTRY

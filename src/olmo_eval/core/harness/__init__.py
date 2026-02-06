@@ -47,27 +47,26 @@ Example:
     harness = Harness(provider, config)
 """
 
-from .backend import (
+from .backends import (
     BACKEND_REGISTRY,
     Backend,
-    InternalBackend,
+    DefaultBackend,
     OpenAIAgentsBackend,
     get_backend,
     list_backends,
     register_backend,
 )
-from .config import HarnessBackend, HarnessConfig, harness_config
+from .config import HarnessConfig, harness_config
 from .harness import Harness, create_harness
 from .presets import (
-    HARNESS_PRESETS,
     get_harness_preset,
     list_harness_presets,
     register_harness_preset,
 )
 from .result import HarnessResult
-from .tool import Tool, tool
 from .tools import (
     TOOL_REGISTRY,
+    Tool,
     clear_registry,
     ensure_tools_registered,
     get_tool,
@@ -75,12 +74,12 @@ from .tools import (
     list_tools,
     register_tool,
     registered_tool,
+    tool,
 )
 
 __all__ = [
     # Main classes
     "Harness",
-    "HarnessBackend",
     "HarnessConfig",
     "HarnessResult",
     "Tool",
@@ -99,14 +98,13 @@ __all__ = [
     "TOOL_REGISTRY",
     # Backends
     "Backend",
-    "InternalBackend",
+    "DefaultBackend",
     "OpenAIAgentsBackend",
     "BACKEND_REGISTRY",
     "get_backend",
     "list_backends",
     "register_backend",
     # Presets
-    "HARNESS_PRESETS",
     "get_harness_preset",
     "list_harness_presets",
     "register_harness_preset",

@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR, cluster_has_weka
-from olmo_eval.core.types import RunnerType
 
 if TYPE_CHECKING:
     from olmo_eval.cli.beaker.config_loader import LaunchConfig
@@ -87,12 +86,9 @@ class JobConfigAssembler:
         command = self._build_command(exp, model_resources)
 
         # Determine provider extras
-        if exp.runner_type == RunnerType.AGENT:
-            provider_extras = ["vllm", "agents"]
-        else:
-            config_provider = model_resources.get("provider") or "vllm"
-            provider_group = BACKEND_OPTIONAL_GROUPS.get(str(config_provider))
-            provider_extras = [provider_group] if provider_group else []
+        config_provider = model_resources.get("provider") or "vllm"
+        provider_group = BACKEND_OPTIONAL_GROUPS.get(str(config_provider))
+        provider_extras = [provider_group] if provider_group else []
 
         install_extras = list(provider_extras)
         if self.config.store:
@@ -264,8 +260,8 @@ class JobConfigAssembler:
         if exp.parallelism > 1:
             command.extend(["--parallelism", str(exp.parallelism)])
 
-        # Add runner type and related flags
-        self._add_runner_flags(command, exp, model_resources)
+        # Add worker flags
+        self._add_worker_flags(command, model_resources)
 
         # Add S3 options
         if self.config.s3_bucket and self.config.s3_prefix:
@@ -306,39 +302,25 @@ class JobConfigAssembler:
         if self.config.inspect_request:
             command.append("--inspect-request")
 
+        if self.config.harness:
+            command.extend(["--harness", self.config.harness])
+
         return command
 
-    def _add_runner_flags(
-        self, command: list[str], exp: ExperimentPlan, model_resources: dict
-    ) -> None:
-        """Add runner type and related flags to command."""
+    def _add_worker_flags(self, command: list[str], model_resources: dict) -> None:
+        """Add worker-related flags to command."""
+        effective_num_workers = (
+            self.config.num_workers
+            if self.config.num_workers is not None
+            else model_resources.get("num_workers")
+        )
+        effective_gpus_per_worker = (
+            self.config.gpus_per_worker
+            if self.config.gpus_per_worker != 1
+            else model_resources.get("gpus_per_worker", 1)
+        )
 
-        runner_type = exp.runner_type
-
-        # Add runner type flag (only if not async, since async is the default)
-        if runner_type != RunnerType.ASYNC:
-            command.extend(["--runner-type", runner_type.value])
-
-        # Agent-specific flags
-        if runner_type == RunnerType.AGENT:
-            if exp.num_gpus > 1:
-                command.extend(["--num-gpus", str(exp.num_gpus)])
-            return
-
-        # Async worker flags
-        if runner_type == RunnerType.ASYNC:
-            effective_num_workers = (
-                self.config.num_workers
-                if self.config.num_workers is not None
-                else model_resources.get("num_workers")
-            )
-            effective_gpus_per_worker = (
-                self.config.gpus_per_worker
-                if self.config.gpus_per_worker != 1
-                else model_resources.get("gpus_per_worker", 1)
-            )
-
-            if effective_num_workers is not None:
-                command.extend(["--num-workers", str(effective_num_workers)])
-            if effective_gpus_per_worker and effective_gpus_per_worker != 1:
-                command.extend(["--gpus-per-worker", str(effective_gpus_per_worker)])
+        if effective_num_workers is not None:
+            command.extend(["--num-workers", str(effective_num_workers)])
+        if effective_gpus_per_worker and effective_gpus_per_worker != 1:
+            command.extend(["--gpus-per-worker", str(effective_gpus_per_worker)])

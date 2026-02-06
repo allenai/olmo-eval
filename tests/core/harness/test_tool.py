@@ -12,7 +12,7 @@ from olmo_eval.core.harness import (
     register_tool,
     registered_tool,
 )
-from olmo_eval.core.harness.tool import Tool, tool
+from olmo_eval.core.harness.tools import Tool, tool
 
 
 @pytest.fixture(autouse=True)

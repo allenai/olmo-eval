@@ -15,8 +15,12 @@ from .registry import (
     register_tool,
     registered_tool,
 )
+from .tool import Tool, tool
 
 __all__ = [
+    # Tool class
+    "Tool",
+    "tool",
     # Registry
     "TOOL_REGISTRY",
     "clear_registry",

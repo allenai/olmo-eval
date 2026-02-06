@@ -10,7 +10,6 @@ from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan
 if TYPE_CHECKING:
     from olmo_eval.cli.beaker.config_loader import LaunchConfig
     from olmo_eval.cli.beaker.model_grouper import ModelGrouper
-    from olmo_eval.core.types import RunnerType
     from olmo_eval.launch import BeakerModelSpec
 
 
@@ -86,7 +85,6 @@ class ExperimentPlanBuilder:
         model_indices: list[int],
         tasks: list[str],
         priority: str,
-        runner_type: RunnerType,
         total_expanded_tasks: int,
         multiple_models: bool,
         multiple_priorities: bool,
@@ -127,7 +125,6 @@ class ExperimentPlanBuilder:
                     parallelism=m_parallelism,
                     split_index=None,
                     total_splits=None,
-                    runner_type=runner_type,
                     model_overrides=model_overrides,
                     task_overrides=task_overrides,
                 )
@@ -141,7 +138,6 @@ class ExperimentPlanBuilder:
         model_indices: list[int],
         tasks: list[str],
         priority: str,
-        runner_type: RunnerType,
         total_expanded_tasks: int,
         multiple_models: bool,
         multiple_priorities: bool,
@@ -194,7 +190,6 @@ class ExperimentPlanBuilder:
                     parallelism=1,  # With packed models, parallelism is per-model
                     split_index=None,
                     total_splits=None,
-                    runner_type=runner_type,
                     model_overrides=model_overrides,
                     task_overrides=task_overrides,
                 )
@@ -255,7 +250,6 @@ class ExperimentPlanBuilder:
                         parallelism=1,
                         split_index=i + 1 if total_splits > 1 else None,
                         total_splits=total_splits if total_splits > 1 else None,
-                        runner_type=runner_type,
                         model_overrides=bin_overrides,
                         task_overrides=task_overrides,
                     )
@@ -302,7 +296,6 @@ class ExperimentPlanBuilder:
                         group_model_indices,
                         t_list,
                         effective_priority,
-                        self.config.runner_type,
                         total_expanded,
                         multiple_models,
                         multiple_priorities,
@@ -318,7 +311,6 @@ class ExperimentPlanBuilder:
                         group_model_indices,
                         t_list,
                         effective_priority,
-                        self.config.runner_type,
                         total_expanded,
                         multiple_models,
                         multiple_priorities,

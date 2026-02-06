@@ -8,8 +8,8 @@ from unittest.mock import patch
 import pytest
 
 from olmo_eval.core.harness import clear_registry, register_tool
-from olmo_eval.core.harness.config import HarnessBackend, HarnessConfig, harness_config
-from olmo_eval.core.harness.tool import tool
+from olmo_eval.core.harness.config import HarnessConfig, harness_config
+from olmo_eval.core.harness.tools import tool
 
 
 @pytest.fixture(autouse=True)
@@ -43,9 +43,9 @@ class TestHarnessConfig:
         assert config.tool_names == ()
         assert config.system_prompt is None
         assert config.tool_choice == "auto"
-        assert config.max_turns == 10
-        assert config.max_concurrency == 8
-        assert config.backend == "internal"
+        assert config.max_turns is None
+        assert config.max_concurrency is None
+        assert config.backend == "default"
 
     def test_config_with_tools(self, sample_tool):
         """Test HarnessConfig with tool names."""
@@ -84,7 +84,7 @@ class TestHarnessConfig:
             tool_choice="required",
             max_turns=5,
             max_concurrency=4,
-            backend=HarnessBackend.OPENAI_AGENTS,
+            backend="openai_agents",
             required_secrets=("API_KEY",),
         )
 
@@ -202,8 +202,6 @@ class TestHarnessConfigFactory:
             max_turns=15,
             max_concurrency=16,
             backend="openai_agents",
-            model_url="http://localhost:8000",
-            api_key="test_key",
             required_secrets=["SECRET"],
         )
 
@@ -213,6 +211,4 @@ class TestHarnessConfigFactory:
         assert config.max_turns == 15
         assert config.max_concurrency == 16
         assert config.backend == "openai_agents"
-        assert config.model_url == "http://localhost:8000"
-        assert config.api_key == "test_key"
         assert config.required_secrets == ("SECRET",)

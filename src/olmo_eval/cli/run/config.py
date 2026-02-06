@@ -7,8 +7,6 @@ from typing import Any
 
 from rich.console import Console
 
-from olmo_eval.core.types import RequestType, RunnerType
-
 console = Console()
 
 
@@ -28,7 +26,6 @@ class RunConfig:
     output_dir: str
     provider: str | None = None
     attention_backend: str | None = None
-    runner_type: RunnerType = RunnerType.ASYNC
     num_workers: int | None = None
     gpus_per_worker: int = 1
     num_gpus: int = 1
@@ -77,7 +74,6 @@ class RunConfigBuilder:
         output_dir: str,
         provider: str | None = None,
         attention_backend: str | None = None,
-        runner_type: RunnerType = RunnerType.ASYNC,
         num_workers: int | None = None,
         gpus_per_worker: int = 1,
         num_gpus: int = 1,
@@ -114,7 +110,6 @@ class RunConfigBuilder:
             models: Tuple of model names/paths from -m flags.
             task: Tuple of task specs from -t flags.
             output_dir: Output directory for results.
-            runner_type: Type of runner to use (async or agent).
             cli_model_overrides: Per-model overrides from -o flags (positional list).
             cli_task_overrides: Per-task overrides from -o flags (task_spec -> [overrides]).
             harness_preset: Name of a harness preset (e.g., "search").
@@ -126,7 +121,6 @@ class RunConfigBuilder:
         self.output_dir = output_dir
         self.provider = provider
         self.attention_backend = attention_backend
-        self.runner_type = runner_type
         self.num_workers = num_workers
         self.gpus_per_worker = gpus_per_worker
         self.num_gpus = num_gpus
@@ -223,7 +217,6 @@ class RunConfigBuilder:
             output_dir=self.output_dir,
             provider=provider,
             attention_backend=attention_backend,
-            runner_type=self.runner_type,
             num_workers=self.num_workers,
             gpus_per_worker=self.gpus_per_worker,
             num_gpus=self.num_gpus,
@@ -312,78 +305,6 @@ class RunConfigBuilder:
         """Validate CLI flag combinations and print warnings.
 
         Returns:
-            True if validation passes, raises SystemExit on fatal errors.
+            True if validation passes.
         """
-        # Warning for num-workers without async runner type
-        if self.num_workers is not None and self.runner_type != RunnerType.ASYNC:
-            console.print(
-                "[yellow]Warning:[/yellow] --num-workers has no effect without --runner-type async"
-            )
-
-        if self.gpus_per_worker != 1 and self.runner_type != RunnerType.ASYNC:
-            console.print(
-                "[yellow]Warning:[/yellow] --gpus-per-worker has no effect without "
-                "--runner-type async"
-            )
-
-        # Check for incompatible flags with agent runner
-        if self.runner_type == RunnerType.AGENT and len(self.models) > 1:
-            console.print(
-                "[red]Error:[/red] --runner-type agent only supports a single model. "
-                "Use beaker launch for multi-model agent runs."
-            )
-            raise SystemExit(1)
-
         return True
-
-    #: (runner_type, request_type) pairs that are known to be incompatible,
-    #: mapped to a human-readable reason shown in the error message.
-    INCOMPATIBLE_RUNNER_REQUEST: dict[tuple[RunnerType, RequestType], str] = {}
-
-    def validate_task_compatibility(self, task_specs: list[str]) -> None:
-        """Check that every task's request type is compatible with the runner.
-
-        Uses :attr:`INCOMPATIBLE_RUNNER_REQUEST` to decide which
-        (runner_type, request_type) combinations are invalid.
-
-        Args:
-            task_specs: List of task specifications to check.
-
-        Raises:
-            SystemExit: If any task produces a request type incompatible with the runner.
-        """
-        from olmo_eval.evals.tasks import get_task
-
-        # Collect the request types that are blocked for the current runner.
-        blocked: dict[RequestType, str] = {
-            req: reason
-            for (runner, req), reason in self.INCOMPATIBLE_RUNNER_REQUEST.items()
-            if runner == self.runner_type
-        }
-        if not blocked:
-            return
-
-        # Group incompatible tasks by reason so each reason is reported once.
-        by_reason: dict[str, list[str]] = {}
-        for spec in task_specs:
-            try:
-                task = get_task(spec)
-            except KeyError:
-                continue  # Unknown tasks caught later by runner.validate()
-            reason = blocked.get(task.request_type)
-            if reason is not None:
-                by_reason.setdefault(reason, []).append(spec)
-
-        if not by_reason:
-            return
-
-        for reason, specs in by_reason.items():
-            console.print(
-                f"\n[bold red]Error:[/bold red] The following tasks cannot run "
-                f"with --runner-type {self.runner_type.value}:\n"
-                f"  {', '.join(specs)}\n\n"
-                f"[yellow]{reason}[/yellow]\n\n"
-                f"Use [bold]--runner-type async[/bold] (the default) instead:\n"
-                f"  olmo-eval run -m <model> -t {' -t '.join(specs)}\n"
-            )
-        raise SystemExit(1)

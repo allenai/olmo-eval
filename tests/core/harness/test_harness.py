@@ -9,7 +9,7 @@ import pytest
 from olmo_eval.core.harness import clear_registry, register_tool
 from olmo_eval.core.harness.config import HarnessConfig
 from olmo_eval.core.harness.harness import Harness, create_harness
-from olmo_eval.core.harness.tool import tool
+from olmo_eval.core.harness.tools import tool
 from olmo_eval.core.types import LMOutput, LMRequest, RequestType
 
 
@@ -206,7 +206,7 @@ class TestHarnessRun:
         # Configure mock to return response without tool calls
         mock_provider.generate.return_value = [[LMOutput(text="Final answer", tool_calls=None)]]
 
-        config = HarnessConfig(name="no_tools", backend="internal")
+        config = HarnessConfig(name="no_tools", backend="default")
         harness = Harness(mock_provider, config)
 
         request = LMRequest(
@@ -225,7 +225,7 @@ class TestHarnessRun:
         """Test run_batch processes multiple requests."""
         mock_provider.generate.return_value = [[LMOutput(text="Answer", tool_calls=None)]]
 
-        config = HarnessConfig(name="batch_test", backend="internal")
+        config = HarnessConfig(name="batch_test", backend="default")
         harness = Harness(mock_provider, config)
 
         requests = [

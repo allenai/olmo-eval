@@ -765,8 +765,7 @@ Available inference providers:
 | `--workspace` | `-w` | required | Beaker workspace |
 | `--budget` | `-B` | required | Beaker budget |
 | `--group` | `-g` | none | Add experiments to Beaker group(s) (can specify multiple) |
-| `--runner-type` | `-R` | `async` | Runner type: `async` (default) or `agent` |
-| `--num-workers` | `-W` | auto | Number of workers for async mode |
+| `--num-workers` | `-W` | auto | Number of workers |
 | `--gpus-per-worker` | | `1` | GPUs per worker for async mode |
 | `--dry-run` | `-d` | `false` | Print spec without launching |
 | `--follow/--no-follow` | | `true` | Follow logs after launch |
@@ -943,8 +942,7 @@ description: "Full evaluation suite for Llama 70B"
 | `budget` | string | yes | Beaker budget |
 | `beaker_image` | string | no | Container image to use (config-only) |
 | `groups` | list | no | Beaker groups to add experiments to |
-| `runner_type` | string | no | Runner type: `async` (default) or `agent` |
-| `num_workers` | int | no | Number of workers for async modes |
+| `num_workers` | int | no | Number of workers |
 | `gpus_per_worker` | int | no | GPUs per worker for async modes (default: `1`) |
 | `description` | string | no | Experiment description (config-only) |
 
@@ -1144,16 +1142,9 @@ Configure via environment variables:
 
 ## Advanced Usage
 
-### Runner Types
+### Multi-GPU and Parallel Evaluation
 
-Two runner types are available:
-
-| Runner | Flag | Backend | Best For |
-|--------|------|---------|----------|
-| Async | (default) | Any | Multi-GPU batch processing, tool-augmented evaluation |
-| Agent | `--runner-type agent` | vLLM | Legacy multi-turn agent tasks |
-
-**Async Mode (Default)** - Spawns worker processes that each load the model and process batches in parallel. Supports tool-augmented evaluation via `--harness`:
+Worker processes each load the model and process batches in parallel:
 
 ```bash
 # Auto-detect workers from available GPUs
@@ -1166,16 +1157,6 @@ olmo-eval run --num-workers 4 -m llama3.1-8b -t mmlu -t gsm8k
 olmo-eval run --num-workers 2 --gpus-per-worker 4 -m llama3.1-70b -t mmlu
 
 # Tool-augmented evaluation with harness
-olmo-eval run -m llama3.1-8b -t simpleqa --harness search
-```
-
-**Agent Mode (Legacy)** - For legacy multi-turn agent tasks. Prefer using async mode with `--harness` for new evaluations:
-
-```bash
-# Legacy approach
-olmo-eval run --runner-type agent -m llama3.1-8b -t simpleqa_agent
-
-# Preferred approach (async with harness)
 olmo-eval run -m llama3.1-8b -t simpleqa --harness search
 ```
 

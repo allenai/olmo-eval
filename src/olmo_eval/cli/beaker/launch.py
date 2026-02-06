@@ -30,7 +30,6 @@ from olmo_eval.cli.utils import (
     reconstruct_ordered_args,
 )
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_UV_CACHE_DIR
-from olmo_eval.core.types import RunnerType
 
 
 @click.command()
@@ -97,14 +96,7 @@ from olmo_eval.core.types import RunnerType
     multiple=True,
     help="Add experiments to Beaker group(s) (can specify multiple, creates if needed)",
 )
-@click.option(
-    "--runner-type",
-    "-R",
-    type=click.Choice([e.value for e in RunnerType], case_sensitive=False),
-    default=None,
-    help="Runner type: async (default) or agent",
-)
-@click.option("--num-workers", "-W", type=int, help="Number of workers for async modes")
+@click.option("--num-workers", "-W", type=int, help="Number of workers")
 @click.option("--gpus-per-worker", type=int, default=1, help="GPUs per worker for async mode")
 @click.option("--dry-run", "-d", is_flag=True, help="Print spec without launching")
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
@@ -193,6 +185,12 @@ from olmo_eval.core.types import RunnerType
     help="Print the first request of each task before model generation",
 )
 @click.option(
+    "--harness",
+    type=str,
+    default=None,
+    help="Harness preset name (e.g., 'search', 'dr_tulu') for tool/prompt configuration",
+)
+@click.option(
     "--uv-cache-dir",
     default=BEAKER_UV_CACHE_DIR,
     show_default=True,
@@ -215,7 +213,6 @@ def launch(
     budget: str | None,
     image: str | None,
     group: tuple[str, ...],
-    runner_type: str | None,
     num_workers: int | None,
     gpus_per_worker: int,
     dry_run: bool,
@@ -237,6 +234,7 @@ def launch(
     inspect_tokens: bool,
     inspect_response: bool,
     inspect_request: bool,
+    harness: str | None,
     uv_cache_dir: str,
 ) -> None:
     """Launch an evaluation job on Beaker.
@@ -301,7 +299,6 @@ def launch(
         "budget": budget,
         "image": image,
         "group": group,
-        "runner_type": runner_type,
         "num_workers": num_workers,
         "gpus_per_worker": gpus_per_worker,
         "s3_bucket": s3_bucket,
@@ -318,6 +315,7 @@ def launch(
         "inspect_tokens": inspect_tokens,
         "inspect_response": inspect_response,
         "inspect_request": inspect_request,
+        "harness": harness,
         "uv_cache_dir": uv_cache_dir,
     }
 
@@ -431,7 +429,7 @@ def launch(
 
     # Show experiment matrix if multiple experiments
     if total_experiments > 1:
-        _print_experiment_matrix(experiment_plan, launch_config.runner_type)
+        _print_experiment_matrix(experiment_plan)
 
     console.print()
 
@@ -456,9 +454,7 @@ def launch(
         job_config = job_assembler.assemble(exp)
         job_configs.append(job_config)
 
-        exp_summary = _build_experiment_summary(
-            exp, job_config, task_configs_by_spec, launch_config.runner_type
-        )
+        exp_summary = _build_experiment_summary(exp, job_config, task_configs_by_spec)
         experiment_summaries.append(exp_summary)
 
     # Print experiment summaries
@@ -626,16 +622,13 @@ def _ensure_secrets(
     return common_secrets, store_secrets, task_secrets
 
 
-def _print_experiment_matrix(
-    experiment_plan: list["ExperimentPlan"], runner_type: RunnerType
-) -> None:
+def _print_experiment_matrix(experiment_plan: list["ExperimentPlan"]) -> None:
     """Print experiment matrix table."""
     matrix_table = Table(show_header=True, title="Experiment Plan")
     matrix_table.add_column("Name", style="cyan")
     matrix_table.add_column("Models", style="blue")
     matrix_table.add_column("Provider", style="white")
     matrix_table.add_column("Tasks", style="dim")
-    matrix_table.add_column("Runner", style="magenta")
     matrix_table.add_column("Priority", style="yellow")
     matrix_table.add_column("GPUs", style="green", justify="right")
 
@@ -666,19 +659,11 @@ def _print_experiment_matrix(
         else:
             task_display = f"{exp.tasks[0]}, ... ({len(exp.tasks)} total)"
 
-        # Runner display
-        runner_names = {
-            RunnerType.ASYNC: "AsyncEvalRunner",
-            RunnerType.AGENT: "AgentEvalRunner",
-        }
-        runner_display = runner_names.get(exp.runner_type, "AsyncEvalRunner")
-
         matrix_table.add_row(
             exp.name,
             model_display,
             provider_display,
             task_display,
-            runner_display,
             exp.priority,
             str(exp.num_gpus),
         )
@@ -690,7 +675,6 @@ def _build_experiment_summary(
     exp: "ExperimentPlan",
     job_config,
     task_configs_by_spec: dict,
-    runner_type: RunnerType,
 ) -> ExperimentSummary:
     """Build experiment summary for display."""
     from olmo_eval.runners import AsyncEvalRunner

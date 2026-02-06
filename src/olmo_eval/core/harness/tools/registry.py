@@ -11,7 +11,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..tool import Tool
+    from .tool import Tool
 
 # Global registry mapping tool names to Tool instances
 TOOL_REGISTRY: dict[str, Tool] = {}
@@ -119,7 +119,7 @@ def registered_tool(
     Returns:
         Decorator function that converts a function to a registered Tool.
     """
-    from ..tool import Tool
+    from .tool import Tool
 
     def decorator(fn: Callable[..., Awaitable[str] | str]) -> Tool:
         t = Tool.from_function(fn, name=name, description=description, strict=strict)
@@ -129,7 +129,7 @@ def registered_tool(
     if callable(name):
         fn = name
         name = None
-        from ..tool import Tool
+        from .tool import Tool
 
         t = Tool.from_function(fn)  # type: ignore[arg-type]
         return register_tool(t)  # type: ignore[return-value]

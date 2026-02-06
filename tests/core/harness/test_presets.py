@@ -7,7 +7,7 @@ import pytest
 from olmo_eval.core.harness import clear_registry
 from olmo_eval.core.harness.config import HarnessConfig
 from olmo_eval.core.harness.presets import (
-    HARNESS_PRESETS,
+    _PRESET_REGISTRY,
     get_harness_preset,
     list_harness_presets,
     register_harness_preset,
@@ -40,14 +40,14 @@ class TestHarnessPresets:
         assert isinstance(config, HarnessConfig)
         assert config.name == "default"
         assert config.tool_names == ()
-        assert config.max_turns == 1
+        assert config.max_turns is None
 
-    def test_get_search_preset(self):
-        """Test getting the search preset."""
-        config = get_harness_preset("search")
+    def test_get_dr_tulu_preset(self):
+        """Test getting the dr_tulu preset."""
+        config = get_harness_preset("dr_tulu")
 
         assert isinstance(config, HarnessConfig)
-        assert config.name == "search"
+        assert config.name == "dr_tulu"
         assert len(config.tool_names) > 0
         assert "semantic_scholar_snippet_search" in config.tool_names
         assert "serper_google_webpage_search" in config.tool_names
@@ -64,7 +64,7 @@ class TestHarnessPresets:
         presets = list_harness_presets()
 
         assert "default" in presets
-        assert "search" in presets
+        assert "dr_tulu" in presets
         assert presets == sorted(presets)  # Should be sorted
 
     def test_register_custom_preset(self):
@@ -77,16 +77,16 @@ class TestHarnessPresets:
 
         register_harness_preset("custom", custom)
 
-        assert "custom" in HARNESS_PRESETS
+        assert "custom" in _PRESET_REGISTRY
         retrieved = get_harness_preset("custom")
         assert retrieved.system_prompt == "Custom prompt"
 
         # Clean up
-        del HARNESS_PRESETS["custom"]
+        del _PRESET_REGISTRY["custom"]
 
-    def test_search_preset_required_secrets(self):
-        """Test that search preset has required secrets."""
-        config = get_harness_preset("search")
+    def test_dr_tulu_preset_required_secrets(self):
+        """Test that dr_tulu preset has required secrets."""
+        config = get_harness_preset("dr_tulu")
 
         assert "S2_API_KEY" in config.required_secrets
         assert "SERPER_API_KEY" in config.required_secrets
@@ -118,7 +118,7 @@ class TestSearchTools:
 
     def test_search_tools_have_schemas(self):
         """Test that search tools have valid schemas."""
-        config = get_harness_preset("search")
+        config = get_harness_preset("dr_tulu")
         schemas = config.tool_schemas
 
         assert len(schemas) == 3

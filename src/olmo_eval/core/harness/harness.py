@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from olmo_eval.core.types import LMOutput, LMRequest, SamplingParams
 
-from .backend import get_backend
+from .backends import get_backend
 from .config import HarnessConfig
 from .result import HarnessResult
 
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 
 class Harness:
-    """A model configured with specific capabilities.
+    """A model provider configured with specific capabilities.
 
     Wraps an InferenceProvider and applies configuration to all requests.
     Uses pluggable backends for execution.
@@ -149,7 +149,7 @@ class Harness:
         """
         import asyncio
 
-        semaphore = asyncio.Semaphore(self.config.max_concurrency)
+        semaphore = asyncio.Semaphore(self.config.max_concurrency or 8)
 
         async def run_one(request: LMRequest) -> HarnessResult:
             async with semaphore:

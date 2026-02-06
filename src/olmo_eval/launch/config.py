@@ -45,7 +45,7 @@ from typing import Any
 from omegaconf import MISSING, OmegaConf
 
 from olmo_eval.core.constants.infrastructure import DEFAULT_MAX_GPUS_PER_NODE
-from olmo_eval.core.types import ProviderKind, RunnerType
+from olmo_eval.core.types import ProviderKind
 
 
 @dataclass
@@ -83,7 +83,6 @@ class BeakerModelSpec:
         preemptible: Whether this model's jobs can be preempted.
         timeout: Timeout for this model's jobs.
         shared_memory: Shared memory size (e.g., "10GiB").
-        runner_type: Runner type (async or agent). Overrides default.
         num_workers: Number of workers for async modes (overrides default).
         gpus_per_worker: GPUs per worker for async modes (overrides default).
         provider: Inference provider configuration (ProviderConfig with name and optional package).
@@ -105,7 +104,6 @@ class BeakerModelSpec:
             provider:
               name: vllm
               package: https://github.com/davidheineman/vllm@my-branch
-            runner_type: async
             num_workers: 2
             gpus_per_worker: 4
             timeout: 48h
@@ -128,8 +126,6 @@ class BeakerModelSpec:
     timeout: str | None = None
     shared_memory: str | None = None
 
-    # Runner type (async or agent)
-    runner_type: str | None = None  # String for OmegaConf compatibility
     num_workers: int | None = None
     gpus_per_worker: int | None = None
 
@@ -422,7 +418,6 @@ class EvalConfig:
         beaker_image: Container image to use.
         description: Optional experiment description.
         groups: List of Beaker groups to add experiments to.
-        runner_type: Default runner type (async or agent).
         num_workers: Number of workers for async modes.
         gpus_per_worker: GPUs per worker for async modes.
         pack_models: Pack multiple models into single experiments when they fit.
@@ -445,8 +440,7 @@ class EvalConfig:
     timeout: str = "24h"
     retries: int | None = None
 
-    # Runner type and worker settings
-    runner_type: str = RunnerType.ASYNC.value  # String for OmegaConf compatibility
+    # Worker settings
     num_workers: int | None = None
     gpus_per_worker: int = 1
 
@@ -480,21 +474,13 @@ class EvalConfig:
             - parallelism: Number of model instances to run
             - Other resource settings (cluster, timeout, etc.)
         """
-        # Determine runner type (model overrides config default)
-        runner_type_str = model.runner_type if model.runner_type is not None else self.runner_type
-        runner_type = RunnerType(runner_type_str)
-
         num_workers = model.num_workers if model.num_workers is not None else self.num_workers
         gpus_per_worker = (
             model.gpus_per_worker if model.gpus_per_worker is not None else self.gpus_per_worker
         )
 
-        # Calculate GPUs per model instance
-        # For async modes, GPUs are calculated from workers
-        if runner_type == RunnerType.ASYNC and num_workers is not None:
-            gpus_per_model = num_workers * gpus_per_worker
-        else:
-            gpus_per_model = model.gpus
+        # Calculate GPUs per model instance from workers if specified
+        gpus_per_model = num_workers * gpus_per_worker if num_workers is not None else model.gpus
 
         # Parallelism is always per-model (default 1)
         parallelism = model.parallelism
@@ -515,7 +501,6 @@ class EvalConfig:
             "preemptible": model.preemptible if model.preemptible is not None else self.preemptible,
             "timeout": model.timeout if model.timeout is not None else self.timeout,
             "shared_memory": model.shared_memory,  # None uses BeakerJobConfig default
-            "runner_type": runner_type,
             "num_workers": num_workers,
             "gpus_per_worker": gpus_per_worker,
             "provider": provider_name,

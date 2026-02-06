@@ -8,61 +8,33 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from olmo_eval.core.types import ToolSchema
 
-    from .tool import Tool
-
-
-class HarnessBackend(StrEnum):
-    """Type of backend for harness execution."""
-
-    INTERNAL = "internal"
-    OPENAI_AGENTS = "openai_agents"
+    from .tools import Tool
 
 
 @dataclass(frozen=True)
 class HarnessConfig:
-    """Immutable configuration describing model capabilities.
+    """Immutable configuration for a Harness.
 
     This configuration determines how a Harness wraps a provider:
     - Which tools are available (by name, resolved from registry)
     - System prompt to prepend to requests
     - Tool choice behavior (auto, none, required)
-    - Multi-turn settings (max_turns, max_concurrency)
-    - Backend selection (internal, openai_agents)
-
-    The configuration is serializable (uses tool names, not Tool objects)
-    for passing across process boundaries.
-
-    Attributes:
-        name: Human-readable name for this harness configuration.
-        tool_names: Names of tools from the registry to enable.
-        system_prompt: System prompt to prepend to requests.
-        tool_choice: How the model should use tools ("auto", "none", "required", or tool name).
-        max_turns: Maximum turns in multi-turn execution.
-        max_concurrency: Maximum concurrent tool executions.
-        backend: Backend for agent execution ("internal", "openai_agents").
-        model_url: API endpoint URL (for external backends).
-        api_key: API key (for external backends).
-        required_secrets: Environment variable names that must be set.
+    - Backend selection (default, openai_agents)
     """
 
     name: str
     tool_names: tuple[str, ...] = ()
     system_prompt: str | None = None
     tool_choice: Literal["auto", "none", "required"] | str = "auto"
-    max_turns: int = 10
-    max_concurrency: int = 8
-    backend: HarnessBackend = HarnessBackend.INTERNAL
-    # For API-based backends
-    model_url: str | None = None
-    api_key: str | None = None
-    # Secrets validation
+    backend: str = "default"
     required_secrets: tuple[str, ...] = ()
+    max_turns: int | None = None
+    max_concurrency: int | None = None
 
     @property
     def tools(self) -> tuple[Tool, ...]:
@@ -116,20 +88,20 @@ class HarnessConfig:
         Returns:
             Dictionary representation suitable for JSON serialization.
         """
-        return {
+        d: dict[str, Any] = {
             "name": self.name,
             "tool_names": list(self.tool_names),
             "system_prompt": self.system_prompt,
             "tool_choice": self.tool_choice,
-            "max_turns": self.max_turns,
-            "max_concurrency": self.max_concurrency,
-            "backend": self.backend.value
-            if isinstance(self.backend, HarnessBackend)
-            else self.backend,
-            "model_url": self.model_url,
-            "api_key": self.api_key,
+            "backend": self.backend,
             "required_secrets": list(self.required_secrets),
         }
+        # Only include agent-specific fields if set
+        if self.max_turns is not None:
+            d["max_turns"] = self.max_turns
+        if self.max_concurrency is not None:
+            d["max_concurrency"] = self.max_concurrency
+        return d
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> HarnessConfig:
@@ -146,12 +118,10 @@ class HarnessConfig:
             tool_names=tuple(data.get("tool_names", [])),
             system_prompt=data.get("system_prompt"),
             tool_choice=data.get("tool_choice", "auto"),
-            max_turns=data.get("max_turns", 10),
-            max_concurrency=data.get("max_concurrency", 8),
-            backend=HarnessBackend(data.get("backend", "internal")),
-            model_url=data.get("model_url"),
-            api_key=data.get("api_key"),
+            backend=data.get("backend", "default"),
             required_secrets=tuple(data.get("required_secrets", [])),
+            max_turns=data.get("max_turns"),
+            max_concurrency=data.get("max_concurrency"),
         )
 
     def with_tools(self, *tools: Tool | str) -> HarnessConfig:
@@ -178,12 +148,10 @@ class HarnessConfig:
             tool_names=tuple(new_names),
             system_prompt=self.system_prompt,
             tool_choice=self.tool_choice,
+            backend=self.backend,
+            required_secrets=self.required_secrets,
             max_turns=self.max_turns,
             max_concurrency=self.max_concurrency,
-            backend=self.backend,
-            model_url=self.model_url,
-            api_key=self.api_key,
-            required_secrets=self.required_secrets,
         )
 
     def with_system_prompt(self, system_prompt: str) -> HarnessConfig:
@@ -200,12 +168,10 @@ class HarnessConfig:
             tool_names=self.tool_names,
             system_prompt=system_prompt,
             tool_choice=self.tool_choice,
+            backend=self.backend,
+            required_secrets=self.required_secrets,
             max_turns=self.max_turns,
             max_concurrency=self.max_concurrency,
-            backend=self.backend,
-            model_url=self.model_url,
-            api_key=self.api_key,
-            required_secrets=self.required_secrets,
         )
 
 
@@ -214,12 +180,10 @@ def harness_config(
     tools: Sequence[Tool | str] = (),
     system_prompt: str | None = None,
     tool_choice: Literal["auto", "none", "required"] | str = "auto",
-    max_turns: int = 10,
-    max_concurrency: int = 8,
-    backend: HarnessBackend = HarnessBackend.INTERNAL,
-    model_url: str | None = None,
-    api_key: str | None = None,
+    backend: str = "default",
     required_secrets: Sequence[str] = (),
+    max_turns: int | None = None,
+    max_concurrency: int | None = None,
 ) -> HarnessConfig:
     """Create a HarnessConfig, registering any Tool objects passed.
 
@@ -231,18 +195,15 @@ def harness_config(
         tools: Sequence of Tool instances or tool names.
         system_prompt: System prompt to prepend to requests.
         tool_choice: How the model should use tools.
-        max_turns: Maximum turns in multi-turn execution.
-        max_concurrency: Maximum concurrent tool executions.
-        backend: Backend for agent execution.
-        model_url: API endpoint URL.
-        api_key: API key.
+        backend: Backend name.
         required_secrets: Environment variable names that must be set.
+        max_turns: Maximum turns for agent backends (None = backend default).
+        max_concurrency: Maximum concurrent tool executions for agent backends.
 
     Returns:
         A new HarnessConfig instance with tools registered.
     """
-    from .tool import Tool
-    from .tools import register_tool
+    from .tools import Tool, register_tool
 
     tool_names: list[str] = []
     for t in tools:
@@ -257,10 +218,8 @@ def harness_config(
         tool_names=tuple(tool_names),
         system_prompt=system_prompt,
         tool_choice=tool_choice,
+        backend=backend,
+        required_secrets=tuple(required_secrets),
         max_turns=max_turns,
         max_concurrency=max_concurrency,
-        backend=backend,
-        model_url=model_url,
-        api_key=api_key,
-        required_secrets=tuple(required_secrets),
     )

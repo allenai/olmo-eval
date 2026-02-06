@@ -77,18 +77,6 @@ class MetricName(StrEnum):
     F1 = "f1"
 
 
-class RunnerType(StrEnum):
-    """Runner type for evaluation execution.
-
-    Determines which evaluation runner to use:
-    - ASYNC: Parallel execution with multiple worker processes (default)
-    - AGENT: Agent runner for multi-turn tasks with tool use
-    """
-
-    ASYNC = "async"
-    AGENT = "agent"
-
-
 class RequestType(Enum):
     """Type of request to send to the LM."""
 
@@ -131,7 +119,6 @@ class Instance:
     gold_answer: str | None = None
     choices: tuple[str, ...] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
-    # Tool calling fields
     tools: tuple[ToolSchema, ...] | None = None
     expected_tool_calls: tuple[dict[str, Any], ...] | None = None
     should_abstain: bool | None = None
@@ -142,20 +129,12 @@ class Instance:
 
 @dataclass(frozen=True, slots=True)
 class LMRequest:
-    """Request to send to a language model.
-
-    For CHAT requests: use `messages`
-    For COMPLETION requests: use `prompt` and optionally `continuations`
-    For AGENT requests: additionally include `tools` and `system_prompt`
-    """
+    """Request to send to a language model."""
 
     request_type: RequestType
-    # Chat-style fields
     messages: tuple[dict[str, Any], ...] = ()
-    # Completion-style fields
     prompt: str = ""
     continuations: tuple[str, ...] | None = None
-    # Agent-specific fields (optional)
     tools: tuple[ToolSchema, ...] | None = None
     system_prompt: str | None = None
 
