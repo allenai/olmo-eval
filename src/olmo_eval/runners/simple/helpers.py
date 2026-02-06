@@ -6,6 +6,7 @@ import dataclasses
 import multiprocessing as mp
 import queue
 import time
+from typing import Any
 
 from rich.console import Console
 
@@ -147,6 +148,14 @@ def wait_for_workers_ready(
 # -----------------------------------------------------------------------------
 
 
+def _hashable_sampling_key(sampling_params: Any) -> Any:
+    """Build a hashable key from sampling params (astuple may contain lists)."""
+    if sampling_params is None:
+        return None
+    t = dataclasses.astuple(sampling_params)
+    return tuple(tuple(x) if isinstance(x, list) else x for x in t)
+
+
 def process_batch(
     batch: list[QueueItem],
     provider: InferenceProvider,
@@ -167,11 +176,12 @@ def process_batch(
     from olmo_eval.core.types import RequestType
 
     # Group items that share the same request type and sampling params.
-    # We use value-based comparison (astuple) because items are
-    # pickled/unpickled through mp.Queue, giving each a new object.
+    # We use a hashable key (lists in astuple converted to tuples) because
+    # items are pickled/unpickled through mp.Queue and params may use lists
+    # (e.g. stop_sequences) which cannot be dict keys.
     groups: dict[tuple, list[QueueItem]] = {}
     for item in batch:
-        sp_key = dataclasses.astuple(item.sampling_params) if item.sampling_params else None
+        sp_key = _hashable_sampling_key(item.sampling_params)
         key = (item.request.request_type, sp_key)
         groups.setdefault(key, []).append(item)
 
