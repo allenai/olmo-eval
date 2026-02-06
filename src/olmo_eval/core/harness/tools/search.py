@@ -14,8 +14,7 @@ import os
 
 import httpx
 
-from olmo_eval.core.harness.registry import registered_tool
-from olmo_eval.core.harness.tool import Tool
+from .registry import registered_tool
 
 
 @registered_tool(
@@ -192,15 +191,3 @@ async def serper_fetch_page(url: str) -> str:
         text = text[:4000] + "\n\n[Content truncated...]"
 
     return text
-
-
-# Export the tools tuple for convenience
-# These are already registered via @registered_tool decorator
-SEARCH_TOOLS: tuple[Tool, ...] = (
-    semantic_scholar_search,
-    serper_web_search,
-    serper_fetch_page,
-)
-
-# Tool names for easy reference
-SEARCH_TOOL_NAMES: tuple[str, ...] = tuple(t.name for t in SEARCH_TOOLS)

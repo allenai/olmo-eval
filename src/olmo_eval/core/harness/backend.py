@@ -1,10 +1,7 @@
-"""AgentBackend: Pluggable execution backends for multi-turn agent loops.
+"""Backend: Pluggable execution backends for Harness.
 
-This module defines the abstract backend interface and provides implementations:
-- InternalBackend: Built-in loop using Harness tools directly
-- OpenAIAgentsBackend: Delegate to OpenAI Agents SDK
-
-Backends are registered using the @register_backend decorator.
+Backends are registered using the @register_backend decorator and define
+how the harness executes requests.
 """
 
 from __future__ import annotations
@@ -26,19 +23,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class AgentBackend(ABC):
-    """Abstract base class for agent execution backends.
+class Backend(ABC):
+    """Abstract base class for harness execution backends.
 
-    Backends handle the multi-turn agent loop, including:
-    - Sending requests to the model
-    - Parsing tool calls from responses
-    - Executing tools
-    - Building the conversation history
-    - Tracking the trajectory
-
-    Different backends can use different execution strategies:
-    - InternalBackend: Built-in loop using Harness tools
-    - OpenAIAgentsBackend: Delegate to OpenAI Agents SDK
+    Backends define how the harness executes requests. All backends must
+    implement the `run` method.
     """
 
     @abstractmethod
@@ -48,11 +37,11 @@ class AgentBackend(ABC):
         request: LMRequest,
         sampling_params: SamplingParams | None = None,
     ) -> HarnessResult:
-        """Execute the agent loop and return the result.
+        """Execute the request and return the result.
 
         Args:
             harness: The Harness instance (provides provider and config).
-            request: The initial request to start the conversation.
+            request: The initial request to process.
             sampling_params: Optional sampling parameters override.
 
         Returns:
@@ -65,17 +54,17 @@ class AgentBackend(ABC):
 # Backend Registry
 # -----------------------------------------------------------------------------
 
-BACKEND_REGISTRY: dict[str, type[AgentBackend]] = {}
+BACKEND_REGISTRY: dict[str, type[Backend]] = {}
 
-T = TypeVar("T", bound=AgentBackend)
+T = TypeVar("T", bound=Backend)
 
 
 def register_backend(name: str):
-    """Decorator to register an AgentBackend class.
+    """Decorator to register a Backend class.
 
     Usage:
         @register_backend("internal")
-        class InternalBackend(AgentBackend):
+        class InternalBackend(Backend):
             ...
 
     Args:
@@ -94,7 +83,7 @@ def register_backend(name: str):
     return decorator
 
 
-def get_backend(name: str) -> AgentBackend:
+def get_backend(name: str) -> Backend:
     """Get a backend instance by name.
 
     Args:
@@ -122,15 +111,15 @@ def list_backends() -> list[str]:
 
 
 # -----------------------------------------------------------------------------
-# Backend Implementations
+# Agent Backend Implementations
 # -----------------------------------------------------------------------------
 
 
 @register_backend("internal")
-class InternalBackend(AgentBackend):
+class InternalBackend(Backend):
     """Built-in agent loop using Harness tools directly.
 
-    This backend implements a simple turn-based loop:
+    This backend implements a simple turn-based agent loop:
     1. Send request to model
     2. If response has tool calls, execute them
     3. Append results to conversation and repeat
@@ -274,7 +263,7 @@ class InternalBackend(AgentBackend):
 
 
 @register_backend("openai_agents")
-class OpenAIAgentsBackend(AgentBackend):
+class OpenAIAgentsBackend(Backend):
     """Backend that delegates execution to OpenAI Agents SDK.
 
     This backend converts Harness tools to the agents SDK format

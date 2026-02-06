@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from olmo_eval.core.harness import clear_registry
 from olmo_eval.core.harness.config import HarnessConfig
 from olmo_eval.core.harness.presets import (
     HARNESS_PRESETS,
@@ -11,7 +12,6 @@ from olmo_eval.core.harness.presets import (
     list_harness_presets,
     register_harness_preset,
 )
-from olmo_eval.core.harness.registry import clear_registry
 
 
 @pytest.fixture(autouse=True)
@@ -95,15 +95,21 @@ class TestHarnessPresets:
 class TestSearchTools:
     """Tests for search tools in the search preset."""
 
+    @pytest.fixture(autouse=True)
+    def register_search_tools(self):
+        """Ensure search tools are registered for these tests."""
+        # Force import to trigger @registered_tool decorators
+        from olmo_eval.core.harness import register_tool
+        from olmo_eval.core.harness.tools import search  # noqa: F401
+
+        # Re-register tools since registry may have been cleared
+        register_tool(search.semantic_scholar_search)
+        register_tool(search.serper_web_search)
+        register_tool(search.serper_fetch_page)
+
     def test_search_tools_registered(self):
         """Test that search tools are registered when preset is loaded."""
-        # Import the search tools and explicitly register them
-        # (needed because module may have been imported and cleared before)
-        from olmo_eval.core.harness.registry import list_tools, register_tool
-        from olmo_eval.core.harness.tools.search import SEARCH_TOOLS
-
-        for tool in SEARCH_TOOLS:
-            register_tool(tool)
+        from olmo_eval.core.harness import list_tools
 
         tools = list_tools()
         assert "semantic_scholar_snippet_search" in tools
@@ -112,13 +118,6 @@ class TestSearchTools:
 
     def test_search_tools_have_schemas(self):
         """Test that search tools have valid schemas."""
-        # Import the search tools and explicitly register them
-        from olmo_eval.core.harness.registry import register_tool
-        from olmo_eval.core.harness.tools.search import SEARCH_TOOLS
-
-        for tool in SEARCH_TOOLS:
-            register_tool(tool)
-
         config = get_harness_preset("search")
         schemas = config.tool_schemas
 

@@ -22,7 +22,7 @@ class Harness:
     """A model configured with specific capabilities.
 
     Wraps an InferenceProvider and applies configuration to all requests.
-    Uses pluggable backends for agent execution (internal loop, OpenAI Agents SDK, etc.)
+    Uses pluggable backends for execution.
 
     The Harness provides two main interfaces:
     - generate(): Single-turn generation with config injected (tools, system prompt)

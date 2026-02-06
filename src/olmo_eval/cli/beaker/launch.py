@@ -341,7 +341,7 @@ def launch(
         cli_priority=None,
         default_priority=effective_priority,
     )
-    tasks_by_priority, valid_tasks, agent_task_specs = task_validator.validate_and_group()
+    tasks_by_priority, valid_tasks = task_validator.validate_and_group()
 
     # Create launcher
     launcher = BeakerLauncher(workspace=launch_config.workspace)
@@ -392,7 +392,7 @@ def launch(
     # Group models and build experiment plan
     model_grouper = ModelGrouper(launch_config, eval_config)
     experiment_builder = ExperimentPlanBuilder(
-        launch_config, model_grouper, tasks_by_priority, agent_task_specs, override_priority
+        launch_config, model_grouper, tasks_by_priority, override_priority
     )
     experiment_plan, split_models = experiment_builder.build()
 

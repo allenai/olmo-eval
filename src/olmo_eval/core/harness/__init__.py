@@ -8,7 +8,7 @@ Key Components:
 - Tool: Unified schema + implementation for tools
 - HarnessConfig: Immutable configuration describing model capabilities
 - Harness: Wraps a provider with config, provides generate() and run()
-- AgentBackend: Pluggable execution backends (internal loop, OpenAI Agents SDK)
+- Backend: Pluggable execution backends
 
 Example:
     from olmo_eval.core.harness import (
@@ -49,14 +49,14 @@ Example:
 
 from .backend import (
     BACKEND_REGISTRY,
-    AgentBackend,
+    Backend,
     InternalBackend,
     OpenAIAgentsBackend,
     get_backend,
     list_backends,
     register_backend,
 )
-from .config import HarnessConfig, harness_config
+from .config import HarnessBackend, HarnessConfig, harness_config
 from .harness import Harness, create_harness
 from .presets import (
     HARNESS_PRESETS,
@@ -64,7 +64,9 @@ from .presets import (
     list_harness_presets,
     register_harness_preset,
 )
-from .registry import (
+from .result import HarnessResult
+from .tool import Tool, tool
+from .tools import (
     TOOL_REGISTRY,
     clear_registry,
     ensure_tools_registered,
@@ -74,12 +76,11 @@ from .registry import (
     register_tool,
     registered_tool,
 )
-from .result import HarnessResult
-from .tool import Tool, tool
 
 __all__ = [
     # Main classes
     "Harness",
+    "HarnessBackend",
     "HarnessConfig",
     "HarnessResult",
     "Tool",
@@ -97,7 +98,7 @@ __all__ = [
     "ensure_tools_registered",
     "TOOL_REGISTRY",
     # Backends
-    "AgentBackend",
+    "Backend",
     "InternalBackend",
     "OpenAIAgentsBackend",
     "BACKEND_REGISTRY",

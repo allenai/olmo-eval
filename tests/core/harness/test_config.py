@@ -7,8 +7,8 @@ from unittest.mock import patch
 
 import pytest
 
-from olmo_eval.core.harness.config import HarnessConfig, harness_config
-from olmo_eval.core.harness.registry import clear_registry, register_tool
+from olmo_eval.core.harness import clear_registry, register_tool
+from olmo_eval.core.harness.config import HarnessBackend, HarnessConfig, harness_config
 from olmo_eval.core.harness.tool import tool
 
 
@@ -84,7 +84,7 @@ class TestHarnessConfig:
             tool_choice="required",
             max_turns=5,
             max_concurrency=4,
-            backend="openai_agents",
+            backend=HarnessBackend.OPENAI_AGENTS,
             required_secrets=("API_KEY",),
         )
 
@@ -164,7 +164,7 @@ class TestHarnessConfigFactory:
 
         assert "factory_tool" in config.tool_names
         # Tool should be registered
-        from olmo_eval.core.harness.registry import get_tool
+        from olmo_eval.core.harness import get_tool
 
         assert get_tool("factory_tool") is factory_func
 

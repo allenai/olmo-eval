@@ -6,9 +6,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from olmo_eval.core.harness import clear_registry, register_tool
 from olmo_eval.core.harness.config import HarnessConfig
 from olmo_eval.core.harness.harness import Harness, create_harness
-from olmo_eval.core.harness.registry import clear_registry, register_tool
 from olmo_eval.core.harness.tool import tool
 from olmo_eval.core.types import LMOutput, LMRequest, RequestType
 

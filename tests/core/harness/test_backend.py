@@ -1,4 +1,4 @@
-"""Tests for AgentBackend implementations."""
+"""Tests for Backend implementations."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from olmo_eval.core.harness import clear_registry, register_tool
 from olmo_eval.core.harness.backend import (
     BACKEND_REGISTRY,
     InternalBackend,
@@ -15,7 +16,6 @@ from olmo_eval.core.harness.backend import (
 )
 from olmo_eval.core.harness.config import HarnessConfig
 from olmo_eval.core.harness.harness import Harness
-from olmo_eval.core.harness.registry import clear_registry, register_tool
 from olmo_eval.core.harness.tool import tool
 from olmo_eval.core.types import LMOutput, LMRequest, RequestType
 from olmo_eval.core.types.tools import ToolCall
@@ -64,10 +64,10 @@ class TestGetBackend:
 
     def test_register_custom_backend(self):
         """Test registering a custom backend using the decorator."""
-        from olmo_eval.core.harness.backend import AgentBackend
+        from olmo_eval.core.harness.backend import Backend
 
         @register_backend("custom")
-        class CustomBackend(AgentBackend):
+        class CustomBackend(Backend):
             async def run(self, harness, request, sampling_params=None):
                 pass
 

@@ -6,11 +6,11 @@ import json as json_module
 from typing import TYPE_CHECKING
 
 from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan
-from olmo_eval.core.types import RunnerType
 
 if TYPE_CHECKING:
     from olmo_eval.cli.beaker.config_loader import LaunchConfig
     from olmo_eval.cli.beaker.model_grouper import ModelGrouper
+    from olmo_eval.core.types import RunnerType
     from olmo_eval.launch import BeakerModelSpec
 
 
@@ -22,7 +22,6 @@ class ExperimentPlanBuilder:
         config: LaunchConfig,
         model_grouper: ModelGrouper,
         tasks_by_priority: dict[str, list[str]],
-        agent_task_specs: set[str],
         override_priority: str | None = None,
     ):
         """Initialize the builder.
@@ -31,23 +30,12 @@ class ExperimentPlanBuilder:
             config: Parsed launch configuration.
             model_grouper: Model grouper instance.
             tasks_by_priority: Dict mapping priority -> task specs.
-            agent_task_specs: Set of agent task specifications.
             override_priority: Priority extracted from -o priority=X, overrides default.
         """
         self.config = config
         self.model_grouper = model_grouper
         self.tasks_by_priority = tasks_by_priority
-        self.agent_task_specs = agent_task_specs
         self.override_priority = override_priority
-
-    def is_agent_spec(self, spec: str) -> bool:
-        """Check if a task spec is an agent task."""
-        from olmo_eval.core.configs import expand_tasks
-        from olmo_eval.evals.tasks import get_base_task_name
-
-        base_spec = get_base_task_name(spec)
-        expanded = expand_tasks([base_spec])
-        return all(t in self.agent_task_specs for t in expanded)
 
     def _get_model_gpu_needs(
         self, model_cfgs: list[BeakerModelSpec], model_specs: list[str]
@@ -304,54 +292,38 @@ class ExperimentPlanBuilder:
             for t_priority, t_list in self.tasks_by_priority.items():
                 # Use override priority if specified via -o priority=X, else use task's priority
                 effective_priority = self.override_priority or t_priority
+                total_expanded = len(expand_tasks(t_list))
 
-                # Split tasks into agent and simple categories
-                agent_tasks = [t for t in t_list if self.is_agent_spec(t)]
-                simple_tasks = [t for t in t_list if not self.is_agent_spec(t)]
-
-                for task_category, category_tasks in [
-                    ("agent", agent_tasks),
-                    ("simple", simple_tasks),
-                ]:
-                    if not category_tasks:
-                        continue
-
-                    category_expanded = len(expand_tasks(category_tasks))
-                    # Agent tasks always use AGENT runner, others use config's runner_type
-                    effective_runner = (
-                        RunnerType.AGENT if task_category == "agent" else self.config.runner_type
+                if self.config.pack_models:
+                    # Pack models together when they fit
+                    experiments, splits = self._build_experiments_packed(
+                        group_model_cfgs,
+                        group_model_specs,
+                        group_model_indices,
+                        t_list,
+                        effective_priority,
+                        self.config.runner_type,
+                        total_expanded,
+                        multiple_models,
+                        multiple_priorities,
+                        task_overrides,
                     )
-
-                    if self.config.pack_models:
-                        # Pack models together when they fit
-                        experiments, splits = self._build_experiments_packed(
-                            group_model_cfgs,
-                            group_model_specs,
-                            group_model_indices,
-                            category_tasks,
-                            effective_priority,
-                            effective_runner,
-                            category_expanded,
-                            multiple_models,
-                            multiple_priorities,
-                            task_overrides,
-                        )
-                        experiment_plan.extend(experiments)
-                        split_models.extend(splits)
-                    else:
-                        # Each model gets its own experiment (default)
-                        experiments = self._build_experiments_no_pack(
-                            group_model_cfgs,
-                            group_model_specs,
-                            group_model_indices,
-                            category_tasks,
-                            effective_priority,
-                            effective_runner,
-                            category_expanded,
-                            multiple_models,
-                            multiple_priorities,
-                            task_overrides,
-                        )
-                        experiment_plan.extend(experiments)
+                    experiment_plan.extend(experiments)
+                    split_models.extend(splits)
+                else:
+                    # Each model gets its own experiment (default)
+                    experiments = self._build_experiments_no_pack(
+                        group_model_cfgs,
+                        group_model_specs,
+                        group_model_indices,
+                        t_list,
+                        effective_priority,
+                        self.config.runner_type,
+                        total_expanded,
+                        multiple_models,
+                        multiple_priorities,
+                        task_overrides,
+                    )
+                    experiment_plan.extend(experiments)
 
         return experiment_plan, split_models

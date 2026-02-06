@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from olmo_eval.core.harness.registry import (
+from olmo_eval.core.harness import (
     TOOL_REGISTRY,
     clear_registry,
     get_tool,

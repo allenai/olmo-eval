@@ -8,12 +8,20 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from olmo_eval.core.types import ToolSchema
 
     from .tool import Tool
+
+
+class HarnessBackend(StrEnum):
+    """Type of backend for harness execution."""
+
+    INTERNAL = "internal"
+    OPENAI_AGENTS = "openai_agents"
 
 
 @dataclass(frozen=True)
@@ -49,7 +57,7 @@ class HarnessConfig:
     tool_choice: Literal["auto", "none", "required"] | str = "auto"
     max_turns: int = 10
     max_concurrency: int = 8
-    backend: Literal["internal", "openai_agents"] = "internal"
+    backend: HarnessBackend = HarnessBackend.INTERNAL
     # For API-based backends
     model_url: str | None = None
     api_key: str | None = None
@@ -66,7 +74,7 @@ class HarnessConfig:
         Raises:
             ValueError: If any tool name is not registered.
         """
-        from .registry import get_tools
+        from .tools import get_tools
 
         return get_tools(self.tool_names)
 
@@ -115,7 +123,9 @@ class HarnessConfig:
             "tool_choice": self.tool_choice,
             "max_turns": self.max_turns,
             "max_concurrency": self.max_concurrency,
-            "backend": self.backend,
+            "backend": self.backend.value
+            if isinstance(self.backend, HarnessBackend)
+            else self.backend,
             "model_url": self.model_url,
             "api_key": self.api_key,
             "required_secrets": list(self.required_secrets),
@@ -138,7 +148,7 @@ class HarnessConfig:
             tool_choice=data.get("tool_choice", "auto"),
             max_turns=data.get("max_turns", 10),
             max_concurrency=data.get("max_concurrency", 8),
-            backend=data.get("backend", "internal"),
+            backend=HarnessBackend(data.get("backend", "internal")),
             model_url=data.get("model_url"),
             api_key=data.get("api_key"),
             required_secrets=tuple(data.get("required_secrets", [])),
@@ -153,7 +163,7 @@ class HarnessConfig:
         Returns:
             New HarnessConfig with the additional tools.
         """
-        from .registry import register_tool
+        from .tools import register_tool
 
         new_names = list(self.tool_names)
         for t in tools:
@@ -206,7 +216,7 @@ def harness_config(
     tool_choice: Literal["auto", "none", "required"] | str = "auto",
     max_turns: int = 10,
     max_concurrency: int = 8,
-    backend: Literal["internal", "openai_agents"] = "internal",
+    backend: HarnessBackend = HarnessBackend.INTERNAL,
     model_url: str | None = None,
     api_key: str | None = None,
     required_secrets: Sequence[str] = (),
@@ -231,8 +241,8 @@ def harness_config(
     Returns:
         A new HarnessConfig instance with tools registered.
     """
-    from .registry import register_tool
     from .tool import Tool
+    from .tools import register_tool
 
     tool_names: list[str] = []
     for t in tools:
