@@ -208,6 +208,18 @@ from olmo_eval.core.types import RunnerType
     is_flag=True,
     help="Print the first request of each task before model generation",
 )
+@click.option(
+    "--harness",
+    type=str,
+    default=None,
+    help="Harness preset name (e.g., 'search') for tool/prompt configuration",
+)
+@click.option(
+    "--harness-config",
+    type=click.Path(exists=True),
+    default=None,
+    help="Path to harness config YAML/JSON file",
+)
 def run(
     models: tuple[str, ...],
     task: tuple[str, ...],
@@ -245,6 +257,8 @@ def run(
     inspect_tokens: bool,
     inspect_response: bool,
     inspect_request: bool,
+    harness: str | None,
+    harness_config: str | None,
 ) -> None:
     """Run evaluation on specified tasks.
 
@@ -321,6 +335,8 @@ def run(
         inspect_request=inspect_request,
         cli_model_overrides=model_overrides,
         cli_task_overrides=task_overrides,
+        harness_preset=harness,
+        harness_config_path=harness_config,
     )
 
     # Validate CLI flags

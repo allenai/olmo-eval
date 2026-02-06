@@ -63,6 +63,9 @@ class AsyncEvalRunner(AsyncBaseRunner):
     save_predictions: bool = True
     save_requests: bool = True
 
+    # Harness configuration for tool/prompt injection
+    harness_config: dict[str, Any] | None = None
+
     # Configuration for print_config display
     _mode_name: str = "Async Mode"
     _mode_description: str = "Async (All-at-once)"
@@ -145,6 +148,7 @@ class AsyncEvalRunner(AsyncBaseRunner):
                             effective_extra_loader_config,
                             effective_max_concurrency,
                             init_times,
+                            self.harness_config,
                         ),
                     )
                     worker.start()

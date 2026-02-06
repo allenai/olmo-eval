@@ -63,6 +63,9 @@ class RunConfig:
     inspect_response: bool = False
     inspect_request: bool = False
 
+    # Harness configuration for tool/prompt injection
+    harness_config: dict[str, Any] | None = None
+
 
 class RunConfigBuilder:
     """Builds and validates run configuration from CLI arguments."""
@@ -102,6 +105,8 @@ class RunConfigBuilder:
         inspect_request: bool = False,
         cli_model_overrides: list[list[str]] | None = None,
         cli_task_overrides: dict[str, list[str]] | None = None,
+        harness_preset: str | None = None,
+        harness_config_path: str | None = None,
     ):
         """Initialize the builder with raw CLI arguments.
 
@@ -112,6 +117,8 @@ class RunConfigBuilder:
             runner_type: Type of runner to use (async or agent).
             cli_model_overrides: Per-model overrides from -o flags (positional list).
             cli_task_overrides: Per-task overrides from -o flags (task_spec -> [overrides]).
+            harness_preset: Name of a harness preset (e.g., "search").
+            harness_config_path: Path to a harness config YAML/JSON file.
             ... (other standard args)
         """
         self.models = models
@@ -147,6 +154,8 @@ class RunConfigBuilder:
         self.inspect_request = inspect_request
         self.cli_model_overrides = cli_model_overrides or []
         self.cli_task_overrides = cli_task_overrides or {}
+        self.harness_preset = harness_preset
+        self.harness_config_path = harness_config_path
 
     def build(self) -> RunConfig:
         """Parse inputs and build configuration.
@@ -203,6 +212,9 @@ class RunConfigBuilder:
             if not attention_backend and "attention_backend" in first_overrides:
                 attention_backend = first_overrides["attention_backend"]
 
+        # Resolve harness configuration from preset or file
+        harness_config = self._resolve_harness_config()
+
         return RunConfig(
             model_names=model_names,
             per_model_overrides=per_model_overrides,
@@ -237,7 +249,64 @@ class RunConfigBuilder:
             inspect_tokens=self.inspect_tokens,
             inspect_response=self.inspect_response,
             inspect_request=self.inspect_request,
+            harness_config=harness_config,
         )
+
+    def _resolve_harness_config(self) -> dict[str, Any] | None:
+        """Resolve harness configuration from preset name or config file.
+
+        Returns:
+            Serialized harness config dict, or None if no harness specified.
+
+        Raises:
+            SystemExit: If harness preset or config file is invalid.
+        """
+        if self.harness_preset and self.harness_config_path:
+            console.print("[red]Error:[/red] Cannot specify both --harness and --harness-config")
+            raise SystemExit(1)
+
+        if self.harness_preset:
+            try:
+                from olmo_eval.core.harness import get_harness_preset
+
+                config = get_harness_preset(self.harness_preset)
+                console.print(f"[dim]Using harness preset: {self.harness_preset}[/dim]")
+                return config.to_dict()
+            except ValueError as e:
+                console.print(f"[red]Error:[/red] {e}")
+                raise SystemExit(1) from None
+
+        if self.harness_config_path:
+            import json
+
+            import yaml
+
+            try:
+                with open(self.harness_config_path) as f:
+                    if self.harness_config_path.endswith(".json"):
+                        config_dict = json.load(f)
+                    else:
+                        config_dict = yaml.safe_load(f)
+
+                # Validate the config can be loaded
+                from olmo_eval.core.harness import HarnessConfig
+
+                config = HarnessConfig.from_dict(config_dict)
+                console.print(f"[dim]Using harness config: {self.harness_config_path}[/dim]")
+                return config.to_dict()
+            except FileNotFoundError:
+                console.print(
+                    f"[red]Error:[/red] Harness config file not found: {self.harness_config_path}"
+                )
+                raise SystemExit(1) from None
+            except (json.JSONDecodeError, yaml.YAMLError) as e:
+                console.print(f"[red]Error:[/red] Invalid harness config file: {e}")
+                raise SystemExit(1) from None
+            except (KeyError, TypeError) as e:
+                console.print(f"[red]Error:[/red] Invalid harness config format: {e}")
+                raise SystemExit(1) from None
+
+        return None
 
     def validate_flags(self) -> bool:
         """Validate CLI flag combinations and print warnings.

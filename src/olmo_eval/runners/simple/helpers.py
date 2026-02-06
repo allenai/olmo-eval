@@ -6,11 +6,15 @@ import dataclasses
 import multiprocessing as mp
 import queue
 import time
+from typing import TYPE_CHECKING
 
 from rich.console import Console
 
 from olmo_eval.inference import InferenceProvider
 from olmo_eval.runners.simple.queue import QueueItem, ResultItem
+
+if TYPE_CHECKING:
+    from olmo_eval.core.harness import Harness
 
 console = Console()
 
@@ -151,18 +155,23 @@ def process_batch(
     batch: list[QueueItem],
     provider: InferenceProvider,
     result_queue: mp.Queue,
+    harness: Harness | None = None,
 ) -> None:
-    """Process a batch of instances through the provider.
+    """Process a batch of instances through the provider or harness.
 
     Items are grouped by ``(request_type, sampling_params)`` so that each
     provider call receives a homogeneous set of requests.  This is necessary
     because the async worker mixes items from different tasks (which may have
     different request types or sampling parameters) into a single batch.
 
+    When a harness is provided, it wraps the provider and can inject tools,
+    system prompts, and other configuration into requests.
+
     Args:
         batch: List of QueueItems to process
         provider: InferenceProvider instance
         result_queue: Queue to put results
+        harness: Optional Harness instance for tool/prompt configuration
     """
     from olmo_eval.core.types import RequestType
 
@@ -182,9 +191,14 @@ def process_batch(
 
         try:
             if request_type == RequestType.LOGLIKELIHOOD:
+                # Logprobs don't use harness (no tool injection needed)
                 outputs_list = provider.logprobs(requests)
             else:
-                outputs_list = provider.generate(requests, sampling_params)
+                # Use harness.generate() if available, otherwise provider.generate()
+                if harness is not None:
+                    outputs_list = harness.generate(requests, sampling_params)
+                else:
+                    outputs_list = provider.generate(requests, sampling_params)
 
             for item, outputs in zip(group, outputs_list, strict=True):
                 result_queue.put(

@@ -100,6 +100,7 @@ class RunnerFactory:
             inspect_tokens=self.config.inspect_tokens,
             inspect_response=self.config.inspect_response,
             inspect_request=self.config.inspect_request,
+            harness_config=self.config.harness_config,
         )
 
     def create(self) -> Any:

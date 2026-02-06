@@ -29,6 +29,7 @@ def instance_worker_process(
     extra_loader_config: dict[str, Any] | None = None,
     max_concurrency: int | None = None,
     init_times: dict[str, float] | None = None,
+    harness_config_dict: dict[str, Any] | None = None,
 ) -> None:
     """Worker that collects all items and processes them at once.
 
@@ -49,6 +50,7 @@ def instance_worker_process(
         extra_loader_config: Extra config for model loader (e.g., {"distributed": true})
         max_concurrency: Maximum concurrent API requests (for litellm and other API providers)
         init_times: Shared dict for tracking worker initialization times
+        harness_config_dict: Serialized HarnessConfig dict for tool/prompt configuration
     """
     import sys
 
@@ -86,6 +88,15 @@ def instance_worker_process(
             provider_type, model_name, tokenizer=tokenizer, worker_id=worker_id, **engine_kwargs
         )
 
+        # Create Harness if config provided
+        harness = None
+        if harness_config_dict:
+            from olmo_eval.core.harness import Harness, HarnessConfig
+
+            harness_config = HarnessConfig.from_dict(harness_config_dict)
+            harness = Harness(provider, harness_config)
+            worker_logger.info(f"Harness created with config: {harness_config.name}")
+
         init_time = time.time() - init_start
         worker_logger.info(f"Engine ready ({init_time:.1f}s)")
         if init_times is not None:
@@ -103,7 +114,7 @@ def instance_worker_process(
 
         # Process all items at once - vLLM handles internal batching
         if items:
-            process_batch(items, provider, result_queue)
+            process_batch(items, provider, result_queue, harness=harness)
 
         worker_logger.info("Processing complete")
     except Exception as e:

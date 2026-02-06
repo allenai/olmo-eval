@@ -52,6 +52,7 @@ The evaluation framework is built around these core abstractions:
 |-------------|-------------|
 | **Task** | Defines a single evaluation (data loading, formatting, scoring) |
 | **Suite** | Groups tasks and/or nested suites with aggregation |
+| **Harness** | A model configured with specific capabilities (tools, system prompts) |
 | **Formatter** | Converts instances into LM requests |
 | **Scorer** | Scores individual instance/output pairs |
 | **Metric** | Aggregates scores into final metrics |
@@ -204,6 +205,160 @@ presets = get_model_presets()
 #     "olmo-2-7b": ModelConfig(model="allenai/OLMo-2-1124-7B"),
 #     ...
 # }
+```
+
+### Harness
+
+A **Harness** configures a model with specific capabilities like tools and system prompts. It wraps an inference provider and injects configuration into requests, enabling tool-augmented evaluation without modifying task definitions.
+
+**Key concept**: Any task can be run with or without tools—that's determined by the Harness configuration, not the task definition. This allows comparing baseline vs tool-augmented performance on the same task.
+
+#### Using Harness via CLI
+
+```bash
+# Run task without tools (baseline)
+olmo-eval run -m llama3.1-8b -t simpleqa
+
+# Run task with search tools via harness preset
+olmo-eval run -m llama3.1-8b -t simpleqa --harness search
+
+# Use a custom harness config file
+olmo-eval run -m llama3.1-8b -t simpleqa --harness-config ./my_harness.yaml
+```
+
+#### Available Harness Presets
+
+| Preset | Description | Tools |
+|--------|-------------|-------|
+| `default` | No tools, no system prompt | None |
+| `search` | Web search capabilities | `semantic_scholar_snippet_search`, `serper_google_webpage_search`, `serper_fetch_webpage_content` |
+
+```bash
+# List available presets
+olmo-eval run --help  # Shows --harness options
+```
+
+#### HarnessConfig
+
+Configuration for a harness:
+
+```python
+from olmo_eval.core.harness import HarnessConfig, get_harness_preset
+
+# Get a preset
+config = get_harness_preset("search")
+
+# Create custom config
+config = HarnessConfig(
+    name="my_harness",
+    tool_names=("web_search", "calculator"),  # References to registered tools
+    system_prompt="You are a helpful assistant with tools.",
+    max_turns=10,
+    max_concurrency=8,
+)
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | `str` | Required | Harness identifier |
+| `tool_names` | `tuple[str, ...]` | `()` | Names of registered tools |
+| `system_prompt` | `str \| None` | `None` | System prompt to inject |
+| `tool_choice` | `str` | `"auto"` | Tool selection mode (`auto`, `none`, `required`) |
+| `max_turns` | `int` | `10` | Max turns for multi-turn execution |
+| `max_concurrency` | `int` | `8` | Concurrent executions |
+| `backend` | `str` | `"internal"` | Execution backend (`internal`, `openai_agents`) |
+| `required_secrets` | `tuple[str, ...]` | `()` | Required environment variables |
+
+#### Defining Tools
+
+Tools combine schema (for the LLM) and implementation (for execution) in a single definition:
+
+```python
+from olmo_eval.core.harness import tool, registered_tool
+
+# Option 1: @tool decorator (local use)
+@tool(description="Search the web for information")
+async def web_search(query: str) -> str:
+    """Search implementation."""
+    return await search_api(query)
+
+# Option 2: @registered_tool decorator (global registry, for cross-process use)
+@registered_tool(description="Fetch a webpage")
+async def fetch_page(url: str) -> str:
+    """Fetch implementation."""
+    return await fetch_url(url)
+```
+
+Tools are automatically registered when using `@registered_tool`, making them available by name in HarnessConfig.
+
+#### Custom Harness Config File
+
+Create a YAML file for custom harness configurations:
+
+```yaml
+# my_harness.yaml
+name: custom_search
+tool_names:
+  - semantic_scholar_snippet_search
+  - serper_google_webpage_search
+system_prompt: |
+  You are a research assistant with web search capabilities.
+  Use search tools to find accurate information before answering.
+max_turns: 15
+max_concurrency: 4
+required_secrets:
+  - S2_API_KEY
+  - SERPER_API_KEY
+```
+
+```bash
+olmo-eval run -m llama3.1-8b -t simpleqa --harness-config my_harness.yaml
+```
+
+#### Programmatic Usage
+
+```python
+from olmo_eval.core.harness import Harness, HarnessConfig, get_harness_preset
+from olmo_eval.inference import create_provider, ProviderType
+
+# Create provider
+provider = create_provider(ProviderType.VLLM, "meta-llama/Llama-3.1-8B-Instruct")
+
+# Create harness with preset
+config = get_harness_preset("search")
+harness = Harness(provider, config)
+
+# Single-turn generation (tools injected into request)
+outputs = harness.generate(requests, sampling_params)
+
+# Multi-turn execution with tool calling
+result = await harness.run(request, sampling_params)
+print(result.trajectory)  # Shows all turns including tool calls
+print(result.final_output)  # Final model response
+```
+
+#### Beaker Launch with Harness
+
+```bash
+# Launch evaluation with search harness
+olmo-eval beaker launch -n "eval-with-tools" \
+    -m llama3.1-8b \
+    -t simpleqa \
+    --harness search \
+    --cluster h100
+```
+
+Or in a config file:
+
+```yaml
+name: eval-with-tools
+models:
+  - name_or_path: llama3.1-8b
+    provider: vllm
+tasks:
+  - simpleqa
+harness: search  # Preset name
+cluster: h100
 ```
 
 ## Adding New Tasks
@@ -393,130 +548,48 @@ register_regime("my_task", "3shot", num_fewshot=3)
 
 Usage: `olmo-eval run -t my_task:bpb:3shot`
 
-## Agent Tasks
+## Tool-Augmented Evaluation
 
-Agent tasks support multi-turn evaluations with tool use, enabling evaluation of models' ability to use tools to complete tasks. They use the OpenAI Agents SDK for orchestration and support vLLM as the inference backend.
+olmo-eval supports evaluating models with tool use through the **Harness** abstraction. This enables comparing baseline model performance against tool-augmented performance on the same tasks.
 
-### Creating an Agent Task
+### Recommended Approach: Harness
 
-Agent tasks extend `AgentTask` instead of `Task` and use `AgentTaskConfig` instead of `TaskConfig`:
-
-```python
-from collections.abc import AsyncGenerator, Iterator
-from contextlib import asynccontextmanager
-from typing import Any
-
-from olmo_eval.core import AccuracyMetric, Instance
-from olmo_eval.core.formatters import ChatFormatter
-from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.tasks.core import AgentTask, AgentTaskConfig, register
-
-
-async def my_tool(query: str) -> str:
-    """A tool the agent can use.
-
-    Args:
-        query: The search query.
-
-    Returns:
-        Tool result as a string.
-    """
-    # Tool implementation
-    return f"Result for: {query}"
-
-
-class MyAgentTask(AgentTask):
-    """Agent task with custom tools."""
-
-    @property
-    def instances(self) -> Iterator[Instance]:
-        """Yield instances from the dataset."""
-        if self._instances_cache is None:
-            self._instances_cache = []
-            loader = DataLoader()
-            source = self.config.get_data_source()
-            for idx, doc in enumerate(loader.load(source)):
-                self._instances_cache.append(
-                    Instance(
-                        question=doc["question"],
-                        gold_answer=doc["answer"],
-                        metadata={"id": idx},
-                    )
-                )
-        yield from self._instances_cache
-
-    @asynccontextmanager
-    async def _get_agent(
-        self,
-        model: str,
-        model_url: str,
-        system_prompt: str | None = None,
-        temperature: float = 0.0,
-        **kwargs: Any,
-    ) -> AsyncGenerator[Any, None]:
-        """Create agent with tools."""
-        from agents import Agent, ModelSettings, OpenAIChatCompletionsModel, function_tool
-        from openai import AsyncOpenAI
-
-        client = AsyncOpenAI(base_url=model_url, api_key="EMPTY")
-        llm = OpenAIChatCompletionsModel(openai_client=client, model=model)
-
-        # Create tools using function_tool decorator
-        tools = [function_tool(strict_mode=False)(my_tool)]
-
-        agent = Agent(
-            name="MyAgent",
-            instructions=system_prompt or "You are a helpful assistant.",
-            model=llm,
-            model_settings=ModelSettings(temperature=temperature),
-            tools=tools,
-        )
-        yield agent
-
-
-def _my_agent_config() -> AgentTaskConfig:
-    return AgentTaskConfig(
-        name="my_agent_task",
-        data_source=DataSource(path="my-org/my-dataset", split="test"),
-        formatter=ChatFormatter(system_prompt="You are a helpful assistant with tools."),
-        metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
-        max_turns=10,
-        max_concurrency=1,
-        required_secrets=("MY_API_KEY",),
-    )
-
-
-@register("my_agent_task", _my_agent_config)
-class MyAgent(MyAgentTask):
-    pass
-```
-
-### AgentTaskConfig Reference
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `formatter` | `Formatter` | `ChatFormatter()` | Formatter with system prompt (use `ChatFormatter(system_prompt="...")`) |
-| `max_turns` | `int` | `10` | Maximum agent turns |
-| `max_concurrency` | `int` | `1` | Concurrent agent executions |
-| `required_secrets` | `tuple[str, ...]` | `()` | Required environment variables |
-| `tools` | `tuple[ToolSchema, ...]` | `()` | Tool schemas for display |
-
-### Running Agent Tasks
+The **Harness** is the preferred way to add tools to evaluations. It separates tool configuration from task definition, allowing any task to be run with or without tools:
 
 ```bash
-# Local run
-olmo-eval run --task simpleqa_agent --model Qwen/Qwen3-8B -o limit=10
+# Baseline evaluation (no tools)
+olmo-eval run -m llama3.1-8b -t simpleqa
 
-# Beaker launch
-olmo-eval beaker launch -n "agent-eval" -m Qwen/Qwen3-8B -t simpleqa_agent -o limit=10
+# Same task with search tools
+olmo-eval run -m llama3.1-8b -t simpleqa --harness search
 ```
 
-### vLLM Configuration
+See the [Harness](#harness) section above for full documentation on:
+- Available presets (`search`, `default`)
+- Creating custom harness configurations
+- Defining tools with the `@tool` decorator
+- Programmatic usage
 
-For agent tasks using vLLM, the tool call parser is auto-detected based on model name. You can override it via model overrides:
+### Legacy: Agent Tasks
+
+> **Note**: For new evaluations, prefer using regular tasks with `--harness` instead of AgentTask. The Harness approach is more flexible and allows comparing with/without tools on the same task.
+
+Agent tasks (`AgentTask`) are an older pattern that bundles tools directly into the task definition. They still work but are less flexible than the Harness approach.
 
 ```bash
-olmo-eval run --task simpleqa_agent -m my-model -o tool_call_parser=hermes
+# Legacy agent task (tools bundled in task)
+olmo-eval run -m llama3.1-8b -t simpleqa_agent
+
+# Equivalent using Harness (preferred)
+olmo-eval run -m llama3.1-8b -t simpleqa --harness search
+```
+
+### vLLM Tool Configuration
+
+For tool-augmented evaluation using vLLM, the tool call parser is auto-detected based on model name. Override it via model overrides if needed:
+
+```bash
+olmo-eval run -m my-model -t simpleqa --harness search -o tool_call_parser=hermes
 ```
 
 Supported parsers: `hermes`, `llama3_json`, `mistral`
@@ -1077,10 +1150,10 @@ Two runner types are available:
 
 | Runner | Flag | Backend | Best For |
 |--------|------|---------|----------|
-| Async | (default) | Any | Multi-GPU batch processing |
-| Agent | `--runner-type agent` | vLLM | Multi-turn agent tasks |
+| Async | (default) | Any | Multi-GPU batch processing, tool-augmented evaluation |
+| Agent | `--runner-type agent` | vLLM | Legacy multi-turn agent tasks |
 
-**Async Mode (Default)** - Spawns worker processes that each load the model and process batches in parallel:
+**Async Mode (Default)** - Spawns worker processes that each load the model and process batches in parallel. Supports tool-augmented evaluation via `--harness`:
 
 ```bash
 # Auto-detect workers from available GPUs
@@ -1091,12 +1164,19 @@ olmo-eval run --num-workers 4 -m llama3.1-8b -t mmlu -t gsm8k
 
 # Multi-GPU models (e.g., 70B on 4 GPUs per worker)
 olmo-eval run --num-workers 2 --gpus-per-worker 4 -m llama3.1-70b -t mmlu
+
+# Tool-augmented evaluation with harness
+olmo-eval run -m llama3.1-8b -t simpleqa --harness search
 ```
 
-**Agent Mode** - For multi-turn agent tasks with tool use:
+**Agent Mode (Legacy)** - For legacy multi-turn agent tasks. Prefer using async mode with `--harness` for new evaluations:
 
 ```bash
+# Legacy approach
 olmo-eval run --runner-type agent -m llama3.1-8b -t simpleqa_agent
+
+# Preferred approach (async with harness)
+olmo-eval run -m llama3.1-8b -t simpleqa --harness search
 ```
 
 ## Debugging and Inspection
