@@ -386,10 +386,14 @@ class Task(ABC):
         for response in responses:
             for output in response.outputs:
                 output.extracted_answer = self.extract_answer(output)
-            # Apply each scorer, taking best score across outputs (for multi-sample)
+            # Apply each scorer
             for scorer in scorers_by_name.values():
-                scores = [scorer.score(response.instance, o) for o in response.outputs]
-                response.scores[scorer.name] = max(scores) if scores else 0.0
+                if hasattr(scorer, "score_response"):
+                    response.scores[scorer.name] = scorer.score_response(response)
+                else:
+                    # Per-output scoring, take best score across outputs (for multi-sample)
+                    scores = [scorer.score(response.instance, o) for o in response.outputs]
+                    response.scores[scorer.name] = max(scores) if scores else 0.0
         return responses
 
     def compute_metrics(self, responses: Sequence[Response]) -> dict[str, dict[str, float]]:

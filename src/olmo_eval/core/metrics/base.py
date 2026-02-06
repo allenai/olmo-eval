@@ -11,6 +11,7 @@ from ..scorers import (
     ExactMatchScorer,
     F1Scorer,
     LogprobScorer,
+    MultipleChoiceLogprobScorer,
     PerplexityScorer,
     Scorer,
     ToolCallScorer,
@@ -63,6 +64,21 @@ class F1Metric(Metric):
 
     name: str = "f1"
     scorer: type[Scorer] = F1Scorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        if not responses:
+            return 0.0
+        scorer_name = self.scorer().name
+        total = sum(r.scores.get(scorer_name, 0.0) for r in responses)
+        return total / len(responses)
+
+
+@dataclass(frozen=True, slots=True)
+class MultipleChoiceLogprobMetric(Metric):
+    """Mean accuracy for multiple choice scored by logprob (argmax choice vs gold_idx)."""
+
+    name: str = "accuracy"
+    scorer: type[Scorer] = MultipleChoiceLogprobScorer
 
     def compute(self, responses: Sequence[Response]) -> float:
         if not responses:

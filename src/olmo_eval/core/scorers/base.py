@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
 from typing import Any, ClassVar
 
-from ..types import Instance, LMOutput
+from ..types import Instance, LMOutput, Response
 from ..utils import _execute_code_unsafe
 
 
@@ -63,6 +63,40 @@ class MultipleChoiceScorer(Scorer):
         gold = str(instance.gold_answer).strip().upper()
         pred = str(output.extracted_answer).strip().upper()
         return 1.0 if gold == pred else 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class MultipleChoiceLogprobScorer(Scorer):
+    """Score multiple choice by logprob: pick choice with highest total logprob, compare to gold_idx.
+
+    Uses the full response (one output per continuation). Implements score_response()
+    so that Task.score_responses calls it once per response instead of per-output.
+    """
+
+    name: str = "multiple_choice_logprob"
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        """Per-output score not used; scoring is done in score_response."""
+        return 0.0
+
+    def score_response(self, response: Response) -> float:
+        """Score 1.0 if the choice with highest total logprob equals gold_idx, else 0.0."""
+        outputs = response.outputs
+        if not outputs:
+            return 0.0
+        gold_idx = response.instance.metadata.get("gold_idx")
+        if gold_idx is None:
+            return 0.0
+        # Get total logprob for each output (one per choice)
+        total_logprobs = []
+        for o in outputs:
+            if o.logprobs:
+                total = sum(tok.get("logprob", 0.0) for tok in o.logprobs)
+            else:
+                total = o.metadata.get("total_logprob", float("-inf"))
+            total_logprobs.append(total)
+        pred_idx = max(range(len(total_logprobs)), key=lambda i: total_logprobs[i])
+        return 1.0 if pred_idx == gold_idx else 0.0
 
 
 def _normalize_text(text: str) -> str:

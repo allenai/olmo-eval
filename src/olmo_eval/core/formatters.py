@@ -151,6 +151,42 @@ class MultipleChoiceFormatter(Formatter):
 
 
 @dataclass(slots=True)
+class MultipleChoiceLogprobFormatter(Formatter):
+    template: str = "{question}"
+    label_prefix: str = " "  # Space before letter for standard tokenization
+    include_choices_in_prompt: bool = True
+    answer_suffix: str = ""  # e.g. "\n\nAnswer: " so prompt ends before the answer letter
+
+    @property
+    def request_type(self) -> RequestType:
+        return RequestType.LOGLIKELIHOOD
+
+    def format(
+        self,
+        instance: Instance,
+        fewshot: list[Instance] | None = None,
+    ) -> LMRequest:
+        prompt = self.template.format(question=instance.question)
+        continuations: tuple[str, ...] = ()
+        if instance.choices:
+            if self.include_choices_in_prompt:
+                choices_text = "\n".join(
+                    f"{chr(ord('A') + i)}. {c}" for i, c in enumerate(instance.choices)
+                )
+                prompt = f"{prompt}\n\n{choices_text}"
+            if self.answer_suffix:
+                prompt = prompt + self.answer_suffix
+            # Continuations are the answer letters (A, B, C, D) with optional prefix for tokenization
+            letters = tuple(chr(ord("A") + i) for i in range(len(instance.choices)))
+            continuations = tuple(self.label_prefix + letter for letter in letters)
+        return LMRequest(
+            request_type=self.request_type,
+            prompt=prompt,
+            continuations=continuations,
+        )
+
+
+@dataclass(slots=True)
 class MCQAChatFormatter(Formatter):
     """Format multiple choice questions for chat-based CoT generation."""
 
