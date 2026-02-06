@@ -29,7 +29,7 @@ def get_model_presets() -> dict[str, ModelConfig]:
         # HuggingFace models (vLLM inference)
 
         # Llama
-        "llama3-8b": ModelConfig(
+        "llama-3-8b": ModelConfig(
             model="meta-llama/Meta-Llama-3-8B",
             provider=ProviderConfig(kind=ProviderKind.VLLM),
         ),
@@ -49,15 +49,15 @@ def get_model_presets() -> dict[str, ModelConfig]:
             model="meta-llama/Llama-3.1-70B-Instruct",
             provider=ProviderConfig(kind=ProviderKind.VLLM),
         ),
-        "llama3.2-1b": ModelConfig(
+        "llama-3.2-1b": ModelConfig(
             model="meta-llama/Llama-3.2-1B",
             provider=ProviderConfig(kind=ProviderKind.VLLM),
         ),
-        "llama3.2-3b": ModelConfig(
+        "llama-3.2-3b": ModelConfig(
             model="meta-llama/Llama-3.2-3B",
             provider=ProviderConfig(kind=ProviderKind.VLLM),
         ),
-        "llama4-scout-17b-16e": ModelConfig(
+        "llama-4-scout-17b-16e": ModelConfig(
             model="meta-llama/Llama-4-Scout-17B-16E",
             provider=ProviderConfig(kind=ProviderKind.VLLM),
         ),
