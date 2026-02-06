@@ -46,6 +46,10 @@ def build_predictions(scored: Sequence[Any]) -> list[dict]:
                 "is_greedy": meta.get("is_greedy", False),
             }
 
+            # Add logprobs
+            if out.logprobs is not None:
+                out_data["logprobs"] = out.logprobs
+
             # Compute derived metrics (matching oe-eval format)
             if num_tokens > 0:
                 out_data["logits_per_token"] = sum_logits / num_tokens
