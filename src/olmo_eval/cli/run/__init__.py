@@ -329,6 +329,9 @@ def run(
     # Build configuration
     run_config = config_builder.build()
 
+    # Print the config
+    console.print(run_config)
+
     # Set up storage backends
     storage_setup = StorageSetup(
         store=store,
