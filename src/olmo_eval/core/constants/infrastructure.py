@@ -117,7 +117,12 @@ NEW_CLUSTER_ALIASES: dict[str, str] = {
 # Weka Storage Mounts
 # =============================================================================
 
-WEKA_CLUSTERS: set[str] = set()
+WEKA_CLUSTERS: set[str] = {
+    "ai2/jupiter",
+    "ai2/saturn",
+    "ai2/ceres",
+    "ai2/neptune",
+}
 """Clusters with Weka storage available.
 
 Uses canonical cluster names (the short form from NEW_CLUSTER_ALIASES values

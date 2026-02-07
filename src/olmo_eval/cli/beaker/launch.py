@@ -410,6 +410,14 @@ def launch(
         if model_cfg.provider and model_cfg.provider.required_secrets:
             all_required_secrets.update(model_cfg.provider.required_secrets)
 
+    # Collect harness-required secrets
+    if launch_config.harness:
+        from olmo_eval.core.harness import get_harness_preset
+
+        harness_config = get_harness_preset(launch_config.harness)
+        if harness_config.required_secrets:
+            all_required_secrets.update(harness_config.required_secrets)
+
     # Ensure secrets
     common_secrets, store_secrets, task_secrets = _ensure_secrets(
         launcher, dry_run, launch_config, all_required_secrets
