@@ -29,7 +29,7 @@ for m in "${models[@]}"; do
     name="c4-bpb-${run_id}"           # experiment/run name shown in Beaker
 
     # Auto-accept "create missing groups?" prompts.
-    olmo-eval beaker launch \
+    yes | olmo-eval beaker launch \
       -n "${name}" \
       -m "${m}" \
       -o gpus=4 \
@@ -38,7 +38,6 @@ for m in "${models[@]}"; do
       -w "${WORKSPACE}" \
       -B "${BUDGET}" \
       -p "${PRIORITY}" \
-      -y \
       >"logs/${name}.log" 2>&1
   ) &
 done
