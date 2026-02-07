@@ -26,7 +26,7 @@ for m in "${models[@]}"; do
   (
     set -euo pipefail
     run_id="${m}"                 # "run id" = model name (your request)
-    name="c4-${run_id}"           # experiment/run name shown in Beaker
+    name="c4-bpb-${run_id}"           # experiment/run name shown in Beaker
 
     # Auto-accept "create missing groups?" prompts.
     yes | olmo-eval beaker launch \
@@ -35,6 +35,7 @@ for m in "${models[@]}"; do
       -t "${TASK_SET}" \
       -c "${CLUSTER}" \
       -w "${WORKSPACE}" \
+      -o gpus=4 \
       --budget "${BUDGET}" \
       --priority "${PRIORITY}" \
       --gpus-per-worker 4 \
