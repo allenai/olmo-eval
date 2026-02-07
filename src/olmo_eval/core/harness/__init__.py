@@ -53,6 +53,7 @@ from .backends import (
     DefaultBackend,
     OpenAIAgentsBackend,
     get_backend,
+    get_backend_extras,
     list_backends,
     register_backend,
 )
@@ -102,6 +103,7 @@ __all__ = [
     "OpenAIAgentsBackend",
     "BACKEND_REGISTRY",
     "get_backend",
+    "get_backend_extras",
     "list_backends",
     "register_backend",
     # Presets

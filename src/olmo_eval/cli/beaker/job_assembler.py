@@ -94,6 +94,14 @@ class JobConfigAssembler:
         if self.config.store:
             install_extras.append("postgres")
 
+        # Add harness backend dependencies
+        if self.config.harness:
+            from olmo_eval.core.harness import get_backend_extras, get_harness_preset
+
+            preset = get_harness_preset(self.config.harness)
+            backend_extras = get_backend_extras(preset.backend)
+            install_extras.extend(backend_extras)
+
         # Build secrets
         env_secrets = [
             BeakerEnvSecret(env_var, secret_name) for env_var, secret_name in self.common_secrets

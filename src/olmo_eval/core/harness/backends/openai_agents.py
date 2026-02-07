@@ -23,6 +23,8 @@ class OpenAIAgentsBackend(Backend):
     and uses the SDK's Runner for execution.
     """
 
+    required_extras = ("agents",)
+
     async def run(
         self,
         harness: Harness,

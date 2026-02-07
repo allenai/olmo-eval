@@ -24,7 +24,12 @@ class Backend:
 
     Backends define how the harness executes requests. Backends may optionally
     implement `run` for multi-turn execution support.
+
+    Class Attributes:
+        required_extras: Tuple of pyproject.toml extra names required by this backend.
     """
+
+    required_extras: tuple[str, ...] = ()
 
     async def run(
         self,
@@ -108,6 +113,24 @@ def list_backends() -> list[str]:
     return sorted(BACKEND_REGISTRY.keys())
 
 
+def get_backend_extras(name: str) -> tuple[str, ...]:
+    """Get the required extras for a backend by name.
+
+    Args:
+        name: Backend name (e.g., "default", "openai_agents").
+
+    Returns:
+        Tuple of pyproject.toml extra names required by the backend.
+
+    Raises:
+        ValueError: If backend name is unknown.
+    """
+    if name not in BACKEND_REGISTRY:
+        available = ", ".join(sorted(BACKEND_REGISTRY.keys()))
+        raise ValueError(f"Unknown backend: '{name}'. Available: {available}")
+    return BACKEND_REGISTRY[name].required_extras
+
+
 # Import backends to trigger registration
 from .default import DefaultBackend  # noqa: E402
 from .openai_agents import OpenAIAgentsBackend  # noqa: E402
@@ -118,6 +141,7 @@ __all__ = [
     "DefaultBackend",
     "OpenAIAgentsBackend",
     "get_backend",
+    "get_backend_extras",
     "list_backends",
     "register_backend",
 ]

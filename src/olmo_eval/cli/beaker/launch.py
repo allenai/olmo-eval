@@ -22,6 +22,7 @@ from rich.table import Table
 
 from olmo_eval.cli.utils import (
     ExperimentSummary,
+    HarnessSummary,
     OrderedMultiOption,
     RunnerConfig,
     console,
@@ -454,7 +455,9 @@ def launch(
         job_config = job_assembler.assemble(exp)
         job_configs.append(job_config)
 
-        exp_summary = _build_experiment_summary(exp, job_config, task_configs_by_spec)
+        exp_summary = _build_experiment_summary(
+            exp, job_config, task_configs_by_spec, launch_config.harness
+        )
         experiment_summaries.append(exp_summary)
 
     # Print experiment summaries
@@ -675,6 +678,7 @@ def _build_experiment_summary(
     exp: "ExperimentPlan",
     job_config,
     task_configs_by_spec: dict,
+    harness: str | None = None,
 ) -> ExperimentSummary:
     """Build experiment summary for display."""
     from olmo_eval.runners import AsyncEvalRunner
@@ -694,10 +698,20 @@ def _build_experiment_summary(
         output_dir=BEAKER_RESULT_DIR,
     )
 
+    # Load harness config (default if not specified)
+    from olmo_eval.core.harness import get_harness_preset
+
+    harness_config = get_harness_preset(harness or "default")
+
+    harness_summary = HarnessSummary(
+        model=exp.model_cfgs[0],
+        config=harness_config,
+    )
+
     return ExperimentSummary(
         name=exp.name,
-        models=list(exp.model_cfgs),
         tasks=exp_task_configs,
+        harness=harness_summary,
         runner=exp_runner_config,
         beaker=job_config,
     )
