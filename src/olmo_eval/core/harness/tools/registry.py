@@ -45,8 +45,35 @@ def register_tool(tool: Tool) -> Tool:
     return tool
 
 
+_builtin_tools_loaded = False
+
+
+def _load_builtin_tools() -> None:
+    """Import all built-in tool modules to register their tools."""
+    global _builtin_tools_loaded
+    if _builtin_tools_loaded:
+        return
+
+    import importlib
+    import pkgutil
+    import sys
+
+    import olmo_eval.core.harness.tools as tools_pkg
+
+    for module_info in pkgutil.iter_modules(tools_pkg.__path__):
+        if module_info.name not in ("registry", "tool", "__init__"):
+            full_name = f"{tools_pkg.__name__}.{module_info.name}"
+            if full_name in sys.modules:
+                # Reload to re-register tools after clear_registry()
+                importlib.reload(sys.modules[full_name])
+            else:
+                importlib.import_module(f".{module_info.name}", tools_pkg.__name__)
+
+    _builtin_tools_loaded = True
+
+
 def get_tool(name: str) -> Tool:
-    """Get a registered tool by name.
+    """Get a registered tool by name. Auto-loads built-in tools if needed.
 
     Args:
         name: The name of the tool to retrieve.
@@ -58,10 +85,12 @@ def get_tool(name: str) -> Tool:
         ValueError: If no tool with the given name is registered.
     """
     if name not in TOOL_REGISTRY:
+        _load_builtin_tools()
+
+    if name not in TOOL_REGISTRY:
         available = ", ".join(sorted(TOOL_REGISTRY.keys())) or "(none)"
-        raise ValueError(
-            f"Unknown tool: '{name}'. Did you forget to register it? Available tools: {available}"
-        )
+        raise ValueError(f"Unknown tool: '{name}'. Available: {available}")
+
     return TOOL_REGISTRY[name]
 
 
@@ -90,11 +119,13 @@ def list_tools() -> list[str]:
 
 
 def clear_registry() -> None:
-    """Clear all registered tools.
+    """Clear all registered tools and reset builtin loading state.
 
     Primarily useful for testing.
     """
+    global _builtin_tools_loaded
     TOOL_REGISTRY.clear()
+    _builtin_tools_loaded = False
 
 
 def registered_tool(
