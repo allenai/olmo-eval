@@ -29,7 +29,7 @@ console = Console()
 class FlaggedArg:
     """Argument with its flag type for order tracking."""
 
-    flag: str  # 'm', 't', or 'o'
+    flag: str  # 'm', 't', 'o', or 'h'
     value: str
 
 
@@ -65,6 +65,7 @@ def reconstruct_ordered_args(args: list[str]) -> list[FlaggedArg]:
         "--task": "t",
         "-o": "o",
         "--override": "o",
+        "--harness": "h",
     }
 
     ordered: list[FlaggedArg] = []
@@ -93,22 +94,24 @@ def reconstruct_ordered_args(args: list[str]) -> list[FlaggedArg]:
 
 def process_ordered_args(
     ordered: list[FlaggedArg],
-) -> tuple[list[list[str]], dict[str, list[str]]]:
-    """Associate -o overrides with preceding -m or -t.
+) -> tuple[list[list[str]], dict[str, list[str]], list[str]]:
+    """Associate -o overrides with preceding -m, -t, or --harness.
 
     Args:
         ordered: List of FlaggedArg with flag type and value.
 
     Returns:
-        Tuple of (model_overrides, task_overrides) where:
+        Tuple of (model_overrides, task_overrides, harness_overrides) where:
         - model_overrides is a list of override lists, one per model (positional)
         - task_overrides is a dict mapping task name to list of override strings
+        - harness_overrides is a list of override strings for the harness
 
     Raises:
-        click.UsageError: If -o appears without a preceding -m or -t.
+        click.UsageError: If -o appears without a preceding -m, -t, or --harness.
     """
     model_overrides: list[list[str]] = []  # Positional: one list per model
     task_overrides: dict[str, list[str]] = {}
+    harness_overrides: list[str] = []
 
     current_model_index: int = -1
     current_task: str | None = None
@@ -123,16 +126,22 @@ def process_ordered_args(
             current_task = arg.value
             task_overrides.setdefault(current_task, [])
             last_flag = "t"
+        elif arg.flag == "h":
+            last_flag = "h"
         elif arg.flag == "o":
-            # Apply to last model or task
+            # Apply to last model, task, or harness
             if last_flag == "m" and current_model_index >= 0:
                 model_overrides[current_model_index].append(arg.value)
             elif last_flag == "t" and current_task:
                 task_overrides[current_task].append(arg.value)
+            elif last_flag == "h":
+                harness_overrides.append(arg.value)
             else:
-                raise click.UsageError("-o/--override must follow -m/--model or -t/--task")
+                raise click.UsageError(
+                    "-o/--override must follow -m/--model, -t/--task, or --harness"
+                )
 
-    return model_overrides, task_overrides
+    return model_overrides, task_overrides, harness_overrides
 
 
 def extract_priority_from_overrides(

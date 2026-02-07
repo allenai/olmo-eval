@@ -63,8 +63,9 @@ class LaunchConfig:
     inspect_response: bool = False
     inspect_request: bool = False
 
-    # Harness preset
+    # Harness preset and overrides
     harness: str | None = None
+    harness_overrides: list[str] = field(default_factory=list)
 
     # Credential injection
     inject_aws_credentials: bool = False
@@ -271,6 +272,7 @@ class LaunchConfigLoader:
             inspect_response=self.cli_args.get("inspect_response", False),
             inspect_request=self.cli_args.get("inspect_request", False),
             harness=self.cli_args.get("harness"),
+            harness_overrides=self.cli_args.get("harness_overrides", []),
             uv_cache_dir=self.cli_args.get("uv_cache_dir"),
         )
 

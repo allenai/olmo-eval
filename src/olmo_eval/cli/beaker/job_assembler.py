@@ -313,6 +313,9 @@ class JobConfigAssembler:
         if self.config.harness:
             command.extend(["--harness", self.config.harness])
 
+        for override in self.config.harness_overrides:
+            command.extend(["-o", override])
+
         return command
 
     def _add_worker_flags(self, command: list[str], model_resources: dict) -> None:

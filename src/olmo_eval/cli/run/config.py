@@ -103,6 +103,7 @@ class RunConfigBuilder:
         cli_task_overrides: dict[str, list[str]] | None = None,
         harness_preset: str | None = None,
         harness_config_path: str | None = None,
+        cli_harness_overrides: list[str] | None = None,
     ):
         """Initialize the builder with raw CLI arguments.
 
@@ -114,6 +115,7 @@ class RunConfigBuilder:
             cli_task_overrides: Per-task overrides from -o flags (task_spec -> [overrides]).
             harness_preset: Name of a harness preset (e.g., "search").
             harness_config_path: Path to a harness config YAML/JSON file.
+            cli_harness_overrides: Harness overrides from -o flags after --harness.
             ... (other standard args)
         """
         self.models = models
@@ -150,6 +152,7 @@ class RunConfigBuilder:
         self.cli_task_overrides = cli_task_overrides or {}
         self.harness_preset = harness_preset
         self.harness_config_path = harness_config_path
+        self.cli_harness_overrides = cli_harness_overrides or []
 
     def build(self) -> RunConfig:
         """Parse inputs and build configuration.
@@ -254,9 +257,13 @@ class RunConfigBuilder:
         Raises:
             SystemExit: If harness preset or config file is invalid.
         """
+        from omegaconf import OmegaConf
+
         if self.harness_preset and self.harness_config_path:
             console.print("[red]Error:[/red] Cannot specify both --harness and --harness-config")
             raise SystemExit(1)
+
+        harness_dict: dict[str, Any] | None = None
 
         if self.harness_preset:
             try:
@@ -264,12 +271,12 @@ class RunConfigBuilder:
 
                 config = get_harness_preset(self.harness_preset)
                 console.print(f"[dim]Using harness preset: {self.harness_preset}[/dim]")
-                return config.to_dict()
+                harness_dict = config.to_dict()
             except ValueError as e:
                 console.print(f"[red]Error:[/red] {e}")
                 raise SystemExit(1) from None
 
-        if self.harness_config_path:
+        elif self.harness_config_path:
             import json
 
             import yaml
@@ -286,7 +293,7 @@ class RunConfigBuilder:
 
                 config = HarnessConfig.from_dict(config_dict)
                 console.print(f"[dim]Using harness config: {self.harness_config_path}[/dim]")
-                return config.to_dict()
+                harness_dict = config.to_dict()
             except FileNotFoundError:
                 console.print(
                     f"[red]Error:[/red] Harness config file not found: {self.harness_config_path}"
@@ -299,7 +306,22 @@ class RunConfigBuilder:
                 console.print(f"[red]Error:[/red] Invalid harness config format: {e}")
                 raise SystemExit(1) from None
 
-        return None
+        elif self.cli_harness_overrides:
+            # No harness specified but overrides provided - load default harness
+            from olmo_eval.core.harness import get_harness_preset
+
+            config = get_harness_preset("default")
+            console.print("[dim]Using default harness with overrides[/dim]")
+            harness_dict = config.to_dict()
+
+        # Apply CLI overrides if we have a harness config
+        if harness_dict is not None and self.cli_harness_overrides:
+            override_config = OmegaConf.from_dotlist(self.cli_harness_overrides)
+            base = OmegaConf.create(harness_dict)
+            merged = OmegaConf.merge(base, override_config)
+            harness_dict = OmegaConf.to_container(merged, resolve=True)  # type: ignore[assignment]
+
+        return harness_dict
 
     def validate_flags(self) -> bool:
         """Validate CLI flag combinations and print warnings.
