@@ -23,71 +23,71 @@ def get_model_presets() -> dict[str, ProviderConfig]:
         # HuggingFace models (vLLM inference)
         "llama3.1-8b": ProviderConfig(
             kind=ProviderKind.VLLM,
-            model_name="meta-llama/Meta-Llama-3.1-8B",
+            model="meta-llama/Meta-Llama-3.1-8B",
         ),
         "llama3.1-8b-instruct": ProviderConfig(
             kind=ProviderKind.VLLM,
-            model_name="meta-llama/Llama-3.1-8B-Instruct",
+            model="meta-llama/Llama-3.1-8B-Instruct",
         ),
         "llama3.1-70b": ProviderConfig(
             kind=ProviderKind.VLLM,
-            model_name="meta-llama/Meta-Llama-3.1-70B",
+            model="meta-llama/Meta-Llama-3.1-70B",
         ),
         "llama3.1-70b-instruct": ProviderConfig(
             kind=ProviderKind.VLLM,
-            model_name="meta-llama/Llama-3.1-70B-Instruct",
+            model="meta-llama/Llama-3.1-70B-Instruct",
         ),
         "olmo-2-7b": ProviderConfig(
             kind=ProviderKind.VLLM,
-            model_name="allenai/OLMo-2-1124-7B",
+            model="allenai/OLMo-2-1124-7B",
             trust_remote_code=True,
         ),
         "olmo-2-13b": ProviderConfig(
             kind=ProviderKind.VLLM,
-            model_name="allenai/OLMo-2-1124-13B",
+            model="allenai/OLMo-2-1124-13B",
             trust_remote_code=True,
         ),
         "qwen2.5-7b": ProviderConfig(
             kind=ProviderKind.VLLM,
-            model_name="Qwen/Qwen2.5-7B",
+            model="Qwen/Qwen2.5-7B",
         ),
         "mistral-7b": ProviderConfig(
             kind=ProviderKind.VLLM,
-            model_name="mistralai/Mistral-7B-v0.3",
+            model="mistralai/Mistral-7B-v0.3",
         ),
         # Mock model for testing (no dependencies required)
         "mock": ProviderConfig(
             kind=ProviderKind.MOCK,
-            model_name="mock",
+            model="mock",
         ),
         # API-based models (for agent tasks - requires API keys)
         "gpt-4o": ProviderConfig(
             kind=ProviderKind.LITELLM,
-            model_name="gpt-4o",
+            model="gpt-4o",
             base_url="https://api.openai.com/v1",
             required_secrets=("OPENAI_API_KEY",),
         ),
         "gpt-4o-mini": ProviderConfig(
             kind=ProviderKind.LITELLM,
-            model_name="gpt-4o-mini",
+            model="gpt-4o-mini",
             base_url="https://api.openai.com/v1",
             required_secrets=("OPENAI_API_KEY",),
         ),
         "gpt-4-turbo": ProviderConfig(
             kind=ProviderKind.LITELLM,
-            model_name="gpt-4-turbo",
+            model="gpt-4-turbo",
             base_url="https://api.openai.com/v1",
             required_secrets=("OPENAI_API_KEY",),
         ),
         "claude-3-opus": ProviderConfig(
             kind=ProviderKind.LITELLM,
-            model_name="claude-3-opus-20240229",
+            model="claude-3-opus-20240229",
             base_url="https://api.anthropic.com",
             required_secrets=("ANTHROPIC_API_KEY",),
         ),
         "claude-3-sonnet": ProviderConfig(
             kind=ProviderKind.LITELLM,
-            model_name="claude-3-sonnet-20240229",
+            model="claude-3-sonnet-20240229",
             base_url="https://api.anthropic.com",
             required_secrets=("ANTHROPIC_API_KEY",),
         ),

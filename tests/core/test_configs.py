@@ -67,21 +67,21 @@ class TestGetModelConfig:
         config = get_model_config("llama3.1-8b")
 
         assert isinstance(config, ProviderConfig)
-        assert config.model_name == "meta-llama/Meta-Llama-3.1-8B"
+        assert config.model == "meta-llama/Meta-Llama-3.1-8B"
         assert config.get_provider_name() == "vllm"
 
     def test_get_unknown_model_as_hf_path(self):
         """Test that unknown model name is treated as HF path."""
         config = get_model_config("some-org/custom-model")
 
-        assert config.model_name == "some-org/custom-model"
+        assert config.model == "some-org/custom-model"
         assert config.get_provider_name() == "vllm"  # Default
 
     def test_get_model_with_override(self):
         """Test getting model with field override."""
         config = get_model_config("llama3.1-8b", kind="hf")
 
-        assert config.model_name == "meta-llama/Meta-Llama-3.1-8B"
+        assert config.model == "meta-llama/Meta-Llama-3.1-8B"
         assert config.get_provider_name() == "hf"
 
     def test_get_model_with_multiple_overrides(self):
@@ -104,7 +104,7 @@ class TestGetModelConfig:
             kind="hf",
         )
 
-        assert config.model_name == "custom/model"
+        assert config.model == "custom/model"
         assert config.get_provider_name() == "hf"
 
     def test_get_model_extra_args_merged(self):
@@ -130,7 +130,7 @@ class TestGetModelConfig:
         """Test tokenizer override on a preset model."""
         config = get_model_config("llama3.1-8b", tokenizer="allenai/dolma2-tokenizer")
 
-        assert config.model_name == "meta-llama/Meta-Llama-3.1-8B"
+        assert config.model == "meta-llama/Meta-Llama-3.1-8B"
         assert config.tokenizer == "allenai/dolma2-tokenizer"
 
     def test_tokenizer_override_custom_model(self):
@@ -140,7 +140,7 @@ class TestGetModelConfig:
             tokenizer="custom/my-tokenizer",
         )
 
-        assert config.model_name == "custom/my-model"
+        assert config.model == "custom/my-model"
         assert config.tokenizer == "custom/my-tokenizer"
 
     def test_tokenizer_default_is_none(self):

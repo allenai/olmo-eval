@@ -111,7 +111,7 @@ def _dr_tulu_preset() -> HarnessConfig:
 
     Note: This preset requires a provider to be set before use:
         config = get_harness_preset("dr_tulu").with_provider(
-            ProviderConfig(kind="vllm_server", model_name="llama3.1-8b", base_url="...")
+            ProviderConfig(kind="vllm_server", model="llama3.1-8b", base_url="...")
         )
         harness = Harness(config)
     """

@@ -29,10 +29,10 @@ class ProviderConfig:
 
     Attributes:
         kind: Provider type (vllm, vllm_server, hf, litellm, mock).
-        model_name: Model identifier or path (HuggingFace ID or local path).
+        model: Model name or path (HuggingFace ID, API model name, or local path).
         alias: Short display name for the model (used in DB and S3 paths).
         base_url: Base URL for API-based providers (vllm_server, litellm).
-        tokenizer: Tokenizer path/identifier (defaults to model_name if None).
+        tokenizer: Tokenizer path/identifier (defaults to model if None).
         revision: Model revision/commit hash for HuggingFace models.
         trust_remote_code: Whether to trust remote code for HuggingFace models.
         dtype: Data type for model weights (auto, float16, bfloat16, float32).
@@ -44,7 +44,7 @@ class ProviderConfig:
     """
 
     kind: str = ProviderKind.VLLM
-    model_name: str = ""
+    model: str = ""
     alias: str | None = None
     base_url: str | None = None
     tokenizer: str | None = None
@@ -90,7 +90,7 @@ class ProviderConfig:
         if self.max_concurrency is not None:
             provider_kwargs["max_concurrency"] = self.max_concurrency
 
-        return create_provider(self.kind, self.model_name, **provider_kwargs)
+        return create_provider(self.kind, self.model, **provider_kwargs)
 
     def get_provider_name(self, override: str | None = None) -> str:
         """Get the effective provider name as a string.
@@ -126,7 +126,7 @@ class ProviderConfig:
         """
         d: dict[str, Any] = {
             "kind": self.kind,
-            "model_name": self.model_name,
+            "model": self.model,
         }
         if self.base_url is not None:
             d["base_url"] = self.base_url
@@ -162,7 +162,7 @@ class ProviderConfig:
         """
         return cls(
             kind=data.get("kind", ProviderKind.VLLM),
-            model_name=data.get("model_name", ""),
+            model=data.get("model", data.get("model_name", "")),
             base_url=data.get("base_url"),
             tokenizer=data.get("tokenizer"),
             revision=data.get("revision"),

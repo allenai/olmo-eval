@@ -675,14 +675,15 @@ def _build_experiment_summary(
         output_dir=BEAKER_RESULT_DIR,
     )
 
+    from dataclasses import replace
+
     from olmo_eval.core.harness import get_harness_preset
 
     harness_config = get_harness_preset(harness or "default")
+    provider_with_model = replace(harness_config.provider, model=exp.model_specs[0])
+    harness_config = harness_config.with_provider(provider_with_model)
 
-    harness_summary = HarnessSummary(
-        model=exp.model_specs[0],
-        config=harness_config,
-    )
+    harness_summary = HarnessSummary(config=harness_config)
 
     return ExperimentSummary(
         name=exp.name,

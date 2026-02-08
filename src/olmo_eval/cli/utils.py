@@ -15,9 +15,8 @@ if TYPE_CHECKING:
 
 @dataclass
 class HarnessSummary:
-    """Display-friendly representation of a Harness (model + config)."""
+    """Display-friendly representation of a Harness."""
 
-    model: str
     config: "HarnessConfig"
 
 

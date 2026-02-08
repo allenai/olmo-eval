@@ -173,7 +173,7 @@ class TestCreateHarness:
         """Test create_harness with mock provider type."""
         config = HarnessConfig(
             name="default",
-            provider=ProviderConfig(kind=ProviderKind.MOCK, model_name="test-model"),
+            provider=ProviderConfig(kind=ProviderKind.MOCK, model="test-model"),
         )
         harness = create_harness(config)
 
@@ -184,7 +184,7 @@ class TestCreateHarness:
         """Test create_harness with explicit config."""
         config = HarnessConfig(
             name="explicit",
-            provider=ProviderConfig(kind=ProviderKind.MOCK, model_name="test-model"),
+            provider=ProviderConfig(kind=ProviderKind.MOCK, model="test-model"),
         )
         harness = create_harness(config)
 

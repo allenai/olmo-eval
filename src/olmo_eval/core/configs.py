@@ -128,7 +128,7 @@ def get_provider_config(name: str, **overrides: Any) -> ProviderConfig:
             # Build new config with overrides
             return ProviderConfig(
                 kind=filtered_overrides.get("kind", base.kind),
-                model_name=filtered_overrides.get("model_name", base.model_name),
+                model=filtered_overrides.get("model", base.model),
                 base_url=filtered_overrides.get("base_url", base.base_url),
                 tokenizer=filtered_overrides.get("tokenizer", base.tokenizer),
                 revision=filtered_overrides.get("revision", base.revision),
@@ -147,7 +147,7 @@ def get_provider_config(name: str, **overrides: Any) -> ProviderConfig:
         return base
 
     # Not a preset - create ProviderConfig directly
-    return ProviderConfig(model_name=name, **filtered_overrides)
+    return ProviderConfig(model=name, **filtered_overrides)
 
 
 # Backward compatibility alias

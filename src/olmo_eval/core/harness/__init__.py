@@ -31,7 +31,7 @@ Example:
         name="search_agent",
         provider=ProviderConfig(
             kind="vllm",
-            model_name="llama3.1-8b",
+            model="llama3.1-8b",
         ),
         tool_names=("web_search",),
         system_prompt="You have access to search tools.",

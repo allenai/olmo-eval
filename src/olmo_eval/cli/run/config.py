@@ -61,7 +61,7 @@ class RunConfig:
     @property
     def model_name(self) -> str:
         """Get the model name from the harness config."""
-        return self.harness_config.provider.model_name
+        return self.harness_config.provider.model
 
     @property
     def provider_config(self) -> ProviderConfig:
@@ -290,15 +290,15 @@ class RunConfigBuilder:
     def _build_provider_config(
         self, model_name: str, base: ProviderConfig, overrides: dict[str, Any]
     ) -> ProviderConfig:
-        """Build provider config with model_name and overrides.
+        """Build provider config with model and overrides.
 
         The harness preset's provider config provides the base configuration.
-        The model_name from CLI is set as provider.model_name.
+        The model from CLI is set as provider.model.
         CLI overrides are applied on top.
         """
         return ProviderConfig(
             kind=overrides.get("kind", base.kind),
-            model_name=model_name,
+            model=model_name,
             alias=overrides.get("alias", base.alias),
             base_url=overrides.get("base_url", base.base_url),
             tokenizer=overrides.get("tokenizer", base.tokenizer),

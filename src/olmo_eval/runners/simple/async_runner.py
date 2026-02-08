@@ -103,14 +103,14 @@ class AsyncEvalRunner(BaseEvalRunner):
     @property
     def model_name(self) -> str:
         """Get the model name from provider config."""
-        return self.provider_config.model_name
+        return self.provider_config.model
 
     def validate(self) -> None:
         """Validate runner configuration."""
         from olmo_eval.runners.constants import ValidationError
 
-        if not self.provider_config.model_name:
-            raise ValidationError("provider_config.model_name is required")
+        if not self.provider_config.model:
+            raise ValidationError("provider_config.model is required")
 
         if not self.task_specs:
             raise ValidationError("task_specs is required")
@@ -227,7 +227,7 @@ class AsyncEvalRunner(BaseEvalRunner):
 
         try:
             for i in range(num_workers):
-                worker_id = get_worker_id(self.provider_config.model_name, i)
+                worker_id = get_worker_id(self.provider_config.model, i)
 
                 if total_gpus > 0:
                     start_gpu = i * self.gpus_per_worker
@@ -243,7 +243,7 @@ class AsyncEvalRunner(BaseEvalRunner):
                         gpu_ids,
                         instance_queue,
                         result_queue,
-                        self.provider_config.model_name,
+                        self.provider_config.model,
                         provider_type.value,
                         self.attention_backend,
                         self.provider_config.tokenizer,
@@ -416,7 +416,7 @@ class AsyncEvalRunner(BaseEvalRunner):
         tokenizer = None
 
         if self.inspect_formatted or self.inspect_tokens:
-            tokenizer_name = self.provider_config.tokenizer or self.provider_config.model_name
+            tokenizer_name = self.provider_config.tokenizer or self.provider_config.model
             try:
                 tokenizer = load_tokenizer(tokenizer_name)
             except Exception as e:
@@ -630,13 +630,13 @@ class AsyncEvalRunner(BaseEvalRunner):
             provider_str = "vllm"
 
         display_model_name = get_model_display_name(
-            self.provider_config.model_name, self.provider_config.alias
+            self.provider_config.model, self.provider_config.alias
         )
 
         results_dict: dict[str, Any] = {
             "timestamp": datetime.now().isoformat(),
             "model": display_model_name,
-            "model_path": self.provider_config.model_name,
+            "model_path": self.provider_config.model,
             "provider": provider_str,
             "tasks": {},
             "errors": [],

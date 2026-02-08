@@ -13,7 +13,7 @@ def make_harness_config(model_name: str = "llama3.1-8b") -> HarnessConfig:
     """Create a HarnessConfig with the given model name."""
     return HarnessConfig(
         name="test",
-        provider=ProviderConfig(model_name=model_name),
+        provider=ProviderConfig(model=model_name),
     )
 
 

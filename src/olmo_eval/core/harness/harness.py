@@ -29,7 +29,7 @@ class Harness:
             name="search",
             provider=ProviderConfig(
                 kind="vllm",
-                model_name="llama3.1-8b",
+                model="llama3.1-8b",
             ),
             tool_names=("web_search", "fetch_page"),
             system_prompt="You have access to search tools.",

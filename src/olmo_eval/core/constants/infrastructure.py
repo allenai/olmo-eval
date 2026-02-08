@@ -186,9 +186,10 @@ OE_EVAL_LAUNCH_COMMAND = "oe_eval/launch.py"
 
 BACKEND_OPTIONAL_GROUPS: dict[str, str | None] = {
     "vllm": "vllm",
+    "vllm_server": "vllm",
     "hf": "hf",
     "litellm": "litellm",
-    "mock": None,  # No dependency needed for mock backend
+    "mock": None,
 }
 """Mapping of backend types to their pyproject.toml optional dependency group names.
 
