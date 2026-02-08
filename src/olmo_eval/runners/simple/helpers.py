@@ -9,15 +9,14 @@ import queue
 import time
 from typing import TYPE_CHECKING, Any
 
-from rich.console import Console
-
+from olmo_eval.core.logging import get_logger
 from olmo_eval.inference import InferenceProvider
 from olmo_eval.runners.simple.queue import QueueItem, ResultItem
 
 if TYPE_CHECKING:
     from olmo_eval.core.harness import Harness
 
-console = Console()
+logger = get_logger(__name__)
 
 
 # -----------------------------------------------------------------------------
@@ -66,8 +65,8 @@ def check_workers_alive(
         while True:
             result_item = result_queue.get_nowait()
             if result_item.task_id == "__WORKER_FATAL__":
-                console.print("\n[bold red]FATAL: Worker crashed![/bold red]")
-                console.print(f"[red]{result_item.error}[/red]")
+                logger.error("FATAL: Worker crashed!")
+                logger.error(result_item.error)
                 # Terminate all workers
                 for worker in workers:
                     if worker.is_alive():
@@ -118,8 +117,8 @@ def wait_for_workers_ready(
         try:
             result_item = result_queue.get_nowait()
             if result_item.task_id == "__WORKER_FATAL__":
-                console.print("\n[bold red]FATAL: Worker failed during startup![/bold red]")
-                console.print(f"[red]{result_item.error}[/red]")
+                logger.error("FATAL: Worker failed during startup!")
+                logger.error(result_item.error)
                 # Terminate all workers
                 for worker in workers:
                     if worker.is_alive():

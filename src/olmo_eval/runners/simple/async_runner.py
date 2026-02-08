@@ -258,15 +258,12 @@ class AsyncEvalRunner(BaseEvalRunner):
                 worker.start()
                 workers.append(worker)
 
-            console.print(
-                f"[bold green]{len(workers)} worker(s) started, "
-                "processing instances...[/bold green]"
-            )
+            logger.info(f"{len(workers)} worker(s) started, processing instances...")
 
             # Wait for workers to initialize
-            console.print("[dim]Waiting for workers to initialize...[/dim]")
+            logger.info("Waiting for workers to initialize...")
             wait_for_workers_ready(workers, result_queue, startup_timeout=60.0)
-            console.print("[dim]Workers initialized successfully[/dim]")
+            logger.info("Workers initialized successfully")
 
             # Capture init times from workers
             provider_init_seconds = dict(init_times)
@@ -313,11 +310,11 @@ class AsyncEvalRunner(BaseEvalRunner):
         trackers: dict[str, TaskTracker] = {}
         items: list[QueueItem] = []
 
-        console.print(f"[bold]Model:[/bold] {self.model_name}")
-        console.print(f"[bold]Tasks:[/bold] {len(expanded_tasks)}")
+        logger.info(f"Model: {self.model_name}")
+        logger.info(f"Tasks: {len(expanded_tasks)}")
 
         # Prepare tasks in parallel
-        console.print(f"[bold]Preparing {len(expanded_tasks)} tasks...[/bold]")
+        logger.info(f"Preparing {len(expanded_tasks)} tasks...")
 
         def prepare_one(spec: str) -> tuple[str, TaskTracker, list[QueueItem]]:
             try:
@@ -352,9 +349,9 @@ class AsyncEvalRunner(BaseEvalRunner):
                 trackers[spec] = tracker
                 items.extend(task_items)
                 if tracker.error:
-                    console.print(f"  [red]- {spec}: ERROR - {tracker.error}[/red]")
+                    logger.error(f"  {spec}: ERROR - {tracker.error}")
                 else:
-                    console.print(f"  - {spec}: {len(task_items)} instances")
+                    logger.info(f"  {spec}: {len(task_items)} instances")
                     if self.save_requests and task_items and tracker.task:
                         request_objects = build_requests_from_items(
                             task_items, tracker.task.config.name
@@ -420,7 +417,7 @@ class AsyncEvalRunner(BaseEvalRunner):
             try:
                 tokenizer = load_tokenizer(tokenizer_name)
             except Exception as e:
-                console.print(f"[yellow]Warning:[/yellow] Could not load tokenizer: {e}")
+                logger.warning(f"Could not load tokenizer: {e}")
 
         for spec, tracker in trackers.items():
             if tracker.task and not tracker.error:
@@ -454,7 +451,7 @@ class AsyncEvalRunner(BaseEvalRunner):
                                     native_id=native_id,
                                 )
                             except Exception as e:
-                                console.print(f"[red]Error formatting request:[/red] {e}")
+                                logger.error(f"Error formatting request: {e}")
 
                         if tokenizer and self.inspect_tokens:
                             try:
@@ -467,7 +464,7 @@ class AsyncEvalRunner(BaseEvalRunner):
                                     native_id=native_id,
                                 )
                             except Exception as e:
-                                console.print(f"[red]Error tokenizing request:[/red] {e}")
+                                logger.error(f"Error tokenizing request: {e}")
 
     def _setup_workers(
         self,
@@ -476,13 +473,13 @@ class AsyncEvalRunner(BaseEvalRunner):
     ) -> tuple[mp.Queue, mp.Queue, int]:
         """Setup queues and compute worker allocation."""
         total_instances = len(items)
-        console.print(f"[bold]Total instances:[/bold] {total_instances}")
+        logger.info(f"Total instances: {total_instances}")
 
         instance_queue: mp.Queue = ctx.Queue()
         result_queue: mp.Queue = ctx.Queue()
 
         num_workers = self._get_num_workers()
-        console.print(f"[bold]Total workers:[/bold] {num_workers}")
+        logger.info(f"Total workers: {num_workers}")
 
         return instance_queue, result_queue, num_workers
 
@@ -551,8 +548,8 @@ class AsyncEvalRunner(BaseEvalRunner):
 
             # Check for fatal worker crash
             if result_item.task_id == "__WORKER_FATAL__":
-                console.print("\n[bold red]FATAL: Worker crashed![/bold red]")
-                console.print(f"[red]{result_item.error}[/red]")
+                logger.error("FATAL: Worker crashed!")
+                logger.error(result_item.error)
                 for worker in workers:
                     if worker.is_alive():
                         worker.terminate()
@@ -602,11 +599,10 @@ class AsyncEvalRunner(BaseEvalRunner):
         """Report when a task completes."""
         label = f"{model_name}:{result.spec}"
         if result.error:
-            console.print(f"  [red]✗[/red] {label} (ERROR: {result.error})")
+            logger.error(f"✗ {label} (ERROR: {result.error})")
         else:
-            console.print(
-                f"  [green]✓[/green] {label} ({result.num_instances} instances, "
-                f"{result.duration_seconds:.1f}s)"
+            logger.info(
+                f"✓ {label} ({result.num_instances} instances, {result.duration_seconds:.1f}s)"
             )
 
     def _aggregate_results(
@@ -619,9 +615,9 @@ class AsyncEvalRunner(BaseEvalRunner):
 
         errors = [(spec, r) for spec, r in results.items() if r.error]
         if errors:
-            console.print(f"\n[bold red]Errors:[/bold red] {len(errors)} tasks failed")
+            logger.error(f"{len(errors)} tasks failed")
             for spec, error_result in errors:
-                console.print(f"  - {spec}: {error_result.error}")
+                logger.error(f"  {spec}: {error_result.error}")
 
         try:
             provider_type = ProviderType(self.provider_config.get_provider_name())
