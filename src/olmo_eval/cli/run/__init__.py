@@ -121,9 +121,9 @@ def run(
     from olmo_eval.core.logging import configure_logging
     from olmo_eval.runners import ValidationError
 
-    # Process ordered args to associate overrides with model/tasks/harness
+    # Process ordered args to associate overrides with tasks/harness
     ordered_args = reconstruct_ordered_args(sys.argv[1:])
-    model_overrides, task_overrides, harness_overrides = process_ordered_args(ordered_args)
+    task_overrides, harness_overrides = process_ordered_args(ordered_args)
 
     # Configure logging for Beaker job visibility
     configure_logging(level="INFO")
@@ -166,7 +166,6 @@ def run(
         inspect_tokens=inspect_tokens,
         inspect_response=inspect_response,
         inspect_request=inspect_request,
-        cli_model_overrides=model_overrides,
         cli_task_overrides=task_overrides,
         harness_preset=harness_preset,
         harness_config_path=harness_config,

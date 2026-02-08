@@ -20,9 +20,4 @@ class ExperimentPlan:
     split_index: int | None = None
     total_splits: int | None = None
 
-    model_overrides: list[list[str]] = field(default_factory=list)
     task_overrides: dict[str, list[str]] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        if not self.model_overrides:
-            self.model_overrides = [[] for _ in self.model_specs]

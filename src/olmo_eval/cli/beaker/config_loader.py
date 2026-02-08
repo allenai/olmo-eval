@@ -24,7 +24,6 @@ class LaunchConfig:
     workspace: str
     budget: str
 
-    model_overrides: list[list[str]] = field(default_factory=list)
     task_overrides: dict[str, list[str]] = field(default_factory=dict)
 
     max_gpus_per_node: int = 8
@@ -92,7 +91,6 @@ class LaunchConfigLoader:
         cli_name = self.cli_args.get("name")
         cli_model = self.cli_args.get("model", ())
         cli_task = self.cli_args.get("task", ())
-        cli_model_overrides: list[list[str]] = self.cli_args.get("model_overrides", [])
         cli_task_overrides: dict[str, list[str]] = self.cli_args.get("task_overrides", {})
         cli_cluster = self.cli_args.get("cluster")
         cli_max_gpus_per_node = self.cli_args.get("max_gpus_per_node")
@@ -186,7 +184,6 @@ class LaunchConfigLoader:
             cluster=cluster,
             workspace=workspace,
             budget=budget,
-            model_overrides=cli_model_overrides,
             task_overrides=cli_task_overrides,
             max_gpus_per_node=max_gpus_per_node,
             pack_models=pack_models,

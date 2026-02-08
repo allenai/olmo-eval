@@ -137,10 +137,6 @@ class JobConfigAssembler:
         m_spec = exp.model_specs[0]
         command.extend(["-m", m_spec])
 
-        if exp.model_overrides and exp.model_overrides[0]:
-            for override in exp.model_overrides[0]:
-                command.extend(["-o", override])
-
         for t in exp.tasks:
             command.extend(["-t", t])
             if t in exp.task_overrides:

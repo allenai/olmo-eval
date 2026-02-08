@@ -23,19 +23,9 @@ class ExperimentPlanBuilder:
         self.tasks_by_priority = tasks_by_priority
         self.override_priority = override_priority
 
-    def _build_model_overrides(self, m_spec: str, original_index: int) -> list[str]:
-        """Build list of -o override strings for a model."""
-        overrides: list[str] = []
-
-        if original_index < len(self.config.model_overrides):
-            overrides.extend(self.config.model_overrides[original_index])
-
-        return overrides
-
     def _build_experiments(
         self,
         model_specs: list[str],
-        model_indices: list[int],
         tasks: list[str],
         priority: str,
         total_expanded_tasks: int,
@@ -47,15 +37,13 @@ class ExperimentPlanBuilder:
         from olmo_eval.launch import get_model_short_name
 
         experiments = []
-        for m_spec, m_idx in zip(model_specs, model_indices, strict=True):
+        for m_spec in model_specs:
             base_name = self.config.name
             if multiple_models:
                 short_m = get_model_short_name(m_spec)
                 base_name = f"{base_name}-{short_m}"
             if multiple_priorities:
                 base_name = f"{base_name}-{priority}"
-
-            model_overrides = [self._build_model_overrides(m_spec, m_idx)]
 
             experiments.append(
                 ExperimentPlan(
@@ -69,7 +57,6 @@ class ExperimentPlanBuilder:
                     parallelism=1,
                     split_index=None,
                     total_splits=None,
-                    model_overrides=model_overrides,
                     task_overrides=task_overrides,
                 )
             )
@@ -84,7 +71,6 @@ class ExperimentPlanBuilder:
 
         task_overrides = self.config.task_overrides
         model_specs = self.config.model_specs
-        model_indices = list(range(len(model_specs)))
 
         multiple_models = len(model_specs) > 1
         multiple_priorities = len(self.tasks_by_priority) > 1
@@ -95,7 +81,6 @@ class ExperimentPlanBuilder:
 
             experiments = self._build_experiments(
                 model_specs,
-                model_indices,
                 t_list,
                 effective_priority,
                 total_expanded,

@@ -274,7 +274,7 @@ def launch(
     from olmo_eval.core.constants.infrastructure import BEAKER_DEFAULT_IMAGE
 
     ordered_args = reconstruct_ordered_args(sys.argv[1:])
-    model_overrides, raw_task_overrides, harness_overrides = process_ordered_args(ordered_args)
+    raw_task_overrides, harness_overrides = process_ordered_args(ordered_args)
 
     # Extract priority from task overrides (e.g., -o priority=urgent after -t)
     # This is done once here and the filtered overrides are used everywhere
@@ -285,7 +285,6 @@ def launch(
         "name": name,
         "model": model,
         "task": task,
-        "model_overrides": model_overrides,
         "task_overrides": task_overrides,  # Already filtered (priority extracted)
         "cluster": cluster,
         "max_gpus_per_node": max_gpus_per_node,
