@@ -6,7 +6,7 @@ models=(
   llama-3.1-70b
   qwen-1.5-72b
   qwen-1.5-110b
-  qwen-1.5-moe-a2.7b
+  # qwen-1.5-moe-a2.7b
   qwen-2-72b
   qwen-2.5-32b
   qwen-2.5-72b
@@ -15,7 +15,7 @@ models=(
 )
 
 TASK_SET="c4:ppl"
-CLUSTER="aus80g"
+CLUSTER="h100"
 WORKSPACE="ai2/perplexity-evals"
 BUDGET="ai2/oe-base"
 PRIORITY="high"
