@@ -268,6 +268,12 @@ class AsyncEvalRunner(BaseEvalRunner):
             # Capture init times from workers
             provider_init_seconds = dict(init_times)
 
+            # Reset tracker start times now that workers are ready
+            # This ensures task duration only measures actual processing time
+            processing_start = time.time()
+            for tracker in trackers.values():
+                tracker.start_time = processing_start
+
             # Process results
             results = await self._process_results(
                 trackers,
