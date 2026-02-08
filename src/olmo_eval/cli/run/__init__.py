@@ -172,11 +172,20 @@ def run(
         cli_harness_overrides=harness_overrides,
     )
 
+    from rich.panel import Panel
+    from rich.pretty import Pretty
+
     # Build configuration
     run_config = config_builder.build()
 
-    # Print the config
-    console.print(run_config)
+    # Print the config with resolved tasks
+    console.print(
+        Panel(
+            Pretty(run_config, expand_all=True),
+            title="[bold]Run Configuration[/bold]",
+            border_style="cyan",
+        )
+    )
 
     # Set up storage backends
     storage_setup = StorageSetup(

@@ -76,7 +76,7 @@ class OpenAIAgentsBackend(Backend):
 
         # Convert harness tools to agents SDK format
         agent_tools = []
-        for tool in config.tools:
+        for tool in config.resolved_tools:
             # Use function_tool decorator to wrap the execute function
             wrapped = function_tool(strict_mode=False)(tool.execute)
             # Override name and description

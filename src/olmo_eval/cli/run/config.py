@@ -21,10 +21,10 @@ class RunConfig:
     """
 
     harness_config: HarnessConfig
-    task_specs: list[str] = field(default_factory=list)
+    task_specs: list[str] = field(default_factory=list, repr=False)
     # Per-task overrides (task_spec -> overrides dict)
     # These are applied when preparing tasks since tasks are loaded by spec
-    task_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
+    task_overrides: dict[str, dict[str, Any]] = field(default_factory=dict, repr=False)
 
     output_dir: str = "/tmp/results/"
     num_workers: int | None = None
@@ -67,6 +67,25 @@ class RunConfig:
     def provider_config(self) -> ProviderConfig:
         """Get the provider config from the harness config."""
         return self.harness_config.provider
+
+    @property
+    def tasks(self) -> list:
+        """Resolve task_specs to TaskConfig objects for display."""
+        from olmo_eval.evals.tasks import get_task
+
+        return [get_task(spec).config for spec in self.task_specs]
+
+    def __rich_repr__(self):
+        """Rich repr that shows resolved tasks instead of task_specs."""
+        from dataclasses import fields
+
+        for f in fields(self):
+            if f.name == "task_specs":
+                yield "tasks", self.tasks
+            elif not f.repr:
+                continue
+            else:
+                yield f.name, getattr(self, f.name)
 
 
 class RunConfigBuilder:
