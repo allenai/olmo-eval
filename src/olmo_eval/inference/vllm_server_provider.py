@@ -33,7 +33,7 @@ class VLLMServerProvider(InferenceProvider):
     def __init__(
         self,
         model_name: str,
-        base_url: str,
+        base_url: str | None = None,
         timeout: float = 60.0,
         max_concurrency: int = 32,
     ) -> None:
@@ -41,12 +41,12 @@ class VLLMServerProvider(InferenceProvider):
 
         Args:
             model_name: Model identifier for requests.
-            base_url: Base URL of the vLLM server (e.g., "http://localhost:8000/v1").
+            base_url: Base URL of the vLLM server. Defaults to "http://localhost:8000/v1".
             timeout: Request timeout in seconds.
             max_concurrency: Maximum number of concurrent requests.
         """
         super().__init__(model_name)
-        self.base_url = base_url
+        self.base_url = base_url or "http://localhost:8000/v1"
         self.timeout = timeout
         self.max_concurrency = max_concurrency
         self._client: AsyncOpenAI | None = None
