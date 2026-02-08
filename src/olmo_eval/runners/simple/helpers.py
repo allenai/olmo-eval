@@ -172,8 +172,6 @@ def process_batch(
     from tqdm import tqdm
 
     with tqdm(total=len(batch), desc="Processing instances", unit="inst") as pbar:
-        # If harness is configured, use async harness.run() for all requests
-        # This handles both tool and non-tool cases uniformly
         if harness is not None:
             _process_with_harness(batch, harness, result_queue, pbar)
             return
@@ -264,6 +262,9 @@ def _process_with_harness(
 ) -> None:
     """Process batch using harness.run(), streaming results as they complete.
 
+    Chunks the batch to avoid overwhelming the HTTP connection pool. Each chunk
+    is processed with bounded concurrency before moving to the next.
+
     Args:
         batch: Queue items to process.
         harness: Harness instance for execution.
@@ -274,88 +275,104 @@ def _process_with_harness(
     """
     from dataclasses import replace as dataclass_replace
 
-    async def run_batch_async() -> None:
-        semaphore = asyncio.Semaphore(harness.config.max_concurrency or 8)
+    # Chunk size based on concurrency - process N * concurrency items at a time
+    # This provides backpressure without overwhelming connection pools
+    max_concurrency = harness.config.max_concurrency or 8
+    chunk_size = max_concurrency * 8  # 64 items per chunk at default concurrency
 
-        async def run_one(item: QueueItem) -> None:
-            async with semaphore:
-                last_error: Exception | None = None
-                attempt = 0
+    async def run_one(item: QueueItem, semaphore: asyncio.Semaphore) -> None:
+        async with semaphore:
+            last_error: Exception | None = None
+            attempt = 0
 
-                while attempt <= max_retries:
-                    try:
-                        harness_result = await harness.run(item.request, item.sampling_params)
+            while attempt <= max_retries:
+                try:
+                    harness_result = await harness.run(item.request, item.sampling_params)
 
-                        final_output = harness_result.final_output
+                    final_output = harness_result.final_output
 
-                        # Add trajectory metadata if present (for tool-based execution)
-                        if harness_result.trajectory.num_turns > 1 or harness.config.has_tools:
-                            output_with_metadata = dataclass_replace(
-                                final_output,
-                                metadata={
-                                    **(final_output.metadata or {}),
-                                    "trajectory": harness_result.trajectory.to_dict(),
-                                    "max_turns_reached": harness_result.max_turns_reached,
-                                    "total_tool_calls": harness_result.total_tool_calls,
-                                    "num_turns": harness_result.num_turns,
-                                },
-                            )
-                        else:
-                            output_with_metadata = final_output
-
-                        result_queue.put(
-                            ResultItem(
-                                model_name=item.model_name,
-                                task_id=item.task_id,
-                                instance_idx=item.instance_idx,
-                                instance=item.instance,
-                                request=item.request,
-                                outputs=[output_with_metadata],
-                                error=harness_result.error,
-                                attempt=attempt,
-                            )
+                    # Add trajectory metadata if present (for tool-based execution)
+                    if harness_result.trajectory.num_turns > 1 or harness.config.has_tools:
+                        output_with_metadata = dataclass_replace(
+                            final_output,
+                            metadata={
+                                **(final_output.metadata or {}),
+                                "trajectory": harness_result.trajectory.to_dict(),
+                                "max_turns_reached": harness_result.max_turns_reached,
+                                "total_tool_calls": harness_result.total_tool_calls,
+                                "num_turns": harness_result.num_turns,
+                            },
                         )
-                        pbar.update(1)
-                        return  # Success, exit retry loop
+                    else:
+                        output_with_metadata = final_output
 
-                    except Exception as e:
-                        last_error = e
-                        attempt += 1
-
-                        # Log full error details for debugging
-                        error_detail = _format_error_detail(e)
-                        logger.warning(
-                            f"Error on instance {item.instance_idx} "
-                            f"(attempt {attempt}/{max_retries + 1}): {error_detail}"
+                    result_queue.put(
+                        ResultItem(
+                            model_name=item.model_name,
+                            task_id=item.task_id,
+                            instance_idx=item.instance_idx,
+                            instance=item.instance,
+                            request=item.request,
+                            outputs=[output_with_metadata],
+                            error=harness_result.error,
+                            attempt=attempt,
                         )
-
-                        if attempt <= max_retries and _is_retryable_error(e):
-                            delay = retry_delay * (2 ** (attempt - 1))
-                            logger.info(f"Retrying in {delay:.1f}s...")
-                            await asyncio.sleep(delay)
-                        else:
-                            break  # Non-retryable or max retries exceeded
-
-                # All retries exhausted or non-retryable error
-                error_detail = _format_error_detail(last_error)
-
-                result_queue.put(
-                    ResultItem(
-                        model_name=item.model_name,
-                        task_id=item.task_id,
-                        instance_idx=item.instance_idx,
-                        instance=item.instance,
-                        request=item.request,
-                        outputs=[],
-                        error=error_detail,
-                        attempt=attempt,
                     )
+                    pbar.update(1)
+                    return  # Success, exit retry loop
+
+                except Exception as e:
+                    last_error = e
+                    attempt += 1
+
+                    # Log full error details for debugging
+                    error_detail = _format_error_detail(e)
+                    logger.warning(
+                        f"Error on instance {item.instance_idx} "
+                        f"(attempt {attempt}/{max_retries + 1}): {error_detail}"
+                    )
+
+                    if attempt <= max_retries and _is_retryable_error(e):
+                        delay = retry_delay * (2 ** (attempt - 1))
+                        logger.info(f"Retrying in {delay:.1f}s...")
+                        await asyncio.sleep(delay)
+                    else:
+                        break  # Non-retryable or max retries exceeded
+
+            # All retries exhausted or non-retryable error
+            error_detail = _format_error_detail(last_error)
+
+            result_queue.put(
+                ResultItem(
+                    model_name=item.model_name,
+                    task_id=item.task_id,
+                    instance_idx=item.instance_idx,
+                    instance=item.instance,
+                    request=item.request,
+                    outputs=[],
+                    error=error_detail,
+                    attempt=attempt,
                 )
-                pbar.update(1)
+            )
+            pbar.update(1)
 
-        await asyncio.gather(*[run_one(item) for item in batch])
+    async def run_chunk(chunk: list[QueueItem]) -> None:
+        semaphore = asyncio.Semaphore(max_concurrency)
+        await asyncio.gather(*[run_one(item, semaphore) for item in chunk])
 
-    asyncio.run(run_batch_async())
+    async def run_all_chunks() -> None:
+        # Process batch in chunks to avoid overwhelming connection pools
+        num_chunks = (len(batch) + chunk_size - 1) // chunk_size
+        for chunk_idx, i in enumerate(range(0, len(batch), chunk_size)):
+            chunk = batch[i : i + chunk_size]
+            if num_chunks > 1:
+                logger.info(
+                    f"Processing chunk {chunk_idx + 1}/{num_chunks} "
+                    f"({len(chunk)} instances, concurrency={max_concurrency})"
+                )
+            await run_chunk(chunk)
+
+    asyncio.run(run_all_chunks())
 
 
 def _process_with_provider(

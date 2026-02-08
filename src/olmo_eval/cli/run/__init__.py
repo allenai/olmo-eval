@@ -131,6 +131,7 @@ def run(
     # Set debug environment variables
     if debug_requests:
         os.environ["OLMO_EVAL_DEBUG_REQUESTS"] = "1"
+        os.environ["VLLM_DEBUG_REQUESTS"] = "1"
     if debug_provider:
         os.environ["OLMO_EVAL_DEBUG_PROVIDER"] = "1"
 
