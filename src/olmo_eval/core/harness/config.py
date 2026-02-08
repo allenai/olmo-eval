@@ -188,7 +188,7 @@ class HarnessConfig:
 
     This configuration determines how a Harness wraps a provider:
     - Provider configuration (via ProviderConfig)
-    - Which tools are available (by name, resolved from registry)
+    - Which tools are available (Tool objects or names resolved from registry)
     - System prompt to prepend to requests
     - Tool choice behavior (auto, none, required)
     - Backend selection (default, openai_agents)
@@ -196,8 +196,7 @@ class HarnessConfig:
 
     name: str
     provider: ProviderConfig = field(default_factory=ProviderConfig)
-    # Tool configuration
-    tool_names: tuple[str, ...] = ()
+    tools: tuple[Tool | str, ...] = ()
     system_prompt: str | None = None
     tool_choice: Literal["auto", "none", "required"] | str = "auto"
     backend: str = "default"
@@ -206,18 +205,16 @@ class HarnessConfig:
     max_concurrency: int | None = None  # For agent execution
 
     @property
-    def tools(self) -> tuple[Tool, ...]:
-        """Resolve tools from the registry.
+    def tool_names(self) -> tuple[str, ...]:
+        """Get tool names (for serialization)."""
+        return tuple(t if isinstance(t, str) else t.name for t in self.tools)
 
-        Returns:
-            Tuple of Tool instances corresponding to tool_names.
+    @property
+    def resolved_tools(self) -> tuple[Tool, ...]:
+        """Resolve all tools to Tool instances."""
+        from .tools import get_tool
 
-        Raises:
-            ValueError: If any tool name is not registered.
-        """
-        from .tools import get_tools
-
-        return get_tools(self.tool_names)
+        return tuple(t if not isinstance(t, str) else get_tool(t) for t in self.tools)
 
     @property
     def tool_schemas(self) -> tuple[ToolSchema, ...]:
@@ -226,7 +223,7 @@ class HarnessConfig:
         Returns:
             Tuple of ToolSchema instances for all configured tools.
         """
-        return tuple(t.schema for t in self.tools)
+        return tuple(t.schema for t in self.resolved_tools)
 
     @property
     def has_tools(self) -> bool:
@@ -235,7 +232,7 @@ class HarnessConfig:
         Returns:
             True if at least one tool is configured.
         """
-        return len(self.tool_names) > 0
+        return len(self.tools) > 0
 
     def validate_secrets(self) -> list[str]:
         """Check that all required secrets are available.
@@ -286,8 +283,8 @@ class HarnessConfig:
         return cls(
             name=data.get("name", "default"),
             provider=ProviderConfig.from_dict(provider_data),
-            # Tool configuration
-            tool_names=tuple(data.get("tool_names", [])),
+            # Tool configuration (serialized as "tool_names" for backward compat)
+            tools=tuple(data.get("tool_names", [])),
             system_prompt=data.get("system_prompt"),
             tool_choice=data.get("tool_choice", "auto"),
             backend=data.get("backend", "default"),
@@ -296,29 +293,19 @@ class HarnessConfig:
             max_concurrency=data.get("max_concurrency"),
         )
 
-    def with_tools(self, *tools: Tool | str) -> HarnessConfig:
+    def with_tools(self, *new_tools: Tool | str) -> HarnessConfig:
         """Create a new config with additional tools.
 
         Args:
-            *tools: Tool instances or names to add.
+            *new_tools: Tool instances or names to add.
 
         Returns:
             New HarnessConfig with the additional tools.
         """
-        from .tools import register_tool
-
-        new_names = list(self.tool_names)
-        for t in tools:
-            if isinstance(t, str):
-                new_names.append(t)
-            else:
-                register_tool(t)
-                new_names.append(t.name)
-
         return HarnessConfig(
             name=self.name,
             provider=self.provider,
-            tool_names=tuple(new_names),
+            tools=self.tools + new_tools,
             system_prompt=self.system_prompt,
             tool_choice=self.tool_choice,
             backend=self.backend,
@@ -339,7 +326,7 @@ class HarnessConfig:
         return HarnessConfig(
             name=self.name,
             provider=self.provider,
-            tool_names=self.tool_names,
+            tools=self.tools,
             system_prompt=system_prompt,
             tool_choice=self.tool_choice,
             backend=self.backend,
@@ -360,7 +347,7 @@ class HarnessConfig:
         return HarnessConfig(
             name=self.name,
             provider=provider,
-            tool_names=self.tool_names,
+            tools=self.tools,
             system_prompt=self.system_prompt,
             tool_choice=self.tool_choice,
             backend=self.backend,
@@ -368,6 +355,34 @@ class HarnessConfig:
             max_turns=self.max_turns,
             max_concurrency=self.max_concurrency,
         )
+
+    def merge_provider(self, provider: ProviderConfig) -> HarnessConfig:
+        """Create a new config merging model info from provider while preserving harness settings.
+
+        This is useful when a harness preset specifies a provider kind (e.g., VLLM_SERVER)
+        but the model name comes from user input. The harness's provider kind takes precedence
+        if explicitly set (non-default), while model-specific fields come from the new provider.
+
+        Args:
+            provider: Provider configuration with model information.
+
+        Returns:
+            New HarnessConfig with merged provider settings.
+        """
+        from dataclasses import fields, replace
+
+        # Start with incoming provider, overlay non-default harness values
+        defaults = ProviderConfig()
+        overrides = {
+            f.name: getattr(self.provider, f.name)
+            for f in fields(self.provider)
+            if getattr(self.provider, f.name) != getattr(defaults, f.name)
+        }
+        # Special case: kwargs should merge, not replace
+        if self.provider.kwargs:
+            overrides["kwargs"] = {**provider.kwargs, **self.provider.kwargs}
+
+        return self.with_provider(replace(provider, **overrides))
 
 
 def harness_config(
@@ -381,10 +396,7 @@ def harness_config(
     max_turns: int | None = None,
     max_concurrency: int | None = None,
 ) -> HarnessConfig:
-    """Create a HarnessConfig, registering any Tool objects passed.
-
-    This is a convenience function that accepts either Tool instances
-    or tool names. Tool instances are automatically registered.
+    """Create a HarnessConfig.
 
     Args:
         name: Human-readable name for this configuration.
@@ -398,22 +410,12 @@ def harness_config(
         max_concurrency: Maximum concurrent tool executions for agent backends.
 
     Returns:
-        A new HarnessConfig instance with tools registered.
+        A new HarnessConfig instance.
     """
-    from .tools import Tool, register_tool
-
-    tool_names: list[str] = []
-    for t in tools:
-        if isinstance(t, Tool):
-            register_tool(t)
-            tool_names.append(t.name)
-        else:
-            tool_names.append(t)
-
     return HarnessConfig(
         name=name,
         provider=provider or ProviderConfig(),
-        tool_names=tuple(tool_names),
+        tools=tuple(tools),
         system_prompt=system_prompt,
         tool_choice=tool_choice,
         backend=backend,

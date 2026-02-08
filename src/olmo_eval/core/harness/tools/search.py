@@ -6,6 +6,7 @@ This module provides search tools that can be used with the Harness:
 - serper_fetch_page: Fetch and extract webpage content
 
 These tools are pre-registered in the global registry.
+Import the tool objects and use .name for HarnessConfig.tool_names.
 """
 
 from __future__ import annotations

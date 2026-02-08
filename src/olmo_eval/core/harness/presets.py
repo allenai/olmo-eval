@@ -106,14 +106,12 @@ register_harness_preset(
 @harness_preset("dr_tulu")
 def _dr_tulu_preset() -> HarnessConfig:
     """Dr. Tulu preset with web and academic search tools."""
+    from .tools.search import semantic_scholar_search, serper_fetch_page, serper_web_search
+
     return HarnessConfig(
         name="dr_tulu",
         provider=ProviderConfig(kind=ProviderKind.VLLM_SERVER),
-        tool_names=(
-            "semantic_scholar_snippet_search",
-            "serper_google_webpage_search",
-            "serper_fetch_webpage_content",
-        ),
+        tools=(semantic_scholar_search, serper_web_search, serper_fetch_page),
         system_prompt=DR_TULU_SYSTEM_PROMPT,
         max_turns=10,
         max_concurrency=8,

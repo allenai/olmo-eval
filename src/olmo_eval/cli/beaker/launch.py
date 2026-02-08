@@ -679,8 +679,9 @@ def _build_experiment_summary(
 
     harness_config = get_harness_preset(harness or "default")
     # Look up model preset or create provider config from model name
+    # Use merge_provider to preserve harness preset's provider kind (e.g., VLLM_SERVER)
     provider_config = get_provider_config(exp.model_specs[0])
-    harness_config = harness_config.with_provider(provider_config)
+    harness_config = harness_config.merge_provider(provider_config)
 
     harness_summary = HarnessSummary(config=harness_config)
 
