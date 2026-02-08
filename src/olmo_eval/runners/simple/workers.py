@@ -99,6 +99,7 @@ def instance_worker_process(
             # Check if harness has tools configured - if so, enable auto tool choice
             enable_auto_tool_choice = False
             tool_call_parser = None
+            provider_kwargs = None
             if harness_config_dict:
                 tool_names = harness_config_dict.get("tool_names", ())
                 if tool_names:
@@ -107,6 +108,7 @@ def instance_worker_process(
                 # Get tool_call_parser from provider config if specified
                 provider_dict = harness_config_dict.get("provider", {})
                 tool_call_parser = provider_dict.get("tool_call_parser")
+                provider_kwargs = provider_dict.get("kwargs", {})
 
             server_context, provider = _create_vllm_server_provider(
                 model_name=model_name,
@@ -114,6 +116,7 @@ def instance_worker_process(
                 worker_logger=worker_logger,
                 enable_auto_tool_choice=enable_auto_tool_choice,
                 tool_call_parser=tool_call_parser,
+                provider_kwargs=provider_kwargs,
                 **engine_kwargs,
             )
         else:
@@ -180,6 +183,7 @@ def _create_vllm_server_provider(
     worker_logger: Any = None,
     enable_auto_tool_choice: bool = False,
     tool_call_parser: str | None = None,
+    provider_kwargs: dict[str, Any] | None = None,
     **engine_kwargs: Any,
 ) -> tuple[Any, InferenceProvider]:
     """Create a vLLM server process and provider.
@@ -193,6 +197,7 @@ def _create_vllm_server_provider(
         worker_logger: Logger for status messages.
         enable_auto_tool_choice: Enable automatic tool choice in vLLM.
         tool_call_parser: Parser for tool calls (auto-detected if not specified).
+        provider_kwargs: Kwargs to pass to VLLMServerProvider (e.g., timeout, max_retries).
         **engine_kwargs: Additional vLLM engine arguments.
 
     Returns:
@@ -244,9 +249,16 @@ def _create_vllm_server_provider(
     server.start(progress_callback=progress_callback)
 
     # Create provider that connects to the server
+    provider_kwargs = provider_kwargs or {}
+    if worker_logger and provider_kwargs:
+        if "timeout" in provider_kwargs:
+            worker_logger.info(f"  Request timeout: {provider_kwargs['timeout']}s")
+        if "max_retries" in provider_kwargs:
+            worker_logger.info(f"  Max retries: {provider_kwargs['max_retries']}")
     provider = VLLMServerProvider(
         model_name=model_name,
         base_url=server.base_url,
+        **provider_kwargs,
     )
 
     return server, provider

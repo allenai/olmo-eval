@@ -18,6 +18,19 @@ os.environ.setdefault("HF_DATASETS_DISABLE_PROGRESS_BAR", "1")
 os.environ.setdefault("LITELLM_LOG", "ERROR")
 
 
+class FlushingStreamHandler(logging.StreamHandler):
+    """StreamHandler that flushes after every emit.
+
+    In multiprocessing subprocesses, stdout/stderr may be line-buffered or
+    fully buffered, causing logs to appear only after the process completes.
+    This handler forces a flush after each log message to ensure real-time output.
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:
+        super().emit(record)
+        self.flush()
+
+
 def configure_logging(level: LogLevel = "INFO") -> None:
     """Configure root logging for olmo-eval.
 
@@ -63,7 +76,7 @@ def configure_worker_logging(worker_id: str) -> logging.Logger:
     logger = logging.getLogger(f"{PACKAGE_LOGGER_NAME}.worker.{worker_id}")
 
     if not logger.handlers:
-        handler = logging.StreamHandler()
+        handler = FlushingStreamHandler()
         handler.setFormatter(
             logging.Formatter(
                 f"%(asctime)s [{worker_id}] [%(levelname)s] %(message)s",
