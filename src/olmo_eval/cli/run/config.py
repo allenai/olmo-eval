@@ -46,7 +46,6 @@ class RunConfig:
     # Experiment metadata
     experiment_name: str | None = None
     experiment_group: str | None = None
-    alias: str | None = None
 
     # Output options
     save_predictions: bool = True
@@ -95,7 +94,6 @@ class RunConfigBuilder:
         db_password: str = "postgres",
         experiment_name: str | None = None,
         experiment_group: str | None = None,
-        alias: str | None = None,
         save_predictions: bool = True,
         save_requests: bool = True,
         inspect_instance: bool = False,
@@ -142,7 +140,6 @@ class RunConfigBuilder:
         self.db_password = db_password
         self.experiment_name = experiment_name
         self.experiment_group = experiment_group
-        self.alias = alias
         self.save_predictions = save_predictions
         self.save_requests = save_requests
         self.inspect_instance = inspect_instance
@@ -202,7 +199,6 @@ class RunConfigBuilder:
             db_password=self.db_password,
             experiment_name=self.experiment_name,
             experiment_group=self.experiment_group,
-            alias=self.alias,
             save_predictions=self.save_predictions,
             save_requests=self.save_requests,
             inspect_instance=self.inspect_instance,

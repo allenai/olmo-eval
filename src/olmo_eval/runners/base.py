@@ -37,7 +37,6 @@ class BaseEvalRunner(ABC):
     # Experiment metadata
     experiment_name: str | None = None
     experiment_group: str | None = None
-    alias: str | None = None
 
     # Output persistence options
     save_predictions: bool = True

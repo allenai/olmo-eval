@@ -119,11 +119,6 @@ def experiment_options(func: F) -> F:  # noqa: UP047
         "--experiment-group",
         help="Experiment group for grouping related experiments",
     )
-    @click.option(
-        "--alias",
-        "-a",
-        help="Short name for model (used as model_name in DB)",
-    )
     @functools.wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         return func(*args, **kwargs)

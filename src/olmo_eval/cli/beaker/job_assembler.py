@@ -226,37 +226,20 @@ class JobConfigAssembler:
         # Set output directory for Beaker (use -O short form)
         command.extend(["-O", BEAKER_RESULT_DIR])
 
-        # Add models with their overrides using -o flags
-        for i, (m_cfg, m_spec) in enumerate(zip(exp.model_cfgs, exp.model_specs, strict=True)):
-            # Add the model
-            command.extend(["-m", m_spec])
+        # Add model - run command will resolve provider config from model name
+        # Note: beaker launch only supports single model per experiment now
+        m_cfg = exp.model_cfgs[0]
+        m_spec = exp.model_specs[0]
+        command.extend(["-m", m_spec])
 
-            # Add per-model overrides using -o flags
-            if i < len(exp.model_overrides):
-                for override in exp.model_overrides[i]:
-                    command.extend(["-o", override])
+        # Add user-specified model overrides from CLI -o flags
+        if exp.model_overrides and exp.model_overrides[0]:
+            for override in exp.model_overrides[0]:
+                command.extend(["-o", override])
 
-            # Add alias if present
-            if m_cfg.alias:
-                command.extend(["--alias", m_cfg.alias])
-
-            # Add provider config if specified (via -o overrides)
-            if m_cfg.provider:
-                from dataclasses import fields
-
-                for f in fields(m_cfg.provider):
-                    value = getattr(m_cfg.provider, f.name)
-                    if value is None or value == "":
-                        continue
-                    # Handle enum values
-                    if hasattr(value, "value"):
-                        value = value.value
-                    # Skip default values and complex types
-                    if f.name == "kwargs" and not value:
-                        continue
-                    if isinstance(value, (dict, tuple, list)):
-                        continue  # Complex types not supported via CLI
-                    command.extend(["-o", f"provider.{f.name}={value}"])
+        # Add alias if present (as a model override)
+        if m_cfg.alias:
+            command.extend(["-o", f"alias={m_cfg.alias}"])
 
         # Add tasks with their overrides
         for t in exp.tasks:

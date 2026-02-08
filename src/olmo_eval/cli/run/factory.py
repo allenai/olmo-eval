@@ -59,7 +59,6 @@ class RunnerFactory:
             s3_config=self.s3_config,
             experiment_name=self.config.experiment_name,
             experiment_group=self.config.experiment_group,
-            alias=self.config.alias,
             save_predictions=self.config.save_predictions,
             save_requests=self.config.save_requests,
             inspect_instance=self.config.inspect_instance,

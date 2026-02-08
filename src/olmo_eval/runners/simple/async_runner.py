@@ -80,7 +80,6 @@ class AsyncEvalRunner(BaseEvalRunner):
     # Experiment metadata
     experiment_name: str | None = None
     experiment_group: str | None = None
-    alias: str | None = None
 
     # Output persistence options
     save_predictions: bool = True
@@ -630,7 +629,9 @@ class AsyncEvalRunner(BaseEvalRunner):
         except ValueError:
             provider_str = "vllm"
 
-        display_model_name = get_model_display_name(self.provider_config.model_name, self.alias)
+        display_model_name = get_model_display_name(
+            self.provider_config.model_name, self.provider_config.alias
+        )
 
         results_dict: dict[str, Any] = {
             "timestamp": datetime.now().isoformat(),

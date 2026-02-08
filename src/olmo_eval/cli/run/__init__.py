@@ -92,7 +92,6 @@ def run(
     # Experiment options
     experiment_name: str | None,
     experiment_group: str | None,
-    alias: str | None,
     # Output options
     output_dir: str,
     save_predictions: bool,
@@ -160,7 +159,6 @@ def run(
         db_password=db_password,
         experiment_name=experiment_name,
         experiment_group=experiment_group,
-        alias=alias,
         save_predictions=save_predictions,
         save_requests=save_requests,
         inspect_instance=inspect_instance,

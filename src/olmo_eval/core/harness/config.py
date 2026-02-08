@@ -30,6 +30,7 @@ class ProviderConfig:
     Attributes:
         kind: Provider type (vllm, vllm_server, hf, litellm, mock).
         model_name: Model identifier or path (HuggingFace ID or local path).
+        alias: Short display name for the model (used in DB and S3 paths).
         base_url: Base URL for API-based providers (vllm_server, litellm).
         tokenizer: Tokenizer path/identifier (defaults to model_name if None).
         revision: Model revision/commit hash for HuggingFace models.
@@ -44,6 +45,7 @@ class ProviderConfig:
 
     kind: str = ProviderKind.VLLM
     model_name: str = ""
+    alias: str | None = None
     base_url: str | None = None
     tokenizer: str | None = None
     revision: str | None = None
