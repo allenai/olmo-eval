@@ -25,6 +25,82 @@ class OpenAIAgentsBackend(Backend):
     name = "openai_agents"
     required_extras = ("agents",)
 
+    def __init__(self) -> None:
+        self._cached_agent: Any = None  # Agent type from agents SDK
+        self._cached_config: HarnessConfig | None = None
+        self._cached_provider_id: int | None = None
+
+    def _get_openai_client(self, provider: InferenceProvider) -> Any:
+        """Get OpenAI client from provider or fallback to environment."""
+        client = provider.get_openai_client()
+        if client is None:
+            # Fallback to environment variables for backward compatibility
+            import os
+
+            from openai import AsyncOpenAI  # type: ignore[import-not-found]
+
+            client = AsyncOpenAI(
+                base_url=os.getenv("OPENAI_BASE_URL", "http://localhost:8000/v1"),
+                api_key=os.getenv("OPENAI_API_KEY", "EMPTY"),
+                timeout=60.0,
+            )
+        return client
+
+    def _convert_tools(self, tools: list[Any], function_tool: Any) -> list[Any]:
+        """Convert harness tools to agents SDK format."""
+        agent_tools = []
+        for tool in tools:
+            # Use function_tool decorator to wrap the execute function
+            wrapped = function_tool(strict_mode=False)(tool.execute)
+            # Override name and description
+            wrapped.name = tool.name
+            if hasattr(wrapped, "description"):
+                wrapped.description = tool.description
+            agent_tools.append(wrapped)
+        return agent_tools
+
+    def _get_or_create_agent(self, provider: InferenceProvider, config: HarnessConfig) -> Any:
+        """Get cached agent or create a new one if config/provider changed."""
+        from agents import (  # type: ignore[import-not-found]
+            Agent,
+            OpenAIChatCompletionsModel,
+            function_tool,
+        )
+
+        # Return cached if same config (identity check - config is frozen)
+        # and same provider (id check)
+        if (
+            self._cached_agent is not None
+            and self._cached_config is config
+            and self._cached_provider_id == id(provider)
+        ):
+            return self._cached_agent
+
+        # Create model
+        client = self._get_openai_client(provider)
+        model = OpenAIChatCompletionsModel(
+            openai_client=client,
+            model=provider.model_name,
+        )
+
+        # Convert tools
+        agent_tools = self._convert_tools(config.resolved_tools, function_tool)
+
+        # Create agent
+        agent = Agent(
+            name=self.name,
+            instructions=config.system_prompt or "",
+            model=model,
+            tools=agent_tools,
+        )
+
+        # Cache for reuse
+        self._cached_agent = agent
+        self._cached_config = config
+        self._cached_provider_id = id(provider)
+
+        return agent
+
     async def run(
         self,
         provider: InferenceProvider,
@@ -44,54 +120,14 @@ class OpenAIAgentsBackend(Backend):
             HarnessResult with trajectory from SDK execution.
         """
         try:
-            from agents import (  # type: ignore[import-not-found]
-                Agent,
-                OpenAIChatCompletionsModel,
-                Runner,
-                function_tool,
-            )
+            from agents import Runner  # type: ignore[import-not-found]
         except ImportError as e:
             raise ImportError(
                 "OpenAI Agents SDK not installed. Install with: pip install openai-agents"
             ) from e
 
-        # Get OpenAI client from provider
-        client = provider.get_openai_client()
-        if client is None:
-            # Fallback to environment variables for backward compatibility
-            import os
-
-            from openai import AsyncOpenAI  # type: ignore[import-not-found]
-
-            client = AsyncOpenAI(
-                base_url=os.getenv("OPENAI_BASE_URL", "http://localhost:8000/v1"),
-                api_key=os.getenv("OPENAI_API_KEY", "EMPTY"),
-                timeout=60.0,
-            )
-
-        model = OpenAIChatCompletionsModel(
-            openai_client=client,
-            model=provider.model_name,
-        )
-
-        # Convert harness tools to agents SDK format
-        agent_tools = []
-        for tool in config.resolved_tools:
-            # Use function_tool decorator to wrap the execute function
-            wrapped = function_tool(strict_mode=False)(tool.execute)
-            # Override name and description
-            wrapped.name = tool.name
-            if hasattr(wrapped, "description"):
-                wrapped.description = tool.description
-            agent_tools.append(wrapped)
-
-        # Create agent
-        agent = Agent(
-            name=self.name,
-            instructions=config.system_prompt or "",
-            model=model,
-            tools=agent_tools,
-        )
+        # Get or create cached agent
+        agent = self._get_or_create_agent(provider, config)
 
         # Get the input message
         input_text = ""
