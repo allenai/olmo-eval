@@ -34,28 +34,6 @@ class OpenAIAgentsBackend(Backend):
         self._cached_config: HarnessConfig | None = None
         self._cached_provider_id: int | None = None
 
-    def _get_openai_client(self, provider: InferenceProvider, config: HarnessConfig) -> Any:
-        """Get OpenAI client from provider.
-
-        Args:
-            provider: The inference provider (must have a pre-configured client).
-            config: Harness config.
-
-        Returns:
-            AsyncOpenAI client.
-
-        Raises:
-            RuntimeError: If provider doesn't have an OpenAI client.
-        """
-        client = provider.get_openai_client()
-        if client is None:
-            raise RuntimeError(
-                f"Provider {type(provider).__name__} does not have an OpenAI client. "
-                f"The openai_agents backend requires a provider with OpenAI API support "
-                f"(e.g., VLLMServerProvider, LiteLLMProvider)."
-            )
-        return client
-
     def _convert_tools(self, tools: Sequence[Any], function_tool: Any) -> list[Any]:
         """Convert harness tools to agents SDK format."""
         agent_tools = []
@@ -77,6 +55,11 @@ class OpenAIAgentsBackend(Backend):
             function_tool,
         )
 
+        from olmo_eval.inference.utils import patch_openai_agents_for_vllm
+
+        # Apply vLLM compatibility patch (removes 'strict' field from tool schemas)
+        patch_openai_agents_for_vllm()
+
         # Return cached if same config (identity check - config is frozen)
         # and same provider (id check)
         if (
@@ -86,8 +69,8 @@ class OpenAIAgentsBackend(Backend):
         ):
             return self._cached_agent
 
-        # Create model
-        client = self._get_openai_client(provider, config)
+        # Create model using provider's OpenAI client
+        client = provider.get_openai_client()
 
         # Log client configuration for debugging
         base_url = getattr(client, "base_url", "unknown")
