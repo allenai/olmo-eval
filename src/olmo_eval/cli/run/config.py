@@ -267,11 +267,9 @@ class RunConfigBuilder:
             harness_dict = OmegaConf.to_container(merged, resolve=True)
             harness_config = HarnessConfig.from_dict(harness_dict)  # type: ignore[arg-type]
 
-        # Look up model preset or create provider config from model name
-        # get_provider_config handles both preset lookup and direct model paths
         from olmo_eval.core.configs import get_provider_config
 
         provider_config = get_provider_config(model_name)
-        harness_config = harness_config.with_provider(provider_config)
+        harness_config = harness_config.merge_provider(provider_config)
 
         return harness_config
