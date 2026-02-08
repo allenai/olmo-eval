@@ -7,6 +7,7 @@ from .registry import (
     get_tool,
     get_tools,
     list_tools,
+    load_tools,
     register_tool,
     registered_tool,
 )
@@ -21,6 +22,7 @@ __all__ = [
     "get_tool",
     "get_tools",
     "list_tools",
+    "load_tools",
     "register_tool",
     "registered_tool",
 ]

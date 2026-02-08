@@ -107,7 +107,7 @@ register_harness_preset(
 def _dr_tulu_preset() -> HarnessConfig:
     """Dr. Tulu preset with web and academic search tools.
 
-    Lazily imports search tools to avoid loading httpx etc unless needed.
+    Tools are loaded lazily when first accessed via HarnessConfig.tools.
 
     Note: This preset requires a provider to be set before use:
         config = get_harness_preset("dr_tulu").with_provider(
@@ -115,8 +115,6 @@ def _dr_tulu_preset() -> HarnessConfig:
         )
         harness = Harness(config)
     """
-    from .tools import search as _  # noqa: F401
-
     return HarnessConfig(
         name="dr_tulu",
         provider=ProviderConfig(kind=ProviderKind.VLLM_SERVER),

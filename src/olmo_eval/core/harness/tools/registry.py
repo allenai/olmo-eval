@@ -45,13 +45,17 @@ def register_tool(tool: Tool) -> Tool:
     return tool
 
 
-_builtin_tools_loaded = False
+_tools_loaded = False
 
 
-def _load_builtin_tools() -> None:
-    """Import all built-in tool modules to register their tools."""
-    global _builtin_tools_loaded
-    if _builtin_tools_loaded:
+def load_tools() -> None:
+    """Import all built-in tool modules to register their tools.
+
+    This is called automatically when accessing tools via get_tool(),
+    but can be called explicitly to ensure all tools are registered.
+    """
+    global _tools_loaded
+    if _tools_loaded:
         return
 
     import importlib
@@ -69,7 +73,7 @@ def _load_builtin_tools() -> None:
             else:
                 importlib.import_module(f".{module_info.name}", tools_pkg.__name__)
 
-    _builtin_tools_loaded = True
+    _tools_loaded = True
 
 
 def get_tool(name: str) -> Tool:
@@ -85,7 +89,7 @@ def get_tool(name: str) -> Tool:
         ValueError: If no tool with the given name is registered.
     """
     if name not in TOOL_REGISTRY:
-        _load_builtin_tools()
+        load_tools()
 
     if name not in TOOL_REGISTRY:
         available = ", ".join(sorted(TOOL_REGISTRY.keys())) or "(none)"
@@ -119,13 +123,13 @@ def list_tools() -> list[str]:
 
 
 def clear_registry() -> None:
-    """Clear all registered tools and reset builtin loading state.
+    """Clear all registered tools and reset loading state.
 
     Primarily useful for testing.
     """
-    global _builtin_tools_loaded
+    global _tools_loaded
     TOOL_REGISTRY.clear()
-    _builtin_tools_loaded = False
+    _tools_loaded = False
 
 
 def registered_tool(
