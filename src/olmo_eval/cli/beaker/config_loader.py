@@ -27,7 +27,6 @@ class LaunchConfig:
     task_overrides: dict[str, list[str]] = field(default_factory=dict)
 
     max_gpus_per_node: int = 8
-    pack_models: bool = False
     priority: str = "normal"
     preemptible: bool = True
     timeout: str = "24h"
@@ -94,7 +93,6 @@ class LaunchConfigLoader:
         cli_task_overrides: dict[str, list[str]] = self.cli_args.get("task_overrides", {})
         cli_cluster = self.cli_args.get("cluster")
         cli_max_gpus_per_node = self.cli_args.get("max_gpus_per_node")
-        cli_pack_models = self.cli_args.get("pack_models")
         cli_priority = self.cli_args.get("priority")
         cli_preemptible = self.cli_args.get("preemptible")
         cli_timeout = self.cli_args.get("timeout")
@@ -118,7 +116,6 @@ class LaunchConfigLoader:
                 if cli_max_gpus_per_node is not None
                 else cfg.max_gpus_per_node
             )
-            pack_models = cli_pack_models if cli_pack_models is not None else cfg.pack_models
             priority = cli_priority if cli_priority is not None else cfg.priority
             preemptible = cli_preemptible if cli_preemptible is not None else cfg.preemptible
             timeout = cli_timeout if cli_timeout is not None else cfg.timeout
@@ -143,7 +140,6 @@ class LaunchConfigLoader:
             model_specs = list(cli_model) if cli_model else []
             cluster = cli_cluster
             max_gpus_per_node = cli_max_gpus_per_node
-            pack_models = cli_pack_models
             priority = cli_priority
             preemptible = cli_preemptible
             timeout = cli_timeout
@@ -155,7 +151,6 @@ class LaunchConfigLoader:
         max_gpus_per_node = (
             max_gpus_per_node if max_gpus_per_node is not None else DEFAULT_MAX_GPUS_PER_NODE
         )
-        pack_models = pack_models if pack_models is not None else False
         priority = priority or "normal"
         preemptible = preemptible if preemptible is not None else True
         timeout = timeout or "24h"
@@ -186,7 +181,6 @@ class LaunchConfigLoader:
             budget=budget,
             task_overrides=cli_task_overrides,
             max_gpus_per_node=max_gpus_per_node,
-            pack_models=pack_models,
             priority=priority,
             preemptible=preemptible,
             timeout=timeout,

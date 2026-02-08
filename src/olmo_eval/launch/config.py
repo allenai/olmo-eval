@@ -102,7 +102,6 @@ class EvalConfig:
 
     cluster: str | None = None
     max_gpus_per_node: int = DEFAULT_MAX_GPUS_PER_NODE
-    pack_models: bool = False
 
     priority: str = "normal"
     preemptible: bool = True

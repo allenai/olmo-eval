@@ -134,8 +134,7 @@ class JobConfigAssembler:
 
         command.extend(["-O", BEAKER_RESULT_DIR])
 
-        m_spec = exp.model_specs[0]
-        command.extend(["-m", m_spec])
+        command.extend(["-m", exp.model_spec])
 
         for t in exp.tasks:
             command.extend(["-t", t])

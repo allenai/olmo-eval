@@ -10,7 +10,7 @@ class ExperimentPlan:
     """A single experiment to be launched on Beaker."""
 
     name: str
-    model_specs: list[str]
+    model_spec: str
     priority: str
     tasks: list[str]
     original_task_specs: list[str]

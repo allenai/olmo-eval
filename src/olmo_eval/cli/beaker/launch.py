@@ -72,12 +72,6 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_UV
     help="Maximum GPUs per node (default: 8). Models are split across experiments if exceeded.",
 )
 @click.option(
-    "--pack/--no-pack",
-    default=None,
-    help="Pack multiple models into single experiments when they fit. "
-    "Default is --no-pack: each model runs in its own experiment for easier resource acquisition.",
-)
-@click.option(
     "--priority",
     "-p",
     type=click.Choice(["low", "normal", "high", "urgent"]),
@@ -204,7 +198,6 @@ def launch(
     override: tuple[str, ...],
     cluster: str | None,
     max_gpus_per_node: int | None,
-    pack: bool | None,
     priority: str | None,
     preemptible: bool | None,
     timeout: str | None,
@@ -288,7 +281,6 @@ def launch(
         "task_overrides": task_overrides,  # Already filtered (priority extracted)
         "cluster": cluster,
         "max_gpus_per_node": max_gpus_per_node,
-        "pack_models": pack,
         "priority": priority,
         "preemptible": preemptible,
         "timeout": timeout,
@@ -632,9 +624,7 @@ def _print_experiment_matrix(experiment_plan: list["ExperimentPlan"]) -> None:
     matrix_table.add_column("GPUs", style="green", justify="right")
 
     for exp in experiment_plan:
-        model_display = (
-            exp.model_specs[0] if len(exp.model_specs) == 1 else f"{len(exp.model_specs)} models"
-        )
+        model_display = exp.model_spec
 
         if len(exp.tasks) <= 3:
             task_display = ", ".join(exp.tasks)
@@ -678,7 +668,7 @@ def _build_experiment_summary(
     from olmo_eval.core.harness import get_harness_preset
 
     harness_config = get_harness_preset(harness or "default")
-    provider_config = get_provider_config(exp.model_specs[0])
+    provider_config = get_provider_config(exp.model_spec)
     harness_config = harness_config.merge_provider(provider_config)
 
     harness_summary = HarnessSummary(config=harness_config)

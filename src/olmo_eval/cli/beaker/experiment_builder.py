@@ -48,7 +48,7 @@ class ExperimentPlanBuilder:
             experiments.append(
                 ExperimentPlan(
                     name=base_name,
-                    model_specs=[m_spec],
+                    model_spec=m_spec,
                     priority=priority,
                     tasks=tasks,
                     original_task_specs=self.config.task_specs,
