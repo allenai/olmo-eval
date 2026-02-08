@@ -67,18 +67,26 @@ class InferenceProvider(ABC):
         """Get the tokenizer for this provider.
 
         Returns:
-            The tokenizer instance if available, None otherwise.
-        """
-        return None  # Default: no tokenizer
+            The tokenizer instance.
 
-    def get_openai_client(self) -> "AsyncOpenAI | None":
+        Raises:
+            NotImplementedError: If provider doesn't support tokenizer access.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not provide tokenizer access")
+
+    def get_openai_client(self) -> "AsyncOpenAI":
         """Get an AsyncOpenAI client for this provider.
 
         Used by backends that need an OpenAI-compatible client
-        (e.g., OpenAI Agents SDK). Returns None if the provider
-        doesn't have an OpenAI-compatible interface.
+        (e.g., OpenAI Agents SDK).
 
         Returns:
-            AsyncOpenAI client if available, None otherwise.
+            AsyncOpenAI client.
+
+        Raises:
+            NotImplementedError: If provider doesn't have an OpenAI-compatible interface.
         """
-        return None  # Default: not available
+        raise NotImplementedError(
+            f"{type(self).__name__} does not provide an OpenAI client. "
+            f"Use a provider with OpenAI API support (e.g., VLLMServerProvider, LiteLLMProvider)."
+        )

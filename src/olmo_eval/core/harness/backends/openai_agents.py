@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from typing import Any
 
@@ -13,6 +14,8 @@ from olmo_eval.inference.base import InferenceProvider
 from ..config import HarnessConfig
 from ..result import HarnessResult
 from . import Backend, register_backend
+
+logger = logging.getLogger(__name__)
 
 
 @register_backend("openai_agents")
@@ -32,29 +35,24 @@ class OpenAIAgentsBackend(Backend):
         self._cached_provider_id: int | None = None
 
     def _get_openai_client(self, provider: InferenceProvider, config: HarnessConfig) -> Any:
-        """Get OpenAI client from provider or fallback to environment.
+        """Get OpenAI client from provider.
 
         Args:
-            provider: The inference provider (may have a pre-configured client).
-            config: Harness config (may have timeout in provider kwargs).
+            provider: The inference provider (must have a pre-configured client).
+            config: Harness config.
 
         Returns:
             AsyncOpenAI client.
+
+        Raises:
+            RuntimeError: If provider doesn't have an OpenAI client.
         """
         client = provider.get_openai_client()
         if client is None:
-            # Fallback to environment variables for backward compatibility
-            import os
-
-            from openai import AsyncOpenAI  # type: ignore[import-not-found]
-
-            # Get timeout from provider config kwargs, default to 120s for agent tasks
-            timeout = config.provider.kwargs.get("timeout", 120.0)
-
-            client = AsyncOpenAI(
-                base_url=os.getenv("OPENAI_BASE_URL", "http://localhost:8000/v1"),
-                api_key=os.getenv("OPENAI_API_KEY", "EMPTY"),
-                timeout=float(timeout),
+            raise RuntimeError(
+                f"Provider {type(provider).__name__} does not have an OpenAI client. "
+                f"The openai_agents backend requires a provider with OpenAI API support "
+                f"(e.g., VLLMServerProvider, LiteLLMProvider)."
             )
         return client
 
@@ -90,6 +88,12 @@ class OpenAIAgentsBackend(Backend):
 
         # Create model
         client = self._get_openai_client(provider, config)
+
+        # Log client configuration for debugging
+        base_url = getattr(client, "base_url", "unknown")
+        timeout = getattr(client, "timeout", "unknown")
+        logger.info(f"OpenAI client configured: base_url={base_url}, timeout={timeout}")
+
         model = OpenAIChatCompletionsModel(
             openai_client=client,
             model=provider.model_name,

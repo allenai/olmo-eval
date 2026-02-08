@@ -138,7 +138,6 @@ def instance_worker_process(
 
                 harness_config = HarnessConfig.from_dict(harness_config_dict)
                 harness = Harness(harness_config, provider=provider)
-                worker_logger.info(f"Harness created with config: {harness_config.name}")
 
             init_time = time.time() - init_start
             worker_logger.info(f"Provider ready ({init_time:.1f}s)")

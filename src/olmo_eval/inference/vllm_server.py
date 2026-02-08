@@ -102,7 +102,6 @@ def _wait_for_server(
             # Try health endpoint first
             with urllib.request.urlopen(health_url, timeout=5) as response:
                 if response.status == 200:
-                    logger.info(f"vLLM server ready at {url}")
                     if progress_callback:
                         progress_callback(f"vLLM server ready at {url}")
                     return True, None, None
@@ -115,7 +114,6 @@ def _wait_for_server(
             # Fallback to models endpoint
             with urllib.request.urlopen(models_url, timeout=5) as response:
                 if response.status == 200:
-                    logger.info(f"vLLM server ready at {url}")
                     if progress_callback:
                         progress_callback(f"vLLM server ready at {url}")
                     return True, None, None
@@ -349,7 +347,6 @@ class VLLMServerProcess:
             raise RuntimeError(error_msg)
 
         self._started = True
-        logger.info(f"vLLM server started at {self.base_url}")
         return self.base_url
 
     def stop(self) -> None:
