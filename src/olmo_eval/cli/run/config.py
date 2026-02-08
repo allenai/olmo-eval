@@ -243,7 +243,6 @@ class RunConfigBuilder:
                 from olmo_eval.core.harness import get_harness_preset
 
                 harness_config = get_harness_preset(self.harness_preset)
-                console.print(f"[dim]Using harness preset: {self.harness_preset}[/dim]")
             except ValueError as e:
                 console.print(f"[red]Error:[/red] {e}")
                 raise SystemExit(1) from None

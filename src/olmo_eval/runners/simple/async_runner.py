@@ -270,12 +270,6 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         trackers: dict[str, TaskTracker] = {}
         items: list[QueueItem] = []
 
-        logger.info(f"Model: {self.model_name}")
-        logger.info(f"Tasks: {len(expanded_tasks)}")
-
-        # Prepare tasks in parallel
-        logger.info(f"Preparing {len(expanded_tasks)} tasks...")
-
         def prepare_one(spec: str) -> tuple[str, TaskTracker, list[QueueItem]]:
             try:
                 overrides, sampling_overrides = self._build_task_overrides(spec)

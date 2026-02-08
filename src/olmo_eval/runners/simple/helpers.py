@@ -340,6 +340,7 @@ def _process_with_harness(
                         break  # Non-retryable or max retries exceeded
 
             # All retries exhausted or non-retryable error
+            assert last_error is not None  # Must have failed at least once to reach here
             error_detail = _format_error_detail(last_error)
 
             result_queue.put(
