@@ -70,6 +70,7 @@ class JobConfigAssembler:
 
         job_env_vars: dict[str, str] = {
             "BEAKER_AUTHOR": self.beaker_username,
+            "FORCE_COLOR": "1",
         }
 
         if cluster_has_weka(self.config.cluster):
