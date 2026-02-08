@@ -91,6 +91,7 @@ class LiteLLMProvider(InferenceProvider):
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self.api_kwargs = api_kwargs
+        self._client: AsyncOpenAI | None = None  # Cached client
 
         if is_debug_provider():
             litellm._turn_on_debug()
@@ -109,18 +110,23 @@ class LiteLLMProvider(InferenceProvider):
     def get_openai_client(self) -> AsyncOpenAI | None:
         """Get an AsyncOpenAI client if base_url is configured.
 
+        Returns cached client on subsequent calls to avoid connection pool leaks.
+
         Returns:
             AsyncOpenAI client if base_url is set, None otherwise.
         """
         if self.base_url is None:
             return None
 
-        from openai import AsyncOpenAI
+        if self._client is None:
+            from openai import AsyncOpenAI
 
-        return AsyncOpenAI(
-            base_url=self.base_url,
-            api_key=os.getenv("OPENAI_API_KEY", "EMPTY"),
-        )
+            self._client = AsyncOpenAI(
+                base_url=self.base_url,
+                api_key=os.getenv("OPENAI_API_KEY", "EMPTY"),
+            )
+
+        return self._client
 
     def _is_retryable(self, exc: Exception) -> bool:
         """Determine whether *exc* should be retried.

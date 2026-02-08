@@ -204,6 +204,11 @@ class HarnessConfig:
     max_turns: int | None = None
     max_concurrency: int | None = None  # For agent execution
 
+    # Cache for resolved tools (not part of frozen fields, uses object.__setattr__)
+    _resolved_tools_cache: tuple[Tool, ...] | None = field(
+        default=None, repr=False, compare=False, hash=False
+    )
+
     @property
     def tool_names(self) -> tuple[str, ...]:
         """Get tool names (for serialization)."""
@@ -211,10 +216,19 @@ class HarnessConfig:
 
     @property
     def resolved_tools(self) -> tuple[Tool, ...]:
-        """Resolve all tools to Tool instances."""
+        """Resolve all tools to Tool instances.
+
+        Results are cached since config is immutable.
+        """
+        if self._resolved_tools_cache is not None:
+            return self._resolved_tools_cache
+
         from .tools import get_tool
 
-        return tuple(t if not isinstance(t, str) else get_tool(t) for t in self.tools)
+        resolved = tuple(t if not isinstance(t, str) else get_tool(t) for t in self.tools)
+        # Use object.__setattr__ to bypass frozen dataclass
+        object.__setattr__(self, "_resolved_tools_cache", resolved)
+        return resolved
 
     @property
     def tool_schemas(self) -> tuple[ToolSchema, ...]:

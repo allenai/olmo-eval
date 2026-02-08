@@ -34,6 +34,12 @@ class OpenAIAgentsBackend(Backend):
         self._cached_config: HarnessConfig | None = None
         self._cached_provider_id: int | None = None
 
+    def clear_cache(self) -> None:
+        """Clear cached agent to allow recreation with new config/provider."""
+        self._cached_agent = None
+        self._cached_config = None
+        self._cached_provider_id = None
+
     def _convert_tools(self, tools: Sequence[Any], function_tool: Any) -> list[Any]:
         """Convert harness tools to agents SDK format."""
         agent_tools = []
@@ -57,14 +63,11 @@ class OpenAIAgentsBackend(Backend):
 
         from olmo_eval.inference.utils import patch_openai_agents_for_vllm
 
-        # Apply vLLM compatibility patch (removes 'strict' field from tool schemas)
         patch_openai_agents_for_vllm()
 
-        # Return cached if same config (identity check - config is frozen)
-        # and same provider (id check)
         if (
             self._cached_agent is not None
-            and self._cached_config is config
+            and self._cached_config == config
             and self._cached_provider_id == id(provider)
         ):
             return self._cached_agent
@@ -82,10 +85,8 @@ class OpenAIAgentsBackend(Backend):
             model=provider.model_name,
         )
 
-        # Convert tools
         agent_tools = self._convert_tools(config.resolved_tools, function_tool)
 
-        # Create agent
         agent = Agent(
             name=self.name,
             instructions=config.system_prompt or "",
@@ -93,7 +94,6 @@ class OpenAIAgentsBackend(Backend):
             tools=agent_tools,
         )
 
-        # Cache for reuse
         self._cached_agent = agent
         self._cached_config = config
         self._cached_provider_id = id(provider)

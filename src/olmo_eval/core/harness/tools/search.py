@@ -11,11 +11,46 @@ Import the tool objects and use .name for HarnessConfig.tool_names.
 
 from __future__ import annotations
 
+import atexit
 import os
 
 import httpx
 
 from .registry import registered_tool
+
+# Module-level shared HTTP client for connection reuse
+_http_client: httpx.AsyncClient | None = None
+
+
+def _get_http_client() -> httpx.AsyncClient:
+    """Get or create a shared async HTTP client.
+
+    Returns a module-level client that reuses connections across tool calls.
+    The client is automatically closed on module/process exit.
+    """
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        _http_client = httpx.AsyncClient(timeout=30.0)
+    return _http_client
+
+
+def _cleanup_http_client() -> None:
+    """Close the shared HTTP client on exit."""
+    global _http_client
+    if _http_client is not None and not _http_client.is_closed:
+        # Use sync close for atexit handler
+        import asyncio
+
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(_http_client.aclose())
+        except RuntimeError:
+            # No running loop, use sync approach
+            asyncio.run(_http_client.aclose())
+        _http_client = None
+
+
+atexit.register(_cleanup_http_client)
 
 
 @registered_tool(
@@ -36,19 +71,19 @@ async def semantic_scholar_search(query: str) -> str:
     if api_key:
         headers["x-api-key"] = api_key
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        try:
-            resp = await client.get(
-                "https://api.semanticscholar.org/graph/v1/paper/search",
-                params={"query": query, "limit": 5, "fields": "title,abstract,url,year,authors"},
-                headers=headers,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-        except httpx.HTTPStatusError as e:
-            return f"Error searching Semantic Scholar: HTTP {e.response.status_code}"
-        except httpx.RequestError as e:
-            return f"Error searching Semantic Scholar: {e}"
+    client = _get_http_client()
+    try:
+        resp = await client.get(
+            "https://api.semanticscholar.org/graph/v1/paper/search",
+            params={"query": query, "limit": 5, "fields": "title,abstract,url,year,authors"},
+            headers=headers,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except httpx.HTTPStatusError as e:
+        return f"Error searching Semantic Scholar: HTTP {e.response.status_code}"
+    except httpx.RequestError as e:
+        return f"Error searching Semantic Scholar: {e}"
 
     papers = data.get("data", [])
     if not papers:
@@ -99,22 +134,22 @@ async def serper_web_search(query: str) -> str:
     if not api_key:
         return "Error: SERPER_API_KEY not configured."
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        try:
-            resp = await client.post(
-                "https://google.serper.dev/search",
-                json={"q": query, "num": 5},
-                headers={
-                    "X-API-KEY": api_key,
-                    "Content-Type": "application/json",
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-        except httpx.HTTPStatusError as e:
-            return f"Error searching web: HTTP {e.response.status_code}"
-        except httpx.RequestError as e:
-            return f"Error searching web: {e}"
+    client = _get_http_client()
+    try:
+        resp = await client.post(
+            "https://google.serper.dev/search",
+            json={"q": query, "num": 5},
+            headers={
+                "X-API-KEY": api_key,
+                "Content-Type": "application/json",
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except httpx.HTTPStatusError as e:
+        return f"Error searching web: HTTP {e.response.status_code}"
+    except httpx.RequestError as e:
+        return f"Error searching web: {e}"
 
     results = []
 
@@ -165,22 +200,22 @@ async def serper_fetch_page(url: str) -> str:
     if not api_key:
         return "Error: SERPER_API_KEY not configured."
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        try:
-            resp = await client.post(
-                "https://scrape.serper.dev",
-                json={"url": url},
-                headers={
-                    "X-API-KEY": api_key,
-                    "Content-Type": "application/json",
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-        except httpx.HTTPStatusError as e:
-            return f"Error fetching webpage: HTTP {e.response.status_code}"
-        except httpx.RequestError as e:
-            return f"Error fetching webpage: {e}"
+    client = _get_http_client()
+    try:
+        resp = await client.post(
+            "https://scrape.serper.dev",
+            json={"url": url},
+            headers={
+                "X-API-KEY": api_key,
+                "Content-Type": "application/json",
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except httpx.HTTPStatusError as e:
+        return f"Error fetching webpage: HTTP {e.response.status_code}"
+    except httpx.RequestError as e:
+        return f"Error fetching webpage: {e}"
 
     # Extract text content
     text = data.get("text", "")

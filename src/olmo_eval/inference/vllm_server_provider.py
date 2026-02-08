@@ -107,6 +107,7 @@ class VLLMServerProvider(InferenceProvider):
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self._client: AsyncOpenAI | None = None
+        self._http_client: httpx.AsyncClient | None = None  # For debug logging
         self._openai_module: Any = None  # Cached openai module for exception types
 
     def _get_or_create_client(self) -> AsyncOpenAI:
@@ -118,10 +119,9 @@ class VLLMServerProvider(InferenceProvider):
             self._openai_module = openai
 
             # Add request/response logging if debug mode enabled
-            http_client = None
             if _DEBUG_REQUESTS:
                 logger.info("vLLM debug request logging enabled (VLLM_DEBUG_REQUESTS=1)")
-                http_client = httpx.AsyncClient(
+                self._http_client = httpx.AsyncClient(
                     event_hooks={
                         "request": [_log_request],
                         "response": [_log_response],
@@ -132,9 +132,18 @@ class VLLMServerProvider(InferenceProvider):
                 base_url=self.base_url,
                 timeout=self.timeout,
                 max_retries=0,  # Disable SDK retries - we handle them ourselves
-                http_client=http_client,
+                http_client=self._http_client,
             )
         return self._client
+
+    async def aclose(self) -> None:
+        """Close the provider and release resources."""
+        if self._http_client is not None:
+            await self._http_client.aclose()
+            self._http_client = None
+        if self._client is not None:
+            await self._client.close()
+            self._client = None
 
     def get_openai_client(self) -> AsyncOpenAI:
         """Get the AsyncOpenAI client for this provider."""

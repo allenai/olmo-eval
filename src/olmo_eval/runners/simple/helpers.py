@@ -356,11 +356,13 @@ def _process_with_harness(
             )
             pbar.update(1)
 
-    async def run_chunk(chunk: list[QueueItem]) -> None:
-        semaphore = asyncio.Semaphore(max_concurrency)
+    async def run_chunk(chunk: list[QueueItem], semaphore: asyncio.Semaphore) -> None:
         await asyncio.gather(*[run_one(item, semaphore) for item in chunk])
 
     async def run_all_chunks() -> None:
+        # Create semaphore once for all chunks to maintain consistent backpressure
+        semaphore = asyncio.Semaphore(max_concurrency)
+
         # Process batch in chunks to avoid overwhelming connection pools
         num_chunks = (len(batch) + chunk_size - 1) // chunk_size
         for chunk_idx, i in enumerate(range(0, len(batch), chunk_size)):
@@ -370,7 +372,7 @@ def _process_with_harness(
                     f"Processing chunk {chunk_idx + 1}/{num_chunks} "
                     f"({len(chunk)} instances, concurrency={max_concurrency})"
                 )
-            await run_chunk(chunk)
+            await run_chunk(chunk, semaphore)
 
     asyncio.run(run_all_chunks())
 
