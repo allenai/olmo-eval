@@ -11,14 +11,13 @@ if TYPE_CHECKING:
     from olmo_eval.core.harness import HarnessConfig
     from olmo_eval.evals.tasks.core.base import TaskConfig
     from olmo_eval.launch.beaker.launcher import BeakerJobConfig
-    from olmo_eval.launch.config import BeakerModelSpec
 
 
 @dataclass
 class HarnessSummary:
     """Display-friendly representation of a Harness (model + config)."""
 
-    model: "BeakerModelSpec"
+    model: str
     config: "HarnessConfig"
 
 

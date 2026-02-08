@@ -34,7 +34,6 @@ class VLLMServerProvider(InferenceProvider):
         self,
         model_name: str,
         base_url: str,
-        api_key: str = "EMPTY",
         timeout: float = 60.0,
         max_concurrency: int = 32,
     ) -> None:
@@ -43,13 +42,11 @@ class VLLMServerProvider(InferenceProvider):
         Args:
             model_name: Model identifier for requests.
             base_url: Base URL of the vLLM server (e.g., "http://localhost:8000/v1").
-            api_key: API key for authentication (default "EMPTY" for local servers).
             timeout: Request timeout in seconds.
             max_concurrency: Maximum number of concurrent requests.
         """
         super().__init__(model_name)
         self.base_url = base_url
-        self.api_key = api_key
         self.timeout = timeout
         self.max_concurrency = max_concurrency
         self._client: AsyncOpenAI | None = None
@@ -61,7 +58,6 @@ class VLLMServerProvider(InferenceProvider):
 
             self._client = AsyncOpenAI(
                 base_url=self.base_url,
-                api_key=self.api_key,
                 timeout=self.timeout,
             )
         return self._client

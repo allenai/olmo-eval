@@ -74,7 +74,10 @@ def create_provider(
         case ProviderType.VLLM_SERVER:
             from .vllm_server_provider import VLLMServerProvider
 
-            return VLLMServerProvider(model_name, **kwargs)
+            server_kwargs = {
+                k: v for k, v in kwargs.items() if k in ("base_url", "timeout", "max_concurrency")
+            }
+            return VLLMServerProvider(model_name, **server_kwargs)
         case ProviderType.LITELLM:
             from .litellm import LiteLLMProvider
 

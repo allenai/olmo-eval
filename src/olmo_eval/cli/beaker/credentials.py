@@ -9,7 +9,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 if TYPE_CHECKING:
-    from olmo_eval.launch import BeakerLauncher, BeakerModelSpec
+    from olmo_eval.launch import BeakerLauncher
 
 console = Console()
 
@@ -19,59 +19,37 @@ class CredentialManager:
 
     def __init__(
         self,
-        model_configs: list[BeakerModelSpec],
+        model_specs: list[str],
         store: bool,
         aws_credentials: bool | None,
         gcs_credentials: bool | None,
     ):
-        """Initialize the credential manager.
-
-        Args:
-            model_configs: List of model configurations.
-            store: Whether storage is enabled.
-            aws_credentials: Override for AWS credential injection.
-            gcs_credentials: Override for GCS credential injection.
-        """
-        self.model_configs = model_configs
+        self.model_specs = model_specs
         self.store = store
         self.aws_credentials = aws_credentials
         self.gcs_credentials = gcs_credentials
 
-    def detect_and_setup(
-        self,
-        launcher: BeakerLauncher,
-    ) -> tuple[bool, bool]:
-        """Detect and set up credential injection.
-
-        Args:
-            launcher: BeakerLauncher instance for API calls.
-
-        Returns:
-            Tuple of (inject_aws, inject_gcs).
-        """
+    def detect_and_setup(self, launcher: BeakerLauncher) -> tuple[bool, bool]:
+        """Detect and set up credential injection."""
         from olmo_eval.launch.beaker.aws import is_s3_path
         from olmo_eval.launch.beaker.gcs import get_local_gcs_credentials, is_gcs_path
 
-        # Auto-detect S3 models
-        s3_models = [m.name_or_path for m in self.model_configs if is_s3_path(m.name_or_path)]
+        s3_models = [m for m in self.model_specs if is_s3_path(m)]
         inject_aws = self.aws_credentials
         if inject_aws is None:
             inject_aws = bool(s3_models) or self.store
 
-        # Auto-detect GCS models
-        gcs_models = [m.name_or_path for m in self.model_configs if is_gcs_path(m.name_or_path)]
+        gcs_models = [m for m in self.model_specs if is_gcs_path(m)]
         inject_gcs = self.gcs_credentials
         if inject_gcs is None:
             inject_gcs = bool(gcs_models)
 
-        # Display GCS credential info
         if inject_gcs:
             self._display_gcs_info(launcher, get_local_gcs_credentials())
 
         return inject_aws, inject_gcs
 
     def _display_gcs_info(self, launcher: Any, local_gcs_creds: Any) -> None:
-        """Display GCS credential information."""
         beaker_user = launcher.beaker.user_name
 
         gcs_table = Table(show_header=False, box=None, expand=True)
@@ -108,17 +86,6 @@ class CredentialManager:
         effective_groups: list[str],
         inject_aws: bool,
     ) -> None:
-        """Display storage configuration information.
-
-        Args:
-            launcher: BeakerLauncher instance.
-            s3_bucket: S3 bucket name.
-            s3_prefix: S3 prefix.
-            s3_region: S3 region.
-            s3_endpoint_url: S3 endpoint URL.
-            effective_groups: List of effective groups.
-            inject_aws: Whether AWS credentials will be injected.
-        """
         from olmo_eval.launch.beaker.aws import get_local_aws_credentials
 
         if not (self.store or (s3_bucket and s3_prefix) or inject_aws):
@@ -126,7 +93,6 @@ class CredentialManager:
 
         storage_lines = []
 
-        # S3 Access credentials
         if inject_aws:
             local_creds = get_local_aws_credentials()
             beaker_user = launcher.beaker.user_name
@@ -144,7 +110,6 @@ class CredentialManager:
                     "job may fail if S3 access is required"
                 )
 
-        # S3 storage settings
         if s3_bucket and s3_prefix:
             storage_lines.append("[bold]S3 Storage:[/bold]")
             storage_lines.append(f"  Bucket: {s3_bucket}")
@@ -155,7 +120,6 @@ class CredentialManager:
             if effective_groups:
                 storage_lines.append(f"  Group: {effective_groups[0]}")
 
-        # PostgreSQL storage
         if self.store:
             storage_lines.append("[bold]PostgreSQL:[/bold]")
             storage_lines.append(

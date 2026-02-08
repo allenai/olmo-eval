@@ -5,7 +5,6 @@ Configuration loading, validation, and job assembly are delegated to:
 - config_loader.py: LaunchConfigLoader for loading/merging config
 - task_validator.py: TaskValidator for task validation and priority grouping
 - credentials.py: CredentialManager for AWS/GCS credential handling
-- model_grouper.py: ModelGrouper for grouping models by runtime signature
 - experiment_builder.py: ExperimentPlanBuilder for building experiment plans
 - job_assembler.py: JobConfigAssembler for assembling BeakerJobConfig
 """
@@ -271,7 +270,6 @@ def launch(
     from olmo_eval.cli.beaker.credentials import CredentialManager
     from olmo_eval.cli.beaker.experiment_builder import ExperimentPlanBuilder
     from olmo_eval.cli.beaker.job_assembler import JobConfigAssembler
-    from olmo_eval.cli.beaker.model_grouper import ModelGrouper
     from olmo_eval.cli.beaker.task_validator import TaskValidator
     from olmo_eval.core.constants.infrastructure import BEAKER_DEFAULT_IMAGE
 
@@ -348,7 +346,7 @@ def launch(
 
     # Set up credentials
     cred_manager = CredentialManager(
-        launch_config.model_configs,
+        launch_config.model_specs,
         launch_config.store,
         aws_credentials,
         gcs_credentials,
@@ -389,11 +387,8 @@ def launch(
     # Handle group creation
     _handle_group_creation(launcher, effective_groups, dry_run)
 
-    # Group models and build experiment plan
-    model_grouper = ModelGrouper(launch_config, eval_config)
-    experiment_builder = ExperimentPlanBuilder(
-        launch_config, model_grouper, tasks_by_priority, override_priority
-    )
+    # Build experiment plan
+    experiment_builder = ExperimentPlanBuilder(launch_config, tasks_by_priority, override_priority)
     experiment_plan, split_models = experiment_builder.build()
 
     # Get task configs with overrides applied
@@ -405,11 +400,6 @@ def launch(
     for task_cfg in task_configs_by_spec.values():
         if hasattr(task_cfg, "required_secrets") and task_cfg.required_secrets:
             all_required_secrets.update(task_cfg.required_secrets)
-
-    # Collect provider-required secrets from model configs
-    for model_cfg in launch_config.model_configs:
-        if model_cfg.provider and model_cfg.provider.required_secrets:
-            all_required_secrets.update(model_cfg.provider.required_secrets)
 
     # Collect harness-required secrets
     if launch_config.harness:
@@ -426,7 +416,7 @@ def launch(
 
     # Print summary header
     total_experiments = len(experiment_plan)
-    total_expanded_tasks = len(valid_tasks) * len(launch_config.model_configs)
+    total_expanded_tasks = len(valid_tasks) * len(launch_config.model_specs)
     console.print()
     console.print(
         f"[bold]Launching {total_experiments} experiment(s) "
@@ -446,7 +436,6 @@ def launch(
     # Build job configs and summaries
     job_assembler = JobConfigAssembler(
         launch_config,
-        eval_config,
         effective_image,
         effective_groups,
         launcher.beaker.user_name,
@@ -639,33 +628,15 @@ def _print_experiment_matrix(experiment_plan: list["ExperimentPlan"]) -> None:
     matrix_table = Table(show_header=True, title="Experiment Plan")
     matrix_table.add_column("Name", style="cyan")
     matrix_table.add_column("Models", style="blue")
-    matrix_table.add_column("Provider", style="white")
     matrix_table.add_column("Tasks", style="dim")
     matrix_table.add_column("Priority", style="yellow")
     matrix_table.add_column("GPUs", style="green", justify="right")
 
     for exp in experiment_plan:
-        # Model display
         model_display = (
-            exp.model_cfgs[0].name_or_path
-            if len(exp.model_cfgs) == 1
-            else f"{len(exp.model_cfgs)} models"
+            exp.model_specs[0] if len(exp.model_specs) == 1 else f"{len(exp.model_specs)} models"
         )
 
-        # Provider display
-        def _get_provider_str(p):
-            if not p:
-                return "default"
-            kind = p.kind
-            return kind.value if hasattr(kind, "value") else kind
-
-        if len(exp.model_cfgs) == 1:
-            provider_display = _get_provider_str(exp.model_cfgs[0].provider)
-        else:
-            providers = {_get_provider_str(m.provider) for m in exp.model_cfgs}
-            provider_display = ", ".join(sorted(providers))
-
-        # Task display - show actual task names
         if len(exp.tasks) <= 3:
             task_display = ", ".join(exp.tasks)
         else:
@@ -674,7 +645,6 @@ def _print_experiment_matrix(experiment_plan: list["ExperimentPlan"]) -> None:
         matrix_table.add_row(
             exp.name,
             model_display,
-            provider_display,
             task_display,
             exp.priority,
             str(exp.num_gpus),
@@ -692,14 +662,12 @@ def _build_experiment_summary(
     """Build experiment summary for display."""
     from olmo_eval.runners import AsyncEvalRunner
 
-    # Build task configs list (with overrides already applied)
     exp_task_configs = []
     for task_spec in exp.tasks:
         base_spec = task_spec.rsplit("@", 1)[0] if "@" in task_spec else task_spec
         if base_spec in task_configs_by_spec:
             exp_task_configs.append(task_configs_by_spec[base_spec])
 
-    # Runner class is always AsyncEvalRunner
     exp_runner_class = AsyncEvalRunner
 
     exp_runner_config = RunnerConfig(
@@ -707,13 +675,12 @@ def _build_experiment_summary(
         output_dir=BEAKER_RESULT_DIR,
     )
 
-    # Load harness config (default if not specified)
     from olmo_eval.core.harness import get_harness_preset
 
     harness_config = get_harness_preset(harness or "default")
 
     harness_summary = HarnessSummary(
-        model=exp.model_cfgs[0],
+        model=exp.model_specs[0],
         config=harness_config,
     )
 
