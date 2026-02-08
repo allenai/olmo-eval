@@ -20,7 +20,7 @@ class HarnessSummary:
     config: "HarnessConfig"
 
 
-console = Console()
+console = Console(force_terminal=True, width=120)
 
 
 @dataclass
