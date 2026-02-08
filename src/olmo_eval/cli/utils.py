@@ -112,7 +112,8 @@ def process_ordered_args(
 
     for arg in ordered:
         if arg.flag == "t":
-            current_task = arg.value
+            # Strip priority suffix (@urgent, @high, etc.) for override key
+            current_task = arg.value.rsplit("@", 1)[0] if "@" in arg.value else arg.value
             task_overrides.setdefault(current_task, [])
             last_flag = "t"
         elif arg.flag == "h":
