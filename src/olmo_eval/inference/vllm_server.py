@@ -109,6 +109,25 @@ def _wait_for_server(
     return False, last_error, None
 
 
+def _infer_tool_call_parser(model_name: str) -> str:
+    """Infer the appropriate tool call parser based on model name.
+
+    Args:
+        model_name: Model name or path.
+
+    Returns:
+        Tool call parser name for vLLM.
+    """
+    model_lower = model_name.lower()
+    if "llama" in model_lower:
+        return "llama3_json"
+    elif "mistral" in model_lower:
+        return "mistral"
+    else:
+        # Default for Qwen, OLMo, and other models
+        return "hermes"
+
+
 def _build_server_command(
     model_name: str,
     port: int,
@@ -117,6 +136,8 @@ def _build_server_command(
     gpu_memory_utilization: float = 0.9,
     dtype: str = "auto",
     tokenizer: str | None = None,
+    enable_auto_tool_choice: bool = False,
+    tool_call_parser: str | None = None,
     **kwargs: Any,
 ) -> list[str]:
     """Build the vLLM server command.
@@ -129,6 +150,9 @@ def _build_server_command(
         gpu_memory_utilization: Fraction of GPU memory to use
         dtype: Data type for model weights
         tokenizer: Custom tokenizer (defaults to model_name)
+        enable_auto_tool_choice: Enable automatic tool choice
+        tool_call_parser: Parser for tool calls (auto-detected if not specified
+            when enable_auto_tool_choice is True)
         **kwargs: Additional vLLM server arguments
 
     Returns:
@@ -157,6 +181,13 @@ def _build_server_command(
 
     if max_model_len:
         cmd.extend(["--max-model-len", str(max_model_len)])
+
+    # Tool calling support
+    if enable_auto_tool_choice:
+        cmd.append("--enable-auto-tool-choice")
+        # Auto-detect parser if not specified
+        parser = tool_call_parser or _infer_tool_call_parser(model_name)
+        cmd.extend(["--tool-call-parser", parser])
 
     # Add any extra kwargs as CLI args
     for key, value in kwargs.items():

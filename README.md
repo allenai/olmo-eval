@@ -584,16 +584,6 @@ olmo-eval run -m llama3.1-8b -t simpleqa_agent
 olmo-eval run -m llama3.1-8b -t simpleqa --harness search
 ```
 
-### vLLM Tool Configuration
-
-For tool-augmented evaluation using vLLM, the tool call parser is auto-detected based on model name. Override it via model overrides if needed:
-
-```bash
-olmo-eval run -m my-model -t simpleqa --harness search -o tool_call_parser=hermes
-```
-
-Supported parsers: `hermes`, `llama3_json`, `mistral`
-
 ## Launching on Beaker
 
 olmo-eval includes built-in support for launching evaluation jobs on [Beaker](https://beaker.org).

@@ -307,6 +307,7 @@ class RunConfigBuilder:
             dtype=overrides.get("dtype", base.dtype),
             max_model_len=overrides.get("max_model_len", base.max_model_len),
             max_concurrency=overrides.get("max_concurrency", base.max_concurrency),
+            tool_call_parser=overrides.get("tool_call_parser", base.tool_call_parser),
             required_secrets=base.required_secrets,
             package=overrides.get("package", base.package),
             kwargs={**base.kwargs, **overrides.get("kwargs", {})},

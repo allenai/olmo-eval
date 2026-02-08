@@ -96,10 +96,24 @@ def instance_worker_process(
 
         # For vllm_server, we need to start a vLLM server process
         if provider_type == ProviderType.VLLM_SERVER:
+            # Check if harness has tools configured - if so, enable auto tool choice
+            enable_auto_tool_choice = False
+            tool_call_parser = None
+            if harness_config_dict:
+                tool_names = harness_config_dict.get("tool_names", ())
+                if tool_names:
+                    enable_auto_tool_choice = True
+                    worker_logger.info(f"  Tools configured: {list(tool_names)}")
+                # Get tool_call_parser from provider config if specified
+                provider_dict = harness_config_dict.get("provider", {})
+                tool_call_parser = provider_dict.get("tool_call_parser")
+
             server_context, provider = _create_vllm_server_provider(
                 model_name=model_name,
                 tokenizer=tokenizer,
                 worker_logger=worker_logger,
+                enable_auto_tool_choice=enable_auto_tool_choice,
+                tool_call_parser=tool_call_parser,
                 **engine_kwargs,
             )
         else:
@@ -164,6 +178,8 @@ def _create_vllm_server_provider(
     model_name: str,
     tokenizer: str | None = None,
     worker_logger: Any = None,
+    enable_auto_tool_choice: bool = False,
+    tool_call_parser: str | None = None,
     **engine_kwargs: Any,
 ) -> tuple[Any, InferenceProvider]:
     """Create a vLLM server process and provider.
@@ -175,6 +191,8 @@ def _create_vllm_server_provider(
         model_name: Model name/path to serve.
         tokenizer: Optional tokenizer path.
         worker_logger: Logger for status messages.
+        enable_auto_tool_choice: Enable automatic tool choice in vLLM.
+        tool_call_parser: Parser for tool calls (auto-detected if not specified).
         **engine_kwargs: Additional vLLM engine arguments.
 
     Returns:
@@ -193,11 +211,24 @@ def _create_vllm_server_provider(
         # vLLM server uses VLLM_ATTENTION_BACKEND env var
         os.environ["VLLM_ATTENTION_BACKEND"] = engine_kwargs["attention_backend"]
 
+    # Tool calling support
+    if enable_auto_tool_choice:
+        server_kwargs["enable_auto_tool_choice"] = True
+        if tool_call_parser:
+            server_kwargs["tool_call_parser"] = tool_call_parser
+        # Parser will be auto-detected by VLLMServerProcess if not specified
+
     if worker_logger:
         worker_logger.info("Starting vLLM server subprocess...")
         worker_logger.info(f"  Model: {model_name}")
         if tokenizer:
             worker_logger.info(f"  Tokenizer: {tokenizer}")
+        if enable_auto_tool_choice:
+            worker_logger.info("  Auto tool choice: enabled")
+            if tool_call_parser:
+                worker_logger.info(f"  Tool call parser: {tool_call_parser}")
+            else:
+                worker_logger.info("  Tool call parser: auto-detect")
         if server_kwargs:
             worker_logger.info(f"  Server kwargs: {server_kwargs}")
 
