@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any, TypeVar
+
+import httpx
 
 from olmo_eval.core.logging import get_logger
 from olmo_eval.core.types import LMOutput, LMRequest, SamplingParams
@@ -38,7 +41,30 @@ _ALWAYS_RETRY_TYPES = (
 
 logger = get_logger(__name__)
 
+# Enable with VLLM_DEBUG_REQUESTS=1
+_DEBUG_REQUESTS = os.environ.get("VLLM_DEBUG_REQUESTS", "").lower() in ("1", "true", "yes")
+
 T = TypeVar("T")
+
+
+def _log_request(request: httpx.Request) -> None:
+    """Log outgoing HTTP request."""
+    body = request.content.decode("utf-8", errors="replace") if request.content else ""
+    # Truncate very long bodies
+    if len(body) > 2000:
+        body = body[:2000] + "... [truncated]"
+    logger.info(f"vLLM request: {request.method} {request.url}\n  body: {body}")
+
+
+async def _log_response(response: httpx.Response) -> None:
+    """Log incoming HTTP response."""
+    # Read the response body (needed for streaming responses)
+    await response.aread()
+    body = response.text
+    # Truncate very long bodies
+    if len(body) > 2000:
+        body = body[:2000] + "... [truncated]"
+    logger.info(f"vLLM response: {response.status_code} {response.reason_phrase}\n  body: {body}")
 
 
 class VLLMServerProvider(InferenceProvider):
@@ -90,10 +116,23 @@ class VLLMServerProvider(InferenceProvider):
             from openai import AsyncOpenAI
 
             self._openai_module = openai
+
+            # Add request/response logging if debug mode enabled
+            http_client = None
+            if _DEBUG_REQUESTS:
+                logger.info("vLLM debug request logging enabled (VLLM_DEBUG_REQUESTS=1)")
+                http_client = httpx.AsyncClient(
+                    event_hooks={
+                        "request": [_log_request],
+                        "response": [_log_response],
+                    }
+                )
+
             self._client = AsyncOpenAI(
                 base_url=self.base_url,
                 timeout=self.timeout,
                 max_retries=0,  # Disable SDK retries - we handle them ourselves
+                http_client=http_client,
             )
         return self._client
 
