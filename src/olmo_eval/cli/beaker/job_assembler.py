@@ -240,21 +240,23 @@ class JobConfigAssembler:
             if m_cfg.alias:
                 command.extend(["--alias", m_cfg.alias])
 
-            # Add provider config if specified
+            # Add provider config if specified (via -o overrides)
             if m_cfg.provider:
-                # Get string value (handles both ProviderKind enum and plain strings)
-                kind = m_cfg.provider.kind
-                provider_kind = kind.value if hasattr(kind, "value") else kind
-                command.extend(["--provider", provider_kind])
-                # Pass other provider config fields via overrides
                 from dataclasses import fields
 
                 for f in fields(m_cfg.provider):
-                    if f.name == "kind":
-                        continue  # Already passed via --provider
                     value = getattr(m_cfg.provider, f.name)
-                    if value:
-                        command.extend(["-o", f"provider.{f.name}={value}"])
+                    if value is None or value == "":
+                        continue
+                    # Handle enum values
+                    if hasattr(value, "value"):
+                        value = value.value
+                    # Skip default values and complex types
+                    if f.name == "kwargs" and not value:
+                        continue
+                    if isinstance(value, (dict, tuple, list)):
+                        continue  # Complex types not supported via CLI
+                    command.extend(["-o", f"provider.{f.name}={value}"])
 
         # Add tasks with their overrides
         for t in exp.tasks:
