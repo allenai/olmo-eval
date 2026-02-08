@@ -6,6 +6,7 @@ It provides both single-turn (generate) and multi-turn (run) interfaces.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
 from olmo_eval.core.types import LMOutput, LMRequest, SamplingParams
@@ -137,12 +138,14 @@ class Harness:
         self,
         requests: list[LMRequest],
         sampling_params: SamplingParams | None = None,
+        on_instance_complete: Callable[[], None] | None = None,
     ) -> list[HarnessResult]:
         """Execute multiple multi-turn requests with concurrency control.
 
         Args:
             requests: List of initial requests.
             sampling_params: Optional sampling parameters.
+            on_instance_complete: Optional callback called when each instance completes.
 
         Returns:
             List of HarnessResult, one per request.
@@ -153,7 +156,10 @@ class Harness:
 
         async def run_one(request: LMRequest) -> HarnessResult:
             async with semaphore:
-                return await self.run(request, sampling_params)
+                result = await self.run(request, sampling_params)
+                if on_instance_complete:
+                    on_instance_complete()
+                return result
 
         return await asyncio.gather(*[run_one(r) for r in requests])
 

@@ -7,7 +7,7 @@ import dataclasses
 import multiprocessing as mp
 import queue
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
 
@@ -175,71 +175,78 @@ def process_batch(
         result_queue: Queue to put results
         harness: Optional Harness instance for tool/prompt configuration
     """
+    from tqdm import tqdm
+
     from olmo_eval.core.types import RequestType
 
-    # Check if harness has tools - if so, use multi-turn execution
-    if harness is not None and harness.config.has_tools:
-        _process_batch_with_tools(batch, harness, result_queue)
-        return
+    # Create progress bar for total batch
+    with tqdm(total=len(batch), desc="Processing instances", unit="inst") as pbar:
+        # Check if harness has tools - if so, use multi-turn execution
+        if harness is not None and harness.config.has_tools:
+            _process_batch_with_tools(batch, harness, result_queue, pbar)
+            return
 
-    # Group items that share the same request type and sampling params.
-    # We use value-based comparison (astuple) because items are
-    # pickled/unpickled through mp.Queue, giving each a new object.
-    groups: dict[tuple, list[QueueItem]] = {}
-    for item in batch:
-        sp_key = dataclasses.astuple(item.sampling_params) if item.sampling_params else None
-        key = (item.request.request_type, sp_key)
-        groups.setdefault(key, []).append(item)
+        # Group items that share the same request type and sampling params.
+        # We use value-based comparison (astuple) because items are
+        # pickled/unpickled through mp.Queue, giving each a new object.
+        groups: dict[tuple, list[QueueItem]] = {}
+        for item in batch:
+            sp_key = dataclasses.astuple(item.sampling_params) if item.sampling_params else None
+            key = (item.request.request_type, sp_key)
+            groups.setdefault(key, []).append(item)
 
-    for (_req_type, _), group in groups.items():
-        requests = [item.request for item in group]
-        sampling_params = group[0].sampling_params
-        request_type = group[0].request.request_type
+        for (_req_type, _), group in groups.items():
+            requests = [item.request for item in group]
+            sampling_params = group[0].sampling_params
+            request_type = group[0].request.request_type
 
-        try:
-            if request_type == RequestType.LOGLIKELIHOOD:
-                # Logprobs don't use harness (no tool injection needed)
-                outputs_list = provider.logprobs(requests)
-            else:
-                # Use harness.generate() if available, otherwise provider.generate()
-                if harness is not None:
-                    outputs_list = harness.generate(requests, sampling_params)
+            try:
+                if request_type == RequestType.LOGLIKELIHOOD:
+                    # Logprobs don't use harness (no tool injection needed)
+                    outputs_list = provider.logprobs(requests)
                 else:
-                    outputs_list = provider.generate(requests, sampling_params)
+                    # Use harness.generate() if available, otherwise provider.generate()
+                    if harness is not None:
+                        outputs_list = harness.generate(requests, sampling_params)
+                    else:
+                        outputs_list = provider.generate(requests, sampling_params)
 
-            for item, outputs in zip(group, outputs_list, strict=True):
-                result_queue.put(
-                    ResultItem(
-                        model_name=item.model_name,
-                        task_id=item.task_id,
-                        instance_idx=item.instance_idx,
-                        instance=item.instance,
-                        request=item.request,
-                        outputs=outputs,
-                        error=None,
-                        attempt=item.attempt,
+                for item, outputs in zip(group, outputs_list, strict=True):
+                    result_queue.put(
+                        ResultItem(
+                            model_name=item.model_name,
+                            task_id=item.task_id,
+                            instance_idx=item.instance_idx,
+                            instance=item.instance,
+                            request=item.request,
+                            outputs=outputs,
+                            error=None,
+                            attempt=item.attempt,
+                        )
                     )
-                )
-        except Exception as e:
-            for item in group:
-                result_queue.put(
-                    ResultItem(
-                        model_name=item.model_name,
-                        task_id=item.task_id,
-                        instance_idx=item.instance_idx,
-                        instance=item.instance,
-                        request=item.request,
-                        outputs=[],
-                        error=str(e),
-                        attempt=item.attempt,
+                    pbar.update(1)
+            except Exception as e:
+                for item in group:
+                    result_queue.put(
+                        ResultItem(
+                            model_name=item.model_name,
+                            task_id=item.task_id,
+                            instance_idx=item.instance_idx,
+                            instance=item.instance,
+                            request=item.request,
+                            outputs=[],
+                            error=str(e),
+                            attempt=item.attempt,
+                        )
                     )
-                )
+                    pbar.update(1)
 
 
 def _process_batch_with_tools(
     batch: list[QueueItem],
     harness: Harness,
     result_queue: mp.Queue,
+    pbar: Any,
 ) -> None:
     """Process a batch with multi-turn tool execution.
 
@@ -250,6 +257,7 @@ def _process_batch_with_tools(
         batch: List of QueueItems to process
         harness: Harness instance with tools configured
         result_queue: Queue to put results
+        pbar: tqdm progress bar to update
     """
     from dataclasses import replace as dataclass_replace
 
@@ -257,8 +265,13 @@ def _process_batch_with_tools(
         requests = [item.request for item in batch]
         sampling_params = batch[0].sampling_params if batch else None
 
+        def on_complete() -> None:
+            pbar.update(1)
+
         try:
-            results = await harness.run_batch(requests, sampling_params)
+            results = await harness.run_batch(
+                requests, sampling_params, on_instance_complete=on_complete
+            )
 
             for item, harness_result in zip(batch, results, strict=True):
                 # Extract final_output and add trajectory to metadata
@@ -302,6 +315,7 @@ def _process_batch_with_tools(
                         attempt=item.attempt,
                     )
                 )
+                pbar.update(1)
 
     # Run the async batch processing
     asyncio.run(run_batch_async())

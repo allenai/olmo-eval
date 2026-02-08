@@ -15,7 +15,7 @@ import socket
 import subprocess
 import sys
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager, suppress
 from typing import TYPE_CHECKING, Any
 
@@ -39,11 +39,15 @@ def _find_free_port() -> int:
         return s.getsockname()[1]
 
 
+ProgressCallback = Callable[[str], None]
+
+
 def _wait_for_server(
     url: str,
     timeout: float = DEFAULT_STARTUP_TIMEOUT,
     interval: float = DEFAULT_HEALTH_CHECK_INTERVAL,
     process: subprocess.Popen | None = None,
+    progress_callback: ProgressCallback | None = None,
 ) -> tuple[bool, Exception | None, str | None]:
     """Wait for vLLM server to be ready.
 
@@ -52,6 +56,7 @@ def _wait_for_server(
         timeout: Maximum time to wait in seconds
         interval: Time between health checks in seconds
         process: Optional subprocess to monitor for early exit
+        progress_callback: Optional callback for progress updates
 
     Returns:
         Tuple of (success, last_error, process_output):
@@ -67,8 +72,20 @@ def _wait_for_server(
 
     start_time = time.time()
     last_error: Exception | None = None
+    last_progress_time = 0.0
+    progress_interval = 10.0  # Log progress every 10 seconds
+
+    if progress_callback:
+        progress_callback(f"Waiting for vLLM server (0/{int(timeout)}s)...")
 
     while time.time() - start_time < timeout:
+        elapsed = time.time() - start_time
+
+        # Log progress periodically
+        if progress_callback and elapsed - last_progress_time >= progress_interval:
+            progress_callback(f"Waiting for vLLM server ({int(elapsed)}/{int(timeout)}s)...")
+            last_progress_time = elapsed
+
         # Check if the subprocess has died
         if process is not None:
             exit_code = process.poll()
@@ -86,6 +103,8 @@ def _wait_for_server(
             with urllib.request.urlopen(health_url, timeout=5) as response:
                 if response.status == 200:
                     logger.info(f"vLLM server ready at {url}")
+                    if progress_callback:
+                        progress_callback(f"vLLM server ready at {url}")
                     return True, None, None
         except urllib.error.URLError as e:
             last_error = e
@@ -97,6 +116,8 @@ def _wait_for_server(
             with urllib.request.urlopen(models_url, timeout=5) as response:
                 if response.status == 200:
                     logger.info(f"vLLM server ready at {url}")
+                    if progress_callback:
+                        progress_callback(f"vLLM server ready at {url}")
                     return True, None, None
         except urllib.error.URLError as e:
             last_error = e
@@ -235,8 +256,11 @@ class VLLMServerProcess:
         """Get the base URL for the OpenAI-compatible API."""
         return f"http://localhost:{self.port}/v1"
 
-    def start(self) -> str:
+    def start(self, progress_callback: ProgressCallback | None = None) -> str:
         """Start the vLLM server.
+
+        Args:
+            progress_callback: Optional callback for progress updates during startup.
 
         Returns:
             The base URL for the OpenAI-compatible API
@@ -255,6 +279,8 @@ class VLLMServerProcess:
         )
 
         logger.info(f"Starting vLLM server: {' '.join(cmd)}")
+        if progress_callback:
+            progress_callback(f"Starting vLLM server for {self.model_name}...")
 
         # Start the server process
         env = os.environ.copy()
@@ -287,7 +313,10 @@ class VLLMServerProcess:
 
         # Wait for server to be ready
         success, last_error, process_output = _wait_for_server(
-            self.base_url, timeout=self.startup_timeout, process=self._process
+            self.base_url,
+            timeout=self.startup_timeout,
+            process=self._process,
+            progress_callback=progress_callback,
         )
         if not success:
             # Try to capture any remaining output before stopping
@@ -373,6 +402,7 @@ def vllm_server_context(
     port: int | None = None,
     tensor_parallel_size: int = 1,
     startup_timeout: float = DEFAULT_STARTUP_TIMEOUT,
+    progress_callback: ProgressCallback | None = None,
     **kwargs: Any,
 ) -> Generator[str, None, None]:
     """Context manager to start and stop a vLLM server.
@@ -385,6 +415,7 @@ def vllm_server_context(
         port: Port to serve on (auto-assigned if None)
         tensor_parallel_size: Number of GPUs for tensor parallelism
         startup_timeout: Maximum time to wait for server startup
+        progress_callback: Optional callback for progress updates during startup
         **kwargs: Additional arguments passed to vLLM server
 
     Yields:
@@ -405,6 +436,6 @@ def vllm_server_context(
     )
 
     try:
-        yield server.start()
+        yield server.start(progress_callback=progress_callback)
     finally:
         server.stop()

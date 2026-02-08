@@ -239,11 +239,9 @@ def _create_vllm_server_provider(
         **server_kwargs,
     )
 
-    # Start the server (this blocks until ready)
-    base_url = server.start()
-
-    if worker_logger:
-        worker_logger.info(f"vLLM server started at {base_url}")
+    # Start the server with progress callback
+    progress_callback = worker_logger.info if worker_logger else None
+    server.start(progress_callback=progress_callback)
 
     # Create provider that connects to the server
     provider = VLLMServerProvider(

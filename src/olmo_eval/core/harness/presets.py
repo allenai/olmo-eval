@@ -105,16 +105,7 @@ register_harness_preset(
 
 @harness_preset("dr_tulu")
 def _dr_tulu_preset() -> HarnessConfig:
-    """Dr. Tulu preset with web and academic search tools.
-
-    Tools are loaded lazily when first accessed via HarnessConfig.tools.
-
-    Note: This preset requires a provider to be set before use:
-        config = get_harness_preset("dr_tulu").with_provider(
-            ProviderConfig(kind="vllm_server", model="llama3.1-8b", base_url="...")
-        )
-        harness = Harness(config)
-    """
+    """Dr. Tulu preset with web and academic search tools."""
     return HarnessConfig(
         name="dr_tulu",
         provider=ProviderConfig(kind=ProviderKind.VLLM_SERVER),
