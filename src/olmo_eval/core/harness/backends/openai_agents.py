@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from olmo_eval.core.types import LMOutput, LMRequest, SamplingParams
@@ -46,7 +47,7 @@ class OpenAIAgentsBackend(Backend):
             )
         return client
 
-    def _convert_tools(self, tools: list[Any], function_tool: Any) -> list[Any]:
+    def _convert_tools(self, tools: Sequence[Any], function_tool: Any) -> list[Any]:
         """Convert harness tools to agents SDK format."""
         agent_tools = []
         for tool in tools:
