@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from olmo_eval.core.types import LMOutput, LMRequest, SamplingParams
 from olmo_eval.core.types.tools import ToolCall, ToolResult
 from olmo_eval.core.types.trajectory import AgentTrajectory, AgentTurn
+from olmo_eval.inference.base import InferenceProvider
 
+from ..config import HarnessConfig
 from ..result import HarnessResult
 from . import Backend, register_backend
-
-if TYPE_CHECKING:
-    from ..harness import Harness
 
 
 @register_backend("openai_agents")
@@ -23,18 +22,21 @@ class OpenAIAgentsBackend(Backend):
     and uses the SDK's Runner for execution.
     """
 
+    name = "openai_agents"
     required_extras = ("agents",)
 
     async def run(
         self,
-        harness: Harness,
+        provider: InferenceProvider,
+        config: HarnessConfig,
         request: LMRequest,
         sampling_params: SamplingParams | None = None,
     ) -> HarnessResult:
         """Execute using OpenAI Agents SDK.
 
         Args:
-            harness: The Harness instance.
+            provider: The inference provider for model calls.
+            config: Harness configuration (tools, system prompt, etc.).
             request: The initial request.
             sampling_params: Optional sampling parameters.
 
@@ -48,32 +50,33 @@ class OpenAIAgentsBackend(Backend):
                 Runner,
                 function_tool,
             )
-            from openai import AsyncOpenAI  # type: ignore[import-not-found]
         except ImportError as e:
             raise ImportError(
                 "OpenAI Agents SDK not installed. Install with: pip install openai-agents"
             ) from e
 
-        import os
+        # Get OpenAI client from provider
+        client = provider.get_openai_client()
+        if client is None:
+            # Fallback to environment variables for backward compatibility
+            import os
 
-        # Create OpenAI client pointing to harness provider
-        base_url = os.getenv("OPENAI_BASE_URL", "http://localhost:8000/v1")
-        api_key = os.getenv("OPENAI_API_KEY", "EMPTY")
+            from openai import AsyncOpenAI  # type: ignore[import-not-found]
 
-        client = AsyncOpenAI(
-            base_url=base_url,
-            api_key=api_key,
-            timeout=60.0,
-        )
+            client = AsyncOpenAI(
+                base_url=os.getenv("OPENAI_BASE_URL", "http://localhost:8000/v1"),
+                api_key=os.getenv("OPENAI_API_KEY", "EMPTY"),
+                timeout=60.0,
+            )
 
         model = OpenAIChatCompletionsModel(
             openai_client=client,
-            model=harness.model_name,
+            model=provider.model_name,
         )
 
         # Convert harness tools to agents SDK format
         agent_tools = []
-        for tool in harness.config.tools:
+        for tool in config.tools:
             # Use function_tool decorator to wrap the execute function
             wrapped = function_tool(strict_mode=False)(tool.execute)
             # Override name and description
@@ -84,8 +87,8 @@ class OpenAIAgentsBackend(Backend):
 
         # Create agent
         agent = Agent(
-            name=harness.config.name,
-            instructions=harness.config.system_prompt or "",
+            name=self.name,
+            instructions=config.system_prompt or "",
             model=model,
             tools=agent_tools,
         )
@@ -99,7 +102,7 @@ class OpenAIAgentsBackend(Backend):
                     break
 
         # Run agent
-        max_turns = harness.config.max_turns or 10
+        max_turns = config.max_turns or 10
         result = await Runner.run(
             starting_agent=agent,
             input=input_text,

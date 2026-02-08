@@ -45,7 +45,7 @@ class TestGetBackend:
 
         @register_backend("custom")
         class CustomBackend(Backend):
-            async def run(self, harness, request, sampling_params=None):
+            async def run(self, provider, config, request, sampling_params=None):
                 pass
 
         assert "custom" in BACKEND_REGISTRY
@@ -64,7 +64,7 @@ class TestDefaultBackend:
         mock_provider.generate.return_value = [[LMOutput(text="Response", tool_calls=None)]]
 
         config = HarnessConfig(name="test", backend="default")
-        harness = Harness(mock_provider, config)
+        harness = Harness(config, provider=mock_provider)
 
         request = LMRequest(
             request_type=RequestType.CHAT,
@@ -72,7 +72,7 @@ class TestDefaultBackend:
         )
 
         backend = DefaultBackend()
-        result = await backend.run(harness, request)
+        result = await backend.run(harness.provider, harness.config, request)
 
         assert result.final_text == "Response"
         assert result.num_turns == 1

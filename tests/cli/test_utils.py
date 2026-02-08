@@ -117,16 +117,18 @@ class TestProcessOrderedArgs:
 
     def test_empty_list(self):
         """Test with empty list."""
-        model_overrides, task_overrides = process_ordered_args([])
+        model_overrides, task_overrides, harness_overrides = process_ordered_args([])
         assert model_overrides == []
         assert task_overrides == {}
+        assert harness_overrides == []
 
     def test_single_model_no_overrides(self):
         """Test single model without overrides."""
         ordered = [FlaggedArg("m", "llama3.1-8b")]
-        model_overrides, task_overrides = process_ordered_args(ordered)
-        assert model_overrides == [[]]  # Positional list with one empty override list
+        model_overrides, task_overrides, harness_overrides = process_ordered_args(ordered)
+        assert model_overrides == []  # No overrides specified
         assert task_overrides == {}
+        assert harness_overrides == []
 
     def test_single_model_with_overrides(self):
         """Test single model with overrides."""
@@ -135,38 +137,10 @@ class TestProcessOrderedArgs:
             FlaggedArg("o", "provider.kind=vllm"),
             FlaggedArg("o", "gpus=4"),
         ]
-        model_overrides, task_overrides = process_ordered_args(ordered)
-        assert model_overrides == [["provider.kind=vllm", "gpus=4"]]
+        model_overrides, task_overrides, harness_overrides = process_ordered_args(ordered)
+        assert model_overrides == ["provider.kind=vllm", "gpus=4"]
         assert task_overrides == {}
-
-    def test_multiple_models_with_overrides(self):
-        """Test multiple models with different overrides."""
-        ordered = [
-            FlaggedArg("m", "llama3.1-8b"),
-            FlaggedArg("o", "provider.kind=vllm"),
-            FlaggedArg("m", "gpt-4o"),
-            FlaggedArg("o", "provider.kind=litellm"),
-        ]
-        model_overrides, task_overrides = process_ordered_args(ordered)
-        # Positional: first model gets vllm, second gets litellm
-        assert model_overrides == [
-            ["provider.kind=vllm"],
-            ["provider.kind=litellm"],
-        ]
-        assert task_overrides == {}
-
-    def test_model_without_overrides_between_others(self):
-        """Test model without overrides between models with overrides."""
-        ordered = [
-            FlaggedArg("m", "model1"),
-            FlaggedArg("o", "gpus=2"),
-            FlaggedArg("m", "model2"),  # No overrides
-            FlaggedArg("m", "model3"),
-            FlaggedArg("o", "gpus=4"),
-        ]
-        model_overrides, task_overrides = process_ordered_args(ordered)
-        # Positional: [model1 overrides, model2 overrides, model3 overrides]
-        assert model_overrides == [["gpus=2"], [], ["gpus=4"]]
+        assert harness_overrides == []
 
     def test_single_task_with_overrides(self):
         """Test single task with overrides."""
@@ -174,31 +148,28 @@ class TestProcessOrderedArgs:
             FlaggedArg("t", "mmlu"),
             FlaggedArg("o", "limit=100"),
         ]
-        model_overrides, task_overrides = process_ordered_args(ordered)
-        assert model_overrides == []  # No models
+        model_overrides, task_overrides, harness_overrides = process_ordered_args(ordered)
+        assert model_overrides == []  # No model overrides
         assert task_overrides == {"mmlu": ["limit=100"]}
+        assert harness_overrides == []
 
-    def test_mixed_models_and_tasks(self):
-        """Test mixed models and tasks with overrides."""
+    def test_model_and_tasks_with_overrides(self):
+        """Test model and tasks with overrides."""
         ordered = [
             FlaggedArg("m", "llama3.1-8b"),
             FlaggedArg("o", "provider.kind=vllm"),
             FlaggedArg("o", "provider.package=vllm==0.14.0"),
-            FlaggedArg("m", "other-model"),
             FlaggedArg("t", "mmlu"),
             FlaggedArg("o", "limit=100"),
             FlaggedArg("t", "gsm8k"),  # No overrides
         ]
-        model_overrides, task_overrides = process_ordered_args(ordered)
-        # Positional: first model gets vllm overrides, second has none
-        assert model_overrides == [
-            ["provider.kind=vllm", "provider.package=vllm==0.14.0"],
-            [],
-        ]
+        model_overrides, task_overrides, harness_overrides = process_ordered_args(ordered)
+        assert model_overrides == ["provider.kind=vllm", "provider.package=vllm==0.14.0"]
         assert task_overrides == {
             "mmlu": ["limit=100"],
             "gsm8k": [],
         }
+        assert harness_overrides == []
 
     def test_override_without_preceding_flag_raises(self):
         """Test that -o without preceding -m or -t raises error."""
@@ -267,36 +238,29 @@ class TestEndToEndOrdering:
     def test_full_command_line(self):
         """Test reconstructing and processing a full command line."""
         args = [
-            "beaker",
-            "launch",
+            "run",
             "-m",
             "llama3.1-8b",
             "-o",
             "provider.kind=vllm",
             "-o",
-            "provider.package=vllm==0.14.0",
-            "-m",
-            "gpt-4o",
-            "-o",
-            "provider.kind=litellm",
+            "gpus=4",
             "-t",
             "mmlu",
             "-o",
             "limit=100",
             "-t",
             "gsm8k",
-            "--cluster",
-            "h100",
+            "--output-dir",
+            "/tmp/results",
         ]
         ordered = reconstruct_ordered_args(args)
-        model_overrides, task_overrides = process_ordered_args(ordered)
+        model_overrides, task_overrides, harness_overrides = process_ordered_args(ordered)
 
-        # Positional: first model (llama) gets vllm overrides, second (gpt-4o) gets litellm
-        assert model_overrides == [
-            ["provider.kind=vllm", "provider.package=vllm==0.14.0"],
-            ["provider.kind=litellm"],
-        ]
+        # Single model with overrides
+        assert model_overrides == ["provider.kind=vllm", "gpus=4"]
         assert task_overrides == {
             "mmlu": ["limit=100"],
             "gsm8k": [],
         }
+        assert harness_overrides == []

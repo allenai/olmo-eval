@@ -7,7 +7,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from .config import HarnessConfig
+from olmo_eval.core.types import ProviderKind
+
+from .config import HarnessConfig, ProviderConfig
 from .constants import DR_TULU_SYSTEM_PROMPT
 
 # ─────────────────────────────────────────────────────────
@@ -89,7 +91,7 @@ def list_harness_presets() -> list[str]:
 
 
 # ─────────────────────────────────────────────────────────
-# Preset Definitions
+# Preset Harness Configurations
 # ─────────────────────────────────────────────────────────
 
 # Default preset: no tools, standard model behavior
@@ -106,11 +108,18 @@ def _dr_tulu_preset() -> HarnessConfig:
     """Dr. Tulu preset with web and academic search tools.
 
     Lazily imports search tools to avoid loading httpx etc unless needed.
+
+    Note: This preset requires a provider to be set before use:
+        config = get_harness_preset("dr_tulu").with_provider(
+            ProviderConfig(kind="vllm_server", model_name="llama3.1-8b", base_url="...")
+        )
+        harness = Harness(config)
     """
     from .tools import search as _  # noqa: F401
 
     return HarnessConfig(
         name="dr_tulu",
+        provider=ProviderConfig(kind=ProviderKind.VLLM_SERVER),
         tool_names=(
             "semantic_scholar_snippet_search",
             "serper_google_webpage_search",

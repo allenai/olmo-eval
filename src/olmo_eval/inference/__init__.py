@@ -17,6 +17,7 @@ __all__ = [
     "MockProvider",
     "HuggingFaceProvider",
     "VLLMProvider",
+    "VLLMServerProvider",
     "LiteLLMProvider",
     "create_provider",
     # Tokenizer utilities
@@ -33,6 +34,7 @@ class ProviderType(StrEnum):
     MOCK = "mock"
     HUGGINGFACE = "hf"
     VLLM = "vllm"
+    VLLM_SERVER = "vllm_server"
     LITELLM = "litellm"
 
 
@@ -69,6 +71,10 @@ def create_provider(
             from .vllm import VLLMProvider
 
             return VLLMProvider(model_name, worker_id=worker_id, **kwargs)
+        case ProviderType.VLLM_SERVER:
+            from .vllm_server_provider import VLLMServerProvider
+
+            return VLLMServerProvider(model_name, **kwargs)
         case ProviderType.LITELLM:
             from .litellm import LiteLLMProvider
 
@@ -87,6 +93,10 @@ def __getattr__(name: str):
         from .vllm import VLLMProvider
 
         return VLLMProvider
+    if name == "VLLMServerProvider":
+        from .vllm_server_provider import VLLMServerProvider
+
+        return VLLMServerProvider
     if name == "LiteLLMProvider":
         from .litellm import LiteLLMProvider
 

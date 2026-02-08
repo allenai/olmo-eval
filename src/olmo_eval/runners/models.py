@@ -109,7 +109,7 @@ class MetricsOutput:
     """Top-level metrics.json output structure."""
 
     timestamp: str
-    config: dict[str, Any]  # ModelConfig.to_dict() or {"models": {name: config}}
+    config: dict[str, Any]  # ProviderConfig.to_dict() or {"models": {name: config}}
     tasks: list[dict[str, Any]]  # List of TaskMetricsEntry.to_dict()
     summary: dict[str, Any]  # task_name -> ScoreSummary or model -> task -> ScoreSummary
     errors: list[dict[str, Any]] = field(default_factory=list)

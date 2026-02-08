@@ -179,15 +179,16 @@ def _get_provider_for_model(model_name: str) -> ProviderConfig:
 
     presets = get_model_presets()
     if model_name in presets:
-        preset_provider = presets[model_name].provider
+        # Presets now return harness ProviderConfig, convert to launch ProviderConfig
+        preset = presets[model_name]
         # Normalize enum to string value for OmegaConf compatibility
-        kind = preset_provider.kind
+        kind = preset.kind
         kind_str: str = str(kind.value) if hasattr(kind, "value") else str(kind)
         return ProviderConfig(
             kind=kind_str,
-            package=preset_provider.package,
-            max_concurrency=preset_provider.max_concurrency,
-            required_secrets=preset_provider.required_secrets,
+            package=preset.package,
+            max_concurrency=preset.max_concurrency,
+            required_secrets=preset.required_secrets,
         )
     # Not a preset - default to vllm
     return ProviderConfig(kind=ProviderKind.VLLM.value)

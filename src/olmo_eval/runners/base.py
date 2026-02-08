@@ -31,9 +31,6 @@ class BaseEvalRunner(ABC):
     # Per-task overrides
     task_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
 
-    # Per-model overrides (maps model name -> overrides dict)
-    model_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
-
     # S3 upload configuration (optional)
     s3_config: S3Config | None = None
 

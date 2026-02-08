@@ -7,10 +7,10 @@ from unittest.mock import MagicMock
 import pytest
 
 from olmo_eval.core.harness import clear_registry, register_tool
-from olmo_eval.core.harness.config import HarnessConfig
+from olmo_eval.core.harness.config import HarnessConfig, ProviderConfig
 from olmo_eval.core.harness.harness import Harness, create_harness
 from olmo_eval.core.harness.tools import tool
-from olmo_eval.core.types import LMOutput, LMRequest, RequestType
+from olmo_eval.core.types import LMOutput, LMRequest, ProviderKind, RequestType
 
 
 @pytest.fixture(autouse=True)
@@ -49,7 +49,7 @@ class TestHarness:
     def test_harness_creation(self, mock_provider):
         """Test creating a Harness."""
         config = HarnessConfig(name="test")
-        harness = Harness(mock_provider, config)
+        harness = Harness(config, provider=mock_provider)
 
         assert harness.provider is mock_provider
         assert harness.config is config
@@ -58,7 +58,7 @@ class TestHarness:
     def test_harness_generate(self, mock_provider):
         """Test single-turn generate method."""
         config = HarnessConfig(name="test")
-        harness = Harness(mock_provider, config)
+        harness = Harness(config, provider=mock_provider)
 
         request = LMRequest(
             request_type=RequestType.CHAT,
@@ -75,7 +75,7 @@ class TestHarness:
     def test_harness_logprobs(self, mock_provider):
         """Test logprobs method."""
         config = HarnessConfig(name="test")
-        harness = Harness(mock_provider, config)
+        harness = Harness(config, provider=mock_provider)
 
         request = LMRequest(
             request_type=RequestType.LOGLIKELIHOOD,
@@ -92,7 +92,7 @@ class TestHarness:
             name="with_tools",
             tool_names=("test_search",),
         )
-        harness = Harness(mock_provider, config)
+        harness = Harness(config, provider=mock_provider)
 
         request = LMRequest(
             request_type=RequestType.CHAT,
@@ -111,7 +111,7 @@ class TestHarness:
             name="with_prompt",
             system_prompt="You are a helpful assistant.",
         )
-        harness = Harness(mock_provider, config)
+        harness = Harness(config, provider=mock_provider)
 
         request = LMRequest(
             request_type=RequestType.CHAT,
@@ -128,7 +128,7 @@ class TestHarness:
             name="inject_test",
             system_prompt="System message",
         )
-        harness = Harness(mock_provider, config)
+        harness = Harness(config, provider=mock_provider)
 
         messages = ({"role": "user", "content": "Hello"},)
         injected = harness._inject_system_prompt(messages)
@@ -144,7 +144,7 @@ class TestHarness:
             name="no_inject",
             system_prompt="New system",
         )
-        harness = Harness(mock_provider, config)
+        harness = Harness(config, provider=mock_provider)
 
         messages = (
             {"role": "system", "content": "Existing system"},
@@ -158,7 +158,7 @@ class TestHarness:
     def test_harness_no_inject_if_no_prompt(self, mock_provider):
         """Test that nothing is injected if no system prompt configured."""
         config = HarnessConfig(name="no_prompt")
-        harness = Harness(mock_provider, config)
+        harness = Harness(config, provider=mock_provider)
 
         messages = ({"role": "user", "content": "Hello"},)
         injected = harness._inject_system_prompt(messages)
@@ -169,28 +169,36 @@ class TestHarness:
 class TestCreateHarness:
     """Tests for create_harness factory function."""
 
-    def test_create_harness_default(self, mock_provider):
-        """Test create_harness with default config."""
-        harness = create_harness(mock_provider)
+    def test_create_harness_with_mock_provider(self):
+        """Test create_harness with mock provider type."""
+        config = HarnessConfig(
+            name="default",
+            provider=ProviderConfig(kind=ProviderKind.MOCK, model_name="test-model"),
+        )
+        harness = create_harness(config)
 
         assert harness.config.name == "default"
-        assert harness.provider is mock_provider
+        assert harness.provider.model_name == "test-model"
 
-    def test_create_harness_with_config(self, mock_provider):
+    def test_create_harness_with_config(self):
         """Test create_harness with explicit config."""
-        config = HarnessConfig(name="explicit")
-        harness = create_harness(mock_provider, config)
+        config = HarnessConfig(
+            name="explicit",
+            provider=ProviderConfig(kind=ProviderKind.MOCK, model_name="test-model"),
+        )
+        harness = create_harness(config)
 
         assert harness.config.name == "explicit"
 
-    def test_create_harness_with_dict(self, mock_provider):
+    def test_create_harness_with_dict(self):
         """Test create_harness with dict config."""
         config_dict = {
             "name": "from_dict",
+            "provider": {"kind": "mock", "model_name": "test-model"},
             "system_prompt": "Test prompt",
             "max_turns": 5,
         }
-        harness = create_harness(mock_provider, config_dict)
+        harness = create_harness(config_dict)
 
         assert harness.config.name == "from_dict"
         assert harness.config.system_prompt == "Test prompt"
@@ -207,7 +215,7 @@ class TestHarnessRun:
         mock_provider.generate.return_value = [[LMOutput(text="Final answer", tool_calls=None)]]
 
         config = HarnessConfig(name="no_tools", backend="default")
-        harness = Harness(mock_provider, config)
+        harness = Harness(config, provider=mock_provider)
 
         request = LMRequest(
             request_type=RequestType.CHAT,
@@ -226,7 +234,7 @@ class TestHarnessRun:
         mock_provider.generate.return_value = [[LMOutput(text="Answer", tool_calls=None)]]
 
         config = HarnessConfig(name="batch_test", backend="default")
-        harness = Harness(mock_provider, config)
+        harness = Harness(config, provider=mock_provider)
 
         requests = [
             LMRequest(

@@ -1,9 +1,12 @@
 """Inference provider base class and protocol definition."""
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from olmo_eval.core.types import LMOutput, LMRequest, SamplingParams
+
+if TYPE_CHECKING:
+    from openai import AsyncOpenAI
 
 
 class InferenceProvider(ABC):
@@ -67,3 +70,15 @@ class InferenceProvider(ABC):
             The tokenizer instance if available, None otherwise.
         """
         return None  # Default: no tokenizer
+
+    def get_openai_client(self) -> "AsyncOpenAI | None":
+        """Get an AsyncOpenAI client for this provider.
+
+        Used by backends that need an OpenAI-compatible client
+        (e.g., OpenAI Agents SDK). Returns None if the provider
+        doesn't have an OpenAI-compatible interface.
+
+        Returns:
+            AsyncOpenAI client if available, None otherwise.
+        """
+        return None  # Default: not available

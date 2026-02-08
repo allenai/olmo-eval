@@ -5,7 +5,16 @@ import pytest
 # Import to ensure tasks and suites are registered
 import olmo_eval.evals  # noqa: F401
 import olmo_eval.evals.tasks  # noqa: F401
+from olmo_eval.core.harness.config import HarnessConfig, ProviderConfig
 from olmo_eval.runners import EvalRunner, ValidationError
+
+
+def make_harness_config(model_name: str = "llama3.1-8b") -> HarnessConfig:
+    """Create a HarnessConfig with the given model name."""
+    return HarnessConfig(
+        name="test",
+        provider=ProviderConfig(model_name=model_name),
+    )
 
 
 class TestEvalRunnerValidation:
@@ -14,7 +23,7 @@ class TestEvalRunnerValidation:
     def test_validate_valid_task(self):
         """Test validation passes for valid task."""
         runner = EvalRunner(
-            model_names=["llama3.1-8b"],
+            harness_config=make_harness_config(),
             task_specs=["humaneval"],
         )
         # Should not raise
@@ -23,7 +32,7 @@ class TestEvalRunnerValidation:
     def test_validate_valid_suite(self):
         """Test validation passes for valid suite."""
         runner = EvalRunner(
-            model_names=["llama3.1-8b"],
+            harness_config=make_harness_config(),
             task_specs=["mt_mbpp_v2fix"],
         )
         # Should not raise
@@ -32,7 +41,7 @@ class TestEvalRunnerValidation:
     def test_validate_multiple_valid_specs(self):
         """Test validation passes for multiple valid specs."""
         runner = EvalRunner(
-            model_names=["llama3.1-8b"],
+            harness_config=make_harness_config(),
             task_specs=["humaneval", "mbpp", "mt_mbpp_v2fix"],
         )
         # Should not raise
@@ -41,7 +50,7 @@ class TestEvalRunnerValidation:
     def test_validate_invalid_task_raises(self):
         """Test validation fails for unknown task."""
         runner = EvalRunner(
-            model_names=["llama3.1-8b"],
+            harness_config=make_harness_config(),
             task_specs=["nonexistent_task"],
         )
         with pytest.raises(ValidationError, match="Unknown task or suite"):
@@ -50,7 +59,7 @@ class TestEvalRunnerValidation:
     def test_validate_invalid_suite_raises(self):
         """Test validation fails for unknown suite."""
         runner = EvalRunner(
-            model_names=["llama3.1-8b"],
+            harness_config=make_harness_config(),
             task_specs=["nonexistent:suite"],
         )
         with pytest.raises(ValidationError, match="Unknown task or suite"):
@@ -62,7 +71,7 @@ class TestEvalRunnerValidation:
         Note: Regimes are now accessed as variants using single colon syntax.
         """
         runner = EvalRunner(
-            model_names=["llama3.1-8b"],
+            harness_config=make_harness_config(),
             task_specs=["humaneval:nonexistent_regime"],
         )
         with pytest.raises(ValidationError, match="Unknown variant/regime"):
@@ -71,7 +80,7 @@ class TestEvalRunnerValidation:
     def test_validate_collects_multiple_errors(self):
         """Test validation collects all errors."""
         runner = EvalRunner(
-            model_names=["llama3.1-8b"],
+            harness_config=make_harness_config(),
             task_specs=["bad_task1", "bad_task2", "humaneval"],
         )
         with pytest.raises(ValidationError) as exc_info:
@@ -84,7 +93,7 @@ class TestEvalRunnerValidation:
     def test_validate_mixed_valid_and_invalid(self):
         """Test validation fails if any spec is invalid."""
         runner = EvalRunner(
-            model_names=["llama3.1-8b"],
+            harness_config=make_harness_config(),
             task_specs=["humaneval", "nonexistent", "mt_mbpp_v2fix"],
         )
         with pytest.raises(ValidationError, match="nonexistent"):
@@ -93,7 +102,7 @@ class TestEvalRunnerValidation:
     def test_validate_empty_task_specs(self):
         """Test validation fails with empty task specs."""
         runner = EvalRunner(
-            model_names=["llama3.1-8b"],
+            harness_config=make_harness_config(),
             task_specs=[],
         )
         with pytest.raises(ValidationError):

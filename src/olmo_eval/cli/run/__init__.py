@@ -5,10 +5,19 @@ Configuration parsing, storage setup, and runner creation are delegated to:
 - config.py: RunConfigBuilder for parsing and validating CLI arguments
 - storage.py: StorageSetup for initializing storage backends
 - factory.py: RunnerFactory for creating appropriate runners
+- options.py: Option decorators for logical grouping
 """
 
 import click
 
+from olmo_eval.cli.run.options import (
+    experiment_options,
+    harness_options,
+    inspect_options,
+    output_options,
+    parallelism_options,
+    storage_options,
+)
 from olmo_eval.cli.utils import (
     OrderedMultiOption,
     console,
@@ -16,19 +25,17 @@ from olmo_eval.cli.utils import (
     process_ordered_args,
     reconstruct_ordered_args,
 )
-from olmo_eval.core.constants.infrastructure import LOCAL_RESULT_DIR
 
 
 @click.command()
+# Core options (inline)
 @click.option(
     "--model",
     "-m",
-    "models",
-    multiple=True,
     required=True,
     cls=OrderedMultiOption,
     save_to="_ordered",
-    help="Model name or preset. Can specify multiple times. Use --override after to add overrides.",
+    help="Model name or preset. Use --override after to add overrides.",
 )
 @click.option(
     "--task",
@@ -39,7 +46,6 @@ from olmo_eval.core.constants.infrastructure import LOCAL_RESULT_DIR
     save_to="_ordered",
     help="Task spec or suite. Use --override after to add overrides.",
 )
-@click.option("--config", "-c", type=click.Path(exists=True), help="YAML config file")
 @click.option(
     "--override",
     "-o",
@@ -49,182 +55,30 @@ from olmo_eval.core.constants.infrastructure import LOCAL_RESULT_DIR
     save_to="_ordered",
     help="Override for preceding -m or -t (e.g., -o provider.kind=vllm -o limit=100)",
 )
-@click.option("--output-dir", "-O", default=LOCAL_RESULT_DIR, help="Output directory")
-@click.option("--provider", type=click.Choice(["hf", "vllm", "litellm"]), help="Override provider")
-@click.option(
-    "--store",
-    is_flag=True,
-    help="Persist results to the configured database",
-)
-@click.option("--dry-run", is_flag=True, help="Print config and exit without running")
-@click.option(
-    "--num-workers",
-    type=int,
-    default=None,
-    help="Number of workers for async modes (default: auto-detect from GPUs)",
-)
-@click.option(
-    "--gpus-per-worker",
-    type=int,
-    default=1,
-    help="Number of GPUs each worker uses (default: 1)",
-)
-@click.option(
-    "--attention-backend",
-    type=click.Choice(["FLASHINFER", "FLASH_ATTN"], case_sensitive=False),
-    default=None,
-    help="vLLM attention backend (e.g., FLASHINFER for better performance on supported GPUs)",
-)
-@click.option(
-    "--parallelism",
-    "-P",
-    type=int,
-    default=1,
-    help="Number of model instances to run in parallel (passed from launch command)",
-)
-@click.option(
-    "--s3-bucket",
-    help="S3 bucket for storing evaluation results",
-)
-@click.option(
-    "--s3-prefix",
-    help="S3 prefix/path within bucket for results",
-)
-@click.option(
-    "--s3-group",
-    help="S3 group name (used in path structure)",
-)
-@click.option(
-    "--s3-endpoint-url",
-    help="S3 endpoint URL (for S3-compatible storage)",
-)
-@click.option(
-    "--s3-region",
-    default="us-east-1",
-    help="S3 region (default: us-east-1)",
-)
-@click.option(
-    "--db-host",
-    envvar="PGHOST",
-    default="localhost",
-    help="PostgreSQL host",
-)
-@click.option(
-    "--db-port",
-    type=int,
-    envvar="PGPORT",
-    default=5432,
-    help="PostgreSQL port",
-)
-@click.option(
-    "--db-name",
-    envvar="PGDATABASE",
-    default="olmo_eval",
-    help="PostgreSQL database name",
-)
-@click.option(
-    "--db-user",
-    envvar="PGUSER",
-    default="postgres",
-    help="PostgreSQL user",
-)
-@click.option(
-    "--db-password",
-    envvar="PGPASSWORD",
-    default="postgres",
-    help="PostgreSQL password",
-)
-@click.option(
-    "--experiment-name",
-    help="Human-readable experiment name for database storage",
-)
-@click.option(
-    "--experiment-group",
-    help="Experiment group for grouping related experiments (defaults to experiment-name)",
-)
-@click.option(
-    "--alias",
-    "-a",
-    help="Short name for model (used as model_name in DB, original path stored as model_path)",
-)
-@click.option(
-    "--num-gpus",
-    type=int,
-    default=1,
-    help="Number of GPUs for tensor parallelism",
-)
-@click.option(
-    "--debug-requests",
-    is_flag=True,
-    help="Log HTTP requests/responses to inference providers",
-)
-@click.option(
-    "--debug-provider",
-    is_flag=True,
-    help="Enable verbose provider logging",
-)
-@click.option(
-    "--save-predictions/--no-save-predictions",
-    "save_predictions",
-    default=True,
-    help="Save per-instance predictions to JSONL (default: enabled)",
-)
-@click.option(
-    "--save-requests/--no-save-requests",
-    "save_requests",
-    default=True,
-    help="Save per-instance requests to JSONL (default: enabled)",
-)
-@click.option(
-    "--inspect-instance",
-    is_flag=True,
-    help="Print the first instance of each task before running evaluation",
-)
-@click.option(
-    "--inspect-formatted",
-    is_flag=True,
-    help="Show formatted prompt (after template applied) before evaluation",
-)
-@click.option(
-    "--inspect-tokens",
-    is_flag=True,
-    help="Show token array before evaluation",
-)
-@click.option(
-    "--inspect-response",
-    is_flag=True,
-    help="Print the first response of each task after model generation",
-)
-@click.option(
-    "--inspect-request",
-    is_flag=True,
-    help="Print the first request of each task before model generation",
-)
-@click.option(
-    "--harness",
-    type=str,
-    default=None,
-    help="Harness preset name (e.g., 'search') for tool/prompt configuration",
-)
-@click.option(
-    "--harness-config",
-    type=click.Path(exists=True),
-    default=None,
-    help="Path to harness config YAML/JSON file",
-)
+@click.option("--config", "-c", type=click.Path(exists=True), help="YAML config file")
+# Grouped options via decorators
+@harness_options
+@parallelism_options
+@storage_options
+@experiment_options
+@output_options
+@inspect_options
 def run(
-    models: tuple[str, ...],
+    # Core options
+    model: str,
     task: tuple[str, ...],
-    config: str | None,
     cli_override: tuple[str, ...],
-    output_dir: str,
-    provider: str | None,
-    store: bool,
-    dry_run: bool,
+    config: str | None,
+    # Harness options
+    harness_preset: str | None,
+    harness_config: str | None,
+    # Parallelism options
     num_workers: int | None,
     gpus_per_worker: int,
-    attention_backend: str | None,
+    num_gpus: int,
     parallelism: int,
+    # Storage options
+    store: bool,
     s3_bucket: str | None,
     s3_prefix: str | None,
     s3_group: str | None,
@@ -235,25 +89,25 @@ def run(
     db_name: str,
     db_user: str,
     db_password: str,
+    # Experiment options
     experiment_name: str | None,
     experiment_group: str | None,
     alias: str | None,
-    num_gpus: int,
-    debug_requests: bool,
-    debug_provider: bool,
+    # Output options
+    output_dir: str,
     save_predictions: bool,
     save_requests: bool,
+    dry_run: bool,
+    # Inspect options
+    debug_requests: bool,
+    debug_provider: bool,
     inspect_instance: bool,
     inspect_formatted: bool,
     inspect_tokens: bool,
     inspect_response: bool,
     inspect_request: bool,
-    harness: str | None,
-    harness_config: str | None,
 ) -> None:
     """Run evaluation on specified tasks.
-
-    Supports multiple models: use -m multiple times for multi-model runs.
 
     Use -o/--override after -m or -t to apply overrides:
 
@@ -268,7 +122,7 @@ def run(
     from olmo_eval.core.logging import configure_logging
     from olmo_eval.runners import ValidationError
 
-    # Process ordered args to associate overrides with models/tasks/harness
+    # Process ordered args to associate overrides with model/tasks/harness
     ordered_args = reconstruct_ordered_args(sys.argv[1:])
     model_overrides, task_overrides, harness_overrides = process_ordered_args(ordered_args)
 
@@ -286,11 +140,9 @@ def run(
 
     # Build configuration
     config_builder = RunConfigBuilder(
-        models=models,
+        model=model,
         task=task,
         output_dir=output_dir,
-        provider=provider,
-        attention_backend=attention_backend,
         num_workers=num_workers,
         gpus_per_worker=gpus_per_worker,
         num_gpus=num_gpus,
@@ -318,13 +170,10 @@ def run(
         inspect_request=inspect_request,
         cli_model_overrides=model_overrides,
         cli_task_overrides=task_overrides,
-        harness_preset=harness,
+        harness_preset=harness_preset,
         harness_config_path=harness_config,
         cli_harness_overrides=harness_overrides,
     )
-
-    # Validate CLI flags
-    config_builder.validate_flags()
 
     # Build configuration
     run_config = config_builder.build()

@@ -57,7 +57,6 @@ __all__ = [
     "ScoreSummary",
     "MetricsOutput",
     "RunnerResultsMixin",
-    "AsyncRunnerMixin",
 ]
 
 
@@ -73,34 +72,6 @@ class RunnerResultsMixin:
 
     # Per-task overrides
     task_overrides: dict[str, dict[str, Any]]
-
-    def _build_task_overrides(self, spec: str) -> tuple[dict[str, Any], dict[str, Any]]:
-        """Build task and sampling overrides for a given task spec.
-
-        Returns:
-            Tuple of (task_overrides, sampling_overrides)
-        """
-        from dataclasses import fields
-
-        from olmo_eval.core.types import SamplingParams
-        from olmo_eval.evals.tasks.core.base import TaskConfig
-
-        task_overrides: dict[str, Any] = {}
-        sampling_overrides: dict[str, Any] = {}
-
-        # Get field names from dataclasses
-        task_fields = {f.name for f in fields(TaskConfig)}
-        sampling_fields = {f.name for f in fields(SamplingParams)}
-
-        # Apply per-task overrides
-        per_task = getattr(self, "task_overrides", {}).get(spec, {})
-        for key, value in per_task.items():
-            if key in task_fields:
-                task_overrides[key] = value
-            elif key in sampling_fields:
-                sampling_overrides[key] = value
-
-        return task_overrides, sampling_overrides
 
     def _validate_task_specs(self) -> list[str]:
         """Validate task specs and return list of errors.
@@ -283,7 +254,7 @@ class RunnerResultsMixin:
         )
 
     def _report_task_completion(self, model_name: str, result: TaskResult) -> None:
-        """Report when a (model, task) pair completes."""
+        """Report when a task completes."""
         label = f"{model_name}:{result.spec}"
         if result.error:
             console.print(f"  [red]✗[/red] {label} (ERROR: {result.error})")
@@ -304,83 +275,3 @@ class RunnerResultsMixin:
     ) -> None:
         """Write per-instance requests to JSONL (oe-eval compatible format)."""
         write_requests_jsonl(self.output_dir, spec, requests, model_name, task_hash=task_hash)
-
-
-class AsyncRunnerMixin(RunnerResultsMixin):
-    """Additional shared functionality for async runners."""
-
-    model_names: list[str]
-    task_specs: list[str]
-    num_workers: int | None
-    gpus_per_worker: int
-
-    # Subclasses should override these for print_config display
-    _mode_name: str = "Async"
-    _mode_description: str = "Async"
-
-    def validate(self) -> None:
-        """Validate configuration."""
-        from olmo_eval.runners.constants import ValidationError
-
-        if not self.model_names:
-            raise ValidationError("model_names is required")
-
-        if not self.task_specs:
-            raise ValidationError("task_specs is required")
-
-        # Validate task specs using shared helper
-        errors = self._validate_task_specs()
-        if errors:
-            raise ValidationError("\n".join(errors))
-
-    def print_config(self) -> None:
-        """Print configuration."""
-        from rich.table import Table
-
-        from olmo_eval.core.configs import expand_tasks
-
-        table = Table(title=f"Run Configuration ({self._mode_name})")
-        table.add_column("Setting", style="cyan")
-        table.add_column("Value", style="white")
-
-        models_str = ", ".join(self.model_names)
-        table.add_row("Models", models_str)
-        table.add_row("Mode", self._mode_description)
-        table.add_row("Output Dir", self.output_dir)
-        table.add_row("Workers", str(self.num_workers or "auto-detect"))
-        table.add_row("GPUs per Worker", str(self.gpus_per_worker))
-
-        console.print(table)
-
-        expanded = expand_tasks(self.task_specs)
-        total_pairs = len(self.model_names) * len(expanded)
-        console.print(f"\n[bold]Models:[/bold] {len(self.model_names)}")
-        console.print(f"[bold]Tasks:[/bold] {len(expanded)}")
-        console.print(f"[bold]Total (model, task) pairs:[/bold] {total_pairs}")
-        for spec in expanded:
-            console.print(f"  - {spec}")
-
-    def _get_num_workers(self) -> int:
-        """Get number of workers based on available GPUs."""
-        if self.num_workers is not None:
-            return self.num_workers
-
-        # Auto-detect GPUs
-        try:
-            import torch  # type: ignore[import-not-found]
-
-            num_gpus = torch.cuda.device_count()
-            if num_gpus == 0:
-                return 1  # Fallback to single worker for CPU
-            return max(1, num_gpus // self.gpus_per_worker)
-        except ImportError:
-            return 1  # Fallback to single worker if torch unavailable
-
-    def _get_total_gpus(self) -> int:
-        """Get total number of available GPUs."""
-        try:
-            import torch  # type: ignore[import-not-found]
-
-            return torch.cuda.device_count()
-        except ImportError:
-            return 0

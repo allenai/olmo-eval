@@ -94,7 +94,7 @@ def reconstruct_ordered_args(args: list[str]) -> list[FlaggedArg]:
 
 def process_ordered_args(
     ordered: list[FlaggedArg],
-) -> tuple[list[list[str]], dict[str, list[str]], list[str]]:
+) -> tuple[list[str], dict[str, list[str]], list[str]]:
     """Associate -o overrides with preceding -m, -t, or --harness.
 
     Args:
@@ -102,25 +102,22 @@ def process_ordered_args(
 
     Returns:
         Tuple of (model_overrides, task_overrides, harness_overrides) where:
-        - model_overrides is a list of override lists, one per model (positional)
+        - model_overrides is a list of override strings for the model
         - task_overrides is a dict mapping task name to list of override strings
         - harness_overrides is a list of override strings for the harness
 
     Raises:
         click.UsageError: If -o appears without a preceding -m, -t, or --harness.
     """
-    model_overrides: list[list[str]] = []  # Positional: one list per model
+    model_overrides: list[str] = []
     task_overrides: dict[str, list[str]] = {}
     harness_overrides: list[str] = []
 
-    current_model_index: int = -1
     current_task: str | None = None
     last_flag: str | None = None
 
     for arg in ordered:
         if arg.flag == "m":
-            model_overrides.append([])
-            current_model_index = len(model_overrides) - 1
             last_flag = "m"
         elif arg.flag == "t":
             current_task = arg.value
@@ -129,9 +126,9 @@ def process_ordered_args(
         elif arg.flag == "h":
             last_flag = "h"
         elif arg.flag == "o":
-            # Apply to last model, task, or harness
-            if last_flag == "m" and current_model_index >= 0:
-                model_overrides[current_model_index].append(arg.value)
+            # Apply to model, task, or harness
+            if last_flag == "m":
+                model_overrides.append(arg.value)
             elif last_flag == "t" and current_task:
                 task_overrides[current_task].append(arg.value)
             elif last_flag == "h":
@@ -215,24 +212,6 @@ class ExperimentSummary:
     harness: HarnessSummary
     runner: RunnerConfig
     beaker: "BeakerJobConfig"
-
-
-def parse_model_spec(spec: str) -> tuple[str, dict[str, Any]]:
-    """Parse model spec into (model_name, overrides).
-
-    Returns the model name and an empty overrides dict.
-    Use -o flag for overrides instead.
-    """
-    return spec, {}
-
-
-def parse_task_spec_with_overrides(spec: str) -> tuple[str, dict[str, Any]]:
-    """Parse task spec into (task_spec, overrides).
-
-    Returns the task spec and an empty overrides dict.
-    Use -o flag for overrides instead.
-    """
-    return spec, {}
 
 
 def print_runtime_environment() -> None:

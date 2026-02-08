@@ -1,9 +1,4 @@
-"""Tool registry and pre-built tools.
-
-This package provides:
-- Global tool registry for cross-process lookup
-- Pre-built tools for common use cases (search, etc.)
-"""
+"""Tool registry and pre-built tools."""
 
 from .registry import (
     TOOL_REGISTRY,
@@ -18,10 +13,8 @@ from .registry import (
 from .tool import Tool, tool
 
 __all__ = [
-    # Tool class
     "Tool",
     "tool",
-    # Registry
     "TOOL_REGISTRY",
     "clear_registry",
     "ensure_tools_registered",

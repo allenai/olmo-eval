@@ -7,14 +7,13 @@ how the harness executes requests.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, TypeVar
+from typing import TypeVar
 
 from olmo_eval.core.types import LMRequest, SamplingParams
+from olmo_eval.inference.base import InferenceProvider
 
+from ..config import HarnessConfig
 from ..result import HarnessResult
-
-if TYPE_CHECKING:
-    from ..harness import Harness
 
 logger = logging.getLogger(__name__)
 
@@ -26,21 +25,25 @@ class Backend:
     implement `run` for multi-turn execution support.
 
     Class Attributes:
+        name: Human-readable name for this backend.
         required_extras: Tuple of pyproject.toml extra names required by this backend.
     """
 
+    name: str = "base"
     required_extras: tuple[str, ...] = ()
 
     async def run(
         self,
-        harness: Harness,
+        provider: InferenceProvider,
+        config: HarnessConfig,
         request: LMRequest,
         sampling_params: SamplingParams | None = None,
     ) -> HarnessResult:
         """Execute the request and return the result.
 
         Args:
-            harness: The Harness instance (provides provider and config).
+            provider: The inference provider for model calls.
+            config: Harness configuration (tools, system prompt, etc.).
             request: The initial request to process.
             sampling_params: Optional sampling parameters override.
 
@@ -50,7 +53,7 @@ class Backend:
         Raises:
             NotImplementedError: If this backend doesn't support run().
         """
-        raise NotImplementedError(f"{self.__class__.__name__} does not support run()")
+        raise NotImplementedError(f"Backend '{self.name}' does not support run()")
 
 
 # -----------------------------------------------------------------------------

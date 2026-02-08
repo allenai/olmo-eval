@@ -43,19 +43,19 @@ class RunnerFactory:
 
         console.print("[bold cyan]Using AsyncEvalRunner[/bold cyan]")
 
+        # Get attention_backend from provider kwargs if specified
+        provider_kwargs = self.config.harness_config.provider.kwargs
+        attention_backend = provider_kwargs.get("attention_backend") if provider_kwargs else None
+
         return AsyncEvalRunner(
-            model_names=self.config.model_names,
+            harness_config=self.config.harness_config,
             task_specs=self.config.task_specs,
             output_dir=self.config.output_dir,
-            provider_override=self.config.provider,
             storages=self.storages,
             num_workers=self.config.num_workers,
             gpus_per_worker=self.config.gpus_per_worker,
-            attention_backend=self.config.attention_backend.upper()
-            if self.config.attention_backend
-            else None,
+            attention_backend=attention_backend,
             task_overrides=self.config.task_overrides,
-            model_overrides=self.config.per_model_overrides,
             s3_config=self.s3_config,
             experiment_name=self.config.experiment_name,
             experiment_group=self.config.experiment_group,
@@ -67,5 +67,4 @@ class RunnerFactory:
             inspect_tokens=self.config.inspect_tokens,
             inspect_response=self.config.inspect_response,
             inspect_request=self.config.inspect_request,
-            harness_config=self.config.harness_config,
         )

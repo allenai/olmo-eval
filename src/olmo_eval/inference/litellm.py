@@ -5,13 +5,16 @@ from __future__ import annotations
 import asyncio
 import os
 from collections.abc import Awaitable, Callable
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from olmo_eval.core.debug import is_debug_provider
 from olmo_eval.core.logging import get_logger
 from olmo_eval.core.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
 
 from .base import InferenceProvider
+
+if TYPE_CHECKING:
+    from openai import AsyncOpenAI
 
 # Maximum stop sequences supported by OpenAI-compatible APIs
 _MAX_STOP_SEQUENCES = 4
@@ -58,6 +61,7 @@ class LiteLLMProvider(InferenceProvider):
     def __init__(
         self,
         model_name: str,
+        base_url: str | None = None,
         max_concurrency: int = 32,
         max_retries: int = 3,
         retry_delay: float = 1.0,
@@ -67,6 +71,7 @@ class LiteLLMProvider(InferenceProvider):
 
         Args:
             model_name: Model identifier (e.g., "gpt-4", "claude-3-opus").
+            base_url: Optional base URL for OpenAI-compatible endpoints.
             max_concurrency: Maximum number of concurrent API requests.
             max_retries: Maximum number of retries for transient errors.
             retry_delay: Base delay in seconds between retries (exponential backoff).
@@ -81,6 +86,7 @@ class LiteLLMProvider(InferenceProvider):
 
         super().__init__(model_name)
         self._litellm = litellm
+        self.base_url = base_url
         self.max_concurrency = max_concurrency
         self.max_retries = max_retries
         self.retry_delay = retry_delay
@@ -99,6 +105,22 @@ class LiteLLMProvider(InferenceProvider):
             value = os.getenv(env_var)
             if value:
                 setattr(self._litellm, litellm_attr, value)
+
+    def get_openai_client(self) -> AsyncOpenAI | None:
+        """Get an AsyncOpenAI client if base_url is configured.
+
+        Returns:
+            AsyncOpenAI client if base_url is set, None otherwise.
+        """
+        if self.base_url is None:
+            return None
+
+        from openai import AsyncOpenAI
+
+        return AsyncOpenAI(
+            base_url=self.base_url,
+            api_key=os.getenv("OPENAI_API_KEY", "EMPTY"),
+        )
 
     def _is_retryable(self, exc: Exception) -> bool:
         """Determine whether *exc* should be retried.

@@ -14,13 +14,14 @@ from typing import Any
 
 from rich.console import Console
 
-from olmo_eval.core.configs import expand_tasks, get_model_config
+from olmo_eval.core.configs import expand_tasks
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
+from olmo_eval.core.harness.config import HarnessConfig, ProviderConfig
 from olmo_eval.core.logging import get_logger, get_worker_id
 from olmo_eval.core.types import Response
 from olmo_eval.inference import ProviderType
 from olmo_eval.runners.base import BaseEvalRunner
-from olmo_eval.runners.mixins import AsyncRunnerMixin, S3Config
+from olmo_eval.runners.mixins import S3Config
 from olmo_eval.runners.simple.helpers import (
     check_workers_alive,
     terminate_workers,
@@ -47,33 +48,31 @@ logger = get_logger(__name__)
 
 
 @dataclass
-class AsyncEvalRunner(AsyncRunnerMixin, BaseEvalRunner):
+class AsyncEvalRunner(BaseEvalRunner):
     """Async evaluation runner with instance-level queuing.
 
-    Uses per-model queues where instances from all tasks are mixed together,
-    enabling better GPU utilization and early completion reporting.
-    Supports multiple models in a single run, producing results for each
-    unique (model, task) pair.
+    Uses a single model with instance-level queuing where instances from all
+    tasks are mixed together, enabling better GPU utilization and early
+    completion reporting.
     """
 
-    model_names: list[str] = field(default_factory=list)
+    # Harness configuration (includes provider, tools, system prompt)
+    harness_config: HarnessConfig = field(default_factory=lambda: HarnessConfig(name="default"))
+
+    # Task configuration
     task_specs: list[str] = field(default_factory=list)
+    task_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    # Output configuration
     output_dir: str = BEAKER_RESULT_DIR
-    provider_override: str | None = None
     storages: list[StorageBackend] = field(default_factory=list)
 
-    # Multi-worker config
+    # Worker configuration
     num_workers: int | None = None
     gpus_per_worker: int = 1
 
-    # vLLM config
+    # vLLM-specific configuration
     attention_backend: str | None = None
-
-    # Per-task overrides
-    task_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
-
-    # Per-model overrides
-    model_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     # S3 upload configuration (optional)
     s3_config: S3Config | None = None
@@ -93,104 +92,176 @@ class AsyncEvalRunner(AsyncRunnerMixin, BaseEvalRunner):
     inspect_tokens: bool = False
     inspect_request: bool = False
 
-    # Harness configuration for tool/prompt injection
-    harness_config: dict[str, Any] | None = None
-
     # Configuration for print_config display
     _mode_name: str = "Async Mode"
     _mode_description: str = "Async (All-at-once)"
+
+    @property
+    def provider_config(self) -> ProviderConfig:
+        """Get the provider config from harness config."""
+        return self.harness_config.provider
+
+    @property
+    def model_name(self) -> str:
+        """Get the model name from provider config."""
+        return self.provider_config.model_name
+
+    def validate(self) -> None:
+        """Validate runner configuration."""
+        from olmo_eval.runners.constants import ValidationError
+
+        if not self.provider_config.model_name:
+            raise ValidationError("provider_config.model_name is required")
+
+        if not self.task_specs:
+            raise ValidationError("task_specs is required")
+
+        # Validate task specs
+        errors = self._validate_task_specs()
+        if errors:
+            raise ValidationError("\n".join(errors))
+
+    def _validate_task_specs(self) -> list[str]:
+        """Validate task specs and return list of errors.
+
+        Includes validation of task names and variants/regimes.
+        """
+        from olmo_eval.evals.suites import suite_exists
+        from olmo_eval.evals.tasks import list_regimes, list_tasks, list_variants
+        from olmo_eval.evals.tasks.core.registry import parse_task_spec
+
+        errors: list[str] = []
+        available_tasks = set(list_tasks())
+        regimes_by_task = list_regimes()
+        variants_by_task = list_variants()
+
+        for spec in self.task_specs:
+            if suite_exists(spec):
+                continue
+
+            # Parse task_name[:variant1[:variant2...]] format
+            task_name, variants, _overrides = parse_task_spec(spec)
+
+            if task_name not in available_tasks:
+                errors.append(f"Unknown task or suite: '{spec}'")
+                continue
+
+            # Validate each variant/regime exists (check both registries)
+            task_variants = set(variants_by_task.get(task_name, []))
+            task_regimes = set(regimes_by_task.get(task_name, []))
+            all_valid_variants = task_variants | task_regimes
+
+            for variant in variants:
+                if variant not in all_valid_variants:
+                    available_list = sorted(all_valid_variants)
+                    if available_list:
+                        errors.append(
+                            f"Unknown variant/regime '{variant}' for task '{task_name}'. "
+                            f"Available: {', '.join(available_list)}"
+                        )
+                    else:
+                        errors.append(
+                            f"Unknown variant/regime '{variant}' for task '{task_name}'. "
+                            f"This task has no registered variants or regimes."
+                        )
+
+        return errors
+
+    def print_config(self) -> None:
+        """Print runner configuration."""
+        from rich.table import Table
+
+        from olmo_eval.core.configs import expand_tasks
+
+        table = Table(title=f"Run Configuration ({self._mode_name})")
+        table.add_column("Setting", style="cyan")
+        table.add_column("Value", style="white")
+
+        table.add_row("Model", self.model_name)
+        table.add_row("Provider", self.provider_config.get_provider_name())
+        table.add_row("Mode", self._mode_description)
+        table.add_row("Output Dir", self.output_dir)
+        table.add_row("Workers", str(self.num_workers or "auto-detect"))
+        table.add_row("GPUs per Worker", str(self.gpus_per_worker))
+
+        console.print(table)
+
+        expanded = expand_tasks(self.task_specs)
+        console.print(f"\n[bold]Tasks:[/bold] {len(expanded)}")
+        for spec in expanded:
+            console.print(f"  - {spec}")
 
     def run(self) -> dict[str, Any]:
         """Sync wrapper for async execution."""
         return asyncio.run(self.run_async())
 
     async def run_async(self) -> dict[str, Any]:
-        """Execute evaluations using instance-level queuing with multi-model support."""
+        """Execute evaluations using instance-level queuing."""
         # Track experiment start time
         experiment_start = time.time()
 
         # Prepare tasks
-        expanded_tasks, trackers, model_items, model_configs = self._prepare_tasks()
-
-        total_pairs = len(self.model_names) * len(expanded_tasks)
-        total_instances = sum(len(items) for items in model_items.values())
+        expanded_tasks, trackers, items = self._prepare_tasks()
+        total_instances = len(items)
 
         # Setup multiprocessing
         ctx = mp.get_context("spawn")
-        model_queues, result_queue, total_workers, workers_per_model, gpus_per_model = (
-            self._setup_workers(model_items, model_configs, ctx)
-        )
+        instance_queue, result_queue, num_workers = self._setup_workers(items, ctx)
         total_gpus = self._get_total_gpus()
 
         # Create shared dict for tracking worker init times
         manager = ctx.Manager()
         init_times = manager.dict()
 
-        # Shuffle and enqueue items per model
-        for model_name, items in model_items.items():
-            random.shuffle(items)
-            for item in items:
-                model_queues[model_name].put(item)
+        # Shuffle and enqueue items
+        random.shuffle(items)
+        for item in items:
+            instance_queue.put(item)
 
         # Add poison pills AFTER all items are enqueued
-        for model_name in self.model_names:
-            for _ in range(workers_per_model):
-                model_queues[model_name].put(None)
+        for _ in range(num_workers):
+            instance_queue.put(None)
 
-        # Start workers for each model
+        # Start workers
         workers: list[mp.process.BaseProcess] = []
-        gpu_offset = 0
+        provider_type = ProviderType(self.provider_config.get_provider_name())
 
         try:
-            for model_name in self.model_names:
-                model_config = model_configs[model_name]
-                provider_type = ProviderType(model_config.get_provider_name(self.provider_override))
+            for i in range(num_workers):
+                worker_id = get_worker_id(self.provider_config.model_name, i)
 
-                # Get per-model vLLM loading options
-                per_model_overrides = self.model_overrides.get(model_name, {})
-                effective_load_format = per_model_overrides.get("load_format")
-                effective_extra_loader_config = per_model_overrides.get("extra_loader_config")
+                if total_gpus > 0:
+                    start_gpu = i * self.gpus_per_worker
+                    end_gpu = min(start_gpu + self.gpus_per_worker, total_gpus)
+                    gpu_ids = list(range(start_gpu, end_gpu)) if start_gpu < end_gpu else []
+                else:
+                    gpu_ids = []
 
-                # Get max_concurrency from the resolved model config
-                effective_max_concurrency = model_config.provider.max_concurrency
-
-                for i in range(workers_per_model):
-                    worker_id = get_worker_id(model_config.model, i)
-
-                    if total_gpus > 0:
-                        start_gpu = gpu_offset + (i * self.gpus_per_worker)
-                        end_gpu = min(start_gpu + self.gpus_per_worker, gpu_offset + gpus_per_model)
-                        gpu_ids = list(range(start_gpu, end_gpu)) if start_gpu < end_gpu else []
-                    else:
-                        gpu_ids = []
-
-                    worker = ctx.Process(
-                        target=instance_worker_process,
-                        args=(
-                            worker_id,
-                            gpu_ids,
-                            model_queues[model_name],
-                            result_queue,
-                            model_config.model,
-                            provider_type.value,
-                            self.attention_backend,
-                            model_config.tokenizer,
-                            model_config.max_model_len,
-                            effective_load_format,
-                            effective_extra_loader_config,
-                            effective_max_concurrency,
-                            init_times,
-                            self.harness_config,
-                        ),
-                    )
-                    worker.start()
-                    workers.append(worker)
-
-                gpu_offset += gpus_per_model
+                worker = ctx.Process(
+                    target=instance_worker_process,
+                    args=(
+                        worker_id,
+                        gpu_ids,
+                        instance_queue,
+                        result_queue,
+                        self.provider_config.model_name,
+                        provider_type.value,
+                        self.attention_backend,
+                        self.provider_config.tokenizer,
+                        self.provider_config.max_model_len,
+                        None,  # load_format - not currently exposed via ProviderConfig
+                        None,  # extra_loader_config - not currently exposed
+                        self.provider_config.max_concurrency,
+                        init_times,
+                        self.harness_config.to_dict(),
+                    ),
+                )
+                worker.start()
+                workers.append(worker)
 
             console.print(
-                f"[bold green]{len(workers)} worker(s) started across "
-                f"{len(self.model_names)} model(s), processing instances...[/bold green]"
+                f"[bold green]{len(workers)} worker(s) started, "
+                "processing instances...[/bold green]"
             )
 
             # Wait for workers to initialize
@@ -203,7 +274,12 @@ class AsyncEvalRunner(AsyncRunnerMixin, BaseEvalRunner):
 
             # Process results
             results = await self._process_results(
-                trackers, result_queue, model_queues, workers, total_pairs, total_instances
+                trackers,
+                result_queue,
+                instance_queue,
+                workers,
+                len(expanded_tasks),
+                total_instances,
             )
 
             # Wait for all workers
@@ -217,7 +293,7 @@ class AsyncEvalRunner(AsyncRunnerMixin, BaseEvalRunner):
             experiment_duration_seconds = time.time() - experiment_start
 
             # Aggregate and save results
-            results_dict = self._aggregate_results(results, expanded_tasks, model_configs, "vllm")
+            results_dict = self._aggregate_results(results, expanded_tasks)
             return self._finalize_and_save(
                 results_dict,
                 experiment_duration_seconds=experiment_duration_seconds,
@@ -225,86 +301,67 @@ class AsyncEvalRunner(AsyncRunnerMixin, BaseEvalRunner):
             )
         finally:
             terminate_workers(workers)
-            for q in list(model_queues.values()) + [result_queue]:
+            for q in [instance_queue, result_queue]:
                 q.cancel_join_thread()
             manager.shutdown()
 
     def _prepare_tasks(
         self,
-    ) -> tuple[
-        list[str],
-        dict[tuple[str, str], TaskTracker],
-        dict[str, list[QueueItem]],
-        dict[str, Any],
-    ]:
+    ) -> tuple[list[str], dict[str, TaskTracker], list[QueueItem]]:
         """Prepare all tasks and return tracking data structures."""
         expanded_tasks = expand_tasks(self.task_specs)
 
-        trackers: dict[tuple[str, str], TaskTracker] = {}
-        model_items: dict[str, list[QueueItem]] = {m: [] for m in self.model_names}
-        model_configs: dict[str, Any] = {}
+        trackers: dict[str, TaskTracker] = {}
+        items: list[QueueItem] = []
 
-        console.print(f"[bold]Models:[/bold] {len(self.model_names)}")
+        console.print(f"[bold]Model:[/bold] {self.model_name}")
         console.print(f"[bold]Tasks:[/bold] {len(expanded_tasks)}")
-        total_pairs = len(self.model_names) * len(expanded_tasks)
-        console.print(f"[bold]Total (model, task) pairs:[/bold] {total_pairs}")
-
-        # Get model configs with per-model overrides
-        for model_name in self.model_names:
-            overrides = self.model_overrides.get(model_name, {})
-            model_config = get_model_config(model_name, **overrides)
-            model_configs[model_name] = model_config
 
         # Prepare tasks in parallel
-        console.print(f"[bold]Preparing {total_pairs} tasks...[/bold]")
+        console.print(f"[bold]Preparing {len(expanded_tasks)} tasks...[/bold]")
 
-        def prepare_one(
-            model_name: str, spec: str
-        ) -> tuple[str, str, TaskTracker, list[QueueItem]]:
+        def prepare_one(spec: str) -> tuple[str, TaskTracker, list[QueueItem]]:
             try:
                 overrides, sampling_overrides = self._build_task_overrides(spec)
-                task, items = prepare_task_items(
+                task, task_items = prepare_task_items(
                     spec,
-                    model_name,
+                    self.model_name,
                     overrides or None,
                     sampling_overrides=sampling_overrides or None,
                 )
                 tracker = TaskTracker(
-                    model_name=model_name,
+                    model_name=self.model_name,
                     spec=spec,
                     task=task,
-                    total_instances=len(items),
+                    total_instances=len(task_items),
                 )
-                return (model_name, spec, tracker, items)
+                return (spec, tracker, task_items)
             except Exception as e:
                 tracker = TaskTracker(
-                    model_name=model_name,
+                    model_name=self.model_name,
                     spec=spec,
                     task=None,
                     total_instances=0,
                     error=str(e),
                 )
-                return (model_name, spec, tracker, [])
+                return (spec, tracker, [])
 
-        with ThreadPoolExecutor(max_workers=min(32, total_pairs)) as executor:
-            futures = {
-                executor.submit(prepare_one, model_name, spec): (model_name, spec)
-                for model_name in self.model_names
-                for spec in expanded_tasks
-            }
+        with ThreadPoolExecutor(max_workers=min(32, len(expanded_tasks))) as executor:
+            futures = {executor.submit(prepare_one, spec): spec for spec in expanded_tasks}
             for future in as_completed(futures):
-                model_name, spec, tracker, items = future.result()
-                key = (model_name, spec)
-                trackers[key] = tracker
-                model_items[model_name].extend(items)
+                spec, tracker, task_items = future.result()
+                trackers[spec] = tracker
+                items.extend(task_items)
                 if tracker.error:
-                    console.print(f"  [red]- {model_name}:{spec}: ERROR - {tracker.error}[/red]")
+                    console.print(f"  [red]- {spec}: ERROR - {tracker.error}[/red]")
                 else:
-                    console.print(f"  - {model_name}:{spec}: {len(items)} instances")
-                    if self.save_requests and items and tracker.task:
-                        request_objects = build_requests_from_items(items, tracker.task.config.name)
+                    console.print(f"  - {spec}: {len(task_items)} instances")
+                    if self.save_requests and task_items and tracker.task:
+                        request_objects = build_requests_from_items(
+                            task_items, tracker.task.config.name
+                        )
                         task_hash = compute_task_hash(tracker.task.config.to_dict())
-                        self._write_requests(model_name, spec, request_objects, task_hash)
+                        self._write_requests(self.model_name, spec, request_objects, task_hash)
 
         # Optionally inspect first instance of each task
         if (
@@ -313,15 +370,39 @@ class AsyncEvalRunner(AsyncRunnerMixin, BaseEvalRunner):
             or self.inspect_tokens
             or self.inspect_request
         ):
-            self._inspect_tasks(trackers, model_configs)
+            self._inspect_tasks(trackers)
 
-        return expanded_tasks, trackers, model_items, model_configs
+        return expanded_tasks, trackers, items
 
-    def _inspect_tasks(
-        self,
-        trackers: dict[tuple[str, str], TaskTracker],
-        model_configs: dict[str, Any],
-    ) -> None:
+    def _build_task_overrides(self, spec: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Build task and sampling overrides for a given task spec.
+
+        Returns:
+            Tuple of (task_overrides, sampling_overrides)
+        """
+        from dataclasses import fields
+
+        from olmo_eval.core.types import SamplingParams
+        from olmo_eval.evals.tasks.core.base import TaskConfig
+
+        task_overrides: dict[str, Any] = {}
+        sampling_overrides: dict[str, Any] = {}
+
+        # Get field names from dataclasses
+        task_fields = {f.name for f in fields(TaskConfig)}
+        sampling_fields = {f.name for f in fields(SamplingParams)}
+
+        # Apply per-task overrides
+        per_task = self.task_overrides.get(spec, {})
+        for key, value in per_task.items():
+            if key in task_fields:
+                task_overrides[key] = value
+            elif key in sampling_fields:
+                sampling_overrides[key] = value
+
+        return task_overrides, sampling_overrides
+
+    def _inspect_tasks(self, trackers: dict[str, TaskTracker]) -> None:
         """Inspect first instance of each unique task."""
         from olmo_eval.core.inspection import (
             format_with_chat_template,
@@ -333,23 +414,17 @@ class AsyncEvalRunner(AsyncRunnerMixin, BaseEvalRunner):
             tokenize_request,
         )
 
-        inspected_tasks: set[str] = set()
         tokenizer = None
 
         if self.inspect_formatted or self.inspect_tokens:
-            first_model = self.model_names[0] if self.model_names else None
-            if first_model:
-                first_model_config = model_configs.get(first_model)
-                if first_model_config:
-                    tokenizer_name = first_model_config.tokenizer or first_model_config.model
-                    try:
-                        tokenizer = load_tokenizer(tokenizer_name)
-                    except Exception as e:
-                        console.print(f"[yellow]Warning:[/yellow] Could not load tokenizer: {e}")
+            tokenizer_name = self.provider_config.tokenizer or self.provider_config.model_name
+            try:
+                tokenizer = load_tokenizer(tokenizer_name)
+            except Exception as e:
+                console.print(f"[yellow]Warning:[/yellow] Could not load tokenizer: {e}")
 
-        for key, tracker in trackers.items():
-            spec = key[1]
-            if spec not in inspected_tasks and tracker.task and not tracker.error:
+        for spec, tracker in trackers.items():
+            if tracker.task and not tracker.error:
                 first_instance = next(iter(tracker.task.instances), None)
                 if first_instance:
                     native_id = first_instance.metadata.get("id", "0")
@@ -395,59 +470,76 @@ class AsyncEvalRunner(AsyncRunnerMixin, BaseEvalRunner):
                             except Exception as e:
                                 console.print(f"[red]Error tokenizing request:[/red] {e}")
 
-                    inspected_tasks.add(spec)
-
     def _setup_workers(
         self,
-        model_items: dict[str, list[QueueItem]],
-        model_configs: dict[str, Any],
+        items: list[QueueItem],
         ctx: Any,
-    ) -> tuple[dict[str, mp.Queue], mp.Queue, int, int, int]:
+    ) -> tuple[mp.Queue, mp.Queue, int]:
         """Setup queues and compute worker allocation."""
-        total_instances = sum(len(items) for items in model_items.values())
+        total_instances = len(items)
         console.print(f"[bold]Total instances:[/bold] {total_instances}")
 
-        model_queues: dict[str, mp.Queue] = {m: ctx.Queue() for m in self.model_names}
+        instance_queue: mp.Queue = ctx.Queue()
         result_queue: mp.Queue = ctx.Queue()
 
-        total_gpus = self._get_total_gpus()
-        total_workers = self._get_num_workers()
-        num_models = len(self.model_names)
-        workers_per_model = max(1, total_workers // num_models)
-        gpus_per_model = max(0, total_gpus // num_models) if total_gpus > 0 else 0
+        num_workers = self._get_num_workers()
+        console.print(f"[bold]Total workers:[/bold] {num_workers}")
 
-        console.print(f"[bold]Total workers:[/bold] {total_workers}")
+        return instance_queue, result_queue, num_workers
 
-        return model_queues, result_queue, total_workers, workers_per_model, gpus_per_model
+    def _get_num_workers(self) -> int:
+        """Get number of workers based on available GPUs."""
+        if self.num_workers is not None:
+            return self.num_workers
+
+        # Auto-detect GPUs
+        try:
+            import torch  # type: ignore[import-not-found]
+
+            num_gpus = torch.cuda.device_count()
+            if num_gpus == 0:
+                return 1  # Fallback to single worker for CPU
+            return max(1, num_gpus // self.gpus_per_worker)
+        except ImportError:
+            return 1  # Fallback to single worker if torch unavailable
+
+    def _get_total_gpus(self) -> int:
+        """Get total number of available GPUs."""
+        try:
+            import torch  # type: ignore[import-not-found]
+
+            return torch.cuda.device_count()
+        except ImportError:
+            return 0
 
     async def _process_results(
         self,
-        trackers: dict[tuple[str, str], TaskTracker],
+        trackers: dict[str, TaskTracker],
         result_queue: mp.Queue,
-        model_queues: dict[str, mp.Queue],
+        instance_queue: mp.Queue,
         workers: list[mp.process.BaseProcess],
-        total_pairs: int,
+        total_tasks: int,
         total_instances: int,
-    ) -> dict[tuple[str, str], Any]:
+    ) -> dict[str, Any]:
         """Process results from workers."""
         from olmo_eval.runners.utils import TaskResult
 
-        results: dict[tuple[str, str], TaskResult] = {}
-        completed_pairs = 0
+        results: dict[str, TaskResult] = {}
+        completed_tasks = 0
 
         # Pre-add error tasks to results
-        for key, tracker in trackers.items():
+        for spec, tracker in trackers.items():
             if tracker.error:
                 task_result = finalize_task(tracker)
-                results[key] = task_result
-                completed_pairs += 1
-                self._report_task_completion(tracker.model_name, task_result)
+                results[spec] = task_result
+                completed_tasks += 1
+                self._report_task_completion(self.model_name, task_result)
 
         pending_instances = total_instances
         last_health_check = time.time()
         health_check_interval = 5.0
 
-        while completed_pairs < total_pairs and pending_instances > 0:
+        while completed_tasks < total_tasks and pending_instances > 0:
             try:
                 result_item: ResultItem = await asyncio.get_event_loop().run_in_executor(
                     None, lambda: result_queue.get(timeout=1.0)
@@ -466,12 +558,11 @@ class AsyncEvalRunner(AsyncRunnerMixin, BaseEvalRunner):
                     if worker.is_alive():
                         worker.terminate()
                         worker.join(timeout=5)
-                for mp_queue in list(model_queues.values()) + [result_queue]:
+                for mp_queue in [instance_queue, result_queue]:
                     mp_queue.cancel_join_thread()
                 raise RuntimeError(f"Worker process crashed: {result_item.error}")
 
-            key = (result_item.model_name, result_item.task_id)
-            tracker = trackers[key]
+            tracker = trackers[result_item.task_id]
 
             if tracker.error:
                 pending_instances -= 1
@@ -482,9 +573,9 @@ class AsyncEvalRunner(AsyncRunnerMixin, BaseEvalRunner):
                 pending_instances -= 1
                 if tracker.is_complete():
                     task_result = finalize_task(tracker)
-                    results[key] = task_result
-                    completed_pairs += 1
-                    self._report_task_completion(tracker.model_name, task_result)
+                    results[result_item.task_id] = task_result
+                    completed_tasks += 1
+                    self._report_task_completion(self.model_name, task_result)
             else:
                 response = Response(
                     instance=result_item.instance,
@@ -497,83 +588,78 @@ class AsyncEvalRunner(AsyncRunnerMixin, BaseEvalRunner):
 
                 if is_complete:
                     task_result = finalize_task(tracker)
-                    results[key] = task_result
-                    completed_pairs += 1
-                    self._report_task_completion(tracker.model_name, task_result)
+                    results[result_item.task_id] = task_result
+                    completed_tasks += 1
+                    self._report_task_completion(self.model_name, task_result)
                     if self.save_predictions and task_result.predictions:
                         task_hash = compute_task_hash(task_result.config)
                         self._write_predictions(
-                            tracker.model_name, task_result.spec, task_result.predictions, task_hash
+                            self.model_name, task_result.spec, task_result.predictions, task_hash
                         )
 
         return results
 
+    def _report_task_completion(self, model_name: str, result: Any) -> None:
+        """Report when a task completes."""
+        label = f"{model_name}:{result.spec}"
+        if result.error:
+            console.print(f"  [red]✗[/red] {label} (ERROR: {result.error})")
+        else:
+            console.print(
+                f"  [green]✓[/green] {label} ({result.num_instances} instances, "
+                f"{result.duration_seconds:.1f}s)"
+            )
+
     def _aggregate_results(
         self,
-        results: dict[tuple[str, str], Any],
+        results: dict[str, Any],
         expanded_tasks: list[str],
-        model_configs: dict[str, Any],
-        provider_name: str,
     ) -> dict[str, Any]:
-        """Aggregate results by model and prepare final output."""
+        """Aggregate results and prepare final output."""
         from olmo_eval.runners.mixins import get_model_display_name
 
-        errors = [(k, r) for k, r in results.items() if r.error]
+        errors = [(spec, r) for spec, r in results.items() if r.error]
         if errors:
-            console.print(
-                f"\n[bold red]Errors:[/bold red] {len(errors)} (model, task) pairs failed"
-            )
-            for (model_name, spec), error_result in errors:
-                console.print(f"  - {model_name}:{spec}: {error_result.error}")
+            console.print(f"\n[bold red]Errors:[/bold red] {len(errors)} tasks failed")
+            for spec, error_result in errors:
+                console.print(f"  - {spec}: {error_result.error}")
+
+        try:
+            provider_type = ProviderType(self.provider_config.get_provider_name())
+            provider_str = provider_type.value
+        except ValueError:
+            provider_str = "vllm"
+
+        display_model_name = get_model_display_name(self.provider_config.model_name, self.alias)
 
         results_dict: dict[str, Any] = {
             "timestamp": datetime.now().isoformat(),
-            "models": {},
+            "model": display_model_name,
+            "model_path": self.provider_config.model_name,
+            "provider": provider_str,
+            "tasks": {},
             "errors": [],
         }
 
-        for model_name in self.model_names:
-            model_config = model_configs[model_name]
-            try:
-                provider_type = ProviderType(model_config.get_provider_name())
-                provider_str = provider_type.value
-            except ValueError:
-                provider_str = provider_name
+        for spec in expanded_tasks:
+            if spec in results:
+                task_result = results[spec]
+                if task_result.error:
+                    results_dict["errors"].append({"spec": spec, "error": task_result.error})
+                else:
+                    task_data = task_result.to_dict(include_predictions=True)
+                    task_hash = compute_task_hash(task_result.config)
+                    if task_hash:
+                        task_data["task_hash"] = task_hash
+                    results_dict["tasks"][spec] = task_data
 
-            model_alias = self.model_overrides.get(model_name, {}).get("alias")
-            display_model_name = get_model_display_name(model_config.model, model_alias)
+        model_config_dict = self.provider_config.to_dict()
+        model_config_dict["attention_backend"] = self.attention_backend
+        results_dict["model_config"] = model_config_dict
 
-            model_results: dict[str, Any] = {
-                "model": display_model_name,
-                "model_path": model_config.model,
-                "provider": provider_str,
-                "tasks": {},
-            }
-
-            for spec in expanded_tasks:
-                key = (model_name, spec)
-                if key in results:
-                    task_result = results[key]
-                    if task_result.error:
-                        results_dict["errors"].append(
-                            {"model": model_name, "spec": spec, "error": task_result.error}
-                        )
-                    else:
-                        task_data = task_result.to_dict(include_predictions=True)
-                        task_hash = compute_task_hash(task_result.config)
-                        if task_hash:
-                            task_data["task_hash"] = task_hash
-                        model_results["tasks"][spec] = task_data
-
-            model_config_dict = model_config.to_dict()
-            model_config_dict["attention_backend"] = self.attention_backend
-            model_results["model_config"] = model_config_dict
-
-            results_dict["models"][model_name] = model_results
-
-            suite_aggs = compute_suite_aggregations(self.task_specs, model_results["tasks"])
-            if suite_aggs:
-                model_results["suites"] = suite_aggs
+        suite_aggs = compute_suite_aggregations(self.task_specs, results_dict["tasks"])
+        if suite_aggs:
+            results_dict["suites"] = suite_aggs
 
         return results_dict
 
@@ -585,43 +671,67 @@ class AsyncEvalRunner(AsyncRunnerMixin, BaseEvalRunner):
     ) -> dict[str, Any]:
         """Log summary, write metrics, upload to S3, and save results."""
         from olmo_eval.core.types import compute_model_hash
+        from olmo_eval.runners.metrics import log_summary, write_metrics_json
+        from olmo_eval.runners.storage import save_results, upload_to_s3
 
-        self._log_summary(results_dict, multi_model=True)
+        log_summary(results_dict, multi_model=False)
 
         experiment_id = generate_experiment_id()
+        model_hash = compute_model_hash(results_dict.get("model_config", {}))
+        results_dict["_model_hash"] = model_hash
 
-        for model_data in results_dict.get("models", {}).values():
-            model_hash = compute_model_hash(model_data.get("model_config", {}))
-            model_data["_model_hash"] = model_hash
-
-        self._write_metrics_json(
-            results_dict,
-            multi_model=True,
+        write_metrics_json(
+            output_dir=self.output_dir,
+            results=results_dict,
+            multi_model=False,
             experiment_id=experiment_id,
+            experiment_name=self.experiment_name,
+            experiment_group=self.experiment_group,
+            model_hash=model_hash,
+            experiment_duration_seconds=experiment_duration_seconds,
+            provider_init_seconds=provider_init_seconds,
+        )
+
+        s3_location: str | None = None
+        if self.s3_config and model_hash:
+            s3_location = upload_to_s3(
+                output_dir=self.output_dir,
+                s3_config=self.s3_config,
+                model_name=self.model_name,
+                model_hash=model_hash,
+                experiment_id=experiment_id,
+            )
+
+        results_dict["_experiment_id"] = experiment_id
+        results_dict["_s3_location"] = s3_location
+
+        save_results(
+            results=results_dict,
+            storages=self.storages,
+            s3_config=self.s3_config,
+            experiment_id=experiment_id,
+            model_hash=model_hash,
+            s3_location=s3_location,
             experiment_name=self.experiment_name,
             experiment_group=self.experiment_group,
             experiment_duration_seconds=experiment_duration_seconds,
             provider_init_seconds=provider_init_seconds,
         )
 
-        for model_name, model_data in results_dict.get("models", {}).items():
-            model_hash = model_data.get("_model_hash")
-            s3_location: str | None = None
-
-            if self.s3_config and model_hash:
-                s3_location = self._upload_to_s3(
-                    model_name=model_name,
-                    model_hash=model_hash,
-                    experiment_id=experiment_id,
-                )
-
-            model_data["_experiment_id"] = experiment_id
-            model_data["_s3_location"] = s3_location
-
-        self._save_results(
-            results_dict,
-            experiment_duration_seconds=experiment_duration_seconds,
-            provider_init_seconds=provider_init_seconds,
-        )
-
         return results_dict
+
+    def _write_predictions(
+        self, model_name: str, spec: str, predictions: list[dict], task_hash: str | None = None
+    ) -> None:
+        """Write per-instance predictions to JSONL."""
+        from olmo_eval.runners.writers import write_predictions_jsonl
+
+        write_predictions_jsonl(self.output_dir, spec, predictions, model_name, task_hash=task_hash)
+
+    def _write_requests(
+        self, model_name: str, spec: str, requests: list[dict], task_hash: str | None = None
+    ) -> None:
+        """Write per-instance requests to JSONL."""
+        from olmo_eval.runners.writers import write_requests_jsonl
+
+        write_requests_jsonl(self.output_dir, spec, requests, model_name, task_hash=task_hash)

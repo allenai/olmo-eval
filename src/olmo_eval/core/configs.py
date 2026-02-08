@@ -3,84 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
-from olmo_eval.core.types import DtypeLiteral, ProviderKind
-from olmo_eval.launch.config import ProviderConfig
-
-
-@dataclass
-class ModelConfig:
-    """Core model configuration for inference.
-
-    For agent tasks, models can be specified in two ways:
-    1. HuggingFace model/path with provider="vllm" - starts local vLLM server
-    2. API endpoint with model_url - uses OpenAI-compatible API directly
-
-    Example presets for API-based models:
-        "gpt-4o": ModelConfig(model="gpt-4o", model_url="https://api.openai.com/v1")
-        "claude-3": ModelConfig(model="claude-3-opus", model_url="https://api.anthropic.com")
-    """
-
-    model: str
-    tokenizer: str | None = None  # Tokenizer path/identifier, defaults to model if None
-    provider: ProviderConfig = field(default_factory=lambda: ProviderConfig(kind=ProviderKind.VLLM))
-    revision: str | None = None
-    trust_remote_code: bool = False
-    dtype: DtypeLiteral = "auto"
-    max_model_len: int | None = None  # Override model's default context length (vLLM)
-    extra_args: dict[str, Any] = field(default_factory=dict)
-    # API endpoint for OpenAI-compatible APIs (agent tasks only)
-    # When set, agent tasks use this URL directly instead of starting vLLM
-    model_url: str | None = None
-
-    def __post_init__(self) -> None:
-        if isinstance(self.provider, dict):
-            provider_dict = cast(dict[str, Any], self.provider)
-            kind = provider_dict.get("kind", "vllm")
-            if isinstance(kind, str):
-                kind = ProviderKind(kind)
-            object.__setattr__(
-                self,
-                "provider",
-                ProviderConfig(
-                    kind=kind,
-                    package=provider_dict.get("package"),
-                    max_concurrency=provider_dict.get("max_concurrency"),
-                    required_secrets=tuple(provider_dict.get("required_secrets", ())),
-                ),
-            )
-
-    def get_provider_name(self, override: str | None = None) -> str:
-        """Get the effective provider name as a string.
-
-        Args:
-            override: Optional provider name override. If provided, this takes
-                precedence over the configured provider.
-
-        Returns:
-            Provider name string (e.g., "vllm", "litellm", "hf").
-        """
-        if override:
-            return override
-        kind = self.provider.kind
-        return str(kind.value) if hasattr(kind, "value") else str(kind)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to dictionary for JSON output."""
-        from dataclasses import asdict
-
-        return asdict(self)
+from olmo_eval.core.harness.config import ProviderConfig
 
 
 @dataclass
 class RunConfig:
     """Top-level configuration for an evaluation run."""
 
-    model: ModelConfig
+    model: ProviderConfig
     tasks: list[str] = field(default_factory=list)
     output_dir: str = BEAKER_RESULT_DIR
     batch_size: int | Literal["auto"] = "auto"
@@ -162,7 +97,7 @@ def validate_tasks(tasks: list[str]) -> tuple[list[str], list[str]]:
     return valid_tasks, invalid_tasks
 
 
-# Keys that are vLLM/backend-specific and should not be passed to ModelConfig
+# Keys that are vLLM/backend-specific and should not be passed to ProviderConfig
 # These are handled separately by the runners
 _BACKEND_ONLY_KEYS = {
     "load_format",
@@ -173,72 +108,52 @@ _BACKEND_ONLY_KEYS = {
 }
 
 
-def get_model_config(name: str, **overrides: Any) -> ModelConfig:
-    """Get a model config by preset name with optional overrides.
+def get_provider_config(name: str, **overrides: Any) -> ProviderConfig:
+    """Get a provider config by preset name with optional overrides.
 
     Args:
         name: Preset name (e.g., "llama3.1-8b") or HuggingFace model path.
         **overrides: Override specific config fields.
 
     Returns:
-        ModelConfig instance.
+        ProviderConfig instance.
     """
     from olmo_eval.core.constants.models import get_model_presets
 
-    # Filter out backend-specific keys that don't belong in ModelConfig
+    # Filter out backend-specific keys that don't belong in ProviderConfig
     filtered_overrides = {k: v for k, v in overrides.items() if k not in _BACKEND_ONLY_KEYS}
 
-    models = get_model_presets()
-    if name in models:
-        base = models[name]
-        if filtered_overrides:
-            # Merge partial provider overrides with the base preset's provider config
-            # so that e.g. `-o provider.max_concurrency=32` preserves kind=litellm
-            provider_raw = filtered_overrides.get("provider", base.provider)
-            if isinstance(provider_raw, dict):
-                base_provider = base.provider
-                kind_raw = provider_raw.get("kind", base_provider.kind)
-                kind = ProviderKind(kind_raw) if isinstance(kind_raw, str) else kind_raw
-                provider_value: ProviderConfig = ProviderConfig(
-                    kind=kind,
-                    package=provider_raw.get("package", base_provider.package),
-                    max_concurrency=provider_raw.get(
-                        "max_concurrency", base_provider.max_concurrency
-                    ),
-                    required_secrets=tuple(
-                        provider_raw.get("required_secrets", base_provider.required_secrets)
-                    ),
-                )
-            else:
-                provider_value = provider_raw
+    presets = get_model_presets()
+    if name in presets:
+        base = presets[name]
 
-            return ModelConfig(
-                model=filtered_overrides.get("model", base.model),
+        if filtered_overrides:
+            # Build new config with overrides
+            return ProviderConfig(
+                kind=filtered_overrides.get("kind", base.kind),
+                model_name=filtered_overrides.get("model_name", base.model_name),
+                base_url=filtered_overrides.get("base_url", base.base_url),
                 tokenizer=filtered_overrides.get("tokenizer", base.tokenizer),
-                provider=provider_value,
                 revision=filtered_overrides.get("revision", base.revision),
                 trust_remote_code=filtered_overrides.get(
                     "trust_remote_code", base.trust_remote_code
                 ),
                 dtype=filtered_overrides.get("dtype", base.dtype),
                 max_model_len=filtered_overrides.get("max_model_len", base.max_model_len),
-                extra_args={**base.extra_args, **filtered_overrides.get("extra_args", {})},
+                max_concurrency=filtered_overrides.get("max_concurrency", base.max_concurrency),
+                required_secrets=tuple(
+                    filtered_overrides.get("required_secrets", base.required_secrets)
+                ),
+                package=filtered_overrides.get("package", base.package),
+                kwargs={**base.kwargs, **filtered_overrides.get("kwargs", {})},
             )
         return base
 
-    # Check if model_url was provided in overrides
-    model_url = filtered_overrides.pop("model_url", None)
-    config = ModelConfig(model=name, **filtered_overrides)
-    if model_url:
-        config = ModelConfig(
-            model=config.model,
-            tokenizer=config.tokenizer,
-            provider=config.provider,
-            revision=config.revision,
-            trust_remote_code=config.trust_remote_code,
-            dtype=config.dtype,
-            max_model_len=config.max_model_len,
-            extra_args=config.extra_args,
-            model_url=model_url,
-        )
-    return config
+    # Not a preset - create ProviderConfig directly
+    return ProviderConfig(model_name=name, **filtered_overrides)
+
+
+# Backward compatibility alias
+def get_model_config(name: str, **overrides: Any) -> ProviderConfig:
+    """Alias for get_provider_config for backward compatibility."""
+    return get_provider_config(name, **overrides)

@@ -94,7 +94,7 @@ def instance_worker_process(
             from olmo_eval.core.harness import Harness, HarnessConfig
 
             harness_config = HarnessConfig.from_dict(harness_config_dict)
-            harness = Harness(provider, harness_config)
+            harness = Harness(harness_config, provider=provider)
             worker_logger.info(f"Harness created with config: {harness_config.name}")
 
         init_time = time.time() - init_start

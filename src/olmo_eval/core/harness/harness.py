@@ -6,7 +6,7 @@ It provides both single-turn (generate) and multi-turn (run) interfaces.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from olmo_eval.core.types import LMOutput, LMRequest, SamplingParams
 
@@ -19,46 +19,49 @@ if TYPE_CHECKING:
 
 
 class Harness:
-    """A model provider configured with specific capabilities.
-
-    Wraps an InferenceProvider and applies configuration to all requests.
-    Uses pluggable backends for execution.
-
-    The Harness provides two main interfaces:
-    - generate(): Single-turn generation with config injected (tools, system prompt)
-    - run(): Multi-turn execution with automatic tool handling
+    """An execution harness configured with specific capabilities.
 
     Example:
-        from olmo_eval.core.harness import Harness, HarnessConfig
-        from olmo_eval.inference import VLLMProvider
+        from olmo_eval.core.harness import Harness, HarnessConfig, ProviderConfig
 
-        # Create provider
-        provider = VLLMProvider("llama3.1-8b")
-
-        # Create harness with tools
+        # Create harness with provider config
         config = HarnessConfig(
             name="search",
+            provider=ProviderConfig(
+                kind="vllm",
+                model_name="llama3.1-8b",
+            ),
             tool_names=("web_search", "fetch_page"),
             system_prompt="You have access to search tools.",
         )
-        harness = Harness(provider, config)
+        harness = Harness(config)
 
-        # Single-turn generation
+        # Single generation
         outputs = harness.generate([request])
 
         # Multi-turn execution
         result = await harness.run(request)
+
+        # Or use an existing provider
+        provider = create_provider("vllm", "llama3.1-8b")
+        harness = Harness(config, provider=provider)
     """
 
-    def __init__(self, provider: InferenceProvider, config: HarnessConfig) -> None:
+    def __init__(
+        self,
+        config: HarnessConfig,
+        *,
+        provider: InferenceProvider | None = None,
+    ) -> None:
         """Initialize the Harness.
 
         Args:
-            provider: The inference provider for model calls.
-            config: Configuration specifying tools, system prompt, etc.
+            config: Configuration specifying provider, tools, system prompt, etc.
+            provider: Optional existing provider to use. If not provided,
+                creates one from config.provider.
         """
-        self.provider = provider
         self.config = config
+        self.provider = provider if provider is not None else config.provider.create_provider()
         self.backend = get_backend(config.backend)
 
     @property
@@ -97,9 +100,6 @@ class Harness:
     def logprobs(self, requests: list[LMRequest]) -> list[list[LMOutput]]:
         """Log probability computation.
 
-        Note: Config injection is optional for logprobs since tools
-        typically aren't relevant for perplexity-style evaluation.
-
         Args:
             requests: List of requests with continuations to score.
 
@@ -131,7 +131,7 @@ class Harness:
         Returns:
             HarnessResult with trajectory and final output.
         """
-        return await self.backend.run(self, request, sampling_params)
+        return await self.backend.run(self.provider, self.config, request, sampling_params)
 
     async def run_batch(
         self,
@@ -212,26 +212,18 @@ class Harness:
 
 
 def create_harness(
-    provider: InferenceProvider,
-    config: HarnessConfig | dict[str, Any] | None = None,
+    config: HarnessConfig | dict[str, Any],
 ) -> Harness:
-    """Create a Harness from provider and optional config.
+    """Create a Harness from config.
 
     Convenience function that handles config creation/parsing.
 
     Args:
-        provider: The inference provider.
-        config: HarnessConfig instance, dict, or None for default.
+        config: HarnessConfig instance or dict.
 
     Returns:
         Configured Harness instance.
     """
-    resolved: HarnessConfig
-    if config is None:
-        resolved = HarnessConfig(name="default")
-    elif isinstance(config, dict):
-        resolved = HarnessConfig.from_dict(config)  # type: ignore[arg-type]
-    else:
-        resolved = config
-
-    return Harness(provider, resolved)
+    if isinstance(config, dict):
+        return Harness(HarnessConfig.from_dict(cast(dict[str, Any], config)))
+    return Harness(config)

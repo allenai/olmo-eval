@@ -6,6 +6,7 @@ and provides both single-turn and multi-turn interfaces.
 
 Key Components:
 - Tool: Unified schema + implementation for tools
+- ProviderConfig: Configuration for creating an InferenceProvider
 - HarnessConfig: Immutable configuration describing model capabilities
 - Harness: Wraps a provider with config, provides generate() and run()
 - Backend: Pluggable execution backends
@@ -14,26 +15,29 @@ Example:
     from olmo_eval.core.harness import (
         Harness,
         HarnessConfig,
+        ProviderConfig,
         Tool,
         tool,
         get_harness_preset,
     )
-    from olmo_eval.inference import VLLMProvider
 
     # Define a custom tool
     @tool(description="Search the web for information")
     async def web_search(query: str) -> str:
         return await search_api(query)
 
-    # Create harness with tools
-    provider = VLLMProvider("llama3.1-8b")
+    # Create harness with provider config
     config = HarnessConfig(
         name="search_agent",
+        provider=ProviderConfig(
+            kind="vllm",
+            model_name="llama3.1-8b",
+        ),
         tool_names=("web_search",),
         system_prompt="You have access to search tools.",
         max_turns=10,
     )
-    harness = Harness(provider, config)
+    harness = Harness(config)
 
     # Single-turn generation with tools
     outputs = harness.generate([request])
@@ -44,7 +48,7 @@ Example:
 
     # Or use a preset
     config = get_harness_preset("search")
-    harness = Harness(provider, config)
+    harness = Harness(config)
 """
 
 from .backends import (
@@ -57,7 +61,7 @@ from .backends import (
     list_backends,
     register_backend,
 )
-from .config import HarnessConfig, harness_config
+from .config import HarnessConfig, ProviderConfig, harness_config
 from .harness import Harness, create_harness
 from .presets import (
     get_harness_preset,
@@ -83,6 +87,7 @@ __all__ = [
     "Harness",
     "HarnessConfig",
     "HarnessResult",
+    "ProviderConfig",
     "Tool",
     # Factory functions
     "create_harness",
