@@ -51,11 +51,11 @@ class TestHarnessConfig:
         """Test HarnessConfig with tool names."""
         config = HarnessConfig(
             name="with_tools",
-            tool_names=("sample_tool",),
+            tools=("sample_tool",),
         )
 
         assert config.has_tools is True
-        tools = config.tools
+        tools = config.resolved_tools
         assert len(tools) == 1
         assert tools[0].name == "sample_tool"
 
@@ -63,7 +63,7 @@ class TestHarnessConfig:
         """Test getting tool schemas from config."""
         config = HarnessConfig(
             name="schemas",
-            tool_names=("sample_tool",),
+            tools=("sample_tool",),
         )
 
         schemas = config.tool_schemas
@@ -79,7 +79,7 @@ class TestHarnessConfig:
         """Test to_dict / from_dict round-trip."""
         config = HarnessConfig(
             name="serialize",
-            tool_names=("tool_a", "tool_b"),
+            tools=("tool_a", "tool_b"),
             system_prompt="Test prompt",
             tool_choice="required",
             max_turns=5,
@@ -156,6 +156,8 @@ class TestHarnessConfigFactory:
         @tool(name="factory_tool")
         async def factory_func(x: str) -> str:
             return x
+
+        register_tool(factory_func)
 
         config = harness_config(
             name="factory_test",

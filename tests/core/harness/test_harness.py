@@ -90,7 +90,7 @@ class TestHarness:
         """Test that _apply_config injects tool schemas."""
         config = HarnessConfig(
             name="with_tools",
-            tool_names=("test_search",),
+            tools=("test_search",),
         )
         harness = Harness(config, provider=mock_provider)
 
