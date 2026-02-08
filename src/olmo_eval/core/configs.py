@@ -97,11 +97,8 @@ def validate_tasks(tasks: list[str]) -> tuple[list[str], list[str]]:
     return valid_tasks, invalid_tasks
 
 
-# Keys that are vLLM/backend-specific and should not be passed to ProviderConfig
-# These are handled separately by the runners
+# Keys that are runner-specific and should not be passed to ProviderConfig
 _BACKEND_ONLY_KEYS = {
-    "load_format",
-    "extra_loader_config",
     "attention_backend",
     "gpus_per_worker",
     "gpus",

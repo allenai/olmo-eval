@@ -225,12 +225,6 @@ class RunConfigBuilder:
         """
         from omegaconf import OmegaConf
 
-        from olmo_eval.core.configs import get_provider_config
-
-        # Build provider config from model name and overrides
-        provider_config = get_provider_config(model_name, **model_overrides)
-
-        # Now resolve harness config
         if self.harness_preset and self.harness_config_path:
             console.print("[red]Error:[/red] Cannot specify both --harness and --harness-config")
             raise SystemExit(1)
@@ -274,7 +268,6 @@ class RunConfigBuilder:
                 raise SystemExit(1) from None
 
         else:
-            # Create default harness config
             harness_config = HarnessConfig(name="default")
 
         # Apply CLI overrides to harness config
@@ -286,7 +279,35 @@ class RunConfigBuilder:
             harness_dict = OmegaConf.to_container(merged, resolve=True)
             harness_config = HarnessConfig.from_dict(harness_dict)  # type: ignore[arg-type]
 
-        # Inject the provider config into harness config
+        # Build provider config: harness preset is base, model_name goes into provider
+        provider_config = self._build_provider_config(
+            model_name, harness_config.provider, model_overrides
+        )
         harness_config = harness_config.with_provider(provider_config)
 
         return harness_config
+
+    def _build_provider_config(
+        self, model_name: str, base: ProviderConfig, overrides: dict[str, Any]
+    ) -> ProviderConfig:
+        """Build provider config with model_name and overrides.
+
+        The harness preset's provider config provides the base configuration.
+        The model_name from CLI is set as provider.model_name.
+        CLI overrides are applied on top.
+        """
+        return ProviderConfig(
+            kind=overrides.get("kind", base.kind),
+            model_name=model_name,
+            alias=overrides.get("alias", base.alias),
+            base_url=overrides.get("base_url", base.base_url),
+            tokenizer=overrides.get("tokenizer", base.tokenizer),
+            revision=overrides.get("revision", base.revision),
+            trust_remote_code=overrides.get("trust_remote_code", base.trust_remote_code),
+            dtype=overrides.get("dtype", base.dtype),
+            max_model_len=overrides.get("max_model_len", base.max_model_len),
+            max_concurrency=overrides.get("max_concurrency", base.max_concurrency),
+            required_secrets=base.required_secrets,
+            package=overrides.get("package", base.package),
+            kwargs={**base.kwargs, **overrides.get("kwargs", {})},
+        )

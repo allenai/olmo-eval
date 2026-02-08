@@ -248,8 +248,8 @@ class AsyncEvalRunner(BaseEvalRunner):
                         self.attention_backend,
                         self.provider_config.tokenizer,
                         self.provider_config.max_model_len,
-                        None,  # load_format - not currently exposed via ProviderConfig
-                        None,  # extra_loader_config - not currently exposed
+                        self.provider_config.kwargs.get("load_format"),
+                        self.provider_config.kwargs.get("extra_loader_config"),
                         self.provider_config.max_concurrency,
                         init_times,
                         self.harness_config.to_dict(),

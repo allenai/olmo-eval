@@ -86,8 +86,8 @@ class BeakerModelSpec:
         num_workers: Number of workers for async modes (overrides default).
         gpus_per_worker: GPUs per worker for async modes (overrides default).
         provider: Inference provider configuration (ProviderConfig with name and optional package).
-        load_format: vLLM model loading format (e.g., "runai_streamer" for distributed loading).
-        extra_loader_config: Extra config for model loader (e.g., {"distributed": true}).
+        kwargs: Provider-specific keyword arguments passed to the harness ProviderConfig.
+            For vLLM: load_format, extra_loader_config, etc.
 
     Example:
         models:
@@ -111,10 +111,11 @@ class BeakerModelSpec:
             gpus: 4
             provider:
               name: vllm
-            load_format: runai_streamer  # Use distributed streaming loader
-            extra_loader_config:
-              distributed: true
-              concurrency: 16
+            kwargs:
+              load_format: runai_streamer  # vLLM distributed streaming loader
+              extra_loader_config:
+                distributed: true
+                concurrency: 16
     """
 
     name_or_path: str = MISSING
@@ -129,12 +130,8 @@ class BeakerModelSpec:
     num_workers: int | None = None
     gpus_per_worker: int | None = None
 
-    # Runtime inference provider installation
     provider: ProviderConfig | None = None
-
-    # vLLM model loading configuration
-    load_format: str | None = None
-    extra_loader_config: dict[str, Any] | None = None  # e.g., {"distributed": true}
+    kwargs: dict[str, Any] | None = None
 
 
 def apply_overrides_to_model(name_or_path: str, overrides: list[str]) -> BeakerModelSpec:
@@ -507,8 +504,7 @@ class EvalConfig:
             "provider": provider_name,
             "provider_package": provider_package,
             "provider_max_concurrency": provider_max_concurrency,
-            "load_format": model.load_format,
-            "extra_loader_config": model.extra_loader_config,
+            "kwargs": model.kwargs,  # Provider-specific kwargs (e.g., load_format for vLLM)
         }
 
     @classmethod

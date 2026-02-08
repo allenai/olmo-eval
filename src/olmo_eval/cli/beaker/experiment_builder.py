@@ -64,17 +64,15 @@ class ExperimentPlanBuilder:
         if not has_gpus_override:
             overrides.append(f"gpus={gpus}")
 
-        # Get model resources for additional overrides
         m_resources = self.model_grouper.get_model_resources(m_cfg, m_spec)
 
-        if m_resources.get("load_format"):
-            overrides.append(f"load_format={m_resources['load_format']}")
-
-        if m_resources.get("extra_loader_config"):
-            json_config = json_module.dumps(
-                m_resources["extra_loader_config"], separators=(",", ":")
-            )
-            overrides.append(f"extra_loader_config={json_config}")
+        if m_resources.get("kwargs"):
+            for key, value in m_resources["kwargs"].items():
+                if isinstance(value, dict):
+                    json_value = json_module.dumps(value, separators=(",", ":"))
+                    overrides.append(f"kwargs.{key}={json_value}")
+                else:
+                    overrides.append(f"kwargs.{key}={value}")
 
         return overrides
 

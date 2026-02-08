@@ -593,12 +593,13 @@ class TestApplyOverridesToModel:
         """Test with mix of simple and nested overrides."""
         config = apply_overrides_to_model(
             "llama3.1-8b",
-            ["gpus=4", "provider.kind=vllm", "load_format=auto"],
+            ["gpus=4", "provider.kind=vllm", "kwargs.load_format=auto"],
         )
         assert config.gpus == 4
         assert config.provider is not None
         assert config.provider.kind == "vllm"
-        assert config.load_format == "auto"
+        assert config.kwargs is not None
+        assert config.kwargs["load_format"] == "auto"
 
 
 class TestParseModelConfigWithOverridesParam:
@@ -702,12 +703,13 @@ class TestParseModelConfigWithProvider:
         """Test parsing model string with provider and other overrides."""
         config = parse_model_config(
             "llama3.1-8b",
-            overrides=["provider.kind=vllm", "load_format=auto"],
+            overrides=["provider.kind=vllm", "kwargs.load_format=auto"],
         )
         assert config.name_or_path == "llama3.1-8b"
         assert config.provider is not None
         assert config.provider.kind == "vllm"
-        assert config.load_format == "auto"
+        assert config.kwargs is not None
+        assert config.kwargs["load_format"] == "auto"
 
 
 class TestEvalConfigWithProvider:
