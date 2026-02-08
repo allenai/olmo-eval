@@ -182,23 +182,69 @@ def process_batch(
         _process_with_provider(batch, provider, result_queue, pbar)
 
 
+def _format_error_detail(exc: Exception) -> str:
+    """Format exception with HTTP details for debugging."""
+    parts = [f"type: {type(exc).__qualname__}"]
+
+    # HTTP status code
+    status = getattr(exc, "status_code", None)
+    if status is not None:
+        parts.append(f"status_code: {status}")
+
+    # Request URL from response
+    response = getattr(exc, "response", None)
+    if response is not None:
+        url = getattr(response, "url", None)
+        if url is not None:
+            parts.append(f"url: {url}")
+
+    # Error message
+    message = getattr(exc, "message", None) or str(exc)
+    if len(message) > 500:
+        message = message[:500] + "..."
+    parts.append(f"message: {message}")
+
+    # Root cause (e.g., httpx.ReadTimeout)
+    cause = exc.__cause__
+    if cause is not None:
+        parts.append(f"cause: {type(cause).__qualname__}: {cause}")
+
+    return " | ".join(parts)
+
+
 def _is_retryable_error(error: Exception) -> bool:
     """Check if an error is transient and should be retried."""
-    error_str = str(error).lower()
+    # Check HTTP status code first (most reliable)
+    status_code = getattr(error, "status_code", None)
+    if status_code is not None:
+        status_code = int(status_code)
+        # Non-retryable: 400, 401, 403, 404, 422
+        if status_code in (400, 401, 403, 404, 422):
+            return False
+        # Retryable: 429, 5xx
+        if status_code in (429, 500, 502, 503, 504):
+            return True
+
+    # Check exception type name
     error_type = type(error).__name__
+    if error_type in ("BadRequestError", "UnprocessableEntityError", "NotFoundError"):
+        return False
+    if error_type in ("APITimeoutError", "APIConnectionError", "RateLimitError"):
+        return True
+
+    # Fall back to string matching for errors without status codes
+    error_str = str(error).lower()
 
     # Timeout errors are retryable
     if "timeout" in error_str or "timed out" in error_str:
         return True
 
     # Connection errors are retryable
-    if "connection" in error_str or "connect" in error_type.lower():
+    if "connection" in error_str:
         return True
 
     # Rate limit errors are retryable
     if "rate" in error_str and "limit" in error_str:
-        return True
-    if "429" in error_str or "ratelimit" in error_type.lower():
         return True
 
     # Server errors (5xx) are retryable
@@ -276,28 +322,22 @@ def _process_with_harness(
                         last_error = e
                         attempt += 1
 
+                        # Log full error details for debugging
+                        error_detail = _format_error_detail(e)
+                        logger.warning(
+                            f"Error on instance {item.instance_idx} "
+                            f"(attempt {attempt}/{max_retries + 1}): {error_detail}"
+                        )
+
                         if attempt <= max_retries and _is_retryable_error(e):
                             delay = retry_delay * (2 ** (attempt - 1))
-                            logger.warning(
-                                f"Retryable error on instance {item.instance_idx} "
-                                f"(attempt {attempt}/{max_retries + 1}): {e}. "
-                                f"Retrying in {delay:.1f}s..."
-                            )
+                            logger.info(f"Retrying in {delay:.1f}s...")
                             await asyncio.sleep(delay)
                         else:
                             break  # Non-retryable or max retries exceeded
 
                 # All retries exhausted or non-retryable error
-                error_type = type(last_error).__name__
-                error_msg = str(last_error)
-
-                if "timeout" in error_msg.lower() or "timed out" in error_msg.lower():
-                    error_detail = (
-                        f"Request timed out after {attempt} attempts "
-                        f"(instance {item.instance_idx}): {error_msg}"
-                    )
-                else:
-                    error_detail = f"{error_type} after {attempt} attempts: {error_msg}"
+                error_detail = _format_error_detail(last_error)
 
                 result_queue.put(
                     ResultItem(
