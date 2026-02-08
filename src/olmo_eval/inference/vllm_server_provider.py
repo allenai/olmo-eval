@@ -118,15 +118,29 @@ class VLLMServerProvider(InferenceProvider):
 
             self._openai_module = openai
 
-            # Add request/response logging if debug mode enabled
+            # Configure connection pool limits to prevent exhaustion with large batches.
+            # Default httpx settings (100 connections) can cause issues when processing
+            # thousands of instances with agent loops making multiple API calls each.
+            limits = httpx.Limits(
+                max_keepalive_connections=20,
+                max_connections=50,
+                keepalive_expiry=30.0,  # Close idle connections after 30s
+            )
+
+            # Build event hooks for debug logging if enabled
+            event_hooks: dict[str, list[Any]] | None = None
             if _DEBUG_REQUESTS:
                 logger.info("vLLM debug request logging enabled (VLLM_DEBUG_REQUESTS=1)")
-                self._http_client = httpx.AsyncClient(
-                    event_hooks={
-                        "request": [_log_request],
-                        "response": [_log_response],
-                    }
-                )
+                event_hooks = {
+                    "request": [_log_request],
+                    "response": [_log_response],
+                }
+
+            self._http_client = httpx.AsyncClient(
+                limits=limits,
+                timeout=self.timeout,
+                event_hooks=event_hooks or {},
+            )
 
             self._client = AsyncOpenAI(
                 base_url=self.base_url,
