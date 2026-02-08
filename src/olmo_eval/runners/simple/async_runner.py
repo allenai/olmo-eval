@@ -21,7 +21,7 @@ from olmo_eval.core.logging import get_logger, get_worker_id
 from olmo_eval.core.types import Response
 from olmo_eval.inference import ProviderType
 from olmo_eval.runners.base import BaseEvalRunner
-from olmo_eval.runners.mixins import S3Config
+from olmo_eval.runners.mixins import RunnerResultsMixin, S3Config
 from olmo_eval.runners.simple.helpers import (
     check_workers_alive,
     terminate_workers,
@@ -48,7 +48,7 @@ logger = get_logger(__name__)
 
 
 @dataclass
-class AsyncEvalRunner(BaseEvalRunner):
+class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
     """Async evaluation runner with instance-level queuing.
 
     Uses a single model with instance-level queuing where instances from all
@@ -119,52 +119,6 @@ class AsyncEvalRunner(BaseEvalRunner):
         errors = self._validate_task_specs()
         if errors:
             raise ValidationError("\n".join(errors))
-
-    def _validate_task_specs(self) -> list[str]:
-        """Validate task specs and return list of errors.
-
-        Includes validation of task names and variants/regimes.
-        """
-        from olmo_eval.evals.suites import suite_exists
-        from olmo_eval.evals.tasks import list_regimes, list_tasks, list_variants
-        from olmo_eval.evals.tasks.core.registry import parse_task_spec
-
-        errors: list[str] = []
-        available_tasks = set(list_tasks())
-        regimes_by_task = list_regimes()
-        variants_by_task = list_variants()
-
-        for spec in self.task_specs:
-            if suite_exists(spec):
-                continue
-
-            # Parse task_name[:variant1[:variant2...]] format
-            task_name, variants, _overrides = parse_task_spec(spec)
-
-            if task_name not in available_tasks:
-                errors.append(f"Unknown task or suite: '{spec}'")
-                continue
-
-            # Validate each variant/regime exists (check both registries)
-            task_variants = set(variants_by_task.get(task_name, []))
-            task_regimes = set(regimes_by_task.get(task_name, []))
-            all_valid_variants = task_variants | task_regimes
-
-            for variant in variants:
-                if variant not in all_valid_variants:
-                    available_list = sorted(all_valid_variants)
-                    if available_list:
-                        errors.append(
-                            f"Unknown variant/regime '{variant}' for task '{task_name}'. "
-                            f"Available: {', '.join(available_list)}"
-                        )
-                    else:
-                        errors.append(
-                            f"Unknown variant/regime '{variant}' for task '{task_name}'. "
-                            f"This task has no registered variants or regimes."
-                        )
-
-        return errors
 
     def print_config(self) -> None:
         """Print runner configuration."""
@@ -674,19 +628,15 @@ class AsyncEvalRunner(BaseEvalRunner):
     ) -> dict[str, Any]:
         """Log summary, write metrics, upload to S3, and save results."""
         from olmo_eval.core.types import compute_model_hash
-        from olmo_eval.runners.metrics import log_summary, write_metrics_json
-        from olmo_eval.runners.storage import save_results, upload_to_s3
 
-        log_summary(results_dict, multi_model=False)
+        self._log_summary(results_dict)
 
         experiment_id = generate_experiment_id()
         model_hash = compute_model_hash(results_dict.get("model_config", {}))
         results_dict["_model_hash"] = model_hash
 
-        write_metrics_json(
-            output_dir=self.output_dir,
+        self._write_metrics_json(
             results=results_dict,
-            multi_model=False,
             experiment_id=experiment_id,
             experiment_name=self.experiment_name,
             experiment_group=self.experiment_group,
@@ -697,9 +647,7 @@ class AsyncEvalRunner(BaseEvalRunner):
 
         s3_location: str | None = None
         if self.s3_config and model_hash:
-            s3_location = upload_to_s3(
-                output_dir=self.output_dir,
-                s3_config=self.s3_config,
+            s3_location = self._upload_to_s3(
                 model_name=self.model_name,
                 model_hash=model_hash,
                 experiment_id=experiment_id,
@@ -708,33 +656,13 @@ class AsyncEvalRunner(BaseEvalRunner):
         results_dict["_experiment_id"] = experiment_id
         results_dict["_s3_location"] = s3_location
 
-        save_results(
+        self._save_results(
             results=results_dict,
-            storages=self.storages,
-            s3_config=self.s3_config,
             experiment_id=experiment_id,
             model_hash=model_hash,
             s3_location=s3_location,
-            experiment_name=self.experiment_name,
-            experiment_group=self.experiment_group,
             experiment_duration_seconds=experiment_duration_seconds,
             provider_init_seconds=provider_init_seconds,
         )
 
         return results_dict
-
-    def _write_predictions(
-        self, model_name: str, spec: str, predictions: list[dict], task_hash: str | None = None
-    ) -> None:
-        """Write per-instance predictions to JSONL."""
-        from olmo_eval.runners.writers import write_predictions_jsonl
-
-        write_predictions_jsonl(self.output_dir, spec, predictions, model_name, task_hash=task_hash)
-
-    def _write_requests(
-        self, model_name: str, spec: str, requests: list[dict], task_hash: str | None = None
-    ) -> None:
-        """Write per-instance requests to JSONL."""
-        from olmo_eval.runners.writers import write_requests_jsonl
-
-        write_requests_jsonl(self.output_dir, spec, requests, model_name, task_hash=task_hash)

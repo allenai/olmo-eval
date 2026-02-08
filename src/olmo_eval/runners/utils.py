@@ -7,7 +7,6 @@ New code should import directly from the specific modules:
 - aggregation: compute_suite_aggregations
 - builders: build_predictions, build_requests
 - writers: write_predictions_jsonl, write_requests_jsonl
-- execution: run_task_impl
 """
 
 from __future__ import annotations
@@ -29,7 +28,6 @@ from olmo_eval.runners.common import (
     sanitize_spec_for_filename,
     serialize_sampling_params,
 )
-from olmo_eval.runners.execution import run_task_impl
 from olmo_eval.runners.types import PREDICTIONS_SUFFIX, REQUESTS_SUFFIX, TaskResult
 from olmo_eval.runners.writers import write_predictions_jsonl, write_requests_jsonl
 
@@ -50,7 +48,6 @@ __all__ = [
     "log_task_metrics",
     "make_metric_key",
     "parse_metric_key",
-    "run_task_impl",
     "sanitize_spec_for_filename",
     "serialize_sampling_params",
     "write_predictions_jsonl",
