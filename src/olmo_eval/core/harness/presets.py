@@ -112,7 +112,7 @@ def _dr_tulu_preset() -> HarnessConfig:
         name="dr_tulu",
         provider=ProviderConfig(
             kind=ProviderKind.VLLM_SERVER,
-            kwargs={"timeout": 300.0},  # 5 minutes for agent tasks with tool calls
+            kwargs={"timeout": 120},
         ),
         tools=(semantic_scholar_search, serper_web_search, serper_fetch_page),
         system_prompt=DR_TULU_SYSTEM_PROMPT,

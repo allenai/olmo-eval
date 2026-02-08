@@ -42,18 +42,39 @@ class TaskTracker:
     total_instances: int
     completed_count: int = 0
     responses: dict[int, Response] = field(default_factory=dict)
-    error: str | None = None
+    failed_instances: dict[int, str] = field(default_factory=dict)  # idx -> error message
+    error: str | None = None  # Task-level error (e.g., prep failed)
     start_time: float = field(default_factory=time.time)
 
     def is_complete(self) -> bool:
-        """Check if task is complete (all instances done or error occurred)."""
-        return self.completed_count >= self.total_instances or self.error is not None
+        """Check if task is complete (all instances done, including failed ones)."""
+        if self.error is not None:
+            return True  # Task-level error stops everything
+        processed = self.completed_count + len(self.failed_instances)
+        return processed >= self.total_instances
 
     def add_response(self, idx: int, response: Response) -> bool:
         """Add a response. Returns True if task is now complete."""
         self.responses[idx] = response
         self.completed_count += 1
         return self.is_complete()
+
+    def add_failure(self, idx: int, error: str) -> bool:
+        """Record a failed instance. Returns True if task is now complete."""
+        self.failed_instances[idx] = error
+        return self.is_complete()
+
+    def get_error_summary(self) -> str | None:
+        """Get summary of failures, if any."""
+        if self.error:
+            return self.error
+        if not self.failed_instances:
+            return None
+        if len(self.failed_instances) == 1:
+            idx, err = next(iter(self.failed_instances.items()))
+            return f"Instance {idx} failed: {err}"
+        first_error = next(iter(self.failed_instances.values()))
+        return f"{len(self.failed_instances)} instances failed (first: {first_error})"
 
 
 @dataclass
@@ -168,6 +189,7 @@ def finalize_task(tracker: TaskTracker) -> TaskResult:
 
     duration = time.time() - tracker.start_time
 
+    # Task-level error (e.g., prep failed) - no results possible
     if tracker.error:
         return TaskResult(
             spec=tracker.spec,
@@ -188,7 +210,20 @@ def finalize_task(tracker: TaskTracker) -> TaskResult:
             duration_seconds=duration,
         )
 
-    # Sort responses by index
+    # Check if we have any successful responses
+    if not tracker.responses:
+        # All instances failed
+        error_summary = tracker.get_error_summary() or "All instances failed"
+        return TaskResult(
+            spec=tracker.spec,
+            config=tracker.task.config.to_dict(),
+            num_instances=tracker.total_instances,
+            metrics={},
+            error=error_summary,
+            duration_seconds=duration,
+        )
+
+    # Sort responses by index (only successful ones)
     responses = [tracker.responses[i] for i in sorted(tracker.responses.keys())]
 
     # Score and compute metrics
@@ -204,6 +239,15 @@ def finalize_task(tracker: TaskTracker) -> TaskResult:
     # Extract metric metadata (returns "metric:scorer" format)
     primary_metric = get_metric_metadata(tracker.task)
 
+    # Add warning about failed instances if any
+    error_summary = tracker.get_error_summary()
+    if error_summary:
+        # Log failed instances but still return partial results
+        logger.warning(
+            f"Task {tracker.spec} completed with failures: {error_summary}. "
+            f"Computed metrics on {len(responses)}/{tracker.total_instances} instances."
+        )
+
     return TaskResult(
         spec=tracker.spec,
         config=task_config.to_dict(),
@@ -212,6 +256,8 @@ def finalize_task(tracker: TaskTracker) -> TaskResult:
         duration_seconds=duration,
         predictions=predictions,
         primary_metric=primary_metric,
+        # Include error summary if there were partial failures
+        error=error_summary if tracker.failed_instances else None,
     )
 
 

@@ -182,13 +182,50 @@ def process_batch(
         _process_with_provider(batch, provider, result_queue, pbar)
 
 
+def _is_retryable_error(error: Exception) -> bool:
+    """Check if an error is transient and should be retried."""
+    error_str = str(error).lower()
+    error_type = type(error).__name__
+
+    # Timeout errors are retryable
+    if "timeout" in error_str or "timed out" in error_str:
+        return True
+
+    # Connection errors are retryable
+    if "connection" in error_str or "connect" in error_type.lower():
+        return True
+
+    # Rate limit errors are retryable
+    if "rate" in error_str and "limit" in error_str:
+        return True
+    if "429" in error_str or "ratelimit" in error_type.lower():
+        return True
+
+    # Server errors (5xx) are retryable
+    if "500" in error_str or "502" in error_str or "503" in error_str or "504" in error_str:
+        return True
+
+    return "internal" in error_str and "error" in error_str
+
+
 def _process_with_harness(
     batch: list[QueueItem],
     harness: Harness,
     result_queue: mp.Queue,
     pbar: Any,
+    max_retries: int = 2,
+    retry_delay: float = 2.0,
 ) -> None:
-    """Process batch using harness.run(), streaming results as they complete."""
+    """Process batch using harness.run(), streaming results as they complete.
+
+    Args:
+        batch: Queue items to process.
+        harness: Harness instance for execution.
+        result_queue: Queue to put results.
+        pbar: Progress bar to update.
+        max_retries: Maximum retry attempts for transient errors.
+        retry_delay: Base delay between retries (exponential backoff).
+    """
     from dataclasses import replace as dataclass_replace
 
     async def run_batch_async() -> None:
@@ -196,51 +233,84 @@ def _process_with_harness(
 
         async def run_one(item: QueueItem) -> None:
             async with semaphore:
-                try:
-                    harness_result = await harness.run(item.request, item.sampling_params)
+                last_error: Exception | None = None
+                attempt = 0
 
-                    final_output = harness_result.final_output
+                while attempt <= max_retries:
+                    try:
+                        harness_result = await harness.run(item.request, item.sampling_params)
 
-                    # Add trajectory metadata if present (for tool-based execution)
-                    if harness_result.trajectory.num_turns > 1 or harness.config.has_tools:
-                        output_with_metadata = dataclass_replace(
-                            final_output,
-                            metadata={
-                                **(final_output.metadata or {}),
-                                "trajectory": harness_result.trajectory.to_dict(),
-                                "max_turns_reached": harness_result.max_turns_reached,
-                                "total_tool_calls": harness_result.total_tool_calls,
-                                "num_turns": harness_result.num_turns,
-                            },
+                        final_output = harness_result.final_output
+
+                        # Add trajectory metadata if present (for tool-based execution)
+                        if harness_result.trajectory.num_turns > 1 or harness.config.has_tools:
+                            output_with_metadata = dataclass_replace(
+                                final_output,
+                                metadata={
+                                    **(final_output.metadata or {}),
+                                    "trajectory": harness_result.trajectory.to_dict(),
+                                    "max_turns_reached": harness_result.max_turns_reached,
+                                    "total_tool_calls": harness_result.total_tool_calls,
+                                    "num_turns": harness_result.num_turns,
+                                },
+                            )
+                        else:
+                            output_with_metadata = final_output
+
+                        result_queue.put(
+                            ResultItem(
+                                model_name=item.model_name,
+                                task_id=item.task_id,
+                                instance_idx=item.instance_idx,
+                                instance=item.instance,
+                                request=item.request,
+                                outputs=[output_with_metadata],
+                                error=harness_result.error,
+                                attempt=attempt,
+                            )
                         )
-                    else:
-                        output_with_metadata = final_output
+                        pbar.update(1)
+                        return  # Success, exit retry loop
 
-                    result_queue.put(
-                        ResultItem(
-                            model_name=item.model_name,
-                            task_id=item.task_id,
-                            instance_idx=item.instance_idx,
-                            instance=item.instance,
-                            request=item.request,
-                            outputs=[output_with_metadata],
-                            error=harness_result.error,
-                            attempt=item.attempt,
-                        )
+                    except Exception as e:
+                        last_error = e
+                        attempt += 1
+
+                        if attempt <= max_retries and _is_retryable_error(e):
+                            delay = retry_delay * (2 ** (attempt - 1))
+                            logger.warning(
+                                f"Retryable error on instance {item.instance_idx} "
+                                f"(attempt {attempt}/{max_retries + 1}): {e}. "
+                                f"Retrying in {delay:.1f}s..."
+                            )
+                            await asyncio.sleep(delay)
+                        else:
+                            break  # Non-retryable or max retries exceeded
+
+                # All retries exhausted or non-retryable error
+                error_type = type(last_error).__name__
+                error_msg = str(last_error)
+
+                if "timeout" in error_msg.lower() or "timed out" in error_msg.lower():
+                    error_detail = (
+                        f"Request timed out after {attempt} attempts "
+                        f"(instance {item.instance_idx}): {error_msg}"
                     )
-                except Exception as e:
-                    result_queue.put(
-                        ResultItem(
-                            model_name=item.model_name,
-                            task_id=item.task_id,
-                            instance_idx=item.instance_idx,
-                            instance=item.instance,
-                            request=item.request,
-                            outputs=[],
-                            error=str(e),
-                            attempt=item.attempt,
-                        )
+                else:
+                    error_detail = f"{error_type} after {attempt} attempts: {error_msg}"
+
+                result_queue.put(
+                    ResultItem(
+                        model_name=item.model_name,
+                        task_id=item.task_id,
+                        instance_idx=item.instance_idx,
+                        instance=item.instance,
+                        request=item.request,
+                        outputs=[],
+                        error=error_detail,
+                        attempt=attempt,
                     )
+                )
                 pbar.update(1)
 
         await asyncio.gather(*[run_one(item) for item in batch])

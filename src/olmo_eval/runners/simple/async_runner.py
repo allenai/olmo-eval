@@ -521,13 +521,19 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             tracker = trackers[result_item.task_id]
 
             if tracker.error:
+                # Task-level error already set (e.g., prep failed)
                 pending_instances -= 1
                 continue
 
             if result_item.error:
-                tracker.error = f"Instance {result_item.instance_idx} failed: {result_item.error}"
+                # Instance-level failure - log but continue processing other instances
+                logger.warning(
+                    f"Instance {result_item.instance_idx} failed for {result_item.task_id}: "
+                    f"{result_item.error}"
+                )
+                is_complete = tracker.add_failure(result_item.instance_idx, result_item.error)
                 pending_instances -= 1
-                if tracker.is_complete():
+                if is_complete:
                     task_result = finalize_task(tracker)
                     results[result_item.task_id] = task_result
                     completed_tasks += 1
