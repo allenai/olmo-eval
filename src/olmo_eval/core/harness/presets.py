@@ -129,5 +129,5 @@ def _dr_tulu_preset() -> HarnessConfig:
         max_turns=10,
         max_concurrency=8,
         backend="openai_agents",
-        required_secrets=("S2_API_KEY", "SERPER_API_KEY"),
+        required_secrets=("S2_API_KEY", "SERPER_API_KEY", "OPENAI_API_KEY"),
     )
