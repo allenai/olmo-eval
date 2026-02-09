@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING, Any
 from olmo_eval.core.debug import is_debug_provider, is_debug_requests
 from olmo_eval.core.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
 
-from .base import InferenceProvider
-from .tokenizer_utils import encode_context_and_continuation
+from ..base import InferenceProvider
+from ..tokenizer_utils import encode_context_and_continuation
 
 logger = logging.getLogger(__name__)
 

@@ -54,7 +54,6 @@ Example:
 from .backends import (
     BACKEND_REGISTRY,
     Backend,
-    DefaultBackend,
     OpenAIAgentsBackend,
     get_backend,
     get_backend_extras,
@@ -104,7 +103,6 @@ __all__ = [
     "TOOL_REGISTRY",
     # Backends
     "Backend",
-    "DefaultBackend",
     "OpenAIAgentsBackend",
     "BACKEND_REGISTRY",
     "get_backend",

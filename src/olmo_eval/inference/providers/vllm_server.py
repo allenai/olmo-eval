@@ -12,13 +12,13 @@ from olmo_eval.core.logging import get_logger
 from olmo_eval.core.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
 from olmo_eval.core.types.tools import ToolCall
 
-from .base import InferenceProvider
-from .retry import retry_with_backoff
+from ..base import InferenceProvider
+from ..retry import retry_with_backoff
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
 
-    from .vllm_server import VLLMServerProcess
+    from .vllm_server_utils import VLLMServerProcess
 
 logger = get_logger(__name__)
 
@@ -53,7 +53,7 @@ class VLLMServerProvider(InferenceProvider):
         self,
         model_name: str,
         base_url: str | None = None,
-        timeout: float = 120.0,
+        timeout: float = 30.0,
         max_concurrency: int = 32,
         max_retries: int = 3,
         retry_delay: float = 1.0,
@@ -98,7 +98,7 @@ class VLLMServerProvider(InferenceProvider):
             self.base_url = base_url
         else:
             # Start our own server
-            from olmo_eval.inference.vllm_server import VLLMServerProcess
+            from .vllm_server_utils import VLLMServerProcess
 
             # Build server kwargs
             srv_kwargs: dict[str, Any] = dict(server_kwargs)

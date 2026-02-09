@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from olmo_eval.core.types import LMOutput, LMRequest, SamplingParams
 
-from .backends import get_backend
+from .backends import Backend, get_backend
 from .config import HarnessConfig
 from .result import HarnessResult
 
@@ -22,28 +22,10 @@ class Harness:
     """An execution harness configured with specific capabilities.
 
     The Harness wraps an InferenceProvider (created from config) and applies
-    configuration to all requests. It provides both single-turn (generate)
+    configuration to all requests. It provides both single-turn (generate/agenerate)
     and multi-turn (run) interfaces.
 
-    Example:
-        from olmo_eval.core.harness import Harness, HarnessConfig, ProviderConfig
-
-        config = HarnessConfig(
-            name="search",
-            provider=ProviderConfig(
-                kind="vllm",
-                model="llama3.1-8b",
-            ),
-            tool_names=("web_search", "fetch_page"),
-            system_prompt="You have access to search tools.",
-        )
-        harness = Harness(config)
-
-        # Single generation (batched)
-        outputs = harness.generate([request1, request2])
-
-        # Multi-turn execution with tools
-        result = await harness.run(request)
+    For multi-turn execution with run(), a backend must be configured.
     """
 
     def __init__(self, config: HarnessConfig) -> None:
@@ -55,7 +37,7 @@ class Harness:
         """
         self.config = config
         self._provider: InferenceProvider | None = None
-        self.backend = get_backend(config.backend)
+        self._backend: Backend | None = None
 
     @property
     def provider(self) -> InferenceProvider:
@@ -66,6 +48,24 @@ class Harness:
         if self._provider is None:
             self._provider = self.config.provider.create_provider()
         return self._provider
+
+    @property
+    def backend(self) -> Backend:
+        """Get or create the backend.
+
+        The backend is lazily created from config.backend on first access.
+
+        Raises:
+            RuntimeError: If no backend is configured.
+        """
+        if self._backend is None:
+            if not self.config.backend:
+                raise RuntimeError(
+                    "No backend configured. Set config.backend to use run(). "
+                    "For single-turn generation, use generate() or agenerate() instead."
+                )
+            self._backend = get_backend(self.config.backend)
+        return self._backend
 
     @property
     def model_name(self) -> str:
@@ -146,6 +146,9 @@ class Harness:
 
         Returns:
             HarnessResult with trajectory and final output.
+
+        Raises:
+            RuntimeError: If no backend is configured.
         """
         return await self.backend.run(self.provider, self.config, request, sampling_params)
 

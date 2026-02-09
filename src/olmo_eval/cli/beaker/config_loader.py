@@ -36,7 +36,7 @@ class LaunchConfig:
 
     num_workers: int | None = None
     gpus_per_worker: int = 1
-    gpus: int = 1
+    gpus: int = 0
 
     s3_bucket: str | None = None
     s3_prefix: str | None = None
@@ -145,8 +145,14 @@ class LaunchConfigLoader:
             timeout = cli_timeout
             num_workers = self.cli_args.get("num_workers")
             gpus_per_worker = self.cli_args.get("gpus_per_worker", 1)
-            gpus = cli_gpus if cli_gpus is not None else 1
+            gpus = cli_gpus  # None means auto-detect from provider
             image = cli_image
+
+        # Auto-detect GPU requirements from provider if not explicitly set
+        if gpus is None and model_specs:
+            gpus = self._detect_gpu_requirement(model_specs[0])
+        elif gpus is None:
+            gpus = 0  # Default to 0 if no model specified
 
         max_gpus_per_node = (
             max_gpus_per_node if max_gpus_per_node is not None else DEFAULT_MAX_GPUS_PER_NODE
@@ -249,3 +255,21 @@ class LaunchConfigLoader:
                 "[red]Error:[/red] --s3-bucket and --s3-prefix are required when --store is enabled"
             )
             raise SystemExit(1) from None
+
+    def _detect_gpu_requirement(self, model_spec: str) -> int:
+        """Detect GPU requirement based on provider type.
+
+        Args:
+            model_spec: Model specification (name or preset).
+
+        Returns:
+            1 if provider requires GPU (vllm, hf), 0 otherwise (litellm, mock).
+        """
+        from olmo_eval.core.configs import get_provider_config
+
+        try:
+            provider_config = get_provider_config(model_spec)
+            return 1 if provider_config.requires_gpu else 0
+        except Exception:
+            # If we can't determine, default to 1 GPU for safety
+            return 1

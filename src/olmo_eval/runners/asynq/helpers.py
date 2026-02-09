@@ -199,7 +199,7 @@ async def process_chat_request(
         harness_result = await harness.run(item.request, item.sampling_params)
         final_output = harness_result.final_output
 
-        if harness_result.trajectory.num_turns > 1 or harness.config.has_tools:
+        if harness_result.trajectory is not None:
             output_with_metadata = dataclass_replace(
                 final_output,
                 metadata={

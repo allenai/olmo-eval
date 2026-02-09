@@ -3,7 +3,7 @@
 from olmo_eval.core.types import ProviderKind
 
 from .base import InferenceProvider
-from .mock import MockProvider
+from .providers.mock import MockProvider
 from .tokenizer_utils import (
     encode_context_and_continuation,
     get_bos_token_ids,
@@ -55,19 +55,19 @@ def create_provider(
         case "mock":
             return MockProvider(model_name)
         case "hf":
-            from .huggingface import HuggingFaceProvider
+            from .providers.huggingface import HuggingFaceProvider
 
             return HuggingFaceProvider(model_name, **kwargs)
         case "vllm":
-            from .vllm import VLLMProvider
+            from .providers.vllm import VLLMProvider
 
             return VLLMProvider(model_name, worker_id=worker_id, **kwargs)
         case "vllm_server":
-            from .vllm_server_provider import VLLMServerProvider
+            from .providers.vllm_server import VLLMServerProvider
 
             return VLLMServerProvider(model_name, **kwargs)
         case "litellm":
-            from .litellm import LiteLLMProvider
+            from .providers.litellm import LiteLLMProvider
 
             return LiteLLMProvider(model_name, **kwargs)
         case _:
@@ -77,19 +77,19 @@ def create_provider(
 # Lazy imports for optional dependencies
 def __getattr__(name: str):
     if name == "HuggingFaceProvider":
-        from .huggingface import HuggingFaceProvider
+        from .providers.huggingface import HuggingFaceProvider
 
         return HuggingFaceProvider
     if name == "VLLMProvider":
-        from .vllm import VLLMProvider
+        from .providers.vllm import VLLMProvider
 
         return VLLMProvider
     if name == "VLLMServerProvider":
-        from .vllm_server_provider import VLLMServerProvider
+        from .providers.vllm_server import VLLMServerProvider
 
         return VLLMServerProvider
     if name == "LiteLLMProvider":
-        from .litellm import LiteLLMProvider
+        from .providers.litellm import LiteLLMProvider
 
         return LiteLLMProvider
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

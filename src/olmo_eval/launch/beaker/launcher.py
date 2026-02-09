@@ -378,7 +378,7 @@ class BeakerJobConfig:
     budget: str  # Beaker budget
 
     # Resources
-    num_gpus: int = 1
+    num_gpus: int = 0
     shared_memory: str = "10GiB"
 
     # Job settings

@@ -60,6 +60,18 @@ class ProviderConfig:
     package: str | None = None
     kwargs: Mapping[str, Any] = field(default_factory=dict)
 
+    # Providers that require GPU resources for local inference
+    _GPU_PROVIDERS: ClassVar[frozenset[str]] = frozenset({"vllm", "vllm_server", "hf"})
+
+    @property
+    def requires_gpu(self) -> bool:
+        """Whether this provider requires GPU resources.
+
+        Returns True for local inference providers (vllm, vllm_server, hf).
+        Returns False for API-based providers (litellm, mock).
+        """
+        return str(self.kind) in self._GPU_PROVIDERS
+
     # Config fields accepted by each provider kind (fields with non-default values are passed)
     _PROVIDER_FIELDS: ClassVar[dict[str, tuple[str, ...]]] = {
         "vllm": ("tokenizer", "revision", "trust_remote_code", "dtype", "max_model_len"),
@@ -272,7 +284,7 @@ class HarnessConfig:
     tools: tuple[Tool | str, ...] = ()
     system_prompt: str | None = None
     tool_choice: Literal["auto", "none", "required"] | str = "auto"
-    backend: str = "default"
+    backend: str | None = None
     required_secrets: tuple[str, ...] = ()  # For tools
     max_turns: int | None = None
     max_concurrency: int | None = None  # For agent execution
@@ -374,7 +386,7 @@ class HarnessConfig:
             tools=tuple(data.get("tool_names", [])),
             system_prompt=data.get("system_prompt"),
             tool_choice=data.get("tool_choice", "auto"),
-            backend=data.get("backend", "default"),
+            backend=data.get("backend"),
             required_secrets=tuple(data.get("required_secrets", [])),
             max_turns=data.get("max_turns"),
             max_concurrency=data.get("max_concurrency"),
@@ -500,7 +512,7 @@ def harness_config(
     tools: Sequence[Tool | str] = (),
     system_prompt: str | None = None,
     tool_choice: Literal["auto", "none", "required"] | str = "auto",
-    backend: str = "default",
+    backend: str | None = None,
     required_secrets: Sequence[str] = (),
     max_turns: int | None = None,
     max_concurrency: int | None = None,
@@ -513,7 +525,7 @@ def harness_config(
         tools: Sequence of Tool instances or tool names.
         system_prompt: System prompt to prepend to requests.
         tool_choice: How the model should use tools.
-        backend: Backend name.
+        backend: Backend name (None = no multi-turn support via run()).
         required_secrets: Environment variable names for tools.
         max_turns: Maximum turns for agent backends (None = backend default).
         max_concurrency: Maximum concurrent tool executions for agent backends.

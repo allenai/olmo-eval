@@ -2,7 +2,7 @@
 
 from olmo_eval.core.types import LMOutput, LMRequest, SamplingParams
 
-from .base import InferenceProvider
+from ..base import InferenceProvider
 
 
 class MockProvider(InferenceProvider):

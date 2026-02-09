@@ -45,7 +45,7 @@ class TestHarnessConfig:
         assert config.tool_choice == "auto"
         assert config.max_turns is None
         assert config.max_concurrency is None
-        assert config.backend == "default"
+        assert config.backend is None
 
     def test_config_with_tools(self, sample_tool):
         """Test HarnessConfig with tool names."""

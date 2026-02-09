@@ -206,12 +206,11 @@ class TestHarnessRun:
     """Tests for Harness.run() multi-turn execution."""
 
     @pytest.mark.anyio
-    async def test_harness_run_no_tools(self, mock_provider_config):
-        """Test run completes immediately when no tools used."""
+    async def test_harness_run_no_backend_raises(self, mock_provider_config):
+        """Test run raises error when no backend is configured."""
         config = HarnessConfig(
-            name="no_tools",
+            name="no_backend",
             provider=mock_provider_config,
-            backend="default",
         )
         harness = Harness(config)
 
@@ -220,8 +219,5 @@ class TestHarnessRun:
             messages=({"role": "user", "content": "Hello"},),
         )
 
-        result = await harness.run(request)
-
-        assert result.final_text is not None
-        assert result.num_turns == 1
-        assert result.max_turns_reached is False
+        with pytest.raises(RuntimeError, match="No backend configured"):
+            await harness.run(request)

@@ -12,21 +12,21 @@ if TYPE_CHECKING:
 
 @dataclass
 class HarnessResult:
-    """Result from Harness.run() multi-turn execution.
+    """Result from Harness.run() execution.
 
-    Contains the complete trajectory of agent-tool interactions,
-    the final output, and metadata about the execution.
+    Contains the final output and optionally a trajectory of agent-tool
+    interactions for multi-turn execution.
 
     Attributes:
-        trajectory: Complete record of turns (assistant messages, tool calls, results).
         final_output: The final LMOutput from the last assistant turn.
+        trajectory: Complete record of turns (None for single-turn without tools).
         max_turns_reached: Whether execution stopped due to reaching max_turns.
         error: Error message if execution failed.
         metadata: Additional metadata about the execution.
     """
 
-    trajectory: AgentTrajectory
     final_output: LMOutput
+    trajectory: AgentTrajectory | None = None
     max_turns_reached: bool = False
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -54,18 +54,18 @@ class HarnessResult:
         """Count total tool calls in the trajectory.
 
         Returns:
-            Total number of tool calls made.
+            Total number of tool calls made (0 if no trajectory).
         """
-        return self.trajectory.total_tool_calls
+        return self.trajectory.total_tool_calls if self.trajectory else 0
 
     @property
     def num_turns(self) -> int:
         """Get the number of turns in the trajectory.
 
         Returns:
-            Number of turns.
+            Number of turns (1 if no trajectory).
         """
-        return self.trajectory.num_turns
+        return self.trajectory.num_turns if self.trajectory else 1
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization.
@@ -74,7 +74,7 @@ class HarnessResult:
             Dictionary representation of the result.
         """
         return {
-            "trajectory": self.trajectory.to_dict(),
+            "trajectory": self.trajectory.to_dict() if self.trajectory else None,
             "final_output": {
                 "text": self.final_output.text,
                 "extracted_answer": self.final_output.extracted_answer,

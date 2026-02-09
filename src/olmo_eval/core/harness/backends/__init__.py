@@ -135,13 +135,11 @@ def get_backend_extras(name: str) -> tuple[str, ...]:
 
 
 # Import backends to trigger registration
-from .default import DefaultBackend  # noqa: E402
 from .openai_agents import OpenAIAgentsBackend  # noqa: E402
 
 __all__ = [
     "Backend",
     "BACKEND_REGISTRY",
-    "DefaultBackend",
     "OpenAIAgentsBackend",
     "get_backend",
     "get_backend_extras",

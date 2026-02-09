@@ -135,7 +135,7 @@ class TestBeakerJobConfig:
         )
         assert config.name == "test-job"
         assert config.command == ["echo", "hello"]
-        assert config.num_gpus == 1
+        assert config.num_gpus == 0
         assert config.cluster == "h100"
         assert config.workspace == "ai2/oe-data"
         assert config.budget == "ai2/oe-base"

@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
 from abc import ABC, abstractmethod
-from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.core.types import LMOutput, LMRequest, SamplingParams
@@ -72,22 +70,17 @@ class InferenceProvider(ABC):
     ) -> list[list[LMOutput]]:
         """Async version of generate.
 
-        Override this method for providers with native async support.
-        Default implementation runs generate() in a thread pool.
-
         Args:
             requests: Batch of requests to process.
             sampling_params: Sampling configuration.
 
         Returns:
             List of output lists, one per request.
+
+        Raises:
+            NotImplementedError: If provider doesn't support async generation.
         """
-        loop = asyncio.get_running_loop()
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            return await loop.run_in_executor(
-                executor,
-                lambda: self.generate(requests, sampling_params),
-            )
+        raise NotImplementedError(f"{type(self).__name__} does not support async generation")
 
     async def alogprobs(
         self,
@@ -95,21 +88,16 @@ class InferenceProvider(ABC):
     ) -> list[list[LMOutput]]:
         """Async version of logprobs.
 
-        Override this method for providers with native async support.
-        Default implementation runs logprobs() in a thread pool.
-
         Args:
             requests: Batch of requests with continuations to score.
 
         Returns:
             List of output lists with logprobs populated.
+
+        Raises:
+            NotImplementedError: If provider doesn't support async logprobs.
         """
-        loop = asyncio.get_running_loop()
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            return await loop.run_in_executor(
-                executor,
-                lambda: self.logprobs(requests),
-            )
+        raise NotImplementedError(f"{type(self).__name__} does not support async logprobs")
 
     def _default_sampling_params(self, sampling_params: SamplingParams | None) -> SamplingParams:
         """Return sampling params with defaults applied."""

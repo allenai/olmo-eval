@@ -10,8 +10,8 @@ from olmo_eval.core.debug import is_debug_provider
 from olmo_eval.core.logging import get_logger
 from olmo_eval.core.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
 
-from .base import InferenceProvider
-from .retry import retry_with_backoff
+from ..base import InferenceProvider
+from ..retry import retry_with_backoff
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -294,6 +294,11 @@ class LiteLLMProvider(InferenceProvider):
             List of output lists with logprobs populated.
         """
         from tqdm import tqdm
+
+        logger.info(
+            f"Sending {len(requests)} logprob requests for {self.model_name}"
+            f" with max_concurrency {self.max_concurrency}"
+        )
 
         semaphore = asyncio.Semaphore(self.max_concurrency)
         pbar = tqdm(total=len(requests), desc="Processing instances", unit="inst")
