@@ -144,15 +144,9 @@ class OpenAIAgentsBackend(Backend):
             max_turns=max_turns,
         )
 
-        # TODO(undfined): REMOVE BEFORE MERGE
-        logger.info(result)
-
         # Convert result to HarnessResult
         trajectory = self._convert_trajectory(result)
         final_text = result.final_output if hasattr(result, "final_output") else ""
-
-        # TODO(undfined): REMOVE BEFORE MERGE
-        logger.info(trajectory)
 
         return HarnessResult(
             trajectory=trajectory,
@@ -177,59 +171,39 @@ class OpenAIAgentsBackend(Backend):
             item_class = type(item).__name__
 
             if item_class == "MessageOutputItem":
-                # Extract content from raw_item (ResponseOutputMessage)
                 raw = getattr(item, "raw_item", None)
                 content = ""
-
                 if raw is not None:
-                    # ResponseOutputMessage has 'content' which is a list of content parts
                     raw_content = getattr(raw, "content", None)
                     if raw_content:
                         for part in raw_content:
                             if hasattr(part, "text"):
                                 content += part.text
-
                 turns.append(AgentTurn.assistant(content=content))
 
             elif item_class == "ToolCallItem":
-                # Tool call from the model
                 raw = getattr(item, "raw_item", None)
-
-                # TODO(undfined): REMOVE BEFORE MERGE - debug logging
-                logger.info(f"ToolCallItem: raw_item type={type(raw)}, raw={raw}")
                 if raw is not None:
-                    logger.info(f"ToolCallItem: raw attrs={dir(raw)}")
-
-                if raw is not None:
-                    # Try call_id first (OpenAI Responses API), then id
-                    tc_id = getattr(raw, "call_id", None) or getattr(raw, "id", "")
-                    tc_name = getattr(raw, "name", "")
-                    tc_args = getattr(raw, "arguments", "{}")
-
-                    tool_call = ToolCall.create(call_id=tc_id, name=tc_name, arguments=tc_args)
+                    raw_dict = raw.model_dump() if hasattr(raw, "model_dump") else {}
+                    tool_call = ToolCall.create(
+                        call_id=raw.call_id,
+                        name=raw.name,
+                        arguments=raw.arguments or "{}",
+                        metadata=raw_dict,
+                    )
                     turns.append(AgentTurn.assistant(content="", tool_calls=[tool_call]))
 
             elif item_class == "ToolCallOutputItem":
-                # Tool execution result - call_id is on raw_item (FunctionCallOutput)
                 output = getattr(item, "output", None)
                 raw = getattr(item, "raw_item", None)
-
-                # TODO(undfined): REMOVE BEFORE MERGE - debug logging
-                logger.info(f"ToolCallOutputItem: raw_item type={type(raw)}, raw={raw}")
-                if raw is not None:
-                    logger.info(f"ToolCallOutputItem: raw attrs={dir(raw)}")
-
-                # Extract call_id from raw_item - it's a FunctionCallOutput with call_id
-                tool_call_id = ""
-                if raw is not None:
-                    # Try as object attribute first
-                    tool_call_id = getattr(raw, "call_id", None)
-                    # Try as dict if attribute access failed
-                    if not tool_call_id and isinstance(raw, dict):
-                        tool_call_id = raw.get("call_id", "")
-
+                raw_dict = dict(raw) if isinstance(raw, dict) else {}
+                tool_call_id = raw_dict.get("call_id", "")
                 content = str(output) if output is not None else ""
-                tool_result = ToolResult(tool_call_id=tool_call_id or "", content=content)
+                tool_result = ToolResult(
+                    tool_call_id=tool_call_id,
+                    content=content,
+                    metadata=raw_dict,
+                )
                 turns.append(AgentTurn.tool([tool_result]))
 
         return AgentTrajectory(turns=tuple(turns))

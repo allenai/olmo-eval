@@ -43,15 +43,23 @@ class ToolCall:
     id: str
     type: Literal["function"] = "function"
     function: Function = field(default_factory=lambda: Function(name="", arguments="{}"))
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def create(cls, call_id: str, name: str, arguments: dict[str, Any] | str) -> "ToolCall":
+    def create(
+        cls,
+        call_id: str,
+        name: str,
+        arguments: dict[str, Any] | str,
+        metadata: dict[str, Any] | None = None,
+    ) -> "ToolCall":
         """Create a ToolCall with the given parameters.
 
         Args:
             call_id: Unique identifier for the tool call.
             name: Name of the function to call.
             arguments: Arguments as dict (will be JSON-encoded) or JSON string.
+            metadata: Optional extra fields from the SDK.
 
         Returns:
             A new ToolCall instance.
@@ -59,7 +67,11 @@ class ToolCall:
         import json
 
         args_str = json.dumps(arguments) if isinstance(arguments, dict) else arguments
-        return cls(id=call_id, function=Function(name=name, arguments=args_str))
+        return cls(
+            id=call_id,
+            function=Function(name=name, arguments=args_str),
+            metadata=metadata or {},
+        )
 
     @classmethod
     def from_openai(cls, data: dict[str, Any]) -> "ToolCall":
@@ -138,7 +150,7 @@ class ToolCall:
         Returns:
             Dictionary representation of the ToolCall.
         """
-        return {
+        result = {
             "id": self.id,
             "type": self.type,
             "function": {
@@ -146,6 +158,9 @@ class ToolCall:
                 "arguments": self.function.arguments,
             },
         }
+        if self.metadata:
+            result["metadata"] = self.metadata
+        return result
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ToolCall":
@@ -165,6 +180,7 @@ class ToolCall:
                 name=func.get("name", ""),
                 arguments=func.get("arguments", "{}"),
             ),
+            metadata=data.get("metadata", {}),
         )
 
 
@@ -175,6 +191,7 @@ class ToolResult:
     tool_call_id: str
     content: str
     is_error: bool = False
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_openai(self) -> dict[str, Any]:
         """Convert to OpenAI tool message format.
@@ -194,11 +211,14 @@ class ToolResult:
         Returns:
             Dictionary representation of the ToolResult.
         """
-        return {
+        result = {
             "tool_call_id": self.tool_call_id,
             "content": self.content,
             "is_error": self.is_error,
         }
+        if self.metadata:
+            result["metadata"] = self.metadata
+        return result
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ToolResult":
@@ -214,6 +234,7 @@ class ToolResult:
             tool_call_id=data.get("tool_call_id", ""),
             content=data.get("content", ""),
             is_error=data.get("is_error", False),
+            metadata=data.get("metadata", {}),
         )
 
 
