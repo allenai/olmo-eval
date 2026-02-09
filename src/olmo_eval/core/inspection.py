@@ -791,6 +791,92 @@ def inspect_response(
     console.print(Panel(Group(*renderables), title=title, border_style="green"))
 
 
+def inspect_task_instances(
+    trackers: dict[str, Any],
+    provider_config: Any,
+    *,
+    inspect_instance_flag: bool = False,
+    inspect_formatted: bool = False,
+    inspect_tokens_flag: bool = False,
+    inspect_request_flag: bool = False,
+    console: Console | None = None,
+) -> None:
+    """Inspect first instance of each task in the trackers.
+
+    Args:
+        trackers: Dict mapping task spec to TaskTracker objects.
+        provider_config: Provider config with tokenizer/model info.
+        inspect_instance_flag: Show raw instance data.
+        inspect_formatted: Show formatted prompt with chat template.
+        inspect_tokens_flag: Show tokenized representation.
+        inspect_request_flag: Show the LMRequest object.
+        console: Rich Console to print to.
+    """
+    from olmo_eval.core.logging import get_logger
+
+    logger = get_logger(__name__)
+
+    if console is None:
+        from olmo_eval.cli.utils import console as shared_console
+
+        console = shared_console
+
+    tokenizer = None
+    if inspect_formatted or inspect_tokens_flag:
+        tokenizer_name = provider_config.tokenizer or provider_config.model
+        try:
+            tokenizer = load_tokenizer(tokenizer_name)
+        except Exception as e:
+            logger.warning(f"Could not load tokenizer: {e}")
+
+    for spec, tracker in trackers.items():
+        if tracker.task and not tracker.error:
+            first_instance = next(iter(tracker.task.instances), None)
+            if first_instance:
+                native_id = first_instance.metadata.get("id", "0")
+
+                if inspect_instance_flag:
+                    console.print()
+                    inspect_instance(
+                        first_instance, console=console, task_name=spec, native_id=native_id
+                    )
+
+                if inspect_request_flag or (
+                    tokenizer and (inspect_formatted or inspect_tokens_flag)
+                ):
+                    request = tracker.task.format_request(first_instance)
+
+                    if inspect_request_flag:
+                        inspect_request(
+                            request, console=console, task_name=spec, native_id=native_id
+                        )
+
+                    if tokenizer and inspect_formatted:
+                        try:
+                            formatted_prompt = format_with_chat_template(request, tokenizer)
+                            inspect_formatted_request(
+                                formatted_prompt,
+                                console=console,
+                                task_name=spec,
+                                native_id=native_id,
+                            )
+                        except Exception as e:
+                            logger.error(f"Error formatting request: {e}")
+
+                    if tokenizer and inspect_tokens_flag:
+                        try:
+                            tokens = tokenize_request(request, tokenizer)
+                            inspect_tokens(
+                                tokens,
+                                tokenizer,
+                                console=console,
+                                task_name=spec,
+                                native_id=native_id,
+                            )
+                        except Exception as e:
+                            logger.error(f"Error tokenizing request: {e}")
+
+
 __all__ = [
     "format_value",
     "inspect_object",
@@ -804,4 +890,5 @@ __all__ = [
     "inspect_formatted_request",
     "inspect_tokens",
     "formatted_request_to_dict",
+    "inspect_task_instances",
 ]

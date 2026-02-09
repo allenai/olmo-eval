@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from olmo_eval.core.types import ProviderKind
 
@@ -60,38 +60,30 @@ class ProviderConfig:
     package: str | None = None
     kwargs: Mapping[str, Any] = field(default_factory=dict)
 
+    # Config fields accepted by each provider kind (fields with non-default values are passed)
+    _PROVIDER_FIELDS: ClassVar[dict[str, tuple[str, ...]]] = {
+        "vllm": ("tokenizer", "revision", "trust_remote_code", "dtype", "max_model_len"),
+        "vllm_server": ("base_url", "tokenizer", "max_concurrency", "tool_call_parser"),
+        "litellm": ("base_url", "max_concurrency"),
+        "hf": ("tokenizer", "trust_remote_code", "dtype"),
+        "mock": (),
+    }
+
     def create_provider(self) -> InferenceProvider:
-        """Create an InferenceProvider from this configuration.
-
-        Returns:
-            Configured InferenceProvider instance.
-
-        Raises:
-            ValueError: If required secrets are missing or provider type is unknown.
-        """
+        """Create an InferenceProvider from this configuration."""
         from olmo_eval.inference import create_provider
 
-        # Validate secrets
         missing = self.validate_secrets()
         if missing:
             raise ValueError(f"Missing required secrets: {', '.join(missing)}")
 
-        # Build kwargs from config fields
         provider_kwargs: dict[str, Any] = dict(self.kwargs)
-        if self.base_url is not None:
-            provider_kwargs["base_url"] = self.base_url
-        if self.tokenizer is not None:
-            provider_kwargs["tokenizer"] = self.tokenizer
-        if self.revision is not None:
-            provider_kwargs["revision"] = self.revision
-        if self.trust_remote_code:
-            provider_kwargs["trust_remote_code"] = self.trust_remote_code
-        if self.dtype != "auto":
-            provider_kwargs["dtype"] = self.dtype
-        if self.max_model_len is not None:
-            provider_kwargs["max_model_len"] = self.max_model_len
-        if self.max_concurrency is not None:
-            provider_kwargs["max_concurrency"] = self.max_concurrency
+
+        # Add only the fields this provider accepts (skip None/default values)
+        for field_name in self._PROVIDER_FIELDS.get(str(self.kind), ()):
+            value = getattr(self, field_name)
+            if value is not None and value is not False and value != "auto":
+                provider_kwargs[field_name] = value
 
         return create_provider(self.kind, self.model, **provider_kwargs)
 

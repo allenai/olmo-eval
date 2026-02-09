@@ -156,11 +156,15 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         # Prepare tasks
         expanded_tasks, trackers, items = self._prepare_tasks()
         total_instances = len(items)
+        logger.info(f"Total instances: {total_instances}")
 
         # Setup multiprocessing
         ctx = mp.get_context("spawn")
-        instance_queue, result_queue, num_workers = self._setup_workers(items, ctx)
-        total_gpus = self._get_total_gpus()
+        item_queue: mp.Queue = ctx.Queue()
+        result_queue: mp.Queue = ctx.Queue()
+        num_workers = self._get_num_workers()
+        total_gpus = self._get_gpu_count()
+        logger.info(f"Total workers: {num_workers}")
 
         # Create shared dict for tracking worker init times
         manager = ctx.Manager()
@@ -169,41 +173,19 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         # Shuffle and enqueue items
         random.shuffle(items)
         for item in items:
-            instance_queue.put(item)
+            item_queue.put(item)
 
         # Add poison pills AFTER all items are enqueued
         for _ in range(num_workers):
-            instance_queue.put(None)
+            item_queue.put(None)
 
         # Start workers
         workers: list[mp.process.BaseProcess] = []
-        harness_config_dict = self.harness_config.to_dict()
 
         try:
-            for i in range(num_workers):
-                worker_id = get_worker_id(self.provider_config.model, i)
-
-                if total_gpus > 0:
-                    start_gpu = i * self.gpus_per_worker
-                    end_gpu = min(start_gpu + self.gpus_per_worker, total_gpus)
-                    gpu_ids = list(range(start_gpu, end_gpu)) if start_gpu < end_gpu else []
-                else:
-                    gpu_ids = []
-
-                worker = ctx.Process(
-                    target=worker_process,
-                    args=(
-                        worker_id,
-                        gpu_ids,
-                        instance_queue,
-                        result_queue,
-                        harness_config_dict,
-                        init_times,
-                    ),
-                )
-                worker.start()
-                workers.append(worker)
-
+            workers = self._start_workers(
+                ctx, num_workers, total_gpus, item_queue, result_queue, init_times
+            )
             logger.info(f"{len(workers)} worker(s) started, processing instances...")
 
             # Wait for workers to initialize
@@ -224,7 +206,6 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             results = await self._process_results(
                 trackers,
                 result_queue,
-                instance_queue,
                 workers,
                 len(expanded_tasks),
                 total_instances,
@@ -249,7 +230,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             )
         finally:
             terminate_workers(workers)
-            for q in [instance_queue, result_queue]:
+            for q in [item_queue, result_queue]:
                 q.cancel_join_thread()
             manager.shutdown()
 
@@ -312,7 +293,17 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             or self.inspect_tokens
             or self.inspect_request
         ):
-            self._inspect_tasks(trackers)
+            from olmo_eval.core.inspection import inspect_task_instances
+
+            inspect_task_instances(
+                trackers,
+                self.provider_config,
+                inspect_instance_flag=self.inspect_instance,
+                inspect_formatted=self.inspect_formatted,
+                inspect_tokens_flag=self.inspect_tokens,
+                inspect_request_flag=self.inspect_request,
+                console=console,
+            )
 
         return expanded_tasks, trackers, items
 
@@ -344,108 +335,46 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
         return task_overrides, sampling_overrides
 
-    def _inspect_tasks(self, trackers: dict[str, TaskTracker]) -> None:
-        """Inspect first instance of each unique task."""
-        from olmo_eval.core.inspection import (
-            format_with_chat_template,
-            inspect_formatted_request,
-            inspect_instance,
-            inspect_request,
-            inspect_tokens,
-            load_tokenizer,
-            tokenize_request,
-        )
-
-        tokenizer = None
-
-        if self.inspect_formatted or self.inspect_tokens:
-            tokenizer_name = self.provider_config.tokenizer or self.provider_config.model
-            try:
-                tokenizer = load_tokenizer(tokenizer_name)
-            except Exception as e:
-                logger.warning(f"Could not load tokenizer: {e}")
-
-        for spec, tracker in trackers.items():
-            if tracker.task and not tracker.error:
-                first_instance = next(iter(tracker.task.instances), None)
-                if first_instance:
-                    native_id = first_instance.metadata.get("id", "0")
-
-                    if self.inspect_instance:
-                        console.print()
-                        inspect_instance(
-                            first_instance, console=console, task_name=spec, native_id=native_id
-                        )
-
-                    if self.inspect_request or (
-                        tokenizer and (self.inspect_formatted or self.inspect_tokens)
-                    ):
-                        request = tracker.task.format_request(first_instance)
-
-                        if self.inspect_request:
-                            inspect_request(
-                                request, console=console, task_name=spec, native_id=native_id
-                            )
-
-                        if tokenizer and self.inspect_formatted:
-                            try:
-                                formatted_prompt = format_with_chat_template(request, tokenizer)
-                                inspect_formatted_request(
-                                    formatted_prompt,
-                                    console=console,
-                                    task_name=spec,
-                                    native_id=native_id,
-                                )
-                            except Exception as e:
-                                logger.error(f"Error formatting request: {e}")
-
-                        if tokenizer and self.inspect_tokens:
-                            try:
-                                tokens = tokenize_request(request, tokenizer)
-                                inspect_tokens(
-                                    tokens,
-                                    tokenizer,
-                                    console=console,
-                                    task_name=spec,
-                                    native_id=native_id,
-                                )
-                            except Exception as e:
-                                logger.error(f"Error tokenizing request: {e}")
-
-    def _setup_workers(
+    def _start_workers(
         self,
-        items: list[QueueItem],
         ctx: Any,
-    ) -> tuple[mp.Queue, mp.Queue, int]:
-        """Setup queues and compute worker allocation."""
-        total_instances = len(items)
-        logger.info(f"Total instances: {total_instances}")
+        num_workers: int,
+        total_gpus: int,
+        item_queue: mp.Queue,
+        result_queue: mp.Queue,
+        init_times: Any,
+    ) -> list[mp.process.BaseProcess]:
+        """Start worker processes."""
+        workers: list[mp.process.BaseProcess] = []
+        harness_config_dict = self.harness_config.to_dict()
 
-        instance_queue: mp.Queue = ctx.Queue()
-        result_queue: mp.Queue = ctx.Queue()
+        for i in range(num_workers):
+            worker_id = get_worker_id(self.provider_config.model, i)
 
-        num_workers = self._get_num_workers()
-        logger.info(f"Total workers: {num_workers}")
+            if total_gpus > 0:
+                start_gpu = i * self.gpus_per_worker
+                end_gpu = min(start_gpu + self.gpus_per_worker, total_gpus)
+                gpu_ids = list(range(start_gpu, end_gpu)) if start_gpu < end_gpu else []
+            else:
+                gpu_ids = []
 
-        return instance_queue, result_queue, num_workers
+            worker = ctx.Process(
+                target=worker_process,
+                args=(
+                    worker_id,
+                    gpu_ids,
+                    item_queue,
+                    result_queue,
+                    harness_config_dict,
+                    init_times,
+                ),
+            )
+            worker.start()
+            workers.append(worker)
 
-    def _get_num_workers(self) -> int:
-        """Get number of workers based on available GPUs."""
-        if self.num_workers is not None:
-            return self.num_workers
+        return workers
 
-        # Auto-detect GPUs
-        try:
-            import torch  # type: ignore[import-not-found]
-
-            num_gpus = torch.cuda.device_count()
-            if num_gpus == 0:
-                return 1  # Fallback to single worker for CPU
-            return max(1, num_gpus // self.gpus_per_worker)
-        except ImportError:
-            return 1  # Fallback to single worker if torch unavailable
-
-    def _get_total_gpus(self) -> int:
+    def _get_gpu_count(self) -> int:
         """Get total number of available GPUs."""
         try:
             import torch  # type: ignore[import-not-found]
@@ -454,11 +383,20 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         except ImportError:
             return 0
 
+    def _get_num_workers(self) -> int:
+        """Get number of workers based on available GPUs."""
+        if self.num_workers is not None:
+            return self.num_workers
+
+        num_gpus = self._get_gpu_count()
+        if num_gpus == 0:
+            return 1  # Fallback to single worker for CPU
+        return max(1, num_gpus // self.gpus_per_worker)
+
     async def _process_results(
         self,
         trackers: dict[str, TaskTracker],
         result_queue: mp.Queue,
-        instance_queue: mp.Queue,
         workers: list[mp.process.BaseProcess],
         total_tasks: int,
         total_instances: int,
@@ -492,16 +430,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                     last_health_check = time.time()
                 continue
 
-            # Check for fatal worker crash
+            # Check for fatal worker crash - raise immediately, let finally handle cleanup
             if result_item.task_id == "__WORKER_FATAL__":
-                logger.error("FATAL: Worker crashed!")
-                logger.error(result_item.error)
-                for worker in workers:
-                    if worker.is_alive():
-                        worker.terminate()
-                        worker.join(timeout=5)
-                for mp_queue in [instance_queue, result_queue]:
-                    mp_queue.cancel_join_thread()
+                logger.error(f"FATAL: Worker crashed! {result_item.error}")
                 raise RuntimeError(f"Worker process crashed: {result_item.error}")
 
             tracker = trackers[result_item.task_id]
@@ -518,12 +449,6 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                     f"{result_item.error}"
                 )
                 is_complete = tracker.add_failure(result_item.instance_idx, result_item.error)
-                pending_instances -= 1
-                if is_complete:
-                    task_result = finalize_task(tracker)
-                    results[result_item.task_id] = task_result
-                    completed_tasks += 1
-                    self._report_task_completion(self.model_name, task_result)
             else:
                 # Extract trajectory from output metadata if present
                 trajectory = None
@@ -539,20 +464,20 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                     outputs=result_item.outputs,
                     trajectory=trajectory,
                 )
-
                 is_complete = tracker.add_response(result_item.instance_idx, response)
-                pending_instances -= 1
 
-                if is_complete:
-                    task_result = finalize_task(tracker)
-                    results[result_item.task_id] = task_result
-                    completed_tasks += 1
-                    self._report_task_completion(self.model_name, task_result)
-                    if self.save_predictions and task_result.predictions:
-                        task_hash = compute_task_hash(task_result.config)
-                        self._write_predictions(
-                            self.model_name, task_result.spec, task_result.predictions, task_hash
-                        )
+            pending_instances -= 1
+
+            if is_complete:
+                completed_tasks += 1
+                task_result = finalize_task(tracker)
+                results[result_item.task_id] = task_result
+                self._report_task_completion(self.model_name, task_result)
+                if self.save_predictions and task_result.predictions:
+                    task_hash = compute_task_hash(task_result.config)
+                    self._write_predictions(
+                        self.model_name, task_result.spec, task_result.predictions, task_hash
+                    )
 
         return results
 
