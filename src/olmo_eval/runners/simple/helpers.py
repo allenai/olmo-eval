@@ -233,8 +233,6 @@ async def process_request(
             )
 
         else:
-            # TODO(undfined): Come back to this as I don't like it being something different.
-            # Why can't we just use the async methods?
             # COMPLETION or LOGLIKELIHOOD - run sync methods in executor
             loop = asyncio.get_event_loop()
 
