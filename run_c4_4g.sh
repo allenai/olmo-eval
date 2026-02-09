@@ -15,7 +15,7 @@ models=(
 )
 
 TASK_SET="c4:ppl"
-CLUSTER="h100"
+CLUSTER="aus80g"
 WORKSPACE="ai2/perplexity-evals"
 BUDGET="ai2/oe-base"
 PRIORITY="high"
@@ -32,8 +32,7 @@ for m in "${models[@]}"; do
     yes | olmo-eval beaker launch \
       -n "${name}" \
       -m "${m}" \
-      -o gpus=4 \
-      -o vllm_memory_utilization=0.8 \
+      -o gpus=8 \
       -t "${TASK_SET}" \
       -c "${CLUSTER}" \
       -w "${WORKSPACE}" \
