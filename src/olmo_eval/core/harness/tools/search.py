@@ -11,7 +11,6 @@ Import the tool objects and use .name for HarnessConfig.tool_names.
 
 from __future__ import annotations
 
-import atexit
 import logging
 import os
 
@@ -35,25 +34,6 @@ def _get_http_client() -> httpx.AsyncClient:
     if _http_client is None or _http_client.is_closed:
         _http_client = httpx.AsyncClient(timeout=30.0)
     return _http_client
-
-
-def _cleanup_http_client() -> None:
-    """Close the shared HTTP client on exit."""
-    global _http_client
-    if _http_client is not None and not _http_client.is_closed:
-        # Use sync close for atexit handler
-        import asyncio
-
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(_http_client.aclose())
-        except RuntimeError:
-            # No running loop, use sync approach
-            asyncio.run(_http_client.aclose())
-        _http_client = None
-
-
-atexit.register(_cleanup_http_client)
 
 
 @registered_tool(
