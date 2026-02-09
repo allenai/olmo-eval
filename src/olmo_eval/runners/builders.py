@@ -81,6 +81,10 @@ def build_predictions(scored: Sequence[Any]) -> list[dict]:
             "label": label,
         }
 
+        # Add final_output text for chat/agent tasks
+        if resp.outputs and resp.outputs[0].text:
+            prediction["final_output"] = resp.outputs[0].text
+
         # Add trajectory if present (multi-turn/agent tasks)
         if resp.trajectory is not None:
             prediction["trajectory"] = resp.trajectory.to_dict()

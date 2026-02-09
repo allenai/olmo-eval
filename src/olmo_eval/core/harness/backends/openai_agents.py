@@ -180,26 +180,29 @@ class OpenAIAgentsBackend(Backend):
                 # Extract content from raw_item (ResponseOutputMessage)
                 raw = getattr(item, "raw_item", None)
                 content = ""
-                tool_calls_list: list[ToolCall] = []
 
                 if raw is not None:
                     # ResponseOutputMessage has 'content' which is a list of content parts
                     raw_content = getattr(raw, "content", None)
                     if raw_content:
-                        # content is typically a list of text/refusal items
                         for part in raw_content:
                             if hasattr(part, "text"):
                                 content += part.text
 
-                turns.append(
-                    AgentTurn.assistant(content=content, tool_calls=tool_calls_list or None)
-                )
+                turns.append(AgentTurn.assistant(content=content))
 
             elif item_class == "ToolCallItem":
                 # Tool call from the model
                 raw = getattr(item, "raw_item", None)
+
+                # TODO(undfined): REMOVE BEFORE MERGE - debug logging
+                logger.info(f"ToolCallItem: raw_item type={type(raw)}, raw={raw}")
                 if raw is not None:
-                    tc_id = getattr(raw, "call_id", getattr(raw, "id", ""))
+                    logger.info(f"ToolCallItem: raw attrs={dir(raw)}")
+
+                if raw is not None:
+                    # Try call_id first (OpenAI Responses API), then id
+                    tc_id = getattr(raw, "call_id", None) or getattr(raw, "id", "")
                     tc_name = getattr(raw, "name", "")
                     tc_args = getattr(raw, "arguments", "{}")
 
@@ -207,15 +210,26 @@ class OpenAIAgentsBackend(Backend):
                     turns.append(AgentTurn.assistant(content="", tool_calls=[tool_call]))
 
             elif item_class == "ToolCallOutputItem":
-                # Tool execution result
+                # Tool execution result - call_id is on raw_item (FunctionCallOutput)
                 output = getattr(item, "output", None)
                 raw = getattr(item, "raw_item", None)
+
+                # TODO(undfined): REMOVE BEFORE MERGE - debug logging
+                logger.info(f"ToolCallOutputItem: raw_item type={type(raw)}, raw={raw}")
+                if raw is not None:
+                    logger.info(f"ToolCallOutputItem: raw attrs={dir(raw)}")
+
+                # Extract call_id from raw_item - it's a FunctionCallOutput with call_id
                 tool_call_id = ""
                 if raw is not None:
-                    tool_call_id = getattr(raw, "call_id", getattr(raw, "tool_call_id", ""))
+                    # Try as object attribute first
+                    tool_call_id = getattr(raw, "call_id", None)
+                    # Try as dict if attribute access failed
+                    if not tool_call_id and isinstance(raw, dict):
+                        tool_call_id = raw.get("call_id", "")
 
                 content = str(output) if output is not None else ""
-                tool_result = ToolResult(tool_call_id=tool_call_id, content=content)
+                tool_result = ToolResult(tool_call_id=tool_call_id or "", content=content)
                 turns.append(AgentTurn.tool([tool_result]))
 
         return AgentTrajectory(turns=tuple(turns))
