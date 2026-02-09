@@ -35,15 +35,9 @@ def _log_request(request: httpx.Request) -> None:
     logger.info(f"vLLM request: {request.method} {request.url}\n  body: {body}")
 
 
-async def _log_response(response: httpx.Response) -> None:
+def _log_response(response: httpx.Response) -> None:
     """Log incoming HTTP response."""
-    # Read the response body (needed for streaming responses)
-    await response.aread()
-    body = response.text
-    # Truncate very long bodies
-    if len(body) > 2000:
-        body = body[:2000] + "... [truncated]"
-    logger.info(f"vLLM response: {response.status_code} {response.reason_phrase}\n  body: {body}")
+    logger.info(f"vLLM response: {response.status_code} {response.reason_phrase}")
 
 
 class VLLMServerProvider(InferenceProvider):
