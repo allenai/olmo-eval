@@ -319,10 +319,10 @@ olmo-eval run -m llama3.1-8b -t simpleqa --harness-config my_harness.yaml
 
 ```python
 from olmo_eval.core.harness import Harness, HarnessConfig, get_harness_preset
-from olmo_eval.inference import create_provider, ProviderType
+from olmo_eval.inference import create_provider, ProviderKind
 
 # Create provider
-provider = create_provider(ProviderType.VLLM, "meta-llama/Llama-3.1-8B-Instruct")
+provider = create_provider(ProviderKind.VLLM, "meta-llama/Llama-3.1-8B-Instruct")
 
 # Create harness with preset
 config = get_harness_preset("search")

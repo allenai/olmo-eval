@@ -8,7 +8,6 @@ import time
 from typing import Any
 
 from olmo_eval.core.logging import get_logger
-from olmo_eval.inference import ProviderType
 from olmo_eval.runners.simple.queue import QueueItem, ResultItem
 
 logger = get_logger(__name__)
@@ -19,16 +18,8 @@ def instance_worker_process(
     gpu_ids: list[int],
     instance_queue: mp.Queue,
     result_queue: mp.Queue,
-    model_name: str,
-    provider_type_str: str,
-    attention_backend: str | None = None,
-    tokenizer: str | None = None,
-    max_model_len: int | None = None,
-    load_format: str | None = None,
-    extra_loader_config: dict[str, Any] | None = None,
-    max_concurrency: int | None = None,
+    harness_config_dict: dict[str, Any],
     init_times: dict[str, float] | None = None,
-    harness_config_dict: dict[str, Any] | None = None,
 ) -> None:
     """Worker that collects all items and processes them at once.
 
@@ -40,16 +31,8 @@ def instance_worker_process(
         gpu_ids: List of GPU IDs to use (for CUDA_VISIBLE_DEVICES)
         instance_queue: Queue of QueueItems (None = poison pill)
         result_queue: Queue to put ResultItems
-        model_name: Model name for provider
-        provider_type_str: Provider type string
-        attention_backend: Attention backend to use (e.g., "FLASHINFER", "FLASH_ATTN")
-        tokenizer: Tokenizer path/identifier, defaults to model if None
-        max_model_len: Maximum model context length (overrides model's default)
-        load_format: vLLM model loading format (e.g., "runai_streamer")
-        extra_loader_config: Extra config for model loader (e.g., {"distributed": true})
-        max_concurrency: Maximum concurrent API requests (for litellm and other API providers)
+        harness_config_dict: Serialized HarnessConfig dict with all provider configuration
         init_times: Shared dict for tracking worker initialization times
-        harness_config_dict: Serialized HarnessConfig dict for tool/prompt configuration
     """
     import sys
 
@@ -62,12 +45,30 @@ def instance_worker_process(
     worker_logger = configure_worker_logging(worker_id)
     worker_logger.info(f"Starting on GPUs {gpu_ids}")
 
+    # Parse harness config early so we can use it for error reporting
+    from olmo_eval.core.harness import Harness, HarnessConfig
+
+    harness_config = HarnessConfig.from_dict(harness_config_dict)
+    provider_config = harness_config.provider
+    model_name = provider_config.model
+
     try:
         if gpu_ids:
             os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in gpu_ids)
 
-        provider_type = ProviderType(provider_type_str)
-        worker_logger.info(f"Initializing provider: {provider_type.value}")
+        # Extract provider configuration from harness_config
+        provider_kind = str(provider_config.kind)
+        tokenizer = provider_config.tokenizer
+        max_model_len = provider_config.max_model_len
+        max_concurrency = provider_config.max_concurrency or harness_config.max_concurrency
+        provider_kwargs = dict(provider_config.kwargs) if provider_config.kwargs else {}
+
+        # Extract vLLM-specific options from kwargs
+        attention_backend = provider_kwargs.get("attention_backend")
+        load_format = provider_kwargs.get("load_format")
+        extra_loader_config = provider_kwargs.get("model_loader_extra_config")
+
+        worker_logger.info(f"Initializing provider: {provider_kind}")
         worker_logger.info(f"  Model: {model_name}")
         if tokenizer:
             worker_logger.info(f"  Tokenizer: {tokenizer}")
@@ -76,24 +77,18 @@ def instance_worker_process(
 
         init_start = time.time()
 
-        if not harness_config_dict:
-            raise ValueError("harness_config_dict is required")
-
         # Set attention backend via env var (vLLM reads this)
         if attention_backend:
             os.environ["VLLM_ATTENTION_BACKEND"] = attention_backend
 
-        # Create harness config with worker-specific provider overrides
-        from olmo_eval.core.harness import Harness, HarnessConfig
-
-        harness_config = HarnessConfig.from_dict(harness_config_dict)
-
         # Determine if auto tool choice should be enabled
-        enable_auto_tool_choice = (
-            harness_config.has_tools and provider_type == ProviderType.VLLM_SERVER
-        )
-        if enable_auto_tool_choice:
-            worker_logger.info(f"  Tools configured: {list(harness_config.tool_names)}")
+        has_tools = harness_config.has_tools
+        enable_auto_tool_choice = has_tools and provider_kind == "vllm_server"
+
+        worker_logger.info(f"  Has tools: {has_tools}")
+        if has_tools:
+            worker_logger.info(f"  Tools: {list(harness_config.tool_names)}")
+        worker_logger.info(f"  Enable auto tool choice: {enable_auto_tool_choice}")
 
         # Apply worker-specific provider overrides
         harness_config = harness_config.with_provider_overrides(

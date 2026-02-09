@@ -19,7 +19,6 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.core.harness.config import HarnessConfig, ProviderConfig
 from olmo_eval.core.logging import get_logger, get_worker_id
 from olmo_eval.core.types import Response
-from olmo_eval.inference import ProviderType
 from olmo_eval.runners.base import BaseEvalRunner
 from olmo_eval.runners.mixins import RunnerResultsMixin, S3Config
 from olmo_eval.runners.simple.helpers import (
@@ -177,7 +176,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
         # Start workers
         workers: list[mp.process.BaseProcess] = []
-        provider_type = ProviderType(self.provider_config.get_provider_name())
+        harness_config_dict = self.harness_config.to_dict()
 
         try:
             for i in range(num_workers):
@@ -197,16 +196,8 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                         gpu_ids,
                         instance_queue,
                         result_queue,
-                        self.provider_config.model,
-                        provider_type.value,
-                        self.attention_backend,
-                        self.provider_config.tokenizer,
-                        self.provider_config.max_model_len,
-                        self.provider_config.kwargs.get("load_format"),
-                        self.provider_config.kwargs.get("extra_loader_config"),
-                        self.provider_config.max_concurrency,
+                        harness_config_dict,
                         init_times,
-                        self.harness_config.to_dict(),
                     ),
                 )
                 worker.start()
@@ -579,11 +570,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             for spec, error_result in errors:
                 logger.error(f"  {spec}: {error_result.error}")
 
-        try:
-            provider_type = ProviderType(self.provider_config.get_provider_name())
-            provider_str = provider_type.value
-        except ValueError:
-            provider_str = "vllm"
+        provider_str = str(self.provider_config.kind)
 
         display_model_name = get_model_display_name(
             self.provider_config.model, self.provider_config.alias

@@ -1,6 +1,6 @@
 """Language model inference providers."""
 
-from enum import StrEnum
+from olmo_eval.core.types import ProviderKind
 
 from .base import InferenceProvider
 from .mock import MockProvider
@@ -13,7 +13,7 @@ from .tokenizer_utils import (
 
 __all__ = [
     "InferenceProvider",
-    "ProviderType",
+    "ProviderKind",
     "MockProvider",
     "HuggingFaceProvider",
     "VLLMProvider",
@@ -28,18 +28,8 @@ __all__ = [
 ]
 
 
-class ProviderType(StrEnum):
-    """Supported provider types."""
-
-    MOCK = "mock"
-    HUGGINGFACE = "hf"
-    VLLM = "vllm"
-    VLLM_SERVER = "vllm_server"
-    LITELLM = "litellm"
-
-
 def create_provider(
-    provider_type: ProviderType | str,
+    provider_kind: ProviderKind | str,
     model_name: str,
     worker_id: str | None = None,
     **kwargs,
@@ -47,7 +37,7 @@ def create_provider(
     """Create a provider instance.
 
     Args:
-        provider_type: Type of provider to create.
+        provider_kind: Kind of provider to create (e.g., "vllm", "vllm_server", "litellm").
         model_name: Model identifier or path.
         worker_id: Optional worker identifier for logging (only used by vLLM).
         **kwargs: Additional arguments passed to provider constructor.
@@ -56,34 +46,32 @@ def create_provider(
         Initialized provider instance.
 
     Raises:
-        ValueError: If provider type is unknown.
+        ValueError: If provider kind is unknown.
     """
-    provider_type = ProviderType(provider_type) if isinstance(provider_type, str) else provider_type
+    # Normalize to string for comparison (StrEnum compares equal to its value)
+    kind_str = str(provider_kind)
 
-    match provider_type:
-        case ProviderType.MOCK:
+    match kind_str:
+        case "mock":
             return MockProvider(model_name)
-        case ProviderType.HUGGINGFACE:
+        case "hf":
             from .huggingface import HuggingFaceProvider
 
             return HuggingFaceProvider(model_name, **kwargs)
-        case ProviderType.VLLM:
+        case "vllm":
             from .vllm import VLLMProvider
 
             return VLLMProvider(model_name, worker_id=worker_id, **kwargs)
-        case ProviderType.VLLM_SERVER:
+        case "vllm_server":
             from .vllm_server_provider import VLLMServerProvider
 
-            server_kwargs = {
-                k: v for k, v in kwargs.items() if k in ("base_url", "timeout", "max_concurrency")
-            }
-            return VLLMServerProvider(model_name, **server_kwargs)
-        case ProviderType.LITELLM:
+            return VLLMServerProvider(model_name, **kwargs)
+        case "litellm":
             from .litellm import LiteLLMProvider
 
             return LiteLLMProvider(model_name, **kwargs)
         case _:
-            raise ValueError(f"Unknown provider type: {provider_type}")
+            raise ValueError(f"Unknown provider kind: {provider_kind}")
 
 
 # Lazy imports for optional dependencies
