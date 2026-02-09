@@ -144,6 +144,9 @@ class OpenAIAgentsBackend(Backend):
             max_turns=max_turns,
         )
 
+        # TODO(undfined): REMOVE BEFORE MERGE
+        logger.info(result)
+
         # Convert result to HarnessResult
         trajectory = self._convert_trajectory(result)
         final_text = result.final_output if hasattr(result, "final_output") else ""
