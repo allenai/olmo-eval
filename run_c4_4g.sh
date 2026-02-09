@@ -3,15 +3,15 @@ set -euo pipefail
 
 models=(
   deepseek-llm-67b
-  llama-3.1-70b
-  qwen-1.5-72b
-  qwen-1.5-110b
+  # llama-3.1-70b
+  # qwen-1.5-72b
+  # qwen-1.5-110b
   # qwen-1.5-moe-a2.7b
-  qwen-2-72b
-  qwen-2.5-32b
-  qwen-2.5-72b
-  huggyllama-30b
-  huggyllama-65b
+  # qwen-2-72b
+  # qwen-2.5-32b
+  # qwen-2.5-72b
+  # huggyllama-30b
+  # huggyllama-65b
 )
 
 TASK_SET="c4:ppl"
@@ -33,6 +33,7 @@ for m in "${models[@]}"; do
       -n "${name}" \
       -m "${m}" \
       -o gpus=4 \
+      -o vllm_memory_utilization=0.8 \
       -t "${TASK_SET}" \
       -c "${CLUSTER}" \
       -w "${WORKSPACE}" \
