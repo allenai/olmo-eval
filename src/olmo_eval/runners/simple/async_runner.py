@@ -35,7 +35,7 @@ from olmo_eval.runners.simple.queue import (
     finalize_task,
     prepare_task_items,
 )
-from olmo_eval.runners.simple.workers import instance_worker_process
+from olmo_eval.runners.simple.workers import worker_process
 from olmo_eval.runners.utils import (
     compute_suite_aggregations,
     compute_task_hash,
@@ -191,7 +191,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                     gpu_ids = []
 
                 worker = ctx.Process(
-                    target=instance_worker_process,
+                    target=worker_process,
                     args=(
                         worker_id,
                         gpu_ids,

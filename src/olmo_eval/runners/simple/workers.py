@@ -1,4 +1,4 @@
-"""Worker processes for async evaluation runners."""
+"""Worker processes for evaluation runners."""
 
 from __future__ import annotations
 
@@ -17,74 +17,99 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-async def run_worker_loop(
+async def process_items(
     items: list[QueueItem],
     harness: Harness,
     result_queue: mp.Queue,
     max_concurrency: int,
 ) -> None:
-    """Process items using async workers with bounded concurrency.
+    """Process queue items, batching where possible.
 
-    Uses the asyncio.Queue + TaskGroup pattern: populate queue first,
-    then run workers that consume from it.
+    COMPLETION and LOGLIKELIHOOD requests are grouped by sampling_params and
+    processed in batches. CHAT requests are processed individually with async
+    concurrency.
 
     Args:
-        items: List of queue items to process.
+        items: Queue items to process.
         harness: Harness instance for execution.
         result_queue: Queue to put results.
-        max_concurrency: Maximum number of concurrent workers.
+        max_concurrency: Maximum concurrent CHAT requests.
     """
     from tqdm import tqdm
 
-    from olmo_eval.runners.simple.helpers import process_request
+    from olmo_eval.core.types import RequestType, SamplingParams
+    from olmo_eval.runners.simple.helpers import process_batch, process_chat_request
 
-    work_queue: asyncio.Queue[QueueItem] = asyncio.Queue()
+    chat_items: list[QueueItem] = []
+    batchable_items: list[QueueItem] = []
+
+    for item in items:
+        if item.request.request_type == RequestType.CHAT:
+            chat_items.append(item)
+        else:
+            batchable_items.append(item)
+
     pbar = tqdm(total=len(items), desc="Processing", unit="inst")
 
-    # Populate queue with all items
-    for item in items:
-        await work_queue.put(item)
+    if batchable_items:
+        batches: dict[tuple[RequestType, SamplingParams | None], list[QueueItem]] = {}
+        for item in batchable_items:
+            key = (item.request.request_type, item.sampling_params)
+            if key not in batches:
+                batches[key] = []
+            batches[key].append(item)
 
-    async def worker() -> None:
-        """Process items from the queue until empty."""
-        while True:
-            item = await work_queue.get()
-            try:
-                await process_request(item, harness, result_queue)
-                pbar.update(1)
-            finally:
-                work_queue.task_done()
+        loop = asyncio.get_event_loop()
+        for batch in batches.values():
+            await loop.run_in_executor(None, process_batch, batch, harness, result_queue)
+            pbar.update(len(batch))
 
-    try:
-        async with asyncio.TaskGroup() as tg:
-            workers = [tg.create_task(worker()) for _ in range(max_concurrency)]
-            await work_queue.join()
-            for w in workers:
-                w.cancel()
-    finally:
-        pbar.close()
+    if chat_items:
+        work_queue: asyncio.Queue[QueueItem] = asyncio.Queue()
+        for item in chat_items:
+            await work_queue.put(item)
+
+        async def worker() -> None:
+            while True:
+                item = await work_queue.get()
+                try:
+                    await process_chat_request(item, harness, result_queue)
+                    pbar.update(1)
+                finally:
+                    work_queue.task_done()
+
+        try:
+            async with asyncio.TaskGroup() as tg:
+                workers = [tg.create_task(worker()) for _ in range(max_concurrency)]
+                await work_queue.join()
+                for w in workers:
+                    w.cancel()
+        except* asyncio.CancelledError:
+            pass
+
+    pbar.close()
 
 
-def instance_worker_process(
+def worker_process(
     worker_id: str,
     gpu_ids: list[int],
-    instance_queue: mp.Queue,
+    item_queue: mp.Queue,
     result_queue: mp.Queue,
     harness_config_dict: dict[str, Any],
     init_times: dict[str, float] | None = None,
 ) -> None:
-    """Worker that processes items with bounded async concurrency.
+    """Worker process that initializes a harness and processes items.
 
-    Collects items from the mp.Queue, then processes them using an asyncio
-    worker pool with bounded concurrency.
+    Collects all items from the queue, then processes them with batching
+    for COMPLETION/LOGLIKELIHOOD and async concurrency for CHAT requests.
 
     Args:
-        worker_id: Unique worker identifier (e.g., "OLMo-2-7B-w0")
-        gpu_ids: List of GPU IDs to use (for CUDA_VISIBLE_DEVICES)
-        instance_queue: Queue of QueueItems (None = poison pill)
-        result_queue: Queue to put ResultItems
-        harness_config_dict: Serialized HarnessConfig dict with all provider configuration
-        init_times: Shared dict for tracking worker initialization times
+        worker_id: Unique worker identifier.
+        gpu_ids: GPU IDs to use (sets CUDA_VISIBLE_DEVICES).
+        item_queue: Queue of QueueItems (None signals shutdown).
+        result_queue: Queue to put ResultItems.
+        harness_config_dict: Serialized HarnessConfig.
+        init_times: Optional shared dict for tracking initialization times.
     """
     import sys
 
@@ -154,18 +179,17 @@ def instance_worker_process(
             init_times[worker_id] = init_time
 
         try:
-            # Collect all items from mp.Queue
             items: list[QueueItem] = []
             while True:
-                item = instance_queue.get()
-                if item is None:  # Poison pill
+                item = item_queue.get()
+                if item is None:
                     break
                 items.append(item)
 
             worker_logger.info(f"Processing {len(items)} instances...")
 
             if items:
-                asyncio.run(run_worker_loop(items, harness, result_queue, max_concurrency))
+                asyncio.run(process_items(items, harness, result_queue, max_concurrency))
 
             worker_logger.info("Processing complete")
         finally:
@@ -190,5 +214,5 @@ def instance_worker_process(
 
 
 __all__ = [
-    "instance_worker_process",
+    "worker_process",
 ]

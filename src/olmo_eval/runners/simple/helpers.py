@@ -178,87 +178,57 @@ def _format_error_detail(exc: Exception) -> str:
     return " | ".join(parts)
 
 
-async def process_request(
+async def process_chat_request(
     item: QueueItem,
     harness: Harness,
     result_queue: mp.Queue,
 ) -> None:
-    """Process a single request via harness.
+    """Process a single CHAT request via harness.run().
 
-    Handles CHAT, COMPLETION, and LOGLIKELIHOOD request types with a unified
-    interface. CHAT requests use harness.run(), others use generate/logprobs.
+    CHAT requests use the async harness.run() method which handles agentic
+    loops with tool calls. These must be processed individually.
 
     Args:
-        item: Queue item to process.
+        item: Queue item to process (must be CHAT type).
         harness: Harness instance for execution.
         result_queue: Queue to put results.
     """
-    import asyncio
     from dataclasses import replace as dataclass_replace
 
-    from olmo_eval.core.types import RequestType
-
     try:
-        request_type = item.request.request_type
+        harness_result = await harness.run(item.request, item.sampling_params)
+        final_output = harness_result.final_output
 
-        if request_type == RequestType.CHAT:
-            harness_result = await harness.run(item.request, item.sampling_params)
-            final_output = harness_result.final_output
-
-            if harness_result.trajectory.num_turns > 1 or harness.config.has_tools:
-                output_with_metadata = dataclass_replace(
-                    final_output,
-                    metadata={
-                        **(final_output.metadata or {}),
-                        "trajectory": harness_result.trajectory.to_dict(),
-                        "max_turns_reached": harness_result.max_turns_reached,
-                        "total_tool_calls": harness_result.total_tool_calls,
-                        "num_turns": harness_result.num_turns,
-                    },
-                )
-            else:
-                output_with_metadata = final_output
-
-            result_queue.put(
-                ResultItem(
-                    model_name=item.model_name,
-                    task_id=item.task_id,
-                    instance_idx=item.instance_idx,
-                    instance=item.instance,
-                    request=item.request,
-                    outputs=[output_with_metadata],
-                    error=harness_result.error,
-                    attempt=item.attempt,
-                )
+        if harness_result.trajectory.num_turns > 1 or harness.config.has_tools:
+            output_with_metadata = dataclass_replace(
+                final_output,
+                metadata={
+                    **(final_output.metadata or {}),
+                    "trajectory": harness_result.trajectory.to_dict(),
+                    "max_turns_reached": harness_result.max_turns_reached,
+                    "total_tool_calls": harness_result.total_tool_calls,
+                    "num_turns": harness_result.num_turns,
+                },
             )
-
         else:
-            # COMPLETION or LOGLIKELIHOOD - run sync methods in executor
-            loop = asyncio.get_event_loop()
+            output_with_metadata = final_output
 
-            if request_type == RequestType.LOGLIKELIHOOD:
-                outputs_list = await loop.run_in_executor(None, harness.logprobs, [item.request])
-            else:
-                outputs_list = await loop.run_in_executor(
-                    None, harness.generate, [item.request], item.sampling_params
-                )
-
-            result_queue.put(
-                ResultItem(
-                    model_name=item.model_name,
-                    task_id=item.task_id,
-                    instance_idx=item.instance_idx,
-                    instance=item.instance,
-                    request=item.request,
-                    outputs=outputs_list[0],
-                    error=None,
-                    attempt=item.attempt,
-                )
+        result_queue.put(
+            ResultItem(
+                model_name=item.model_name,
+                task_id=item.task_id,
+                instance_idx=item.instance_idx,
+                instance=item.instance,
+                request=item.request,
+                outputs=[output_with_metadata],
+                error=harness_result.error,
+                attempt=item.attempt,
             )
+        )
 
     except Exception as e:
         error_detail = _format_error_detail(e)
-        logger.warning(f"Error on instance {item.instance_idx}: {error_detail}")
+        logger.warning(f"Error on CHAT instance {item.instance_idx}: {error_detail}")
 
         result_queue.put(
             ResultItem(
@@ -274,8 +244,74 @@ async def process_request(
         )
 
 
+def process_batch(
+    items: list[QueueItem],
+    harness: Harness,
+    result_queue: mp.Queue,
+) -> None:
+    """Process a batch of COMPLETION or LOGLIKELIHOOD requests.
+
+    All items must have the same request_type and sampling_params.
+    Calls harness.generate or harness.logprobs once for the entire batch.
+
+    Args:
+        items: List of queue items to process (same type and sampling_params).
+        harness: Harness instance for execution.
+        result_queue: Queue to put results.
+    """
+    from olmo_eval.core.types import RequestType
+
+    if not items:
+        return
+
+    request_type = items[0].request.request_type
+    sampling_params = items[0].sampling_params
+    requests = [item.request for item in items]
+
+    try:
+        if request_type == RequestType.LOGLIKELIHOOD:
+            all_outputs = harness.logprobs(requests)
+        else:
+            all_outputs = harness.generate(requests, sampling_params)
+
+        # Map outputs back to individual items
+        for item, outputs in zip(items, all_outputs, strict=True):
+            result_queue.put(
+                ResultItem(
+                    model_name=item.model_name,
+                    task_id=item.task_id,
+                    instance_idx=item.instance_idx,
+                    instance=item.instance,
+                    request=item.request,
+                    outputs=outputs,
+                    error=None,
+                    attempt=item.attempt,
+                )
+            )
+
+    except Exception as e:
+        # Batch failed - report error for all items
+        error_detail = _format_error_detail(e)
+        logger.warning(f"Batch error ({len(items)} items): {error_detail}")
+
+        for item in items:
+            result_queue.put(
+                ResultItem(
+                    model_name=item.model_name,
+                    task_id=item.task_id,
+                    instance_idx=item.instance_idx,
+                    instance=item.instance,
+                    request=item.request,
+                    outputs=[],
+                    error=error_detail,
+                    attempt=item.attempt,
+                )
+            )
+
+
 __all__ = [
     "check_workers_alive",
     "wait_for_workers_ready",
-    "process_request",
+    "process_chat_request",
+    "process_batch",
 ]
