@@ -130,14 +130,14 @@ def instance_worker_process(
 
                 # Separate by request type - worker handles this grouping
                 chat_items = [i for i in items if i.request.request_type == RequestType.CHAT]
-                batch_items = [i for i in items if i.request.request_type != RequestType.CHAT]
+                generate_items = [i for i in items if i.request.request_type != RequestType.CHAT]
 
-                # Process batch items (COMPLETION, LOGLIKELIHOOD) - sync
-                if batch_items:
-                    worker_logger.info(f"Processing {len(batch_items)} batch requests...")
-                    process_generate_requests(batch_items, harness, result_queue)
+                # Process (COMPLETION, LOGLIKELIHOOD)
+                if generate_items:
+                    worker_logger.info(f"Processing {len(generate_items)} batch requests...")
+                    process_generate_requests(generate_items, harness, result_queue)
 
-                # Process chat items - async execution managed here
+                # Process chat items
                 if chat_items:
                     import asyncio
 

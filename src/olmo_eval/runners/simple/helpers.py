@@ -267,17 +267,10 @@ async def process_chat_requests(
 
     from tqdm import tqdm
 
-    # Chunk size based on concurrency - process N * concurrency items at a time
-    # This provides backpressure without overwhelming connection pools
     max_concurrency = harness.config.max_concurrency or 8
-    chunk_size = max_concurrency * 8  # 64 items per chunk at default concurrency
-
-    # Track completed count for progress bar
-    completed = 0
     pbar = tqdm(total=len(batch), desc="Chat requests", unit="inst")
 
     async def run_one(item: QueueItem, semaphore: asyncio.Semaphore) -> None:
-        nonlocal completed
         async with semaphore:
             try:
                 harness_result = await harness.run(item.request, item.sampling_params)
@@ -311,7 +304,6 @@ async def process_chat_requests(
                         attempt=0,
                     )
                 )
-                completed += 1
                 pbar.update(1)
 
             except Exception as e:
@@ -331,26 +323,11 @@ async def process_chat_requests(
                         attempt=0,
                     )
                 )
-                completed += 1
                 pbar.update(1)
 
-    async def run_chunk(chunk: list[QueueItem], semaphore: asyncio.Semaphore) -> None:
-        await asyncio.gather(*[run_one(item, semaphore) for item in chunk])
-
     try:
-        # Create semaphore once for all chunks to maintain consistent backpressure
         semaphore = asyncio.Semaphore(max_concurrency)
-
-        # Process batch in chunks to avoid overwhelming connection pools
-        num_chunks = (len(batch) + chunk_size - 1) // chunk_size
-        for chunk_idx, i in enumerate(range(0, len(batch), chunk_size)):
-            chunk = batch[i : i + chunk_size]
-            if num_chunks > 1:
-                logger.info(
-                    f"Processing chunk {chunk_idx + 1}/{num_chunks} "
-                    f"({len(chunk)} instances, concurrency={max_concurrency})"
-                )
-            await run_chunk(chunk, semaphore)
+        await asyncio.gather(*[run_one(item, semaphore) for item in batch])
     finally:
         pbar.close()
 
