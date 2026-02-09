@@ -2,15 +2,67 @@
 
 from __future__ import annotations
 
+import asyncio
 import multiprocessing as mp
 import os
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from olmo_eval.core.logging import get_logger
 from olmo_eval.runners.simple.queue import QueueItem, ResultItem
 
+if TYPE_CHECKING:
+    from olmo_eval.core.harness import Harness
+
 logger = get_logger(__name__)
+
+
+async def run_worker_loop(
+    items: list[QueueItem],
+    harness: Harness,
+    result_queue: mp.Queue,
+    max_concurrency: int,
+) -> None:
+    """Process items using async workers with bounded concurrency.
+
+    Uses the asyncio.Queue + TaskGroup pattern: populate queue first,
+    then run workers that consume from it.
+
+    Args:
+        items: List of queue items to process.
+        harness: Harness instance for execution.
+        result_queue: Queue to put results.
+        max_concurrency: Maximum number of concurrent workers.
+    """
+    from tqdm import tqdm
+
+    from olmo_eval.runners.simple.helpers import process_request
+
+    work_queue: asyncio.Queue[QueueItem] = asyncio.Queue()
+    pbar = tqdm(total=len(items), desc="Processing", unit="inst")
+
+    # Populate queue with all items
+    for item in items:
+        await work_queue.put(item)
+
+    async def worker() -> None:
+        """Process items from the queue until empty."""
+        while True:
+            item = await work_queue.get()
+            try:
+                await process_request(item, harness, result_queue)
+                pbar.update(1)
+            finally:
+                work_queue.task_done()
+
+    try:
+        async with asyncio.TaskGroup() as tg:
+            workers = [tg.create_task(worker()) for _ in range(max_concurrency)]
+            await work_queue.join()
+            for w in workers:
+                w.cancel()
+    finally:
+        pbar.close()
 
 
 def instance_worker_process(
@@ -21,10 +73,10 @@ def instance_worker_process(
     harness_config_dict: dict[str, Any],
     init_times: dict[str, float] | None = None,
 ) -> None:
-    """Worker that collects all items and processes them at once.
+    """Worker that processes items with bounded async concurrency.
 
-    Collects all items from the queue, then processes them in a single
-    provider call for maximum throughput. vLLM handles internal batching.
+    Collects items from the mp.Queue, then processes them using an asyncio
+    worker pool with bounded concurrency.
 
     Args:
         worker_id: Unique worker identifier (e.g., "OLMo-2-7B-w0")
@@ -38,14 +90,11 @@ def instance_worker_process(
 
     from olmo_eval.core.logging import configure_logging, configure_worker_logging
 
-    # Set up root logger so third-party loggers (e.g. litellm) have a
-    # handler to propagate to.  Must happen before provider init.
     configure_logging()
 
     worker_logger = configure_worker_logging(worker_id)
     worker_logger.info(f"Starting on GPUs {gpu_ids}")
 
-    # Parse harness config early so we can use it for error reporting
     from olmo_eval.core.harness import Harness, HarnessConfig
 
     harness_config = HarnessConfig.from_dict(harness_config_dict)
@@ -56,14 +105,12 @@ def instance_worker_process(
         if gpu_ids:
             os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in gpu_ids)
 
-        # Extract provider configuration from harness_config
         provider_kind = str(provider_config.kind)
         tokenizer = provider_config.tokenizer
         max_model_len = provider_config.max_model_len
-        max_concurrency = provider_config.max_concurrency or harness_config.max_concurrency
+        max_concurrency = provider_config.max_concurrency or harness_config.max_concurrency or 8
         provider_kwargs = dict(provider_config.kwargs) if provider_config.kwargs else {}
 
-        # Extract vLLM-specific options from kwargs
         attention_backend = provider_kwargs.get("attention_backend")
         load_format = provider_kwargs.get("load_format")
         extra_loader_config = provider_kwargs.get("model_loader_extra_config")
@@ -77,11 +124,9 @@ def instance_worker_process(
 
         init_start = time.time()
 
-        # Set attention backend via env var (vLLM reads this)
         if attention_backend:
             os.environ["VLLM_ATTENTION_BACKEND"] = attention_backend
 
-        # Determine if auto tool choice should be enabled
         has_tools = harness_config.has_tools
         enable_auto_tool_choice = has_tools and provider_kind == "vllm_server"
 
@@ -90,7 +135,6 @@ def instance_worker_process(
             worker_logger.info(f"  Tools: {list(harness_config.tool_names)}")
         worker_logger.info(f"  Enable auto tool choice: {enable_auto_tool_choice}")
 
-        # Apply worker-specific provider overrides
         harness_config = harness_config.with_provider_overrides(
             tensor_parallel_size=len(gpu_ids) if gpu_ids else None,
             max_model_len=max_model_len,
@@ -110,7 +154,7 @@ def instance_worker_process(
             init_times[worker_id] = init_time
 
         try:
-            # Collect all items from queue
+            # Collect all items from mp.Queue
             items: list[QueueItem] = []
             while True:
                 item = instance_queue.get()
@@ -120,40 +164,17 @@ def instance_worker_process(
 
             worker_logger.info(f"Processing {len(items)} instances...")
 
-            # Process items grouped by request type
             if items:
-                from olmo_eval.core.types import RequestType
-                from olmo_eval.runners.simple.helpers import (
-                    process_chat_requests,
-                    process_generate_requests,
-                )
-
-                # Separate by request type - worker handles this grouping
-                chat_items = [i for i in items if i.request.request_type == RequestType.CHAT]
-                generate_items = [i for i in items if i.request.request_type != RequestType.CHAT]
-
-                # Process (COMPLETION, LOGLIKELIHOOD)
-                if generate_items:
-                    worker_logger.info(f"Processing {len(generate_items)} batch requests...")
-                    process_generate_requests(generate_items, harness, result_queue)
-
-                # Process chat items
-                if chat_items:
-                    import asyncio
-
-                    worker_logger.info(f"Processing {len(chat_items)} chat requests...")
-                    asyncio.run(process_chat_requests(chat_items, harness, result_queue))
+                asyncio.run(run_worker_loop(items, harness, result_queue, max_concurrency))
 
             worker_logger.info("Processing complete")
         finally:
-            # Ensure provider cleanup (stops vLLM server if managed)
             close_fn = getattr(harness.provider, "close", None)
             if callable(close_fn):
                 close_fn()
 
     except Exception as e:
         worker_logger.error(f"Worker process failed: {e}")
-        # Put a fatal error marker in the result queue so main process knows we died
         result_queue.put(
             ResultItem(
                 model_name=model_name,

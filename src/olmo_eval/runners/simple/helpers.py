@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import dataclasses
 import multiprocessing as mp
 import queue
 import time
@@ -146,7 +144,7 @@ def wait_for_workers_ready(
 
 
 # -----------------------------------------------------------------------------
-# Batch processing
+# Request processing
 # -----------------------------------------------------------------------------
 
 
@@ -180,160 +178,106 @@ def _format_error_detail(exc: Exception) -> str:
     return " | ".join(parts)
 
 
-def process_generate_requests(
-    batch: list[QueueItem],
+async def process_request(
+    item: QueueItem,
     harness: Harness,
     result_queue: mp.Queue,
 ) -> None:
-    """Process COMPLETION/LOGLIKELIHOOD requests via harness.generate()/logprobs().
+    """Process a single request via harness.
 
-    Groups requests by sampling_params and sends them to the harness in batches.
+    Handles CHAT, COMPLETION, and LOGLIKELIHOOD request types with a unified
+    interface. CHAT requests use harness.run(), others use generate/logprobs.
 
     Args:
-        batch: Queue items to process (COMPLETION or LOGLIKELIHOOD only).
+        item: Queue item to process.
         harness: Harness instance for execution.
         result_queue: Queue to put results.
     """
-    from tqdm import tqdm
+    import asyncio
+    from dataclasses import replace as dataclass_replace
 
     from olmo_eval.core.types import RequestType
 
-    # Group items by (request_type, sampling_params) for batch efficiency
-    groups: dict[tuple, list[QueueItem]] = {}
-    for item in batch:
-        sp_key = dataclasses.astuple(item.sampling_params) if item.sampling_params else None
-        key = (item.request.request_type, sp_key)
-        groups.setdefault(key, []).append(item)
-
-    with tqdm(total=len(batch), desc="Batch requests", unit="inst") as pbar:
-        for group in groups.values():
-            requests = [item.request for item in group]
-            sampling_params = group[0].sampling_params
-            request_type = group[0].request.request_type
-
-            try:
-                if request_type == RequestType.LOGLIKELIHOOD:
-                    outputs_list = harness.logprobs(requests)
-                else:
-                    outputs_list = harness.generate(requests, sampling_params)
-
-                for item, outputs in zip(group, outputs_list, strict=True):
-                    result_queue.put(
-                        ResultItem(
-                            model_name=item.model_name,
-                            task_id=item.task_id,
-                            instance_idx=item.instance_idx,
-                            instance=item.instance,
-                            request=item.request,
-                            outputs=outputs,
-                            error=None,
-                            attempt=item.attempt,
-                        )
-                    )
-                    pbar.update(1)
-            except Exception as e:
-                for item in group:
-                    result_queue.put(
-                        ResultItem(
-                            model_name=item.model_name,
-                            task_id=item.task_id,
-                            instance_idx=item.instance_idx,
-                            instance=item.instance,
-                            request=item.request,
-                            outputs=[],
-                            error=_format_error_detail(e),
-                            attempt=item.attempt,
-                        )
-                    )
-                    pbar.update(1)
-
-
-async def process_chat_requests(
-    batch: list[QueueItem],
-    harness: Harness,
-    result_queue: mp.Queue,
-) -> None:
-    """Process CHAT requests via harness.run() for multi-turn execution.
-
-    This is an async function - the caller (worker) manages the event loop.
-    Uses concurrency control for chat/agent tasks.
-
-    Args:
-        batch: Queue items to process (CHAT requests only).
-        harness: Harness instance for execution.
-        result_queue: Queue to put results.
-    """
-    from dataclasses import replace as dataclass_replace
-
-    from tqdm import tqdm
-
-    max_concurrency = harness.config.max_concurrency or 8
-    pbar = tqdm(total=len(batch), desc="Chat requests", unit="inst")
-
-    async def run_one(item: QueueItem, semaphore: asyncio.Semaphore) -> None:
-        async with semaphore:
-            try:
-                harness_result = await harness.run(item.request, item.sampling_params)
-
-                final_output = harness_result.final_output
-
-                if harness_result.trajectory.num_turns > 1 or harness.config.has_tools:
-                    output_with_metadata = dataclass_replace(
-                        final_output,
-                        metadata={
-                            **(final_output.metadata or {}),
-                            "trajectory": harness_result.trajectory.to_dict(),
-                            "max_turns_reached": harness_result.max_turns_reached,
-                            "total_tool_calls": harness_result.total_tool_calls,
-                            "num_turns": harness_result.num_turns,
-                        },
-                    )
-                else:
-                    output_with_metadata = final_output
-
-                result_queue.put(
-                    ResultItem(
-                        model_name=item.model_name,
-                        task_id=item.task_id,
-                        instance_idx=item.instance_idx,
-                        instance=item.instance,
-                        request=item.request,
-                        outputs=[output_with_metadata],
-                        error=harness_result.error,
-                        attempt=0,
-                    )
-                )
-                pbar.update(1)
-
-            except Exception as e:
-                # Log full error details for debugging
-                error_detail = _format_error_detail(e)
-                logger.warning(f"Error on instance {item.instance_idx}: {error_detail}")
-
-                result_queue.put(
-                    ResultItem(
-                        model_name=item.model_name,
-                        task_id=item.task_id,
-                        instance_idx=item.instance_idx,
-                        instance=item.instance,
-                        request=item.request,
-                        outputs=[],
-                        error=error_detail,
-                        attempt=0,
-                    )
-                )
-                pbar.update(1)
-
     try:
-        semaphore = asyncio.Semaphore(max_concurrency)
-        await asyncio.gather(*[run_one(item, semaphore) for item in batch])
-    finally:
-        pbar.close()
+        request_type = item.request.request_type
+
+        if request_type == RequestType.CHAT:
+            harness_result = await harness.run(item.request, item.sampling_params)
+            final_output = harness_result.final_output
+
+            if harness_result.trajectory.num_turns > 1 or harness.config.has_tools:
+                output_with_metadata = dataclass_replace(
+                    final_output,
+                    metadata={
+                        **(final_output.metadata or {}),
+                        "trajectory": harness_result.trajectory.to_dict(),
+                        "max_turns_reached": harness_result.max_turns_reached,
+                        "total_tool_calls": harness_result.total_tool_calls,
+                        "num_turns": harness_result.num_turns,
+                    },
+                )
+            else:
+                output_with_metadata = final_output
+
+            result_queue.put(
+                ResultItem(
+                    model_name=item.model_name,
+                    task_id=item.task_id,
+                    instance_idx=item.instance_idx,
+                    instance=item.instance,
+                    request=item.request,
+                    outputs=[output_with_metadata],
+                    error=harness_result.error,
+                    attempt=item.attempt,
+                )
+            )
+
+        else:
+            # TODO(undfined): Come back to this as I don't like it being something different.
+            # Why can't we just use the async methods?
+            # COMPLETION or LOGLIKELIHOOD - run sync methods in executor
+            loop = asyncio.get_event_loop()
+
+            if request_type == RequestType.LOGLIKELIHOOD:
+                outputs_list = await loop.run_in_executor(None, harness.logprobs, [item.request])
+            else:
+                outputs_list = await loop.run_in_executor(
+                    None, harness.generate, [item.request], item.sampling_params
+                )
+
+            result_queue.put(
+                ResultItem(
+                    model_name=item.model_name,
+                    task_id=item.task_id,
+                    instance_idx=item.instance_idx,
+                    instance=item.instance,
+                    request=item.request,
+                    outputs=outputs_list[0],
+                    error=None,
+                    attempt=item.attempt,
+                )
+            )
+
+    except Exception as e:
+        error_detail = _format_error_detail(e)
+        logger.warning(f"Error on instance {item.instance_idx}: {error_detail}")
+
+        result_queue.put(
+            ResultItem(
+                model_name=item.model_name,
+                task_id=item.task_id,
+                instance_idx=item.instance_idx,
+                instance=item.instance,
+                request=item.request,
+                outputs=[],
+                error=error_detail,
+                attempt=item.attempt,
+            )
+        )
 
 
 __all__ = [
     "check_workers_alive",
     "wait_for_workers_ready",
-    "process_generate_requests",
-    "process_chat_requests",
+    "process_request",
 ]
