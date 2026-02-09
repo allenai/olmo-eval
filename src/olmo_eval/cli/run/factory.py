@@ -4,13 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from rich.console import Console
-
 from olmo_eval.cli.run.config import RunConfig
 from olmo_eval.runners.models import S3Config
 from olmo_eval.storage import StorageBackend
-
-console = Console()
 
 
 class RunnerFactory:
@@ -40,8 +36,6 @@ class RunnerFactory:
             Configured AsyncEvalRunner instance.
         """
         from olmo_eval.runners.asynq import AsyncEvalRunner
-
-        console.print("[bold cyan]Using AsyncEvalRunner[/bold cyan]")
 
         # Get attention_backend from provider kwargs if specified
         provider_kwargs = self.config.harness_config.provider.kwargs
