@@ -19,6 +19,7 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.core.harness.config import HarnessConfig, ProviderConfig
 from olmo_eval.core.logging import get_logger, get_worker_id
 from olmo_eval.core.types import Response
+from olmo_eval.core.types.trajectory import AgentTrajectory
 from olmo_eval.runners.base import BaseEvalRunner
 from olmo_eval.runners.mixins import RunnerResultsMixin, S3Config
 from olmo_eval.runners.simple.helpers import (
@@ -524,10 +525,19 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                     completed_tasks += 1
                     self._report_task_completion(self.model_name, task_result)
             else:
+                # Extract trajectory from output metadata if present
+                trajectory = None
+                if result_item.outputs:
+                    meta = result_item.outputs[0].metadata or {}
+                    traj_dict = meta.get("trajectory")
+                    if traj_dict:
+                        trajectory = AgentTrajectory.from_dict(traj_dict)
+
                 response = Response(
                     instance=result_item.instance,
                     request=result_item.request,
                     outputs=result_item.outputs,
+                    trajectory=trajectory,
                 )
 
                 is_complete = tracker.add_response(result_item.instance_idx, response)

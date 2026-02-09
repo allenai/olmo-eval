@@ -12,11 +12,14 @@ Import the tool objects and use .name for HarnessConfig.tool_names.
 from __future__ import annotations
 
 import atexit
+import logging
 import os
 
 import httpx
 
 from .registry import registered_tool
+
+logger = logging.getLogger(__name__)
 
 # Module-level shared HTTP client for connection reuse
 _http_client: httpx.AsyncClient | None = None
@@ -71,18 +74,36 @@ async def semantic_scholar_search(query: str) -> str:
     if api_key:
         headers["x-api-key"] = api_key
 
+    sanitized_query = query.strip()
+    if not sanitized_query:
+        return "Error: Empty search query."
+
     client = _get_http_client()
     try:
         resp = await client.get(
             "https://api.semanticscholar.org/graph/v1/paper/search",
-            params={"query": query, "limit": 5, "fields": "title,abstract,url,year,authors"},
+            params={
+                "query": sanitized_query,
+                "limit": 5,
+                "fields": "title,abstract,url,year,authors",
+            },
             headers=headers,
         )
+        if resp.status_code != 200:
+            logger.error(
+                f"Semantic Scholar API error: status={resp.status_code}, "
+                f"query={sanitized_query!r}, response={resp.text[:500]}"
+            )
         resp.raise_for_status()
         data = resp.json()
     except httpx.HTTPStatusError as e:
+        logger.error(
+            f"Semantic Scholar HTTP error: status={e.response.status_code}, "
+            f"query={sanitized_query!r}, response={e.response.text[:500]}"
+        )
         return f"Error searching Semantic Scholar: HTTP {e.response.status_code}"
     except httpx.RequestError as e:
+        logger.error(f"Semantic Scholar request error: {e}, query={sanitized_query!r}")
         return f"Error searching Semantic Scholar: {e}"
 
     papers = data.get("data", [])
@@ -134,21 +155,36 @@ async def serper_web_search(query: str) -> str:
     if not api_key:
         return "Error: SERPER_API_KEY not configured."
 
+    # Sanitize query - remove problematic characters
+    sanitized_query = query.strip()
+    if not sanitized_query:
+        return "Error: Empty search query."
+
     client = _get_http_client()
     try:
         resp = await client.post(
             "https://google.serper.dev/search",
-            json={"q": query, "num": 5},
+            json={"q": sanitized_query, "num": 5},
             headers={
                 "X-API-KEY": api_key,
                 "Content-Type": "application/json",
             },
         )
+        if resp.status_code != 200:
+            logger.error(
+                f"Serper API error: status={resp.status_code}, "
+                f"query={sanitized_query!r}, response={resp.text[:500]}"
+            )
         resp.raise_for_status()
         data = resp.json()
     except httpx.HTTPStatusError as e:
+        logger.error(
+            f"Serper HTTP error: status={e.response.status_code}, "
+            f"query={sanitized_query!r}, response={e.response.text[:500]}"
+        )
         return f"Error searching web: HTTP {e.response.status_code}"
     except httpx.RequestError as e:
+        logger.error(f"Serper request error: {e}, query={sanitized_query!r}")
         return f"Error searching web: {e}"
 
     results = []
@@ -200,21 +236,34 @@ async def serper_fetch_page(url: str) -> str:
     if not api_key:
         return "Error: SERPER_API_KEY not configured."
 
+    if not url or not url.strip():
+        return "Error: Empty URL."
+
     client = _get_http_client()
     try:
         resp = await client.post(
             "https://scrape.serper.dev",
-            json={"url": url},
+            json={"url": url.strip()},
             headers={
                 "X-API-KEY": api_key,
                 "Content-Type": "application/json",
             },
         )
+        if resp.status_code != 200:
+            logger.error(
+                f"Serper scrape API error: status={resp.status_code}, "
+                f"url={url!r}, response={resp.text[:500]}"
+            )
         resp.raise_for_status()
         data = resp.json()
     except httpx.HTTPStatusError as e:
+        logger.error(
+            f"Serper scrape HTTP error: status={e.response.status_code}, "
+            f"url={url!r}, response={e.response.text[:500]}"
+        )
         return f"Error fetching webpage: HTTP {e.response.status_code}"
     except httpx.RequestError as e:
+        logger.error(f"Serper scrape request error: {e}, url={url!r}")
         return f"Error fetching webpage: {e}"
 
     # Extract text content
