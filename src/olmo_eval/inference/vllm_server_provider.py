@@ -35,11 +35,6 @@ def _log_request(request: httpx.Request) -> None:
     logger.info(f"vLLM request: {request.method} {request.url}\n  body: {body}")
 
 
-def _log_response(response: httpx.Response) -> None:
-    """Log incoming HTTP response."""
-    logger.info(f"vLLM response: {response.status_code} {response.reason_phrase}")
-
-
 class VLLMServerProvider(InferenceProvider):
     """Provider that uses a vLLM server's OpenAI-compatible API.
 
@@ -159,7 +154,6 @@ class VLLMServerProvider(InferenceProvider):
                 logger.info("vLLM debug request logging enabled (VLLM_DEBUG_REQUESTS=1)")
                 event_hooks = {
                     "request": [_log_request],
-                    "response": [_log_response],
                 }
 
             self._http_client = httpx.AsyncClient(
