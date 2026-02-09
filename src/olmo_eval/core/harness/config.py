@@ -181,6 +181,45 @@ class ProviderConfig:
             kwargs=data.get("kwargs", {}),
         )
 
+    def with_overrides(self, **overrides: Any) -> ProviderConfig:
+        """Create a new config with overrides applied.
+
+        Known field names are set directly on the config. Unknown names
+        are merged into kwargs. None values are ignored.
+
+        Args:
+            **overrides: Field overrides (e.g., max_model_len=4096).
+
+        Returns:
+            New ProviderConfig with overrides applied.
+
+        Example:
+            config = provider_config.with_overrides(
+                tensor_parallel_size=4,
+                max_model_len=8192,
+                tokenizer="/path/to/tokenizer",
+            )
+        """
+        from dataclasses import fields, replace
+
+        # Separate known fields from kwargs
+        field_names = {f.name for f in fields(self)}
+        field_overrides = {}
+        extra_kwargs = dict(self.kwargs)
+
+        for key, value in overrides.items():
+            if value is None:
+                continue
+            if key in field_names and key != "kwargs":
+                field_overrides[key] = value
+            else:
+                extra_kwargs[key] = value
+
+        if extra_kwargs != dict(self.kwargs):
+            field_overrides["kwargs"] = extra_kwargs
+
+        return replace(self, **field_overrides) if field_overrides else self
+
 
 @dataclass(frozen=True)
 class HarnessConfig:
@@ -397,6 +436,28 @@ class HarnessConfig:
             overrides["kwargs"] = {**provider.kwargs, **self.provider.kwargs}
 
         return self.with_provider(replace(provider, **overrides))
+
+    def with_provider_overrides(self, **overrides: Any) -> HarnessConfig:
+        """Create a new config with provider overrides applied.
+
+        Convenience method that applies overrides to the provider config.
+        Known provider field names are set directly; unknown names go to kwargs.
+        None values are ignored.
+
+        Args:
+            **overrides: Provider field overrides.
+
+        Returns:
+            New HarnessConfig with updated provider.
+
+        Example:
+            config = harness_config.with_provider_overrides(
+                tensor_parallel_size=4,
+                max_model_len=8192,
+                enable_auto_tool_choice=True,
+            )
+        """
+        return self.with_provider(self.provider.with_overrides(**overrides))
 
 
 def harness_config(

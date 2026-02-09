@@ -6,7 +6,6 @@ It provides both single-turn (generate) and multi-turn (run) interfaces.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
 from olmo_eval.core.types import LMOutput, LMRequest, SamplingParams
@@ -22,10 +21,13 @@ if TYPE_CHECKING:
 class Harness:
     """An execution harness configured with specific capabilities.
 
+    The Harness wraps an InferenceProvider (created from config) and applies
+    configuration to all requests. It provides both single-turn (generate)
+    and multi-turn (run) interfaces.
+
     Example:
         from olmo_eval.core.harness import Harness, HarnessConfig, ProviderConfig
 
-        # Create harness with provider config
         config = HarnessConfig(
             name="search",
             provider=ProviderConfig(
@@ -37,33 +39,33 @@ class Harness:
         )
         harness = Harness(config)
 
-        # Single generation
-        outputs = harness.generate([request])
+        # Single generation (batched)
+        outputs = harness.generate([request1, request2])
 
-        # Multi-turn execution
+        # Multi-turn execution with tools
         result = await harness.run(request)
-
-        # Or use an existing provider
-        provider = create_provider("vllm", "llama3.1-8b")
-        harness = Harness(config, provider=provider)
     """
 
-    def __init__(
-        self,
-        config: HarnessConfig,
-        *,
-        provider: InferenceProvider | None = None,
-    ) -> None:
+    def __init__(self, config: HarnessConfig) -> None:
         """Initialize the Harness.
 
         Args:
             config: Configuration specifying provider, tools, system prompt, etc.
-            provider: Optional existing provider to use. If not provided,
-                creates one from config.provider.
+                The provider is created from config.provider.
         """
         self.config = config
-        self.provider = provider if provider is not None else config.provider.create_provider()
+        self._provider: InferenceProvider | None = None
         self.backend = get_backend(config.backend)
+
+    @property
+    def provider(self) -> InferenceProvider:
+        """Get or create the inference provider.
+
+        The provider is lazily created from config.provider on first access.
+        """
+        if self._provider is None:
+            self._provider = self.config.provider.create_provider()
+        return self._provider
 
     @property
     def model_name(self) -> str:
@@ -133,35 +135,6 @@ class Harness:
             HarnessResult with trajectory and final output.
         """
         return await self.backend.run(self.provider, self.config, request, sampling_params)
-
-    async def run_batch(
-        self,
-        requests: list[LMRequest],
-        sampling_params: SamplingParams | None = None,
-        on_instance_complete: Callable[[], None] | None = None,
-    ) -> list[HarnessResult]:
-        """Execute multiple multi-turn requests with concurrency control.
-
-        Args:
-            requests: List of initial requests.
-            sampling_params: Optional sampling parameters.
-            on_instance_complete: Optional callback called when each instance completes.
-
-        Returns:
-            List of HarnessResult, one per request.
-        """
-        import asyncio
-
-        semaphore = asyncio.Semaphore(self.config.max_concurrency or 8)
-
-        async def run_one(request: LMRequest) -> HarnessResult:
-            async with semaphore:
-                result = await self.run(request, sampling_params)
-                if on_instance_complete:
-                    on_instance_complete()
-                return result
-
-        return await asyncio.gather(*[run_one(r) for r in requests])
 
     # ─────────────────────────────────────────────────────────
     # Config application (used by backends)

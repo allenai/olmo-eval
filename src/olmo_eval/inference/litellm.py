@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any, TypeVar
+from collections.abc import Awaitable, Callable, Coroutine
+from typing import TYPE_CHECKING, Any
 
 from olmo_eval.core.debug import is_debug_provider
 from olmo_eval.core.logging import get_logger
@@ -41,7 +41,24 @@ _ALWAYS_RETRY_TYPES = (
 
 logger = get_logger(__name__)
 
-T = TypeVar("T")
+
+def _run_async[T](coro: Coroutine[Any, Any, T]) -> T:
+    """Run an async coroutine, handling both sync and async contexts.
+
+    If called from within an existing event loop, creates a new thread
+    to run the coroutine. Otherwise, uses asyncio.run().
+    """
+    try:
+        asyncio.get_running_loop()
+        # We're in an async context - need to run in a separate thread
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(asyncio.run, coro)
+            return future.result()
+    except RuntimeError:
+        # No event loop running, safe to use asyncio.run()
+        return asyncio.run(coro)
 
 
 class LiteLLMProvider(InferenceProvider):
@@ -181,7 +198,7 @@ class LiteLLMProvider(InferenceProvider):
 
         return "\n".join(parts)
 
-    async def _retry_with_backoff_async(
+    async def _retry_with_backoff_async[T](
         self, func: Callable[[], Awaitable[T]], *, context: str = ""
     ) -> T:
         """Execute with exponential backoff for retryable errors.
@@ -328,7 +345,7 @@ class LiteLLMProvider(InferenceProvider):
             pbar.close()
             return list(results)
 
-        return asyncio.run(arun())
+        return _run_async(arun())
 
     async def _logprobs_single_async(self, request: LMRequest) -> list[LMOutput]:
         """Compute logprobs for a single request."""
@@ -404,4 +421,4 @@ class LiteLLMProvider(InferenceProvider):
             pbar.close()
             return list(results)
 
-        return asyncio.run(arun())
+        return _run_async(arun())

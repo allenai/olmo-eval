@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any, TypeVar
+from collections.abc import Awaitable, Callable, Coroutine
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -44,7 +44,24 @@ logger = get_logger(__name__)
 # Enable with VLLM_DEBUG_REQUESTS=1
 _DEBUG_REQUESTS = os.environ.get("VLLM_DEBUG_REQUESTS", "").lower() in ("1", "true", "yes")
 
-T = TypeVar("T")
+
+def _run_async[T](coro: Coroutine[Any, Any, T]) -> T:
+    """Run an async coroutine, handling both sync and async contexts.
+
+    If called from within an existing event loop, creates a new thread
+    to run the coroutine. Otherwise, uses asyncio.run().
+    """
+    try:
+        asyncio.get_running_loop()
+        # We're in an async context - need to run in a separate thread
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(asyncio.run, coro)
+            return future.result()
+    except RuntimeError:
+        # No event loop running, safe to use asyncio.run()
+        return asyncio.run(coro)
 
 
 def _log_request(request: httpx.Request) -> None:
@@ -70,15 +87,15 @@ async def _log_response(response: httpx.Response) -> None:
 class VLLMServerProvider(InferenceProvider):
     """Provider that uses a vLLM server's OpenAI-compatible API.
 
-    This provider wraps a vLLM server URL (e.g., from vllm_server_context)
-    and provides both the standard InferenceProvider interface and an
-    AsyncOpenAI client for agent backends.
+    This provider can either connect to an existing vLLM server (if base_url
+    is provided) or start and manage its own server subprocess.
 
     Example:
-        with vllm_server_context("meta-llama/Llama-3.1-8B-Instruct") as url:
-            provider = VLLMServerProvider("Llama-3.1-8B-Instruct", base_url=url)
-            harness = Harness(provider, config)
-            result = await harness.run(request)
+        # Auto-start server (managed lifecycle)
+        provider = VLLMServerProvider("meta-llama/Llama-3.1-8B-Instruct")
+
+        # Or connect to existing server
+        provider = VLLMServerProvider("model", base_url="http://localhost:8000/v1")
     """
 
     def __init__(
@@ -89,19 +106,33 @@ class VLLMServerProvider(InferenceProvider):
         max_concurrency: int = 32,
         max_retries: int = 3,
         retry_delay: float = 1.0,
+        # Server config (only used if base_url is None)
+        tensor_parallel_size: int = 1,
+        max_model_len: int | None = None,
+        tokenizer: str | None = None,
+        enable_auto_tool_choice: bool = False,
+        tool_call_parser: str | None = None,
+        trust_remote_code: bool = False,
+        **server_kwargs: Any,
     ) -> None:
         """Initialize the provider.
 
         Args:
             model_name: Model identifier for requests.
-            base_url: Base URL of the vLLM server. Defaults to "http://localhost:8000/v1".
+            base_url: Base URL of existing vLLM server. If None, starts own server.
             timeout: Request timeout in seconds.
             max_concurrency: Maximum number of concurrent requests.
             max_retries: Maximum number of retries for transient errors.
             retry_delay: Base delay in seconds between retries (exponential backoff).
+            tensor_parallel_size: Number of GPUs for tensor parallelism (server mode).
+            max_model_len: Maximum model context length (server mode).
+            tokenizer: Tokenizer path override (server mode).
+            enable_auto_tool_choice: Enable automatic tool choice (server mode).
+            tool_call_parser: Tool call parser name (server mode).
+            trust_remote_code: Trust remote code for model loading (server mode).
+            **server_kwargs: Additional vLLM server arguments.
         """
         super().__init__(model_name)
-        self.base_url = base_url or "http://localhost:8000/v1"
         self.timeout = timeout
         self.max_concurrency = max_concurrency
         self.max_retries = max_retries
@@ -109,6 +140,45 @@ class VLLMServerProvider(InferenceProvider):
         self._client: AsyncOpenAI | None = None
         self._http_client: httpx.AsyncClient | None = None  # For debug logging
         self._openai_module: Any = None  # Cached openai module for exception types
+        self._server: Any = None  # VLLMServerProcess if we started it
+
+        if base_url:
+            # Connect to existing server
+            self.base_url = base_url
+        else:
+            # Start our own server
+            from olmo_eval.inference.vllm_server import VLLMServerProcess
+
+            # Build server kwargs
+            srv_kwargs: dict[str, Any] = dict(server_kwargs)
+            if max_model_len:
+                srv_kwargs["max_model_len"] = max_model_len
+            if tokenizer:
+                srv_kwargs["tokenizer"] = tokenizer
+            if enable_auto_tool_choice:
+                srv_kwargs["enable_auto_tool_choice"] = True
+                if tool_call_parser:
+                    srv_kwargs["tool_call_parser"] = tool_call_parser
+            if trust_remote_code:
+                srv_kwargs["trust_remote_code"] = True
+
+            self._server = VLLMServerProcess(
+                model_name=model_name,
+                tensor_parallel_size=tensor_parallel_size,
+                **srv_kwargs,
+            )
+            self._server.start()
+            self.base_url = self._server.base_url
+
+    def close(self) -> None:
+        """Close the provider and stop managed server if any."""
+        if self._server is not None:
+            self._server.stop()
+            self._server = None
+
+    def __del__(self) -> None:
+        """Ensure server is stopped on garbage collection."""
+        self.close()
 
     def _get_or_create_client(self) -> AsyncOpenAI:
         """Get or create the AsyncOpenAI client."""
@@ -222,7 +292,7 @@ class VLLMServerProvider(InferenceProvider):
 
         return "\n".join(parts)
 
-    async def _retry_with_backoff_async(
+    async def _retry_with_backoff_async[T](
         self, func: Callable[[], Awaitable[T]], *, context: str = ""
     ) -> T:
         """Execute with exponential backoff for retryable errors.
@@ -377,7 +447,7 @@ class VLLMServerProvider(InferenceProvider):
 
             return await asyncio.gather(*[process(r) for r in requests])
 
-        return asyncio.run(arun())
+        return _run_async(arun())
 
     def logprobs(self, requests: list[LMRequest]) -> list[list[LMOutput]]:
         """Compute logprobs (limited support via API).

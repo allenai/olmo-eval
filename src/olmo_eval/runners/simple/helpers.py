@@ -7,10 +7,9 @@ import dataclasses
 import multiprocessing as mp
 import queue
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from olmo_eval.core.logging import get_logger
-from olmo_eval.inference import InferenceProvider
 from olmo_eval.runners.simple.queue import QueueItem, ResultItem
 
 if TYPE_CHECKING:
@@ -96,7 +95,7 @@ def wait_for_workers_ready(
     result_queue: mp.Queue,
     startup_timeout: float = 30.0,
 ) -> None:
-    """Wait briefly for workers to start and check for early failures.
+    """Wait for workers to start and check for early failures.
 
     Args:
         workers: List of worker processes
@@ -149,35 +148,6 @@ def wait_for_workers_ready(
 # -----------------------------------------------------------------------------
 # Batch processing
 # -----------------------------------------------------------------------------
-
-
-def process_batch(
-    batch: list[QueueItem],
-    provider: InferenceProvider,
-    result_queue: mp.Queue,
-    harness: Harness | None = None,
-) -> None:
-    """Process a batch of instances through the provider or harness.
-
-    For harness-based requests (with or without tools), uses async harness.run()
-    to stream results as they complete. For provider-only requests, groups by
-    request type and uses batch generation.
-
-    Args:
-        batch: List of QueueItems to process
-        provider: InferenceProvider instance
-        result_queue: Queue to put results
-        harness: Optional Harness instance for tool/prompt configuration
-    """
-    from tqdm import tqdm
-
-    with tqdm(total=len(batch), desc="Processing instances", unit="inst") as pbar:
-        if harness is not None:
-            _process_with_harness(batch, harness, result_queue, pbar)
-            return
-
-        # Provider-only path: group by request type for batch efficiency
-        _process_with_provider(batch, provider, result_queue, pbar)
 
 
 def _format_error_detail(exc: Exception) -> str:
@@ -252,35 +222,108 @@ def _is_retryable_error(error: Exception) -> bool:
     return "internal" in error_str and "error" in error_str
 
 
-def _process_with_harness(
+def process_generate_requests(
     batch: list[QueueItem],
     harness: Harness,
     result_queue: mp.Queue,
-    pbar: Any,
+) -> None:
+    """Process COMPLETION/LOGLIKELIHOOD requests via harness.generate()/logprobs().
+
+    Groups requests by sampling_params and sends them to the harness in batches.
+
+    Args:
+        batch: Queue items to process (COMPLETION or LOGLIKELIHOOD only).
+        harness: Harness instance for execution.
+        result_queue: Queue to put results.
+    """
+    from tqdm import tqdm
+
+    from olmo_eval.core.types import RequestType
+
+    # Group items by (request_type, sampling_params) for batch efficiency
+    groups: dict[tuple, list[QueueItem]] = {}
+    for item in batch:
+        sp_key = dataclasses.astuple(item.sampling_params) if item.sampling_params else None
+        key = (item.request.request_type, sp_key)
+        groups.setdefault(key, []).append(item)
+
+    with tqdm(total=len(batch), desc="Batch requests", unit="inst") as pbar:
+        for group in groups.values():
+            requests = [item.request for item in group]
+            sampling_params = group[0].sampling_params
+            request_type = group[0].request.request_type
+
+            try:
+                if request_type == RequestType.LOGLIKELIHOOD:
+                    outputs_list = harness.logprobs(requests)
+                else:
+                    outputs_list = harness.generate(requests, sampling_params)
+
+                for item, outputs in zip(group, outputs_list, strict=True):
+                    result_queue.put(
+                        ResultItem(
+                            model_name=item.model_name,
+                            task_id=item.task_id,
+                            instance_idx=item.instance_idx,
+                            instance=item.instance,
+                            request=item.request,
+                            outputs=outputs,
+                            error=None,
+                            attempt=item.attempt,
+                        )
+                    )
+                    pbar.update(1)
+            except Exception as e:
+                for item in group:
+                    result_queue.put(
+                        ResultItem(
+                            model_name=item.model_name,
+                            task_id=item.task_id,
+                            instance_idx=item.instance_idx,
+                            instance=item.instance,
+                            request=item.request,
+                            outputs=[],
+                            error=_format_error_detail(e),
+                            attempt=item.attempt,
+                        )
+                    )
+                    pbar.update(1)
+
+
+async def process_chat_requests(
+    batch: list[QueueItem],
+    harness: Harness,
+    result_queue: mp.Queue,
     max_retries: int = 2,
     retry_delay: float = 2.0,
 ) -> None:
-    """Process batch using harness.run(), streaming results as they complete.
+    """Process CHAT requests via harness.run() for multi-turn execution.
 
-    Chunks the batch to avoid overwhelming the HTTP connection pool. Each chunk
-    is processed with bounded concurrency before moving to the next.
+    This is an async function - the caller (worker) manages the event loop.
+    Uses concurrency control for chat/agent tasks.
 
     Args:
-        batch: Queue items to process.
+        batch: Queue items to process (CHAT requests only).
         harness: Harness instance for execution.
         result_queue: Queue to put results.
-        pbar: Progress bar to update.
         max_retries: Maximum retry attempts for transient errors.
         retry_delay: Base delay between retries (exponential backoff).
     """
     from dataclasses import replace as dataclass_replace
+
+    from tqdm import tqdm
 
     # Chunk size based on concurrency - process N * concurrency items at a time
     # This provides backpressure without overwhelming connection pools
     max_concurrency = harness.config.max_concurrency or 8
     chunk_size = max_concurrency * 8  # 64 items per chunk at default concurrency
 
+    # Track completed count for progress bar
+    completed = 0
+    pbar = tqdm(total=len(batch), desc="Chat requests", unit="inst")
+
     async def run_one(item: QueueItem, semaphore: asyncio.Semaphore) -> None:
+        nonlocal completed
         async with semaphore:
             last_error: Exception | None = None
             attempt = 0
@@ -318,6 +361,7 @@ def _process_with_harness(
                             attempt=attempt,
                         )
                     )
+                    completed += 1
                     pbar.update(1)
                     return  # Success, exit retry loop
 
@@ -355,12 +399,13 @@ def _process_with_harness(
                     attempt=attempt,
                 )
             )
+            completed += 1
             pbar.update(1)
 
     async def run_chunk(chunk: list[QueueItem], semaphore: asyncio.Semaphore) -> None:
         await asyncio.gather(*[run_one(item, semaphore) for item in chunk])
 
-    async def run_all_chunks() -> None:
+    try:
         # Create semaphore once for all chunks to maintain consistent backpressure
         semaphore = asyncio.Semaphore(max_concurrency)
 
@@ -374,70 +419,13 @@ def _process_with_harness(
                     f"({len(chunk)} instances, concurrency={max_concurrency})"
                 )
             await run_chunk(chunk, semaphore)
-
-    asyncio.run(run_all_chunks())
-
-
-def _process_with_provider(
-    batch: list[QueueItem],
-    provider: InferenceProvider,
-    result_queue: mp.Queue,
-    pbar: Any,
-) -> None:
-    """Process batch using provider directly, grouping by request type."""
-    from olmo_eval.core.types import RequestType
-
-    # Group items by (request_type, sampling_params) for batch efficiency
-    groups: dict[tuple, list[QueueItem]] = {}
-    for item in batch:
-        sp_key = dataclasses.astuple(item.sampling_params) if item.sampling_params else None
-        key = (item.request.request_type, sp_key)
-        groups.setdefault(key, []).append(item)
-
-    for group in groups.values():
-        requests = [item.request for item in group]
-        sampling_params = group[0].sampling_params
-        request_type = group[0].request.request_type
-
-        try:
-            if request_type == RequestType.LOGLIKELIHOOD:
-                outputs_list = provider.logprobs(requests)
-            else:
-                outputs_list = provider.generate(requests, sampling_params)
-
-            for item, outputs in zip(group, outputs_list, strict=True):
-                result_queue.put(
-                    ResultItem(
-                        model_name=item.model_name,
-                        task_id=item.task_id,
-                        instance_idx=item.instance_idx,
-                        instance=item.instance,
-                        request=item.request,
-                        outputs=outputs,
-                        error=None,
-                        attempt=item.attempt,
-                    )
-                )
-                pbar.update(1)
-        except Exception as e:
-            for item in group:
-                result_queue.put(
-                    ResultItem(
-                        model_name=item.model_name,
-                        task_id=item.task_id,
-                        instance_idx=item.instance_idx,
-                        instance=item.instance,
-                        request=item.request,
-                        outputs=[],
-                        error=str(e),
-                        attempt=item.attempt,
-                    )
-                )
-                pbar.update(1)
+    finally:
+        pbar.close()
 
 
 __all__ = [
     "check_workers_alive",
     "wait_for_workers_ready",
-    "process_batch",
+    "process_generate_requests",
+    "process_chat_requests",
 ]
