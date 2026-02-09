@@ -94,7 +94,6 @@ def list_harness_presets() -> list[str]:
 # Preset Harness Configurations
 # ─────────────────────────────────────────────────────────
 
-# Default preset: no tools, standard model behavior
 register_harness_preset(
     "default",
     HarnessConfig(
