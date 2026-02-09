@@ -148,6 +148,9 @@ class OpenAIAgentsBackend(Backend):
         trajectory = self._convert_trajectory(result)
         final_text = result.final_output if hasattr(result, "final_output") else ""
 
+        # TODO(undfined): REMOVE BEFORE MERGE
+        logger.info(trajectory)
+
         return HarnessResult(
             trajectory=trajectory,
             final_output=LMOutput(text=final_text or ""),
