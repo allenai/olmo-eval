@@ -20,7 +20,6 @@ def get_model_presets() -> dict[str, ProviderConfig]:
     from olmo_eval.core.types import ProviderKind
 
     return {
-        # HuggingFace models (vLLM inference)
         "llama3.1-8b": ProviderConfig(
             kind=ProviderKind.VLLM,
             model="meta-llama/Meta-Llama-3.1-8B",
@@ -55,12 +54,6 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             kind=ProviderKind.VLLM,
             model="mistralai/Mistral-7B-v0.3",
         ),
-        # Mock model for testing (no dependencies required)
-        "mock": ProviderConfig(
-            kind=ProviderKind.MOCK,
-            model="mock",
-        ),
-        # API-based models (for agent tasks - requires API keys)
         "gpt-4o": ProviderConfig(
             kind=ProviderKind.LITELLM,
             model="gpt-4o",
@@ -90,5 +83,9 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             model="claude-3-sonnet-20240229",
             base_url="https://api.anthropic.com",
             required_secrets=("ANTHROPIC_API_KEY",),
+        ),
+        "mock": ProviderConfig(
+            kind=ProviderKind.MOCK,
+            model="mock",
         ),
     }

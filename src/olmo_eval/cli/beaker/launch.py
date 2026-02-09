@@ -392,6 +392,14 @@ def launch(
         if hasattr(task_cfg, "required_secrets") and task_cfg.required_secrets:
             all_required_secrets.update(task_cfg.required_secrets)
 
+    # Collect required secrets from model presets
+    from olmo_eval.core.configs import get_provider_config
+
+    for model_spec in launch_config.model_specs:
+        provider_config = get_provider_config(model_spec)
+        if provider_config.required_secrets:
+            all_required_secrets.update(provider_config.required_secrets)
+
     # Collect harness-required secrets
     if launch_config.harness:
         from olmo_eval.core.harness import get_harness_preset
