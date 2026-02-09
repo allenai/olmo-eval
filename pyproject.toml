@@ -40,7 +40,7 @@ hf = [
     "transformers~=4.57.3",
 ]
 vllm = [
-    "vllm[runai]==0.13.0",  # runai extras enable S3 model loading
+    "vllm[runai]==0.15.1",  # runai extras enable S3 model loading
     "opencv-python-headless==4.12.0.88",  # Required to avoid libxcb import error
     "torch-c-dlpack-ext",  # Required for TVM tensor allocation in vLLM
 ]
