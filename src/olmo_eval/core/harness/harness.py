@@ -111,6 +111,19 @@ class Harness:
         """
         return self.provider.logprobs(requests)
 
+    async def agenerate(
+        self,
+        requests: list[LMRequest],
+        sampling_params: SamplingParams | None = None,
+    ) -> list[list[LMOutput]]:
+        """Async single-turn generation with config injected."""
+        transformed = [self._apply_config(r) for r in requests]
+        return await self.provider.agenerate(transformed, sampling_params)
+
+    async def alogprobs(self, requests: list[LMRequest]) -> list[list[LMOutput]]:
+        """Async log probability computation."""
+        return await self.provider.alogprobs(requests)
+
     # ─────────────────────────────────────────────────────────
     # Multi-turn interface (delegates to backend)
     # ─────────────────────────────────────────────────────────

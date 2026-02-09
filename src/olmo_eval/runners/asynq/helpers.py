@@ -244,7 +244,7 @@ async def process_chat_request(
         )
 
 
-def process_batch(
+async def process_batch(
     items: list[QueueItem],
     harness: Harness,
     result_queue: mp.Queue,
@@ -252,7 +252,7 @@ def process_batch(
     """Process a batch of COMPLETION or LOGLIKELIHOOD requests.
 
     All items must have the same request_type and sampling_params.
-    Calls harness.generate or harness.logprobs once for the entire batch.
+    Calls harness.agenerate or harness.alogprobs once for the entire batch.
 
     Args:
         items: List of queue items to process (same type and sampling_params).
@@ -270,9 +270,9 @@ def process_batch(
 
     try:
         if request_type == RequestType.LOGLIKELIHOOD:
-            all_outputs = harness.logprobs(requests)
+            all_outputs = await harness.alogprobs(requests)
         else:
-            all_outputs = harness.generate(requests, sampling_params)
+            all_outputs = await harness.agenerate(requests, sampling_params)
 
         # Map outputs back to individual items
         for item, outputs in zip(items, all_outputs, strict=True):

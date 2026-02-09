@@ -35,8 +35,6 @@ async def process_items(
         result_queue: Queue to put results.
         max_concurrency: Maximum concurrent CHAT requests.
     """
-    from tqdm import tqdm
-
     from olmo_eval.core.types import RequestType, SamplingParams
     from olmo_eval.runners.asynq.helpers import process_batch, process_chat_request
 
@@ -49,8 +47,6 @@ async def process_items(
         else:
             batchable_items.append(item)
 
-    pbar = tqdm(total=len(items), desc="Processing", unit="inst")
-
     if batchable_items:
         batches: dict[tuple[RequestType, SamplingParams | None], list[QueueItem]] = {}
         for item in batchable_items:
@@ -59,10 +55,8 @@ async def process_items(
                 batches[key] = []
             batches[key].append(item)
 
-        loop = asyncio.get_event_loop()
         for batch in batches.values():
-            await loop.run_in_executor(None, process_batch, batch, harness, result_queue)
-            pbar.update(len(batch))
+            await process_batch(batch, harness, result_queue)
 
     if chat_items:
         work_queue: asyncio.Queue[QueueItem] = asyncio.Queue()
@@ -74,7 +68,6 @@ async def process_items(
                 item = await work_queue.get()
                 try:
                     await process_chat_request(item, harness, result_queue)
-                    pbar.update(1)
                 finally:
                     work_queue.task_done()
 
@@ -86,8 +79,6 @@ async def process_items(
                     w.cancel()
         except* asyncio.CancelledError:
             pass
-
-    pbar.close()
 
 
 def worker_process(
