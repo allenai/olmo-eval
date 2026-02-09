@@ -104,7 +104,7 @@ register_harness_preset(
 
 
 @harness_preset("dr_tulu")
-def _dr_tulu_preset() -> HarnessConfig:
+def _dr_tulu() -> HarnessConfig:
     """Dr. Tulu preset with web and academic search tools."""
     from .tools.search import semantic_scholar_search, serper_fetch_page, serper_web_search
 
@@ -112,12 +112,12 @@ def _dr_tulu_preset() -> HarnessConfig:
         name="dr_tulu",
         provider=ProviderConfig(
             kind=ProviderKind.VLLM_SERVER,
-            kwargs={"timeout": 120},
+            kwargs={"timeout": 30},
         ),
         tools=(semantic_scholar_search, serper_web_search, serper_fetch_page),
         system_prompt=DR_TULU_SYSTEM_PROMPT,
         max_turns=10,
-        max_concurrency=8,
+        max_concurrency=32,
         backend="openai_agents",
         required_secrets=("S2_API_KEY", "SERPER_API_KEY", "OPENAI_API_KEY"),
     )

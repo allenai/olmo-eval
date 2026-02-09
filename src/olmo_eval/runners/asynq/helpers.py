@@ -8,7 +8,7 @@ import time
 from typing import TYPE_CHECKING
 
 from olmo_eval.core.logging import get_logger
-from olmo_eval.runners.simple.queue import QueueItem, ResultItem
+from olmo_eval.runners.asynq.queue import QueueItem, ResultItem
 
 if TYPE_CHECKING:
     from olmo_eval.core.harness import Harness

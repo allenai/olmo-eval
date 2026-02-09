@@ -9,7 +9,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.core.logging import get_logger
-from olmo_eval.runners.simple.queue import QueueItem, ResultItem
+from olmo_eval.runners.asynq.queue import QueueItem, ResultItem
 
 if TYPE_CHECKING:
     from olmo_eval.core.harness import Harness
@@ -38,7 +38,7 @@ async def process_items(
     from tqdm import tqdm
 
     from olmo_eval.core.types import RequestType, SamplingParams
-    from olmo_eval.runners.simple.helpers import process_batch, process_chat_request
+    from olmo_eval.runners.asynq.helpers import process_batch, process_chat_request
 
     chat_items: list[QueueItem] = []
     batchable_items: list[QueueItem] = []

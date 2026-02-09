@@ -39,7 +39,7 @@ class RunnerFactory:
         Returns:
             Configured AsyncEvalRunner instance.
         """
-        from olmo_eval.runners.simple import AsyncEvalRunner
+        from olmo_eval.runners.asynq import AsyncEvalRunner
 
         console.print("[bold cyan]Using AsyncEvalRunner[/bold cyan]")
 

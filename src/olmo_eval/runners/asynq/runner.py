@@ -20,14 +20,12 @@ from olmo_eval.core.harness.config import HarnessConfig, ProviderConfig
 from olmo_eval.core.logging import get_logger, get_worker_id
 from olmo_eval.core.types import Response
 from olmo_eval.core.types.trajectory import AgentTrajectory
-from olmo_eval.runners.base import BaseEvalRunner
-from olmo_eval.runners.mixins import RunnerResultsMixin, S3Config
-from olmo_eval.runners.simple.helpers import (
+from olmo_eval.runners.asynq.helpers import (
     check_workers_alive,
     terminate_workers,
     wait_for_workers_ready,
 )
-from olmo_eval.runners.simple.queue import (
+from olmo_eval.runners.asynq.queue import (
     QueueItem,
     ResultItem,
     TaskTracker,
@@ -35,7 +33,9 @@ from olmo_eval.runners.simple.queue import (
     finalize_task,
     prepare_task_items,
 )
-from olmo_eval.runners.simple.workers import worker_process
+from olmo_eval.runners.asynq.workers import worker_process
+from olmo_eval.runners.base import BaseEvalRunner
+from olmo_eval.runners.mixins import RunnerResultsMixin, S3Config
 from olmo_eval.runners.utils import (
     compute_suite_aggregations,
     compute_task_hash,
