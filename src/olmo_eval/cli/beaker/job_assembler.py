@@ -54,9 +54,14 @@ class JobConfigAssembler:
             preset = get_harness_preset(self.config.harness)
             backend_extras = get_backend_extras(preset.backend)
             install_extras.extend(backend_extras)
-            provider_group = BACKEND_OPTIONAL_GROUPS.get(preset.provider.kind)
-            if provider_group:
-                install_extras.append(provider_group)
+
+        # Get provider extras from model preset (takes precedence over harness default)
+        from olmo_eval.core.configs import get_provider_config
+
+        provider_config = get_provider_config(exp.model_spec)
+        provider_group = BACKEND_OPTIONAL_GROUPS.get(provider_config.kind)
+        if provider_group and provider_group not in install_extras:
+            install_extras.append(provider_group)
 
         env_secrets = [
             BeakerEnvSecret(env_var, secret_name) for env_var, secret_name in self.common_secrets
