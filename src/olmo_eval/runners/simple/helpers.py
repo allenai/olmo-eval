@@ -277,7 +277,6 @@ async def process_chat_requests(
 
                 final_output = harness_result.final_output
 
-                # Add trajectory metadata if present (for tool-based execution)
                 if harness_result.trajectory.num_turns > 1 or harness.config.has_tools:
                     output_with_metadata = dataclass_replace(
                         final_output,

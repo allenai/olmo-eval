@@ -170,49 +170,52 @@ class OpenAIAgentsBackend(Backend):
         """
         turns: list[AgentTurn] = []
 
-        # The agents SDK provides run history in result.new_items or similar
-        # This is a simplified conversion; actual implementation depends on SDK version
-        if hasattr(result, "new_items"):
-            for item in result.new_items:
-                item_type = getattr(item, "type", None) or type(item).__name__
+        if not hasattr(result, "new_items"):
+            return AgentTrajectory(turns=tuple(turns))
 
-                if "message" in item_type.lower() or "output" in item_type.lower():
-                    # Assistant message
-                    content = ""
-                    if hasattr(item, "output"):
-                        content = str(item.output)
-                    elif hasattr(item, "content"):
-                        content = str(item.content)
+        for item in result.new_items:
+            item_class = type(item).__name__
 
-                    tool_calls = []
-                    if hasattr(item, "tool_calls") and item.tool_calls:
-                        for tc in item.tool_calls:
-                            tc_name = getattr(tc, "name", "") or getattr(
-                                getattr(tc, "function", None), "name", ""
-                            )
-                            tool_calls.append(
-                                ToolCall.create(
-                                    call_id=getattr(tc, "id", ""),
-                                    name=tc_name,
-                                    arguments=getattr(tc, "arguments", "{}"),
-                                )
-                            )
+            if item_class == "MessageOutputItem":
+                # Extract content from raw_item (ResponseOutputMessage)
+                raw = getattr(item, "raw_item", None)
+                content = ""
+                tool_calls_list: list[ToolCall] = []
 
-                    turns.append(
-                        AgentTurn.assistant(content=content, tool_calls=tool_calls or None)
-                    )
+                if raw is not None:
+                    # ResponseOutputMessage has 'content' which is a list of content parts
+                    raw_content = getattr(raw, "content", None)
+                    if raw_content:
+                        # content is typically a list of text/refusal items
+                        for part in raw_content:
+                            if hasattr(part, "text"):
+                                content += part.text
 
-                elif "tool" in item_type.lower():
-                    # Tool result
-                    results = []
-                    if hasattr(item, "output"):
-                        tool_call_id = getattr(item, "call_id", getattr(item, "tool_call_id", ""))
-                        results.append(
-                            ToolResult(
-                                tool_call_id=tool_call_id,
-                                content=str(item.output),
-                            )
-                        )
-                    turns.append(AgentTurn.tool(results))
+                turns.append(
+                    AgentTurn.assistant(content=content, tool_calls=tool_calls_list or None)
+                )
+
+            elif item_class == "ToolCallItem":
+                # Tool call from the model
+                raw = getattr(item, "raw_item", None)
+                if raw is not None:
+                    tc_id = getattr(raw, "call_id", getattr(raw, "id", ""))
+                    tc_name = getattr(raw, "name", "")
+                    tc_args = getattr(raw, "arguments", "{}")
+
+                    tool_call = ToolCall.create(call_id=tc_id, name=tc_name, arguments=tc_args)
+                    turns.append(AgentTurn.assistant(content="", tool_calls=[tool_call]))
+
+            elif item_class == "ToolCallOutputItem":
+                # Tool execution result
+                output = getattr(item, "output", None)
+                raw = getattr(item, "raw_item", None)
+                tool_call_id = ""
+                if raw is not None:
+                    tool_call_id = getattr(raw, "call_id", getattr(raw, "tool_call_id", ""))
+
+                content = str(output) if output is not None else ""
+                tool_result = ToolResult(tool_call_id=tool_call_id, content=content)
+                turns.append(AgentTurn.tool([tool_result]))
 
         return AgentTrajectory(turns=tuple(turns))
