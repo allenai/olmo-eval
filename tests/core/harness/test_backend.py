@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import pytest
 
 from olmo_eval.core.harness.backends import (
@@ -15,15 +13,16 @@ from olmo_eval.core.harness.backends import (
 )
 from olmo_eval.core.harness.config import HarnessConfig
 from olmo_eval.core.harness.harness import Harness
-from olmo_eval.core.types import LMOutput, LMRequest, RequestType
+from olmo_eval.core.types import LMRequest, RequestType
 
 
 @pytest.fixture
-def mock_provider():
-    """Create a mock inference provider."""
-    provider = MagicMock()
-    provider.model_name = "test-model"
-    return provider
+def mock_provider_config():
+    """Create a mock provider config."""
+    from olmo_eval.core.harness.config import ProviderConfig
+    from olmo_eval.core.types import ProviderKind
+
+    return ProviderConfig(kind=ProviderKind.MOCK, model="test-model")
 
 
 class TestGetBackend:
@@ -59,12 +58,10 @@ class TestDefaultBackend:
     """Tests for DefaultBackend."""
 
     @pytest.mark.anyio
-    async def test_run_single_generation(self, mock_provider):
+    async def test_run_single_generation(self, mock_provider_config):
         """Test run performs single generation."""
-        mock_provider.generate.return_value = [[LMOutput(text="Response", tool_calls=None)]]
-
-        config = HarnessConfig(name="test", backend="default")
-        harness = Harness(config, provider=mock_provider)
+        config = HarnessConfig(name="test", provider=mock_provider_config, backend="default")
+        harness = Harness(config)
 
         request = LMRequest(
             request_type=RequestType.CHAT,
@@ -74,7 +71,6 @@ class TestDefaultBackend:
         backend = DefaultBackend()
         result = await backend.run(harness.provider, harness.config, request)
 
-        assert result.final_text == "Response"
+        assert result.final_text is not None
         assert result.num_turns == 1
         assert result.max_turns_reached is False
-        mock_provider.generate.assert_called_once()

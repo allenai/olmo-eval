@@ -1,6 +1,10 @@
 """Inference provider base class and protocol definition."""
 
+from __future__ import annotations
+
+import asyncio
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.core.types import LMOutput, LMRequest, SamplingParams
@@ -13,6 +17,8 @@ class InferenceProvider(ABC):
     """Abstract base class for language model inference providers.
 
     All providers must implement `generate` and `logprobs` methods.
+    Providers that support async operations should override `agenerate`
+    and `alogprobs` for better performance in async contexts.
     """
 
     model_name: str
@@ -59,6 +65,52 @@ class InferenceProvider(ABC):
         """
         ...
 
+    async def agenerate(
+        self,
+        requests: list[LMRequest],
+        sampling_params: SamplingParams | None = None,
+    ) -> list[list[LMOutput]]:
+        """Async version of generate.
+
+        Override this method for providers with native async support.
+        Default implementation runs generate() in a thread pool.
+
+        Args:
+            requests: Batch of requests to process.
+            sampling_params: Sampling configuration.
+
+        Returns:
+            List of output lists, one per request.
+        """
+        loop = asyncio.get_running_loop()
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            return await loop.run_in_executor(
+                executor,
+                lambda: self.generate(requests, sampling_params),
+            )
+
+    async def alogprobs(
+        self,
+        requests: list[LMRequest],
+    ) -> list[list[LMOutput]]:
+        """Async version of logprobs.
+
+        Override this method for providers with native async support.
+        Default implementation runs logprobs() in a thread pool.
+
+        Args:
+            requests: Batch of requests with continuations to score.
+
+        Returns:
+            List of output lists with logprobs populated.
+        """
+        loop = asyncio.get_running_loop()
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            return await loop.run_in_executor(
+                executor,
+                lambda: self.logprobs(requests),
+            )
+
     def _default_sampling_params(self, sampling_params: SamplingParams | None) -> SamplingParams:
         """Return sampling params with defaults applied."""
         return sampling_params or SamplingParams()
@@ -74,7 +126,7 @@ class InferenceProvider(ABC):
         """
         raise NotImplementedError(f"{type(self).__name__} does not provide tokenizer access")
 
-    def get_openai_client(self) -> "AsyncOpenAI":
+    def get_openai_client(self) -> AsyncOpenAI:
         """Get an AsyncOpenAI client for this provider.
 
         Used by backends that need an OpenAI-compatible client

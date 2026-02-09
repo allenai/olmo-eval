@@ -36,6 +36,14 @@ class MockProvider(InferenceProvider):
 
         return [[mock_output for _ in range(num_samples)] for _ in requests]
 
+    async def agenerate(
+        self,
+        requests: list[LMRequest],
+        sampling_params: SamplingParams | None = None,
+    ) -> list[list[LMOutput]]:
+        """Async generate - just calls sync generate for mock."""
+        return self.generate(requests, sampling_params)
+
     def logprobs(
         self,
         requests: list[LMRequest],
@@ -57,3 +65,10 @@ class MockProvider(InferenceProvider):
                 )
             results.append(request_outputs)
         return results
+
+    async def alogprobs(
+        self,
+        requests: list[LMRequest],
+    ) -> list[list[LMOutput]]:
+        """Async logprobs - just calls sync logprobs for mock."""
+        return self.logprobs(requests)

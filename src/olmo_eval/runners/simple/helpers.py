@@ -180,48 +180,6 @@ def _format_error_detail(exc: Exception) -> str:
     return " | ".join(parts)
 
 
-def _is_retryable_error(error: Exception) -> bool:
-    """Check if an error is transient and should be retried."""
-    # Check HTTP status code first (most reliable)
-    status_code = getattr(error, "status_code", None)
-    if status_code is not None:
-        status_code = int(status_code)
-        # Non-retryable: 400, 401, 403, 404, 422
-        if status_code in (400, 401, 403, 404, 422):
-            return False
-        # Retryable: 429, 5xx
-        if status_code in (429, 500, 502, 503, 504):
-            return True
-
-    # Check exception type name
-    error_type = type(error).__name__
-    if error_type in ("BadRequestError", "UnprocessableEntityError", "NotFoundError"):
-        return False
-    if error_type in ("APITimeoutError", "APIConnectionError", "RateLimitError"):
-        return True
-
-    # Fall back to string matching for errors without status codes
-    error_str = str(error).lower()
-
-    # Timeout errors are retryable
-    if "timeout" in error_str or "timed out" in error_str:
-        return True
-
-    # Connection errors are retryable
-    if "connection" in error_str:
-        return True
-
-    # Rate limit errors are retryable
-    if "rate" in error_str and "limit" in error_str:
-        return True
-
-    # Server errors (5xx) are retryable
-    if "500" in error_str or "502" in error_str or "503" in error_str or "504" in error_str:
-        return True
-
-    return "internal" in error_str and "error" in error_str
-
-
 def process_generate_requests(
     batch: list[QueueItem],
     harness: Harness,
@@ -294,8 +252,6 @@ async def process_chat_requests(
     batch: list[QueueItem],
     harness: Harness,
     result_queue: mp.Queue,
-    max_retries: int = 2,
-    retry_delay: float = 2.0,
 ) -> None:
     """Process CHAT requests via harness.run() for multi-turn execution.
 
@@ -306,8 +262,6 @@ async def process_chat_requests(
         batch: Queue items to process (CHAT requests only).
         harness: Harness instance for execution.
         result_queue: Queue to put results.
-        max_retries: Maximum retry attempts for transient errors.
-        retry_delay: Base delay between retries (exponential backoff).
     """
     from dataclasses import replace as dataclass_replace
 
@@ -325,82 +279,60 @@ async def process_chat_requests(
     async def run_one(item: QueueItem, semaphore: asyncio.Semaphore) -> None:
         nonlocal completed
         async with semaphore:
-            last_error: Exception | None = None
-            attempt = 0
+            try:
+                harness_result = await harness.run(item.request, item.sampling_params)
 
-            while attempt <= max_retries:
-                try:
-                    harness_result = await harness.run(item.request, item.sampling_params)
+                final_output = harness_result.final_output
 
-                    final_output = harness_result.final_output
-
-                    # Add trajectory metadata if present (for tool-based execution)
-                    if harness_result.trajectory.num_turns > 1 or harness.config.has_tools:
-                        output_with_metadata = dataclass_replace(
-                            final_output,
-                            metadata={
-                                **(final_output.metadata or {}),
-                                "trajectory": harness_result.trajectory.to_dict(),
-                                "max_turns_reached": harness_result.max_turns_reached,
-                                "total_tool_calls": harness_result.total_tool_calls,
-                                "num_turns": harness_result.num_turns,
-                            },
-                        )
-                    else:
-                        output_with_metadata = final_output
-
-                    result_queue.put(
-                        ResultItem(
-                            model_name=item.model_name,
-                            task_id=item.task_id,
-                            instance_idx=item.instance_idx,
-                            instance=item.instance,
-                            request=item.request,
-                            outputs=[output_with_metadata],
-                            error=harness_result.error,
-                            attempt=attempt,
-                        )
+                # Add trajectory metadata if present (for tool-based execution)
+                if harness_result.trajectory.num_turns > 1 or harness.config.has_tools:
+                    output_with_metadata = dataclass_replace(
+                        final_output,
+                        metadata={
+                            **(final_output.metadata or {}),
+                            "trajectory": harness_result.trajectory.to_dict(),
+                            "max_turns_reached": harness_result.max_turns_reached,
+                            "total_tool_calls": harness_result.total_tool_calls,
+                            "num_turns": harness_result.num_turns,
+                        },
                     )
-                    completed += 1
-                    pbar.update(1)
-                    return  # Success, exit retry loop
+                else:
+                    output_with_metadata = final_output
 
-                except Exception as e:
-                    last_error = e
-                    attempt += 1
-
-                    # Log full error details for debugging
-                    error_detail = _format_error_detail(e)
-                    logger.warning(
-                        f"Error on instance {item.instance_idx} "
-                        f"(attempt {attempt}/{max_retries + 1}): {error_detail}"
+                result_queue.put(
+                    ResultItem(
+                        model_name=item.model_name,
+                        task_id=item.task_id,
+                        instance_idx=item.instance_idx,
+                        instance=item.instance,
+                        request=item.request,
+                        outputs=[output_with_metadata],
+                        error=harness_result.error,
+                        attempt=0,
                     )
-
-                    if attempt <= max_retries and _is_retryable_error(e):
-                        delay = retry_delay * (2 ** (attempt - 1))
-                        logger.info(f"Retrying in {delay:.1f}s...")
-                        await asyncio.sleep(delay)
-                    else:
-                        break  # Non-retryable or max retries exceeded
-
-            # All retries exhausted or non-retryable error
-            assert last_error is not None  # Must have failed at least once to reach here
-            error_detail = _format_error_detail(last_error)
-
-            result_queue.put(
-                ResultItem(
-                    model_name=item.model_name,
-                    task_id=item.task_id,
-                    instance_idx=item.instance_idx,
-                    instance=item.instance,
-                    request=item.request,
-                    outputs=[],
-                    error=error_detail,
-                    attempt=attempt,
                 )
-            )
-            completed += 1
-            pbar.update(1)
+                completed += 1
+                pbar.update(1)
+
+            except Exception as e:
+                # Log full error details for debugging
+                error_detail = _format_error_detail(e)
+                logger.warning(f"Error on instance {item.instance_idx}: {error_detail}")
+
+                result_queue.put(
+                    ResultItem(
+                        model_name=item.model_name,
+                        task_id=item.task_id,
+                        instance_idx=item.instance_idx,
+                        instance=item.instance,
+                        request=item.request,
+                        outputs=[],
+                        error=error_detail,
+                        attempt=0,
+                    )
+                )
+                completed += 1
+                pbar.update(1)
 
     async def run_chunk(chunk: list[QueueItem], semaphore: asyncio.Semaphore) -> None:
         await asyncio.gather(*[run_one(item, semaphore) for item in chunk])

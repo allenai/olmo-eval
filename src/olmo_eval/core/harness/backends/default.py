@@ -46,8 +46,8 @@ class DefaultBackend(Backend):
         # Apply config to the request (tools, system prompt, etc.)
         transformed = self._apply_config(config, request)
 
-        # Generate
-        outputs = provider.generate([transformed], sampling_params)
+        # Generate using async method
+        outputs = await provider.agenerate([transformed], sampling_params)
         output = outputs[0][0] if outputs and outputs[0] else LMOutput(text="")
 
         # Build trajectory with a single assistant turn

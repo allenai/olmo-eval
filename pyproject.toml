@@ -3,7 +3,7 @@ name = "olmo-eval-internal"
 version = "0.1.0"
 description = "Evaluation toolkit for OLMo models"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [
     { name = "Allen Institute for AI" },
