@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, Response, SamplingParams
 
 if TYPE_CHECKING:
-    from olmo_eval.evals.tasks import Task
+    from olmo_eval.evals.tasks.common import Task
 
 # Sentinel value for fatal worker errors
 WORKER_FATAL_TASK_ID = "__WORKER_FATAL__"

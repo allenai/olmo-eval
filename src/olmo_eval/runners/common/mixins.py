@@ -22,8 +22,6 @@ from olmo_eval.runners.common.models import (
     TaskMetricsEntry,
 )
 from olmo_eval.runners.common.types import TaskResult
-
-# Re-export for backward compatibility
 from olmo_eval.runners.io.formatting import (  # noqa: F401
     build_s3_prefix,
     get_model_display_name,
@@ -44,7 +42,6 @@ if TYPE_CHECKING:
 logger = get_logger("runners.mixins")
 
 
-# Re-export dataclasses for backward compatibility
 __all__ = [
     "S3Config",
     "sanitize_model_name",
@@ -84,7 +81,7 @@ class RunnerResultsMixin:
         """
         from olmo_eval.common.configs import expand_tasks, validate_task_metrics
         from olmo_eval.evals.suites import suite_exists
-        from olmo_eval.evals.tasks import list_regimes, list_tasks, list_variants
+        from olmo_eval.evals.tasks.common import list_regimes, list_tasks, list_variants
         from olmo_eval.evals.tasks.common.registry import parse_task_spec
 
         errors: list[str] = []

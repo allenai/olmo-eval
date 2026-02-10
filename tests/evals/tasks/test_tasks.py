@@ -3,7 +3,7 @@
 import pytest
 
 from olmo_eval.common.types import Instance, LMOutput, RequestType
-from olmo_eval.evals.tasks import get_task, list_tasks
+from olmo_eval.evals.tasks.common import get_task, list_tasks
 
 
 class TestTaskRegistration:

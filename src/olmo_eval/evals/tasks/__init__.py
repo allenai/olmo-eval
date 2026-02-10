@@ -4,43 +4,6 @@ import importlib
 import pkgutil
 from pathlib import Path
 
-# Re-export from common for backward compatibility
-from .common import (
-    Task,
-    TaskConfig,
-    clear_registry,
-    get_base_task_name,
-    get_task,
-    get_task_dependencies,
-    list_regimes,
-    list_tasks,
-    list_variants,
-    parse_overrides,
-    parse_task_spec,
-    register,
-    register_regime,
-    register_variant,
-    task_exists,
-)
-
-__all__ = [
-    "Task",
-    "TaskConfig",
-    "clear_registry",
-    "get_base_task_name",
-    "get_task",
-    "get_task_dependencies",
-    "list_regimes",
-    "list_tasks",
-    "list_variants",
-    "parse_overrides",
-    "parse_task_spec",
-    "register",
-    "register_regime",
-    "register_variant",
-    "task_exists",
-]
-
 
 def _discover_and_load_tasks() -> None:
     """Auto-discover and import all task modules to trigger registration."""

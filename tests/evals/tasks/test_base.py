@@ -7,7 +7,7 @@ import pytest
 from olmo_eval.common.metrics import AccuracyMetric
 from olmo_eval.common.scorers import ExactMatchScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response, Split
-from olmo_eval.evals.tasks import Task, TaskConfig
+from olmo_eval.evals.tasks.common import Task, TaskConfig
 
 
 class ConcreteTask(Task):

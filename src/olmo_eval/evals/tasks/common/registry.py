@@ -201,7 +201,7 @@ def parse_task_spec(spec: str) -> tuple[str, list[str], dict[str, Any]]:
 
     Returns:
         Tuple of (task_name, variants, overrides). Variants is a list (may be empty).
-        Overrides is always an empty dict (kept for API compatibility).
+        Overrides is always an empty dict.
 
     Examples:
         >>> parse_task_spec("arc_easy")

@@ -13,18 +13,15 @@ class TaskValidator:
     def __init__(
         self,
         task_specs: list[str],
-        cli_priority: str | None,
-        default_priority: str,
+        default_priority: str = "normal",
     ):
         """Initialize the validator.
 
         Args:
             task_specs: List of task specifications (may include @priority suffixes).
-            cli_priority: Priority specified via CLI (if any).
-            default_priority: Default priority to use.
+            default_priority: Default priority for tasks without @priority suffix.
         """
         self.task_specs = task_specs
-        self.cli_priority = cli_priority
         self.default_priority = default_priority
 
     def validate_and_group(self) -> tuple[dict[str, list[str]], list[str]]:
@@ -40,15 +37,10 @@ class TaskValidator:
         from olmo_eval.launch import validate_priority_configuration
 
         # Group by priority WITHOUT expanding first
-        try:
-            tasks_by_priority = validate_priority_configuration(
-                tasks=self.task_specs,
-                cli_priority=self.cli_priority,
-                default_priority=self.default_priority,
-            )
-        except ValueError as e:
-            console.print(f"[red]Error:[/red] {e}")
-            raise SystemExit(1) from None
+        tasks_by_priority = validate_priority_configuration(
+            tasks=self.task_specs,
+            default_priority=self.default_priority,
+        )
 
         # Get all specs (without @priority suffix)
         all_task_specs = [t for tasks in tasks_by_priority.values() for t in tasks]

@@ -21,5 +21,4 @@ beaker.add_command(launch)
 beaker.add_command(watch)
 beaker.add_command(group)
 
-# Re-export for backwards compatibility
 __all__ = ["beaker", "launch", "watch", "group"]

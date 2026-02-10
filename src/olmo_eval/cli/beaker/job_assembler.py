@@ -118,8 +118,7 @@ class JobConfigAssembler:
         self, task_specs: list[str], task_overrides: dict[str, list[str]]
     ) -> list[str] | None:
         from olmo_eval.common.configs import expand_tasks
-        from olmo_eval.evals.tasks import get_task_dependencies
-        from olmo_eval.evals.tasks.common.registry import parse_overrides
+        from olmo_eval.evals.tasks.common import get_task_dependencies, parse_overrides
 
         # Expand suites to individual tasks before extracting dependencies
         expanded_specs = expand_tasks(task_specs)

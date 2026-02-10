@@ -62,7 +62,7 @@ The evaluation framework is built around these core abstractions:
 Tasks define how to load data, format prompts, and score outputs. Register with `@register`:
 
 ```python
-from olmo_eval.evals.tasks import Task, register
+from olmo_eval.evals.tasks.common import Task, register
 from olmo_eval.data import DataSource
 
 @register("my_task")
@@ -75,7 +75,7 @@ class MyTask(Task):
 **Regimes** are named presets that override task settings (e.g., few-shot count):
 
 ```python
-from olmo_eval.evals.tasks import register_regime
+from olmo_eval.evals.tasks.common import register_regime
 
 register_regime("my_task", "olmes", num_fewshot=5, fewshot_seed=42)
 # Usage: olmo-eval run -m model -t my_task:olmes
@@ -413,7 +413,7 @@ from typing import Any
 
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType
 from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.tasks import Task, register
+from olmo_eval.evals.tasks.common import Task, register
 
 
 @register("my_task")
@@ -543,7 +543,7 @@ class MMLUPhysics(MMLUTask):
 
 **Variants** modify how a task is formatted/scored (e.g., `:mc`, `:bpb`):
 ```python
-from olmo_eval.evals.tasks import register_variant
+from olmo_eval.evals.tasks.common import register_variant
 
 # Register after task is defined
 register_variant("my_task", "bpb", formatter=PPLFormatter(), metrics=(BPBMetric(scorer=BitsPerByteScorer),))
@@ -551,7 +551,7 @@ register_variant("my_task", "bpb", formatter=PPLFormatter(), metrics=(BPBMetric(
 
 **Regimes** are configuration presets (e.g., `:olmes`, `:zero`):
 ```python
-from olmo_eval.evals.tasks import register_regime
+from olmo_eval.evals.tasks.common import register_regime
 
 register_regime("my_task", "olmes", num_fewshot=5, fewshot_seed=1234)
 register_regime("my_task", "3shot", num_fewshot=3)
@@ -580,20 +580,6 @@ See the [Harness](#harness) section above for full documentation on:
 - Creating custom harness configurations
 - Defining tools with the `@tool` decorator
 - Programmatic usage
-
-### Legacy: Agent Tasks
-
-> **Note**: For new evaluations, prefer using regular tasks with `--harness` instead of AgentTask. The Harness approach is more flexible and allows comparing with/without tools on the same task.
-
-Agent tasks (`AgentTask`) are an older pattern that bundles tools directly into the task definition. They still work but are less flexible than the Harness approach.
-
-```bash
-# Legacy agent task (tools bundled in task)
-olmo-eval run -m llama3.1-8b -t simpleqa_agent
-
-# Equivalent using Harness (preferred)
-olmo-eval run -m llama3.1-8b -t simpleqa --harness dr_tulu
-```
 
 ## Launching on Beaker
 

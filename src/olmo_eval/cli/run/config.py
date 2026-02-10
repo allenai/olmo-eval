@@ -69,7 +69,7 @@ class RunConfig:
     @property
     def tasks(self) -> list:
         """Resolve task_specs to TaskConfig objects for display."""
-        from olmo_eval.evals.tasks import get_task
+        from olmo_eval.evals.tasks.common import get_task
 
         return [get_task(spec).config for spec in self.task_specs]
 

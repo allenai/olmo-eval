@@ -6,7 +6,7 @@ import pytest
 import olmo_eval.evals  # noqa: F401
 import olmo_eval.evals.tasks  # noqa: F401
 from olmo_eval.harness.config import HarnessConfig, ProviderConfig
-from olmo_eval.runners import EvalRunner, ValidationError
+from olmo_eval.runners import AsyncEvalRunner, ValidationError
 
 
 def make_harness_config(model_name: str = "llama3.1-8b") -> HarnessConfig:
@@ -17,12 +17,12 @@ def make_harness_config(model_name: str = "llama3.1-8b") -> HarnessConfig:
     )
 
 
-class TestEvalRunnerValidation:
-    """Tests for EvalRunner.validate method."""
+class TestAsyncEvalRunnerValidation:
+    """Tests for AsyncEvalRunner.validate method."""
 
     def test_validate_valid_task(self):
         """Test validation passes for valid task with metrics."""
-        runner = EvalRunner(
+        runner = AsyncEvalRunner(
             harness_config=make_harness_config(),
             task_specs=["humaneval:bpb"],
         )
@@ -31,7 +31,7 @@ class TestEvalRunnerValidation:
 
     def test_validate_valid_suite(self):
         """Test validation passes for valid suite with metrics."""
-        runner = EvalRunner(
+        runner = AsyncEvalRunner(
             harness_config=make_harness_config(),
             task_specs=["mt_mbpp_v2fix:bpb"],
         )
@@ -40,7 +40,7 @@ class TestEvalRunnerValidation:
 
     def test_validate_multiple_valid_specs(self):
         """Test validation passes for multiple valid specs with metrics."""
-        runner = EvalRunner(
+        runner = AsyncEvalRunner(
             harness_config=make_harness_config(),
             task_specs=["humaneval:bpb", "mbpp:bpb"],
         )
@@ -49,7 +49,7 @@ class TestEvalRunnerValidation:
 
     def test_validate_task_without_metrics_fails(self):
         """Test validation fails for task without metrics configured."""
-        runner = EvalRunner(
+        runner = AsyncEvalRunner(
             harness_config=make_harness_config(),
             task_specs=["humaneval"],
         )
@@ -58,7 +58,7 @@ class TestEvalRunnerValidation:
 
     def test_validate_invalid_task_raises(self):
         """Test validation fails for unknown task."""
-        runner = EvalRunner(
+        runner = AsyncEvalRunner(
             harness_config=make_harness_config(),
             task_specs=["nonexistent_task"],
         )
@@ -67,7 +67,7 @@ class TestEvalRunnerValidation:
 
     def test_validate_invalid_suite_raises(self):
         """Test validation fails for unknown suite."""
-        runner = EvalRunner(
+        runner = AsyncEvalRunner(
             harness_config=make_harness_config(),
             task_specs=["nonexistent:suite"],
         )
@@ -79,7 +79,7 @@ class TestEvalRunnerValidation:
 
         Note: Regimes are now accessed as variants using single colon syntax.
         """
-        runner = EvalRunner(
+        runner = AsyncEvalRunner(
             harness_config=make_harness_config(),
             task_specs=["humaneval:nonexistent_regime"],
         )
@@ -88,7 +88,7 @@ class TestEvalRunnerValidation:
 
     def test_validate_collects_multiple_errors(self):
         """Test validation collects all errors."""
-        runner = EvalRunner(
+        runner = AsyncEvalRunner(
             harness_config=make_harness_config(),
             task_specs=["bad_task1", "bad_task2", "humaneval:bpb"],
         )
@@ -101,7 +101,7 @@ class TestEvalRunnerValidation:
 
     def test_validate_mixed_valid_and_invalid(self):
         """Test validation fails if any spec is invalid."""
-        runner = EvalRunner(
+        runner = AsyncEvalRunner(
             harness_config=make_harness_config(),
             task_specs=["humaneval:bpb", "nonexistent", "mbpp:bpb"],
         )
@@ -110,7 +110,7 @@ class TestEvalRunnerValidation:
 
     def test_validate_empty_task_specs(self):
         """Test validation fails with empty task specs."""
-        runner = EvalRunner(
+        runner = AsyncEvalRunner(
             harness_config=make_harness_config(),
             task_specs=[],
         )

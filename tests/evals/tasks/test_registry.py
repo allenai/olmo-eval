@@ -6,7 +6,7 @@ import pytest
 
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType
 from olmo_eval.data import DataSource
-from olmo_eval.evals.tasks import (
+from olmo_eval.evals.tasks.common import (
     Task,
     clear_registry,
     get_base_task_name,

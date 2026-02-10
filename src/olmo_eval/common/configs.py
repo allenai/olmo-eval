@@ -75,7 +75,7 @@ def validate_tasks(tasks: list[str]) -> tuple[list[str], list[str]]:
         of all task specs. invalid_tasks contains any specs that don't exist.
     """
     from olmo_eval.evals.suites import suite_exists
-    from olmo_eval.evals.tasks import task_exists
+    from olmo_eval.evals.tasks.common import task_exists
 
     valid_tasks = []
     invalid_tasks = []
@@ -109,7 +109,7 @@ def validate_task_metrics(tasks: list[str]) -> tuple[list[str], list[str]]:
     Returns:
         Tuple of (tasks_with_metrics, tasks_without_metrics).
     """
-    from olmo_eval.evals.tasks import get_task
+    from olmo_eval.evals.tasks.common import get_task
 
     with_metrics = []
     without_metrics = []
@@ -181,9 +181,3 @@ def get_provider_config(name: str, **overrides: Any) -> ProviderConfig:
 
     # Not a preset - create ProviderConfig directly
     return ProviderConfig(model=name, **filtered_overrides)
-
-
-# Backward compatibility alias
-def get_model_config(name: str, **overrides: Any) -> ProviderConfig:
-    """Alias for get_provider_config for backward compatibility."""
-    return get_provider_config(name, **overrides)

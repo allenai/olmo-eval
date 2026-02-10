@@ -80,8 +80,7 @@ def inspect(
         load_tokenizer,
         tokenize_request,
     )
-    from olmo_eval.evals.tasks import get_task, task_exists
-    from olmo_eval.evals.tasks.common.registry import get_base_task_name
+    from olmo_eval.evals.tasks.common import get_base_task_name, get_task, task_exists
 
     # Validate tokenizer is provided when needed
     if (formatted or tokens) and not tokenizer:

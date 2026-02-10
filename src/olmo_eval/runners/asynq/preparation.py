@@ -8,7 +8,7 @@ from typing import Any
 
 from olmo_eval.common.logging import get_logger
 from olmo_eval.common.types import Response, SamplingParams
-from olmo_eval.evals.tasks import Task, get_task
+from olmo_eval.evals.tasks.common import Task, get_task
 from olmo_eval.runners.asynq.types import QueueItem, TaskTracker
 from olmo_eval.runners.common.types import TaskResult
 from olmo_eval.runners.io.builders import build_predictions

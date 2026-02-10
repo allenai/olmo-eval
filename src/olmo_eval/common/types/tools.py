@@ -497,9 +497,6 @@ class FileSystemToolType(ToolType):
         )
 
 
-# Convenience functions wrapping ToolTypeRegistry for backwards compatibility
-
-
 def get_tool_type(name: str) -> type[ToolType] | None:
     """Get a tool type class by name.
 

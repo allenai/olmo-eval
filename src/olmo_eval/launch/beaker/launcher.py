@@ -172,62 +172,40 @@ def parse_task_with_priority(task_spec: str, default_priority: str = "normal") -
 
 def validate_priority_configuration(
     tasks: tuple[str, ...] | list[str],
-    cli_priority: str | None,
     default_priority: str = "normal",
 ) -> dict[str, list[str]]:
-    """Validate priority configuration and group tasks by priority.
+    """Group tasks by priority.
 
     Tasks can specify priority via @priority suffix (e.g., "mmlu@high").
-    Tasks without @priority use the default_priority from the config file.
+    Tasks without @priority use the default_priority.
 
     Args:
         tasks: Task specifications (may include @priority suffixes).
-        cli_priority: Global priority override (typically None, kept for API compatibility).
         default_priority: Default priority for tasks without @priority suffix.
 
     Returns:
         Dictionary mapping priority levels to lists of task names.
 
-    Raises:
-        ValueError: If cli_priority is set while tasks have @priority suffixes.
-
     Examples:
-        # Tasks without @priority suffix use default
-        >>> validate_priority_configuration(["mmlu", "gsm8k"], None)
+        >>> validate_priority_configuration(["mmlu", "gsm8k"])
         {"normal": ["mmlu", "gsm8k"]}
 
-        # Tasks with @priority suffixes
-        >>> validate_priority_configuration(["mmlu@high", "gsm8k@normal"], None)
+        >>> validate_priority_configuration(["mmlu@high", "gsm8k@normal"])
         {"high": ["mmlu"], "normal": ["gsm8k"]}
 
-        # Custom default priority
-        >>> validate_priority_configuration(["mmlu", "gsm8k"], None, "high")
+        >>> validate_priority_configuration(["mmlu", "gsm8k"], "high")
         {"high": ["mmlu", "gsm8k"]}
     """
     from collections import defaultdict
 
     tasks_by_priority: dict[str, list[str]] = defaultdict(list)
-    tasks_with_priority_suffix: list[str] = []
 
     for task_spec in tasks:
         if "@" in task_spec:
-            tasks_with_priority_suffix.append(task_spec)
             task_name, task_priority = parse_task_with_priority(task_spec)
             tasks_by_priority[task_priority].append(task_name)
         else:
-            # Use CLI priority if provided, otherwise use default
-            effective_priority = cli_priority if cli_priority is not None else default_priority
-            tasks_by_priority[effective_priority].append(task_spec)
-
-    # Conflict check: global priority used with @priority suffixes
-    if cli_priority is not None and tasks_with_priority_suffix:
-        raise ValueError(
-            f"Conflicting priority specification: cli_priority={cli_priority} "
-            f"cannot be used together with @priority suffixes on tasks.\n\n"
-            f"Use @priority suffixes to set priority per-task.\n\n"
-            f"Tasks with @priority suffixes:\n"
-            + "\n".join(f"  - {t}" for t in tasks_with_priority_suffix)
-        )
+            tasks_by_priority[default_priority].append(task_spec)
 
     return dict(tasks_by_priority)
 

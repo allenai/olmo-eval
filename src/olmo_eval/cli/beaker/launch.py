@@ -324,7 +324,6 @@ def launch(
     effective_priority = override_priority or launch_config.priority
     task_validator = TaskValidator(
         launch_config.task_specs,
-        cli_priority=None,
         default_priority=effective_priority,
     )
     tasks_by_priority, valid_tasks = task_validator.validate_and_group()
@@ -542,8 +541,8 @@ def _get_task_configs(
     """
     from copy import deepcopy
 
-    from olmo_eval.evals.tasks import get_task as get_task_instance
-    from olmo_eval.evals.tasks.common.registry import parse_task_spec
+    from olmo_eval.evals.tasks.common import get_task as get_task_instance
+    from olmo_eval.evals.tasks.common import parse_task_spec
 
     task_overrides = task_overrides or {}
     task_configs = {}

@@ -21,7 +21,7 @@ from olmo_eval.cli.task import task
 from olmo_eval.cli.utils import console
 from olmo_eval.common.constants import get_model_presets
 from olmo_eval.evals.suites import get_suite, list_suites
-from olmo_eval.evals.tasks import list_regimes, list_tasks, list_variants
+from olmo_eval.evals.tasks.common import list_regimes, list_tasks, list_variants
 
 
 @click.group()

@@ -79,7 +79,7 @@ class BaseEvalRunner(ABC):
             List of error messages (empty if all valid).
         """
         from olmo_eval.evals.suites import suite_exists
-        from olmo_eval.evals.tasks import get_base_task_name, task_exists
+        from olmo_eval.evals.tasks.common import get_base_task_name, task_exists
 
         errors = []
         for spec in self.task_specs:

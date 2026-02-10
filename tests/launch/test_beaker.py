@@ -281,60 +281,45 @@ class TestParseTaskWithPriority:
 class TestValidatePriorityConfiguration:
     """Tests for priority configuration validation."""
 
-    def test_tasks_without_priority_no_cli_flag(self):
-        """Test tasks without @priority suffix and no CLI flag use default."""
-        result = validate_priority_configuration(["mmlu", "gsm8k"], None)
+    def test_tasks_without_priority_use_default(self):
+        """Test tasks without @priority suffix use default."""
+        result = validate_priority_configuration(["mmlu", "gsm8k"])
         assert result == {"normal": ["mmlu", "gsm8k"]}
 
-    def test_tasks_without_priority_with_cli_flag(self):
-        """Test tasks without @priority suffix use CLI priority."""
+    def test_tasks_without_priority_custom_default(self):
+        """Test tasks without @priority suffix use custom default."""
         result = validate_priority_configuration(["mmlu", "gsm8k"], "high")
         assert result == {"high": ["mmlu", "gsm8k"]}
 
-    def test_tasks_with_priority_no_cli_flag(self):
+    def test_tasks_with_priority_suffixes(self):
         """Test tasks with @priority suffixes are grouped correctly."""
-        result = validate_priority_configuration(["mmlu@high", "gsm8k@normal", "arc@high"], None)
+        result = validate_priority_configuration(["mmlu@high", "gsm8k@normal", "arc@high"])
         assert result == {"high": ["mmlu", "arc"], "normal": ["gsm8k"]}
 
-    def test_tasks_with_priority_and_cli_flag_raises(self):
-        """Test that using CLI --priority with @priority suffixes raises error."""
-        with pytest.raises(ValueError, match="Conflicting priority specification"):
-            validate_priority_configuration(["mmlu@high", "gsm8k"], "normal")
-
-    def test_conflict_error_message_shows_tasks(self):
-        """Test that conflict error message lists tasks with @priority suffixes."""
-        with pytest.raises(ValueError, match="mmlu@high"):
-            validate_priority_configuration(["mmlu@high"], "normal")
-
-    def test_mixed_tasks_no_cli_flag(self):
-        """Test mixed tasks (some with, some without @priority) and no CLI flag."""
-        result = validate_priority_configuration(["mmlu@high", "gsm8k", "arc@low"], None)
+    def test_mixed_tasks_with_and_without_priority(self):
+        """Test mixed tasks (some with, some without @priority)."""
+        result = validate_priority_configuration(["mmlu@high", "gsm8k", "arc@low"])
         # gsm8k should use default "normal"
         assert result == {"high": ["mmlu"], "normal": ["gsm8k"], "low": ["arc"]}
 
-    def test_custom_default_priority(self):
-        """Test custom default priority for tasks without @priority suffix."""
-        result = validate_priority_configuration(["mmlu", "gsm8k"], None, default_priority="high")
-        assert result == {"high": ["mmlu", "gsm8k"]}
-
     def test_all_priority_levels(self):
         """Test all valid priority levels work."""
-        result = validate_priority_configuration(["a@low", "b@normal", "c@high", "d@urgent"], None)
+        result = validate_priority_configuration(["a@low", "b@normal", "c@high", "d@urgent"])
         assert result == {"low": ["a"], "normal": ["b"], "high": ["c"], "urgent": ["d"]}
 
     def test_empty_tasks_list(self):
         """Test empty tasks list returns empty dict."""
-        result = validate_priority_configuration([], None)
+        result = validate_priority_configuration([])
         assert result == {}
 
     def test_tuple_input(self):
         """Test that tuple input works (from CLI)."""
-        result = validate_priority_configuration(("mmlu", "gsm8k"), None)
+        result = validate_priority_configuration(("mmlu", "gsm8k"))
         assert result == {"normal": ["mmlu", "gsm8k"]}
 
-    def test_task_with_regime_and_priority(self):
-        """Test task with regime (:) and @priority suffix."""
-        result = validate_priority_configuration(["mmlu:olmes@high"], None)
+    def test_task_with_variant_and_priority(self):
+        """Test task with variant (:) and @priority suffix."""
+        result = validate_priority_configuration(["mmlu:olmes@high"])
         assert result == {"high": ["mmlu:olmes"]}
 
 
