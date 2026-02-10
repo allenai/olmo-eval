@@ -17,7 +17,7 @@ from olmo_eval.common.formatters import PPLFormatter
 from olmo_eval.common.metrics import BPBMetric
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.tasks.common import Task, TaskConfig, register, register_variant
+from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 # Supported languages in multilingual MBPP
 MULTILINGUAL_MBPP_LANGUAGES: tuple[str, ...] = (
@@ -48,12 +48,8 @@ class MultilingualMBPPTask(Task):
     The v2fix version normalizes Windows line endings (\\r\\n -> \\n).
     """
 
-    default_source: str = "allenai/multilingual_mbpp"
     normalize_line_endings: bool = False  # Set True for v2fix
     language: str = "python"  # Override in subclasses
-
-    def __init__(self, config: TaskConfig) -> None:
-        super().__init__(config)
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -65,17 +61,6 @@ class MultilingualMBPPTask(Task):
             for doc in loader.load(source):
                 self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
-
-    def _get_source_for_split(self, split: str) -> DataSource:
-        """Get data source for a specific split."""
-        try:
-            return self.config.get_data_source(split=split).with_subset(self.language)
-        except ValueError:
-            return DataSource(
-                path=self.default_source,
-                subset=self.language,
-                split=split,
-            )
 
     def _normalize(self, text: str) -> str:
         """Normalize line endings if v2fix mode."""

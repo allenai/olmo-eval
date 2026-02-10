@@ -15,7 +15,7 @@ from olmo_eval.common.types import (
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import HUMANEVAL_STOP_SEQUENCES
 from olmo_eval.evals.extract import extract_code
-from olmo_eval.evals.tasks.common import Task, TaskConfig, register, register_variant
+from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 
 @register("humaneval")
@@ -28,12 +28,7 @@ class HumanEval(Task):
         temperature=0.0,
         stop_sequences=HUMANEVAL_STOP_SEQUENCES,
     )
-
-    default_source: str = "openai_humaneval"
     fewshot_split: str = "test"  # HumanEval only has a test split
-
-    def __init__(self, config: TaskConfig) -> None:
-        super().__init__(config)
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -45,16 +40,6 @@ class HumanEval(Task):
             for doc in loader.load(source):
                 self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
-
-    def _get_source_for_split(self, split: str) -> DataSource:
-        """Get data source for a specific split."""
-        try:
-            return self.config.get_data_source(split=split)
-        except ValueError:
-            return DataSource(
-                path=self.default_source,
-                split=split,
-            )
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
@@ -111,7 +96,6 @@ class HumanEvalPlus(HumanEval):
     """HumanEval+ task with additional test cases."""
 
     data_source = DataSource(path="evalplus/humanevalplus")
-    default_source: str = "evalplus/humanevalplus"
 
 
 # =============================================================================

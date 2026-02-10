@@ -22,7 +22,7 @@ from olmo_eval.common.metrics import AccuracyMetric
 from olmo_eval.common.scorers import SimpleQAJudgeScorer
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.tasks.common import Task, TaskConfig, register, register_variant
+from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 logger = logging.getLogger(__name__)
 
@@ -47,22 +47,13 @@ class SimpleQA(Task):
     formatter = ChatFormatter()
     sampling_params = SamplingParams(temperature=0.0)
 
-    default_source: str = "allenai/simpleqa_full"
-
-    def __init__(self, config: TaskConfig) -> None:
-        super().__init__(config)
-        self._instances_cache: list[Instance] | None = None
-
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the dataset."""
         if self._instances_cache is None:
             self._instances_cache = []
             loader = DataLoader()
-            try:
-                source = self.config.get_data_source()
-            except ValueError:
-                source = DataSource(path=self.default_source, split="test")
+            source = self.config.get_data_source()
 
             for idx, doc in enumerate(loader.load(source)):
                 instance = self.process_doc(doc, idx)

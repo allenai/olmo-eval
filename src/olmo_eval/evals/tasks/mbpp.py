@@ -9,16 +9,11 @@ from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import MBPP_STOP_SEQUENCES
 from olmo_eval.evals.extract import extract_code
-from olmo_eval.evals.tasks.common import Task, TaskConfig, register, register_variant
+from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 
 class MBPPBase(Task):
     """Base class for MBPP (Mostly Basic Python Problems) tasks."""
-
-    default_source: str = "google-research-datasets/mbpp"
-
-    def __init__(self, config: TaskConfig) -> None:
-        super().__init__(config)
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -30,16 +25,6 @@ class MBPPBase(Task):
             for doc in loader.load(source):
                 self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
-
-    def _get_source_for_split(self, split: str) -> DataSource:
-        """Get data source for a specific split."""
-        try:
-            return self.config.get_data_source(split=split)
-        except ValueError:
-            return DataSource(
-                path=self.default_source,
-                split=split,
-            )
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
@@ -107,11 +92,7 @@ class MBPP(MBPPBase):
 class MBPPPlusBase(Task):
     """Base class for MBPP+ tasks with additional test cases."""
 
-    default_source: str = "evalplus/mbppplus"
     fewshot_split: str = "test"  # MBPP+ doesn't have a dedicated prompt split
-
-    def __init__(self, config: TaskConfig) -> None:
-        super().__init__(config)
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -123,16 +104,6 @@ class MBPPPlusBase(Task):
             for doc in loader.load(source):
                 self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
-
-    def _get_source_for_split(self, split: str) -> DataSource:
-        """Get data source for a specific split."""
-        try:
-            return self.config.get_data_source(split=split)
-        except ValueError:
-            return DataSource(
-                path=self.default_source,
-                split=split,
-            )
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""

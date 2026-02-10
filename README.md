@@ -420,8 +420,7 @@ from olmo_eval.evals.tasks import Task, TaskConfig, register
 class MyTask(Task):
     """My task implementation."""
 
-    data_source = DataSource(path="my-org/my-dataset")
-    default_source: str = "my-org/my-dataset"
+    data_source = DataSource(path="my-org/my-dataset", split="test")
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -429,17 +428,10 @@ class MyTask(Task):
         if self._instances_cache is None:
             self._instances_cache = []
             loader = DataLoader()
-            source = self._get_source_for_split("test")
+            source = self.config.get_data_source()
             for doc in loader.load(source):
                 self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
-
-    def _get_source_for_split(self, split: str) -> DataSource:
-        """Get data source for a specific split."""
-        try:
-            return self.config.get_data_source(split=split)
-        except ValueError:
-            return DataSource(path=self.default_source, split=split)
 
     def process_doc(self, doc: dict[str, Any]) -> Instance:
         """Convert a dataset document to an Instance."""
