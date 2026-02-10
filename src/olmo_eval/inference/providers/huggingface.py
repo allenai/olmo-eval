@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.core.types import LMOutput, LMRequest, SamplingParams
@@ -188,3 +189,37 @@ class HuggingFaceProvider(InferenceProvider):
             results.append(request_outputs)
 
         return results
+
+    async def agenerate(
+        self,
+        requests: list[LMRequest],
+        sampling_params: SamplingParams | None = None,
+    ) -> list[list[LMOutput]]:
+        """Async generate completions.
+
+        Runs the synchronous HuggingFace generate in a thread pool to avoid blocking.
+
+        Args:
+            requests: Batch of requests to process.
+            sampling_params: Sampling configuration.
+
+        Returns:
+            List of output lists, one per request.
+        """
+        return await asyncio.to_thread(self.generate, requests, sampling_params)
+
+    async def alogprobs(
+        self,
+        requests: list[LMRequest],
+    ) -> list[list[LMOutput]]:
+        """Async compute logprobs for continuations.
+
+        Runs the synchronous HuggingFace logprobs in a thread pool to avoid blocking.
+
+        Args:
+            requests: Batch of requests with continuations to score.
+
+        Returns:
+            List of output lists with logprobs populated.
+        """
+        return await asyncio.to_thread(self.logprobs, requests)

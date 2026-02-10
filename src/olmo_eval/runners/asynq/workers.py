@@ -65,7 +65,7 @@ async def process_items(
         for item in chat_items:
             await work_queue.put(item)
 
-        pbar = tqdm(total=len(chat_items), desc="CHAT instances", unit="inst")
+        pbar = tqdm(total=len(chat_items), desc="Processing instances", unit="inst")
 
         async def worker() -> None:
             while True:
