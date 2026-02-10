@@ -46,7 +46,7 @@ class SimpleQA(Task):
     data_source = DataSource(path="allenai/simpleqa_full", split="test")
     formatter = ChatFormatter()
     metrics = (AccuracyMetric(scorer=SimpleQAJudgeScorer),)
-    sampling_params = SamplingParams(max_tokens=2048, temperature=0.0)
+    sampling_params = SamplingParams(temperature=0.0)
 
     default_source: str = "allenai/simpleqa_full"
 
