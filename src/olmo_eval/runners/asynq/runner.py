@@ -67,10 +67,6 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
     output_dir: str = BEAKER_RESULT_DIR
     storages: list[StorageBackend] = field(default_factory=list)
 
-    # Worker configuration
-    num_workers: int | None = None
-    gpus_per_worker: int = 1
-
     # vLLM-specific configuration
     attention_backend: str | None = None
 
@@ -134,8 +130,6 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         table.add_row("Provider", self.provider_config.get_provider_name())
         table.add_row("Mode", self._mode_description)
         table.add_row("Output Dir", self.output_dir)
-        table.add_row("Workers", str(self.num_workers or "auto-detect"))
-        table.add_row("GPUs per Worker", str(self.gpus_per_worker))
 
         console.print(table)
 
@@ -351,12 +345,8 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         for i in range(num_workers):
             worker_id = get_worker_id(self.provider_config.model, i)
 
-            if total_gpus > 0:
-                start_gpu = i * self.gpus_per_worker
-                end_gpu = min(start_gpu + self.gpus_per_worker, total_gpus)
-                gpu_ids = list(range(start_gpu, end_gpu)) if start_gpu < end_gpu else []
-            else:
-                gpu_ids = []
+            # All GPUs are assigned to the single worker for tensor parallelism
+            gpu_ids = list(range(total_gpus)) if total_gpus > 0 else []
 
             worker = ctx.Process(
                 target=worker_process,
@@ -384,14 +374,12 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             return 0
 
     def _get_num_workers(self) -> int:
-        """Get number of workers based on available GPUs."""
-        if self.num_workers is not None:
-            return self.num_workers
+        """Get number of workers based on provider requirements.
 
-        num_gpus = self._get_gpu_count()
-        if num_gpus == 0:
-            return 1  # Fallback to single worker for CPU
-        return max(1, num_gpus // self.gpus_per_worker)
+        For single-GPU or CPU providers, returns 1.
+        Multi-GPU tensor parallelism is handled within a single worker.
+        """
+        return 1
 
     async def _process_results(
         self,

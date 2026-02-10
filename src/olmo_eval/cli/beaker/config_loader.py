@@ -29,13 +29,11 @@ class LaunchConfig:
     max_gpus_per_node: int = 8
     priority: str = "normal"
     preemptible: bool = True
-    timeout: str = "24h"
+    timeout: str = "6h"
     retries: int | None = None
     image: str | None = None
     groups: list[str] = field(default_factory=list)
 
-    num_workers: int | None = None
-    gpus_per_worker: int = 1
     gpus: int = 0
 
     s3_bucket: str | None = None
@@ -119,16 +117,6 @@ class LaunchConfigLoader:
             priority = cli_priority if cli_priority is not None else cfg.priority
             preemptible = cli_preemptible if cli_preemptible is not None else cfg.preemptible
             timeout = cli_timeout if cli_timeout is not None else cfg.timeout
-            num_workers = (
-                self.cli_args.get("num_workers")
-                if self.cli_args.get("num_workers") is not None
-                else cfg.num_workers
-            )
-            gpus_per_worker = (
-                self.cli_args.get("gpus_per_worker", 1)
-                if self.cli_args.get("gpus_per_worker", 1) != 1
-                else cfg.gpus_per_worker
-            )
             gpus = cli_gpus if cli_gpus is not None else cfg.gpus
             image = cli_image or cfg.beaker_image
         else:
@@ -143,8 +131,6 @@ class LaunchConfigLoader:
             priority = cli_priority
             preemptible = cli_preemptible
             timeout = cli_timeout
-            num_workers = self.cli_args.get("num_workers")
-            gpus_per_worker = self.cli_args.get("gpus_per_worker", 1)
             gpus = cli_gpus  # None means auto-detect from provider
             image = cli_image
 
@@ -193,8 +179,6 @@ class LaunchConfigLoader:
             retries=retries,
             image=image,
             groups=effective_groups,
-            num_workers=num_workers,
-            gpus_per_worker=gpus_per_worker,
             gpus=gpus,
             s3_bucket=s3_bucket,
             s3_prefix=s3_prefix,

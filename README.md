@@ -755,8 +755,6 @@ Available inference providers:
 | `--workspace` | `-w` | required | Beaker workspace |
 | `--budget` | `-B` | required | Beaker budget |
 | `--group` | `-g` | none | Add experiments to Beaker group(s) (can specify multiple) |
-| `--num-workers` | `-W` | auto | Number of workers |
-| `--gpus-per-worker` | | `1` | GPUs per worker for async mode |
 | `--dry-run` | `-d` | `false` | Print spec without launching |
 | `--follow/--no-follow` | | `true` | Follow logs after launch |
 
@@ -932,8 +930,6 @@ description: "Full evaluation suite for Llama 70B"
 | `budget` | string | yes | Beaker budget |
 | `beaker_image` | string | no | Container image to use (config-only) |
 | `groups` | list | no | Beaker groups to add experiments to |
-| `num_workers` | int | no | Number of workers |
-| `gpus_per_worker` | int | no | GPUs per worker for async modes (default: `1`) |
 | `description` | string | no | Experiment description (config-only) |
 
 See `examples/beaker/configs/` for more configuration examples.
@@ -1132,19 +1128,14 @@ Configure via environment variables:
 
 ## Advanced Usage
 
-### Multi-GPU and Parallel Evaluation
-
-Worker processes each load the model and process batches in parallel:
+### Multi-GPU and Tool-Augmented Evaluation
 
 ```bash
-# Auto-detect workers from available GPUs
+# Basic evaluation
 olmo-eval run -m llama3.1-8b -t mmlu -t gsm8k -t arc
 
-# Specify number of workers
-olmo-eval run --num-workers 4 -m llama3.1-8b -t mmlu -t gsm8k
-
-# Multi-GPU models (e.g., 70B on 4 GPUs per worker)
-olmo-eval run --num-workers 2 --gpus-per-worker 4 -m llama3.1-70b -t mmlu
+# Large models with multi-GPU tensor parallelism
+olmo-eval run -m llama3.1-70b -t mmlu --num-gpus 4
 
 # Tool-augmented evaluation with harness
 olmo-eval run -m llama3.1-8b -t simpleqa --harness search

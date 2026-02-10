@@ -21,7 +21,7 @@ async def process_items(
     items: list[QueueItem],
     harness: Harness,
     result_queue: mp.Queue,
-    max_concurrency: int,
+    max_concurrency: int | None = None,
 ) -> None:
     """Process queue items, batching where possible.
 
@@ -71,9 +71,12 @@ async def process_items(
                 finally:
                     work_queue.task_done()
 
+        # Use max_concurrency if specified, otherwise process all items concurrently
+        num_workers = max_concurrency if max_concurrency is not None else len(chat_items)
+
         try:
             async with asyncio.TaskGroup() as tg:
-                workers = [tg.create_task(worker()) for _ in range(max_concurrency)]
+                workers = [tg.create_task(worker()) for _ in range(num_workers)]
                 await work_queue.join()
                 for w in workers:
                     w.cancel()
@@ -124,7 +127,7 @@ def worker_process(
         provider_kind = str(provider_config.kind)
         tokenizer = provider_config.tokenizer
         max_model_len = provider_config.max_model_len
-        max_concurrency = provider_config.max_concurrency or harness_config.max_concurrency or 8
+        max_concurrency = provider_config.max_concurrency or harness_config.max_concurrency
         provider_kwargs = dict(provider_config.kwargs) if provider_config.kwargs else {}
 
         attention_backend = provider_kwargs.get("attention_backend")
@@ -162,6 +165,9 @@ def worker_process(
         )
 
         harness = Harness(harness_config)
+
+        # Force provider creation to catch import errors early
+        _ = harness.provider
 
         init_time = time.time() - init_start
         worker_logger.info(f"Provider ready ({init_time:.1f}s)")

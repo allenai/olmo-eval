@@ -103,40 +103,45 @@ def wait_for_workers_ready(
     Raises:
         RuntimeError: If workers fail during startup
     """
-    # Give workers a moment to initialize and potentially fail
     start_time = time.time()
     check_interval = 0.5
+
+    def drain_fatal_errors() -> None:
+        """Check queue for fatal errors and raise if found."""
+        while True:
+            try:
+                result_item = result_queue.get_nowait()
+                if result_item.task_id == "__WORKER_FATAL__":
+                    # Terminate all workers
+                    for worker in workers:
+                        if worker.is_alive():
+                            worker.terminate()
+                            worker.join(timeout=5)
+                    result_queue.cancel_join_thread()
+                    raise RuntimeError(f"Worker failed during startup: {result_item.error}")
+                else:
+                    # Put non-fatal item back
+                    result_queue.put(result_item)
+                    return
+            except queue.Empty:
+                return
 
     while time.time() - start_time < startup_timeout:
         time.sleep(check_interval)
 
-        # Check for fatal errors
-        try:
-            result_item = result_queue.get_nowait()
-            if result_item.task_id == "__WORKER_FATAL__":
-                logger.error("FATAL: Worker failed during startup!")
-                logger.error(result_item.error)
-                # Terminate all workers
-                for worker in workers:
-                    if worker.is_alive():
-                        worker.terminate()
-                        worker.join(timeout=5)
-                # Cancel queue join thread to allow clean process exit
-                result_queue.cancel_join_thread()
-                raise RuntimeError(f"Worker failed during startup: {result_item.error}")
-            else:
-                # Put non-fatal item back
-                result_queue.put(result_item)
-        except queue.Empty:
-            pass  # Queue empty
+        # Check for fatal errors in queue
+        drain_fatal_errors()
 
         # Check if any worker died with non-zero exit code
         for worker in workers:
             if not worker.is_alive() and worker.exitcode is not None and worker.exitcode != 0:
+                # Drain queue one more time to get the error message
+                drain_fatal_errors()
                 raise RuntimeError(f"Worker died during startup with exit code {worker.exitcode}")
 
-        # If all workers are alive, we're good
+        # If all workers are alive, do one final queue check before returning
         if all(w.is_alive() for w in workers):
+            drain_fatal_errors()
             return
 
     # Final check

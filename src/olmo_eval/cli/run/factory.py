@@ -46,8 +46,6 @@ class RunnerFactory:
             task_specs=self.config.task_specs,
             output_dir=self.config.output_dir,
             storages=self.storages,
-            num_workers=self.config.num_workers,
-            gpus_per_worker=self.config.gpus_per_worker,
             attention_backend=attention_backend,
             task_overrides=self.config.task_overrides,
             s3_config=self.s3_config,

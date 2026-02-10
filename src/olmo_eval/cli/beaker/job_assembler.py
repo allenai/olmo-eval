@@ -52,8 +52,9 @@ class JobConfigAssembler:
             from olmo_eval.core.harness import get_backend_extras, get_harness_preset
 
             preset = get_harness_preset(self.config.harness)
-            backend_extras = get_backend_extras(preset.backend)
-            install_extras.extend(backend_extras)
+            if preset.backend:
+                backend_extras = get_backend_extras(preset.backend)
+                install_extras.extend(backend_extras)
 
         # Get provider extras from model preset (takes precedence over harness default)
         from olmo_eval.core.configs import get_provider_config
@@ -150,8 +151,6 @@ class JobConfigAssembler:
         if exp.parallelism > 1:
             command.extend(["--parallelism", str(exp.parallelism)])
 
-        self._add_worker_flags(command)
-
         if self.config.s3_bucket and self.config.s3_prefix:
             command.extend(["--s3-bucket", self.config.s3_bucket])
             command.extend(["--s3-prefix", self.config.s3_prefix])
@@ -196,9 +195,3 @@ class JobConfigAssembler:
             command.extend(["-o", override])
 
         return command
-
-    def _add_worker_flags(self, command: list[str]) -> None:
-        if self.config.num_workers is not None:
-            command.extend(["--num-workers", str(self.config.num_workers)])
-        if self.config.gpus_per_worker != 1:
-            command.extend(["--gpus-per-worker", str(self.config.gpus_per_worker)])

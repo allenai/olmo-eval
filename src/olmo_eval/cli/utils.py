@@ -176,8 +176,6 @@ class RunnerConfig:
     runner: type
     output_dir: str | None = None
     attention_backend: str | None = None
-    num_workers: int | str | None = None
-    gpus_per_worker: int | None = None
 
     def __repr__(self) -> str:
         parts = [f"runner={self.runner.__name__}"]
@@ -185,10 +183,6 @@ class RunnerConfig:
             parts.append(f"output_dir={self.output_dir!r}")
         if self.attention_backend is not None:
             parts.append(f"attention_backend={self.attention_backend!r}")
-        if self.num_workers is not None:
-            parts.append(f"num_workers={self.num_workers!r}")
-        if self.gpus_per_worker is not None:
-            parts.append(f"gpus_per_worker={self.gpus_per_worker}")
         return f"RunnerConfig({', '.join(parts)})"
 
 

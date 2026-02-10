@@ -14,20 +14,8 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 
 def parallelism_options(func: F) -> F:  # noqa: UP047
-    """Parallelism and worker options."""
+    """Parallelism options."""
 
-    @click.option(
-        "--num-workers",
-        type=int,
-        default=None,
-        help="Number of workers for async modes (default: auto-detect from GPUs)",
-    )
-    @click.option(
-        "--gpus-per-worker",
-        type=int,
-        default=1,
-        help="Number of GPUs each worker uses (default: 1)",
-    )
     @click.option(
         "--num-gpus",
         type=int,

@@ -285,11 +285,11 @@ class HarnessConfig:
     system_prompt: str | None = None
     tool_choice: Literal["auto", "none", "required"] | str = "auto"
     backend: str | None = None
-    required_secrets: tuple[str, ...] = ()  # For tools
+    required_secrets: tuple[str, ...] = ()
     max_turns: int | None = None
-    max_concurrency: int | None = None  # For agent execution
+    max_concurrency: int | None = None
 
-    # Cache for resolved tools (not part of frozen fields, uses object.__setattr__)
+    # Cache for resolved tools
     _resolved_tools_cache: tuple[Tool, ...] | None = field(
         default=None, repr=False, compare=False, hash=False
     )

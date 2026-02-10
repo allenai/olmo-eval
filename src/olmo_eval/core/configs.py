@@ -100,7 +100,6 @@ def validate_tasks(tasks: list[str]) -> tuple[list[str], list[str]]:
 # Keys that are runner-specific and should not be passed to ProviderConfig
 _BACKEND_ONLY_KEYS = {
     "attention_backend",
-    "gpus_per_worker",
     "gpus",
 }
 

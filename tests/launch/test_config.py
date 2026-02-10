@@ -197,4 +197,3 @@ tasks:
         assert config.preemptible is True
         assert config.timeout == "24h"
         assert config.gpus == 1
-        assert config.gpus_per_worker == 1

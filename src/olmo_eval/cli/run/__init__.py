@@ -73,8 +73,6 @@ def run(
     harness_preset: str | None,
     harness_config: str | None,
     # Parallelism options
-    num_workers: int | None,
-    gpus_per_worker: int,
     num_gpus: int,
     parallelism: int,
     # Storage options
@@ -143,8 +141,6 @@ def run(
         model=model,
         task=task,
         output_dir=output_dir,
-        num_workers=num_workers,
-        gpus_per_worker=gpus_per_worker,
         num_gpus=num_gpus,
         parallelism=parallelism,
         store=store,

@@ -27,8 +27,6 @@ class RunConfig:
     task_overrides: dict[str, dict[str, Any]] = field(default_factory=dict, repr=False)
 
     output_dir: str = "/tmp/results/"
-    num_workers: int | None = None
-    gpus_per_worker: int = 1
 
     # Storage configuration
     store: bool = False
@@ -96,8 +94,6 @@ class RunConfigBuilder:
         model: str,
         task: tuple[str, ...],
         output_dir: str,
-        num_workers: int | None = None,
-        gpus_per_worker: int = 1,
         num_gpus: int = 1,
         parallelism: int = 1,
         store: bool = False,
@@ -140,8 +136,6 @@ class RunConfigBuilder:
         self.model = model
         self.task = task
         self.output_dir = output_dir
-        self.num_workers = num_workers
-        self.gpus_per_worker = gpus_per_worker
         self.num_gpus = num_gpus
         self.parallelism = parallelism
         self.store = store
@@ -194,8 +188,6 @@ class RunConfigBuilder:
             task_specs=task_specs,
             task_overrides=task_overrides,
             output_dir=self.output_dir,
-            num_workers=self.num_workers,
-            gpus_per_worker=self.gpus_per_worker,
             store=self.store,
             s3_bucket=self.s3_bucket,
             s3_prefix=self.s3_prefix,

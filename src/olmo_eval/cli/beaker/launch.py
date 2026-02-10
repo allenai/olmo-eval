@@ -90,8 +90,6 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_UV
     multiple=True,
     help="Add experiments to Beaker group(s) (can specify multiple, creates if needed)",
 )
-@click.option("--num-workers", "-W", type=int, help="Number of workers")
-@click.option("--gpus-per-worker", type=int, default=1, help="GPUs per worker for async mode")
 @click.option("--dry-run", "-d", is_flag=True, help="Print spec without launching")
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
 @click.option(
@@ -206,8 +204,6 @@ def launch(
     budget: str | None,
     image: str | None,
     group: tuple[str, ...],
-    num_workers: int | None,
-    gpus_per_worker: int,
     dry_run: bool,
     yes: bool,
     follow: bool,
@@ -289,8 +285,6 @@ def launch(
         "budget": budget,
         "image": image,
         "group": group,
-        "num_workers": num_workers,
-        "gpus_per_worker": gpus_per_worker,
         "s3_bucket": s3_bucket,
         "s3_prefix": s3_prefix,
         "s3_endpoint_url": s3_endpoint_url,

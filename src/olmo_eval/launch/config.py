@@ -108,8 +108,6 @@ class EvalConfig:
     timeout: str = "24h"
     retries: int | None = None
 
-    num_workers: int | None = None
-    gpus_per_worker: int = 1
     gpus: int = 1
 
     workspace: str | None = None
