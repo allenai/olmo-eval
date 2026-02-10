@@ -26,6 +26,7 @@ from olmo_eval.runners.asynq.helpers import (
     wait_for_workers_ready,
 )
 from olmo_eval.runners.asynq.queue import (
+    WORKER_FATAL_TASK_ID,
     QueueItem,
     ResultItem,
     TaskTracker,
@@ -419,7 +420,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 continue
 
             # Check for fatal worker crash - raise immediately, let finally handle cleanup
-            if result_item.task_id == "__WORKER_FATAL__":
+            if result_item.task_id == WORKER_FATAL_TASK_ID:
                 logger.error(f"FATAL: Worker crashed! {result_item.error}")
                 raise RuntimeError(f"Worker process crashed: {result_item.error}")
 

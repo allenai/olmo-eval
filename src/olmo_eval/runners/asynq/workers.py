@@ -9,7 +9,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.core.logging import get_logger
-from olmo_eval.runners.asynq.queue import QueueItem, ResultItem
+from olmo_eval.runners.asynq.queue import WORKER_FATAL_TASK_ID, QueueItem, ResultItem
 
 if TYPE_CHECKING:
     from olmo_eval.core.harness import Harness
@@ -199,7 +199,7 @@ def worker_process(
         result_queue.put(
             ResultItem(
                 model_name=model_name,
-                task_id="__WORKER_FATAL__",
+                task_id=WORKER_FATAL_TASK_ID,
                 instance_idx=-1,
                 instance=None,  # type: ignore[arg-type]
                 request=None,  # type: ignore[arg-type]
