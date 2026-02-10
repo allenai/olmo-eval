@@ -67,7 +67,8 @@ from olmo_eval.data import DataSource
 
 @register("my_task")
 class MyTask(Task):
-    data_source = DataSource(path="my-org/my-dataset")
+    # DataSource specifies path, subset (optional), and split
+    data_source = DataSource(path="cais/mmlu", subset="abstract_algebra", split="test")
     ...
 ```
 
@@ -83,12 +84,11 @@ register_regime("my_task", "olmes", num_fewshot=5, fewshot_seed=42)
 **Runtime Dependencies** allow tasks to specify packages installed at job startup:
 
 ```python
-@register("code_eval", lambda: TaskConfig(
-    name="code_eval",
-    data_source="my-org/code-dataset",
-    dependencies=["code-sandbox==1.0", "git+https://github.com/user/repo@v2.0"],
-))
-class CodeEvalTask(Task): ...
+@register("code_eval")
+class CodeEvalTask(Task):
+    data_source = DataSource(path="my-org/code-dataset", split="test")
+    dependencies = ["code-sandbox==1.0", "git+https://github.com/user/repo@v2.0"]
+    ...
 ```
 
 ### Suites
@@ -413,14 +413,18 @@ from typing import Any
 
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType
 from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.tasks import Task, TaskConfig, register
+from olmo_eval.evals.tasks import Task, register
 
 
 @register("my_task")
 class MyTask(Task):
     """My task implementation."""
 
-    data_source = DataSource(path="my-org/my-dataset", split="test")
+    # DataSource arguments:
+    #   path: HuggingFace dataset path (e.g., "cais/mmlu")
+    #   subset: Dataset subset/config (e.g., "abstract_algebra")
+    #   split: Dataset split (e.g., "test", "validation")
+    data_source = DataSource(path="cais/mmlu", subset="abstract_algebra", split="test")
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -489,8 +493,11 @@ Tasks can load data from multiple sources using `DataSource`:
 ```python
 from olmo_eval.data import DataSource
 
-# HuggingFace datasets
-DataSource(path="cais/mmlu", subset="abstract_algebra")
+# HuggingFace datasets - specify path, subset, and split
+DataSource(path="cais/mmlu", subset="abstract_algebra", split="test")
+
+# Without subset (for datasets that don't have subsets)
+DataSource(path="openai_humaneval", split="test")
 
 # Local JSONL files
 DataSource(path="/path/to/dataset.jsonl")
@@ -500,12 +507,6 @@ DataSource(path="s3://my-bucket/datasets/data.jsonl")
 
 # GCS
 DataSource(path="gs://my-bucket/datasets/data.parquet")
-
-# URI strings are also supported in TaskConfig
-TaskConfig(
-    name="my_task",
-    data_source="hf://cais/mmlu?subset=abstract_algebra",
-)
 ```
 
 ### Common Patterns
@@ -524,18 +525,18 @@ metrics=(AccuracyMetric(scorer=ExactMatchScorer),)
 
 **Tasks with Multiple Subsets** (like MMLU with 57 subjects):
 ```python
+# Base class with shared logic
 class MMLUTask(Task):
-    def __init__(self, config: TaskConfig, subset: str) -> None:
-        super().__init__(config)
-        self.subset = subset
+    ...
 
-# Register each subset
+# Register each subset - the subset is specified in DataSource
 @register("mmlu_anatomy")
 class MMLUAnatomy(MMLUTask):
-    data_source = DataSource(path="cais/mmlu", subset="anatomy")
+    data_source = DataSource(path="cais/mmlu", subset="anatomy", split="test")
 
-    def __init__(self, config: TaskConfig) -> None:
-        super().__init__(config, subset="anatomy")
+@register("mmlu_physics")
+class MMLUPhysics(MMLUTask):
+    data_source = DataSource(path="cais/mmlu", subset="high_school_physics", split="test")
 ```
 
 ### Adding Variants and Regimes
