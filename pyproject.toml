@@ -48,7 +48,7 @@ litellm = [
     "litellm~=1.80.11",
 ]
 agents = [
-    "openai-agents~=0.8.0",
+    "openai-agents~=0.7.0",
     "httpx~=0.28.1",
 ]
 beaker = [
