@@ -91,6 +91,7 @@ def worker_process(
     result_queue: mp.Queue,
     harness_config_dict: dict[str, Any],
     init_times: dict[str, float] | None = None,
+    output_dir: str | None = None,
 ) -> None:
     """Worker process that initializes a harness and processes items.
 
@@ -104,6 +105,7 @@ def worker_process(
         result_queue: Queue to put ResultItems.
         harness_config_dict: Serialized HarnessConfig.
         init_times: Optional shared dict for tracking initialization times.
+        output_dir: Output directory for persisting logs (e.g., vLLM server logs).
     """
     import sys
 
@@ -154,6 +156,9 @@ def worker_process(
             worker_logger.info(f"  Tools: {list(harness_config.tool_names)}")
         worker_logger.info(f"  Enable auto tool choice: {enable_auto_tool_choice}")
 
+        # Set log_dir for vllm_server provider to persist server logs
+        log_dir = output_dir if provider_kind == "vllm_server" and output_dir else None
+
         harness_config = harness_config.with_provider_overrides(
             tensor_parallel_size=len(gpu_ids) if gpu_ids else None,
             max_model_len=max_model_len,
@@ -162,6 +167,7 @@ def worker_process(
             load_format=load_format,
             model_loader_extra_config=extra_loader_config,
             enable_auto_tool_choice=enable_auto_tool_choice or None,
+            log_dir=log_dir,
         )
 
         harness = Harness(harness_config)

@@ -236,6 +236,7 @@ class VLLMServerProcess:
         port: int | None = None,
         tensor_parallel_size: int = 1,
         startup_timeout: float = DEFAULT_STARTUP_TIMEOUT,
+        log_dir: str | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize the server manager.
@@ -245,14 +246,17 @@ class VLLMServerProcess:
             port: Port to serve on (auto-assigned if None)
             tensor_parallel_size: Number of GPUs for tensor parallelism
             startup_timeout: Maximum time to wait for server startup
+            log_dir: Directory to write server logs to (if set, logs are persisted)
             **kwargs: Additional arguments passed to vLLM server
         """
         self.model_name = model_name
         self.port = port or _find_free_port()
         self.tensor_parallel_size = tensor_parallel_size
         self.startup_timeout = startup_timeout
+        self.log_dir = log_dir
         self.server_kwargs = kwargs
         self._process: subprocess.Popen | None = None
+        self._log_file: Any | None = None
         self._started = False
 
     @property
@@ -294,8 +298,25 @@ class VLLMServerProcess:
             env["VLLM_LOGGING_LEVEL"] = "DEBUG"
             logger.info("vLLM debug logging enabled (OLMO_EVAL_DEBUG_PROVIDER=1)")
 
-        # When debugging, stream output to stderr; otherwise capture for error reporting
-        if is_debug_provider():
+        # Determine output handling:
+        # 1. If log_dir is set, write to file for persistence
+        # 2. If debugging, stream to stderr
+        # 3. Otherwise capture for error reporting
+        if self.log_dir:
+            import pathlib
+
+            log_path = pathlib.Path(self.log_dir) / "vllm_server.log"
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            self._log_file = open(log_path, "w")  # noqa: SIM115
+            logger.info(f"vLLM server logs will be written to {log_path}")
+            self._process = subprocess.Popen(
+                cmd,
+                stdout=self._log_file,
+                stderr=subprocess.STDOUT,
+                env=env,
+                preexec_fn=os.setsid if hasattr(os, "setsid") else None,
+            )
+        elif is_debug_provider():
             self._process = subprocess.Popen(
                 cmd,
                 stdout=None,  # Inherit stdout
@@ -387,6 +408,11 @@ class VLLMServerProcess:
             self._process = None
             self._started = False
             atexit.unregister(self.stop)
+            # Close log file if open
+            if self._log_file is not None:
+                with suppress(Exception):
+                    self._log_file.close()
+                self._log_file = None
 
         logger.info("vLLM server stopped")
 
@@ -406,6 +432,7 @@ def vllm_server_context(
     tensor_parallel_size: int = 1,
     startup_timeout: float = DEFAULT_STARTUP_TIMEOUT,
     progress_callback: ProgressCallback | None = None,
+    log_dir: str | None = None,
     **kwargs: Any,
 ) -> Generator[str, None, None]:
     """Context manager to start and stop a vLLM server.
@@ -419,6 +446,7 @@ def vllm_server_context(
         tensor_parallel_size: Number of GPUs for tensor parallelism
         startup_timeout: Maximum time to wait for server startup
         progress_callback: Optional callback for progress updates during startup
+        log_dir: Directory to write server logs to (if set, logs are persisted)
         **kwargs: Additional arguments passed to vLLM server
 
     Yields:
@@ -435,6 +463,7 @@ def vllm_server_context(
         port=port,
         tensor_parallel_size=tensor_parallel_size,
         startup_timeout=startup_timeout,
+        log_dir=log_dir,
         **kwargs,
     )
 

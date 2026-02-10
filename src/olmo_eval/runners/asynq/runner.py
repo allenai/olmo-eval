@@ -358,6 +358,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                     result_queue,
                     harness_config_dict,
                     init_times,
+                    self.output_dir,
                 ),
             )
             worker.start()

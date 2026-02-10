@@ -64,6 +64,7 @@ class VLLMServerProvider(InferenceProvider):
         enable_auto_tool_choice: bool = False,
         tool_call_parser: str | None = None,
         trust_remote_code: bool = False,
+        log_dir: str | None = None,
         **server_kwargs: Any,
     ) -> None:
         """Initialize the provider.
@@ -81,6 +82,7 @@ class VLLMServerProvider(InferenceProvider):
             enable_auto_tool_choice: Enable automatic tool choice (server mode).
             tool_call_parser: Tool call parser name (server mode).
             trust_remote_code: Trust remote code for model loading (server mode).
+            log_dir: Directory to write server logs to (server mode).
             **server_kwargs: Additional vLLM server arguments.
         """
         super().__init__(model_name)
@@ -116,6 +118,7 @@ class VLLMServerProvider(InferenceProvider):
             self._server = VLLMServerProcess(
                 model_name=model_name,
                 tensor_parallel_size=tensor_parallel_size,
+                log_dir=log_dir,
                 **srv_kwargs,
             )
             self._server.start()

@@ -110,6 +110,7 @@ class ProviderConfig:
             "timeout",
             "max_retries",
             "retry_delay",
+            "log_dir",
         ),
         "litellm": (),
         "hf": ("torch_dtype", "device_map", "attn_implementation"),
