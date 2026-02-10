@@ -4,7 +4,8 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import PPLFormatter
-from olmo_eval.common.metrics import BPBMetric
+from olmo_eval.common.metrics import BPBMetric, PassAtKMetric
+from olmo_eval.common.scorers import CodeExecutionScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import MBPP_STOP_SEQUENCES
@@ -186,4 +187,57 @@ register_variant(
     "mbpp_plus",
     "3shot",
     num_fewshot=3,
+)
+
+# =============================================================================
+# Pass@K Execution Variants (require sandbox)
+# =============================================================================
+# These variants execute generated code against test cases.
+# Requires HarnessConfig with sandbox enabled:
+#   sandbox=SandboxConfig(enabled=True, image="volcengine/sandbox-fusion:server-20250609")
+
+register_variant(
+    "mbpp",
+    "pass_at_1",
+    metrics=(PassAtKMetric(k=1, scorer=CodeExecutionScorer),),
+    sampling_params=SamplingParams(
+        max_tokens=1024,
+        temperature=0.2,
+        stop_sequences=MBPP_STOP_SEQUENCES,
+    ),
+)
+
+register_variant(
+    "mbpp",
+    "pass_at_10",
+    metrics=(PassAtKMetric(k=10, scorer=CodeExecutionScorer),),
+    sampling_params=SamplingParams(
+        max_tokens=1024,
+        temperature=0.8,
+        num_samples=10,
+        stop_sequences=MBPP_STOP_SEQUENCES,
+    ),
+)
+
+register_variant(
+    "mbpp_plus",
+    "pass_at_1",
+    metrics=(PassAtKMetric(k=1, scorer=CodeExecutionScorer),),
+    sampling_params=SamplingParams(
+        max_tokens=1024,
+        temperature=0.2,
+        stop_sequences=MBPP_STOP_SEQUENCES,
+    ),
+)
+
+register_variant(
+    "mbpp_plus",
+    "pass_at_10",
+    metrics=(PassAtKMetric(k=10, scorer=CodeExecutionScorer),),
+    sampling_params=SamplingParams(
+        max_tokens=1024,
+        temperature=0.8,
+        num_samples=10,
+        stop_sequences=MBPP_STOP_SEQUENCES,
+    ),
 )

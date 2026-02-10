@@ -51,6 +51,9 @@ agents = [
     "openai-agents~=0.7.0",
     "httpx~=0.28.1",
 ]
+sandbox = [
+    "swe-rex>=0.3.0",
+]
 beaker = [
     "beaker-py>=2.5.4,<3",
     "beaker-gantry>=3.2.0,<4",
@@ -91,6 +94,12 @@ dev = [
 # ty file-based overrides for optional dependencies (inference providers use vllm/litellm)
 [[tool.ty.overrides]]
 include = ["src/olmo_eval/inference/**"]
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
+# ty overrides for sandbox module (uses optional swe-rex dependency)
+[[tool.ty.overrides]]
+include = ["src/olmo_eval/harness/sandbox/**"]
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"
 

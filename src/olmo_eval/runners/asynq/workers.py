@@ -144,16 +144,21 @@ def scoring_worker(
     scoring_queue: mp.Queue,
     scored_queue: mp.Queue,
     total_instances: int,
+    sandbox_config_dict: dict[str, Any] | None = None,
 ) -> None:
     """Worker process that scores individual responses.
 
     Reads ScoringItems from scoring_queue, scores each response, and puts
     ScoredResponses on scored_queue.
 
+    This worker manages sandbox lifecycle when sandbox_config is provided,
+    similar to how inference_worker manages provider lifecycle.
+
     Args:
         scoring_queue: Queue of ScoringItems (None signals shutdown).
         scored_queue: Queue to put ScoredResponses.
         total_instances: Total number of instances to score (for progress bar).
+        sandbox_config_dict: Optional serialized SandboxConfig for code execution.
     """
     from tqdm import tqdm
 
@@ -161,14 +166,17 @@ def scoring_worker(
 
     configure_logging()
 
+    from olmo_eval.common.execution import ScoringContext
     from olmo_eval.runners.asynq.types import ScoredResponse, ScoringItem
 
     pbar: tqdm | None = None
+    sandbox_executor = None
+    scoring_context: ScoringContext | None = None
 
-    def score_item(item: ScoringItem) -> None:
+    def score_item(item: ScoringItem, context: ScoringContext | None) -> None:
         try:
-            # Score single response
-            scored_list = item.task.score_responses([item.response])
+            # Score single response, passing context for sandboxed execution
+            scored_list = item.task.score_responses([item.response], context=context)
             scored = scored_list[0] if scored_list else item.response
             scored_queue.put(
                 ScoredResponse(
@@ -189,6 +197,18 @@ def scoring_worker(
             )
 
     try:
+        # Initialize sandbox if configured (similar to provider init in inference_worker)
+        if sandbox_config_dict is not None:
+            from olmo_eval.harness.sandbox import SandboxConfig, SandboxExecutor
+
+            sandbox_config = SandboxConfig.from_dict(sandbox_config_dict)
+            logger.info("Initializing sandbox for code execution...")
+            sandbox_executor = SandboxExecutor(sandbox_config)
+            # Start sandbox synchronously using asyncio
+            asyncio.run(sandbox_executor.start())
+            scoring_context = ScoringContext(execution_env=sandbox_executor)
+            logger.info("Sandbox ready for scoring")
+
         while True:
             item: ScoringItem | None = scoring_queue.get()
             if item is None:
@@ -198,11 +218,19 @@ def scoring_worker(
             if pbar is None:
                 pbar = tqdm(total=total_instances, desc="Scoring instances", unit="inst")
 
-            score_item(item)
+            score_item(item, scoring_context)
             pbar.update(1)
     finally:
         if pbar is not None:
             pbar.close()
+
+        # Clean up sandbox (similar to provider cleanup in inference_worker)
+        if sandbox_executor is not None:
+            try:
+                asyncio.run(sandbox_executor.stop())
+                logger.info("Sandbox stopped")
+            except Exception as e:
+                logger.warning(f"Failed to stop sandbox: {e}")
 
 
 __all__ = [

@@ -2,7 +2,6 @@
 
 from .base import (
     BitsPerByteScorer,
-    CodeExecutionScorer,
     ExactMatchScorer,
     F1Scorer,
     LogprobScorer,
@@ -10,6 +9,8 @@ from .base import (
     PerplexityScorer,
     Scorer,
 )
+from .code_execution import CodeExecutionScorer
+from .execution import ExecutionScorer, SandboxRequiredError
 from .llm_judge import (
     JudgeFn,
     LLMJudgeScorer,
@@ -35,6 +36,7 @@ __all__ = [
     "build_openai_judge_fn",
     "CodeExecutionScorer",
     "ExactMatchScorer",
+    "ExecutionScorer",
     "F1Scorer",
     "JudgeFn",
     "LLMJudgeScorer",
@@ -42,6 +44,7 @@ __all__ = [
     "MultipleChoiceScorer",
     "PerplexityScorer",
     "RubricJudgeScorer",
+    "SandboxRequiredError",
     "Scorer",
     "SimpleQAGrade",
     "SimpleQAJudgeScorer",

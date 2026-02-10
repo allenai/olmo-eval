@@ -61,6 +61,7 @@ def reconstruct_ordered_args(args: list[str]) -> list[FlaggedArg]:
         "--task": "t",
         "-o": "o",
         "--override": "o",
+        "-H": "h",
         "--harness": "h",
     }
 

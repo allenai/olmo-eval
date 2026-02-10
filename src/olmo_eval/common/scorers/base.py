@@ -1,12 +1,13 @@
 """Scoring base class and implementations."""
 
+from __future__ import annotations
+
 import math
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
 from typing import Any, ClassVar
 
 from olmo_eval.common.types import Instance, LMOutput
-from olmo_eval.common.utils import _execute_code_unsafe
 
 
 @dataclass(frozen=True)
@@ -16,9 +17,13 @@ class Scorer(ABC):
     Subclasses must define:
         - name: str class attribute identifying the scorer
         - score(): method to compute score for an instance/output pair
+
+    For scorers requiring async execution (e.g., sandboxed code execution),
+    extend ExecutionScorer instead and implement ascore().
     """
 
     name: ClassVar[str]
+    requires_async: ClassVar[bool] = False
 
     @abstractmethod
     def score(self, instance: Instance, output: LMOutput) -> float:
@@ -186,31 +191,3 @@ class LogprobScorer(Scorer):
             return float("-inf")
 
         return sum(logprobs)
-
-
-@dataclass(frozen=True, slots=True)
-class CodeExecutionScorer(Scorer):
-    """Score code by executing it against test cases.
-
-    Note: This scorer requires the instance metadata to contain a 'test' key
-    with the test code to run, and the output.extracted_answer to contain
-    the complete code to execute.
-    """
-
-    name: str = "code_execution"
-    timeout: float = 5.0
-
-    def score(self, instance: Instance, output: LMOutput) -> float:
-        """Score by executing code + tests."""
-        if output.extracted_answer is None:
-            return 0.0
-
-        test_code = instance.metadata.get("test", "")
-        if not test_code:
-            return 0.0
-
-        # Combine generated code with tests
-        full_code = f"{output.extracted_answer}\n\n{test_code}"
-
-        success, _ = _execute_code_unsafe(full_code, self.timeout)
-        return 1.0 if success else 0.0

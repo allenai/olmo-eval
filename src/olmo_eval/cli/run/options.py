@@ -203,6 +203,7 @@ def harness_options(func: F) -> F:  # noqa: UP047
     """Harness configuration options."""
 
     @click.option(
+        "-H",
         "--harness",
         "harness_preset",
         type=str,

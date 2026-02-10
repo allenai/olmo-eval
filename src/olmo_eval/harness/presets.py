@@ -55,10 +55,6 @@ def register_harness_preset(name: str, config: HarnessConfig) -> None:
 def get_harness_preset(name: str) -> HarnessConfig:
     """Get a harness preset by name.
 
-    Available presets:
-    - "default": No tools, standard model behavior
-    - "search": Web and academic search tools for factual QA
-
     Args:
         name: Name of the preset to retrieve.
 
@@ -119,4 +115,65 @@ def _dr_tulu() -> HarnessConfig:
         max_concurrency=8,
         backend="openai_agents",
         required_secrets=("S2_API_KEY", "SERPER_API_KEY", "OPENAI_API_KEY"),
+    )
+
+
+# System prompt for coding agent
+CODING_AGENT_SYSTEM_PROMPT = """\
+You are a helpful coding assistant with access to a sandboxed bash shell.
+
+You can execute bash commands to:
+- Run code and tests
+- Install packages
+- Manipulate files
+- Explore the filesystem
+
+Use the execute_bash tool to run commands. The environment is isolated,
+so you can safely experiment.
+
+When solving coding problems:
+1. First understand the problem by reading any provided files
+2. Write and test your solution incrementally
+3. Verify your solution works before providing the final answer
+"""
+
+
+@harness_preset("code_execution")
+def _code_execution() -> HarnessConfig:
+    """Code execution preset for pass@k evaluation tasks.
+
+    Enables sandboxed code execution for scorers without agent tools.
+    Use with tasks like humaneval:pass_at_1, mbpp:pass_at_10, etc.
+    """
+    from .sandbox import SandboxConfig
+
+    return HarnessConfig(
+        name="code_execution",
+        sandbox=SandboxConfig(
+            image="volcengine/sandbox-fusion:server-20250609",
+            deployment_mode="docker",
+        ),
+    )
+
+
+@harness_preset("coding_agent")
+def _coding_agent() -> HarnessConfig:
+    """Coding agent preset with sandboxed shell execution."""
+    from .sandbox import SandboxConfig
+    from .tools.shell import execute_bash
+
+    return HarnessConfig(
+        name="coding_agent",
+        provider=ProviderConfig(
+            kind=ProviderKind.VLLM_SERVER,
+            kwargs={"timeout": 120},
+        ),
+        tools=(execute_bash,),
+        system_prompt=CODING_AGENT_SYSTEM_PROMPT,
+        max_turns=20,
+        backend="openai_agents",
+        sandbox=SandboxConfig(
+            image="volcengine/sandbox-fusion:server-20250609",
+            deployment_mode="docker",
+        ),
     )

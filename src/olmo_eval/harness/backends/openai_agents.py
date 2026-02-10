@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.types import LMOutput, LMRequest, SamplingParams
 from olmo_eval.common.types.tools import ToolCall, ToolResult
@@ -12,7 +12,11 @@ from olmo_eval.common.types.trajectory import AgentTrajectory, AgentTurn
 from olmo_eval.harness.backends import Backend, register_backend
 from olmo_eval.harness.config import HarnessConfig
 from olmo_eval.harness.result import HarnessResult
+from olmo_eval.harness.tools import Tool
 from olmo_eval.inference.base import InferenceProvider
+
+if TYPE_CHECKING:
+    from olmo_eval.harness.sandbox import SandboxExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +43,32 @@ class OpenAIAgentsBackend(Backend):
         self._cached_config = None
         self._cached_provider_id = None
 
-    def _convert_tools(self, tools: Sequence[Any], function_tool: Any) -> list[Any]:
-        """Convert harness tools to agents SDK format."""
+    def _convert_tools(
+        self,
+        tools: Sequence[Tool],
+        function_tool: Any,
+        sandbox: SandboxExecutor | None = None,
+    ) -> list[Any]:
+        """Convert harness tools to agents SDK format.
+
+        Args:
+            tools: Sequence of Tool instances to convert.
+            function_tool: The function_tool decorator from agents SDK.
+            sandbox: Optional sandbox executor for tools that require it.
+
+        Returns:
+            List of agents SDK tool objects.
+        """
         agent_tools = []
         for tool in tools:
+            execute_fn = tool.execute
+
+            # Wrap sandboxed tools to use the executor
+            if tool.requires_sandbox and sandbox is not None:
+                execute_fn = self._wrap_sandboxed_tool(tool, sandbox)
+
             # Use function_tool decorator to wrap the execute function
-            wrapped = function_tool(strict_mode=False)(tool.execute)
+            wrapped = function_tool(strict_mode=False)(execute_fn)
             # Override name and description
             wrapped.name = tool.name
             if hasattr(wrapped, "description"):
@@ -52,8 +76,43 @@ class OpenAIAgentsBackend(Backend):
             agent_tools.append(wrapped)
         return agent_tools
 
-    def _get_or_create_agent(self, provider: InferenceProvider, config: HarnessConfig) -> Any:
-        """Get cached agent or create a new one if config/provider changed."""
+    def _wrap_sandboxed_tool(
+        self,
+        tool: Tool,
+        sandbox: SandboxExecutor,
+    ) -> Any:
+        """Create a wrapper function that executes the tool via sandbox.
+
+        Args:
+            tool: The tool requiring sandbox execution.
+            sandbox: The sandbox executor to use.
+
+        Returns:
+            An async function that executes commands via the sandbox.
+        """
+
+        async def sandboxed_execute(command: str) -> str:
+            """Execute command in sandbox."""
+            return await sandbox.execute(command)
+
+        return sandboxed_execute
+
+    def _create_agent(
+        self,
+        provider: InferenceProvider,
+        config: HarnessConfig,
+        sandbox: SandboxExecutor | None = None,
+    ) -> Any:
+        """Create a new agent with the given configuration.
+
+        Args:
+            provider: The inference provider for model calls.
+            config: Harness configuration.
+            sandbox: Optional sandbox executor for sandboxed tools.
+
+        Returns:
+            An Agent instance from the agents SDK.
+        """
         from agents import (  # type: ignore[import-not-found]
             Agent,
             OpenAIChatCompletionsModel,
@@ -63,13 +122,6 @@ class OpenAIAgentsBackend(Backend):
         from olmo_eval.inference.utils import patch_openai_agents_for_vllm
 
         patch_openai_agents_for_vllm()
-
-        if (
-            self._cached_agent is not None
-            and self._cached_config == config
-            and self._cached_provider_id == id(provider)
-        ):
-            return self._cached_agent
 
         # Create model using provider's OpenAI client
         client = provider.get_openai_client()
@@ -84,7 +136,7 @@ class OpenAIAgentsBackend(Backend):
             model=provider.model_name,
         )
 
-        agent_tools = self._convert_tools(config.resolved_tools, function_tool)
+        agent_tools = self._convert_tools(config.resolved_tools, function_tool, sandbox)
 
         agent = Agent(
             name=self.name,
@@ -92,6 +144,24 @@ class OpenAIAgentsBackend(Backend):
             model=model,
             tools=agent_tools,
         )
+
+        return agent
+
+    def _get_or_create_agent(self, provider: InferenceProvider, config: HarnessConfig) -> Any:
+        """Get cached agent or create a new one if config/provider changed.
+
+        Note: This method does NOT support sandbox tools. Use _create_agent directly
+        when sandbox execution is needed, as agents with sandbox tools cannot be cached
+        (the sandbox executor changes per run).
+        """
+        if (
+            self._cached_agent is not None
+            and self._cached_config == config
+            and self._cached_provider_id == id(provider)
+        ):
+            return self._cached_agent
+
+        agent = self._create_agent(provider, config)
 
         self._cached_agent = agent
         self._cached_config = config
@@ -124,33 +194,55 @@ class OpenAIAgentsBackend(Backend):
                 "OpenAI Agents SDK not installed. Install with: pip install openai-agents"
             ) from e
 
-        # Get or create cached agent
-        agent = self._get_or_create_agent(provider, config)
+        # Check if we need sandbox execution
+        needs_sandbox = config.sandbox is not None and config.has_sandbox_tools
 
-        # Get the input message
-        input_text = ""
-        if request.messages:
-            for msg in reversed(request.messages):
-                if msg.get("role") == "user":
-                    input_text = msg.get("content", "")
-                    break
+        sandbox: SandboxExecutor | None = None
 
-        # Run agent
-        max_turns = config.max_turns or 10
-        result = await Runner.run(
-            starting_agent=agent,
-            input=input_text,
-            max_turns=max_turns,
-        )
+        try:
+            if needs_sandbox:
+                from olmo_eval.harness.sandbox import SandboxExecutor
 
-        # Convert result to HarnessResult
-        trajectory = self._convert_trajectory(result)
-        final_text = result.final_output if hasattr(result, "final_output") else ""
+                assert config.sandbox is not None  # Type narrowing
+                sandbox = SandboxExecutor(config.sandbox)
+                await sandbox.start()
+                logger.info("Sandbox started for tool execution")
 
-        return HarnessResult(
-            trajectory=trajectory,
-            final_output=LMOutput(text=final_text or ""),
-        )
+                # Create agent with sandbox (cannot use cache)
+                agent = self._create_agent(provider, config, sandbox)
+            else:
+                # Use cached agent when no sandbox needed
+                agent = self._get_or_create_agent(provider, config)
+
+            # Get the input message
+            input_text = ""
+            if request.messages:
+                for msg in reversed(request.messages):
+                    if msg.get("role") == "user":
+                        input_text = msg.get("content", "")
+                        break
+
+            # Run agent
+            max_turns = config.max_turns or 10
+            result = await Runner.run(
+                starting_agent=agent,
+                input=input_text,
+                max_turns=max_turns,
+            )
+
+            # Convert result to HarnessResult
+            trajectory = self._convert_trajectory(result)
+            final_text = result.final_output if hasattr(result, "final_output") else ""
+
+            return HarnessResult(
+                trajectory=trajectory,
+                final_output=LMOutput(text=final_text or ""),
+            )
+        finally:
+            # Always clean up sandbox
+            if sandbox is not None:
+                await sandbox.stop()
+                logger.info("Sandbox stopped")
 
     def _convert_trajectory(self, result: Any) -> AgentTrajectory:
         """Convert agents SDK result to AgentTrajectory.

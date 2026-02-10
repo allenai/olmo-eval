@@ -168,10 +168,15 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         scorer_proc: mp.process.BaseProcess | None = None
 
         try:
+            # Prepare sandbox config for scoring worker if configured
+            sandbox_config_dict = None
+            if self.harness_config.sandbox is not None:
+                sandbox_config_dict = self.harness_config.sandbox.to_dict()
+
             # Start scoring worker first so it's ready to receive work
             scorer_proc = ctx.Process(
                 target=scoring_worker,
-                args=(scoring_queue, scored_queue, total_instances),
+                args=(scoring_queue, scored_queue, total_instances, sandbox_config_dict),
             )
             scorer_proc.start()
 

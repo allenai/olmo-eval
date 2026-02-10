@@ -4,7 +4,8 @@ from collections.abc import Iterator, Sequence
 from typing import Any
 
 from olmo_eval.common.formatters import CompletionFormatter, PPLFormatter
-from olmo_eval.common.metrics import BPBMetric
+from olmo_eval.common.metrics import BPBMetric, PassAtKMetric
+from olmo_eval.common.scorers import CodeExecutionScorer
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -135,4 +136,57 @@ register_variant(
     num_fewshot=3,
     fewshot_seed=1234,
     formatter=CompletionFormatter(),
+)
+
+# =============================================================================
+# Pass@K Execution Variants (require sandbox)
+# =============================================================================
+# These variants execute generated code against test cases.
+# Requires HarnessConfig with sandbox enabled:
+#   sandbox=SandboxConfig(enabled=True, image="volcengine/sandbox-fusion:server-20250609")
+
+register_variant(
+    "humaneval",
+    "pass_at_1",
+    metrics=(PassAtKMetric(k=1, scorer=CodeExecutionScorer),),
+    sampling_params=SamplingParams(
+        max_tokens=1024,
+        temperature=0.2,
+        stop_sequences=HUMANEVAL_STOP_SEQUENCES,
+    ),
+)
+
+register_variant(
+    "humaneval",
+    "pass_at_10",
+    metrics=(PassAtKMetric(k=10, scorer=CodeExecutionScorer),),
+    sampling_params=SamplingParams(
+        max_tokens=1024,
+        temperature=0.8,
+        num_samples=10,
+        stop_sequences=HUMANEVAL_STOP_SEQUENCES,
+    ),
+)
+
+register_variant(
+    "humaneval_plus",
+    "pass_at_1",
+    metrics=(PassAtKMetric(k=1, scorer=CodeExecutionScorer),),
+    sampling_params=SamplingParams(
+        max_tokens=1024,
+        temperature=0.2,
+        stop_sequences=HUMANEVAL_STOP_SEQUENCES,
+    ),
+)
+
+register_variant(
+    "humaneval_plus",
+    "pass_at_10",
+    metrics=(PassAtKMetric(k=10, scorer=CodeExecutionScorer),),
+    sampling_params=SamplingParams(
+        max_tokens=1024,
+        temperature=0.8,
+        num_samples=10,
+        stop_sequences=HUMANEVAL_STOP_SEQUENCES,
+    ),
 )

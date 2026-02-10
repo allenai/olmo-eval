@@ -182,6 +182,7 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     help="Print the first request of each task before model generation",
 )
 @click.option(
+    "-H",
     "--harness",
     type=str,
     default=None,

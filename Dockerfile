@@ -99,3 +99,71 @@ RUN python -c "import torch; print(f'PyTorch {torch.__version__}')"
 
 WORKDIR /workspace
 CMD ["bash"]
+
+# ============================================================================
+# Stage 3: Runtime with Podman for sandboxed execution
+# ============================================================================
+ARG CUDA_VERSION
+FROM nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu22.04 AS runtime-sandbox
+
+ARG CUDA_VERSION
+ARG TORCH_VERSION
+ARG PYTHON_VERSION
+
+LABEL org.opencontainers.image.source="https://github.com/allenai/olmo-eval-internal"
+LABEL org.opencontainers.image.description="OLMo evaluation framework with Podman sandbox support"
+LABEL cuda_version="${CUDA_VERSION}"
+LABEL torch_version="${TORCH_VERSION}"
+LABEL python_version="${PYTHON_VERSION}"
+LABEL sandbox_enabled="true"
+
+# Install runtime dependencies + Podman
+# Clean up first to free space in the runtime image
+RUN rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    curl \
+    git \
+    # Podman dependencies
+    podman \
+    slirp4netns \
+    fuse-overlayfs \
+    uidmap \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* \
+    && apt-get clean
+
+# Configure Podman for rootless container operation
+RUN mkdir -p /etc/containers && \
+    echo '[engine]' > /etc/containers/containers.conf && \
+    echo 'cgroup_manager = "cgroupfs"' >> /etc/containers/containers.conf && \
+    echo 'events_logger = "file"' >> /etc/containers/containers.conf
+
+# Configure container registries
+RUN mkdir -p /etc/containers/registries.conf.d && \
+    echo 'unqualified-search-registries = ["docker.io"]' > /etc/containers/registries.conf
+
+# Set subuid/subgid for rootless containers
+RUN echo "root:100000:65536" >> /etc/subuid && \
+    echo "root:100000:65536" >> /etc/subgid
+
+# Copy virtual environment from builder (includes PyTorch)
+COPY --from=builder /opt/venv /opt/venv
+
+# Copy uv resources
+COPY --from=builder /root/.local/share/uv /root/.local/share/uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Set up environment
+ENV PATH="/opt/venv/bin:${PATH}"
+ENV VIRTUAL_ENV="/opt/venv"
+ENV VLLM_LOGGING_LEVEL=WARNING
+ENV HF_HOME=/root/.cache/huggingface
+ENV PYTHONUNBUFFERED=1
+
+# Verify installation
+RUN python -c "import torch; print(f'PyTorch {torch.__version__}')" && \
+    podman --version
+
+WORKDIR /workspace
+CMD ["bash"]
