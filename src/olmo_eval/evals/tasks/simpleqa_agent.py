@@ -138,10 +138,6 @@ def _simpleqa_config() -> TaskConfig:
 
 @register("simpleqa", _simpleqa_config)
 class SimpleQA(SimpleQATask):
-    """SimpleQA evaluation task.
-
-    Run with `--harness search` for tool-augmented evaluation:
-        olmo-eval run -m model -t simpleqa --harness search
-    """
+    """SimpleQA evaluation task."""
 
     pass
