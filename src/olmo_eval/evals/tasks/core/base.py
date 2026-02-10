@@ -228,10 +228,9 @@ class Task(ABC):
         """Format an instance into an LM request."""
         ...
 
-    @abstractmethod
     def extract_answer(self, output: LMOutput) -> Any:
         """Extract the answer from model output."""
-        ...
+        return output.text
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         """Convert a raw document to an Instance.

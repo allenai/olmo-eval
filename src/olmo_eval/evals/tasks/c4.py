@@ -6,7 +6,6 @@ from typing import Any
 from olmo_eval.core.metrics import CorpusPerplexityMetric
 from olmo_eval.core.types import (
     Instance,
-    LMOutput,
     LMRequest,
     RequestType,
 )
@@ -75,10 +74,6 @@ class C4Task(Task):
             prompt=instance.question,
             continuations=continuations,
         )
-
-    def extract_answer(self, output: LMOutput) -> str:
-        # Not used for scoring
-        return output.text
 
 
 class C41KTask(C4Task):

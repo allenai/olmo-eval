@@ -20,7 +20,7 @@ from typing import Any
 from olmo_eval.core.formatters import ChatFormatter
 from olmo_eval.core.metrics import AccuracyMetric
 from olmo_eval.core.scorers import SimpleQAJudgeScorer
-from olmo_eval.core.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
+from olmo_eval.core.types import Instance, LMRequest, RequestType, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register
 
@@ -40,24 +40,7 @@ Always strive to give factually correct answers."""
 
 
 class SimpleQATask(Task):
-    """SimpleQA factual question answering evaluation task.
-
-    This task evaluates a model's ability to answer factual questions.
-    It can be run in two modes:
-
-    1. **Baseline mode** (no harness): Tests the model's parametric knowledge
-       - `olmo-eval run -m model -t simpleqa`
-
-    2. **Tool-augmented mode** (with harness): Tests the model's ability to use
-       search tools to find accurate information
-       - `olmo-eval run -m model -t simpleqa --harness search`
-
-    The task uses an LLM judge (SimpleQAJudgeScorer) to evaluate whether
-    the final answer is CORRECT, INCORRECT, or NOT_ATTEMPTED.
-
-    Attributes:
-        default_source: Default HuggingFace dataset path.
-    """
+    """SimpleQA factual question answering evaluation task."""
 
     default_source: str = "allenai/simpleqa_full"
 
@@ -84,15 +67,6 @@ class SimpleQATask(Task):
         yield from self._instances_cache
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
-        """Convert a dataset document to an Instance.
-
-        Args:
-            doc: Raw document from the dataset.
-            index: Index of the document in the dataset.
-
-        Returns:
-            Instance object, or None if the document is invalid.
-        """
         # Handle different possible field names
         # The dataset may have question directly, or in messages format
         question = doc.get("question") or doc.get("problem") or ""
@@ -139,13 +113,6 @@ class SimpleQATask(Task):
             request_type=RequestType.CHAT,
             messages=({"role": "user", "content": instance.question},),
         )
-
-    def extract_answer(self, output: LMOutput) -> str:
-        """Extract the answer from model output.
-
-        For SimpleQA, the model's text response is the answer.
-        """
-        return output.text
 
 
 # =============================================================================
