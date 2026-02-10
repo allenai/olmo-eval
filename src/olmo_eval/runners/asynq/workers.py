@@ -211,64 +211,58 @@ def inference_worker(
 def scoring_worker(
     scoring_queue: mp.Queue,
     scored_queue: mp.Queue,
-    total_tasks: int,
+    total_instances: int,
 ) -> None:
-    """Worker process that scores completed tasks.
+    """Worker process that scores individual responses.
 
-    Reads ScoringItems from scoring_queue, calls finalize_task, and puts
-    ScoredResults on scored_queue.
+    Reads ScoringItems from scoring_queue, scores each response, and puts
+    ScoredResponses on scored_queue.
 
     Args:
         scoring_queue: Queue of ScoringItems (None signals shutdown).
-        scored_queue: Queue to put ScoredResults.
-        total_tasks: Total number of tasks to score (for progress bar).
+        scored_queue: Queue to put ScoredResponses.
+        total_instances: Total number of instances to score (for progress bar).
     """
     from tqdm import tqdm
-    from tqdm.contrib.logging import logging_redirect_tqdm
 
     from olmo_eval.core.logging import configure_logging
 
     configure_logging()
 
-    scoring_logger = get_logger("scoring_worker")
-    scoring_logger.info("Scoring worker started")
-
-    from olmo_eval.runners.asynq.queue import ScoredResult, ScoringItem, finalize_task
+    from olmo_eval.runners.asynq.queue import ScoredResponse, ScoringItem
 
     try:
-        with (
-            logging_redirect_tqdm(),
-            tqdm(total=total_tasks, desc="Scoring instances", unit="inst") as pbar,
-        ):
+        with tqdm(total=total_instances, desc="Scoring instances", unit="inst") as pbar:
             while True:
                 item: ScoringItem | None = scoring_queue.get()
                 if item is None:
-                    scoring_logger.info("Scoring worker shutting down")
                     break
 
-                scoring_logger.info(f"Scoring {item.spec}...")
                 try:
-                    result = finalize_task(item.tracker)
-                    scored_queue.put(ScoredResult(spec=item.spec, result=result))
-                    scoring_logger.info(f"Scored {item.spec}")
-                except Exception as e:
-                    scoring_logger.error(f"Failed to score {item.spec}: {e}")
-                    # Put an error result
-                    from olmo_eval.runners.utils import TaskResult
-
-                    error_result = TaskResult(
-                        spec=item.spec,
-                        config={},
-                        num_instances=item.tracker.total_instances,
-                        metrics={},
-                        error=f"Scoring failed: {e}",
-                        duration_seconds=0,
+                    # Score single response
+                    scored_list = item.task.score_responses([item.response])
+                    scored = scored_list[0] if scored_list else item.response
+                    scored_queue.put(
+                        ScoredResponse(
+                            spec=item.spec,
+                            instance_idx=item.instance_idx,
+                            scored=scored,
+                        )
                     )
-                    scored_queue.put(ScoredResult(spec=item.spec, result=error_result))
+                except Exception as e:
+                    # On error, return the original response (unscored)
+                    logger.warning(f"Failed to score {item.spec}[{item.instance_idx}]: {e}")
+                    scored_queue.put(
+                        ScoredResponse(
+                            spec=item.spec,
+                            instance_idx=item.instance_idx,
+                            scored=item.response,
+                        )
+                    )
                 finally:
                     pbar.update(1)
     except Exception as e:
-        scoring_logger.error(f"Scoring worker crashed: {e}")
+        logger.error(f"Scoring worker crashed: {e}")
 
 
 __all__ = [

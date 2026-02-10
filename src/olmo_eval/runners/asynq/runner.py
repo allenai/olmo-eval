@@ -29,10 +29,11 @@ from olmo_eval.runners.asynq.queue import (
     WORKER_FATAL_TASK_ID,
     QueueItem,
     ResultItem,
-    ScoredResult,
+    ScoredResponse,
     ScoringItem,
     TaskTracker,
     build_requests_from_items,
+    compute_task_metrics,
     finalize_task,
     prepare_task_items,
 )
@@ -186,7 +187,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             # Start scoring worker first so it's ready to receive work
             scorer_proc = ctx.Process(
                 target=scoring_worker,
-                args=(scoring_queue, scored_queue, len(expanded_tasks)),
+                args=(scoring_queue, scored_queue, total_instances),
             )
             scorer_proc.start()
 
@@ -417,36 +418,62 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         total_tasks: int,
         total_instances: int,
     ) -> dict[str, Any]:
-        """Process results from workers.
+        """Process results from workers with parallel instance-level scoring.
 
-        Collects instance results from result_queue and sends completed tasks to
-        the scoring worker via scoring_queue. Scored results are collected from
-        scored_queue.
+        As each instance result comes in, it's immediately sent to the scoring worker.
+        Scored responses are collected and metrics are computed when all instances
+        for a task are scored.
         """
         from olmo_eval.runners.utils import TaskResult
 
         results: dict[str, TaskResult] = {}
-        tasks_collected = 0  # Tasks with all instances received
-        tasks_scored = 0  # Tasks fully scored
+        tasks_complete = 0  # Tasks with all instances scored and metrics computed
 
-        def handle_scored_result(scored: ScoredResult) -> None:
-            """Process a scored result from the scoring worker."""
-            nonlocal tasks_scored
-            results[scored.spec] = scored.result
-            tasks_scored += 1
-            self._report_task_completion(self.model_name, scored.result)
-            if self.save_predictions and scored.result.predictions:
-                task_hash = compute_task_hash(scored.result.config)
-                self._write_predictions(
-                    self.model_name, scored.result.spec, scored.result.predictions, task_hash
+        # Track scored responses per task: spec -> {idx: scored_response}
+        scored_responses: dict[str, dict[int, Response]] = {spec: {} for spec in trackers}
+        instances_sent: dict[str, int] = {spec: 0 for spec in trackers}
+        instances_scored: dict[str, int] = {spec: 0 for spec in trackers}
+
+        def handle_scored_response(scored: ScoredResponse) -> None:
+            """Process a scored response and finalize task if complete."""
+            nonlocal tasks_complete
+            scored_responses[scored.spec][scored.instance_idx] = scored.scored
+            instances_scored[scored.spec] += 1
+
+            tracker = trackers[scored.spec]
+            expected = tracker.total_instances - len(tracker.failed_instances)
+
+            # Check if all instances for this task are scored
+            if instances_scored[scored.spec] >= expected and scored.spec not in results:
+                # All instances scored - compute metrics
+                responses_list = [
+                    scored_responses[scored.spec][i]
+                    for i in sorted(scored_responses[scored.spec].keys())
+                ]
+                assert tracker.task is not None  # Task exists if we got here
+                task_result = compute_task_metrics(
+                    spec=scored.spec,
+                    task=tracker.task,
+                    scored_responses=responses_list,
+                    failed_instances=tracker.failed_instances,
+                    total_instances=tracker.total_instances,
+                    duration_seconds=time.time() - tracker.start_time,
                 )
+                results[scored.spec] = task_result
+                tasks_complete += 1
+                self._report_task_completion(self.model_name, task_result)
+                if self.save_predictions and task_result.predictions:
+                    task_hash = compute_task_hash(task_result.config)
+                    self._write_predictions(
+                        self.model_name, task_result.spec, task_result.predictions, task_hash
+                    )
 
         def drain_scored_queue() -> None:
-            """Non-blocking drain of scored results."""
+            """Non-blocking drain of scored responses."""
             while True:
                 try:
-                    scored: ScoredResult = scored_queue.get_nowait()
-                    handle_scored_result(scored)
+                    scored: ScoredResponse = scored_queue.get_nowait()
+                    handle_scored_response(scored)
                 except queue.Empty:
                     break
 
@@ -455,17 +482,16 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             if tracker.error:
                 task_result = finalize_task(tracker)
                 results[spec] = task_result
-                tasks_collected += 1
-                tasks_scored += 1
+                tasks_complete += 1
                 self._report_task_completion(self.model_name, task_result)
 
         pending_instances = total_instances
         last_health_check = time.time()
         health_check_interval = 5.0
 
-        # Phase 1: Collect all instance results and submit completed tasks for scoring
-        while tasks_collected < total_tasks and pending_instances > 0:
-            # Check for scored results (non-blocking)
+        # Collect instance results and send each to scoring immediately
+        while pending_instances > 0:
+            # Check for scored responses (non-blocking)
             drain_scored_queue()
 
             try:
@@ -478,56 +504,61 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                     last_health_check = time.time()
                 continue
 
-            # Check for fatal worker crash - raise immediately, let finally handle cleanup
+            # Check for fatal worker crash
             if result_item.task_id == WORKER_FATAL_TASK_ID:
                 logger.error(f"FATAL: Worker crashed! {result_item.error}")
                 raise RuntimeError(f"Worker process crashed: {result_item.error}")
 
             tracker = trackers[result_item.task_id]
+            pending_instances -= 1
 
             if tracker.error:
                 # Task-level error already set (e.g., prep failed)
-                pending_instances -= 1
                 continue
 
             if result_item.error:
-                # Instance-level failure - log but continue processing other instances
+                # Instance-level failure
                 logger.warning(
                     f"Instance {result_item.instance_idx} failed for {result_item.task_id}: "
                     f"{result_item.error}"
                 )
-                is_complete = tracker.add_failure(result_item.instance_idx, result_item.error)
-            else:
-                # Extract trajectory from output metadata if present
-                trajectory = None
-                if result_item.outputs:
-                    meta = result_item.outputs[0].metadata or {}
-                    traj_dict = meta.get("trajectory")
-                    if traj_dict:
-                        trajectory = AgentTrajectory.from_dict(traj_dict)
+                tracker.add_failure(result_item.instance_idx, result_item.error)
+                continue
 
-                response = Response(
-                    instance=result_item.instance,
-                    request=result_item.request,
-                    outputs=result_item.outputs,
-                    trajectory=trajectory,
+            # Build response and send to scoring immediately
+            trajectory = None
+            if result_item.outputs:
+                meta = result_item.outputs[0].metadata or {}
+                traj_dict = meta.get("trajectory")
+                if traj_dict:
+                    trajectory = AgentTrajectory.from_dict(traj_dict)
+
+            response = Response(
+                instance=result_item.instance,
+                request=result_item.request,
+                outputs=result_item.outputs,
+                trajectory=trajectory,
+            )
+
+            # Send to scoring worker immediately
+            assert tracker.task is not None  # Task exists if we got here
+            scoring_queue.put(
+                ScoringItem(
+                    spec=result_item.task_id,
+                    instance_idx=result_item.instance_idx,
+                    response=response,
+                    task=tracker.task,
                 )
-                is_complete = tracker.add_response(result_item.instance_idx, response)
+            )
+            instances_sent[result_item.task_id] += 1
 
-            pending_instances -= 1
-
-            if is_complete:
-                tasks_collected += 1
-                # Send to scoring worker
-                scoring_queue.put(ScoringItem(spec=result_item.task_id, tracker=tracker))
-
-        # Phase 2: Wait for remaining scoring to complete
-        while tasks_scored < total_tasks:
+        # Wait for remaining scoring to complete
+        while tasks_complete < total_tasks:
             try:
-                scored: ScoredResult = await asyncio.get_event_loop().run_in_executor(
+                scored: ScoredResponse = await asyncio.get_event_loop().run_in_executor(
                     None, lambda: scored_queue.get(timeout=1.0)
                 )
-                handle_scored_result(scored)
+                handle_scored_response(scored)
             except queue.Empty:
                 continue
 

@@ -96,18 +96,21 @@ class ResultItem:
 
 @dataclass
 class ScoringItem:
-    """Item to be scored by the scoring worker."""
+    """Single response to be scored by the scoring worker."""
 
     spec: str
-    tracker: TaskTracker
+    instance_idx: int
+    response: Response
+    task: Task
 
 
 @dataclass
-class ScoredResult:
-    """Result from the scoring worker."""
+class ScoredResponse:
+    """Single scored response from the scoring worker."""
 
     spec: str
-    result: TaskResult
+    instance_idx: int
+    scored: Response  # Response with score populated
 
 
 # -----------------------------------------------------------------------------
@@ -284,14 +287,84 @@ def finalize_task(tracker: TaskTracker) -> TaskResult:
     )
 
 
+def compute_task_metrics(
+    spec: str,
+    task: Task,
+    scored_responses: list[Response],
+    failed_instances: dict[int, str],
+    total_instances: int,
+    duration_seconds: float,
+) -> TaskResult:
+    """Compute metrics from pre-scored responses.
+
+    Args:
+        spec: Task specification string.
+        task: Task instance for metric computation.
+        scored_responses: List of already-scored responses.
+        failed_instances: Dict of instance_idx -> error message for failures.
+        total_instances: Total number of instances in the task.
+        duration_seconds: Duration of the task.
+
+    Returns:
+        TaskResult with metrics and predictions.
+    """
+    if not scored_responses:
+        error_summary = (
+            f"{len(failed_instances)} instances failed" if failed_instances else "No responses"
+        )
+        return TaskResult(
+            spec=spec,
+            config=task.config.to_dict(),
+            num_instances=0,
+            metrics={},
+            error=error_summary,
+            duration_seconds=duration_seconds,
+        )
+
+    # Compute metrics from pre-scored responses
+    metrics = task.compute_metrics(scored_responses)
+
+    # Build predictions
+    predictions = build_predictions(scored_responses)
+
+    # Extract metric metadata
+    primary_metric = get_metric_metadata(task)
+
+    # Add warning about failed instances if any
+    error_summary = None
+    if failed_instances:
+        if len(failed_instances) == 1:
+            idx, err = next(iter(failed_instances.items()))
+            error_summary = f"Instance {idx} failed: {err}"
+        else:
+            first_error = next(iter(failed_instances.values()))
+            error_summary = f"{len(failed_instances)} instances failed (first: {first_error})"
+        logger.warning(
+            f"Task {spec} completed with failures: {error_summary}. "
+            f"Computed metrics on {len(scored_responses)}/{total_instances} instances."
+        )
+
+    return TaskResult(
+        spec=spec,
+        config=task.config.to_dict(),
+        num_instances=len(scored_responses),
+        metrics=metrics,
+        duration_seconds=duration_seconds,
+        predictions=predictions,
+        primary_metric=primary_metric,
+        error=error_summary,
+    )
+
+
 __all__ = [
     "WORKER_FATAL_TASK_ID",
     "QueueItem",
     "TaskTracker",
     "ResultItem",
     "ScoringItem",
-    "ScoredResult",
+    "ScoredResponse",
     "prepare_task_items",
     "build_requests_from_items",
     "finalize_task",
+    "compute_task_metrics",
 ]
