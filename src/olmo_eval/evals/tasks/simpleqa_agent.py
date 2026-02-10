@@ -125,7 +125,7 @@ def _simpleqa_config() -> TaskConfig:
     return TaskConfig(
         name="simpleqa",
         data_source=DataSource(path="allenai/simpleqa_full", split="test"),
-        formatter=ChatFormatter(system_prompt=DEFAULT_SYSTEM_PROMPT),
+        formatter=ChatFormatter(),
         metrics=(AccuracyMetric(scorer=SimpleQAJudgeScorer),),
         sampling_params=SamplingParams(max_tokens=2048, temperature=0.0),
     )
