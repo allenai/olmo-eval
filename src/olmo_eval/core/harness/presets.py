@@ -111,12 +111,12 @@ def _dr_tulu() -> HarnessConfig:
         name="dr_tulu",
         provider=ProviderConfig(
             kind=ProviderKind.VLLM_SERVER,
-            kwargs={"timeout": 30},
+            kwargs={"timeout": 120},
         ),
         tools=(semantic_scholar_search, serper_web_search, serper_fetch_page),
         system_prompt=DR_TULU_SYSTEM_PROMPT,
         max_turns=10,
-        max_concurrency=32,
+        max_concurrency=8,
         backend="openai_agents",
         required_secrets=("S2_API_KEY", "SERPER_API_KEY", "OPENAI_API_KEY"),
     )
