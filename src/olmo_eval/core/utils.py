@@ -1,10 +1,43 @@
 """Utility functions for evaluation."""
 
+from __future__ import annotations
+
 import contextlib
 import io
 import math
 import signal
-from typing import Any
+from dataclasses import fields
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    pass
+
+
+class Serializable:
+    """Mixin that provides to_dict() for dataclasses, excluding None values."""
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary, excluding None values."""
+        result: dict[str, Any] = {}
+        for f in fields(self):  # type: ignore[arg-type]
+            value = getattr(self, f.name)
+            if value is None:
+                continue
+            result[f.name] = _serialize_value(value)
+        return result
+
+
+def _serialize_value(value: Any) -> Any:
+    """Serialize a value for JSON output."""
+    if hasattr(value, "to_dict"):
+        return value.to_dict()
+    if isinstance(value, list):
+        return [_serialize_value(item) for item in value]
+    if isinstance(value, dict):
+        return {k: _serialize_value(v) for k, v in value.items()}
+    if hasattr(value, "value"):  # Enum
+        return value.value
+    return value
 
 
 def _execute_code_unsafe(code: str, timeout: float = 5.0) -> tuple[bool, str]:

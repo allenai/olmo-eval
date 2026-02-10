@@ -8,9 +8,11 @@ execution, and LLM judge evaluation.
 from dataclasses import dataclass, field
 from typing import Any
 
+from olmo_eval.core.utils import Serializable
+
 
 @dataclass(frozen=True, slots=True)
-class ToolMetrics:
+class ToolMetrics(Serializable):
     """Metrics for tool calling accuracy."""
 
     call_accuracy: float = 0.0
@@ -20,20 +22,9 @@ class ToolMetrics:
     num_correct_calls: int = 0
     num_correct_arguments: int = 0
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "call_accuracy": self.call_accuracy,
-            "argument_accuracy": self.argument_accuracy,
-            "sequence_accuracy": self.sequence_accuracy,
-            "num_tool_calls": self.num_tool_calls,
-            "num_correct_calls": self.num_correct_calls,
-            "num_correct_arguments": self.num_correct_arguments,
-        }
-
 
 @dataclass(frozen=True, slots=True)
-class TrajectoryMetrics:
+class TrajectoryMetrics(Serializable):
     """Metrics for trajectory evaluation."""
 
     response_check: float = 0.0  # Did the tool call sequence match?
@@ -43,20 +34,9 @@ class TrajectoryMetrics:
     minimal_steps: int = 0
     combined_score: float = 0.0  # Both response AND state passed
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "response_check": self.response_check,
-            "state_check": self.state_check,
-            "efficiency": self.efficiency,
-            "total_steps": self.total_steps,
-            "minimal_steps": self.minimal_steps,
-            "combined_score": self.combined_score,
-        }
-
 
 @dataclass(frozen=True, slots=True)
-class ReliabilityMetrics:
+class ReliabilityMetrics(Serializable):
     """Metrics for multi-trial reliability evaluation."""
 
     num_trials: int = 0
@@ -66,20 +46,9 @@ class ReliabilityMetrics:
     success_count: int = 0
     failure_count: int = 0
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "num_trials": self.num_trials,
-            "pass_at_k": self.pass_at_k,
-            "pass_pow_k": self.pass_pow_k,
-            "k": self.k,
-            "success_count": self.success_count,
-            "failure_count": self.failure_count,
-        }
-
 
 @dataclass(frozen=True, slots=True)
-class ExecutionMetrics:
+class ExecutionMetrics(Serializable):
     """Metrics for task execution."""
 
     total_runs: int = 0
@@ -89,20 +58,9 @@ class ExecutionMetrics:
     timeout_errors: int = 0
     success_rate: float = 0.0
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "total_runs": self.total_runs,
-            "successful_runs": self.successful_runs,
-            "processing_errors": self.processing_errors,
-            "instruction_errors": self.instruction_errors,
-            "timeout_errors": self.timeout_errors,
-            "success_rate": self.success_rate,
-        }
-
 
 @dataclass(frozen=True, slots=True)
-class JudgeMetrics:
+class JudgeMetrics(Serializable):
     """Metrics from LLM-as-judge evaluation."""
 
     accuracy: float = 0.0
@@ -114,22 +72,9 @@ class JudgeMetrics:
     num_incorrect: int = 0
     num_not_attempted: int = 0
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "accuracy": self.accuracy,
-            "not_attempted_rate": self.not_attempted_rate,
-            "judge_model": self.judge_model,
-            "grade_distribution": dict(self.grade_distribution),
-            "num_evaluated": self.num_evaluated,
-            "num_correct": self.num_correct,
-            "num_incorrect": self.num_incorrect,
-            "num_not_attempted": self.num_not_attempted,
-        }
-
 
 @dataclass(frozen=True, slots=True)
-class AgentMetrics:
+class AgentMetrics(Serializable):
     """Container for all agent evaluation metrics.
 
     This is the top-level metrics container that can be added to
@@ -141,21 +86,6 @@ class AgentMetrics:
     reliability: ReliabilityMetrics | None = None
     execution: ExecutionMetrics | None = None
     judge: JudgeMetrics | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
-        result: dict[str, Any] = {}
-        if self.tool is not None:
-            result["tool"] = self.tool.to_dict()
-        if self.trajectory is not None:
-            result["trajectory"] = self.trajectory.to_dict()
-        if self.reliability is not None:
-            result["reliability"] = self.reliability.to_dict()
-        if self.execution is not None:
-            result["execution"] = self.execution.to_dict()
-        if self.judge is not None:
-            result["judge"] = self.judge.to_dict()
-        return result
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AgentMetrics":
