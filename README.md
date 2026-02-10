@@ -576,7 +576,6 @@ olmo-eval run -m llama3.1-8b -t simpleqa --harness dr_tulu
 ```
 
 See the [Harness](#harness) section above for full documentation on:
-- Available presets (`dr_tulu`, `default`)
 - Creating custom harness configurations
 - Defining tools with the `@tool` decorator
 - Programmatic usage
@@ -718,20 +717,6 @@ tasks:
   - mmlu
 cluster: h100
 ```
-
-**Via CLI override flag:**
-
-```bash
-olmo-eval beaker launch -n "eval" -m llama3.1-8b -o provider.kind=vllm -t mmlu
-```
-
-Models with the same provider (and other compatible settings) are grouped into the same experiment.
-Models with different providers run in separate experiments.
-
-Available inference providers:
-- `vllm` - vLLM inference engine
-- `hf` - HuggingFace transformers
-- `litellm` - LiteLLM for API-based models (OpenAI, Anthropic, etc.)
 
 ### CLI Options
 
