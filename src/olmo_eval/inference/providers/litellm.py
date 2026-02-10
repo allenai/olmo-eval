@@ -9,9 +9,8 @@ from typing import TYPE_CHECKING, Any
 from olmo_eval.core.debug import is_debug_provider
 from olmo_eval.core.logging import get_logger
 from olmo_eval.core.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
-
-from ..base import InferenceProvider
-from ..retry import retry_with_backoff
+from olmo_eval.inference.base import InferenceProvider
+from olmo_eval.inference.retry import retry_with_backoff
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI

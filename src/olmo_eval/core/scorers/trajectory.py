@@ -8,8 +8,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
-from ..types import Instance, LMOutput, Response
-from .base import Scorer
+from olmo_eval.core.scorers.base import Scorer
+from olmo_eval.core.types import Instance, LMOutput, Response
 
 
 def _default_state_comparator(expected: dict[str, Any], actual: dict[str, Any]) -> bool:

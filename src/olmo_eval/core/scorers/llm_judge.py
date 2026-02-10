@@ -10,8 +10,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import ClassVar, Literal
 
-from ..types import Instance, LMOutput
-from .base import Scorer
+from olmo_eval.core.scorers.base import Scorer
+from olmo_eval.core.types import Instance, LMOutput
 
 # Type for judge function: takes prompt, returns judge response
 JudgeFn = Callable[[str], str]

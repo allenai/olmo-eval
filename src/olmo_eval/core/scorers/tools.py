@@ -8,8 +8,8 @@ import json
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
-from ..types import Instance, LMOutput
-from .base import Scorer
+from olmo_eval.core.scorers.base import Scorer
+from olmo_eval.core.types import Instance, LMOutput
 
 
 def _parse_arguments(args: str | dict[str, Any]) -> dict[str, Any]:

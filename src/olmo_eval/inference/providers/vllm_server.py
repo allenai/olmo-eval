@@ -11,9 +11,8 @@ import httpx
 from olmo_eval.core.logging import get_logger
 from olmo_eval.core.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
 from olmo_eval.core.types.tools import ToolCall
-
-from ..base import InferenceProvider
-from ..retry import retry_with_backoff
+from olmo_eval.inference.base import InferenceProvider
+from olmo_eval.inference.retry import retry_with_backoff
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI

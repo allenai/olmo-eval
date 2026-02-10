@@ -9,11 +9,10 @@ from __future__ import annotations
 import logging
 from typing import TypeVar
 
+from olmo_eval.core.harness.config import HarnessConfig
+from olmo_eval.core.harness.result import HarnessResult
 from olmo_eval.core.types import LMRequest, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
-
-from ..config import HarnessConfig
-from ..result import HarnessResult
 
 logger = logging.getLogger(__name__)
 

@@ -6,14 +6,13 @@ import logging
 from collections.abc import Sequence
 from typing import Any
 
+from olmo_eval.core.harness.backends import Backend, register_backend
+from olmo_eval.core.harness.config import HarnessConfig
+from olmo_eval.core.harness.result import HarnessResult
 from olmo_eval.core.types import LMOutput, LMRequest, SamplingParams
 from olmo_eval.core.types.tools import ToolCall, ToolResult
 from olmo_eval.core.types.trajectory import AgentTrajectory, AgentTurn
 from olmo_eval.inference.base import InferenceProvider
-
-from ..config import HarnessConfig
-from ..result import HarnessResult
-from . import Backend, register_backend
 
 logger = logging.getLogger(__name__)
 

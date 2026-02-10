@@ -6,9 +6,8 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.core.types import LMOutput, LMRequest, SamplingParams
-
-from ..base import InferenceProvider
-from ..tokenizer_utils import encode_context_and_continuation
+from olmo_eval.inference.base import InferenceProvider
+from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 
 if TYPE_CHECKING:
     import torch

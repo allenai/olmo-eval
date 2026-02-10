@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
-from ..scorers import (
+from olmo_eval.core.scorers import (
     BitsPerByteScorer,
     ExactMatchScorer,
     F1Scorer,
@@ -15,8 +15,8 @@ from ..scorers import (
     Scorer,
     ToolCallScorer,
 )
-from ..types import Response
-from ..utils import compute_pass_at_k, compute_pass_pow_k
+from olmo_eval.core.types import Response
+from olmo_eval.core.utils import compute_pass_at_k, compute_pass_pow_k
 
 
 @dataclass(frozen=True)

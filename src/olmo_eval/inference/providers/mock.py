@@ -1,8 +1,7 @@
 """Mock provider for testing."""
 
 from olmo_eval.core.types import LMOutput, LMRequest, SamplingParams
-
-from ..base import InferenceProvider
+from olmo_eval.inference.base import InferenceProvider
 
 
 class MockProvider(InferenceProvider):
