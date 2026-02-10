@@ -226,38 +226,31 @@ olmo-eval run -m llama3.1-8b -t simpleqa --harness search
 olmo-eval run -m llama3.1-8b -t simpleqa --harness-config ./my_harness.yaml
 ```
 
-#### Available Harness Presets
-
-| Preset | Description | Tools |
-|--------|-------------|-------|
-| `default` | No tools, no system prompt | None |
-| `search` | Web search capabilities | `semantic_scholar_snippet_search`, `serper_google_webpage_search`, `serper_fetch_webpage_content` |
-
-```bash
-# List available presets
-olmo-eval run --help  # Shows --harness options
-```
-
 #### HarnessConfig
 
 Configuration for a harness:
 
 ```python
 from olmo_eval.core.harness import HarnessConfig, ProviderConfig, get_harness_preset
+from olmo_eval.core.harness.tools.search import (
+    semantic_scholar_search,
+    serper_web_search,
+    serper_fetch_page,
+)
 
 # Get a preset
-config = get_harness_preset("search")
+config = get_harness_preset("dr_tulu")
 
-# Create custom config with tools
-from olmo_eval.tools import web_search, calculator  # Registered tools
-
+# Or create custom config with tools
 config = HarnessConfig(
     name="my_harness",
     provider=ProviderConfig(model="gpt-4o", kind="litellm"),
-    tools=(web_search, calculator),
-    system_prompt="You are a helpful assistant with tools.",
+    tools=(semantic_scholar_search, serper_web_search, serper_fetch_page),
+    system_prompt="You are a helpful assistant with search tools.",
     max_turns=10,
     max_concurrency=8,
+    backend="openai_agents",
+    required_secrets=("S2_API_KEY", "SERPER_API_KEY"),
 )
 ```
 
@@ -272,6 +265,38 @@ config = HarnessConfig(
 | `max_turns` | `int \| None` | `None` | Max turns for multi-turn execution |
 | `max_concurrency` | `int \| None` | `None` | Concurrent executions |
 | `required_secrets` | `tuple[str, ...]` | `()` | Required environment variables |
+
+#### Backends
+
+Backends define how the Harness executes multi-turn requests with tool calling. The backend handles the agentic loop: calling the model, executing tools, and feeding results back.
+
+| Backend | Description | Required Extra |
+|---------|-------------|----------------|
+| `openai_agents` | Uses the [OpenAI Agents SDK](https://github.com/openai/openai-agents-python) for execution | `agents` |
+
+**When to use a backend:**
+- For multi-turn execution with `harness.run()`, you must specify a backend
+- For single-turn generation with `harness.generate()`, no backend is needed
+
+```python
+# Multi-turn execution requires a backend
+config = HarnessConfig(
+    name="my_agent",
+    provider=ProviderConfig(model="gpt-4o", kind="litellm"),
+    tools=(semantic_scholar_search, serper_web_search),
+    backend="openai_agents",  # Required for run()
+)
+harness = Harness(config)
+result = await harness.run(request)  # Uses the backend
+
+# Single-turn generation works without a backend
+config = HarnessConfig(
+    name="simple",
+    provider=ProviderConfig(model="gpt-4o", kind="litellm"),
+)
+harness = Harness(config)
+outputs = harness.generate(requests)  # No backend needed
+```
 
 #### Defining Tools
 
@@ -323,26 +348,26 @@ olmo-eval run -m llama3.1-8b -t simpleqa --harness-config my_harness.yaml
 
 ```python
 from olmo_eval.core.harness import Harness, HarnessConfig, ProviderConfig, get_harness_preset
+from olmo_eval.core.harness.tools.search import (
+    semantic_scholar_search,
+    serper_web_search,
+)
 
-# Create harness with preset and provider
-config = get_harness_preset("search").with_provider(
+# Create harness with preset and provider override
+config = get_harness_preset("dr_tulu").with_provider(
     ProviderConfig(model="meta-llama/Llama-3.1-8B-Instruct", kind="vllm")
 )
 harness = Harness(config)
 
-# Or create from scratch with tools
-from olmo_eval.tools import web_search, calculator
-
+# Or create from scratch
 config = HarnessConfig(
     name="my_harness",
     provider=ProviderConfig(model="gpt-4o", kind="litellm"),
-    tools=(web_search, calculator),
+    tools=(semantic_scholar_search, serper_web_search),
     system_prompt="You are a helpful assistant.",
+    backend="openai_agents",
 )
 harness = Harness(config)
-
-# Single-turn generation (tools injected into request)
-outputs = harness.generate(requests, sampling_params)
 
 # Multi-turn execution with tool calling
 result = await harness.run(request, sampling_params)
