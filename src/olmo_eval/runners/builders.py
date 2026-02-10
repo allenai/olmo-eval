@@ -26,7 +26,7 @@ def build_predictions(scored: Sequence[Any]) -> list[dict]:
             # Get values from metadata (set by backend) or compute from logprobs
             meta = out.metadata or {}
             num_bytes = len(out.text.encode("utf-8")) if out.text else 0
-            num_chars = len(out.text)
+            num_chars = len(out.text) if out.text else 0
 
             # Use metadata values if available (from vLLM backend), else compute
             if "sum_logits" in meta:
@@ -40,6 +40,8 @@ def build_predictions(scored: Sequence[Any]) -> list[dict]:
                 num_tokens = 0
 
             out_data: dict[str, Any] = {
+                "text": out.text,
+                "extracted_answer": out.extracted_answer,
                 "sum_logits": sum_logits,
                 "num_tokens": num_tokens,
                 "num_tokens_all": meta.get("num_tokens_all", num_tokens),

@@ -98,6 +98,7 @@ def run(
     # Inspect options
     debug_requests: bool,
     debug_provider: bool,
+    inspect: bool,
     inspect_instance: bool,
     inspect_formatted: bool,
     inspect_tokens: bool,
@@ -132,6 +133,14 @@ def run(
         os.environ["VLLM_DEBUG_REQUESTS"] = "1"
     if debug_provider:
         os.environ["OLMO_EVAL_DEBUG_PROVIDER"] = "1"
+
+    # Expand --inspect to enable all individual inspect flags
+    if inspect:
+        inspect_instance = True
+        inspect_formatted = True
+        inspect_tokens = True
+        inspect_response = True
+        inspect_request = True
 
     # Print runtime environment summary
     print_runtime_environment()

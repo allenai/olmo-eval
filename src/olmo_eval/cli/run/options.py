@@ -163,6 +163,11 @@ def inspect_options(func: F) -> F:  # noqa: UP047
         help="Enable verbose provider logging",
     )
     @click.option(
+        "--inspect",
+        is_flag=True,
+        help="Enable all inspection flags (instance, formatted, tokens, request, response)",
+    )
+    @click.option(
         "--inspect-instance",
         is_flag=True,
         help="Print the first instance of each task before running evaluation",

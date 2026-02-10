@@ -152,6 +152,11 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_UV
     help="Save per-instance requests to JSONL (default: enabled)",
 )
 @click.option(
+    "--inspect",
+    is_flag=True,
+    help="Enable all inspection flags (instance, formatted, tokens, request, response)",
+)
+@click.option(
     "--inspect-instance",
     is_flag=True,
     help="Print the first instance of each task before running evaluation",
@@ -218,6 +223,7 @@ def launch(
     debug_provider: bool,
     save_predictions: bool,
     save_requests: bool,
+    inspect: bool,
     inspect_instance: bool,
     inspect_formatted: bool,
     inspect_tokens: bool,
@@ -268,6 +274,14 @@ def launch(
     # Extract priority from task overrides (e.g., -o priority=urgent after -t)
     # This is done once here and the filtered overrides are used everywhere
     override_priority, task_overrides = extract_priority_from_overrides(raw_task_overrides)
+
+    # Expand --inspect to enable all individual inspect flags
+    if inspect:
+        inspect_instance = True
+        inspect_formatted = True
+        inspect_tokens = True
+        inspect_response = True
+        inspect_request = True
 
     # Build CLI args dict
     cli_args = {
@@ -370,7 +384,7 @@ def launch(
         effective_image = BEAKER_DEFAULT_IMAGE
 
     # Handle group creation
-    _handle_group_creation(launcher, effective_groups, dry_run)
+    _handle_group_creation(launcher, effective_groups, dry_run, yes)
 
     # Build experiment plan
     experiment_builder = ExperimentPlanBuilder(launch_config, tasks_by_priority, override_priority)
@@ -480,7 +494,9 @@ def launch(
         _handle_follow(launcher, launched_experiments, follow)
 
 
-def _handle_group_creation(launcher, effective_groups: list[str], dry_run: bool) -> None:
+def _handle_group_creation(
+    launcher, effective_groups: list[str], dry_run: bool, yes: bool = False
+) -> None:
     """Handle checking and creating Beaker groups."""
     from beaker.exceptions import BeakerGroupNotFound
 
@@ -506,7 +522,8 @@ def _handle_group_creation(launcher, effective_groups: list[str], dry_run: bool)
             console.print(
                 f"\n[yellow]The following groups do not exist:[/yellow] {', '.join(missing_groups)}"
             )
-            if not click.confirm("Would you like to create these groups?", default=True):
+            confirmed = yes or click.confirm("Would you like to create these groups?", default=True)
+            if not confirmed:
                 console.print("[red]Aborted.[/red] Cannot launch without required groups.")
                 raise SystemExit(1) from None
 
