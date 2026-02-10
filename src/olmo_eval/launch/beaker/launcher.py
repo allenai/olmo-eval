@@ -654,10 +654,7 @@ class BeakerLauncher:
         # Build env vars as tuples: (name, value)
         env_vars: list[tuple[str, str]] = list(config.env_vars.items())
 
-        # Add sandbox environment variables if enabled
         if config.enable_sandbox:
-            env_vars.append(("BEAKER_ALLOW_SUBCONTAINERS", "1"))
-            env_vars.append(("BEAKER_SKIP_DOCKER_SOCKET", "1"))
             log.info("Enabling sandbox mode with Podman subcontainers")
 
         # Build mounts for NFS if requested

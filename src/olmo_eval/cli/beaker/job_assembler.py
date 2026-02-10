@@ -92,6 +92,10 @@ class JobConfigAssembler:
             if self.config.uv_cache_dir:
                 job_env_vars["UV_CACHE_DIR"] = self.config.uv_cache_dir
 
+        if self.enable_sandbox:
+            job_env_vars["BEAKER_ALLOW_SUBCONTAINERS"] = "1"
+            job_env_vars["BEAKER_SKIP_DOCKER_SOCKET"] = "1"
+
         task_packages = self._extract_task_dependencies(exp.tasks, exp.task_overrides)
 
         return BeakerJobConfig(
