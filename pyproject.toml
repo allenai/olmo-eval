@@ -41,14 +41,14 @@ hf = [
 ]
 vllm = [
     "vllm[runai]==0.13.0",  # runai extras enable S3 model loading
-    "opencv-python-headless==4.12.0.88",  # Required to avoid libxcb import error
+    "opencv-python-headless==4.13.0.92",  # Required to avoid libxcb import error
     "torch-c-dlpack-ext",  # Required for TVM tensor allocation in vLLM
 ]
 litellm = [
     "litellm~=1.80.11",
 ]
 agents = [
-    "openai-agents~=0.7.0",
+    "openai-agents~=0.8.0",
     "httpx~=0.28.1",
 ]
 beaker = [
