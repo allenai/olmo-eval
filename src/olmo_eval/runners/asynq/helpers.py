@@ -200,6 +200,9 @@ async def process_chat_request(
     """
     from dataclasses import replace as dataclass_replace
 
+    start_time = time.time()
+    logger.info(f"Starting CHAT instance {item.instance_idx}")
+
     try:
         harness_result = await harness.run(item.request, item.sampling_params)
         final_output = harness_result.final_output
@@ -218,6 +221,9 @@ async def process_chat_request(
         else:
             output_with_metadata = final_output
 
+        elapsed = time.time() - start_time
+        logger.info(f"Completed CHAT instance {item.instance_idx} in {elapsed:.2f}s")
+
         result_queue.put(
             ResultItem(
                 model_name=item.model_name,
@@ -232,8 +238,11 @@ async def process_chat_request(
         )
 
     except Exception as e:
+        elapsed = time.time() - start_time
         error_detail = _format_error_detail(e)
-        logger.warning(f"Error on CHAT instance {item.instance_idx}: {error_detail}")
+        logger.warning(
+            f"Error on CHAT instance {item.instance_idx} after {elapsed:.2f}s: {error_detail}"
+        )
 
         result_queue.put(
             ResultItem(
