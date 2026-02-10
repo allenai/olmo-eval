@@ -2,6 +2,7 @@
 
 import logging
 import os
+import warnings
 from typing import Literal
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
@@ -31,11 +32,48 @@ class FlushingStreamHandler(logging.StreamHandler):
         self.flush()
 
 
+def filter_warnings() -> None:
+    """Suppress noisy deprecation warnings from third-party libraries."""
+    # PyTorch deprecation warnings
+    warnings.filterwarnings("ignore", message=r".*torch\.distributed\.\w+_base.*")
+    warnings.filterwarnings("ignore", message=r".*TypedStorage is deprecated.*")
+    warnings.filterwarnings("ignore", message=r".*DTensor.*")
+    warnings.filterwarnings("ignore", message=r".*TORCH_NCCL_AVOID_RECORD_STREAMS.*")
+    warnings.filterwarnings("ignore", message=r".*weights_only=False.*")
+    warnings.filterwarnings("ignore", message=r".*torch\.cuda\.amp\.custom_fwd.*")
+
+    # Flash-attention warnings
+    warnings.filterwarnings("ignore", category=FutureWarning, module=r"flash_attn.*")
+
+    # Transformers/HuggingFace warnings
+    warnings.filterwarnings("ignore", message=r".*resume_download.*deprecated.*")
+    warnings.filterwarnings("ignore", message=r".*clean_up_tokenization_spaces.*")
+
+    # Pydantic warnings
+    warnings.filterwarnings("ignore", message=r".*Pydantic serializer warnings.*")
+
+
+def _is_debug_mode() -> bool:
+    """Check if debug mode is enabled via OLMO_EVAL_DEBUG environment variable."""
+    return os.environ.get("OLMO_EVAL_DEBUG", "").lower() in ("1", "true")
+
+
 def configure_logging(level: LogLevel = "INFO") -> None:
     """Configure root logging for olmo-eval.
 
     Called once at CLI entry points (run.py, beaker/launch.py).
+
+    Set OLMO_EVAL_DEBUG=1 to bypass all log silencing and warning filters.
     """
+    # In debug mode, use DEBUG level and don't silence anything
+    if _is_debug_mode():
+        logging.basicConfig(
+            format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+            level=logging.DEBUG,
+        )
+        return
+
     logging.basicConfig(
         format="%(asctime)s [%(levelname)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
@@ -54,6 +92,9 @@ def configure_logging(level: LogLevel = "INFO") -> None:
     os.environ.setdefault("HF_DATASETS_DISABLE_PROGRESS_BAR", "1")
     os.environ.setdefault("DATASETS_VERBOSITY", "error")
     os.environ.setdefault("VLLM_LOGGING_LEVEL", "WARNING")
+
+    # Filter noisy deprecation warnings
+    filter_warnings()
 
 
 def get_logger(name: str) -> logging.Logger:
