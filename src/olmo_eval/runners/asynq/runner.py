@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import multiprocessing as mp
-import queue
 import random
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Any
 
 from rich.console import Console
@@ -18,33 +16,18 @@ from olmo_eval.core.configs import expand_tasks
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.core.harness.config import HarnessConfig, ProviderConfig
 from olmo_eval.core.logging import get_logger, get_worker_id
-from olmo_eval.core.types import Response
-from olmo_eval.core.types.trajectory import AgentTrajectory
-from olmo_eval.runners.asynq.helpers import (
-    check_workers_alive,
-    terminate_workers,
-    wait_for_workers_ready,
-)
+from olmo_eval.runners.asynq.helpers import terminate_workers, wait_for_workers_ready
 from olmo_eval.runners.asynq.queue import (
-    WORKER_FATAL_TASK_ID,
     QueueItem,
-    ResultItem,
-    ScoredResponse,
-    ScoringItem,
     TaskTracker,
     build_requests_from_items,
-    compute_task_metrics,
-    finalize_task,
     prepare_task_items,
 )
+from olmo_eval.runners.asynq.results import aggregate_results, process_results
 from olmo_eval.runners.asynq.workers import inference_worker, scoring_worker
 from olmo_eval.runners.base import BaseEvalRunner
 from olmo_eval.runners.mixins import RunnerResultsMixin, S3Config
-from olmo_eval.runners.utils import (
-    compute_suite_aggregations,
-    compute_task_hash,
-    generate_experiment_id,
-)
+from olmo_eval.runners.utils import compute_task_hash, generate_experiment_id
 from olmo_eval.storage import StorageBackend
 
 console = Console()
@@ -416,161 +399,19 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         total_tasks: int,
         total_instances: int,
     ) -> dict[str, Any]:
-        """Process results from workers with parallel instance-level scoring.
-
-        As each instance result comes in, it's immediately sent to the scoring worker.
-        Scored responses are collected and metrics are computed when all instances
-        for a task are scored.
-        """
-        from olmo_eval.runners.utils import TaskResult
-
-        results: dict[str, TaskResult] = {}
-        tasks_complete = 0  # Tasks with all instances scored and metrics computed
-
-        # Track scored responses per task: spec -> {idx: scored_response}
-        scored_responses: dict[str, dict[int, Response]] = {spec: {} for spec in trackers}
-        instances_sent: dict[str, int] = {spec: 0 for spec in trackers}
-        instances_scored: dict[str, int] = {spec: 0 for spec in trackers}
-
-        def handle_scored_response(scored: ScoredResponse) -> None:
-            """Process a scored response and finalize task if complete."""
-            nonlocal tasks_complete
-            scored_responses[scored.spec][scored.instance_idx] = scored.scored
-            instances_scored[scored.spec] += 1
-
-            tracker = trackers[scored.spec]
-            expected = tracker.total_instances - len(tracker.failed_instances)
-
-            # Check if all instances for this task are scored
-            if instances_scored[scored.spec] >= expected and scored.spec not in results:
-                # All instances scored - compute metrics
-                responses_list = [
-                    scored_responses[scored.spec][i]
-                    for i in sorted(scored_responses[scored.spec].keys())
-                ]
-                assert tracker.task is not None  # Task exists if we got here
-                task_result = compute_task_metrics(
-                    spec=scored.spec,
-                    task=tracker.task,
-                    scored_responses=responses_list,
-                    failed_instances=tracker.failed_instances,
-                    total_instances=tracker.total_instances,
-                    duration_seconds=time.time() - tracker.start_time,
-                )
-                results[scored.spec] = task_result
-                tasks_complete += 1
-                self._report_task_completion(self.model_name, task_result)
-                if self.save_predictions and task_result.predictions:
-                    task_hash = compute_task_hash(task_result.config)
-                    self._write_predictions(
-                        self.model_name, task_result.spec, task_result.predictions, task_hash
-                    )
-
-        def drain_scored_queue() -> None:
-            """Non-blocking drain of scored responses."""
-            while True:
-                try:
-                    scored: ScoredResponse = scored_queue.get_nowait()
-                    handle_scored_response(scored)
-                except queue.Empty:
-                    break
-
-        # Pre-add error tasks to results (these don't need scoring)
-        for spec, tracker in trackers.items():
-            if tracker.error:
-                task_result = finalize_task(tracker)
-                results[spec] = task_result
-                tasks_complete += 1
-                self._report_task_completion(self.model_name, task_result)
-
-        pending_instances = total_instances
-        last_health_check = time.time()
-        health_check_interval = 5.0
-
-        # Collect instance results and send each to scoring immediately
-        while pending_instances > 0:
-            # Check for scored responses (non-blocking)
-            drain_scored_queue()
-
-            try:
-                result_item: ResultItem = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: result_queue.get(timeout=1.0)
-                )
-            except queue.Empty:
-                if time.time() - last_health_check > health_check_interval:
-                    check_workers_alive(workers, result_queue)
-                    last_health_check = time.time()
-                continue
-
-            # Check for fatal worker crash
-            if result_item.task_id == WORKER_FATAL_TASK_ID:
-                logger.error(f"FATAL: Worker crashed! {result_item.error}")
-                raise RuntimeError(f"Worker process crashed: {result_item.error}")
-
-            tracker = trackers[result_item.task_id]
-            pending_instances -= 1
-
-            if tracker.error:
-                # Task-level error already set (e.g., prep failed)
-                continue
-
-            if result_item.error:
-                # Instance-level failure
-                logger.warning(
-                    f"Instance {result_item.instance_idx} failed for {result_item.task_id}: "
-                    f"{result_item.error}"
-                )
-                tracker.add_failure(result_item.instance_idx, result_item.error)
-                continue
-
-            # Build response and send to scoring immediately
-            trajectory = None
-            if result_item.outputs:
-                meta = result_item.outputs[0].metadata or {}
-                traj_dict = meta.get("trajectory")
-                if traj_dict:
-                    trajectory = AgentTrajectory.from_dict(traj_dict)
-
-            response = Response(
-                instance=result_item.instance,
-                request=result_item.request,
-                outputs=result_item.outputs,
-                trajectory=trajectory,
-            )
-
-            # Send to scoring worker immediately
-            assert tracker.task is not None  # Task exists if we got here
-            scoring_queue.put(
-                ScoringItem(
-                    spec=result_item.task_id,
-                    instance_idx=result_item.instance_idx,
-                    response=response,
-                    task=tracker.task,
-                )
-            )
-            instances_sent[result_item.task_id] += 1
-
-        # Wait for remaining scoring to complete
-        while tasks_complete < total_tasks:
-            try:
-                scored: ScoredResponse = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: scored_queue.get(timeout=1.0)
-                )
-                handle_scored_response(scored)
-            except queue.Empty:
-                continue
-
-        return results
-
-    def _report_task_completion(self, model_name: str, result: Any) -> None:
-        """Report when a task completes."""
-        label = f"{model_name}:{result.spec}"
-        if result.error:
-            logger.error(f"✗ {label} (ERROR: {result.error})")
-        else:
-            logger.info(
-                f"✓ {label} ({result.num_instances} instances, {result.duration_seconds:.1f}s)"
-            )
+        """Process results from workers with parallel instance-level scoring."""
+        return await process_results(
+            trackers=trackers,
+            result_queue=result_queue,
+            scoring_queue=scoring_queue,
+            scored_queue=scored_queue,
+            workers=workers,
+            total_tasks=total_tasks,
+            total_instances=total_instances,
+            model_name=self.model_name,
+            save_predictions=self.save_predictions,
+            write_predictions_fn=self._write_predictions,
+        )
 
     def _aggregate_results(
         self,
@@ -578,50 +419,13 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         expanded_tasks: list[str],
     ) -> dict[str, Any]:
         """Aggregate results and prepare final output."""
-        from olmo_eval.runners.mixins import get_model_display_name
-
-        errors = [(spec, r) for spec, r in results.items() if r.error]
-        if errors:
-            logger.error(f"{len(errors)} tasks failed")
-            for spec, error_result in errors:
-                logger.error(f"  {spec}: {error_result.error}")
-
-        provider_str = str(self.provider_config.kind)
-
-        display_model_name = get_model_display_name(
-            self.provider_config.model, self.provider_config.alias
+        return aggregate_results(
+            results=results,
+            expanded_tasks=expanded_tasks,
+            task_specs=self.task_specs,
+            provider_config=self.provider_config,
+            attention_backend=self.attention_backend,
         )
-
-        results_dict: dict[str, Any] = {
-            "timestamp": datetime.now().isoformat(),
-            "model": display_model_name,
-            "model_path": self.provider_config.model,
-            "provider": provider_str,
-            "tasks": {},
-            "errors": [],
-        }
-
-        for spec in expanded_tasks:
-            if spec in results:
-                task_result = results[spec]
-                if task_result.error:
-                    results_dict["errors"].append({"spec": spec, "error": task_result.error})
-                else:
-                    task_data = task_result.to_dict(include_predictions=True)
-                    task_hash = compute_task_hash(task_result.config)
-                    if task_hash:
-                        task_data["task_hash"] = task_hash
-                    results_dict["tasks"][spec] = task_data
-
-        model_config_dict = self.provider_config.to_dict()
-        model_config_dict["attention_backend"] = self.attention_backend
-        results_dict["model_config"] = model_config_dict
-
-        suite_aggs = compute_suite_aggregations(self.task_specs, results_dict["tasks"])
-        if suite_aggs:
-            results_dict["suites"] = suite_aggs
-
-        return results_dict
 
     def _finalize_and_save(
         self,
