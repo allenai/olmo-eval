@@ -201,7 +201,6 @@ for _lang in MULTILINGUAL_MBPP_LANGUAGES:
         # Matches oe-eval: no leading space, always prepend \n\n separator
         formatter=PPLFormatter(leading_space=False, always_prepend_separator=True),
         metrics=(BPBMetric(),),
-        primary_metric=BPBMetric(),
     )
 
     # 3shot variant - composable with bpb (e.g., mt_mbpp_{language}:3shot:bpb)
@@ -221,7 +220,6 @@ for _lang in MULTILINGUAL_MBPP_LANGUAGES:
         # Matches oe-eval: no leading space, always prepend \n\n separator
         formatter=PPLFormatter(leading_space=False, always_prepend_separator=True),
         metrics=(BPBMetric(),),
-        primary_metric=BPBMetric(),
     )
 
     # 3shot variant - composable with bpb (e.g., mt_mbpp_v2fix_{language}:3shot:bpb)

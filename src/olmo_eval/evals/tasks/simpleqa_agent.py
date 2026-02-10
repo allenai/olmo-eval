@@ -129,5 +129,4 @@ register_variant(
     "simpleqa",
     "judge",
     metrics=(AccuracyMetric(scorer=SimpleQAJudgeScorer),),
-    primary_metric=AccuracyMetric(scorer=SimpleQAJudgeScorer),
 )

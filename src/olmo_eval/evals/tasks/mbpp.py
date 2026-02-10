@@ -195,7 +195,6 @@ register_variant(
     "bpb",
     formatter=PPLFormatter(leading_space=False),
     metrics=(BPBMetric(),),
-    primary_metric=BPBMetric(),
 )
 
 register_variant(
@@ -203,7 +202,6 @@ register_variant(
     "bpb",
     formatter=PPLFormatter(leading_space=False),
     metrics=(BPBMetric(),),
-    primary_metric=BPBMetric(),
 )
 
 # 3shot variant - composable with bpb (e.g., mbpp:3shot:bpb)

@@ -126,7 +126,6 @@ register_variant(
     "bpb",
     formatter=PPLFormatter(leading_space=True, answer_prefix=" "),
     metrics=(BPBMetric(),),
-    primary_metric=BPBMetric(),
 )
 
 register_variant(
@@ -134,7 +133,6 @@ register_variant(
     "bpb",
     formatter=PPLFormatter(leading_space=True, answer_prefix=" "),
     metrics=(BPBMetric(),),
-    primary_metric=BPBMetric(),
 )
 
 # 3shot variants - composable with bpb (e.g., humaneval:3shot:bpb)
