@@ -37,10 +37,10 @@ olmo-eval suites
 olmo-eval tasks
 
 # Run evaluation (dry run)
-olmo-eval run -m llama3.1-8b -t arc_challenge:olmes --dry-run
+olmo-eval run -m llama3.1-8b -t humaneval:3shot --dry-run
 
-# Run evaluation
-olmo-eval run -m olmo-2-7b -t olmes_core --limit 100
+# Run evaluation with limit
+olmo-eval run -m olmo-2-7b -t humaneval:bpb -o limit=100
 
 ```
 
