@@ -26,6 +26,7 @@ class JobConfigAssembler:
         task_secrets: list[tuple[str, str]],
         inject_aws_credentials: bool,
         inject_gcs_credentials: bool,
+        enable_sandbox: bool = False,
     ):
         self.config = config
         self.effective_image = effective_image
@@ -36,6 +37,7 @@ class JobConfigAssembler:
         self.task_secrets = task_secrets
         self.inject_aws_credentials = inject_aws_credentials
         self.inject_gcs_credentials = inject_gcs_credentials
+        self.enable_sandbox = enable_sandbox
 
     def assemble(self, exp: ExperimentPlan) -> BeakerJobConfig:
         """Assemble a BeakerJobConfig for an experiment."""
@@ -112,6 +114,7 @@ class JobConfigAssembler:
             env_vars=job_env_vars,
             env_secrets=env_secrets,
             task_packages=task_packages,
+            enable_sandbox=self.enable_sandbox,
         )
 
     def _extract_task_dependencies(

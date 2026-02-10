@@ -453,6 +453,7 @@ def launch(
         task_secrets,
         inject_aws,
         inject_gcs,
+        enable_sandbox=harness_needs_sandbox,
     )
 
     job_configs = []
