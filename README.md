@@ -52,7 +52,7 @@ The evaluation framework is built around these core abstractions:
 |-------------|-------------|
 | **Task** | Defines a single evaluation (data loading, formatting, scoring) |
 | **Suite** | Groups tasks and/or nested suites with aggregation |
-| **Harness** | A model configured with specific capabilities (tools, system prompts) |
+| **Harness** | A model provider configured with specific capabilities |
 | **Formatter** | Converts instances into LM requests |
 | **Scorer** | Scores individual instance/output pairs |
 | **Metric** | Aggregates scores into final metrics |
@@ -209,14 +209,14 @@ presets = get_model_presets()
 
 ### Harness
 
-A **Harness** configures a model with specific capabilities like tools and system prompts. It wraps an inference provider and injects configuration into requests, enabling tool-augmented evaluation without modifying task definitions.
+A **Harness** configures a model provider with specific capabilities like tools, system prompts, and backends. It wraps an inference provider and injects configuration into requests, enabling tool-augmented evaluation or multi-turn execution.
 
 **Key concept**: Any task can be run with or without tools—that's determined by the Harness configuration, not the task definition. This allows comparing baseline vs tool-augmented performance on the same task.
 
 #### Using Harness via CLI
 
 ```bash
-# Run task without tools (baseline)
+# Run task without tools or backend (baseline)
 olmo-eval run -m llama3.1-8b -t simpleqa
 
 # Run task with search tools via harness preset
