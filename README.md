@@ -243,15 +243,18 @@ olmo-eval run --help  # Shows --harness options
 Configuration for a harness:
 
 ```python
-from olmo_eval.core.harness import HarnessConfig, get_harness_preset
+from olmo_eval.core.harness import HarnessConfig, ProviderConfig, get_harness_preset
 
 # Get a preset
 config = get_harness_preset("search")
 
-# Create custom config
+# Create custom config with tools
+from olmo_eval.tools import web_search, calculator  # Registered tools
+
 config = HarnessConfig(
     name="my_harness",
-    tool_names=("web_search", "calculator"),  # References to registered tools
+    provider=ProviderConfig(model="gpt-4o", kind="litellm"),
+    tools=(web_search, calculator),
     system_prompt="You are a helpful assistant with tools.",
     max_turns=10,
     max_concurrency=8,
@@ -261,12 +264,13 @@ config = HarnessConfig(
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `name` | `str` | Required | Harness identifier |
-| `tool_names` | `tuple[str, ...]` | `()` | Names of registered tools |
+| `provider` | `ProviderConfig` | `ProviderConfig()` | Model provider configuration |
+| `tools` | `tuple[Tool, ...]` | `()` | Tool instances (use `@registered_tool` decorator) |
 | `system_prompt` | `str \| None` | `None` | System prompt to inject |
 | `tool_choice` | `str` | `"auto"` | Tool selection mode (`auto`, `none`, `required`) |
-| `max_turns` | `int` | `10` | Max turns for multi-turn execution |
-| `max_concurrency` | `int` | `8` | Concurrent executions |
-| `backend` | `str` | `"internal"` | Execution backend (`internal`, `openai_agents`) |
+| `backend` | `str \| None` | `None` | Execution backend (e.g., `openai_agents`) |
+| `max_turns` | `int \| None` | `None` | Max turns for multi-turn execution |
+| `max_concurrency` | `int \| None` | `None` | Concurrent executions |
 | `required_secrets` | `tuple[str, ...]` | `()` | Required environment variables |
 
 #### Defining Tools
@@ -318,15 +322,24 @@ olmo-eval run -m llama3.1-8b -t simpleqa --harness-config my_harness.yaml
 #### Programmatic Usage
 
 ```python
-from olmo_eval.core.harness import Harness, HarnessConfig, get_harness_preset
-from olmo_eval.inference import create_provider, ProviderKind
+from olmo_eval.core.harness import Harness, HarnessConfig, ProviderConfig, get_harness_preset
 
-# Create provider
-provider = create_provider(ProviderKind.VLLM, "meta-llama/Llama-3.1-8B-Instruct")
+# Create harness with preset and provider
+config = get_harness_preset("search").with_provider(
+    ProviderConfig(model="meta-llama/Llama-3.1-8B-Instruct", kind="vllm")
+)
+harness = Harness(config)
 
-# Create harness with preset
-config = get_harness_preset("search")
-harness = Harness(provider, config)
+# Or create from scratch with tools
+from olmo_eval.tools import web_search, calculator
+
+config = HarnessConfig(
+    name="my_harness",
+    provider=ProviderConfig(model="gpt-4o", kind="litellm"),
+    tools=(web_search, calculator),
+    system_prompt="You are a helpful assistant.",
+)
+harness = Harness(config)
 
 # Single-turn generation (tools injected into request)
 outputs = harness.generate(requests, sampling_params)
