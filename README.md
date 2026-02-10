@@ -151,24 +151,24 @@ Note: Currently `AVERAGE_OF_AVERAGES` gives each child equal weight regardless o
 
 ### Formatters
 
-Formatters convert instances into LM requests. See `olmo_eval.core.formatters` for available options.
+Formatters convert instances into LM requests. See `olmo_eval.common.formatters` for available options.
 
 ```python
-from olmo_eval.core import MultipleChoiceFormatter, ChatFormatter
+from olmo_eval.common.formatters import MultipleChoiceFormatter, ChatFormatter
 
 # Multiple choice with logprob scoring
 formatter = MultipleChoiceFormatter(template="Q: {question}\n\nA:")
 
 # Chat-based formatting
-formatter = ChatFormatter(system="You are a helpful assistant.")
+formatter = ChatFormatter(system_prompt="You are a helpful assistant.")
 ```
 
 ### Scorers
 
-Scorers compute a score for each instance/output pair. See `olmo_eval.core.scorers` for available options.
+Scorers compute a score for each instance/output pair. See `olmo_eval.common.scorers` for available options.
 
 ```python
-from olmo_eval.core import ExactMatchScorer, MultipleChoiceScorer
+from olmo_eval.common.scorers import ExactMatchScorer, MultipleChoiceScorer
 
 # Exact string match
 scorer = ExactMatchScorer()
@@ -179,10 +179,11 @@ scorer = MultipleChoiceScorer()
 
 ### Metrics
 
-Metrics aggregate scores across responses. See `olmo_eval.core.metrics` for available options.
+Metrics aggregate scores across responses. See `olmo_eval.common.metrics` for available options.
 
 ```python
-from olmo_eval.core import AccuracyMetric, F1Metric
+from olmo_eval.common.metrics import AccuracyMetric, F1Metric
+from olmo_eval.common.scorers import ExactMatchScorer, F1Scorer
 
 # Mean accuracy
 metric = AccuracyMetric(scorer=ExactMatchScorer)
@@ -193,10 +194,10 @@ metric = F1Metric(scorer=F1Scorer)
 
 ### Model Presets
 
-Pre-configured model settings in `olmo_eval/core/constants/models.py`:
+Pre-configured model settings in `olmo_eval/common/constants/models.py`:
 
 ```python
-from olmo_eval.core import get_model_presets
+from olmo_eval.common.constants import get_model_presets
 
 # Returns dict of preset name -> ModelConfig
 presets = get_model_presets()
@@ -220,7 +221,7 @@ A **Harness** configures a model provider with specific capabilities like tools,
 olmo-eval run -m llama3.1-8b -t simpleqa
 
 # Run task with search tools via harness preset
-olmo-eval run -m llama3.1-8b -t simpleqa --harness search
+olmo-eval run -m llama3.1-8b -t simpleqa --harness dr_tulu
 
 # Use a custom harness config file
 olmo-eval run -m llama3.1-8b -t simpleqa --harness-config ./my_harness.yaml
@@ -231,8 +232,8 @@ olmo-eval run -m llama3.1-8b -t simpleqa --harness-config ./my_harness.yaml
 Configuration for a harness:
 
 ```python
-from olmo_eval.core.harness import HarnessConfig, ProviderConfig, get_harness_preset
-from olmo_eval.core.harness.tools.search import (
+from olmo_eval.common.harness import HarnessConfig, ProviderConfig, get_harness_preset
+from olmo_eval.common.harness.tools.search import (
     semantic_scholar_search,
     serper_web_search,
     serper_fetch_page,
@@ -303,7 +304,7 @@ outputs = harness.generate(requests)  # No backend needed
 Tools combine schema (for the LLM) and implementation (for execution) in a single definition:
 
 ```python
-from olmo_eval.core.harness import tool, registered_tool
+from olmo_eval.common.harness import tool, registered_tool
 
 # Option 1: @tool decorator (local use)
 @tool(description="Search the web for information")
@@ -347,8 +348,8 @@ olmo-eval run -m llama3.1-8b -t simpleqa --harness-config my_harness.yaml
 #### Programmatic Usage
 
 ```python
-from olmo_eval.core.harness import Harness, HarnessConfig, ProviderConfig, get_harness_preset
-from olmo_eval.core.harness.tools.search import (
+from olmo_eval.common.harness import Harness, HarnessConfig, ProviderConfig, get_harness_preset
+from olmo_eval.common.harness.tools.search import (
     semantic_scholar_search,
     serper_web_search,
 )
@@ -382,7 +383,7 @@ print(result.final_output)  # Final model response
 olmo-eval beaker launch -n "eval-with-tools" \
     -m llama3.1-8b \
     -t simpleqa \
-    --harness search \
+    --harness dr_tulu \
     --cluster h100
 ```
 
@@ -395,7 +396,7 @@ models:
     provider: vllm
 tasks:
   - simpleqa
-harness: search  # Preset name
+harness: dr_tulu  # Preset name
 cluster: h100
 ```
 
@@ -412,17 +413,12 @@ Here's a complete, minimal task implementation:
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.core import (
-    AccuracyMetric,
-    Instance,
-    LMOutput,
-    LMRequest,
-    MultipleChoiceFormatter,
-    MultipleChoiceScorer,
-    RequestType,
-)
+from olmo_eval.common.formatters import MultipleChoiceFormatter
+from olmo_eval.common.metrics import AccuracyMetric
+from olmo_eval.common.scorers import MultipleChoiceScorer
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType
 from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.tasks.core import Task, TaskConfig, register
+from olmo_eval.evals.tasks import Task, TaskConfig, register
 
 
 class MyTask(Task):
@@ -599,11 +595,11 @@ The **Harness** is the preferred way to add tools to evaluations. It separates t
 olmo-eval run -m llama3.1-8b -t simpleqa
 
 # Same task with search tools
-olmo-eval run -m llama3.1-8b -t simpleqa --harness search
+olmo-eval run -m llama3.1-8b -t simpleqa --harness dr_tulu
 ```
 
 See the [Harness](#harness) section above for full documentation on:
-- Available presets (`search`, `default`)
+- Available presets (`dr_tulu`, `default`)
 - Creating custom harness configurations
 - Defining tools with the `@tool` decorator
 - Programmatic usage
@@ -619,7 +615,7 @@ Agent tasks (`AgentTask`) are an older pattern that bundles tools directly into 
 olmo-eval run -m llama3.1-8b -t simpleqa_agent
 
 # Equivalent using Harness (preferred)
-olmo-eval run -m llama3.1-8b -t simpleqa --harness search
+olmo-eval run -m llama3.1-8b -t simpleqa --harness dr_tulu
 ```
 
 ## Launching on Beaker
@@ -1176,7 +1172,7 @@ olmo-eval run -m llama3.1-8b -t mmlu -t gsm8k -t arc
 olmo-eval run -m llama3.1-70b -t mmlu --num-gpus 4
 
 # Tool-augmented evaluation with harness
-olmo-eval run -m llama3.1-8b -t simpleqa --harness search
+olmo-eval run -m llama3.1-8b -t simpleqa --harness dr_tulu
 ```
 
 ## Debugging and Inspection
