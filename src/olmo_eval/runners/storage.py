@@ -5,8 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from rich.console import Console
-
+from olmo_eval.cli.utils import console
 from olmo_eval.core.logging import get_logger
 from olmo_eval.runners.common import generate_experiment_id, get_author, get_git_ref, get_workspace
 from olmo_eval.runners.formatting import build_s3_prefix
@@ -15,7 +14,6 @@ from olmo_eval.runners.models import S3Config
 if TYPE_CHECKING:
     from olmo_eval.storage import StorageBackend
 
-console = Console()
 logger = get_logger("runners.storage")
 
 

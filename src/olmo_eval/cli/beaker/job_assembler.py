@@ -117,10 +117,15 @@ class JobConfigAssembler:
     def _extract_task_dependencies(
         self, task_specs: list[str], task_overrides: dict[str, list[str]]
     ) -> list[str] | None:
+        from olmo_eval.core.configs import expand_tasks
         from olmo_eval.evals.tasks import get_task_dependencies
         from olmo_eval.evals.tasks.core.registry import parse_overrides
 
-        deps = get_task_dependencies(task_specs)
+        # Expand suites to individual tasks before extracting dependencies
+        expanded_specs = expand_tasks(task_specs)
+
+        # Get dependencies from registered task configs
+        deps = get_task_dependencies(expanded_specs)
 
         for _task_spec, overrides in task_overrides.items():
             for override_str in overrides:
@@ -178,16 +183,27 @@ class JobConfigAssembler:
             command.append("--no-save-predictions")
         if not self.config.save_requests:
             command.append("--no-save-requests")
-        if self.config.inspect_instance:
-            command.append("--inspect-instance")
-        if self.config.inspect_formatted:
-            command.append("--inspect-formatted")
-        if self.config.inspect_tokens:
-            command.append("--inspect-tokens")
-        if self.config.inspect_response:
-            command.append("--inspect-response")
-        if self.config.inspect_request:
-            command.append("--inspect-request")
+        # Use --inspect if all inspect flags are enabled, otherwise add individual flags
+        all_inspect = (
+            self.config.inspect_instance
+            and self.config.inspect_formatted
+            and self.config.inspect_tokens
+            and self.config.inspect_response
+            and self.config.inspect_request
+        )
+        if all_inspect:
+            command.append("--inspect")
+        else:
+            if self.config.inspect_instance:
+                command.append("--inspect-instance")
+            if self.config.inspect_formatted:
+                command.append("--inspect-formatted")
+            if self.config.inspect_tokens:
+                command.append("--inspect-tokens")
+            if self.config.inspect_response:
+                command.append("--inspect-response")
+            if self.config.inspect_request:
+                command.append("--inspect-request")
 
         if self.config.harness:
             command.extend(["--harness", self.config.harness])

@@ -12,8 +12,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from rich.console import Console
-
+from olmo_eval.cli.utils import console
 from olmo_eval.core.logging import get_logger
 
 # Re-export for backward compatibility
@@ -42,7 +41,6 @@ from olmo_eval.runners.writers import write_predictions_jsonl, write_requests_js
 if TYPE_CHECKING:
     from olmo_eval.storage import StorageBackend
 
-console = Console()
 logger = get_logger("runners.mixins")
 
 

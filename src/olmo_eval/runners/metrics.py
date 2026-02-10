@@ -6,8 +6,6 @@ import json
 import os
 from typing import Any
 
-from rich.console import Console
-
 from olmo_eval.core.logging import get_logger
 from olmo_eval.runners.common import get_primary_metric
 from olmo_eval.runners.models import (
@@ -17,7 +15,6 @@ from olmo_eval.runners.models import (
     TaskMetricsEntry,
 )
 
-console = Console()
 logger = get_logger("runners.metrics")
 
 

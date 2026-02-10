@@ -10,8 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any
 
-from rich.console import Console
-
+from olmo_eval.cli.utils import console
 from olmo_eval.core.configs import expand_tasks
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.core.harness.config import HarnessConfig, ProviderConfig
@@ -34,7 +33,6 @@ from olmo_eval.runners.mixins import RunnerResultsMixin, S3Config
 from olmo_eval.runners.utils import compute_task_hash, generate_experiment_id
 from olmo_eval.storage import StorageBackend
 
-console = Console()
 logger = get_logger(__name__)
 
 
