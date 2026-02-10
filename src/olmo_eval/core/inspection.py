@@ -591,6 +591,7 @@ def inspect_tokens(
         task_name: Optional task name for the panel title.
         native_id: Optional native_id for the panel title.
         max_tokens: Max tokens to display (0 for no limit, default 100).
+            When truncating, shows first 50 and last 50 tokens.
         show_decoded: Whether to show decoded token values.
     """
     if console is None:
@@ -603,18 +604,8 @@ def inspect_tokens(
     if hasattr(tokenizer, "all_special_ids"):
         special_ids = set(tokenizer.all_special_ids)
 
-    # Build display
-    lines: list[str] = []
-    lines.append(f"[bold]{len(tokens)} tokens[/bold]")
-    lines.append("─" * 60)
-
-    display_tokens = tokens
-    truncated = False
-    if max_tokens > 0 and len(tokens) > max_tokens:
-        display_tokens = tokens[:max_tokens]
-        truncated = True
-
-    for token_id in display_tokens:
+    def format_token(token_id: int) -> str:
+        """Format a single token for display."""
         is_special = token_id in special_ids
 
         if show_decoded:
@@ -628,18 +619,47 @@ def inspect_tokens(
                 decoded_display = "<decode error>"
 
             if is_special:
-                line = f"  [bold cyan][{token_id}][/bold cyan] {decoded_display}  [cyan]◆[/cyan]"
-                lines.append(line)
+                return f"  [bold cyan][{token_id}][/bold cyan] {decoded_display}  [cyan]◆[/cyan]"
             else:
-                lines.append(f"  [{token_id}] {decoded_display}")
+                return f"  [{token_id}] {decoded_display}"
         else:
             if is_special:
-                lines.append(f"  [bold cyan][{token_id}][/bold cyan]  [dim cyan]◆[/dim cyan]")
+                return f"  [bold cyan][{token_id}][/bold cyan]  [dim cyan]◆[/dim cyan]"
             else:
-                lines.append(f"  [{token_id}]")
+                return f"  [{token_id}]"
+
+    # Build display
+    lines: list[str] = []
+    lines.append(f"[bold]{len(tokens)} tokens[/bold]")
+    lines.append("─" * 60)
+
+    truncated = False
+    if max_tokens > 0 and len(tokens) > max_tokens:
+        # Show first half and last half of max_tokens
+        half = max_tokens // 2
+        first_tokens = tokens[:half]
+        last_tokens = tokens[-half:]
+        truncated = True
+
+        # Add first tokens
+        for token_id in first_tokens:
+            lines.append(format_token(token_id))
+
+        # Add ellipsis indicator
+        omitted = len(tokens) - max_tokens
+        lines.append(f"\n  [dim]... ({omitted} tokens omitted) ...[/dim]\n")
+
+        # Add last tokens
+        for token_id in last_tokens:
+            lines.append(format_token(token_id))
+    else:
+        # Show all tokens
+        for token_id in tokens:
+            lines.append(format_token(token_id))
 
     if truncated:
-        lines.append(f"\n[dim](showing {max_tokens} of {len(tokens)} tokens)[/dim]")
+        half = max_tokens // 2
+        lines.append(f"\n[dim](showing first {half} and last {half} of {len(tokens)} tokens)[/dim]")
 
     # Build panel title
     if task_name and native_id is not None:

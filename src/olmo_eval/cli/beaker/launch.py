@@ -234,18 +234,7 @@ def launch(
 ) -> None:
     """Launch an evaluation job on Beaker.
 
-    Requires beaker-py to be installed: pip install 'olmo-eval-internal[beaker]'
-
-    Multiple models and/or tasks with different priorities will create separate experiments.
-    Models with compatible runtime configurations (GPUs, provider, etc.) are grouped together.
-    Use --config/-f to load settings from a YAML file; CLI arguments override config values.
-    Use --group/-g to organize experiments into a Beaker group for result aggregation.
-
-    Use -o/--override after -m or -t to apply overrides to that model or task:
-
-        olmo-eval beaker launch -n eval \\
-            -m llama3.1-8b -o provider.kind=vllm -o provider.package=vllm==0.14.0 \\
-            -t mmlu -o limit=100
+    Requires beaker-gantry to be installed: pip install 'olmo-eval-internal[beaker]'
     """
     from datetime import datetime
 
@@ -253,7 +242,7 @@ def launch(
         from olmo_eval.launch import BeakerLauncher, EvalConfig
     except ImportError:
         console.print(
-            "[red]beaker is not installed.[/red]\n"
+            "[red]beaker-gantry is not installed.[/red]\n"
             "Install with: pip install 'olmo-eval-internal[beaker]'"
         )
         raise SystemExit(1) from None
