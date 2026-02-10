@@ -15,9 +15,6 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# Counter for in-flight requests (safe in asyncio single-threaded context)
-_in_flight_count = 0
-
 
 # -----------------------------------------------------------------------------
 # Worker health monitoring
@@ -203,11 +200,6 @@ async def process_chat_request(
     """
     from dataclasses import replace as dataclass_replace
 
-    global _in_flight_count
-    _in_flight_count += 1
-    start_time = time.time()
-    logger.info(f"Starting CHAT instance {item.instance_idx} (in_flight={_in_flight_count})")
-
     try:
         harness_result = await harness.run(item.request, item.sampling_params)
         final_output = harness_result.final_output
@@ -226,13 +218,6 @@ async def process_chat_request(
         else:
             output_with_metadata = final_output
 
-        _in_flight_count -= 1
-        elapsed = time.time() - start_time
-        logger.info(
-            f"Completed CHAT instance {item.instance_idx} in {elapsed:.2f}s "
-            f"(in_flight={_in_flight_count})"
-        )
-
         result_queue.put(
             ResultItem(
                 model_name=item.model_name,
@@ -247,13 +232,8 @@ async def process_chat_request(
         )
 
     except Exception as e:
-        _in_flight_count -= 1
-        elapsed = time.time() - start_time
         error_detail = _format_error_detail(e)
-        logger.warning(
-            f"Error on CHAT instance {item.instance_idx} after {elapsed:.2f}s "
-            f"(in_flight={_in_flight_count}): {error_detail}"
-        )
+        logger.warning(f"Error on CHAT instance {item.instance_idx}: {error_detail}")
 
         result_queue.put(
             ResultItem(

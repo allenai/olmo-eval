@@ -59,15 +59,20 @@ async def process_items(
             await process_batch(batch, harness, result_queue)
 
     if chat_items:
+        from tqdm import tqdm
+
         work_queue: asyncio.Queue[QueueItem] = asyncio.Queue()
         for item in chat_items:
             await work_queue.put(item)
+
+        pbar = tqdm(total=len(chat_items), desc="CHAT instances", unit="inst")
 
         async def worker() -> None:
             while True:
                 item = await work_queue.get()
                 try:
                     await process_chat_request(item, harness, result_queue)
+                    pbar.update(1)
                 finally:
                     work_queue.task_done()
 
@@ -82,6 +87,8 @@ async def process_items(
                     w.cancel()
         except* asyncio.CancelledError:
             pass
+        finally:
+            pbar.close()
 
 
 def worker_process(
