@@ -91,19 +91,20 @@ class HumanEval(Task):
         """
         return extract_code(output.text)
 
-    def score_responses(self, responses: Sequence[Response]) -> Sequence[Response]:
-        """Apply all scorers to extract answers and compute scores."""
+    def _extract_answers(self, responses: Sequence[Response]) -> None:
+        """Extract code and prepend answer prefix.
+
+        HumanEval follows the original paper setup by adding the prompt
+        to the generated code completion as the prompt may provide additional
+        library imports needed for the code execution.
+        """
         for response in responses:
             for output in response.outputs:
                 code = self.extract_answer(output)
                 if code:
-                    # For Humaneval, we follow the original paper setup by adding the prompt
-                    # to the generated code completion as the prompt may provide additional
-                    # library imports needed for the code execution.
                     output.extracted_answer = response.instance.metadata["answer_prefix"] + code
                 else:
                     output.extracted_answer = None
-        return responses
 
 
 @register("humaneval_plus")

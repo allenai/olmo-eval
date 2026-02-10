@@ -374,8 +374,21 @@ class Task(ABC):
     def score_responses(self, responses: Sequence[Response]) -> Sequence[Response]:
         """Apply all scorers to extract answers and compute scores.
 
-        Scorers are collected from metrics that define a scorer attribute.
+        Subclasses needing custom answer extraction should override
+        `_extract_answers()` rather than this method.
         """
+        self._extract_answers(responses)
+        self._apply_scorers(responses)
+        return responses
+
+    def _extract_answers(self, responses: Sequence[Response]) -> None:
+        """Extract answers from outputs. Override for custom extraction logic."""
+        for response in responses:
+            for output in response.outputs:
+                output.extracted_answer = self.extract_answer(output)
+
+    def _apply_scorers(self, responses: Sequence[Response]) -> None:
+        """Run all scorers and populate response.scores."""
         # Collect scorers from metrics, avoiding duplicates by name
         scorers_by_name: dict[str, Scorer] = {}
         for metric in self.config.metrics:
@@ -385,13 +398,10 @@ class Task(ABC):
                     scorers_by_name[scorer_instance.name] = scorer_instance
 
         for response in responses:
-            for output in response.outputs:
-                output.extracted_answer = self.extract_answer(output)
             # Apply each scorer, taking best score across outputs (for multi-sample)
             for scorer in scorers_by_name.values():
                 scores = [scorer.score(response.instance, o) for o in response.outputs]
                 response.scores[scorer.name] = max(scores) if scores else 0.0
-        return responses
 
     def compute_metrics(self, responses: Sequence[Response]) -> dict[str, dict[str, float]]:
         """Compute all metrics from scored responses.
