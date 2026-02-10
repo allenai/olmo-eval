@@ -61,32 +61,16 @@ async def process_items(
     if chat_items:
         from tqdm import tqdm
 
-        work_queue: asyncio.Queue[QueueItem] = asyncio.Queue()
-        for item in chat_items:
-            await work_queue.put(item)
-
+        semaphore = asyncio.Semaphore(max_concurrency or len(chat_items))
         pbar = tqdm(total=len(chat_items), desc="Processing instances", unit="inst")
 
-        async def worker() -> None:
-            while True:
-                item = await work_queue.get()
-                try:
-                    await process_chat_request(item, harness, result_queue)
-                    pbar.update(1)
-                finally:
-                    work_queue.task_done()
-
-        # Use max_concurrency if specified, otherwise process all items concurrently
-        num_workers = max_concurrency if max_concurrency is not None else len(chat_items)
+        async def process(item: QueueItem) -> None:
+            async with semaphore:
+                await process_chat_request(item, harness, result_queue)
+                pbar.update(1)
 
         try:
-            async with asyncio.TaskGroup() as tg:
-                workers = [tg.create_task(worker()) for _ in range(num_workers)]
-                await work_queue.join()
-                for w in workers:
-                    w.cancel()
-        except* asyncio.CancelledError:
-            pass
+            await asyncio.gather(*[process(item) for item in chat_items])
         finally:
             pbar.close()
 

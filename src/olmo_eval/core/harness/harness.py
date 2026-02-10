@@ -21,8 +21,8 @@ if TYPE_CHECKING:
 class Harness:
     """An execution harness configured with specific capabilities.
 
-    The Harness wraps an InferenceProvider (created from config) and applies
-    configuration to all requests. It provides both single-turn (generate/agenerate)
+    The Harness wraps an InferenceProvider and applies
+    configuration to the requests. It provides both single-turn (generate/agenerate)
     and multi-turn (run) interfaces.
 
     For multi-turn execution with run(), a backend must be configured.
