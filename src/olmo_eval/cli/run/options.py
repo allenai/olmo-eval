@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import functools
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 import click
 
@@ -33,7 +33,7 @@ def parallelism_options(func: F) -> F:  # noqa: UP047
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         return func(*args, **kwargs)
 
-    return wrapper
+    return cast(F, wrapper)
 
 
 def storage_options(func: F) -> F:  # noqa: UP047
@@ -93,7 +93,7 @@ def storage_options(func: F) -> F:  # noqa: UP047
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         return func(*args, **kwargs)
 
-    return wrapper
+    return cast(F, wrapper)
 
 
 def experiment_options(func: F) -> F:  # noqa: UP047
@@ -111,7 +111,7 @@ def experiment_options(func: F) -> F:  # noqa: UP047
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         return func(*args, **kwargs)
 
-    return wrapper
+    return cast(F, wrapper)
 
 
 def output_options(func: F) -> F:  # noqa: UP047
@@ -144,7 +144,7 @@ def output_options(func: F) -> F:  # noqa: UP047
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         return func(*args, **kwargs)
 
-    return wrapper
+    return cast(F, wrapper)
 
 
 def inspect_options(func: F) -> F:  # noqa: UP047
@@ -191,7 +191,7 @@ def inspect_options(func: F) -> F:  # noqa: UP047
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         return func(*args, **kwargs)
 
-    return wrapper
+    return cast(F, wrapper)
 
 
 def harness_options(func: F) -> F:  # noqa: UP047
@@ -214,4 +214,4 @@ def harness_options(func: F) -> F:  # noqa: UP047
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         return func(*args, **kwargs)
 
-    return wrapper
+    return cast(F, wrapper)
