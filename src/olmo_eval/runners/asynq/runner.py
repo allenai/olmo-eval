@@ -16,7 +16,11 @@ from olmo_eval.core.configs import expand_tasks
 from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.core.harness.config import HarnessConfig, ProviderConfig
 from olmo_eval.core.logging import get_logger, get_worker_id
-from olmo_eval.runners.asynq.helpers import terminate_workers, wait_for_workers_ready
+from olmo_eval.runners.asynq.helpers import (
+    terminate_workers,
+    wait_for_init_times,
+    wait_for_workers_ready,
+)
 from olmo_eval.runners.asynq.queue import (
     QueueItem,
     TaskTracker,
@@ -182,8 +186,8 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             wait_for_workers_ready(workers, result_queue, startup_timeout=60.0)
             logger.info("Workers initialized successfully")
 
-            # Capture init times from workers
-            provider_init_seconds = dict(init_times)
+            # Wait for workers to report their init times
+            provider_init_seconds = wait_for_init_times(init_times, num_workers)
 
             # Reset tracker start times now that workers are ready
             # This ensures task duration only measures actual processing time

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from rich.console import Console
 
 from olmo_eval.core.logging import get_logger
-from olmo_eval.runners.common import generate_experiment_id, get_author, get_git_ref
+from olmo_eval.runners.common import generate_experiment_id, get_author, get_git_ref, get_workspace
 from olmo_eval.runners.formatting import build_s3_prefix
 from olmo_eval.runners.models import S3Config
 
@@ -190,7 +190,7 @@ def save_results(
 
     author = get_author()
     git_ref = get_git_ref()
-    workspace = s3_config.group if s3_config else "default"
+    workspace = get_workspace()
 
     for model_name, model_results, exp_id, m_hash, s3_loc in models_to_save:
         task_count = len(model_results.get("tasks", {}))

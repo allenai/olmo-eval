@@ -71,6 +71,19 @@ def get_git_ref() -> str:
     return "unknown"
 
 
+def get_workspace() -> str:
+    """Get the Beaker workspace for experiment attribution.
+
+    Checks environment variables in order:
+    1. BEAKER_WORKSPACE - set by olmo-eval beaker launch for Beaker jobs
+    2. Falls back to "default" if no env var is set.
+
+    Returns:
+        Workspace string.
+    """
+    return os.environ.get("BEAKER_WORKSPACE", "default")
+
+
 def sanitize_spec_for_filename(spec: str) -> str:
     """Sanitize a task spec string to be safe for use in filenames.
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import multiprocessing as mp
 import queue
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from olmo_eval.core.logging import get_logger
 from olmo_eval.runners.asynq.queue import WORKER_FATAL_TASK_ID, QueueItem, ResultItem
@@ -146,6 +146,35 @@ def wait_for_workers_ready(
 
     # Final check
     check_workers_alive(workers, result_queue)
+
+
+def wait_for_init_times(
+    init_times: Any,
+    num_workers: int,
+    timeout: float = 300.0,
+    check_interval: float = 1.0,
+) -> dict[str, float]:
+    """Wait for all workers to report their initialization times.
+
+    Args:
+        init_times: Shared manager dict that workers write their init times to.
+        num_workers: Expected number of workers.
+        timeout: Maximum time to wait for all init times.
+        check_interval: How often to check for new entries.
+
+    Returns:
+        Dictionary mapping worker_id to init time in seconds.
+    """
+    start_time = time.time()
+
+    while time.time() - start_time < timeout:
+        if len(init_times) >= num_workers:
+            return dict(init_times)
+        time.sleep(check_interval)
+
+    # Return what we have even if incomplete
+    logger.warning(f"Timed out waiting for init times: got {len(init_times)}/{num_workers} workers")
+    return dict(init_times)
 
 
 # -----------------------------------------------------------------------------
