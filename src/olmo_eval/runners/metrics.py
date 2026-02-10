@@ -254,7 +254,6 @@ def write_metrics_json(
         json.dump(metrics_output.to_dict(), f, indent=2)
 
     logger.info(f"Metrics written to {metrics_file}")
-    console.print(f"[green]Metrics written to {metrics_file}[/green]")
 
 
 def log_summary(results: dict[str, Any], multi_model: bool = False) -> None:

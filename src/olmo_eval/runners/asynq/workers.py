@@ -106,7 +106,6 @@ def inference_worker(
     configure_logging()
 
     worker_logger = configure_worker_logging(worker_id)
-    worker_logger.info(f"Starting on GPUs {gpu_ids}")
 
     from olmo_eval.core.harness import Harness, HarnessConfig
 
@@ -224,41 +223,49 @@ def scoring_worker(
 
     from olmo_eval.runners.asynq.queue import ScoredResponse, ScoringItem
 
-    try:
-        with tqdm(total=total_instances, desc="Scoring instances", unit="inst") as pbar:
-            while True:
-                item: ScoringItem | None = scoring_queue.get()
-                if item is None:
-                    break
+    pbar: tqdm | None = None
 
-                try:
-                    # Score single response
-                    scored_list = item.task.score_responses([item.response])
-                    scored = scored_list[0] if scored_list else item.response
-                    scored_queue.put(
-                        ScoredResponse(
-                            spec=item.spec,
-                            instance_idx=item.instance_idx,
-                            scored=scored,
-                        )
-                    )
-                except Exception as e:
-                    # On error, return the original response (unscored)
-                    logger.warning(f"Failed to score {item.spec}[{item.instance_idx}]: {e}")
-                    scored_queue.put(
-                        ScoredResponse(
-                            spec=item.spec,
-                            instance_idx=item.instance_idx,
-                            scored=item.response,
-                        )
-                    )
-                finally:
-                    pbar.update(1)
-    except Exception as e:
-        logger.error(f"Scoring worker crashed: {e}")
+    def score_item(item: ScoringItem) -> None:
+        try:
+            # Score single response
+            scored_list = item.task.score_responses([item.response])
+            scored = scored_list[0] if scored_list else item.response
+            scored_queue.put(
+                ScoredResponse(
+                    spec=item.spec,
+                    instance_idx=item.instance_idx,
+                    scored=scored,
+                )
+            )
+        except Exception as e:
+            # On error, return the original response (unscored)
+            logger.warning(f"Failed to score {item.spec}[{item.instance_idx}]: {e}")
+            scored_queue.put(
+                ScoredResponse(
+                    spec=item.spec,
+                    instance_idx=item.instance_idx,
+                    scored=item.response,
+                )
+            )
+
+    try:
+        while True:
+            item: ScoringItem | None = scoring_queue.get()
+            if item is None:
+                break
+
+            # Create progress bar on first item (after worker startup logs)
+            if pbar is None:
+                pbar = tqdm(total=total_instances, desc="Scoring instances", unit="inst")
+
+            score_item(item)
+            pbar.update(1)
+    finally:
+        if pbar is not None:
+            pbar.close()
 
 
 __all__ = [
-    "scoring_worker",
     "inference_worker",
+    "scoring_worker",
 ]
