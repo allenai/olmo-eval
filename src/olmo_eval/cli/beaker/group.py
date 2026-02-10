@@ -340,8 +340,8 @@ def group_list(workspace: str, limit: int, search: str | None, mine: bool) -> No
                         workspace_names[grp.workspace_id] = grp.workspace_id
                 workspace_name = workspace_names[grp.workspace_id]
 
-            table.add_row(grp.name, workspace_name, str(exp_count), status_str, created_str)
+            table.add_row(grp.full_name, workspace_name, str(exp_count), status_str, created_str)
         except Exception:
-            table.add_row(grp.name, "-", "?", "[dim]error[/dim]", "-")
+            table.add_row(grp.full_name, "-", "?", "[dim]error[/dim]", "-")
 
     console.print(table)
