@@ -74,9 +74,15 @@ class RunnerResultsMixin:
     def _validate_task_specs(self) -> list[str]:
         """Validate task specs and return list of errors.
 
+        Checks that:
+        1. All tasks/suites exist
+        2. All variants/regimes are valid
+        3. All tasks have metrics configured
+
         Returns:
             List of error messages (empty if all specs are valid).
         """
+        from olmo_eval.core.configs import expand_tasks, validate_task_metrics
         from olmo_eval.evals.suites import suite_exists
         from olmo_eval.evals.tasks import list_regimes, list_tasks, list_variants
         from olmo_eval.evals.tasks.core.registry import parse_task_spec
@@ -115,6 +121,20 @@ class RunnerResultsMixin:
                             f"Unknown variant/regime '{variant}' for task '{task_name}'. "
                             f"This task has no registered variants or regimes."
                         )
+
+        # If we have errors so far, return early (can't validate metrics on invalid tasks)
+        if errors:
+            return errors
+
+        # Check for tasks without metrics configured
+        expanded_tasks = expand_tasks(self.task_specs)
+        _with_metrics, without_metrics = validate_task_metrics(expanded_tasks)
+
+        for spec in without_metrics:
+            errors.append(
+                f"Task '{spec}' has no metrics configured. "
+                f"Use a variant with metrics (e.g., '{spec}:bpb') or register metrics for the task."
+            )
 
         return errors
 

@@ -4,11 +4,11 @@ This module implements the SimpleQA factual question answering evaluation task.
 It can be run with or without search tools via the Harness abstraction.
 
 Usage:
-    # Baseline evaluation (no tools)
-    olmo-eval run -m llama3.1-8b -t simpleqa
+    # With LLM-as-judge scoring
+    olmo-eval run -m llama3.1-8b -t simpleqa:judge
 
     # With search tools (agent evaluation)
-    olmo-eval run -m llama3.1-8b -t simpleqa --harness search
+    olmo-eval run -m llama3.1-8b -t simpleqa:judge --harness dr_tulu
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from olmo_eval.core.metrics import AccuracyMetric
 from olmo_eval.core.scorers import SimpleQAJudgeScorer
 from olmo_eval.core.types import Instance, LMRequest, RequestType, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.tasks.core import Task, TaskConfig, register
+from olmo_eval.evals.tasks.core import Task, TaskConfig, register, register_variant
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,6 @@ class SimpleQA(Task):
 
     data_source = DataSource(path="allenai/simpleqa_full", split="test")
     formatter = ChatFormatter()
-    metrics = (AccuracyMetric(scorer=SimpleQAJudgeScorer),)
     sampling_params = SamplingParams(temperature=0.0)
 
     default_source: str = "allenai/simpleqa_full"
@@ -119,3 +118,16 @@ class SimpleQA(Task):
             request_type=RequestType.CHAT,
             messages=({"role": "user", "content": instance.question},),
         )
+
+
+# =============================================================================
+# Variant Registrations
+# =============================================================================
+
+# Judge variant - uses LLM-as-judge scoring for factual accuracy
+register_variant(
+    "simpleqa",
+    "judge",
+    metrics=(AccuracyMetric(scorer=SimpleQAJudgeScorer),),
+    primary_metric=AccuracyMetric(scorer=SimpleQAJudgeScorer),
+)

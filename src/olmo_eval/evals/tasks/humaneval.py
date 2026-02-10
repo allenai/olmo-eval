@@ -23,7 +23,6 @@ class HumanEval(Task):
     """HumanEval code generation task."""
 
     data_source = DataSource(path="openai_humaneval")
-    metrics = ()
     sampling_params = SamplingParams(
         max_tokens=1024,
         temperature=0.0,
@@ -112,7 +111,6 @@ class HumanEvalPlus(HumanEval):
     """HumanEval+ task with additional test cases."""
 
     data_source = DataSource(path="evalplus/humanevalplus")
-
     default_source: str = "evalplus/humanevalplus"
 
 

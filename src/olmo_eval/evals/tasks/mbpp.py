@@ -97,7 +97,6 @@ class MBPP(MBPPBase):
     """MBPP code generation task."""
 
     data_source = DataSource(path="google-research-datasets/mbpp")
-    metrics = ()
     sampling_params = SamplingParams(
         max_tokens=1024,
         temperature=0.0,
@@ -179,7 +178,6 @@ class MBPPPlus(MBPPPlusBase):
     """MBPP+ code generation task."""
 
     data_source = DataSource(path="evalplus/mbppplus")
-    metrics = ()
     sampling_params = SamplingParams(
         max_tokens=1024,
         temperature=0.0,

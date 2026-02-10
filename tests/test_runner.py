@@ -21,31 +21,40 @@ class TestEvalRunnerValidation:
     """Tests for EvalRunner.validate method."""
 
     def test_validate_valid_task(self):
-        """Test validation passes for valid task."""
+        """Test validation passes for valid task with metrics."""
         runner = EvalRunner(
             harness_config=make_harness_config(),
-            task_specs=["humaneval"],
+            task_specs=["humaneval:bpb"],
         )
         # Should not raise
         runner.validate()
 
     def test_validate_valid_suite(self):
-        """Test validation passes for valid suite."""
+        """Test validation passes for valid suite with metrics."""
         runner = EvalRunner(
             harness_config=make_harness_config(),
-            task_specs=["mt_mbpp_v2fix"],
+            task_specs=["mt_mbpp_v2fix:bpb"],
         )
         # Should not raise
         runner.validate()
 
     def test_validate_multiple_valid_specs(self):
-        """Test validation passes for multiple valid specs."""
+        """Test validation passes for multiple valid specs with metrics."""
         runner = EvalRunner(
             harness_config=make_harness_config(),
-            task_specs=["humaneval", "mbpp", "mt_mbpp_v2fix"],
+            task_specs=["humaneval:bpb", "mbpp:bpb"],
         )
         # Should not raise
         runner.validate()
+
+    def test_validate_task_without_metrics_fails(self):
+        """Test validation fails for task without metrics configured."""
+        runner = EvalRunner(
+            harness_config=make_harness_config(),
+            task_specs=["humaneval"],
+        )
+        with pytest.raises(ValidationError, match="no metrics configured"):
+            runner.validate()
 
     def test_validate_invalid_task_raises(self):
         """Test validation fails for unknown task."""
@@ -81,7 +90,7 @@ class TestEvalRunnerValidation:
         """Test validation collects all errors."""
         runner = EvalRunner(
             harness_config=make_harness_config(),
-            task_specs=["bad_task1", "bad_task2", "humaneval"],
+            task_specs=["bad_task1", "bad_task2", "humaneval:bpb"],
         )
         with pytest.raises(ValidationError) as exc_info:
             runner.validate()
@@ -94,7 +103,7 @@ class TestEvalRunnerValidation:
         """Test validation fails if any spec is invalid."""
         runner = EvalRunner(
             harness_config=make_harness_config(),
-            task_specs=["humaneval", "nonexistent", "mt_mbpp_v2fix"],
+            task_specs=["humaneval:bpb", "nonexistent", "mbpp:bpb"],
         )
         with pytest.raises(ValidationError, match="nonexistent"):
             runner.validate()

@@ -34,9 +34,9 @@ class TaskValidator:
             Tuple of (tasks_by_priority, valid_tasks).
 
         Raises:
-            SystemExit: If any tasks are invalid.
+            SystemExit: If any tasks are invalid or have no metrics configured.
         """
-        from olmo_eval.core.configs import expand_tasks, validate_tasks
+        from olmo_eval.core.configs import expand_tasks, validate_task_metrics, validate_tasks
         from olmo_eval.launch import validate_priority_configuration
 
         # Group by priority WITHOUT expanding first
@@ -63,6 +63,19 @@ class TaskValidator:
                 console.print(f"  - {inv}")
             console.print("\nUse 'olmo-eval tasks' to see available tasks.")
             console.print("Use 'olmo-eval suites' to see available suites.")
+            raise SystemExit(1) from None
+
+        # Check for tasks without metrics configured
+        _with_metrics, without_metrics = validate_task_metrics(valid_tasks)
+        if without_metrics:
+            console.print("[red]Error:[/red] The following tasks have no metrics configured:")
+            for spec in without_metrics:
+                console.print(f"  - {spec}")
+            console.print(
+                "\n[yellow]Hint:[/yellow] Tasks need metrics to score instances. "
+                "Use a variant with metrics (e.g., 'humaneval:bpb') or register "
+                "metrics for the base task."
+            )
             raise SystemExit(1) from None
 
         return tasks_by_priority, valid_tasks

@@ -97,6 +97,40 @@ def validate_tasks(tasks: list[str]) -> tuple[list[str], list[str]]:
     return valid_tasks, invalid_tasks
 
 
+def validate_task_metrics(tasks: list[str]) -> tuple[list[str], list[str]]:
+    """Check which tasks have metrics configured.
+
+    Tasks without metrics cannot be scored, making the evaluation run useless.
+    This validation helps catch configuration errors early.
+
+    Args:
+        tasks: List of task specs (should already be validated as existing).
+
+    Returns:
+        Tuple of (tasks_with_metrics, tasks_without_metrics).
+    """
+    from olmo_eval.evals.tasks import get_task
+
+    with_metrics = []
+    without_metrics = []
+
+    for spec in tasks:
+        # Strip priority suffix
+        task_spec = spec.rsplit("@", 1)[0] if "@" in spec else spec
+
+        try:
+            task = get_task(task_spec)
+            if task.config.metrics:
+                with_metrics.append(spec)
+            else:
+                without_metrics.append(spec)
+        except Exception:
+            # If we can't instantiate the task, skip it (should be caught elsewhere)
+            without_metrics.append(spec)
+
+    return with_metrics, without_metrics
+
+
 # Keys that are runner-specific and should not be passed to ProviderConfig
 _BACKEND_ONLY_KEYS = {
     "attention_backend",

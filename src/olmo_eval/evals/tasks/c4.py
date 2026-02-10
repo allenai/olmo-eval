@@ -81,8 +81,6 @@ class C4(C4Base):
     """C4 perplexity task."""
 
     data_source = DataSource(path="valentinhofmann/c4_short", subset="full", split="validation")
-    metrics = ()
-
     default_subset: str = "full"
 
 
@@ -91,8 +89,6 @@ class C41K(C4Base):
     """C4 perplexity task on 1,000 randomly sampled documents."""
 
     data_source = DataSource(path="valentinhofmann/c4_short", subset="1k", split="validation")
-    metrics = ()
-
     default_subset: str = "1k"
 
 
@@ -101,8 +97,6 @@ class C410K(C4Base):
     """C4 perplexity task on 10,000 randomly sampled documents."""
 
     data_source = DataSource(path="valentinhofmann/c4_short", subset="10k", split="validation")
-    metrics = ()
-
     default_subset: str = "10k"
 
 
@@ -111,8 +105,6 @@ class C4100K(C4Base):
     """C4 perplexity task on 100,000 randomly sampled documents."""
 
     data_source = DataSource(path="valentinhofmann/c4_short", subset="100k", split="validation")
-    metrics = ()
-
     default_subset: str = "100k"
 
 
