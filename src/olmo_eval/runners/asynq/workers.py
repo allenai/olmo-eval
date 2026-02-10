@@ -6,7 +6,9 @@ import asyncio
 import multiprocessing as mp
 import os
 import time
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from olmo_eval.core.logging import get_logger
 from olmo_eval.runners.asynq.queue import WORKER_FATAL_TASK_ID, QueueItem, ResultItem
@@ -15,6 +17,53 @@ if TYPE_CHECKING:
     from olmo_eval.core.harness import Harness
 
 logger = get_logger(__name__)
+
+T = TypeVar("T")
+R = TypeVar("R")
+
+
+class ScoringWorker:
+    """Background worker for scoring completed tasks.
+
+    Uses a thread pool executor to run scoring functions without blocking
+    the async result collection loop.
+    """
+
+    def __init__(self, max_workers: int = 4) -> None:
+        self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="scorer")
+        self._tasks: set[asyncio.Task] = set()
+
+    def submit(
+        self,
+        score_fn: Callable[[T], R],
+        arg: T,
+        callback: Callable[[R], None],
+    ) -> None:
+        """Submit work for background scoring.
+
+        Args:
+            score_fn: Function to run in the executor (e.g., finalize_task).
+            arg: Argument to pass to score_fn.
+            callback: Called with the result after scoring completes.
+        """
+
+        async def score_and_callback() -> None:
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(self._executor, score_fn, arg)
+            callback(result)
+
+        task = asyncio.create_task(score_and_callback())
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def wait(self) -> None:
+        """Wait for all pending scoring tasks to complete."""
+        if self._tasks:
+            await asyncio.gather(*self._tasks)
+
+    def shutdown(self) -> None:
+        """Shutdown the executor."""
+        self._executor.shutdown(wait=True)
 
 
 async def process_items(
@@ -208,5 +257,6 @@ def worker_process(
 
 
 __all__ = [
+    "ScoringWorker",
     "worker_process",
 ]
