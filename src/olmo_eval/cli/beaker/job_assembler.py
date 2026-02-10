@@ -57,9 +57,9 @@ class JobConfigAssembler:
             if preset.backend:
                 backend_extras = get_backend_extras(preset.backend)
                 install_extras.extend(backend_extras)
-
-        if self.enable_sandbox:
-            install_extras.append("sandbox")
+            # Install sandbox extra for any sandbox mode (local, docker, or modal)
+            if preset.sandbox is not None:
+                install_extras.append("sandbox")
 
         # Get provider extras from model preset (takes precedence over harness default)
         from olmo_eval.common.configs import get_provider_config

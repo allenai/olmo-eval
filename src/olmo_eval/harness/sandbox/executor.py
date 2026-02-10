@@ -61,15 +61,7 @@ class SandboxExecutor:
             ImportError: If swe-rex is not installed.
             RuntimeError: If container runtime is not available.
         """
-        try:
-            from swerex.deployment.docker import DockerDeployment
-            from swerex.deployment.local import LocalDeployment
-        except ImportError as e:
-            raise ImportError(
-                "swe-rex not installed. Install with: pip install 'olmo-eval-internal[sandbox]'"
-            ) from e
-
-        deployment = self._create_deployment(DockerDeployment, LocalDeployment)
+        deployment = self._create_deployment()
 
         logger.info(f"Starting sandbox deployment: {type(deployment).__name__}")
         await deployment.start(timeout=self.config.startup_timeout)
@@ -86,26 +78,21 @@ class SandboxExecutor:
         self._session = session_response.session_id
         logger.info(f"Sandbox session created: {self._session}")
 
-    def _create_deployment(
-        self,
-        DockerDeployment: type,
-        LocalDeployment: type,
-    ) -> Any:
+    def _create_deployment(self) -> Any:
         """Create the appropriate deployment based on configuration.
-
-        Args:
-            DockerDeployment: The DockerDeployment class from swe-rex.
-            LocalDeployment: The LocalDeployment class from swe-rex.
 
         Returns:
             A deployment instance.
 
         Raises:
+            ImportError: If swe-rex is not installed.
             RuntimeError: If the requested container runtime is not available.
         """
         mode = self.config.deployment_mode
 
         if mode == "docker":
+            from swerex.deployment.docker import DockerDeployment
+
             if not shutil.which("docker"):
                 raise RuntimeError("Docker not available but deployment_mode='docker'")
             return DockerDeployment(
@@ -114,10 +101,21 @@ class SandboxExecutor:
             )
 
         if mode == "local":
+            from swerex.deployment.local import LocalDeployment
+
             logger.warning(
                 "Using local deployment (unsandboxed). Commands will run on the host system."
             )
             return LocalDeployment()
+
+        if mode == "modal":
+            from swerex.deployment.modal import ModalDeployment
+
+            return ModalDeployment(
+                image=self.config.image,
+                runtime_timeout=self.config.runtime_timeout,
+                modal_sandbox_kwargs=self.config.modal_sandbox_kwargs,
+            )
 
         raise ValueError(f"Unknown deployment mode: {mode}")
 

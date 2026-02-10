@@ -368,13 +368,14 @@ def launch(
     )
 
     # Determine effective image
-    # Check if harness has a sandbox configured - if so, use sandbox image
+    # Check if harness has a sandbox configured with local deployment - if so, use sandbox image
     harness_needs_sandbox = False
     if launch_config.harness:
         from olmo_eval.harness import get_harness_preset
 
         harness_preset = get_harness_preset(launch_config.harness)
-        harness_needs_sandbox = harness_preset.sandbox is not None
+        if harness_preset.sandbox is not None:
+            harness_needs_sandbox = harness_preset.sandbox.is_local_deployment
 
     if image:
         effective_image = image
