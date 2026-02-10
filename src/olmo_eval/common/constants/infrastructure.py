@@ -22,6 +22,9 @@ BEAKER_DEFAULT_PRIORITY = "normal"
 BEAKER_DEFAULT_IMAGE = "ai2-tylerm/olmo-eval-cu1281-trc290-amd64"
 """Default Docker image for Beaker evaluation jobs."""
 
+BEAKER_SANDBOX_IMAGE = "ai2-tylerm/olmo-eval-cu1281-trc290-amd64-sandbox"
+"""Docker image for Beaker evaluation jobs with sandbox support (includes Podman)."""
+
 BEAKER_RESULT_DIR = "/results"
 """Default directory for evaluation results in Beaker jobs."""
 

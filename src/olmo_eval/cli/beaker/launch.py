@@ -256,7 +256,10 @@ def launch(
     from olmo_eval.cli.beaker.experiment_builder import ExperimentPlanBuilder
     from olmo_eval.cli.beaker.job_assembler import JobConfigAssembler
     from olmo_eval.cli.beaker.task_validator import TaskValidator
-    from olmo_eval.common.constants.infrastructure import BEAKER_DEFAULT_IMAGE
+    from olmo_eval.common.constants.infrastructure import (
+        BEAKER_DEFAULT_IMAGE,
+        BEAKER_SANDBOX_IMAGE,
+    )
 
     ordered_args = reconstruct_ordered_args(sys.argv[1:])
     raw_task_overrides, harness_overrides = process_ordered_args(ordered_args)
@@ -365,10 +368,20 @@ def launch(
     )
 
     # Determine effective image
+    # Check if harness has a sandbox configured - if so, use sandbox image
+    harness_needs_sandbox = False
+    if launch_config.harness:
+        from olmo_eval.harness import get_harness_preset
+
+        harness_preset = get_harness_preset(launch_config.harness)
+        harness_needs_sandbox = harness_preset.sandbox is not None
+
     if image:
         effective_image = image
     elif eval_config and eval_config.beaker_image:
         effective_image = eval_config.beaker_image
+    elif harness_needs_sandbox:
+        effective_image = BEAKER_SANDBOX_IMAGE
     else:
         effective_image = BEAKER_DEFAULT_IMAGE
 
