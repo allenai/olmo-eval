@@ -12,7 +12,7 @@ from rich.table import Table
 
 from olmo_eval.cli.results.transformers import _matches_prefix_filter
 from olmo_eval.cli.utils import console, format_timestamp
-from olmo_eval.runners.common import (
+from olmo_eval.runners.processing.utils import (
     extract_score_from_metrics,
     parse_metric_key,
 )

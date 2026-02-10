@@ -2,13 +2,13 @@
 
 import pytest
 
-from olmo_eval.core.formatters import (
+from olmo_eval.common.formatters import (
     ChatFormatter,
     CompletionFormatter,
     MultipleChoiceFormatter,
     PPLFormatter,
 )
-from olmo_eval.core.types import Instance, RequestType
+from olmo_eval.common.types import Instance, RequestType
 
 
 class TestChatFormatter:

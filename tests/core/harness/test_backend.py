@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from olmo_eval.core.harness.backends import (
+from olmo_eval.common.harness.backends import (
     BACKEND_REGISTRY,
     Backend,
     get_backend,

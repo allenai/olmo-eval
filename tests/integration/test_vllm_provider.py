@@ -17,7 +17,7 @@ To use a different model:
 
 import pytest
 
-from olmo_eval.core.types import LMRequest, RequestType, SamplingParams
+from olmo_eval.common.types import LMRequest, RequestType, SamplingParams
 
 pytestmark = [pytest.mark.gpu]
 

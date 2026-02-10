@@ -69,7 +69,7 @@ def inspect(
         olmo-eval task inspect humaneval -T meta-llama/Llama-3.1-8B-Instruct --formatted
         olmo-eval task inspect humaneval -T meta-llama/Llama-3.1-8B-Instruct --tokens
     """
-    from olmo_eval.core.inspection import (
+    from olmo_eval.common.inspection import (
         format_with_chat_template,
         formatted_request_to_dict,
         inspect_formatted_request,
@@ -81,7 +81,7 @@ def inspect(
         tokenize_request,
     )
     from olmo_eval.evals.tasks import get_task, task_exists
-    from olmo_eval.evals.tasks.core.registry import get_base_task_name
+    from olmo_eval.evals.tasks.common.registry import get_base_task_name
 
     # Validate tokenizer is provided when needed
     if (formatted or tokens) and not tokenizer:

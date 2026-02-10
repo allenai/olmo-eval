@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from olmo_eval.core.harness import clear_registry, register_tool
-from olmo_eval.core.harness.config import HarnessConfig, ProviderConfig
-from olmo_eval.core.harness.harness import Harness, create_harness
-from olmo_eval.core.harness.tools import tool
-from olmo_eval.core.types import LMRequest, ProviderKind, RequestType
+from olmo_eval.common.harness import clear_registry, register_tool
+from olmo_eval.common.harness.config import HarnessConfig, ProviderConfig
+from olmo_eval.common.harness.harness import Harness, create_harness
+from olmo_eval.common.harness.tools import tool
+from olmo_eval.common.types import LMRequest, ProviderKind, RequestType
 
 
 @pytest.fixture(autouse=True)

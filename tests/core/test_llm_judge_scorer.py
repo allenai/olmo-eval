@@ -1,10 +1,10 @@
 """Tests for olmo_eval.core.llm_judge_scorer module."""
 
-from olmo_eval.core.scorers import (
+from olmo_eval.common.scorers import (
     RubricJudgeScorer,
     SimpleQAJudgeScorer,
 )
-from olmo_eval.core.types import Instance, LMOutput
+from olmo_eval.common.types import Instance, LMOutput
 
 
 class TestSimpleQAJudgeScorer:

@@ -36,7 +36,7 @@ class TaskValidator:
         Raises:
             SystemExit: If any tasks are invalid or have no metrics configured.
         """
-        from olmo_eval.core.configs import expand_tasks, validate_task_metrics, validate_tasks
+        from olmo_eval.common.configs import expand_tasks, validate_task_metrics, validate_tasks
         from olmo_eval.launch import validate_priority_configuration
 
         # Group by priority WITHOUT expanding first
@@ -91,7 +91,7 @@ class TaskValidator:
         Returns:
             Dict mapping priority -> expanded task count.
         """
-        from olmo_eval.core.configs import expand_tasks
+        from olmo_eval.common.configs import expand_tasks
 
         counts: dict[str, int] = {}
         for priority_level, specs in tasks_by_priority.items():

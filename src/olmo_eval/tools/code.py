@@ -2,7 +2,7 @@
 
 import multiprocessing
 
-from olmo_eval.core.utils import _execute_code_unsafe
+from olmo_eval.common.utils import _execute_code_unsafe
 
 
 def _worker(args: tuple[str, str, float]) -> tuple[str, bool, str]:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR, cluster_has_weka
+from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, cluster_has_weka
 
 if TYPE_CHECKING:
     from olmo_eval.cli.beaker.config_loader import LaunchConfig
@@ -39,7 +39,7 @@ class JobConfigAssembler:
 
     def assemble(self, exp: ExperimentPlan) -> BeakerJobConfig:
         """Assemble a BeakerJobConfig for an experiment."""
-        from olmo_eval.core.constants.infrastructure import BACKEND_OPTIONAL_GROUPS
+        from olmo_eval.common.constants.infrastructure import BACKEND_OPTIONAL_GROUPS
         from olmo_eval.launch import BeakerEnvSecret, BeakerJobConfig
 
         command = self._build_command(exp)
@@ -49,7 +49,7 @@ class JobConfigAssembler:
             install_extras.append("postgres")
 
         if self.config.harness:
-            from olmo_eval.core.harness import get_backend_extras, get_harness_preset
+            from olmo_eval.common.harness import get_backend_extras, get_harness_preset
 
             preset = get_harness_preset(self.config.harness)
             if preset.backend:
@@ -57,7 +57,7 @@ class JobConfigAssembler:
                 install_extras.extend(backend_extras)
 
         # Get provider extras from model preset (takes precedence over harness default)
-        from olmo_eval.core.configs import get_provider_config
+        from olmo_eval.common.configs import get_provider_config
 
         provider_config = get_provider_config(exp.model_spec)
         provider_group = BACKEND_OPTIONAL_GROUPS.get(provider_config.kind)
@@ -117,9 +117,9 @@ class JobConfigAssembler:
     def _extract_task_dependencies(
         self, task_specs: list[str], task_overrides: dict[str, list[str]]
     ) -> list[str] | None:
-        from olmo_eval.core.configs import expand_tasks
+        from olmo_eval.common.configs import expand_tasks
         from olmo_eval.evals.tasks import get_task_dependencies
-        from olmo_eval.evals.tasks.core.registry import parse_overrides
+        from olmo_eval.evals.tasks.common.registry import parse_overrides
 
         # Expand suites to individual tasks before extracting dependencies
         expanded_specs = expand_tasks(task_specs)

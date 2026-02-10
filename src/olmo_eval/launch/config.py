@@ -26,7 +26,7 @@ from typing import Any
 
 from omegaconf import MISSING, OmegaConf
 
-from olmo_eval.core.constants.infrastructure import DEFAULT_MAX_GPUS_PER_NODE
+from olmo_eval.common.constants.infrastructure import DEFAULT_MAX_GPUS_PER_NODE
 
 
 def get_model_short_name(model_name: str, alias: str | None = None) -> str:

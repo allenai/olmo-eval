@@ -30,7 +30,7 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.text import Text
 
-from olmo_eval.core.constants.infrastructure import (
+from olmo_eval.common.constants.infrastructure import (
     BEAKER_DEFAULT_IMAGE,
     BEAKER_DEFAULT_WORKSPACE,
     BEAKER_KNOWN_CLUSTERS,

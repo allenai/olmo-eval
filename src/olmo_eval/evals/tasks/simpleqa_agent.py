@@ -17,12 +17,12 @@ import logging
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.core.formatters import ChatFormatter
-from olmo_eval.core.metrics import AccuracyMetric
-from olmo_eval.core.scorers import SimpleQAJudgeScorer
-from olmo_eval.core.types import Instance, LMRequest, RequestType, SamplingParams
+from olmo_eval.common.formatters import ChatFormatter
+from olmo_eval.common.metrics import AccuracyMetric
+from olmo_eval.common.scorers import SimpleQAJudgeScorer
+from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.tasks.core import Task, TaskConfig, register, register_variant
+from olmo_eval.evals.tasks.common import Task, TaskConfig, register, register_variant
 
 logger = logging.getLogger(__name__)
 

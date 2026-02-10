@@ -4,7 +4,7 @@ from datetime import datetime
 
 import pytest
 
-from olmo_eval.core.types import EvalResult, StoredTaskResult, compute_model_hash
+from olmo_eval.common.types import EvalResult, StoredTaskResult, compute_model_hash
 from olmo_eval.storage.base import convert_runner_results
 
 

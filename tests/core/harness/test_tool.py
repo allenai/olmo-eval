@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from olmo_eval.core.harness import (
+from olmo_eval.common.harness import (
     TOOL_REGISTRY,
     clear_registry,
     get_tool,
@@ -12,7 +12,7 @@ from olmo_eval.core.harness import (
     register_tool,
     registered_tool,
 )
-from olmo_eval.core.harness.tools import Tool, tool
+from olmo_eval.common.harness.tools import Tool, tool
 
 
 @pytest.fixture(autouse=True)

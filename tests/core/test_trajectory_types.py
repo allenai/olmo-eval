@@ -1,6 +1,6 @@
 """Tests for olmo_eval.core.trajectory_types module."""
 
-from olmo_eval.core.types import AgentTrajectory, AgentTurn, ToolCall, ToolResult
+from olmo_eval.common.types import AgentTrajectory, AgentTurn, ToolCall, ToolResult
 
 
 class TestAgentTurn:

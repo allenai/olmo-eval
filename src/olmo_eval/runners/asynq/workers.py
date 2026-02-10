@@ -6,74 +6,12 @@ import asyncio
 import multiprocessing as mp
 import os
 import time
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from olmo_eval.core.logging import get_logger
-from olmo_eval.runners.asynq.queue import WORKER_FATAL_TASK_ID, QueueItem, ResultItem
-
-if TYPE_CHECKING:
-    from olmo_eval.core.harness import Harness
+from olmo_eval.common.logging import get_logger
+from olmo_eval.runners.asynq.types import WORKER_FATAL_TASK_ID, QueueItem, ResultItem
 
 logger = get_logger(__name__)
-
-
-async def process_items(
-    items: list[QueueItem],
-    harness: Harness,
-    result_queue: mp.Queue,
-    max_concurrency: int | None = None,
-) -> None:
-    """Process queue items, batching where possible.
-
-    COMPLETION and LOGLIKELIHOOD requests are grouped by sampling_params and
-    processed in batches. CHAT requests are processed individually with async
-    concurrency.
-
-    Args:
-        items: Queue items to process.
-        harness: Harness instance for execution.
-        result_queue: Queue to put results.
-        max_concurrency: Maximum concurrent CHAT requests.
-    """
-    from olmo_eval.core.types import RequestType, SamplingParams
-    from olmo_eval.runners.asynq.helpers import process_batch, process_chat_request
-
-    chat_items: list[QueueItem] = []
-    batchable_items: list[QueueItem] = []
-
-    for item in items:
-        if item.request.request_type == RequestType.CHAT:
-            chat_items.append(item)
-        else:
-            batchable_items.append(item)
-
-    if batchable_items:
-        batches: dict[tuple[RequestType, SamplingParams | None], list[QueueItem]] = {}
-        for item in batchable_items:
-            key = (item.request.request_type, item.sampling_params)
-            if key not in batches:
-                batches[key] = []
-            batches[key].append(item)
-
-        for batch in batches.values():
-            await process_batch(batch, harness, result_queue)
-
-    if chat_items:
-        from tqdm import tqdm
-        from tqdm.contrib.logging import logging_redirect_tqdm
-
-        semaphore = asyncio.Semaphore(max_concurrency or len(chat_items))
-
-        async def process(item: QueueItem, pbar: tqdm) -> None:
-            async with semaphore:
-                await process_chat_request(item, harness, result_queue)
-                pbar.update(1)
-
-        with (
-            logging_redirect_tqdm(),
-            tqdm(total=len(chat_items), desc="Processing instances", unit="inst") as pbar,
-        ):
-            await asyncio.gather(*[process(item, pbar) for item in chat_items])
 
 
 def inference_worker(
@@ -101,13 +39,13 @@ def inference_worker(
     """
     import sys
 
-    from olmo_eval.core.logging import configure_logging, configure_worker_logging
+    from olmo_eval.common.logging import configure_logging, configure_worker_logging
 
     configure_logging()
 
     worker_logger = configure_worker_logging(worker_id)
 
-    from olmo_eval.core.harness import Harness, HarnessConfig
+    from olmo_eval.common.harness import Harness, HarnessConfig
 
     harness_config = HarnessConfig.from_dict(harness_config_dict)
     provider_config = harness_config.provider
@@ -176,6 +114,8 @@ def inference_worker(
                 items.append(item)
 
             if items:
+                from olmo_eval.runners.asynq.processing import process_items
+
                 asyncio.run(process_items(items, harness, result_queue, max_concurrency))
 
             worker_logger.info("Processing complete")
@@ -217,11 +157,11 @@ def scoring_worker(
     """
     from tqdm import tqdm
 
-    from olmo_eval.core.logging import configure_logging
+    from olmo_eval.common.logging import configure_logging
 
     configure_logging()
 
-    from olmo_eval.runners.asynq.queue import ScoredResponse, ScoringItem
+    from olmo_eval.runners.asynq.types import ScoredResponse, ScoringItem
 
     pbar: tqdm | None = None
 

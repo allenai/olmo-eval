@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from rich.console import Console
 
 if TYPE_CHECKING:
-    from olmo_eval.runners.models import S3Config
+    from olmo_eval.runners.common.models import S3Config
     from olmo_eval.storage import StorageBackend
 
 console = Console()
@@ -116,7 +116,7 @@ class StorageSetup:
             console.print("[red]Error:[/red] --s3-group is required for S3 uploads")
             raise SystemExit(1)
 
-        from olmo_eval.runners.models import S3Config
+        from olmo_eval.runners.common.models import S3Config
 
         s3_config = S3Config(
             bucket=self.s3_bucket,

@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
-from olmo_eval.core.types import LMOutput, LMRequest, SamplingParams
+from olmo_eval.common.types import LMOutput, LMRequest, SamplingParams
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI

@@ -14,7 +14,7 @@ from sqlalchemy import and_, delete, exists, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
-from olmo_eval.core.types import EvalResult, StoredTaskResult
+from olmo_eval.common.types import EvalResult, StoredTaskResult
 from olmo_eval.storage.backends.postgres.models import Experiment, InstancePrediction, TaskResult
 
 

@@ -3,14 +3,14 @@
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.core.metrics import CorpusPerplexityMetric
-from olmo_eval.core.types import (
+from olmo_eval.common.metrics import CorpusPerplexityMetric
+from olmo_eval.common.types import (
     Instance,
     LMRequest,
     RequestType,
 )
 from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.tasks.core import Task, TaskConfig, register, register_variant
+from olmo_eval.evals.tasks.common import Task, TaskConfig, register, register_variant
 
 
 class C4Base(Task):

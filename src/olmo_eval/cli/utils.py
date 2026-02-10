@@ -8,8 +8,8 @@ import click
 from rich.console import Console
 
 if TYPE_CHECKING:
-    from olmo_eval.core.harness import HarnessConfig
-    from olmo_eval.evals.tasks.core.base import TaskConfig
+    from olmo_eval.common.harness import HarnessConfig
+    from olmo_eval.evals.tasks.common.base import TaskConfig
     from olmo_eval.launch.beaker.launcher import BeakerJobConfig
 
 

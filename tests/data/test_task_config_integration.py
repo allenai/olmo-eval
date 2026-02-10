@@ -3,7 +3,7 @@
 import pytest
 
 from olmo_eval.data import DataSource, SourceType
-from olmo_eval.evals.tasks.core import TaskConfig
+from olmo_eval.evals.tasks.common import TaskConfig
 
 
 class TestTaskConfigDataSource:
@@ -37,7 +37,7 @@ class TestTaskConfigDataSource:
         assert source.split == "validation"
 
     def test_get_data_source_uses_config_split_by_default(self):
-        from olmo_eval.core.types import Split
+        from olmo_eval.common.types import Split
 
         config = TaskConfig(
             name="test_task",

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any
 
-from olmo_eval.core.types import LMOutput, LMRequest, SamplingParams
+from olmo_eval.common.types import LMOutput, LMRequest, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 

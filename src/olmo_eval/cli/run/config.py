@@ -7,7 +7,7 @@ from typing import Any
 
 from rich.console import Console
 
-from olmo_eval.core.harness.config import HarnessConfig, ProviderConfig
+from olmo_eval.common.harness.config import HarnessConfig, ProviderConfig
 
 console = Console()
 
@@ -232,7 +232,7 @@ class RunConfigBuilder:
 
         if self.harness_preset:
             try:
-                from olmo_eval.core.harness import get_harness_preset
+                from olmo_eval.common.harness import get_harness_preset
 
                 harness_config = get_harness_preset(self.harness_preset)
             except ValueError as e:
@@ -277,7 +277,7 @@ class RunConfigBuilder:
             harness_dict = OmegaConf.to_container(merged, resolve=True)
             harness_config = HarnessConfig.from_dict(harness_dict)  # type: ignore[arg-type]
 
-        from olmo_eval.core.configs import get_provider_config
+        from olmo_eval.common.configs import get_provider_config
 
         provider_config = get_provider_config(model_name)
         harness_config = harness_config.merge_provider(provider_config)

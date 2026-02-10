@@ -4,7 +4,7 @@ from collections.abc import Iterator
 
 import pytest
 
-from olmo_eval.core.types import Instance, LMOutput, LMRequest, RequestType
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks import (
     Task,
@@ -19,7 +19,7 @@ from olmo_eval.evals.tasks import (
     register_regime,
     register_variant,
 )
-from olmo_eval.evals.tasks.core.registry import _configs, _regimes, _tasks, _variants
+from olmo_eval.evals.tasks.common.registry import _configs, _regimes, _tasks, _variants
 
 
 class DummyTask(Task):

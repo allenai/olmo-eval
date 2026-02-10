@@ -8,7 +8,7 @@ from typing import Any, TypeVar, cast
 
 import click
 
-from olmo_eval.core.constants.infrastructure import LOCAL_RESULT_DIR
+from olmo_eval.common.constants.infrastructure import LOCAL_RESULT_DIR
 
 F = TypeVar("F", bound=Callable[..., Any])
 

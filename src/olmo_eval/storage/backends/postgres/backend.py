@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from olmo_eval.core.types import EvalResult
+from olmo_eval.common.types import EvalResult
 from olmo_eval.storage.backends.postgres.queries import QueryHelper
 from olmo_eval.storage.backends.postgres.session import DatabaseSession
 from olmo_eval.storage.base import StorageBackend

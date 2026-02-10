@@ -117,7 +117,7 @@ def run(
     from olmo_eval.cli.run.config import RunConfigBuilder
     from olmo_eval.cli.run.factory import RunnerFactory
     from olmo_eval.cli.run.storage import StorageSetup
-    from olmo_eval.core.logging import configure_logging
+    from olmo_eval.common.logging import configure_logging
     from olmo_eval.runners import ValidationError
 
     # Process ordered args to associate overrides with tasks/harness

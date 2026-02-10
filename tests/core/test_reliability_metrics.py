@@ -1,9 +1,9 @@
 """Tests for pass@k and pass^k reliability metrics."""
 
-from olmo_eval.core.metrics import PassAtKMetric, PassPowKMetric
-from olmo_eval.core.scorers import CodeExecutionScorer
-from olmo_eval.core.types import Instance, LMOutput, LMRequest, RequestType, Response
-from olmo_eval.core.utils import compute_pass_at_k, compute_pass_pow_k
+from olmo_eval.common.metrics import PassAtKMetric, PassPowKMetric
+from olmo_eval.common.scorers import CodeExecutionScorer
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
+from olmo_eval.common.utils import compute_pass_at_k, compute_pass_pow_k
 
 
 def make_response(task_id: str, score: float, scorer_name: str = "code_execution") -> Response:

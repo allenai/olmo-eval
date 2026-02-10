@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from olmo_eval.core.types import (
+from olmo_eval.common.types import (
     APICallToolType,
     CodeExecutionToolType,
     DatabaseToolType,

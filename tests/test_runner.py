@@ -5,7 +5,7 @@ import pytest
 # Import to ensure tasks and suites are registered
 import olmo_eval.evals  # noqa: F401
 import olmo_eval.evals.tasks  # noqa: F401
-from olmo_eval.core.harness.config import HarnessConfig, ProviderConfig
+from olmo_eval.common.harness.config import HarnessConfig, ProviderConfig
 from olmo_eval.runners import EvalRunner, ValidationError
 
 
@@ -126,7 +126,7 @@ class TestSuiteAggregations:
         # Create mock task results that match expanded mt_mbpp_v2fix tasks
         # Get actual tasks in mt_mbpp_v2fix suite
         from olmo_eval.evals.suites import get_suite
-        from olmo_eval.runners.utils import compute_suite_aggregations
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
 
         suite = get_suite("mt_mbpp_v2fix")
         expanded_tasks = suite.expand()
@@ -145,7 +145,7 @@ class TestSuiteAggregations:
     def test_suite_aggregation_with_priority(self):
         """Test suite aggregation with priority suffix."""
         from olmo_eval.evals.suites import get_suite
-        from olmo_eval.runners.utils import compute_suite_aggregations
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
 
         suite = get_suite("mt_mbpp_v2fix")
         expanded_tasks = suite.expand()
@@ -164,7 +164,7 @@ class TestSuiteAggregations:
 
     def test_suite_aggregation_non_suite_ignored(self):
         """Test that non-suite specs are ignored."""
-        from olmo_eval.runners.utils import compute_suite_aggregations
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
 
         task_results = {"humaneval": {"metrics": {"accuracy": {"exact_match": 0.75}}}}
 
@@ -180,7 +180,7 @@ class TestSuiteAggregations:
             AggregationStrategy,
             Suite,
         )
-        from olmo_eval.runners.utils import compute_suite_aggregations
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
 
         # Create a nested suite for testing
         nested_suite = Suite(
@@ -252,7 +252,7 @@ class TestGetPrimaryMetric:
 
     def test_preferred_metric_used_when_present(self):
         """Test that preferred metric is used when specified and present."""
-        from olmo_eval.runners.utils import get_primary_metric
+        from olmo_eval.runners.processing.utils import get_primary_metric
 
         metrics = {
             "accuracy": {"exact_match": 0.75},
@@ -265,7 +265,7 @@ class TestGetPrimaryMetric:
 
     def test_preferred_metric_ignored_when_not_present(self):
         """Test fallback when preferred metric is not in metrics dict."""
-        from olmo_eval.runners.utils import get_primary_metric
+        from olmo_eval.runners.processing.utils import get_primary_metric
 
         metrics = {"accuracy": {"exact_match": 0.75}, "f1": {"f1_scorer": 0.8}}
         result = get_primary_metric(metrics, preferred="bits_per_byte:bpb_scorer")
@@ -275,7 +275,7 @@ class TestGetPrimaryMetric:
 
     def test_accuracy_fallback_when_no_preferred(self):
         """Test that accuracy is used when no preferred metric specified."""
-        from olmo_eval.runners.utils import get_primary_metric
+        from olmo_eval.runners.processing.utils import get_primary_metric
 
         metrics = {"accuracy": {"exact_match": 0.75}, "bits_per_byte": {"bpb_scorer": 0.5}}
         result = get_primary_metric(metrics)
@@ -284,7 +284,7 @@ class TestGetPrimaryMetric:
 
     def test_alphabetical_fallback_when_no_accuracy(self):
         """Test alphabetical fallback when no accuracy and no preferred."""
-        from olmo_eval.runners.utils import get_primary_metric
+        from olmo_eval.runners.processing.utils import get_primary_metric
 
         metrics = {"f1": {"f1_scorer": 0.8}, "bits_per_byte": {"bpb_scorer": 0.5}}
         result = get_primary_metric(metrics)
@@ -294,14 +294,14 @@ class TestGetPrimaryMetric:
 
     def test_empty_metrics_returns_none(self):
         """Test that empty metrics returns None."""
-        from olmo_eval.runners.utils import get_primary_metric
+        from olmo_eval.runners.processing.utils import get_primary_metric
 
         result = get_primary_metric({})
         assert result is None
 
     def test_preferred_none_same_as_not_specified(self):
         """Test that preferred=None behaves same as not specifying."""
-        from olmo_eval.runners.utils import get_primary_metric
+        from olmo_eval.runners.processing.utils import get_primary_metric
 
         metrics = {"accuracy": {"exact_match": 0.75}, "bits_per_byte": {"bpb_scorer": 0.5}}
 

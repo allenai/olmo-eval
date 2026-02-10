@@ -19,7 +19,7 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager, suppress
 from typing import TYPE_CHECKING, Any
 
-from olmo_eval.core.debug import is_debug_provider
+from olmo_eval.common.debug import is_debug_provider
 
 if TYPE_CHECKING:
     pass

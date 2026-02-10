@@ -2,7 +2,7 @@
 
 import pytest
 
-from olmo_eval.core.types import Instance, LMOutput, RequestType
+from olmo_eval.common.types import Instance, LMOutput, RequestType
 from olmo_eval.evals.tasks import get_task, list_tasks
 
 

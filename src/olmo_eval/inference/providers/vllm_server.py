@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from olmo_eval.core.logging import get_logger
-from olmo_eval.core.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
-from olmo_eval.core.types.tools import ToolCall
+from olmo_eval.common.logging import get_logger
+from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
+from olmo_eval.common.types.tools import ToolCall
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.retry import retry_with_backoff
 

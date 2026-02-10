@@ -1,6 +1,6 @@
 """Language model inference providers."""
 
-from olmo_eval.core.types import ProviderKind
+from olmo_eval.common.types import ProviderKind
 
 from .base import InferenceProvider
 from .providers.mock import MockProvider

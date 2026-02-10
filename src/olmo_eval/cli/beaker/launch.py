@@ -29,7 +29,7 @@ from olmo_eval.cli.utils import (
     process_ordered_args,
     reconstruct_ordered_args,
 )
-from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_UV_CACHE_DIR
+from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_UV_CACHE_DIR
 
 
 @click.command()
@@ -255,7 +255,7 @@ def launch(
     from olmo_eval.cli.beaker.experiment_builder import ExperimentPlanBuilder
     from olmo_eval.cli.beaker.job_assembler import JobConfigAssembler
     from olmo_eval.cli.beaker.task_validator import TaskValidator
-    from olmo_eval.core.constants.infrastructure import BEAKER_DEFAULT_IMAGE
+    from olmo_eval.common.constants.infrastructure import BEAKER_DEFAULT_IMAGE
 
     ordered_args = reconstruct_ordered_args(sys.argv[1:])
     raw_task_overrides, harness_overrides = process_ordered_args(ordered_args)
@@ -390,7 +390,7 @@ def launch(
             all_required_secrets.update(task_cfg.required_secrets)
 
     # Collect required secrets from model presets
-    from olmo_eval.core.configs import get_provider_config
+    from olmo_eval.common.configs import get_provider_config
 
     for model_spec in launch_config.model_specs:
         provider_config = get_provider_config(model_spec)
@@ -399,7 +399,7 @@ def launch(
 
     # Collect harness-required secrets
     if launch_config.harness:
-        from olmo_eval.core.harness import get_harness_preset
+        from olmo_eval.common.harness import get_harness_preset
 
         harness_config = get_harness_preset(launch_config.harness)
         if harness_config.required_secrets:
@@ -543,7 +543,7 @@ def _get_task_configs(
     from copy import deepcopy
 
     from olmo_eval.evals.tasks import get_task as get_task_instance
-    from olmo_eval.evals.tasks.core.registry import parse_task_spec
+    from olmo_eval.evals.tasks.common.registry import parse_task_spec
 
     task_overrides = task_overrides or {}
     task_configs = {}
@@ -672,8 +672,8 @@ def _build_experiment_summary(
         output_dir=BEAKER_RESULT_DIR,
     )
 
-    from olmo_eval.core.configs import get_provider_config
-    from olmo_eval.core.harness import get_harness_preset
+    from olmo_eval.common.configs import get_provider_config
+    from olmo_eval.common.harness import get_harness_preset
 
     harness_config = get_harness_preset(harness or "default")
     provider_config = get_provider_config(exp.model_spec)

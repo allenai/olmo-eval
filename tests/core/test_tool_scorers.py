@@ -1,11 +1,11 @@
 """Tests for olmo_eval.core.tool_scorers module."""
 
-from olmo_eval.core.scorers import (
+from olmo_eval.common.scorers import (
     ToolArgumentScorer,
     ToolCallScorer,
     ToolSequenceScorer,
 )
-from olmo_eval.core.types import Instance, LMOutput, ToolCall
+from olmo_eval.common.types import Instance, LMOutput, ToolCall
 
 
 class TestToolCallScorer:

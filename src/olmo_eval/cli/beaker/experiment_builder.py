@@ -64,7 +64,7 @@ class ExperimentPlanBuilder:
 
     def build(self) -> tuple[list[ExperimentPlan], list[str]]:
         """Build the experiment plan."""
-        from olmo_eval.core.configs import expand_tasks
+        from olmo_eval.common.configs import expand_tasks
 
         experiment_plan: list[ExperimentPlan] = []
         split_models: list[str] = []

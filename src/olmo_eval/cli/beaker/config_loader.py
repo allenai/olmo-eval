@@ -70,7 +70,7 @@ class LaunchConfigLoader:
 
     def load(self) -> LaunchConfig:
         """Load and merge configuration."""
-        from olmo_eval.core.constants.infrastructure import DEFAULT_MAX_GPUS_PER_NODE
+        from olmo_eval.common.constants.infrastructure import DEFAULT_MAX_GPUS_PER_NODE
         from olmo_eval.launch import EvalConfig
 
         cfg: EvalConfig | None = None
@@ -249,7 +249,7 @@ class LaunchConfigLoader:
         Returns:
             1 if provider requires GPU (vllm, hf), 0 otherwise (litellm, mock).
         """
-        from olmo_eval.core.configs import get_provider_config
+        from olmo_eval.common.configs import get_provider_config
 
         try:
             provider_config = get_provider_config(model_spec)

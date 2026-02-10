@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from olmo_eval.core.harness import clear_registry
-from olmo_eval.core.harness.config import HarnessConfig
-from olmo_eval.core.harness.presets import (
+from olmo_eval.common.harness import clear_registry
+from olmo_eval.common.harness.config import HarnessConfig
+from olmo_eval.common.harness.presets import (
     _PRESET_REGISTRY,
     get_harness_preset,
     list_harness_presets,
@@ -99,8 +99,8 @@ class TestSearchTools:
     def register_search_tools(self):
         """Ensure search tools are registered for these tests."""
         # Force import to trigger @registered_tool decorators
-        from olmo_eval.core.harness import register_tool
-        from olmo_eval.core.harness.tools import search  # noqa: F401
+        from olmo_eval.common.harness import register_tool
+        from olmo_eval.common.harness.tools import search  # noqa: F401
 
         # Re-register tools since registry may have been cleared
         register_tool(search.semantic_scholar_search)
@@ -109,7 +109,7 @@ class TestSearchTools:
 
     def test_search_tools_registered(self):
         """Test that search tools are registered when preset is loaded."""
-        from olmo_eval.core.harness import list_tools
+        from olmo_eval.common.harness import list_tools
 
         tools = list_tools()
         assert "semantic_scholar_snippet_search" in tools

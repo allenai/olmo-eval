@@ -7,8 +7,8 @@ import logging
 import os
 from typing import TYPE_CHECKING, Any
 
-from olmo_eval.core.debug import is_debug_provider, is_debug_requests
-from olmo_eval.core.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
+from olmo_eval.common.debug import is_debug_provider, is_debug_requests
+from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 
