@@ -6,9 +6,7 @@ import asyncio
 import multiprocessing as mp
 import os
 import time
-from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any
 
 from olmo_eval.core.logging import get_logger
 from olmo_eval.runners.asynq.queue import WORKER_FATAL_TASK_ID, QueueItem, ResultItem
@@ -17,53 +15,6 @@ if TYPE_CHECKING:
     from olmo_eval.core.harness import Harness
 
 logger = get_logger(__name__)
-
-T = TypeVar("T")
-R = TypeVar("R")
-
-
-class ScoringWorker:
-    """Background worker for scoring completed tasks.
-
-    Uses a thread pool executor to run scoring functions without blocking
-    the async result collection loop.
-    """
-
-    def __init__(self, max_workers: int = 4) -> None:
-        self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="scorer")
-        self._tasks: set[asyncio.Task] = set()
-
-    def submit(
-        self,
-        score_fn: Callable[[T], R],
-        arg: T,
-        callback: Callable[[R], None],
-    ) -> None:
-        """Submit work for background scoring.
-
-        Args:
-            score_fn: Function to run in the executor (e.g., finalize_task).
-            arg: Argument to pass to score_fn.
-            callback: Called with the result after scoring completes.
-        """
-
-        async def score_and_callback() -> None:
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(self._executor, score_fn, arg)
-            callback(result)
-
-        task = asyncio.create_task(score_and_callback())
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
-
-    async def wait(self) -> None:
-        """Wait for all pending scoring tasks to complete."""
-        if self._tasks:
-            await asyncio.gather(*self._tasks)
-
-    def shutdown(self) -> None:
-        """Shutdown the executor."""
-        self._executor.shutdown(wait=True)
 
 
 async def process_items(
@@ -109,22 +60,23 @@ async def process_items(
 
     if chat_items:
         from tqdm import tqdm
+        from tqdm.contrib.logging import logging_redirect_tqdm
 
         semaphore = asyncio.Semaphore(max_concurrency or len(chat_items))
-        pbar = tqdm(total=len(chat_items), desc="Processing instances", unit="inst")
 
-        async def process(item: QueueItem) -> None:
+        async def process(item: QueueItem, pbar: tqdm) -> None:
             async with semaphore:
                 await process_chat_request(item, harness, result_queue)
                 pbar.update(1)
 
-        try:
-            await asyncio.gather(*[process(item) for item in chat_items])
-        finally:
-            pbar.close()
+        with (
+            logging_redirect_tqdm(),
+            tqdm(total=len(chat_items), desc="Processing instances", unit="inst") as pbar,
+        ):
+            await asyncio.gather(*[process(item, pbar) for item in chat_items])
 
 
-def worker_process(
+def inference_worker(
     worker_id: str,
     gpu_ids: list[int],
     item_queue: mp.Queue,
@@ -256,7 +208,70 @@ def worker_process(
         sys.exit(1)
 
 
+def scoring_worker(
+    scoring_queue: mp.Queue,
+    scored_queue: mp.Queue,
+    total_tasks: int,
+) -> None:
+    """Worker process that scores completed tasks.
+
+    Reads ScoringItems from scoring_queue, calls finalize_task, and puts
+    ScoredResults on scored_queue.
+
+    Args:
+        scoring_queue: Queue of ScoringItems (None signals shutdown).
+        scored_queue: Queue to put ScoredResults.
+        total_tasks: Total number of tasks to score (for progress bar).
+    """
+    from tqdm import tqdm
+    from tqdm.contrib.logging import logging_redirect_tqdm
+
+    from olmo_eval.core.logging import configure_logging
+
+    configure_logging()
+
+    scoring_logger = get_logger("scoring_worker")
+    scoring_logger.info("Scoring worker started")
+
+    from olmo_eval.runners.asynq.queue import ScoredResult, ScoringItem, finalize_task
+
+    try:
+        with (
+            logging_redirect_tqdm(),
+            tqdm(total=total_tasks, desc="Scoring instances", unit="inst") as pbar,
+        ):
+            while True:
+                item: ScoringItem | None = scoring_queue.get()
+                if item is None:
+                    scoring_logger.info("Scoring worker shutting down")
+                    break
+
+                scoring_logger.info(f"Scoring {item.spec}...")
+                try:
+                    result = finalize_task(item.tracker)
+                    scored_queue.put(ScoredResult(spec=item.spec, result=result))
+                    scoring_logger.info(f"Scored {item.spec}")
+                except Exception as e:
+                    scoring_logger.error(f"Failed to score {item.spec}: {e}")
+                    # Put an error result
+                    from olmo_eval.runners.utils import TaskResult
+
+                    error_result = TaskResult(
+                        spec=item.spec,
+                        config={},
+                        num_instances=item.tracker.total_instances,
+                        metrics={},
+                        error=f"Scoring failed: {e}",
+                        duration_seconds=0,
+                    )
+                    scored_queue.put(ScoredResult(spec=item.spec, result=error_result))
+                finally:
+                    pbar.update(1)
+    except Exception as e:
+        scoring_logger.error(f"Scoring worker crashed: {e}")
+
+
 __all__ = [
-    "ScoringWorker",
-    "worker_process",
+    "scoring_worker",
+    "inference_worker",
 ]

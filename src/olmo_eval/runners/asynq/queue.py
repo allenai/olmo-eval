@@ -94,6 +94,22 @@ class ResultItem:
     attempt: int = 0
 
 
+@dataclass
+class ScoringItem:
+    """Item to be scored by the scoring worker."""
+
+    spec: str
+    tracker: TaskTracker
+
+
+@dataclass
+class ScoredResult:
+    """Result from the scoring worker."""
+
+    spec: str
+    result: TaskResult
+
+
 # -----------------------------------------------------------------------------
 # Task preparation functions
 # -----------------------------------------------------------------------------
@@ -273,6 +289,8 @@ __all__ = [
     "QueueItem",
     "TaskTracker",
     "ResultItem",
+    "ScoringItem",
+    "ScoredResult",
     "prepare_task_items",
     "build_requests_from_items",
     "finalize_task",
