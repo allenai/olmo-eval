@@ -62,15 +62,13 @@ The evaluation framework is built around these core abstractions:
 Tasks define how to load data, format prompts, and score outputs. Register with `@register`:
 
 ```python
-from olmo_eval.evals.tasks import Task, TaskConfig, register
+from olmo_eval.evals.tasks import Task, register
+from olmo_eval.data import DataSource
 
-@register("my_task", lambda: TaskConfig(
-    name="my_task",
-    data_source="hf://dataset/path",
-    formatter=MultipleChoiceFormatter(),
-    metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
-))
-class MyTask(Task): ...
+@register("my_task")
+class MyTask(Task):
+    data_source = DataSource(path="my-org/my-dataset")
+    ...
 ```
 
 **Regimes** are named presets that override task settings (e.g., few-shot count):
@@ -413,17 +411,16 @@ Here's a complete, minimal task implementation:
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.formatters import MultipleChoiceFormatter
-from olmo_eval.common.metrics import AccuracyMetric
-from olmo_eval.common.scorers import MultipleChoiceScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks import Task, TaskConfig, register
 
 
+@register("my_task")
 class MyTask(Task):
-    """Base class for my task."""
+    """My task implementation."""
 
+    data_source = DataSource(path="my-org/my-dataset")
     default_source: str = "my-org/my-dataset"
 
     @property
@@ -463,21 +460,6 @@ class MyTask(Task):
     def extract_answer(self, output: LMOutput) -> str | None:
         """Extract the answer from model output."""
         return output.text.strip()
-
-
-def _my_task_config() -> TaskConfig:
-    return TaskConfig(
-        name="my_task",
-        data_source=DataSource(path="my-org/my-dataset"),
-        formatter=MultipleChoiceFormatter(template="Q: {question}\n\nA:"),
-        metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
-    )
-
-
-@register("my_task", _my_task_config)
-class MyTaskImpl(MyTask):
-    """Registered task implementation."""
-    pass
 ```
 
 ### Task Class Overview
@@ -556,8 +538,10 @@ class MMLUTask(Task):
         self.subset = subset
 
 # Register each subset
-@register("mmlu_anatomy", _mmlu_anatomy_config)
+@register("mmlu_anatomy")
 class MMLUAnatomy(MMLUTask):
+    data_source = DataSource(path="cais/mmlu", subset="anatomy")
+
     def __init__(self, config: TaskConfig) -> None:
         super().__init__(config, subset="anatomy")
 ```
