@@ -143,11 +143,6 @@ def inference_worker(
         has_tools = harness_config.has_tools
         enable_auto_tool_choice = has_tools and provider_kind == "vllm_server"
 
-        worker_logger.info(f"  Has tools: {has_tools}")
-        if has_tools:
-            worker_logger.info(f"  Tools: {list(harness_config.tool_names)}")
-        worker_logger.info(f"  Enable auto tool choice: {enable_auto_tool_choice}")
-
         # Set log_dir for vllm_server provider to persist server logs
         log_dir = output_dir if provider_kind == "vllm_server" and output_dir else None
 
@@ -180,8 +175,6 @@ def inference_worker(
                 if item is None:
                     break
                 items.append(item)
-
-            worker_logger.info(f"Processing {len(items)} instances...")
 
             if items:
                 asyncio.run(process_items(items, harness, result_queue, max_concurrency))

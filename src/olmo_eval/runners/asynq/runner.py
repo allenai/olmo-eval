@@ -164,7 +164,6 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         scored_queue: mp.Queue = ctx.Queue()
         num_workers = self._get_num_workers()
         total_gpus = self._get_gpu_count()
-        logger.info(f"Total workers: {num_workers}")
 
         # Create shared dict for tracking worker init times
         manager = ctx.Manager()
@@ -194,7 +193,6 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             workers = self._start_workers(
                 ctx, num_workers, total_gpus, item_queue, result_queue, init_times
             )
-            logger.info(f"{len(workers)} worker(s) started, processing instances...")
 
             # Wait for workers to initialize
             logger.info("Waiting for workers to initialize...")
