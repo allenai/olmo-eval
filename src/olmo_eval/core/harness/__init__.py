@@ -1,6 +1,6 @@
 """Harness abstraction for configuring model capabilities.
 
-The Harness is the primary abstraction for "a model configured with specific capabilities".
+The Harness is the primary abstraction for "a model provider configured with specific capabilities".
 It owns the model runtime configuration (tools, system prompt, execution behavior)
 and provides both single-turn and multi-turn interfaces.
 

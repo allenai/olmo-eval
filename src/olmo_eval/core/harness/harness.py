@@ -1,4 +1,4 @@
-"""Harness: A model configured with specific capabilities.
+"""Harness: A model provider configured with specific capabilities.
 
 The Harness wraps an InferenceProvider and applies configuration to all requests.
 It provides both single-turn (generate) and multi-turn (run) interfaces.
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 
 class Harness:
-    """An execution harness configured with specific capabilities.
+    """A model provider configured with specific capabilities.
 
     The Harness wraps an InferenceProvider and applies
     configuration to the requests. It provides both single-turn (generate/agenerate)

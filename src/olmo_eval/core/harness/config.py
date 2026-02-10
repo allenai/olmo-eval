@@ -1,9 +1,3 @@
-"""HarnessConfig: Immutable configuration describing model capabilities.
-
-The configuration uses tool names (not Tool objects) for serialization.
-Tools are resolved from the global registry at runtime.
-"""
-
 from __future__ import annotations
 
 import os

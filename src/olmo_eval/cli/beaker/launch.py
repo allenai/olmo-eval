@@ -180,7 +180,7 @@ from olmo_eval.core.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_UV
     "--harness",
     type=str,
     default=None,
-    help="Harness preset name (e.g., 'search', 'dr_tulu') for tool/prompt configuration",
+    help="Harness preset name",
 )
 @click.option(
     "--uv-cache-dir",
