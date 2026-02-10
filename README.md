@@ -232,8 +232,8 @@ olmo-eval run -m llama3.1-8b -t simpleqa --harness-config ./my_harness.yaml
 Configuration for a harness:
 
 ```python
-from olmo_eval.common.harness import HarnessConfig, ProviderConfig, get_harness_preset
-from olmo_eval.common.harness.tools.search import (
+from olmo_eval.harness import HarnessConfig, ProviderConfig, get_harness_preset
+from olmo_eval.harness.tools.search import (
     semantic_scholar_search,
     serper_web_search,
     serper_fetch_page,
@@ -304,7 +304,7 @@ outputs = harness.generate(requests)  # No backend needed
 Tools combine schema (for the LLM) and implementation (for execution) in a single definition:
 
 ```python
-from olmo_eval.common.harness import tool, registered_tool
+from olmo_eval.harness import tool, registered_tool
 
 # Option 1: @tool decorator (local use)
 @tool(description="Search the web for information")
@@ -348,8 +348,8 @@ olmo-eval run -m llama3.1-8b -t simpleqa --harness-config my_harness.yaml
 #### Programmatic Usage
 
 ```python
-from olmo_eval.common.harness import Harness, HarnessConfig, ProviderConfig, get_harness_preset
-from olmo_eval.common.harness.tools.search import (
+from olmo_eval.harness import Harness, HarnessConfig, ProviderConfig, get_harness_preset
+from olmo_eval.harness.tools.search import (
     semantic_scholar_search,
     serper_web_search,
 )

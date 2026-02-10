@@ -1,5 +1,6 @@
 """Inference provider implementations."""
 
+from .config import ProviderConfig
 from .huggingface import HuggingFaceProvider
 from .litellm import LiteLLMProvider
 from .mock import MockProvider
@@ -10,6 +11,7 @@ __all__ = [
     "HuggingFaceProvider",
     "LiteLLMProvider",
     "MockProvider",
+    "ProviderConfig",
     "VLLMProvider",
     "VLLMServerProvider",
 ]

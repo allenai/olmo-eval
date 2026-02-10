@@ -3,7 +3,7 @@
 # Import to ensure suites are registered
 import olmo_eval.evals  # noqa: F401
 from olmo_eval.common.configs import expand_tasks, get_model_config
-from olmo_eval.common.harness.config import ProviderConfig
+from olmo_eval.harness.config import ProviderConfig
 
 
 class TestExpandTasks:

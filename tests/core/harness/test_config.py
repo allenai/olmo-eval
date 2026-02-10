@@ -7,9 +7,9 @@ from unittest.mock import patch
 
 import pytest
 
-from olmo_eval.common.harness import clear_registry, register_tool
-from olmo_eval.common.harness.config import HarnessConfig, harness_config
-from olmo_eval.common.harness.tools import tool
+from olmo_eval.harness import clear_registry, register_tool
+from olmo_eval.harness.config import HarnessConfig, harness_config
+from olmo_eval.harness.tools import tool
 
 
 @pytest.fixture(autouse=True)
@@ -166,7 +166,7 @@ class TestHarnessConfigFactory:
 
         assert "factory_tool" in config.tool_names
         # Tool should be registered
-        from olmo_eval.common.harness import get_tool
+        from olmo_eval.harness import get_tool
 
         assert get_tool("factory_tool") is factory_func
 

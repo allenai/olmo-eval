@@ -12,7 +12,7 @@ Key Components:
 - Backend: Pluggable execution backends
 
 Example:
-    from olmo_eval.common.harness import (
+    from olmo_eval.harness import (
         Harness,
         HarnessConfig,
         ProviderConfig,

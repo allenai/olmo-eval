@@ -45,7 +45,7 @@ def inference_worker(
 
     worker_logger = configure_worker_logging(worker_id)
 
-    from olmo_eval.common.harness import Harness, HarnessConfig
+    from olmo_eval.harness import Harness, HarnessConfig
 
     harness_config = HarnessConfig.from_dict(harness_config_dict)
     provider_config = harness_config.provider

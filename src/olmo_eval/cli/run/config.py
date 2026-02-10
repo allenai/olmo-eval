@@ -7,7 +7,7 @@ from typing import Any
 
 from rich.console import Console
 
-from olmo_eval.common.harness.config import HarnessConfig, ProviderConfig
+from olmo_eval.harness.config import HarnessConfig, ProviderConfig
 
 console = Console()
 
@@ -232,7 +232,7 @@ class RunConfigBuilder:
 
         if self.harness_preset:
             try:
-                from olmo_eval.common.harness import get_harness_preset
+                from olmo_eval.harness import get_harness_preset
 
                 harness_config = get_harness_preset(self.harness_preset)
             except ValueError as e:

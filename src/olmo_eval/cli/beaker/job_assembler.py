@@ -49,7 +49,7 @@ class JobConfigAssembler:
             install_extras.append("postgres")
 
         if self.config.harness:
-            from olmo_eval.common.harness import get_backend_extras, get_harness_preset
+            from olmo_eval.harness import get_backend_extras, get_harness_preset
 
             preset = get_harness_preset(self.config.harness)
             if preset.backend:

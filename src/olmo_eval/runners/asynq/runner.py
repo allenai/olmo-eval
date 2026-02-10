@@ -13,8 +13,8 @@ from typing import Any
 from olmo_eval.cli.utils import console
 from olmo_eval.common.configs import expand_tasks
 from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR
-from olmo_eval.common.harness.config import HarnessConfig, ProviderConfig
 from olmo_eval.common.logging import get_logger, get_worker_id
+from olmo_eval.harness.config import HarnessConfig, ProviderConfig
 from olmo_eval.runners.asynq.monitoring import (
     terminate_workers,
     wait_for_init_times,

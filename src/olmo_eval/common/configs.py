@@ -8,7 +8,7 @@ from typing import Any, Literal
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
 from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR
-from olmo_eval.common.harness.config import ProviderConfig
+from olmo_eval.harness.config import ProviderConfig
 
 
 @dataclass

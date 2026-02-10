@@ -10,7 +10,7 @@ from olmo_eval.common.logging import get_logger
 from olmo_eval.runners.asynq.types import QueueItem, ResultItem
 
 if TYPE_CHECKING:
-    from olmo_eval.common.harness import Harness
+    from olmo_eval.harness import Harness
 
 logger = get_logger(__name__)
 

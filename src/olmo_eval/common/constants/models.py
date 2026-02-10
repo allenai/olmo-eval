@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from olmo_eval.common.harness.config import ProviderConfig
+    from olmo_eval.harness.config import ProviderConfig
 
 
 # =============================================================================
@@ -16,8 +16,8 @@ def get_model_presets() -> dict[str, ProviderConfig]:
 
     Returns a dictionary mapping preset names to ProviderConfig instances.
     """
-    from olmo_eval.common.harness.config import ProviderConfig
     from olmo_eval.common.types import ProviderKind
+    from olmo_eval.harness.config import ProviderConfig
 
     return {
         "llama3.1-8b": ProviderConfig(

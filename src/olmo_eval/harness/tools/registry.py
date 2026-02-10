@@ -62,7 +62,7 @@ def load_tools() -> None:
     import pkgutil
     import sys
 
-    import olmo_eval.common.harness.tools as tools_pkg
+    import olmo_eval.harness.tools as tools_pkg
 
     for module_info in pkgutil.iter_modules(tools_pkg.__path__):
         if module_info.name not in ("registry", "tool", "__init__"):

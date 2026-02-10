@@ -399,7 +399,7 @@ def launch(
 
     # Collect harness-required secrets
     if launch_config.harness:
-        from olmo_eval.common.harness import get_harness_preset
+        from olmo_eval.harness import get_harness_preset
 
         harness_config = get_harness_preset(launch_config.harness)
         if harness_config.required_secrets:
@@ -673,7 +673,7 @@ def _build_experiment_summary(
     )
 
     from olmo_eval.common.configs import get_provider_config
-    from olmo_eval.common.harness import get_harness_preset
+    from olmo_eval.harness import get_harness_preset
 
     harness_config = get_harness_preset(harness or "default")
     provider_config = get_provider_config(exp.model_spec)
