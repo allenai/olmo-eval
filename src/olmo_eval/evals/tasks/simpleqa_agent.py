@@ -39,8 +39,14 @@ When answering questions:
 Always strive to give factually correct answers."""
 
 
-class SimpleQATask(Task):
+@register("simpleqa")
+class SimpleQA(Task):
     """SimpleQA factual question answering evaluation task."""
+
+    data_source = DataSource(path="allenai/simpleqa_full", split="test")
+    formatter = ChatFormatter()
+    metrics = (AccuracyMetric(scorer=SimpleQAJudgeScorer),)
+    sampling_params = SamplingParams(max_tokens=2048, temperature=0.0)
 
     default_source: str = "allenai/simpleqa_full"
 
@@ -113,31 +119,3 @@ class SimpleQATask(Task):
             request_type=RequestType.CHAT,
             messages=({"role": "user", "content": instance.question},),
         )
-
-
-# =============================================================================
-# Task Configuration
-# =============================================================================
-
-
-def _simpleqa_config() -> TaskConfig:
-    """Create default configuration for SimpleQA task."""
-    return TaskConfig(
-        name="simpleqa",
-        data_source=DataSource(path="allenai/simpleqa_full", split="test"),
-        formatter=ChatFormatter(),
-        metrics=(AccuracyMetric(scorer=SimpleQAJudgeScorer),),
-        sampling_params=SamplingParams(max_tokens=2048, temperature=0.0),
-    )
-
-
-# =============================================================================
-# Task Registration
-# =============================================================================
-
-
-@register("simpleqa", _simpleqa_config)
-class SimpleQA(SimpleQATask):
-    """SimpleQA evaluation task."""
-
-    pass

@@ -5,9 +5,9 @@ from collections.abc import Iterator
 import pytest
 
 from olmo_eval.core.types import Instance, LMOutput, LMRequest, RequestType
+from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks import (
     Task,
-    TaskConfig,
     clear_registry,
     get_base_task_name,
     get_task,
@@ -66,31 +66,31 @@ class TestRegister:
     def test_register_task(self):
         """Test basic task registration."""
 
-        @register("test_task", lambda: TaskConfig(name="test_task", data_source="test/dataset"))
+        @register("test_task")
         class TestTask(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
 
         assert "test_task" in list_tasks()
 
     def test_register_duplicate_raises(self):
         """Test that registering duplicate task names raises an error."""
 
-        @register("duplicate", lambda: TaskConfig(name="duplicate", data_source="test/dataset"))
+        @register("duplicate")
         class FirstTask(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
 
         with pytest.raises(ValueError, match="already registered"):
 
-            @register("duplicate", lambda: TaskConfig(name="duplicate", data_source="test/dataset"))
+            @register("duplicate")
             class SecondTask(DummyTask):
-                pass
+                data_source = DataSource(path="test/dataset")
 
     def test_register_preserves_class(self):
         """Test that @register returns the original class."""
 
-        @register("preserved", lambda: TaskConfig(name="preserved", data_source="test/dataset"))
+        @register("preserved")
         class PreservedTask(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
 
         assert PreservedTask.__name__ == "PreservedTask"
         assert issubclass(PreservedTask, Task)
@@ -102,9 +102,9 @@ class TestRegisterRegime:
     def test_register_regime(self):
         """Test registering a regime for an existing task."""
 
-        @register("base_task", lambda: TaskConfig(name="base_task", data_source="test/dataset"))
+        @register("base_task")
         class BaseTask(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
 
         register_regime("base_task", "custom", num_fewshot=5, limit=100)
 
@@ -119,11 +119,9 @@ class TestRegisterRegime:
     def test_register_multiple_regimes(self):
         """Test registering multiple regimes for one task."""
 
-        @register(
-            "multi_regime", lambda: TaskConfig(name="multi_regime", data_source="test/dataset")
-        )
+        @register("multi_regime")
         class MultiRegimeTask(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
 
         register_regime("multi_regime", "fast", limit=10)
         register_regime("multi_regime", "full", limit=None)
@@ -139,12 +137,10 @@ class TestGetTask:
     def test_get_task_by_name(self):
         """Test getting a task by simple name."""
 
-        @register(
-            "simple_task",
-            lambda: TaskConfig(name="simple_task", data_source="test/dataset", num_fewshot=0),
-        )
+        @register("simple_task")
         class SimpleTask(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
+            num_fewshot = 0
 
         task = get_task("simple_task")
         assert isinstance(task, SimpleTask)
@@ -157,12 +153,10 @@ class TestGetTask:
         Regimes are accessed as variants using single colon syntax: task:regime
         """
 
-        @register(
-            "regime_task",
-            lambda: TaskConfig(name="regime_task", data_source="test/dataset", num_fewshot=0),
-        )
+        @register("regime_task")
         class RegimeTask(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
+            num_fewshot = 0
 
         register_regime("regime_task", "fewshot", num_fewshot=5)
 
@@ -182,12 +176,10 @@ class TestGetTask:
     def test_get_task_with_unknown_regime_raises(self):
         """Test that unknown regime/variant raises KeyError."""
 
-        @register(
-            "fallback_task",
-            lambda: TaskConfig(name="fallback_task", data_source="test/dataset", num_fewshot=3),
-        )
+        @register("fallback_task")
         class FallbackTask(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
+            num_fewshot = 3
 
         # Unknown variant/regime should raise KeyError
         with pytest.raises(KeyError, match="Unknown variant 'unknown_regime'"):
@@ -204,17 +196,17 @@ class TestListTasks:
     def test_list_tasks_returns_sorted(self):
         """Test that list_tasks returns sorted names."""
 
-        @register("zebra", lambda: TaskConfig(name="zebra", data_source="test/dataset"))
+        @register("zebra")
         class ZebraTask(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
 
-        @register("alpha", lambda: TaskConfig(name="alpha", data_source="test/dataset"))
+        @register("alpha")
         class AlphaTask(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
 
-        @register("middle", lambda: TaskConfig(name="middle", data_source="test/dataset"))
+        @register("middle")
         class MiddleTask(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
 
         tasks = list_tasks()
         assert tasks == ["alpha", "middle", "zebra"]
@@ -226,13 +218,13 @@ class TestListRegimes:
     def test_list_regimes_all(self):
         """Test listing all regimes."""
 
-        @register("task_a", lambda: TaskConfig(name="task_a", data_source="test/dataset"))
+        @register("task_a")
         class TaskA(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
 
-        @register("task_b", lambda: TaskConfig(name="task_b", data_source="test/dataset"))
+        @register("task_b")
         class TaskB(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
 
         register_regime("task_a", "regime1")
         register_regime("task_a", "regime2")
@@ -247,9 +239,9 @@ class TestListRegimes:
     def test_list_regimes_filtered(self):
         """Test listing regimes for specific task."""
 
-        @register("filtered", lambda: TaskConfig(name="filtered", data_source="test/dataset"))
+        @register("filtered")
         class FilteredTask(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
 
         register_regime("filtered", "fast")
         register_regime("filtered", "slow")
@@ -262,9 +254,9 @@ class TestListRegimes:
     def test_list_regimes_no_regimes(self):
         """Test listing regimes for task with none registered."""
 
-        @register("no_regimes", lambda: TaskConfig(name="no_regimes", data_source="test/dataset"))
+        @register("no_regimes")
         class NoRegimesTask(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
 
         regimes = list_regimes("no_regimes")
         assert regimes == {"no_regimes": []}
@@ -276,9 +268,9 @@ class TestClearRegistry:
     def test_clear_registry(self):
         """Test that clear_registry removes all entries."""
 
-        @register("to_clear", lambda: TaskConfig(name="to_clear", data_source="test/dataset"))
+        @register("to_clear")
         class ToClearTask(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
 
         register_regime("to_clear", "regime")
 
@@ -316,12 +308,9 @@ class TestGetTaskDependencies:
     def test_empty_dependencies_returns_empty_list(self):
         """Test that tasks without dependencies return empty list."""
 
-        @register(
-            "no_deps_task",
-            lambda: TaskConfig(name="no_deps_task", data_source="test/dataset"),
-        )
+        @register("no_deps_task")
         class NoDepTask(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
 
         result = get_task_dependencies(["no_deps_task"])
         assert result == []
@@ -329,16 +318,10 @@ class TestGetTaskDependencies:
     def test_single_task_with_dependencies(self):
         """Test extracting dependencies from a single task."""
 
-        @register(
-            "deps_task",
-            lambda: TaskConfig(
-                name="deps_task",
-                data_source="test/dataset",
-                dependencies=["pkg1==1.0", "pkg2>=2.0"],
-            ),
-        )
+        @register("deps_task")
         class DepsTask(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
+            dependencies = ["pkg1==1.0", "pkg2>=2.0"]
 
         result = get_task_dependencies(["deps_task"])
         assert result == ["pkg1==1.0", "pkg2>=2.0"]
@@ -346,27 +329,15 @@ class TestGetTaskDependencies:
     def test_multiple_tasks_merge_dependencies(self):
         """Test that dependencies from multiple tasks are merged."""
 
-        @register(
-            "task_a",
-            lambda: TaskConfig(
-                name="task_a",
-                data_source="test/dataset",
-                dependencies=["pkg1==1.0"],
-            ),
-        )
+        @register("task_a")
         class TaskA(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
+            dependencies = ["pkg1==1.0"]
 
-        @register(
-            "task_b",
-            lambda: TaskConfig(
-                name="task_b",
-                data_source="test/dataset",
-                dependencies=["pkg2==2.0"],
-            ),
-        )
+        @register("task_b")
         class TaskB(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
+            dependencies = ["pkg2==2.0"]
 
         result = get_task_dependencies(["task_a", "task_b"])
         assert result == ["pkg1==1.0", "pkg2==2.0"]
@@ -374,27 +345,15 @@ class TestGetTaskDependencies:
     def test_dependencies_deduplicated(self):
         """Test that duplicate dependencies are removed."""
 
-        @register(
-            "dup_task_a",
-            lambda: TaskConfig(
-                name="dup_task_a",
-                data_source="test/dataset",
-                dependencies=["pkg1==1.0", "pkg2==2.0"],
-            ),
-        )
+        @register("dup_task_a")
         class DupTaskA(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
+            dependencies = ["pkg1==1.0", "pkg2==2.0"]
 
-        @register(
-            "dup_task_b",
-            lambda: TaskConfig(
-                name="dup_task_b",
-                data_source="test/dataset",
-                dependencies=["pkg1==1.0", "pkg3==3.0"],  # pkg1 is duplicate
-            ),
-        )
+        @register("dup_task_b")
         class DupTaskB(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
+            dependencies = ["pkg1==1.0", "pkg3==3.0"]  # pkg1 is duplicate
 
         result = get_task_dependencies(["dup_task_a", "dup_task_b"])
         # pkg1==1.0 appears in first task, should only appear once
@@ -403,27 +362,15 @@ class TestGetTaskDependencies:
     def test_preserves_order(self):
         """Test that order is preserved (first occurrence wins)."""
 
-        @register(
-            "order_task_a",
-            lambda: TaskConfig(
-                name="order_task_a",
-                data_source="test/dataset",
-                dependencies=["c-pkg", "a-pkg"],
-            ),
-        )
+        @register("order_task_a")
         class OrderTaskA(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
+            dependencies = ["c-pkg", "a-pkg"]
 
-        @register(
-            "order_task_b",
-            lambda: TaskConfig(
-                name="order_task_b",
-                data_source="test/dataset",
-                dependencies=["b-pkg"],
-            ),
-        )
+        @register("order_task_b")
         class OrderTaskB(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
+            dependencies = ["b-pkg"]
 
         result = get_task_dependencies(["order_task_a", "order_task_b"])
         # Order should be preserved: c-pkg, a-pkg from task_a, then b-pkg from task_b
@@ -432,23 +379,14 @@ class TestGetTaskDependencies:
     def test_mixed_tasks_with_and_without_deps(self):
         """Test mixing tasks with and without dependencies."""
 
-        @register(
-            "with_deps",
-            lambda: TaskConfig(
-                name="with_deps",
-                data_source="test/dataset",
-                dependencies=["special-lib"],
-            ),
-        )
+        @register("with_deps")
         class WithDeps(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
+            dependencies = ["special-lib"]
 
-        @register(
-            "without_deps",
-            lambda: TaskConfig(name="without_deps", data_source="test/dataset"),
-        )
+        @register("without_deps")
         class WithoutDeps(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
 
         result = get_task_dependencies(["without_deps", "with_deps"])
         assert result == ["special-lib"]
@@ -461,16 +399,10 @@ class TestGetTaskDependencies:
     def test_task_with_variant_inherits_base_dependencies(self):
         """Test that variants can override dependencies."""
 
-        @register(
-            "base_deps",
-            lambda: TaskConfig(
-                name="base_deps",
-                data_source="test/dataset",
-                dependencies=["base-pkg"],
-            ),
-        )
+        @register("base_deps")
         class BaseDepsTask(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
+            dependencies = ["base-pkg"]
 
         # Register variant that adds to dependencies
         register_variant("base_deps", "extra", dependencies=["extra-pkg"])
@@ -486,19 +418,13 @@ class TestGetTaskDependencies:
     def test_git_url_dependencies(self):
         """Test tasks with git URL dependencies."""
 
-        @register(
-            "git_deps_task",
-            lambda: TaskConfig(
-                name="git_deps_task",
-                data_source="test/dataset",
-                dependencies=[
-                    "git+https://github.com/user/repo@v1.0",
-                    "https://github.com/user/another-repo",
-                ],
-            ),
-        )
+        @register("git_deps_task")
         class GitDepsTask(DummyTask):
-            pass
+            data_source = DataSource(path="test/dataset")
+            dependencies = [
+                "git+https://github.com/user/repo@v1.0",
+                "https://github.com/user/another-repo",
+            ]
 
         result = get_task_dependencies(["git_deps_task"])
         assert result == [

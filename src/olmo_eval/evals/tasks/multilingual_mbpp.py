@@ -50,10 +50,10 @@ class MultilingualMBPPTask(Task):
 
     default_source: str = "allenai/multilingual_mbpp"
     normalize_line_endings: bool = False  # Set True for v2fix
+    language: str = "python"  # Override in subclasses
 
-    def __init__(self, config: TaskConfig, language: str) -> None:
+    def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
-        self.language = language
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -145,72 +145,47 @@ class MultilingualMBPPV2FixTask(MultilingualMBPPTask):
 
 
 # =============================================================================
-# Task Configurations and Registration
+# Task Registration
 # =============================================================================
-
-
-def _make_mt_mbpp_config(language: str) -> TaskConfig:
-    """Create config for mt_mbpp_{language} task."""
-    return TaskConfig(
-        name=f"mt_mbpp_{language}",
-        data_source=DataSource(path="allenai/multilingual_mbpp", subset=language),
-        metrics=(),
-        sampling_params=SamplingParams(
-            max_tokens=1024,
-            temperature=0.0,
-            stop_sequences=("\n\n",),
-        ),
-    )
-
-
-def _make_mt_mbpp_v2fix_config(language: str) -> TaskConfig:
-    """Create config for mt_mbpp_v2fix_{language} task."""
-    return TaskConfig(
-        name=f"mt_mbpp_v2fix_{language}",
-        data_source=DataSource(path="allenai/multilingual_mbpp", subset=language),
-        metrics=(),
-        sampling_params=SamplingParams(
-            max_tokens=1024,
-            temperature=0.0,
-            stop_sequences=("\n\n",),
-        ),
-    )
-
 
 # Register all mt_mbpp_{language} tasks
 for _lang in MULTILINGUAL_MBPP_LANGUAGES:
-
-    def _make_config_factory(lang: str):
-        return lambda: _make_mt_mbpp_config(lang)
-
-    def _make_class_factory(lang: str):
-        class _MultilingualMBPP(MultilingualMBPPTask):
-            def __init__(self, config: TaskConfig) -> None:
-                super().__init__(config, language=lang)
-
-        _MultilingualMBPP.__name__ = f"MultilingualMBPP_{lang.title()}"
-        return _MultilingualMBPP
-
-    register(f"mt_mbpp_{_lang}", _make_config_factory(_lang))(_make_class_factory(_lang))
+    # Create class with appropriate class attributes
+    _cls = type(
+        f"MultilingualMBPP_{_lang.title()}",
+        (MultilingualMBPPTask,),
+        {
+            "language": _lang,
+            "data_source": DataSource(path="allenai/multilingual_mbpp", subset=_lang),
+            "metrics": (),
+            "sampling_params": SamplingParams(
+                max_tokens=1024,
+                temperature=0.0,
+                stop_sequences=("\n\n",),
+            ),
+        },
+    )
+    register(f"mt_mbpp_{_lang}")(_cls)
 
 
 # Register all mt_mbpp_v2fix_{language} tasks
 for _lang in MULTILINGUAL_MBPP_LANGUAGES:
-
-    def _make_v2fix_config_factory(lang: str):
-        return lambda: _make_mt_mbpp_v2fix_config(lang)
-
-    def _make_v2fix_class_factory(lang: str):
-        class _MultilingualMBPPV2Fix(MultilingualMBPPV2FixTask):
-            def __init__(self, config: TaskConfig) -> None:
-                super().__init__(config, language=lang)
-
-        _MultilingualMBPPV2Fix.__name__ = f"MultilingualMBPPV2Fix_{lang.title()}"
-        return _MultilingualMBPPV2Fix
-
-    register(f"mt_mbpp_v2fix_{_lang}", _make_v2fix_config_factory(_lang))(
-        _make_v2fix_class_factory(_lang)
+    # Create class with appropriate class attributes
+    _cls = type(
+        f"MultilingualMBPPV2Fix_{_lang.title()}",
+        (MultilingualMBPPV2FixTask,),
+        {
+            "language": _lang,
+            "data_source": DataSource(path="allenai/multilingual_mbpp", subset=_lang),
+            "metrics": (),
+            "sampling_params": SamplingParams(
+                max_tokens=1024,
+                temperature=0.0,
+                stop_sequences=("\n\n",),
+            ),
+        },
     )
+    register(f"mt_mbpp_v2fix_{_lang}")(_cls)
 
 
 # =============================================================================

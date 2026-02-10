@@ -20,20 +20,35 @@ T = TypeVar("T", bound=type[Task])
 
 # Module-level registries
 _tasks: dict[str, type[Task]] = {}
-_configs: dict[str, Callable[[], TaskConfig]] = {}
+_configs: dict[str, TaskConfig] = {}
 _variants: dict[str, dict[str, dict[str, Any]]] = {}
 _regimes: dict[str, dict[str, dict[str, Any]]] = {}
 
 
-def register(
-    name: str,
-    config_factory: Callable[[], TaskConfig],
-) -> Callable[[T], T]:
-    """Register a task class with a name and config factory.
+def _build_config(name: str, cls: type[Task]) -> TaskConfig:
+    """Build TaskConfig from class attributes."""
+    kwargs: dict[str, Any] = {}
+    for field in TaskConfig.__dataclass_fields__:
+        if field == "name":
+            continue
+        for klass in cls.__mro__:
+            if field in klass.__dict__:
+                kwargs[field] = klass.__dict__[field]
+                break
+
+    return TaskConfig(name=name, **kwargs)
+
+
+def register(name: str) -> Callable[[T], T]:
+    """Register a task class with a name.
+
+    Config is built from class attributes that match TaskConfig fields.
 
     Usage:
-        @register("mmlu", lambda: TaskConfig(name="mmlu", data_source=DataSource(path="cais/mmlu")))
-        class MMLUTask(Task):
+        @register("mmlu")
+        class MMLU(Task):
+            data_source = DataSource(path="cais/mmlu")
+            metrics = (AccuracyMetric(),)
             ...
     """
 
@@ -41,7 +56,7 @@ def register(
         if name in _tasks:
             raise ValueError(f"Task '{name}' already registered")
         _tasks[name] = cls
-        _configs[name] = config_factory
+        _configs[name] = _build_config(name, cls)
         return cls
 
     return decorator
@@ -277,7 +292,7 @@ def get_task(spec: str, config_overrides: dict[str, Any] | None = None) -> Task:
         available = ", ".join(sorted(_tasks.keys()))
         raise KeyError(f"Unknown task '{task_name}'. Available: {available}")
 
-    config = _configs[task_name]()
+    config = _configs[task_name]
 
     # Apply variant/regime overrides in order (check both registries)
     for variant in variants:

@@ -13,8 +13,8 @@ from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register, register_variant
 
 
-class C4Task(Task):
-    """C4 perplexity task."""
+class C4Base(Task):
+    """Base class for C4 perplexity tasks."""
 
     # This is a version of C4 where the 5% longest documents have been removed
     default_source: str = "valentinhofmann/c4_short"
@@ -76,92 +76,44 @@ class C4Task(Task):
         )
 
 
-class C41KTask(C4Task):
+@register("c4")
+class C4(C4Base):
+    """C4 perplexity task."""
+
+    data_source = DataSource(path="valentinhofmann/c4_short", subset="full", split="validation")
+    metrics = ()
+
+    default_subset: str = "full"
+
+
+@register("c4_1k")
+class C41K(C4Base):
     """C4 perplexity task on 1,000 randomly sampled documents."""
+
+    data_source = DataSource(path="valentinhofmann/c4_short", subset="1k", split="validation")
+    metrics = ()
 
     default_subset: str = "1k"
 
 
-class C410KTask(C4Task):
+@register("c4_10k")
+class C410K(C4Base):
     """C4 perplexity task on 10,000 randomly sampled documents."""
+
+    data_source = DataSource(path="valentinhofmann/c4_short", subset="10k", split="validation")
+    metrics = ()
 
     default_subset: str = "10k"
 
 
-class C4100KTask(C4Task):
+@register("c4_100k")
+class C4100K(C4Base):
     """C4 perplexity task on 100,000 randomly sampled documents."""
+
+    data_source = DataSource(path="valentinhofmann/c4_short", subset="100k", split="validation")
+    metrics = ()
 
     default_subset: str = "100k"
-
-
-# =============================================================================
-# Task Configs
-# =============================================================================
-
-
-def _c4_config() -> TaskConfig:
-    return TaskConfig(
-        name="c4",
-        data_source=DataSource(path="valentinhofmann/c4_short", subset="full", split="validation"),
-        metrics=(),
-    )
-
-
-def _c4_1k_config() -> TaskConfig:
-    return TaskConfig(
-        name="c4_1k",
-        data_source=DataSource(path="valentinhofmann/c4_short", subset="1k", split="validation"),
-        metrics=(),
-    )
-
-
-def _c4_10k_config() -> TaskConfig:
-    return TaskConfig(
-        name="c4_10k",
-        data_source=DataSource(path="valentinhofmann/c4_short", subset="10k", split="validation"),
-        metrics=(),
-    )
-
-
-def _c4_100k_config() -> TaskConfig:
-    return TaskConfig(
-        name="c4_100k",
-        data_source=DataSource(path="valentinhofmann/c4_short", subset="100k", split="validation"),
-        metrics=(),
-    )
-
-
-# =============================================================================
-# Task Registrations
-# =============================================================================
-
-
-@register("c4", _c4_config)
-class C4(C4Task):
-    """C4 perplexity task."""
-
-    pass
-
-
-@register("c4_1k", _c4_1k_config)
-class C41K(C41KTask):
-    """C4 perplexity task on 1,000 randomly sampled documents."""
-
-    pass
-
-
-@register("c4_10k", _c4_10k_config)
-class C410K(C410KTask):
-    """C4 perplexity task on 10,000 randomly sampled documents."""
-
-    pass
-
-
-@register("c4_100k", _c4_100k_config)
-class C4100K(C4100KTask):
-    """C4 perplexity task on 100,000 randomly sampled documents."""
-
-    pass
 
 
 # =============================================================================

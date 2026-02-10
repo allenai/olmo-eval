@@ -18,8 +18,17 @@ from olmo_eval.evals.extract import extract_code
 from olmo_eval.evals.tasks.core import Task, TaskConfig, register, register_variant
 
 
-class HumanEvalTask(Task):
+@register("humaneval")
+class HumanEval(Task):
     """HumanEval code generation task."""
+
+    data_source = DataSource(path="openai_humaneval")
+    metrics = ()
+    sampling_params = SamplingParams(
+        max_tokens=1024,
+        temperature=0.0,
+        stop_sequences=HUMANEVAL_STOP_SEQUENCES,
+    )
 
     default_source: str = "openai_humaneval"
     fewshot_split: str = "test"  # HumanEval only has a test split
@@ -97,60 +106,13 @@ class HumanEvalTask(Task):
         return responses
 
 
-class HumanEvalPlusTask(HumanEvalTask):
+@register("humaneval_plus")
+class HumanEvalPlus(HumanEval):
     """HumanEval+ task with additional test cases."""
 
+    data_source = DataSource(path="evalplus/humanevalplus")
+
     default_source: str = "evalplus/humanevalplus"
-
-
-# =============================================================================
-# Task Configs
-# =============================================================================
-
-
-def _humaneval_config() -> TaskConfig:
-    return TaskConfig(
-        name="humaneval",
-        data_source=DataSource(path="openai_humaneval"),
-        metrics=(),
-        sampling_params=SamplingParams(
-            max_tokens=1024,
-            temperature=0.0,
-            stop_sequences=HUMANEVAL_STOP_SEQUENCES,
-        ),
-    )
-
-
-def _humaneval_plus_config() -> TaskConfig:
-    return TaskConfig(
-        name="humaneval_plus",
-        data_source=DataSource(path="evalplus/humanevalplus"),
-        metrics=(),
-        sampling_params=SamplingParams(
-            max_tokens=1024,
-            temperature=0.0,
-            stop_sequences=HUMANEVAL_STOP_SEQUENCES,
-        ),
-    )
-
-
-# =============================================================================
-# Task Registrations
-# =============================================================================
-
-
-@register("humaneval", _humaneval_config)
-class HumanEval(HumanEvalTask):
-    """HumanEval code generation task."""
-
-    pass
-
-
-@register("humaneval_plus", _humaneval_plus_config)
-class HumanEvalPlus(HumanEvalPlusTask):
-    """HumanEval+ code generation task."""
-
-    pass
 
 
 # =============================================================================
