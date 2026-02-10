@@ -6,10 +6,17 @@ import asyncio
 import multiprocessing as mp
 import os
 import time
+from multiprocessing.synchronize import Event as MPEvent
 from typing import Any
 
 from olmo_eval.common.logging import get_logger
-from olmo_eval.runners.asynq.types import WORKER_FATAL_TASK_ID, QueueItem, ResultItem
+from olmo_eval.runners.asynq.types import (
+    SCORER_FATAL,
+    WORKER_FATAL,
+    QueueItem,
+    ResultItem,
+    ScoredResponse,
+)
 
 logger = get_logger(__name__)
 
@@ -129,7 +136,7 @@ def inference_worker(
         result_queue.put(
             ResultItem(
                 model_name=model_name,
-                task_id=WORKER_FATAL_TASK_ID,
+                task_id=WORKER_FATAL,
                 instance_idx=-1,
                 instance=None,  # type: ignore[arg-type]
                 request=None,  # type: ignore[arg-type]
@@ -145,6 +152,7 @@ def scoring_worker(
     scored_queue: mp.Queue,
     total_instances: int,
     sandbox_config_dict: dict[str, Any] | None = None,
+    ready_event: MPEvent | None = None,
 ) -> None:
     """Worker process that scores individual responses.
 
@@ -159,7 +167,10 @@ def scoring_worker(
         scored_queue: Queue to put ScoredResponses.
         total_instances: Total number of instances to score (for progress bar).
         sandbox_config_dict: Optional serialized SandboxConfig for code execution.
+        ready_event: Optional event to signal when worker is ready.
     """
+    import sys
+
     from tqdm import tqdm
 
     from olmo_eval.common.logging import configure_logging
@@ -167,7 +178,7 @@ def scoring_worker(
     configure_logging()
 
     from olmo_eval.common.execution import ScoringContext
-    from olmo_eval.runners.asynq.types import ScoredResponse, ScoringItem
+    from olmo_eval.runners.asynq.types import ScoringItem
 
     pbar: tqdm | None = None
     sandbox_executor = None
@@ -197,17 +208,21 @@ def scoring_worker(
             )
 
     try:
-        # Initialize sandbox if configured (similar to provider init in inference_worker)
         if sandbox_config_dict is not None:
             from olmo_eval.harness.sandbox import SandboxConfig, SandboxExecutor
 
             sandbox_config = SandboxConfig.from_dict(sandbox_config_dict)
             logger.info("Initializing sandbox for code execution...")
             sandbox_executor = SandboxExecutor(sandbox_config)
+
             # Start sandbox synchronously using asyncio
             asyncio.run(sandbox_executor.start())
             scoring_context = ScoringContext(execution_env=sandbox_executor)
-            logger.info("Sandbox ready for scoring")
+            logger.info("Sandbox ready!")
+
+        # Signal that worker is ready
+        if ready_event is not None:
+            ready_event.set()
 
         while True:
             item: ScoringItem | None = scoring_queue.get()
@@ -220,6 +235,20 @@ def scoring_worker(
 
             score_item(item, scoring_context)
             pbar.update(1)
+
+    except Exception as e:
+        logger.error(f"Scoring worker failed: {e}")
+        # Signal fatal error via the scored queue
+        scored_queue.put(
+            ScoredResponse(
+                spec=SCORER_FATAL,
+                instance_idx=-1,
+                scored=None,
+                error=f"Scoring worker crashed: {e}",
+            )
+        )
+        sys.exit(1)
+
     finally:
         if pbar is not None:
             pbar.close()

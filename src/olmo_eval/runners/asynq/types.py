@@ -11,8 +11,9 @@ from olmo_eval.common.types import Instance, LMOutput, LMRequest, Response, Samp
 if TYPE_CHECKING:
     from olmo_eval.evals.tasks.common import Task
 
-# Sentinel value for fatal worker errors
-WORKER_FATAL_TASK_ID = "__WORKER_FATAL__"
+# Sentinel values for fatal worker errors
+WORKER_FATAL = "__WORKER_FATAL__"
+SCORER_FATAL = "__SCORER_FATAL__"
 
 
 @dataclass
@@ -103,11 +104,13 @@ class ScoredResponse:
 
     spec: str
     instance_idx: int
-    scored: Response  # Response with score populated
+    scored: Response | None  # Response with score populated (None if fatal error)
+    error: str | None = None  # Error message if scoring failed
 
 
 __all__ = [
-    "WORKER_FATAL_TASK_ID",
+    "WORKER_FATAL",
+    "SCORER_FATAL",
     "QueueItem",
     "TaskTracker",
     "ResultItem",

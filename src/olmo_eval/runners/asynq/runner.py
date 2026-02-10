@@ -18,6 +18,7 @@ from olmo_eval.harness.config import HarnessConfig, ProviderConfig
 from olmo_eval.runners.asynq.monitoring import (
     terminate_workers,
     wait_for_init_times,
+    wait_for_scorer_ready,
     wait_for_workers_ready,
 )
 from olmo_eval.runners.asynq.preparation import (
@@ -173,12 +174,27 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             if self.harness_config.sandbox is not None:
                 sandbox_config_dict = self.harness_config.sandbox.to_dict()
 
+            # Create ready event for scoring worker
+            scorer_ready = ctx.Event()
+
             # Start scoring worker first so it's ready to receive work
             scorer_proc = ctx.Process(
                 target=scoring_worker,
-                args=(scoring_queue, scored_queue, total_instances, sandbox_config_dict),
+                args=(
+                    scoring_queue,
+                    scored_queue,
+                    total_instances,
+                    sandbox_config_dict,
+                    scorer_ready,
+                ),
             )
             scorer_proc.start()
+
+            # Wait for scoring worker to be ready
+            if sandbox_config_dict is not None:
+                logger.info("Waiting for scoring worker to initialize...")
+                wait_for_scorer_ready(scorer_proc, scorer_ready, scored_queue, timeout=120.0)
+                logger.info("Scoring worker ready")
 
             workers = self._start_workers(
                 ctx, num_workers, total_gpus, item_queue, result_queue, init_times

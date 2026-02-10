@@ -8,7 +8,7 @@ import time
 from typing import Any
 
 from olmo_eval.common.logging import get_logger
-from olmo_eval.runners.asynq.types import WORKER_FATAL_TASK_ID
+from olmo_eval.runners.asynq.types import SCORER_FATAL, WORKER_FATAL
 
 logger = get_logger(__name__)
 
@@ -53,7 +53,7 @@ def check_workers_alive(
     try:
         while True:
             result_item = result_queue.get_nowait()
-            if result_item.task_id == WORKER_FATAL_TASK_ID:
+            if result_item.task_id == WORKER_FATAL:
                 logger.error("FATAL: Worker crashed!")
                 logger.error(result_item.error)
                 # Terminate all workers
@@ -103,7 +103,7 @@ def wait_for_workers_ready(
         while True:
             try:
                 result_item = result_queue.get_nowait()
-                if result_item.task_id == WORKER_FATAL_TASK_ID:
+                if result_item.task_id == WORKER_FATAL:
                     # Terminate all workers
                     for worker in workers:
                         if worker.is_alive():
@@ -169,9 +169,61 @@ def wait_for_init_times(
     return dict(init_times)
 
 
+def wait_for_scorer_ready(
+    scorer_proc: mp.process.BaseProcess,
+    ready_event: Any,
+    scored_queue: mp.Queue,
+    timeout: float = 60.0,
+) -> None:
+    """Wait for the scoring worker to be ready.
+
+    Args:
+        scorer_proc: The scoring worker process.
+        ready_event: Event that scorer sets when ready.
+        scored_queue: Queue to check for fatal errors.
+        timeout: Maximum time to wait for scorer to be ready.
+
+    Raises:
+        RuntimeError: If scorer fails during startup.
+    """
+    from olmo_eval.runners.asynq.types import ScoredResponse
+
+    start_time = time.time()
+    check_interval = 0.1
+
+    while time.time() - start_time < timeout:
+        # Check if scorer signaled ready
+        if ready_event.is_set():
+            return
+
+        # Check if scorer died
+        if not scorer_proc.is_alive():
+            # Check queue for error message
+            try:
+                item: ScoredResponse = scored_queue.get_nowait()
+                if item.spec == SCORER_FATAL:
+                    raise RuntimeError(f"Scoring worker failed: {item.error}")
+            except queue.Empty:
+                pass
+            raise RuntimeError(
+                f"Scoring worker died during startup with exit code {scorer_proc.exitcode}"
+            )
+
+        time.sleep(check_interval)
+
+    # Timeout - check one more time
+    if not ready_event.is_set():
+        if not scorer_proc.is_alive():
+            raise RuntimeError(
+                f"Scoring worker died during startup with exit code {scorer_proc.exitcode}"
+            )
+        raise RuntimeError("Scoring worker timed out during initialization")
+
+
 __all__ = [
     "terminate_workers",
     "check_workers_alive",
     "wait_for_workers_ready",
     "wait_for_init_times",
+    "wait_for_scorer_ready",
 ]

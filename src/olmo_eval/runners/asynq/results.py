@@ -14,7 +14,8 @@ from olmo_eval.common.types.trajectory import AgentTrajectory
 from olmo_eval.runners.asynq.monitoring import check_workers_alive
 from olmo_eval.runners.asynq.preparation import compute_task_metrics, finalize_task
 from olmo_eval.runners.asynq.types import (
-    WORKER_FATAL_TASK_ID,
+    SCORER_FATAL,
+    WORKER_FATAL,
     ResultItem,
     ScoredResponse,
     ScoringItem,
@@ -74,6 +75,7 @@ async def process_results(
     def handle_scored_response(scored: ScoredResponse) -> None:
         """Process a scored response and finalize task if complete."""
         nonlocal tasks_complete
+        assert scored.scored is not None, "scored.scored should not be None for valid responses"
         scored_responses[scored.spec][scored.instance_idx] = scored.scored
         instances_scored[scored.spec] += 1
 
@@ -110,6 +112,10 @@ async def process_results(
         while True:
             try:
                 scored: ScoredResponse = scored_queue.get_nowait()
+                # Check for fatal scorer error
+                if scored.spec == SCORER_FATAL:
+                    logger.error(f"FATAL: Scoring worker crashed! {scored.error}")
+                    raise RuntimeError(f"Scoring worker crashed: {scored.error}")
                 handle_scored_response(scored)
             except queue.Empty:
                 break
@@ -142,7 +148,7 @@ async def process_results(
             continue
 
         # Check for fatal worker crash
-        if result_item.task_id == WORKER_FATAL_TASK_ID:
+        if result_item.task_id == WORKER_FATAL:
             logger.error(f"FATAL: Worker crashed! {result_item.error}")
             raise RuntimeError(f"Worker process crashed: {result_item.error}")
 
