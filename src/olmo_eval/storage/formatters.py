@@ -16,7 +16,7 @@ class InstanceOutput:
     """Single instance prediction for output."""
 
     native_id: str
-    instance_metrics: dict[str, dict[str, float]]  # Nested: {metric: {scorer: value}}
+    metrics: dict[str, dict[str, float]]  # Nested: {metric: {scorer: value}}
 
 
 @dataclass
@@ -64,7 +64,7 @@ class InstanceCSVRow:
     task_name: str
     task_hash: str
     native_id: str
-    instance_metrics: str  # JSON string
+    metrics: str  # JSON string
 
 
 # --- Experiment query output dataclasses ---
@@ -175,7 +175,7 @@ def stream_instances_to_csv(
             task_name=row.task_name,
             task_hash=row.task_hash,
             native_id=row.native_id,
-            instance_metrics=json.dumps(row.instance_metrics),
+            metrics=json.dumps(row.instance_metrics),
         )
         writer.writerow(astuple(csv_row))
 
@@ -212,7 +212,7 @@ def stream_instances_to_nested_json(
                 instances=[
                     InstanceOutput(
                         native_id=row.native_id,
-                        instance_metrics=row.instance_metrics,
+                        metrics=row.instance_metrics,
                     )
                     for row in task_rows
                 ],
