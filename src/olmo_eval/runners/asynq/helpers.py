@@ -8,7 +8,7 @@ import time
 from typing import TYPE_CHECKING
 
 from olmo_eval.core.logging import get_logger
-from olmo_eval.runners.asynq.queue import QueueItem, ResultItem
+from olmo_eval.runners.asynq.queue import WORKER_FATAL_TASK_ID, QueueItem, ResultItem
 
 if TYPE_CHECKING:
     from olmo_eval.core.harness import Harness
@@ -61,7 +61,7 @@ def check_workers_alive(
     try:
         while True:
             result_item = result_queue.get_nowait()
-            if result_item.task_id == "__WORKER_FATAL__":
+            if result_item.task_id == WORKER_FATAL_TASK_ID:
                 logger.error("FATAL: Worker crashed!")
                 logger.error(result_item.error)
                 # Terminate all workers
@@ -111,7 +111,7 @@ def wait_for_workers_ready(
         while True:
             try:
                 result_item = result_queue.get_nowait()
-                if result_item.task_id == "__WORKER_FATAL__":
+                if result_item.task_id == WORKER_FATAL_TASK_ID:
                     # Terminate all workers
                     for worker in workers:
                         if worker.is_alive():

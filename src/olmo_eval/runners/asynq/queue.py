@@ -13,6 +13,8 @@ from olmo_eval.runners.utils import TaskResult, build_predictions, get_metric_me
 
 logger = get_logger(__name__)
 
+# Sentinel value for fatal worker errors
+WORKER_FATAL_TASK_ID = "__WORKER_FATAL__"
 
 # -----------------------------------------------------------------------------
 # Data structures for instance-level queuing
@@ -262,6 +264,7 @@ def finalize_task(tracker: TaskTracker) -> TaskResult:
 
 
 __all__ = [
+    "WORKER_FATAL_TASK_ID",
     "QueueItem",
     "TaskTracker",
     "ResultItem",
