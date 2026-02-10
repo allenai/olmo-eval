@@ -157,6 +157,7 @@ def _build_server_command(
     tokenizer: str | None = None,
     enable_auto_tool_choice: bool = False,
     tool_call_parser: str | None = None,
+    enable_prefix_caching: bool = True,
     **kwargs: Any,
 ) -> list[str]:
     """Build the vLLM server command.
@@ -172,6 +173,7 @@ def _build_server_command(
         enable_auto_tool_choice: Enable automatic tool choice
         tool_call_parser: Parser for tool calls (auto-detected if not specified
             when enable_auto_tool_choice is True)
+        enable_prefix_caching: Enable prefix caching for faster inference (default: True)
         **kwargs: Additional vLLM server arguments
 
     Returns:
@@ -207,6 +209,10 @@ def _build_server_command(
         # Auto-detect parser if not specified
         parser = tool_call_parser or _infer_tool_call_parser(model_name)
         cmd.extend(["--tool-call-parser", parser])
+
+    # Prefix caching (enabled by default for faster inference)
+    if enable_prefix_caching:
+        cmd.append("--enable-prefix-caching")
 
     # Add any extra kwargs as CLI args
     for key, value in kwargs.items():

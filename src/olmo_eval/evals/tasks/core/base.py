@@ -56,6 +56,7 @@ class TaskConfig:
     num_fewshot: int = 0
     fewshot_seed: int = 42
     limit: int | None = None
+    seed: int = 42
     split: Split = Split.TEST
     primary_metric: MetricName | Metric | None = None
     sampling_params: SamplingParams | None = None
@@ -143,6 +144,7 @@ class TaskConfig:
             "num_fewshot": self.num_fewshot,
             "fewshot_seed": self.fewshot_seed,
             "limit": self.limit,
+            "seed": self.seed,
             "split": self.split.value,
             "primary_metric": serialize_primary_metric(self.get_primary_metric()),
             "sampling_params": asdict(self.sampling_params) if self.sampling_params else None,

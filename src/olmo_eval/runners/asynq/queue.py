@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 import time
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -142,6 +143,10 @@ def prepare_task_items(
 
     instances = list(task.instances)
     if task.config.limit:
+        # Shuffle with seed for reproducible random sampling
+        rng = random.Random(task.config.seed)
+        instances = instances.copy()
+        rng.shuffle(instances)
         instances = instances[: task.config.limit]
 
     items = [
