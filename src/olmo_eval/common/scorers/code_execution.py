@@ -31,7 +31,7 @@ class CodeExecutionScorer(ExecutionScorer):
     """
 
     name: str = "code_execution"
-    timeout: float = 5.0
+    timeout: float = 20.0
     language: str = "python"
 
     async def ascore(
