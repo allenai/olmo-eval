@@ -369,11 +369,16 @@ def launch(
 
     # Determine effective image
     # Check if harness has a sandbox configured with local deployment - if so, use sandbox image
+    # Apply harness overrides first so -o sandbox.mode=docker works correctly
     harness_needs_sandbox = False
     if launch_config.harness:
         from olmo_eval.harness import get_harness_preset
 
         harness_preset = get_harness_preset(launch_config.harness)
+        if launch_config.harness_overrides:
+            harness_preset = _apply_harness_overrides(
+                harness_preset, launch_config.harness_overrides
+            )
         if harness_preset.sandbox is not None:
             harness_needs_sandbox = harness_preset.sandbox.is_local
 
@@ -468,7 +473,11 @@ def launch(
         job_configs.append(job_config)
 
         exp_summary = _build_experiment_summary(
-            exp, job_config, task_configs_by_spec, launch_config.harness
+            exp,
+            job_config,
+            task_configs_by_spec,
+            launch_config.harness,
+            launch_config.harness_overrides,
         )
         experiment_summaries.append(exp_summary)
 
@@ -673,6 +682,7 @@ def _build_experiment_summary(
     job_config,
     task_configs_by_spec: dict,
     harness: str | None = None,
+    harness_overrides: list[str] | None = None,
 ) -> ExperimentSummary:
     """Build experiment summary for display."""
     from olmo_eval.runners import AsyncEvalRunner
@@ -694,6 +704,8 @@ def _build_experiment_summary(
     from olmo_eval.harness import get_harness_preset
 
     harness_config = get_harness_preset(harness or "default")
+    if harness_overrides:
+        harness_config = _apply_harness_overrides(harness_config, harness_overrides)
     provider_config = get_provider_config(exp.model_spec)
     harness_config = harness_config.merge_provider(provider_config)
 
@@ -727,3 +739,25 @@ def _handle_follow(launcher, launched_experiments: list[str], follow: bool) -> N
             for exp_id in launched_experiments:
                 url = launcher.get_experiment_url(exp_id)
                 console.print(f"  - {url}")
+
+
+def _apply_harness_overrides(harness_config, overrides: list[str]):
+    """Apply CLI overrides to harness config.
+
+    Args:
+        harness_config: Base HarnessConfig to modify.
+        overrides: List of dotlist override strings (e.g., ["sandbox.mode=docker"]).
+
+    Returns:
+        New HarnessConfig with overrides applied.
+    """
+    from omegaconf import OmegaConf
+
+    from olmo_eval.harness import HarnessConfig
+
+    harness_dict = harness_config.to_dict()
+    override_config = OmegaConf.from_dotlist(overrides)
+    base = OmegaConf.create(harness_dict)
+    merged = OmegaConf.merge(base, override_config)
+    harness_dict = OmegaConf.to_container(merged, resolve=True)
+    return HarnessConfig.from_dict(harness_dict)  # type: ignore[arg-type]
