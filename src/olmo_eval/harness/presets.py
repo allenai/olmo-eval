@@ -138,34 +138,44 @@ When solving coding problems:
 """
 
 
-@harness_preset("code_execution")
-def _code_execution() -> HarnessConfig:
-    """Code execution preset for pass@k evaluation tasks.
-
-    Enables sandboxed code execution for scorers without agent tools.
-    Use with tasks like humaneval:pass_at_1, mbpp:pass_at_10, etc.
-    """
+@harness_preset("codex_python")
+def _codex_python() -> HarnessConfig:
+    """Python only code execution preset."""
     from .sandbox import SandboxConfig, SandboxMode
 
     return HarnessConfig(
-        name="code_execution",
+        name="codex_python",
         sandbox=SandboxConfig(
-            image="volcengine/sandbox-fusion:server-20250609",
-            mode=SandboxMode.MODAL,
-            required_secrets=("MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET"),
+            image="python:3.12-slim",
+            mode=SandboxMode.DOCKER,
             startup_timeout=300.0,
         ),
     )
 
 
-@harness_preset("coding_agent")
-def _coding_agent() -> HarnessConfig:
+@harness_preset("codex_universal")
+def _codex_universal() -> HarnessConfig:
+    """Universal code execution preset."""
+    from .sandbox import SandboxConfig, SandboxMode
+
+    return HarnessConfig(
+        name="codex_universal",
+        sandbox=SandboxConfig(
+            image="volcengine/sandbox-fusion:server-20250609",
+            mode=SandboxMode.DOCKER,
+            startup_timeout=300.0,
+        ),
+    )
+
+
+@harness_preset("codex_agent")
+def _codex_agent() -> HarnessConfig:
     """Coding agent preset with sandboxed shell execution."""
     from .sandbox import SandboxConfig, SandboxMode
     from .tools.shell import execute_bash
 
     return HarnessConfig(
-        name="coding_agent",
+        name="codex_agent",
         provider=ProviderConfig(
             kind=ProviderKind.VLLM_SERVER,
             kwargs={"timeout": 120},

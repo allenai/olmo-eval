@@ -21,7 +21,7 @@ ARG PYTHON_VERSION=3.12
 # ============================================================================
 # Stage 1: Base builder with CUDA, Python and PyTorch
 # ============================================================================
-FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04 AS builder
+FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu24.04 AS builder
 
 ARG CUDA_VERSION
 ARG TORCH_VERSION
@@ -57,7 +57,7 @@ RUN CUDA_SHORT=$(echo "${CUDA_VERSION}" | sed 's/\.//g' | cut -c1-3) && \
 # Stage 2: Runtime image
 # ============================================================================
 ARG CUDA_VERSION
-FROM nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu22.04
+FROM nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu24.04
 
 ARG CUDA_VERSION
 ARG TORCH_VERSION
@@ -104,7 +104,7 @@ CMD ["bash"]
 # Stage 3: Runtime with Podman for sandboxed execution
 # ============================================================================
 ARG CUDA_VERSION
-FROM nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu22.04 AS runtime-sandbox
+FROM nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu24.04 AS runtime-sandbox
 
 ARG CUDA_VERSION
 ARG TORCH_VERSION
@@ -122,7 +122,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
 RUN rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* && \
     apt-get update && apt-get install -y --no-install-recommends \
-    tzdata \
     build-essential \
     ca-certificates \
     curl \
@@ -130,6 +129,7 @@ RUN rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* && \
     wget \
     # Podman build dependencies
     gcc \
+    golang-go \
     go-md2man \
     iptables \
     libassuan-dev \
@@ -144,8 +144,8 @@ RUN rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* && \
     libseccomp-dev \
     libselinux1-dev \
     libsystemd-dev \
-    slirp4netns \
-    fuse-overlayfs \
+    netavark \
+    passt \
     pkg-config \
     uidmap \
     conmon \
@@ -159,10 +159,6 @@ RUN rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* && \
     python3-sphinx \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* \
     && apt-get clean
-
-# Install Go 1.23 (required for Podman 5.x)
-RUN wget -qO- https://go.dev/dl/go1.23.6.linux-amd64.tar.gz | tar xz -C /usr/local
-ENV PATH="/usr/local/go/bin:${PATH}"
 
 # Configure container registries and policies
 RUN mkdir -p /etc/containers/registries.conf.d/
@@ -178,7 +174,7 @@ RUN wget -qO- https://github.com/containers/podman/archive/refs/tags/v5.6.2.tar.
     && make install PREFIX=/usr \
     && rm -rf /tmp/podman-5.6.2
 
-# Build and install crun from source
+# Build and install crun
 RUN git clone --depth 1 -b 1.14.3 https://github.com/containers/crun.git /tmp/crun \
     && cd /tmp/crun \
     && ./autogen.sh \
@@ -205,18 +201,20 @@ COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /root/.local/share/uv /root/.local/share/uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Install podman-compose
-RUN uv pip install --no-cache-dir --system podman-compose
-
 # Set up environment
 ENV PATH="/opt/venv/bin:${PATH}"
 ENV VIRTUAL_ENV="/opt/venv"
+
+# Install podman-compose into venv
+RUN uv pip install --no-cache-dir podman-compose
+
 ENV VLLM_LOGGING_LEVEL=WARNING
 ENV HF_HOME=/root/.cache/huggingface
 ENV PYTHONUNBUFFERED=1
 
 # Verify installation
-RUN python -c "import torch; print(f'PyTorch {torch.__version__}')"
+RUN python -c "import torch; print(f'PyTorch {torch.__version__}')" && \
+    podman --version
 
 WORKDIR /workspace
 CMD ["bash"]
