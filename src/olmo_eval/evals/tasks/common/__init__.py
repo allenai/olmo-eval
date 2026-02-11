@@ -13,6 +13,7 @@ from .registry import (
     parse_task_spec,
     register,
     register_regime,
+    register_subtasks,
     register_variant,
     task_exists,
 )
@@ -31,6 +32,7 @@ __all__ = [
     "parse_task_spec",
     "register",
     "register_regime",
+    "register_subtasks",
     "register_variant",
     "task_exists",
 ]

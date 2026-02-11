@@ -372,6 +372,76 @@ def clear_registry() -> None:
     _regimes.clear()
 
 
+def register_subtasks(
+    base_class: type[Task],
+    subtasks: list[str],
+    *,
+    task_prefix: str,
+    data_source: str,
+    subtask_attr: str = "subset",
+    class_attrs: dict[str, Any] | None = None,
+    variants: dict[str, dict[str, Any]] | None = None,
+) -> None:
+    """Register multiple subtasks from a base class.
+
+    This is useful for tasks like MMLU (many subjects) or multilingual MBPP
+    (many languages) where you want to generate many similar task registrations.
+
+    Args:
+        base_class: The base Task class to subclass.
+        subtasks: List of subtask identifiers (e.g., language codes, subject names).
+        task_prefix: Prefix for task names (e.g., "mt_mbpp" -> "mt_mbpp_python").
+        data_source: HuggingFace dataset path. Each subtask becomes the subset.
+        subtask_attr: Class attribute name that receives the subtask identifier.
+            Defaults to "subset". Use "language" for multilingual tasks, etc.
+        class_attrs: Additional class attributes applied to all generated tasks.
+        variants: Dict mapping variant names to their config overrides.
+
+    Example:
+        ```python
+        register_subtasks(
+            base_class=MultilingualMBPPTask,
+            subtasks=["python", "java", "rust"],
+            task_prefix="mt_mbpp",
+            data_source="allenai/multilingual_mbpp",
+            subtask_attr="language",
+            class_attrs={
+                "metrics": (),
+                "sampling_params": SamplingParams(max_tokens=1024),
+            },
+            variants={
+                "bpb": {"formatter": PPLFormatter(), "metrics": (BPBMetric(),)},
+                "3shot": {"num_fewshot": 3},
+            },
+        )
+        # Registers: mt_mbpp_python, mt_mbpp_java, mt_mbpp_rust
+        # With variants: mt_mbpp_python:bpb, mt_mbpp_python:3shot, etc.
+        ```
+    """
+    from olmo_eval.data import DataSource
+
+    for subtask in subtasks:
+        task_name = f"{task_prefix}_{subtask}"
+        class_name = f"{base_class.__name__}_{subtask.title().replace('-', '_')}"
+
+        # Build class attributes
+        attrs: dict[str, Any] = {
+            subtask_attr: subtask,
+            "data_source": DataSource(path=data_source, subset=subtask),
+        }
+        if class_attrs:
+            attrs.update(class_attrs)
+
+        # Create and register the subclass
+        cls = type(class_name, (base_class,), attrs)
+        register(task_name)(cls)
+
+        # Register variants
+        if variants:
+            for variant_name, overrides in variants.items():
+                register_variant(task_name, variant_name, **overrides)
+
+
 def get_task_dependencies(specs: list[str]) -> list[str]:
     """Extract and merge dependencies from multiple task specs.
 

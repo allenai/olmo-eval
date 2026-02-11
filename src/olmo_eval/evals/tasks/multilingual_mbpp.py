@@ -16,8 +16,8 @@ from typing import Any
 from olmo_eval.common.formatters import PPLFormatter
 from olmo_eval.common.metrics import BPBMetric
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams
-from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.tasks.common import Task, register, register_variant
+from olmo_eval.data import DataLoader
+from olmo_eval.evals.tasks.common import Task, register_subtasks
 
 # Supported languages in multilingual MBPP
 MULTILINGUAL_MBPP_LANGUAGES: tuple[str, ...] = (
@@ -133,85 +133,31 @@ class MultilingualMBPPV2FixTask(MultilingualMBPPTask):
 # Task Registration
 # =============================================================================
 
-# Register all mt_mbpp_{language} tasks
-for _lang in MULTILINGUAL_MBPP_LANGUAGES:
-    # Create class with appropriate class attributes
-    _cls = type(
-        f"MultilingualMBPP_{_lang.title()}",
-        (MultilingualMBPPTask,),
-        {
-            "language": _lang,
-            "data_source": DataSource(path="allenai/multilingual_mbpp", subset=_lang),
-            "metrics": (),
-            "sampling_params": SamplingParams(
-                max_tokens=1024,
-                temperature=0.0,
-                stop_sequences=("\n\n",),
-            ),
-        },
-    )
-    register(f"mt_mbpp_{_lang}")(_cls)
+_SHARED_ATTRS: dict = {
+    "metrics": (),
+    "sampling_params": SamplingParams(max_tokens=1024, temperature=0.0, stop_sequences=("\n\n",)),
+}
 
+_VARIANTS: dict = {
+    "bpb": {
+        "formatter": PPLFormatter(leading_space=False, always_prepend_separator=True),
+        "metrics": (BPBMetric(),),
+    },
+    "3shot": {"num_fewshot": 3},
+}
 
-# Register all mt_mbpp_v2fix_{language} tasks
-for _lang in MULTILINGUAL_MBPP_LANGUAGES:
-    # Create class with appropriate class attributes
-    _cls = type(
-        f"MultilingualMBPPV2Fix_{_lang.title()}",
-        (MultilingualMBPPV2FixTask,),
-        {
-            "language": _lang,
-            "data_source": DataSource(path="allenai/multilingual_mbpp", subset=_lang),
-            "metrics": (),
-            "sampling_params": SamplingParams(
-                max_tokens=1024,
-                temperature=0.0,
-                stop_sequences=("\n\n",),
-            ),
-        },
-    )
-    register(f"mt_mbpp_v2fix_{_lang}")(_cls)
-
-
-# =============================================================================
-# Variant Registrations
-# =============================================================================
-
-# Register bpb and 3shot variants for all mt_mbpp_{language} tasks
-for _lang in MULTILINGUAL_MBPP_LANGUAGES:
-    # BPB variant - use mt_mbpp_{language}:bpb
-    register_variant(
-        f"mt_mbpp_{_lang}",
-        "bpb",
-        # Matches oe-eval: no leading space, always prepend \n\n separator
-        formatter=PPLFormatter(leading_space=False, always_prepend_separator=True),
-        metrics=(BPBMetric(),),
-    )
-
-    # 3shot variant - composable with bpb (e.g., mt_mbpp_{language}:3shot:bpb)
-    register_variant(
-        f"mt_mbpp_{_lang}",
-        "3shot",
-        num_fewshot=3,
-    )
-
-
-# Register bpb and 3shot variants for all mt_mbpp_v2fix_{language} tasks
-for _lang in MULTILINGUAL_MBPP_LANGUAGES:
-    # BPB variant - use mt_mbpp_v2fix_{language}:bpb
-    register_variant(
-        f"mt_mbpp_v2fix_{_lang}",
-        "bpb",
-        # Matches oe-eval: no leading space, always prepend \n\n separator
-        formatter=PPLFormatter(leading_space=False, always_prepend_separator=True),
-        metrics=(BPBMetric(),),
-    )
-
-    # 3shot variant - composable with bpb (e.g., mt_mbpp_v2fix_{language}:3shot:bpb)
-    register_variant(
-        f"mt_mbpp_v2fix_{_lang}",
-        "3shot",
-        num_fewshot=3,
+for _base, _prefix in [
+    (MultilingualMBPPTask, "mt_mbpp"),
+    (MultilingualMBPPV2FixTask, "mt_mbpp_v2fix"),
+]:
+    register_subtasks(
+        _base,
+        list(MULTILINGUAL_MBPP_LANGUAGES),
+        task_prefix=_prefix,
+        data_source="allenai/multilingual_mbpp",
+        subtask_attr="language",
+        class_attrs=_SHARED_ATTRS,
+        variants=_VARIANTS,
     )
 
 
