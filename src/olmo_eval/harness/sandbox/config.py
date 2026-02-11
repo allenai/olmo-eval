@@ -47,7 +47,7 @@ class SandboxConfig:
     modal_sandbox_kwargs: dict[str, Any] | None = None
     runtime_timeout: float = 3600.0
     required_secrets: tuple[str, ...] = ()
-    docker_internal_host: str = "http://host.containers.internal"
+    docker_internal_host: str = "http://host.docker.internal/"
 
     @property
     def is_local(self) -> bool:
@@ -95,7 +95,5 @@ class SandboxConfig:
             modal_sandbox_kwargs=data.get("modal_sandbox_kwargs"),
             runtime_timeout=data.get("runtime_timeout", 3600.0),
             required_secrets=tuple(data.get("required_secrets", [])),
-            docker_internal_host=data.get(
-                "docker_internal_host", "http://host.containers.internal"
-            ),
+            docker_internal_host=data.get("docker_internal_host", "http://host.docker.internal/"),
         )
