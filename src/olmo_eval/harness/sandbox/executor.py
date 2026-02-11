@@ -59,17 +59,11 @@ class SandboxExecutor:
         deployment = self.get_deployment()
 
         logger.info("Starting sandbox deployment...")
-        try:
-            await deployment.start()
-        except TimeoutError as e:
-            logger.error("Timed out starting sandbox deployment")
-            raise RuntimeError(
-                f"Sandbox deployment timed out after {self.config.startup_timeout}s"
-            ) from e
+        await deployment.start()
 
         self._deployment = deployment
         self._runtime = deployment.runtime
-        logger.info("Sandbox deployment started")
+        logger.info("Sandbox deployment ready!")
 
     def get_deployment(self) -> Any:
         """Create the appropriate deployment based on configuration.

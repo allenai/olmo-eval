@@ -148,7 +148,7 @@ def _codex_python() -> HarnessConfig:
         sandbox=SandboxConfig(
             image="python:3.12-slim",
             mode=SandboxMode.DOCKER,
-            startup_timeout=300.0,
+            startup_timeout=60.0,
         ),
     )
 
@@ -163,7 +163,7 @@ def _codex_universal() -> HarnessConfig:
         sandbox=SandboxConfig(
             image="volcengine/sandbox-fusion:server-20250609",
             mode=SandboxMode.DOCKER,
-            startup_timeout=300.0,
+            startup_timeout=60.0,
         ),
     )
 
@@ -187,5 +187,6 @@ def _codex_agent() -> HarnessConfig:
         sandbox=SandboxConfig(
             image="volcengine/sandbox-fusion:server-20250609",
             mode=SandboxMode.DOCKER,
+            startup_timeout=60.0,
         ),
     )

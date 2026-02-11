@@ -88,8 +88,8 @@ def configure_logging(level: LogLevel = "INFO") -> None:
     logging.getLogger("LiteLLM").setLevel(logging.WARNING)
     logging.getLogger("litellm").setLevel(logging.WARNING)
 
-    # Allow swerex (sandbox) logs through
-    logging.getLogger("swerex").setLevel(logging.INFO)
+    # Allow swerex (sandbox) logs through at DEBUG level
+    logging.getLogger("swerex").setLevel(logging.DEBUG)
 
     # Set environment variables for third-party libraries
     os.environ.setdefault("HF_DATASETS_DISABLE_PROGRESS_BAR", "1")
