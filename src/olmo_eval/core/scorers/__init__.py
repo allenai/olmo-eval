@@ -18,6 +18,7 @@ from .llm_judge import (
     SimpleQAJudgeScorer,
     build_openai_judge_fn,
 )
+from .substring import SubstringRecallScorer
 from .tools import (
     ToolArgumentScorer,
     ToolCallScorer,
@@ -45,6 +46,7 @@ __all__ = [
     "Scorer",
     "SimpleQAGrade",
     "SimpleQAJudgeScorer",
+    "SubstringRecallScorer",
     "ToolArgumentScorer",
     "ToolCallScorer",
     "ToolSequenceScorer",

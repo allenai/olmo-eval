@@ -11,6 +11,7 @@ Paper: https://arxiv.org/abs/2404.06654
 Original implementation: https://github.com/hsiehjackson/RULER
 """
 
+import os
 from collections.abc import Iterator
 from typing import Any
 
@@ -22,16 +23,6 @@ from olmo_eval.data.ruler_loader import download_ruler_data, load_ruler_dataset
 from olmo_eval.data.ruler_tasks import RULER_TASKS
 from olmo_eval.evals.tasks.core.base import Task, TaskConfig
 from olmo_eval.evals.tasks.core.registry import register, register_variant
-
-_CITATION = """
-@misc{hsieh2024ruler,
-    title={RULER: What's the Real Context Size of Your Long-Context Language Models?},
-    author={Cheng-Ping Hsieh and Simeng Sun and Samuel Kriman and Shantanu Acharya and
-            Dima Rekesh and Fei Jia and Yang Zhang and Boris Ginsburg},
-    year={2024},
-    journal={arXiv preprint arXiv:2404.06654},
-}
-"""
 
 
 class RulerTask(Task):
@@ -71,8 +62,6 @@ class RulerTask(Task):
         root_dir = download_ruler_data()
 
         # Get data path from config
-        import os
-
         data_path = os.path.join(root_dir, self.ruler_config["data"])
 
         # Load dataset
@@ -125,7 +114,8 @@ class RulerTask(Task):
             context_fields["context"] = ""
 
         # Format the question using the user template
-        assert self._templates is not None
+        if self._templates is None:
+            raise RuntimeError("Templates not loaded. Call _load_data() first.")
         question = self._templates["user"].format(**context_fields)
 
         # Add system template as prepend text for non-chat format

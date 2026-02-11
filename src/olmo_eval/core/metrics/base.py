@@ -13,9 +13,9 @@ from ..scorers import (
     LogprobScorer,
     PerplexityScorer,
     Scorer,
+    SubstringRecallScorer,
     ToolCallScorer,
 )
-from ..scorers.substring import SubstringRecallScorer
 from ..types import Response
 from ..utils import compute_pass_at_k, compute_pass_pow_k
 

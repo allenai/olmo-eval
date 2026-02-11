@@ -34,7 +34,8 @@ def download_ruler_data() -> str:
         logger.info(f"Extracting RULER data to {root_dir}...")
         with tarfile.open(my_file) as tar:
             tar.extractall(root_dir)
-        assert os.path.exists(data_dir), f"Extraction failed: {data_dir} does not exist"
+        if not os.path.exists(data_dir):
+            raise RuntimeError(f"Extraction failed: {data_dir} does not exist")
     else:
         logger.info(f"Using cached RULER data in {root_dir}.")
 
@@ -151,7 +152,7 @@ def load_ruler_dataset(
     user_template, system_template, prompt_template = get_ruler_templates(task_type)
 
     # Process examples to standardize field names
-    def process_example(example):
+    def process_example(example: dict[str, Any]) -> dict[str, Any]:
         return {
             "question": (example.get("query") or example.get("question") or ""),
             "example": (
