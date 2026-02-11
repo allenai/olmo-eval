@@ -223,6 +223,7 @@ def aggregate_results(
     task_specs: list[str],
     provider_config: Any,
     attention_backend: str | None,
+    harness_config: Any | None = None,
 ) -> dict[str, Any]:
     """Aggregate results and prepare final output.
 
@@ -232,6 +233,7 @@ def aggregate_results(
         task_specs: Original task specs (may include suites).
         provider_config: Provider configuration.
         attention_backend: Attention backend used.
+        harness_config: Optional HarnessConfig for full config serialization.
 
     Returns:
         Results dictionary ready for serialization.
@@ -271,6 +273,9 @@ def aggregate_results(
     model_config_dict = provider_config.to_dict()
     model_config_dict["attention_backend"] = attention_backend
     results_dict["model_config"] = model_config_dict
+
+    if harness_config is not None:
+        results_dict["harness_config"] = harness_config.to_dict()
 
     suite_aggs = compute_suite_aggregations(task_specs, results_dict["tasks"])
     if suite_aggs:

@@ -449,6 +449,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             task_specs=self.task_specs,
             provider_config=self.provider_config,
             attention_backend=self.attention_backend,
+            harness_config=self.harness_config,
         )
 
     def _finalize_and_save(

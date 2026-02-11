@@ -231,7 +231,6 @@ def scoring_worker(
                 sys.exit(1)
 
             scoring_context = ScoringContext(execution_env=sandbox_executor)
-            logger.info("Sandbox ready!")
 
         # Signal that worker is ready
         if ready_event is not None:

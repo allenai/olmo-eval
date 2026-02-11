@@ -30,7 +30,7 @@ def build_single_model_metrics(
     """Build metrics output for single-model format.
 
     Args:
-        results: Results dictionary with 'tasks', 'model_config', etc.
+        results: Results dictionary with 'tasks', 'model_config', 'harness_config', etc.
         experiment_id: Unique ID for this experiment run.
         experiment_name: Human-readable experiment name.
         experiment_group: Group for related experiments.
@@ -41,19 +41,23 @@ def build_single_model_metrics(
     Returns:
         MetricsOutput instance ready for serialization.
     """
-    # Build config from stored model config
-    model_cfg = results.get("model_config", {})
-    config = ModelMetadata(
-        model=model_cfg.get("model", results.get("model", "")),
-        provider=model_cfg.get("provider", results.get("provider", "")),
-        dtype=model_cfg.get("dtype", "auto"),
-        tokenizer=model_cfg.get("tokenizer"),
-        revision=model_cfg.get("revision"),
-        attention_backend=model_cfg.get("attention_backend"),
-    )
+    # Use full harness_config if available, otherwise build from model_config
+    if "harness_config" in results:
+        config_dict = results["harness_config"]
+    else:
+        # Fallback to legacy model_config format
+        model_cfg = results.get("model_config", {})
+        config = ModelMetadata(
+            model=model_cfg.get("model", results.get("model", "")),
+            provider=model_cfg.get("provider", results.get("provider", "")),
+            dtype=model_cfg.get("dtype", "auto"),
+            tokenizer=model_cfg.get("tokenizer"),
+            revision=model_cfg.get("revision"),
+            attention_backend=model_cfg.get("attention_backend"),
+        )
+        config_dict = config.to_dict()
 
-    # Build config dict with model_hash included
-    config_dict = config.to_dict()
+    # Add model_hash to config
     if model_hash is not None:
         config_dict["model_hash"] = model_hash
 
