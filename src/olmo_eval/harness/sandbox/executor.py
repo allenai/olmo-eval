@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import os
+import tempfile
 import time
+from pathlib import Path
 from typing import Any
 
 from olmo_eval.common.execution.environment import ExecutionResult
@@ -63,6 +67,7 @@ class SandboxExecutor:
         self.config = config
         self._deployment: Any = None
         self._runtime: Any = None
+        self._storage_conf_path: str | None = None
 
     async def __aenter__(self) -> SandboxExecutor:
         """Start the sandbox environment."""
@@ -78,6 +83,36 @@ class SandboxExecutor:
         """Stop the sandbox environment."""
         await self.stop()
 
+    def _configure_container_storage(self) -> None:
+        """Configure container runtime to use custom storage location if image_cache_dir is set."""
+        if self.config.image_cache_dir is None:
+            return
+
+        cache_dir = Path(self.config.image_cache_dir)
+        storage_dir = cache_dir / "storage"
+        run_dir = Path("/tmp/containers-run")
+
+        # Ensure directories exist
+        storage_dir.mkdir(parents=True, exist_ok=True)
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create storage.conf (used by Docker/Podman)
+        storage_conf = f"""\
+[storage]
+driver = "overlay"
+graphroot = "{storage_dir}"
+runroot = "{run_dir}"
+"""
+        # Write to temp file (persists for lifetime of executor)
+        fd, conf_path = tempfile.mkstemp(suffix=".conf", prefix="container-storage-")
+        os.write(fd, storage_conf.encode())
+        os.close(fd)
+        self._storage_conf_path = conf_path
+
+        # Set environment variable for container runtime
+        os.environ["CONTAINERS_STORAGE_CONF"] = conf_path
+        logger.info(f"Configured container storage: graphroot={storage_dir}")
+
     async def start(self) -> None:
         """Start the sandbox deployment.
 
@@ -85,6 +120,9 @@ class SandboxExecutor:
             ImportError: If swe-rex is not installed.
             RuntimeError: If container runtime is not available.
         """
+        # Configure container storage before creating deployment
+        self._configure_container_storage()
+
         logger.info("Creating sandbox deployment...")
         deployment = self.get_deployment()
 
@@ -163,6 +201,12 @@ class SandboxExecutor:
                 logger.warning(f"Failed to stop deployment: {e}")
             self._deployment = None
             self._runtime = None
+
+        # Clean up storage config temp file
+        if self._storage_conf_path and os.path.exists(self._storage_conf_path):
+            with contextlib.suppress(OSError):
+                os.unlink(self._storage_conf_path)
+            self._storage_conf_path = None
 
         logger.info("Sandbox stopped")
 

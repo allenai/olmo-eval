@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, cluster_has_weka
+from olmo_eval.common.constants.infrastructure import (
+    BEAKER_RESULT_DIR,
+    BEAKER_SANDBOX_IMAGE_CACHE_DIR,
+    cluster_has_weka,
+)
 
 if TYPE_CHECKING:
     from olmo_eval.cli.beaker.config_loader import LaunchConfig
@@ -98,6 +102,9 @@ class JobConfigAssembler:
         if self.enable_sandbox:
             job_env_vars["BEAKER_ALLOW_SUBCONTAINERS"] = "1"
             job_env_vars["BEAKER_SKIP_DOCKER_SOCKET"] = "1"
+            # Set default image cache on Weka (override: -o sandbox.image_cache_dir=...)
+            if cluster_has_weka(self.config.cluster):
+                job_env_vars["SANDBOX_IMAGE_CACHE_DIR"] = BEAKER_SANDBOX_IMAGE_CACHE_DIR
 
         task_packages = self._extract_task_dependencies(exp.tasks, exp.task_overrides)
 

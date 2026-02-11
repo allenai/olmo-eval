@@ -48,6 +48,7 @@ class SandboxConfig:
     runtime_timeout: float = 3600.0
     required_secrets: tuple[str, ...] = ()
     docker_args: tuple[str, ...] = ()
+    image_cache_dir: str | None = None  # Custom container storage location for image caching
 
     @property
     def is_local(self) -> bool:
@@ -69,6 +70,8 @@ class SandboxConfig:
             "runtime_timeout": self.runtime_timeout,
             "docker_args": list(self.docker_args),
         }
+        if self.image_cache_dir is not None:
+            result["image_cache_dir"] = self.image_cache_dir
         if self.modal_sandbox_kwargs is not None:
             result["modal_sandbox_kwargs"] = self.modal_sandbox_kwargs
         if self.required_secrets:
@@ -96,4 +99,5 @@ class SandboxConfig:
             runtime_timeout=data.get("runtime_timeout", 3600.0),
             required_secrets=tuple(data.get("required_secrets", [])),
             docker_args=tuple(data.get("docker_args", [])),
+            image_cache_dir=data.get("image_cache_dir"),
         )
