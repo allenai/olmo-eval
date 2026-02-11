@@ -176,22 +176,11 @@ class RulerTask(Task):
                 )
             return self.config.formatter.format(instance, self.get_fewshot())
 
-        # Build sampling params from ruler config
-        stop_sequences = []
-        if self.ruler_config.get("stop_new_line", False):
-            stop_sequences = ["\n", "Ċ", "ĊĊ", "<0x0A>"]
-
-        sampling_params = SamplingParams(
-            temperature=0.0,
-            top_p=1.0,
-            max_tokens=self.ruler_config.get("max_gen_toks", 50),
-            stop_sequences=stop_sequences if len(stop_sequences) > 0 else None,
-        )
-
+        # Default formatting: just return the prompt
+        # (sampling_params are already configured in TaskConfig)
         return LMRequest(
             request_type=self.request_type,
             prompt=instance.question,
-            sampling_params=sampling_params,
         )
 
     def extract_answer(self, output: LMOutput) -> Any:
