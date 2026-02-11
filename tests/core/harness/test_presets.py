@@ -7,7 +7,7 @@ import pytest
 from olmo_eval.harness import clear_registry
 from olmo_eval.harness.config import HarnessConfig
 from olmo_eval.harness.presets import (
-    _PRESET_REGISTRY,
+    HarnessPresets,
     get_harness_preset,
     list_harness_presets,
     register_harness_preset,
@@ -77,12 +77,12 @@ class TestHarnessPresets:
 
         register_harness_preset("custom", custom)
 
-        assert "custom" in _PRESET_REGISTRY
+        assert hasattr(HarnessPresets, "custom")
         retrieved = get_harness_preset("custom")
         assert retrieved.system_prompt == "Custom prompt"
 
         # Clean up
-        del _PRESET_REGISTRY["custom"]
+        delattr(HarnessPresets, "custom")
 
     def test_dr_tulu_preset_required_secrets(self):
         """Test that dr_tulu preset has required secrets."""
@@ -90,6 +90,16 @@ class TestHarnessPresets:
 
         assert "S2_API_KEY" in config.required_secrets
         assert "SERPER_API_KEY" in config.required_secrets
+
+    def test_direct_preset_access(self):
+        """Test accessing presets directly via HarnessPresets class."""
+        config = HarnessPresets.default
+        assert isinstance(config, HarnessConfig)
+        assert config.name == "default"
+
+        config = HarnessPresets.dr_tulu
+        assert isinstance(config, HarnessConfig)
+        assert config.name == "dr_tulu"
 
 
 class TestSearchTools:

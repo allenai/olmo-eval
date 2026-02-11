@@ -63,6 +63,7 @@ from .backends import (
 from .config import HarnessConfig, ProviderConfig, harness_config
 from .harness import Harness, create_harness
 from .presets import (
+    HarnessPresets,
     get_harness_preset,
     list_harness_presets,
     register_harness_preset,
@@ -110,6 +111,7 @@ __all__ = [
     "list_backends",
     "register_backend",
     # Presets
+    "HarnessPresets",
     "get_harness_preset",
     "list_harness_presets",
     "register_harness_preset",
