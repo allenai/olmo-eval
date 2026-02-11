@@ -1,23 +1,37 @@
 #!/bin/bash
 # Setup docker.io registry mirror
-# Usage: setup_dockerio_mirror <mirror_url>
-# Example: setup_dockerio_mirror https://mirror.gcr.io
+# Usage: setup_dockerio_mirror <mirror_urls>
+# Example: setup_dockerio_mirror host1:5000,host2:5000
 
-MIRROR_URL="$1"
+MIRROR_URLS="$1"
 
-if [ -z "$MIRROR_URL" ]; then
-    echo "Usage: setup_dockerio_mirror <mirror_url>"
+if [ -z "$MIRROR_URLS" ]; then
+    echo "Usage: setup_dockerio_mirror <mirror_urls>"
+    echo "  mirror_urls: comma-separated list of mirror hosts (e.g., host1:5000,host2:5000)"
     exit 1
 fi
 
+# Start the config file with the registry prefix
 cat > /etc/containers/registries.conf.d/00-docker-mirror.conf << EOF
 [[registry]]
 prefix = "docker.io"
 location = "docker.io"
-
-[[registry.mirror]]
-location = "${MIRROR_URL#https://}"
-insecure = false
 EOF
 
-echo "Configured docker.io mirror: $MIRROR_URL"
+# Add each mirror as a separate [[registry.mirror]] block
+IFS=',' read -ra MIRRORS <<< "$MIRROR_URLS"
+for mirror in "${MIRRORS[@]}"; do
+    # Strip any protocol prefix and whitespace
+    mirror="${mirror#http://}"
+    mirror="${mirror#https://}"
+    mirror="${mirror// /}"
+
+    cat >> /etc/containers/registries.conf.d/00-docker-mirror.conf << EOF
+
+[[registry.mirror]]
+location = "$mirror"
+insecure = true
+EOF
+done
+
+echo "Configured docker.io mirror(s): $MIRROR_URLS"
