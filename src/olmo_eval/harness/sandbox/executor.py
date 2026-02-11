@@ -61,12 +61,24 @@ class SandboxExecutor:
             ImportError: If swe-rex is not installed.
             RuntimeError: If container runtime is not available.
         """
+        logger.info("Creating sandbox deployment...")
         deployment = self._create_deployment()
 
-        await deployment.start()
+        logger.info("Starting sandbox deployment...")
+        try:
+            await asyncio.wait_for(
+                deployment.start(),
+                timeout=self.config.startup_timeout,
+            )
+        except TimeoutError as e:
+            logger.error("Timed out starting sandbox deployment")
+            raise RuntimeError(
+                f"Sandbox deployment timed out after {self.config.startup_timeout}s"
+            ) from e
 
         self._deployment = deployment
         self._runtime = deployment.runtime
+        logger.info("Sandbox deployment started, creating session...")
 
         # Create a persistent bash session for command execution
         from swerex.runtime.abstract import CreateBashSessionRequest
