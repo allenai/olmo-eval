@@ -33,25 +33,25 @@ def get_registry_mirror_url(workspace: str | None = None) -> str | None:
     try:
         beaker = Beaker.from_env(default_workspace=workspace)
 
-        # Get the experiment
-        experiment = beaker.experiment.get(REGISTRY_MIRROR_EXPERIMENT)
+        # Get the workload (experiment) by name
+        workload = beaker.workload.get(REGISTRY_MIRROR_EXPERIMENT)
+        experiment = workload.experiment
 
-        # Get all jobs for this experiment
-        jobs = list(beaker.experiment.jobs(experiment))
-
-        # Filter for running jobs (not finalized, not canceled)
+        # Find running mirror nodes from experiment tasks
         mirror_hosts: list[str] = []
-        for job in jobs:
-            status = job.status
-            if status.finalized is not None or status.canceled is not None:
+        for task in experiment.tasks:
+            # Skip tasks that don't have a running job
+            if not task.idle_job:
                 continue
 
-            # Get BEAKER_NODE_HOSTNAME from env vars
-            if job.execution and job.execution.spec and job.execution.spec.env_vars:
-                for env_var in job.execution.spec.env_vars:
-                    if env_var.name == "BEAKER_NODE_HOSTNAME" and env_var.value:
-                        mirror_hosts.append(f"{env_var.value}:5000")
-                        break
+            # Get job details to find the node hostname
+            job = beaker.job.get(task.idle_job.id)
+
+            # Extract BEAKER_NODE_HOSTNAME from assigned environment variables
+            for env_var in job.assignment_details.assigned_environment_variables:
+                if env_var.name == "BEAKER_NODE_HOSTNAME" and env_var.literal:
+                    mirror_hosts.append(f"{env_var.literal}:5000")
+                    break
 
         if not mirror_hosts:
             log.warning("No running registry mirror nodes found")
