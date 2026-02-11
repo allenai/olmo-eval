@@ -52,7 +52,7 @@ agents = [
     "httpx~=0.28.1",
 ]
 sandbox = [
-    "swe-rex>=0.3.0",
+    "swe-rexi[modal]>=1.4.0,<2",
 ]
 beaker = [
     "beaker-py>=2.5.4,<3",

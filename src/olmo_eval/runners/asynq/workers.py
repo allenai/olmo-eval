@@ -212,7 +212,7 @@ def scoring_worker(
             from olmo_eval.harness.sandbox import SandboxConfig, SandboxExecutor
 
             sandbox_config = SandboxConfig.from_dict(sandbox_config_dict)
-            logger.info("Initializing sandbox for code execution...")
+            logger.info("Initializing sandbox...")
             sandbox_executor = SandboxExecutor(sandbox_config)
 
             # Start sandbox synchronously using asyncio
@@ -257,7 +257,6 @@ def scoring_worker(
         if sandbox_executor is not None:
             try:
                 asyncio.run(sandbox_executor.stop())
-                logger.info("Sandbox stopped")
             except Exception as e:
                 logger.warning(f"Failed to stop sandbox: {e}")
 

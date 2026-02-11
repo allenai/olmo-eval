@@ -242,7 +242,6 @@ class OpenAIAgentsBackend(Backend):
             # Always clean up sandbox
             if sandbox is not None:
                 await sandbox.stop()
-                logger.info("Sandbox stopped")
 
     def _convert_trajectory(self, result: Any) -> AgentTrajectory:
         """Convert agents SDK result to AgentTrajectory.

@@ -85,12 +85,17 @@ class SandboxExecutor:
             A deployment instance.
 
         Raises:
-            ImportError: If swe-rex is not installed.
+            ImportError: If swe-rex or required extras are not installed.
             RuntimeError: If the requested container runtime is not available.
         """
         match self.config.mode:
             case SandboxMode.DOCKER:
-                from swerex.deployment.docker import DockerDeployment
+                try:
+                    from swerex.deployment.docker import DockerDeployment
+                except ImportError as e:
+                    raise ImportError(
+                        "swe-rex not installed. Install with: pip install swe-rex"
+                    ) from e
 
                 if not shutil.which("docker"):
                     raise RuntimeError("Docker not available but mode=SandboxMode.DOCKER")
@@ -100,7 +105,12 @@ class SandboxExecutor:
                 )
 
             case SandboxMode.LOCAL:
-                from swerex.deployment.local import LocalDeployment
+                try:
+                    from swerex.deployment.local import LocalDeployment
+                except ImportError as e:
+                    raise ImportError(
+                        "swe-rex not installed. Install with: pip install swe-rex"
+                    ) from e
 
                 logger.warning(
                     "Using local deployment (unsandboxed). Commands will run on host system."
@@ -108,7 +118,13 @@ class SandboxExecutor:
                 return LocalDeployment()
 
             case SandboxMode.MODAL:
-                from swerex.deployment.modal import ModalDeployment
+                try:
+                    from swerex.deployment.modal import ModalDeployment
+                except ImportError as e:
+                    raise ImportError(
+                        "swe-rex modal support not installed. "
+                        "Install with: pip install 'swe-rex[modal]'"
+                    ) from e
 
                 return ModalDeployment(
                     image=self.config.image,
