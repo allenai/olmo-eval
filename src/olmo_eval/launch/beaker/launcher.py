@@ -414,6 +414,9 @@ class BeakerJobConfig:
     # Sandbox mode - when True, use Podman-enabled base image and set sandbox env vars
     enable_sandbox: bool = False
 
+    # Registry mirror setup script to run during install (for sandbox jobs)
+    setup_registry_mirror: bool = False
+
 
 def resolve_clusters(cluster: str | list[str]) -> list[str]:
     """Resolve cluster aliases to full cluster names.
@@ -547,6 +550,7 @@ class BeakerLauncher:
         env_exports: dict[str, str] | None = None,
         provider_package: str | None = None,
         task_packages: list[str] | None = None,
+        setup_registry_mirror: bool = False,
     ) -> str:
         """Build installation command for gantry's install_cmd parameter.
 
@@ -560,6 +564,7 @@ class BeakerLauncher:
             env_exports: Optional dict of environment variables to export before running.
             provider_package: Optional custom provider package to install (overrides default).
             task_packages: Optional list of task-specific packages to install.
+            setup_registry_mirror: If True, run setup_dockerio_mirror script with MIRROR_URL.
 
         Returns:
             Shell command string for installation.
@@ -567,6 +572,10 @@ class BeakerLauncher:
         # Build the install steps
         # Export UV_PROJECT_ENVIRONMENT so all uv commands use Docker's /opt/venv
         steps = ["export UV_PROJECT_ENVIRONMENT=/opt/venv"]
+
+        # Set up registry mirror for Docker Hub if configured (for sandbox jobs)
+        if setup_registry_mirror:
+            steps.append('if [ -n "$MIRROR_URL" ]; then setup_dockerio_mirror "$MIRROR_URL"; fi')
 
         # Export additional environment variables (e.g., UV_CACHE_DIR)
         if env_exports:
@@ -622,6 +631,7 @@ class BeakerLauncher:
             env_exports,
             config.provider_package,
             config.task_packages,
+            config.setup_registry_mirror,
         )
 
         # Build weka mounts as tuples: (bucket, mount_path)

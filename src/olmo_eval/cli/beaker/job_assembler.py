@@ -95,9 +95,19 @@ class JobConfigAssembler:
             if self.config.uv_cache_dir:
                 job_env_vars["UV_CACHE_DIR"] = self.config.uv_cache_dir
 
+        # Configure sandbox environment and registry mirror
+        setup_registry_mirror = False
         if self.enable_sandbox:
             job_env_vars["BEAKER_ALLOW_SUBCONTAINERS"] = "1"
             job_env_vars["BEAKER_SKIP_DOCKER_SOCKET"] = "1"
+
+            # Get registry mirror URL for faster image pulls
+            from olmo_eval.launch.beaker.mirror import get_registry_mirror_url
+
+            mirror_url = get_registry_mirror_url(self.config.workspace)
+            if mirror_url:
+                job_env_vars["MIRROR_URL"] = mirror_url
+                setup_registry_mirror = True
 
         task_packages = self._extract_task_dependencies(exp.tasks, exp.task_overrides)
 
@@ -122,6 +132,7 @@ class JobConfigAssembler:
             env_secrets=env_secrets,
             task_packages=task_packages,
             enable_sandbox=self.enable_sandbox,
+            setup_registry_mirror=setup_registry_mirror,
         )
 
     def _extract_task_dependencies(
