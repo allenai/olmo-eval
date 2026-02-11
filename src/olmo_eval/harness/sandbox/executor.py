@@ -13,7 +13,7 @@ from typing import Any
 
 from olmo_eval.common.execution.environment import ExecutionResult
 
-from .config import SandboxConfig, SandboxMode
+from .config import SandboxConfig, SandboxMode, build_storage_conf
 
 logger = logging.getLogger(__name__)
 
@@ -96,14 +96,7 @@ class SandboxExecutor:
         storage_dir.mkdir(parents=True, exist_ok=True)
         run_dir.mkdir(parents=True, exist_ok=True)
 
-        # Create storage.conf (used by Docker/Podman)
-        # Use vfs driver for compatibility with network filesystems like Weka
-        storage_conf = f"""\
-[storage]
-driver = "vfs"
-graphroot = "{storage_dir}"
-runroot = "{run_dir}"
-"""
+        storage_conf = build_storage_conf(graphroot=storage_dir, runroot=run_dir)
         # Write to temp file (persists for lifetime of executor)
         fd, conf_path = tempfile.mkstemp(suffix=".conf", prefix="container-storage-")
         os.write(fd, storage_conf.encode())

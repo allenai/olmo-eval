@@ -128,6 +128,7 @@ RUN rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* && \
     git \
     wget \
     # Podman build dependencies
+    fuse-overlayfs \
     gcc \
     golang-go \
     go-md2man \

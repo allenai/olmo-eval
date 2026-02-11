@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 from typing import Any, Literal
 
 ContainerRuntime = Literal["docker", "podman"]
@@ -101,3 +103,37 @@ class SandboxConfig:
             docker_args=tuple(data.get("docker_args", [])),
             image_cache_dir=data.get("image_cache_dir"),
         )
+
+
+def build_storage_conf(graphroot: Path, runroot: Path) -> str:
+    """Build containers storage.conf content.
+
+    Args:
+        graphroot: Directory for container image storage.
+        runroot: Directory for runtime state (locks, temp files).
+
+    Returns:
+        Storage configuration file content.
+
+    Environment variables:
+        SANDBOX_OVERLAY_MOUNT_PROGRAM: Path to fuse-overlayfs binary for
+            network filesystem compatibility (e.g., /usr/bin/fuse-overlayfs).
+    """
+    lines = [
+        "[storage]",
+        'driver = "overlay"',
+        f'graphroot = "{graphroot}"',
+        f'runroot = "{runroot}"',
+    ]
+
+    mount_program = os.environ.get("SANDBOX_OVERLAY_MOUNT_PROGRAM")
+    if mount_program:
+        lines.extend(
+            [
+                "",
+                "[storage.options.overlay]",
+                f'mount_program = "{mount_program}"',
+            ]
+        )
+
+    return "\n".join(lines) + "\n"

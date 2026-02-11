@@ -102,9 +102,10 @@ class JobConfigAssembler:
         if self.enable_sandbox:
             job_env_vars["BEAKER_ALLOW_SUBCONTAINERS"] = "1"
             job_env_vars["BEAKER_SKIP_DOCKER_SOCKET"] = "1"
-            # Set default image cache on Weka (override: -o sandbox.image_cache_dir=...)
+            # Set Weka-specific sandbox config (image cache + fuse-overlayfs for network fs)
             if cluster_has_weka(self.config.cluster):
                 job_env_vars["SANDBOX_IMAGE_CACHE_DIR"] = BEAKER_SANDBOX_IMAGE_CACHE_DIR
+                job_env_vars["SANDBOX_OVERLAY_MOUNT_PROGRAM"] = "/usr/bin/fuse-overlayfs"
 
         task_packages = self._extract_task_dependencies(exp.tasks, exp.task_overrides)
 
