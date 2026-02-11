@@ -23,11 +23,6 @@ def _get_sandbox_docker_args() -> tuple[str, ...]:
     return ("--log-driver=json-file", "--log-opt", f"path={log_path}")
 
 
-def _get_image_cache_dir() -> str | None:
-    """Get container image cache directory from SANDBOX_IMAGE_CACHE_DIR environment variable."""
-    return os.environ.get("SANDBOX_IMAGE_CACHE_DIR")
-
-
 # ─────────────────────────────────────────────────────────
 # Lazy Descriptor
 # ─────────────────────────────────────────────────────────
@@ -119,7 +114,6 @@ class HarnessPresets:
                 mode=SandboxMode.DOCKER,
                 startup_timeout=60.0,
                 docker_args=_get_sandbox_docker_args(),
-                image_cache_dir=_get_image_cache_dir(),
             ),
         )
 
@@ -135,7 +129,6 @@ class HarnessPresets:
                 mode=SandboxMode.DOCKER,
                 startup_timeout=300.0,
                 docker_args=_get_sandbox_docker_args(),
-                image_cache_dir=_get_image_cache_dir(),
             ),
         )
 
@@ -160,7 +153,6 @@ class HarnessPresets:
                 mode=SandboxMode.DOCKER,
                 startup_timeout=300.0,
                 docker_args=_get_sandbox_docker_args(),
-                image_cache_dir=_get_image_cache_dir(),
             ),
         )
 

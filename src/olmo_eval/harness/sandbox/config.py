@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from enum import StrEnum
-from pathlib import Path
 from typing import Any, Literal
 
 ContainerRuntime = Literal["docker", "podman"]
@@ -50,7 +48,6 @@ class SandboxConfig:
     runtime_timeout: float = 3600.0
     required_secrets: tuple[str, ...] = ()
     docker_args: tuple[str, ...] = ()
-    image_cache_dir: str | None = None  # Custom container storage location for image caching
 
     @property
     def is_local(self) -> bool:
@@ -72,8 +69,6 @@ class SandboxConfig:
             "runtime_timeout": self.runtime_timeout,
             "docker_args": list(self.docker_args),
         }
-        if self.image_cache_dir is not None:
-            result["image_cache_dir"] = self.image_cache_dir
         if self.modal_sandbox_kwargs is not None:
             result["modal_sandbox_kwargs"] = self.modal_sandbox_kwargs
         if self.required_secrets:
@@ -101,39 +96,4 @@ class SandboxConfig:
             runtime_timeout=data.get("runtime_timeout", 3600.0),
             required_secrets=tuple(data.get("required_secrets", [])),
             docker_args=tuple(data.get("docker_args", [])),
-            image_cache_dir=data.get("image_cache_dir"),
         )
-
-
-def build_storage_conf(graphroot: Path, runroot: Path) -> str:
-    """Build containers storage.conf content.
-
-    Args:
-        graphroot: Directory for container image storage.
-        runroot: Directory for runtime state (locks, temp files).
-
-    Returns:
-        Storage configuration file content.
-
-    Environment variables:
-        SANDBOX_OVERLAY_MOUNT_PROGRAM: Path to fuse-overlayfs binary for
-            network filesystem compatibility (e.g., /usr/bin/fuse-overlayfs).
-    """
-    lines = [
-        "[storage]",
-        'driver = "overlay"',
-        f'graphroot = "{graphroot}"',
-        f'runroot = "{runroot}"',
-    ]
-
-    mount_program = os.environ.get("SANDBOX_OVERLAY_MOUNT_PROGRAM")
-    if mount_program:
-        lines.extend(
-            [
-                "",
-                "[storage.options.overlay]",
-                f'mount_program = "{mount_program}"',
-            ]
-        )
-
-    return "\n".join(lines) + "\n"

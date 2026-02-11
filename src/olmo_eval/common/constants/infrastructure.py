@@ -34,9 +34,6 @@ LOCAL_RESULT_DIR = "/tmp/results/"
 BEAKER_UV_CACHE_DIR = "/weka/oe-eval-default/olmo-eval-pypi-cache"
 """Default UV cache directory for Beaker jobs (on Weka shared storage)."""
 
-BEAKER_SANDBOX_IMAGE_CACHE_DIR = "/weka/oe-eval-default/olmo-eval/sandbox-image-cache"
-"""Default sandbox image cache directory for Beaker jobs (on Weka shared storage)."""
-
 DEFAULT_MAX_GPUS_PER_NODE = 8
 """Default maximum GPUs available per node for experiment splitting."""
 
