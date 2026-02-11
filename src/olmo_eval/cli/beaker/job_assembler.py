@@ -106,7 +106,7 @@ class JobConfigAssembler:
 
             mirror_url = get_registry_mirror_url(self.config.workspace)
             if mirror_url:
-                job_env_vars["MIRROR_URLS"] = mirror_url
+                job_env_vars["MIRROR_HOSTS"] = mirror_url
                 setup_registry_mirror = True
 
         task_packages = self._extract_task_dependencies(exp.tasks, exp.task_overrides)

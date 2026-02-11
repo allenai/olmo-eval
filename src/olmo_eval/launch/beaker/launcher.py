@@ -564,7 +564,7 @@ class BeakerLauncher:
             env_exports: Optional dict of environment variables to export before running.
             provider_package: Optional custom provider package to install (overrides default).
             task_packages: Optional list of task-specific packages to install.
-            setup_registry_mirror: If True, run setup_dockerio_mirror script with MIRROR_URLS.
+            setup_registry_mirror: If True, run setup_dockerio_mirror script with MIRROR_HOSTS.
 
         Returns:
             Shell command string for installation.
@@ -576,7 +576,7 @@ class BeakerLauncher:
         # Set up registry mirror for Docker Hub if configured (for sandbox jobs)
         if setup_registry_mirror:
             script = "/gantry-runtime/src/olmo_eval/launch/beaker/podman/setup_dockerio_mirror"
-            steps.append(f'if [ -n "$MIRROR_URLS" ]; then {script} "$MIRROR_URLS"; fi')
+            steps.append(f'if [ -n "$MIRROR_HOSTS" ]; then {script} "$MIRROR_HOSTS"; fi')
 
         # Export additional environment variables (e.g., UV_CACHE_DIR)
         if env_exports:
