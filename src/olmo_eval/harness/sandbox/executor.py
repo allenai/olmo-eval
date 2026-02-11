@@ -97,9 +97,10 @@ class SandboxExecutor:
         run_dir.mkdir(parents=True, exist_ok=True)
 
         # Create storage.conf (used by Docker/Podman)
+        # Use vfs driver for compatibility with network filesystems like Weka
         storage_conf = f"""\
 [storage]
-driver = "overlay"
+driver = "vfs"
 graphroot = "{storage_dir}"
 runroot = "{run_dir}"
 """
