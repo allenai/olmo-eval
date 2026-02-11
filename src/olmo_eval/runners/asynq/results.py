@@ -203,6 +203,7 @@ async def process_results(
         except queue.Empty:
             continue
 
+    logger.info(f"Scoring complete ({total_tasks} tasks, {total_instances} instances)")
     return results
 
 
