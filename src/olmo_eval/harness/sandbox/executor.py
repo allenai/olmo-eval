@@ -92,9 +92,8 @@ class SandboxExecutor:
 
                 return DockerDeployment(
                     image=self.config.image,
-                    container_runtime="docker",
+                    container_runtime=self.config.container_runtime,
                     startup_timeout=self.config.startup_timeout,
-                    docker_internal_host=self.config.docker_internal_host,
                 )
 
             case SandboxMode.LOCAL:

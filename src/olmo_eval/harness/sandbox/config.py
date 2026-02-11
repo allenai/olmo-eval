@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
+
+ContainerRuntime = Literal["docker", "podman"]
 
 
 class SandboxMode(StrEnum):
@@ -35,6 +37,7 @@ class SandboxConfig:
 
     image: str
     mode: SandboxMode
+    container_runtime: ContainerRuntime = "podman"
     startup_timeout: float = 60.0
     command_timeout: float = 30.0
     remove_container: bool = True
@@ -44,7 +47,6 @@ class SandboxConfig:
     modal_sandbox_kwargs: dict[str, Any] | None = None
     runtime_timeout: float = 3600.0
     required_secrets: tuple[str, ...] = ()
-    docker_internal_host: str = "http://host.containers.internal"
 
     @property
     def is_local(self) -> bool:
@@ -56,6 +58,7 @@ class SandboxConfig:
         result: dict[str, Any] = {
             "image": self.image,
             "mode": self.mode.value,
+            "container_runtime": self.container_runtime,
             "startup_timeout": self.startup_timeout,
             "command_timeout": self.command_timeout,
             "remove_container": self.remove_container,
@@ -63,7 +66,6 @@ class SandboxConfig:
             "environment": list(self.environment),
             "volumes": list(self.volumes),
             "runtime_timeout": self.runtime_timeout,
-            "docker_internal_host": self.docker_internal_host,
         }
         if self.modal_sandbox_kwargs is not None:
             result["modal_sandbox_kwargs"] = self.modal_sandbox_kwargs
@@ -81,6 +83,7 @@ class SandboxConfig:
         return cls(
             image=data["image"],
             mode=SandboxMode(data["mode"]),
+            container_runtime=data.get("container_runtime", "podman"),
             startup_timeout=data.get("startup_timeout", 60.0),
             command_timeout=data.get("command_timeout", 30.0),
             remove_container=data.get("remove_container", True),
@@ -90,7 +93,4 @@ class SandboxConfig:
             modal_sandbox_kwargs=data.get("modal_sandbox_kwargs"),
             runtime_timeout=data.get("runtime_timeout", 3600.0),
             required_secrets=tuple(data.get("required_secrets", [])),
-            docker_internal_host=data.get(
-                "docker_internal_host", "http://host.containers.internal"
-            ),
         )
