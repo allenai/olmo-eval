@@ -118,8 +118,11 @@ LABEL python_version="${PYTHON_VERSION}"
 LABEL sandbox_enabled="true"
 
 # Install runtime dependencies + Podman build dependencies
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
 RUN rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* && \
     apt-get update && apt-get install -y --no-install-recommends \
+    tzdata \
     build-essential \
     ca-certificates \
     curl \
@@ -127,7 +130,6 @@ RUN rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* && \
     wget \
     # Podman build dependencies
     gcc \
-    golang-go \
     go-md2man \
     iptables \
     libassuan-dev \
@@ -142,8 +144,8 @@ RUN rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* && \
     libseccomp-dev \
     libselinux1-dev \
     libsystemd-dev \
-    netavark \
-    passt \
+    slirp4netns \
+    fuse-overlayfs \
     pkg-config \
     uidmap \
     conmon \
@@ -157,6 +159,10 @@ RUN rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* && \
     python3-sphinx \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* \
     && apt-get clean
+
+# Install Go 1.23 (required for Podman 5.x)
+RUN wget -qO- https://go.dev/dl/go1.23.6.linux-amd64.tar.gz | tar xz -C /usr/local
+ENV PATH="/usr/local/go/bin:${PATH}"
 
 # Configure container registries and policies
 RUN mkdir -p /etc/containers/registries.conf.d/
@@ -210,9 +216,7 @@ ENV HF_HOME=/root/.cache/huggingface
 ENV PYTHONUNBUFFERED=1
 
 # Verify installation
-RUN python -c "import torch; print(f'PyTorch {torch.__version__}')" && \
-    podman --version && \
-    crun --version
+RUN python -c "import torch; print(f'PyTorch {torch.__version__}')"
 
 WORKDIR /workspace
 CMD ["bash"]
