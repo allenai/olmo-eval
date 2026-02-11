@@ -17,6 +17,9 @@ class SandboxMode(StrEnum):
     MODAL = "modal"
 
 
+_DEFAULT_CAPABILITIES: frozenset[str] = frozenset({"bash"})
+
+
 @dataclass(frozen=True)
 class SandboxConfig:
     """Configuration for sandboxed tool execution via SWE-ReX.
@@ -24,6 +27,7 @@ class SandboxConfig:
     Attributes:
         image: Container image for the sandbox environment.
         mode: How to run the sandbox.
+        capabilities: Capabilities this sandbox provides (e.g., {"bash"}).
         startup_timeout: Timeout for container startup in seconds.
         command_timeout: Default timeout for command execution in seconds.
         remove_container: Whether to remove container after use.
@@ -37,6 +41,7 @@ class SandboxConfig:
 
     image: str
     mode: SandboxMode
+    capabilities: frozenset[str] = _DEFAULT_CAPABILITIES
     container_runtime: ContainerRuntime = "podman"
     startup_timeout: float = 60.0
     command_timeout: float = 30.0
@@ -59,6 +64,7 @@ class SandboxConfig:
         result: dict[str, Any] = {
             "image": self.image,
             "mode": self.mode.value,
+            "capabilities": sorted(self.capabilities),
             "container_runtime": self.container_runtime,
             "startup_timeout": self.startup_timeout,
             "command_timeout": self.command_timeout,
@@ -82,9 +88,11 @@ class SandboxConfig:
             raise ValueError("SandboxConfig requires 'image' to be specified")
         if "mode" not in data:
             raise ValueError("SandboxConfig requires 'mode' to be specified")
+        capabilities = data.get("capabilities")
         return cls(
             image=data["image"],
             mode=SandboxMode(data["mode"]),
+            capabilities=frozenset(capabilities) if capabilities else _DEFAULT_CAPABILITIES,
             container_runtime=data.get("container_runtime", "podman"),
             startup_timeout=data.get("startup_timeout", 60.0),
             command_timeout=data.get("command_timeout", 30.0),

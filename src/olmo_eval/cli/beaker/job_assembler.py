@@ -58,7 +58,7 @@ class JobConfigAssembler:
                 backend_extras = get_backend_extras(preset.backend)
                 install_extras.extend(backend_extras)
             # Install sandbox extra for any sandbox mode (local, docker, or modal)
-            if preset.sandbox is not None:
+            if preset.sandboxes:
                 install_extras.append("sandbox")
 
         # Get provider extras from model preset (takes precedence over harness default)

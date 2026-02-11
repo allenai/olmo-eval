@@ -16,7 +16,7 @@ from olmo_eval.harness.tools import Tool
 from olmo_eval.inference.base import InferenceProvider
 
 if TYPE_CHECKING:
-    from olmo_eval.harness.sandbox import SandboxExecutor
+    from olmo_eval.harness.sandbox import SandboxManager
 
 logger = logging.getLogger(__name__)
 
@@ -36,25 +36,27 @@ class OpenAIAgentsBackend(Backend):
         self._cached_agent: Any = None  # Agent type from agents SDK
         self._cached_config: HarnessConfig | None = None
         self._cached_provider_id: int | None = None
+        self._cached_has_sandbox: bool = False
 
     def clear_cache(self) -> None:
         """Clear cached agent to allow recreation with new config/provider."""
         self._cached_agent = None
         self._cached_config = None
         self._cached_provider_id = None
+        self._cached_has_sandbox = False
 
     def _convert_tools(
         self,
         tools: Sequence[Tool],
         function_tool: Any,
-        sandbox: SandboxExecutor | None = None,
+        sandbox_manager: SandboxManager | None = None,
     ) -> list[Any]:
         """Convert harness tools to agents SDK format.
 
         Args:
             tools: Sequence of Tool instances to convert.
             function_tool: The function_tool decorator from agents SDK.
-            sandbox: Optional sandbox executor for tools that require it.
+            sandbox_manager: Optional sandbox manager for tools that require it.
 
         Returns:
             List of agents SDK tool objects.
@@ -63,9 +65,9 @@ class OpenAIAgentsBackend(Backend):
         for tool in tools:
             execute_fn = tool.execute
 
-            # Wrap sandboxed tools to use the executor
-            if tool.requires_sandbox and sandbox is not None:
-                execute_fn = self._wrap_sandboxed_tool(tool, sandbox)
+            # Wrap sandboxed tools to use the manager
+            if tool.sandbox_capabilities and sandbox_manager is not None:
+                execute_fn = self._wrap_sandboxed_tool(tool, sandbox_manager)
 
             # Use function_tool decorator to wrap the execute function
             wrapped = function_tool(strict_mode=False)(execute_fn)
@@ -79,21 +81,22 @@ class OpenAIAgentsBackend(Backend):
     def _wrap_sandboxed_tool(
         self,
         tool: Tool,
-        sandbox: SandboxExecutor,
+        manager: SandboxManager,
     ) -> Any:
-        """Create a wrapper function that executes the tool via sandbox.
+        """Create a wrapper function that executes the tool via sandbox manager.
 
         Args:
             tool: The tool requiring sandbox execution.
-            sandbox: The sandbox executor to use.
+            manager: The sandbox manager to use for routing.
 
         Returns:
             An async function that executes commands via the sandbox.
         """
+        required_caps = tool.sandbox_capabilities
 
         async def sandboxed_execute(command: str) -> str:
             """Execute command in sandbox."""
-            return await sandbox.execute(command)
+            return await manager.execute_with_capabilities(command, required_caps)
 
         return sandboxed_execute
 
@@ -101,14 +104,14 @@ class OpenAIAgentsBackend(Backend):
         self,
         provider: InferenceProvider,
         config: HarnessConfig,
-        sandbox: SandboxExecutor | None = None,
+        sandbox_manager: SandboxManager | None = None,
     ) -> Any:
         """Create a new agent with the given configuration.
 
         Args:
             provider: The inference provider for model calls.
             config: Harness configuration.
-            sandbox: Optional sandbox executor for sandboxed tools.
+            sandbox_manager: Optional sandbox manager for sandboxed tools.
 
         Returns:
             An Agent instance from the agents SDK.
@@ -136,7 +139,7 @@ class OpenAIAgentsBackend(Backend):
             model=provider.model_name,
         )
 
-        agent_tools = self._convert_tools(config.resolved_tools, function_tool, sandbox)
+        agent_tools = self._convert_tools(config.resolved_tools, function_tool, sandbox_manager)
 
         agent = Agent(
             name=self.name,
@@ -147,25 +150,32 @@ class OpenAIAgentsBackend(Backend):
 
         return agent
 
-    def _get_or_create_agent(self, provider: InferenceProvider, config: HarnessConfig) -> Any:
+    def _get_or_create_agent(
+        self,
+        provider: InferenceProvider,
+        config: HarnessConfig,
+        sandbox_manager: SandboxManager | None = None,
+    ) -> Any:
         """Get cached agent or create a new one if config/provider changed.
 
-        Note: This method does NOT support sandbox tools. Use _create_agent directly
-        when sandbox execution is needed, as agents with sandbox tools cannot be cached
-        (the sandbox executor changes per run).
+        Agents are cached based on config, provider, and whether sandbox is used.
+        The sandbox manager is stable across runs, so caching works.
         """
+        has_sandbox = sandbox_manager is not None
         if (
             self._cached_agent is not None
             and self._cached_config == config
             and self._cached_provider_id == id(provider)
+            and self._cached_has_sandbox == has_sandbox
         ):
             return self._cached_agent
 
-        agent = self._create_agent(provider, config)
+        agent = self._create_agent(provider, config, sandbox_manager)
 
         self._cached_agent = agent
         self._cached_config = config
         self._cached_provider_id = id(provider)
+        self._cached_has_sandbox = has_sandbox
 
         return agent
 
@@ -195,24 +205,22 @@ class OpenAIAgentsBackend(Backend):
             ) from e
 
         # Check if we need sandbox execution
-        needs_sandbox = config.sandbox is not None and config.has_sandbox_tools
+        needs_sandbox = config.sandboxes and config.has_sandbox_tools
 
-        sandbox: SandboxExecutor | None = None
+        sandbox_manager: SandboxManager | None = None
 
         try:
             if needs_sandbox:
-                from olmo_eval.harness.sandbox import SandboxExecutor
+                from olmo_eval.harness.sandbox import SandboxManager
 
-                assert config.sandbox is not None  # Type narrowing
-                sandbox = SandboxExecutor(config.sandbox)
-                await sandbox.start()
-                logger.info("Sandbox started for tool execution")
+                sandbox_manager = SandboxManager(config.sandboxes)
+                await sandbox_manager.start()
+                logger.info(
+                    f"Sandbox manager started with {sandbox_manager.executor_count} executor(s)"
+                )
 
-                # Create agent with sandbox (cannot use cache)
-                agent = self._create_agent(provider, config, sandbox)
-            else:
-                # Use cached agent when no sandbox needed
-                agent = self._get_or_create_agent(provider, config)
+            # Use cached agent (manager is stable, so caching works even with sandbox)
+            agent = self._get_or_create_agent(provider, config, sandbox_manager)
 
             # Get the input message
             input_text = ""
@@ -239,9 +247,9 @@ class OpenAIAgentsBackend(Backend):
                 final_output=LMOutput(text=final_text or ""),
             )
         finally:
-            # Always clean up sandbox
-            if sandbox is not None:
-                await sandbox.stop()
+            # Always clean up sandbox manager
+            if sandbox_manager is not None:
+                await sandbox_manager.stop()
 
     def _convert_trajectory(self, result: Any) -> AgentTrajectory:
         """Convert agents SDK result to AgentTrajectory.

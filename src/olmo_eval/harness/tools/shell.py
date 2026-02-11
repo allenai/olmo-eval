@@ -1,8 +1,8 @@
 """Shell execution tools for sandboxed command execution.
 
 This module provides tools for executing shell commands in a sandboxed
-environment. These tools are marked with requires_sandbox=True and
-are executed via the SandboxExecutor.
+environment. These tools specify sandbox_capabilities and are executed
+via the SandboxManager.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from .registry import registered_tool
 @registered_tool(
     name="execute_bash",
     description="Execute a bash command in a sandboxed environment and return the output.",
-    requires_sandbox=True,
+    sandbox_capabilities={"bash"},
 )
 async def execute_bash(command: str) -> str:
     """Execute a bash command in a sandboxed environment.

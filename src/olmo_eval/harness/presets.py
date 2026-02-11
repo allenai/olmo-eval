@@ -109,11 +109,13 @@ class HarnessPresets:
 
         return HarnessConfig(
             name=name,
-            sandbox=SandboxConfig(
-                image="python:3.12",
-                mode=SandboxMode.DOCKER,
-                startup_timeout=60.0,
-                docker_args=_get_sandbox_docker_args(),
+            sandboxes=(
+                SandboxConfig(
+                    image="python:3.12",
+                    mode=SandboxMode.DOCKER,
+                    startup_timeout=60.0,
+                    docker_args=_get_sandbox_docker_args(),
+                ),
             ),
         )
 
@@ -124,11 +126,13 @@ class HarnessPresets:
 
         return HarnessConfig(
             name=name,
-            sandbox=SandboxConfig(
-                image="volcengine/sandbox-fusion:server-20250609",
-                mode=SandboxMode.DOCKER,
-                startup_timeout=300.0,
-                docker_args=_get_sandbox_docker_args(),
+            sandboxes=(
+                SandboxConfig(
+                    image="volcengine/sandbox-fusion:server-20250609",
+                    mode=SandboxMode.DOCKER,
+                    startup_timeout=300.0,
+                    docker_args=_get_sandbox_docker_args(),
+                ),
             ),
         )
 
@@ -148,11 +152,14 @@ class HarnessPresets:
             system_prompt=CODING_AGENT_SYSTEM_PROMPT,
             max_turns=20,
             backend="openai_agents",
-            sandbox=SandboxConfig(
-                image="volcengine/sandbox-fusion:server-20250609",
-                mode=SandboxMode.DOCKER,
-                startup_timeout=300.0,
-                docker_args=_get_sandbox_docker_args(),
+            required_secrets=("OPENAI_API_KEY",),
+            sandboxes=(
+                SandboxConfig(
+                    image="volcengine/sandbox-fusion:server-20250609",
+                    mode=SandboxMode.DOCKER,
+                    startup_timeout=300.0,
+                    docker_args=_get_sandbox_docker_args(),
+                ),
             ),
         )
 

@@ -379,8 +379,8 @@ def launch(
             harness_preset = _apply_harness_overrides(
                 harness_preset, launch_config.harness_overrides
             )
-        if harness_preset.sandbox is not None:
-            harness_needs_sandbox = harness_preset.sandbox.is_local
+        if harness_preset.sandboxes:
+            harness_needs_sandbox = any(s.is_local for s in harness_preset.sandboxes)
 
     if image:
         effective_image = image
@@ -424,8 +424,9 @@ def launch(
         if harness_config.required_secrets:
             all_required_secrets.update(harness_config.required_secrets)
         # Collect sandbox-required secrets
-        if harness_config.sandbox and harness_config.sandbox.required_secrets:
-            all_required_secrets.update(harness_config.sandbox.required_secrets)
+        for sandbox in harness_config.sandboxes:
+            if sandbox.required_secrets:
+                all_required_secrets.update(sandbox.required_secrets)
 
     # Ensure secrets
     common_secrets, store_secrets, task_secrets = _ensure_secrets(

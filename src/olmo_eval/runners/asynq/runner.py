@@ -169,10 +169,10 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         scorer_proc: mp.process.BaseProcess | None = None
 
         try:
-            # Prepare sandbox config for scoring worker if configured
-            sandbox_config_dict = None
-            if self.harness_config.sandbox is not None:
-                sandbox_config_dict = self.harness_config.sandbox.to_dict()
+            # Prepare sandbox configs for scoring worker if configured
+            sandbox_configs_list = None
+            if self.harness_config.sandboxes:
+                sandbox_configs_list = [s.to_dict() for s in self.harness_config.sandboxes]
 
             # Create ready event for scoring worker
             scorer_ready = ctx.Event()
@@ -184,7 +184,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                     scoring_queue,
                     scored_queue,
                     total_instances,
-                    sandbox_config_dict,
+                    sandbox_configs_list,
                     scorer_ready,
                 ),
             )
@@ -201,7 +201,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             logger.info("Inference workers ready")
 
             # Now wait for scoring worker (runs in parallel with inference worker init)
-            if sandbox_config_dict is not None:
+            if sandbox_configs_list is not None:
                 logger.info("Waiting for scoring worker to initialize...")
                 wait_for_scorer_ready(scorer_proc, scorer_ready, scored_queue, timeout=180.0)
                 logger.info("Scoring worker ready")

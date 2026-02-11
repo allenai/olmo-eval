@@ -2,9 +2,11 @@
 
 from .config import SandboxConfig, SandboxMode
 from .executor import SandboxExecutor
+from .manager import SandboxManager
 
 __all__ = [
     "SandboxConfig",
     "SandboxExecutor",
+    "SandboxManager",
     "SandboxMode",
 ]
