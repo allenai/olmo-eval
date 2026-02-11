@@ -190,12 +190,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             )
             scorer_proc.start()
 
-            # Wait for scoring worker to be ready
-            if sandbox_config_dict is not None:
-                logger.info("Waiting for scoring worker to initialize...")
-                wait_for_scorer_ready(scorer_proc, scorer_ready, scored_queue, timeout=120.0)
-                logger.info("Scoring worker ready")
-
+            # Start inference workers immediately (don't block on scorer initialization)
             workers = self._start_workers(
                 ctx, num_workers, total_gpus, item_queue, result_queue, init_times
             )
@@ -204,6 +199,12 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             logger.info("Waiting for workers to initialize...")
             wait_for_workers_ready(workers, result_queue, startup_timeout=60.0)
             logger.info("Workers initialized successfully")
+
+            # Now wait for scoring worker (runs in parallel with inference worker init)
+            if sandbox_config_dict is not None:
+                logger.info("Waiting for scoring worker to initialize...")
+                wait_for_scorer_ready(scorer_proc, scorer_ready, scored_queue, timeout=180.0)
+                logger.info("Scoring worker ready")
 
             # Wait for workers to report their init times
             provider_init_seconds = wait_for_init_times(init_times, num_workers)

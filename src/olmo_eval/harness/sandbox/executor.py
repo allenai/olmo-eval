@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from typing import TYPE_CHECKING, Any
@@ -70,9 +71,17 @@ class SandboxExecutor:
         # Create a persistent bash session for command execution
         from swerex.runtime.abstract import CreateBashSessionRequest
 
-        session_response = await self._runtime.create_session(
-            CreateBashSessionRequest(startup_timeout=30.0)
-        )
+        try:
+            session_response = await asyncio.wait_for(
+                self._runtime.create_session(CreateBashSessionRequest(startup_timeout=30.0)),
+                timeout=self.config.startup_timeout,
+            )
+        except TimeoutError as e:
+            logger.error("Timed out creating bash session in sandbox")
+            raise RuntimeError(
+                f"Sandbox session creation timed out after {self.config.startup_timeout}s"
+            ) from e
+
         self._session = session_response.session_id
         logger.info(f"Sandbox session created: {self._session}")
 

@@ -216,7 +216,20 @@ def scoring_worker(
             sandbox_executor = SandboxExecutor(sandbox_config)
 
             # Start sandbox synchronously using asyncio
-            asyncio.run(sandbox_executor.start())
+            try:
+                asyncio.run(sandbox_executor.start())
+            except Exception as e:
+                logger.error(f"Failed to start sandbox: {e}")
+                scored_queue.put(
+                    ScoredResponse(
+                        spec=SCORER_FATAL,
+                        instance_idx=-1,
+                        scored=None,
+                        error=f"Sandbox initialization failed: {e}",
+                    )
+                )
+                sys.exit(1)
+
             scoring_context = ScoringContext(execution_env=sandbox_executor)
             logger.info("Sandbox ready!")
 
