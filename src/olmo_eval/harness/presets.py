@@ -127,7 +127,7 @@ class HarnessPresets:
             sandbox=SandboxConfig(
                 image="volcengine/sandbox-fusion:server-20250609",
                 mode=SandboxMode.DOCKER,
-                startup_timeout=60.0,
+                startup_timeout=120.0,
                 docker_args=_get_sandbox_docker_args(),
             ),
         )
