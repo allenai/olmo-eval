@@ -48,6 +48,7 @@ class SandboxConfig:
     runtime_timeout: float = 3600.0
     required_secrets: tuple[str, ...] = ()
     docker_internal_host: str = "http://host.docker.internal/"
+    docker_args: tuple[str, ...] = ()
 
     @property
     def is_local(self) -> bool:
@@ -68,6 +69,7 @@ class SandboxConfig:
             "volumes": list(self.volumes),
             "runtime_timeout": self.runtime_timeout,
             "docker_internal_host": self.docker_internal_host,
+            "docker_args": list(self.docker_args),
         }
         if self.modal_sandbox_kwargs is not None:
             result["modal_sandbox_kwargs"] = self.modal_sandbox_kwargs
@@ -96,4 +98,5 @@ class SandboxConfig:
             runtime_timeout=data.get("runtime_timeout", 3600.0),
             required_secrets=tuple(data.get("required_secrets", [])),
             docker_internal_host=data.get("docker_internal_host", "http://host.docker.internal/"),
+            docker_args=tuple(data.get("docker_args", [])),
         )

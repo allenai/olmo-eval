@@ -149,6 +149,7 @@ def _codex_python() -> HarnessConfig:
             image="python:3.12-slim",
             mode=SandboxMode.DOCKER,
             startup_timeout=60.0,
+            docker_args=("--log-driver=json-file", "--log-opt", "path=/results/sandbox.log"),
         ),
     )
 
@@ -164,6 +165,7 @@ def _codex_universal() -> HarnessConfig:
             image="volcengine/sandbox-fusion:server-20250609",
             mode=SandboxMode.DOCKER,
             startup_timeout=60.0,
+            docker_args=("--log-driver=json-file", "--log-opt", "path=/results/sandbox.log"),
         ),
     )
 
@@ -188,5 +190,6 @@ def _codex_agent() -> HarnessConfig:
             image="volcengine/sandbox-fusion:server-20250609",
             mode=SandboxMode.DOCKER,
             startup_timeout=60.0,
+            docker_args=("--log-driver=json-file", "--log-opt", "path=/results/sandbox.log"),
         ),
     )
