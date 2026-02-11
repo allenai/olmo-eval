@@ -162,9 +162,9 @@ RUN rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* && \
 
 # Configure container registries and policies
 RUN mkdir -p /etc/containers/registries.conf.d/
-COPY podman/containers.conf /etc/containers/containers.conf
-COPY podman/policy.json /etc/containers/policy.json
-COPY podman/10-unqualified-search-registries.conf /etc/containers/registries.conf.d/10-unqualified-search-registries.conf
+COPY src/olmo_eval/launch/beaker/podman/containers.conf /etc/containers/containers.conf
+COPY src/olmo_eval/launch/beaker/podman/policy.json /etc/containers/policy.json
+COPY src/olmo_eval/launch/beaker/podman/10-unqualified-search-registries.conf /etc/containers/registries.conf.d/10-unqualified-search-registries.conf
 
 # Build and install Podman from source
 RUN wget -qO- https://github.com/containers/podman/archive/refs/tags/v5.6.2.tar.gz \
@@ -189,10 +189,6 @@ RUN ln -sf $(which podman) /usr/local/bin/docker
 # Set user namespace ranges
 RUN echo "root:10000:11165536" >> /etc/subuid \
     && echo "root:10000:11165536" >> /etc/subgid
-
-# Add registry mirror setup script
-COPY podman/setup_dockerio_mirror /usr/local/bin/setup_dockerio_mirror
-RUN chmod +x /usr/local/bin/setup_dockerio_mirror
 
 # Copy virtual environment from builder (includes PyTorch)
 COPY --from=builder /opt/venv /opt/venv
