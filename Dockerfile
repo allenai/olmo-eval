@@ -117,35 +117,80 @@ LABEL torch_version="${TORCH_VERSION}"
 LABEL python_version="${PYTHON_VERSION}"
 LABEL sandbox_enabled="true"
 
-# Install runtime dependencies + Podman
-# Clean up first to free space in the runtime image
+# Install runtime dependencies + Podman build dependencies
 RUN rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* && \
     apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
     curl \
     git \
-    # Podman dependencies
-    podman \
-    slirp4netns \
-    fuse-overlayfs \
+    wget \
+    # Podman build dependencies
+    gcc \
+    golang-go \
+    go-md2man \
+    iptables \
+    libassuan-dev \
+    libbtrfs-dev \
+    libc6-dev \
+    libdevmapper-dev \
+    libglib2.0-dev \
+    libgpgme-dev \
+    libgpg-error-dev \
+    libprotobuf-dev \
+    libprotobuf-c-dev \
+    libseccomp-dev \
+    libselinux1-dev \
+    libsystemd-dev \
+    netavark \
+    passt \
+    pkg-config \
     uidmap \
+    conmon \
+    golang-github-containers-common \
+    autoconf \
+    automake \
+    libtool \
+    libcap-dev \
+    libyajl-dev \
+    systemd \
+    python3-sphinx \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* \
     && apt-get clean
 
-# Configure Podman for rootless container operation
-RUN mkdir -p /etc/containers && \
-    echo '[engine]' > /etc/containers/containers.conf && \
-    echo 'cgroup_manager = "cgroupfs"' >> /etc/containers/containers.conf && \
-    echo 'events_logger = "file"' >> /etc/containers/containers.conf
+# Configure container registries and policies
+RUN mkdir -p /etc/containers/registries.conf.d/
+COPY podman/containers.conf /etc/containers/containers.conf
+COPY podman/policy.json /etc/containers/policy.json
+COPY podman/10-unqualified-search-registries.conf /etc/containers/registries.conf.d/10-unqualified-search-registries.conf
 
-# Configure container registries
-RUN mkdir -p /etc/containers/registries.conf.d && \
-    echo 'unqualified-search-registries = ["docker.io"]' > /etc/containers/registries.conf
+# Build and install Podman from source
+RUN wget -qO- https://github.com/containers/podman/archive/refs/tags/v5.6.2.tar.gz \
+    | tar xz -C /tmp \
+    && cd /tmp/podman-5.6.2 \
+    && make BUILDTAGS="selinux seccomp" PREFIX=/usr \
+    && make install PREFIX=/usr \
+    && rm -rf /tmp/podman-5.6.2
 
-# Set subuid/subgid for rootless containers
-RUN echo "root:100000:65536" >> /etc/subuid && \
-    echo "root:100000:65536" >> /etc/subgid
+# Build and install crun from source
+RUN git clone --depth 1 -b 1.14.3 https://github.com/containers/crun.git /tmp/crun \
+    && cd /tmp/crun \
+    && ./autogen.sh \
+    && ./configure --prefix=/usr --sysconfdir=/etc \
+    && make \
+    && make install \
+    && rm -rf /tmp/crun
+
+# Symlink so docker commands are translated to podman
+RUN ln -sf $(which podman) /usr/local/bin/docker
+
+# Set user namespace ranges
+RUN echo "root:10000:11165536" >> /etc/subuid \
+    && echo "root:10000:11165536" >> /etc/subgid
+
+# Add registry mirror setup script
+COPY podman/setup_dockerio_mirror /usr/local/bin/setup_dockerio_mirror
+RUN chmod +x /usr/local/bin/setup_dockerio_mirror
 
 # Copy virtual environment from builder (includes PyTorch)
 COPY --from=builder /opt/venv /opt/venv
@@ -153,6 +198,9 @@ COPY --from=builder /opt/venv /opt/venv
 # Copy uv resources
 COPY --from=builder /root/.local/share/uv /root/.local/share/uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Install podman-compose
+RUN uv pip install --no-cache-dir --system podman-compose
 
 # Set up environment
 ENV PATH="/opt/venv/bin:${PATH}"
@@ -163,7 +211,8 @@ ENV PYTHONUNBUFFERED=1
 
 # Verify installation
 RUN python -c "import torch; print(f'PyTorch {torch.__version__}')" && \
-    podman --version
+    podman --version && \
+    crun --version
 
 WORKDIR /workspace
 CMD ["bash"]
