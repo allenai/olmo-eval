@@ -63,7 +63,6 @@ class SandboxExecutor:
         """
         deployment = self._create_deployment()
 
-        logger.info(f"Starting sandbox deployment: {type(deployment).__name__}")
         await deployment.start()
 
         self._deployment = deployment
