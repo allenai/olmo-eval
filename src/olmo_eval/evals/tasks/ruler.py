@@ -164,6 +164,16 @@ class RulerTask(Task):
         """
         # Use config formatter if provided
         if self.config.formatter is not None:
+            # For PPL formatters (BPB variant), convert list answers to strings
+            if isinstance(self.config.formatter, PPLFormatter) and isinstance(
+                instance.gold_answer, list
+            ):
+                # Create a modified instance with string answer
+                instance = Instance(
+                    question=instance.question,
+                    gold_answer=", ".join(str(a) for a in instance.gold_answer),
+                    metadata=instance.metadata,
+                )
             return self.config.formatter.format(instance, self.get_fewshot())
 
         # Build sampling params from ruler config
