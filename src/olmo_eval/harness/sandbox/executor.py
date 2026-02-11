@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import shutil
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -66,7 +65,7 @@ class SandboxExecutor:
         await deployment.start()
 
         self._deployment = deployment
-        self._runtime = await deployment.get_runtime()
+        self._runtime = deployment.runtime
 
         # Create a persistent bash session for command execution
         from swerex.runtime.abstract import CreateBashSessionRequest
@@ -96,8 +95,6 @@ class SandboxExecutor:
                         "swe-rex not installed. Install with: pip install swe-rex"
                     ) from e
 
-                if not shutil.which("docker"):
-                    raise RuntimeError("Docker not available but mode=SandboxMode.DOCKER")
                 return DockerDeployment(
                     image=self.config.image,
                     container_runtime="docker",
