@@ -1,17 +1,27 @@
 """Pre-built harness configurations.
 
-Presets are accessed via `Presets.name` or `get_harness_preset("name")`.
+Presets are accessed via `HarnessPresets.name` or `get_harness_preset("name")`.
 """
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from typing import Any
 
+from olmo_eval.common.constants import BEAKER_RESULT_DIR, LOCAL_RESULT_DIR
 from olmo_eval.common.types import ProviderKind
 
 from .config import HarnessConfig, ProviderConfig
 from .constants import DR_TULU_SYSTEM_PROMPT
+
+
+def _get_sandbox_docker_args() -> tuple[str, ...]:
+    """Get docker args for sandbox log output based on environment."""
+    result_dir = BEAKER_RESULT_DIR if os.environ.get("BEAKER_JOB_ID") else LOCAL_RESULT_DIR
+    log_path = os.path.join(result_dir, "sandbox.log")
+    return ("--log-driver=json-file", "--log-opt", f"path={log_path}")
+
 
 # ─────────────────────────────────────────────────────────
 # Lazy Descriptor
@@ -103,7 +113,7 @@ class HarnessPresets:
                 image="python:3.12",
                 mode=SandboxMode.DOCKER,
                 startup_timeout=60.0,
-                docker_args=("--log-driver=json-file", "--log-opt", "path=/results/sandbox.log"),
+                docker_args=_get_sandbox_docker_args(),
             ),
         )
 
@@ -118,7 +128,7 @@ class HarnessPresets:
                 image="volcengine/sandbox-fusion:server-20250609",
                 mode=SandboxMode.DOCKER,
                 startup_timeout=60.0,
-                docker_args=("--log-driver=json-file", "--log-opt", "path=/results/sandbox.log"),
+                docker_args=_get_sandbox_docker_args(),
             ),
         )
 
@@ -142,7 +152,7 @@ class HarnessPresets:
                 image="volcengine/sandbox-fusion:server-20250609",
                 mode=SandboxMode.DOCKER,
                 startup_timeout=60.0,
-                docker_args=("--log-driver=json-file", "--log-opt", "path=/results/sandbox.log"),
+                docker_args=_get_sandbox_docker_args(),
             ),
         )
 
