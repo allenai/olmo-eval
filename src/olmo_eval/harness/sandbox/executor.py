@@ -120,6 +120,7 @@ class SandboxExecutor:
                     image=self.config.image,
                     container_runtime="docker",
                     startup_timeout=self.config.startup_timeout,
+                    docker_internal_host=self.config.docker_internal_host,
                 )
 
             case SandboxMode.LOCAL:
