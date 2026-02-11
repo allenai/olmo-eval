@@ -3,7 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from enum import StrEnum
+from typing import Any
+
+
+class SandboxMode(StrEnum):
+    """Sandbox deployment modes."""
+
+    LOCAL = "local"
+    DOCKER = "docker"
+    MODAL = "modal"
 
 
 @dataclass(frozen=True)
@@ -11,11 +20,8 @@ class SandboxConfig:
     """Configuration for sandboxed tool execution via SWE-ReX.
 
     Attributes:
-        image: Container image for the sandbox environment (required).
-        deployment_mode: How to deploy the sandbox container (required).
-            - "local": Run commands without sandboxing (for testing only)
-            - "docker": Use Docker-compatible container runtime
-            - "modal": Use Modal for remote sandbox execution
+        image: Container image for the sandbox environment.
+        mode: How to run the sandbox.
         startup_timeout: Timeout for container startup in seconds.
         command_timeout: Default timeout for command execution in seconds.
         remove_container: Whether to remove container after use.
@@ -27,7 +33,7 @@ class SandboxConfig:
     """
 
     image: str
-    deployment_mode: Literal["local", "docker", "modal"]
+    mode: SandboxMode
     startup_timeout: float = 60.0
     command_timeout: float = 30.0
     remove_container: bool = True
@@ -38,15 +44,15 @@ class SandboxConfig:
     runtime_timeout: float = 3600.0
 
     @property
-    def is_local_deployment(self) -> bool:
+    def is_local(self) -> bool:
         """True if sandbox runs locally (docker/local), False if remote (modal)."""
-        return self.deployment_mode in ("local", "docker")
+        return self.mode in (SandboxMode.LOCAL, SandboxMode.DOCKER)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         result = {
             "image": self.image,
-            "deployment_mode": self.deployment_mode,
+            "mode": self.mode.value,
             "startup_timeout": self.startup_timeout,
             "command_timeout": self.command_timeout,
             "remove_container": self.remove_container,
@@ -64,11 +70,11 @@ class SandboxConfig:
         """Create from dictionary."""
         if "image" not in data:
             raise ValueError("SandboxConfig requires 'image' to be specified")
-        if "deployment_mode" not in data:
-            raise ValueError("SandboxConfig requires 'deployment_mode' to be specified")
+        if "mode" not in data:
+            raise ValueError("SandboxConfig requires 'mode' to be specified")
         return cls(
             image=data["image"],
-            deployment_mode=data["deployment_mode"],
+            mode=SandboxMode(data["mode"]),
             startup_timeout=data.get("startup_timeout", 60.0),
             command_timeout=data.get("command_timeout", 30.0),
             remove_container=data.get("remove_container", True),

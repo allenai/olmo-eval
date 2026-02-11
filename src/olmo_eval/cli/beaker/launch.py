@@ -375,7 +375,7 @@ def launch(
 
         harness_preset = get_harness_preset(launch_config.harness)
         if harness_preset.sandbox is not None:
-            harness_needs_sandbox = harness_preset.sandbox.is_local_deployment
+            harness_needs_sandbox = harness_preset.sandbox.is_local
 
     if image:
         effective_image = image

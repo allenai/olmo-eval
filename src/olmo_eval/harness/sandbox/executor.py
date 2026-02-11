@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.execution.environment import ExecutionResult
 
-from .config import SandboxConfig
+from .config import SandboxConfig, SandboxMode
 
 if TYPE_CHECKING:
     pass
@@ -88,36 +88,33 @@ class SandboxExecutor:
             ImportError: If swe-rex is not installed.
             RuntimeError: If the requested container runtime is not available.
         """
-        mode = self.config.deployment_mode
+        match self.config.mode:
+            case SandboxMode.DOCKER:
+                from swerex.deployment.docker import DockerDeployment
 
-        if mode == "docker":
-            from swerex.deployment.docker import DockerDeployment
+                if not shutil.which("docker"):
+                    raise RuntimeError("Docker not available but mode=SandboxMode.DOCKER")
+                return DockerDeployment(
+                    image=self.config.image,
+                    container_runtime="docker",
+                )
 
-            if not shutil.which("docker"):
-                raise RuntimeError("Docker not available but deployment_mode='docker'")
-            return DockerDeployment(
-                image=self.config.image,
-                container_runtime="docker",
-            )
+            case SandboxMode.LOCAL:
+                from swerex.deployment.local import LocalDeployment
 
-        if mode == "local":
-            from swerex.deployment.local import LocalDeployment
+                logger.warning(
+                    "Using local deployment (unsandboxed). Commands will run on host system."
+                )
+                return LocalDeployment()
 
-            logger.warning(
-                "Using local deployment (unsandboxed). Commands will run on the host system."
-            )
-            return LocalDeployment()
+            case SandboxMode.MODAL:
+                from swerex.deployment.modal import ModalDeployment
 
-        if mode == "modal":
-            from swerex.deployment.modal import ModalDeployment
-
-            return ModalDeployment(
-                image=self.config.image,
-                runtime_timeout=self.config.runtime_timeout,
-                modal_sandbox_kwargs=self.config.modal_sandbox_kwargs,
-            )
-
-        raise ValueError(f"Unknown deployment mode: {mode}")
+                return ModalDeployment(
+                    image=self.config.image,
+                    runtime_timeout=self.config.runtime_timeout,
+                    modal_sandbox_kwargs=self.config.modal_sandbox_kwargs,
+                )
 
     async def stop(self) -> None:
         """Stop the sandbox deployment and clean up resources."""

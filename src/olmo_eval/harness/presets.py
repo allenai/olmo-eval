@@ -145,13 +145,13 @@ def _code_execution() -> HarnessConfig:
     Enables sandboxed code execution for scorers without agent tools.
     Use with tasks like humaneval:pass_at_1, mbpp:pass_at_10, etc.
     """
-    from .sandbox import SandboxConfig
+    from .sandbox import SandboxConfig, SandboxMode
 
     return HarnessConfig(
         name="code_execution",
         sandbox=SandboxConfig(
             image="volcengine/sandbox-fusion:server-20250609",
-            deployment_mode="docker",
+            mode=SandboxMode.MODAL,
         ),
     )
 
@@ -159,7 +159,7 @@ def _code_execution() -> HarnessConfig:
 @harness_preset("coding_agent")
 def _coding_agent() -> HarnessConfig:
     """Coding agent preset with sandboxed shell execution."""
-    from .sandbox import SandboxConfig
+    from .sandbox import SandboxConfig, SandboxMode
     from .tools.shell import execute_bash
 
     return HarnessConfig(
@@ -174,6 +174,6 @@ def _coding_agent() -> HarnessConfig:
         backend="openai_agents",
         sandbox=SandboxConfig(
             image="volcengine/sandbox-fusion:server-20250609",
-            deployment_mode="docker",
+            mode=SandboxMode.DOCKER,
         ),
     )
