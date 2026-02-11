@@ -146,7 +146,7 @@ def _codex_python() -> HarnessConfig:
     return HarnessConfig(
         name="codex_python",
         sandbox=SandboxConfig(
-            image="python:3.12-slim",
+            image="python:3.12",
             mode=SandboxMode.DOCKER,
             startup_timeout=60.0,
             docker_args=("--log-driver=json-file", "--log-opt", "path=/results/sandbox.log"),
