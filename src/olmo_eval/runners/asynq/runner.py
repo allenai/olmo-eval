@@ -196,9 +196,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             )
 
             # Wait for workers to initialize
-            logger.info("Waiting for workers to initialize...")
+            logger.info("Waiting for inference workers to initialize...")
             wait_for_workers_ready(workers, result_queue, startup_timeout=60.0)
-            logger.info("Workers initialized successfully")
+            logger.info("Inference workers ready")
 
             # Now wait for scoring worker (runs in parallel with inference worker init)
             if sandbox_config_dict is not None:

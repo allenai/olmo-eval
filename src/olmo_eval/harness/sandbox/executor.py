@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from typing import Any
 
 from olmo_eval.common.execution.environment import ExecutionResult
@@ -10,6 +12,34 @@ from olmo_eval.common.execution.environment import ExecutionResult
 from .config import SandboxConfig, SandboxMode
 
 logger = logging.getLogger(__name__)
+
+
+async def _run_with_progress(
+    coro: Any,
+    message: str,
+    interval: float = 5.0,
+) -> Any:
+    """Run a coroutine while logging progress at regular intervals.
+
+    Args:
+        coro: The coroutine to run.
+        message: Base message to log (elapsed time will be appended).
+        interval: Seconds between progress logs.
+
+    Returns:
+        The result of the coroutine.
+    """
+    task = asyncio.create_task(coro)
+    start = time.time()
+
+    while not task.done():
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=interval)
+        except TimeoutError:
+            elapsed = time.time() - start
+            logger.info(f"{message} ({elapsed:.0f}s elapsed)")
+
+    return task.result()
 
 
 class SandboxExecutor:
@@ -59,7 +89,11 @@ class SandboxExecutor:
         deployment = self.get_deployment()
 
         logger.info("Starting sandbox deployment...")
-        await deployment.start()
+        await _run_with_progress(
+            deployment.start(),
+            "Waiting for sandbox runtime",
+            interval=5.0,
+        )
 
         self._deployment = deployment
         self._runtime = deployment.runtime
