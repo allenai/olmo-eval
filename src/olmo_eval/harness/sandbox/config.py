@@ -30,6 +30,7 @@ class SandboxConfig:
         volumes: Volume mounts as tuple of (host_path, container_path) pairs.
         modal_sandbox_kwargs: Additional kwargs for Modal sandbox configuration.
         runtime_timeout: Timeout for Modal runtime in seconds.
+        required_secrets: Environment variable names that must be set.
     """
 
     image: str
@@ -42,6 +43,7 @@ class SandboxConfig:
     volumes: tuple[tuple[str, str], ...] = ()
     modal_sandbox_kwargs: dict[str, Any] | None = None
     runtime_timeout: float = 3600.0
+    required_secrets: tuple[str, ...] = ()
 
     @property
     def is_local(self) -> bool:
@@ -50,7 +52,7 @@ class SandboxConfig:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
-        result = {
+        result: dict[str, Any] = {
             "image": self.image,
             "mode": self.mode.value,
             "startup_timeout": self.startup_timeout,
@@ -63,6 +65,8 @@ class SandboxConfig:
         }
         if self.modal_sandbox_kwargs is not None:
             result["modal_sandbox_kwargs"] = self.modal_sandbox_kwargs
+        if self.required_secrets:
+            result["required_secrets"] = list(self.required_secrets)
         return result
 
     @classmethod
@@ -83,4 +87,5 @@ class SandboxConfig:
             volumes=tuple(tuple(v) for v in data.get("volumes", [])),
             modal_sandbox_kwargs=data.get("modal_sandbox_kwargs"),
             runtime_timeout=data.get("runtime_timeout", 3600.0),
+            required_secrets=tuple(data.get("required_secrets", [])),
         )

@@ -152,6 +152,7 @@ def _code_execution() -> HarnessConfig:
         sandbox=SandboxConfig(
             image="volcengine/sandbox-fusion:server-20250609",
             mode=SandboxMode.MODAL,
+            required_secrets=("MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET"),
         ),
     )
 

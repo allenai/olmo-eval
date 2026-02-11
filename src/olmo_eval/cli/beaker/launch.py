@@ -418,6 +418,9 @@ def launch(
         harness_config = get_harness_preset(launch_config.harness)
         if harness_config.required_secrets:
             all_required_secrets.update(harness_config.required_secrets)
+        # Collect sandbox-required secrets
+        if harness_config.sandbox and harness_config.sandbox.required_secrets:
+            all_required_secrets.update(harness_config.sandbox.required_secrets)
 
     # Ensure secrets
     common_secrets, store_secrets, task_secrets = _ensure_secrets(
