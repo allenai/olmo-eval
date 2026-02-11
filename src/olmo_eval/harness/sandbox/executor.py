@@ -64,7 +64,7 @@ class SandboxExecutor:
         deployment = self._create_deployment()
 
         logger.info(f"Starting sandbox deployment: {type(deployment).__name__}")
-        await deployment.start(timeout=self.config.startup_timeout)
+        await deployment.start()
 
         self._deployment = deployment
         self._runtime = await deployment.get_runtime()
@@ -102,6 +102,7 @@ class SandboxExecutor:
                 return DockerDeployment(
                     image=self.config.image,
                     container_runtime="docker",
+                    startup_timeout=self.config.startup_timeout,
                 )
 
             case SandboxMode.LOCAL:
@@ -128,6 +129,7 @@ class SandboxExecutor:
 
                 return ModalDeployment(
                     image=self.config.image,
+                    startup_timeout=self.config.startup_timeout,
                     runtime_timeout=self.config.runtime_timeout,
                     modal_sandbox_kwargs=self.config.modal_sandbox_kwargs,
                 )
