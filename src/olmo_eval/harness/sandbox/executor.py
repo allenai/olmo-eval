@@ -88,7 +88,6 @@ class SandboxExecutor:
                     image=self.config.image,
                     container_runtime=self.config.container_runtime,
                     startup_timeout=self.config.startup_timeout,
-                    docker_internal_host=self.config.docker_internal_host,
                     docker_args=list(self.config.docker_args) or None,
                 )
 
