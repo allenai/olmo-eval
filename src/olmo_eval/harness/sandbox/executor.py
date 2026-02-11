@@ -2,17 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import uuid
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from olmo_eval.common.execution.environment import ExecutionResult
 
 from .config import SandboxConfig, SandboxMode
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +33,6 @@ class SandboxExecutor:
         self.config = config
         self._deployment: Any = None
         self._runtime: Any = None
-        self._session: Any = None
 
     async def __aenter__(self) -> SandboxExecutor:
         """Start the sandbox environment."""
@@ -55,21 +49,18 @@ class SandboxExecutor:
         await self.stop()
 
     async def start(self) -> None:
-        """Start the sandbox deployment and create a session.
+        """Start the sandbox deployment.
 
         Raises:
             ImportError: If swe-rex is not installed.
             RuntimeError: If container runtime is not available.
         """
         logger.info("Creating sandbox deployment...")
-        deployment = self._create_deployment()
+        deployment = self.get_deployment()
 
         logger.info("Starting sandbox deployment...")
         try:
-            await asyncio.wait_for(
-                deployment.start(),
-                timeout=self.config.startup_timeout,
-            )
+            await deployment.start()
         except TimeoutError as e:
             logger.error("Timed out starting sandbox deployment")
             raise RuntimeError(
@@ -78,26 +69,9 @@ class SandboxExecutor:
 
         self._deployment = deployment
         self._runtime = deployment.runtime
-        logger.info("Sandbox deployment started, creating session...")
+        logger.info("Sandbox deployment started")
 
-        # Create a persistent bash session for command execution
-        from swerex.runtime.abstract import CreateBashSessionRequest
-
-        try:
-            session_response = await asyncio.wait_for(
-                self._runtime.create_session(CreateBashSessionRequest(startup_timeout=30.0)),
-                timeout=self.config.startup_timeout,
-            )
-        except TimeoutError as e:
-            logger.error("Timed out creating bash session in sandbox")
-            raise RuntimeError(
-                f"Sandbox session creation timed out after {self.config.startup_timeout}s"
-            ) from e
-
-        self._session = session_response.session_id
-        logger.info(f"Sandbox session created: {self._session}")
-
-    def _create_deployment(self) -> Any:
+    def get_deployment(self) -> Any:
         """Create the appropriate deployment based on configuration.
 
         Returns:
@@ -154,15 +128,6 @@ class SandboxExecutor:
 
     async def stop(self) -> None:
         """Stop the sandbox deployment and clean up resources."""
-        if self._session is not None and self._runtime is not None:
-            try:
-                from swerex.runtime.abstract import CloseBashSessionRequest
-
-                await self._runtime.close_session(CloseBashSessionRequest(session_id=self._session))
-            except Exception as e:
-                logger.warning(f"Failed to close session: {e}")
-            self._session = None
-
         if self._deployment is not None:
             try:
                 await self._deployment.stop()
@@ -186,25 +151,26 @@ class SandboxExecutor:
         Raises:
             RuntimeError: If the sandbox is not started.
         """
-        if self._runtime is None or self._session is None:
+        if self._runtime is None:
             raise RuntimeError("Sandbox not started. Call start() first or use async context.")
 
-        from swerex.runtime.abstract import BashAction
+        from swerex.runtime.abstract import Command
 
         effective_timeout = timeout if timeout is not None else self.config.command_timeout
 
-        response = await self._runtime.run_in_session(
-            BashAction(
-                session_id=self._session,
-                command=command,
+        response = await self._runtime.execute(
+            Command(
+                command=["bash", "-c", command],
                 timeout=effective_timeout,
             )
         )
 
         # Combine stdout and stderr, include exit code information
         output_parts = []
-        if response.output:
-            output_parts.append(response.output)
+        if response.stdout:
+            output_parts.append(response.stdout)
+        if response.stderr:
+            output_parts.append(response.stderr)
         if response.exit_code != 0:
             output_parts.append(f"\n[Exit code: {response.exit_code}]")
 
@@ -218,9 +184,6 @@ class SandboxExecutor:
     ) -> ExecutionResult:
         """Execute code in the specified language.
 
-        This method writes the code to a temporary file in the sandbox,
-        executes it, and returns the result.
-
         Args:
             code: Source code to execute.
             language: Programming language (default: "python").
@@ -229,68 +192,45 @@ class SandboxExecutor:
         Returns:
             ExecutionResult with success status and output.
         """
-        if self._runtime is None or self._session is None:
+        if self._runtime is None:
             return ExecutionResult(
                 success=False,
                 error="Sandbox not started. Call start() first or use async context.",
             )
 
-        # Map language to file extension and interpreter
-        lang_config = {
-            "python": {"ext": ".py", "cmd": "python"},
-            "python3": {"ext": ".py", "cmd": "python3"},
-            "bash": {"ext": ".sh", "cmd": "bash"},
-            "sh": {"ext": ".sh", "cmd": "sh"},
+        interpreters = {
+            "python": "python",
+            "python3": "python3",
+            "bash": "bash",
+            "sh": "sh",
         }
 
-        config = lang_config.get(language.lower())
-        if config is None:
+        interpreter = interpreters.get(language.lower())
+        if interpreter is None:
             return ExecutionResult(
                 success=False,
                 error=f"Unsupported language: {language}",
             )
 
-        # Generate unique filename
-        file_id = uuid.uuid4().hex[:8]
-        filename = f"/tmp/code_{file_id}{config['ext']}"
-
         try:
-            from swerex.runtime.abstract import BashAction
+            from swerex.runtime.abstract import Command
 
             effective_timeout = timeout if timeout is not None else self.config.command_timeout
 
-            # Write code to file using heredoc (no escaping needed)
-            write_cmd = f"cat > {filename} << 'CODEEOF'\n{code}\nCODEEOF"
-            await self._runtime.run_in_session(
-                BashAction(
-                    session_id=self._session,
-                    command=write_cmd,
-                    timeout=10.0,
-                )
-            )
-
-            # Execute the code
-            exec_cmd = f"{config['cmd']} {filename}"
-            response = await self._runtime.run_in_session(
-                BashAction(
-                    session_id=self._session,
-                    command=exec_cmd,
+            response = await self._runtime.execute(
+                Command(
+                    command=[interpreter, "-c", code],
                     timeout=effective_timeout,
                 )
             )
 
-            # Cleanup
-            await self._runtime.run_in_session(
-                BashAction(
-                    session_id=self._session,
-                    command=f"rm -f {filename}",
-                    timeout=5.0,
-                )
-            )
+            output = response.stdout or ""
+            if response.stderr:
+                output += response.stderr
 
             return ExecutionResult(
                 success=response.exit_code == 0,
-                output=response.output or "",
+                output=output,
                 exit_code=response.exit_code,
             )
 
@@ -305,4 +245,4 @@ class SandboxExecutor:
     @property
     def is_running(self) -> bool:
         """Check if the sandbox is running."""
-        return self._deployment is not None and self._session is not None
+        return self._deployment is not None and self._runtime is not None
