@@ -52,7 +52,7 @@ agents = [
     "httpx~=0.28.1",
 ]
 sandbox = [
-    "swe-rex[modal] @ git+https://github.com/SWE-agent/SWE-ReX.git@e6d38e21ce6df66f6e4f5e99b490580a27d3e34b",
+    "swe-rex[modal] @ git+https://github.com/jdahm/SWE-ReX/tree/johannd/ai2",
 ]
 beaker = [
     "beaker-py>=2.5.4,<3",
