@@ -158,6 +158,7 @@ def _build_server_command(
     enable_auto_tool_choice: bool = False,
     tool_call_parser: str | None = None,
     enable_prefix_caching: bool = True,
+    chat_template_kwargs: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> list[str]:
     """Build the vLLM server command.
@@ -174,11 +175,14 @@ def _build_server_command(
         tool_call_parser: Parser for tool calls (auto-detected if not specified
             when enable_auto_tool_choice is True)
         enable_prefix_caching: Enable prefix caching for faster inference (default: True)
+        chat_template_kwargs: Extra kwargs for chat template (e.g., {"enable_thinking": false})
         **kwargs: Additional vLLM server arguments
 
     Returns:
         Command list for subprocess
     """
+    import json
+
     cmd = [
         sys.executable,
         "-m",
@@ -213,6 +217,10 @@ def _build_server_command(
     # Prefix caching (enabled by default for faster inference)
     if enable_prefix_caching:
         cmd.append("--enable-prefix-caching")
+
+    # Chat template kwargs (e.g., for Qwen3 enable_thinking)
+    if chat_template_kwargs:
+        cmd.extend(["--chat-template-kwargs", json.dumps(chat_template_kwargs)])
 
     # Add any extra kwargs as CLI args
     for key, value in kwargs.items():

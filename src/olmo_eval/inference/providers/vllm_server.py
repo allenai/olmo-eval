@@ -64,6 +64,7 @@ class VLLMServerProvider(InferenceProvider):
         tool_call_parser: str | None = None,
         trust_remote_code: bool = False,
         log_dir: str | None = None,
+        chat_template_kwargs: dict[str, Any] | None = None,
         **server_kwargs: Any,
     ) -> None:
         """Initialize the provider.
@@ -82,6 +83,7 @@ class VLLMServerProvider(InferenceProvider):
             tool_call_parser: Tool call parser name (server mode).
             trust_remote_code: Trust remote code for model loading (server mode).
             log_dir: Directory to write server logs to (server mode).
+            chat_template_kwargs: Extra kwargs for chat template (e.g., {"enable_thinking": false}).
             **server_kwargs: Additional vLLM server arguments.
         """
         super().__init__(model_name)
@@ -89,6 +91,7 @@ class VLLMServerProvider(InferenceProvider):
         self.max_concurrency = max_concurrency
         self.max_retries = max_retries
         self.retry_delay = retry_delay
+        self.chat_template_kwargs = chat_template_kwargs
         self._client: AsyncOpenAI | None = None
         self._http_client: httpx.AsyncClient | None = None
         self._openai_module: Any = None
@@ -113,6 +116,8 @@ class VLLMServerProvider(InferenceProvider):
                     srv_kwargs["tool_call_parser"] = tool_call_parser
             if trust_remote_code:
                 srv_kwargs["trust_remote_code"] = True
+            if chat_template_kwargs:
+                srv_kwargs["chat_template_kwargs"] = chat_template_kwargs
 
             self._server = VLLMServerProcess(
                 model_name=model_name,
@@ -217,6 +222,10 @@ class VLLMServerProvider(InferenceProvider):
             kwargs["stop"] = list(params.stop_sequences)[:4]
         if tools:
             kwargs["tools"] = tools
+
+        # Pass chat_template_kwargs via extra_body for vLLM
+        if self.chat_template_kwargs:
+            kwargs["extra_body"] = {"chat_template_kwargs": self.chat_template_kwargs}
 
         response = await client.chat.completions.create(**kwargs)
 

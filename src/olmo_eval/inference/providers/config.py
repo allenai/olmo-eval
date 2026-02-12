@@ -104,6 +104,7 @@ class ProviderConfig:
             "max_retries",
             "retry_delay",
             "log_dir",
+            "chat_template_kwargs",
         ),
         "litellm": (),
         "hf": ("torch_dtype", "device_map", "attn_implementation"),
