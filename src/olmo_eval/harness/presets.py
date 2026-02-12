@@ -71,10 +71,23 @@ You can execute bash commands to:
 Use the execute_bash tool to run commands. The environment is isolated,
 so you can safely experiment.
 
+IMPORTANT: When writing code with special characters (quotes, backslashes, newlines),
+use a heredoc to write the code to a file, then run the file:
+
+cat << 'EOF' > solution.py
+# Your code here - special characters are preserved exactly
+def example():
+    return "hello\\nworld"
+EOF
+python solution.py
+
+Do NOT use python -c with complex code as it causes escaping issues.
+
 When solving coding problems:
 1. First understand the problem by reading any provided files
-2. Write and test your solution incrementally
-3. Verify your solution works before providing the final answer
+2. Write your solution to a file using heredoc syntax
+3. Run and test your solution
+4. Verify it works before providing the final answer
 """
 
 
