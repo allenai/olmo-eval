@@ -14,7 +14,7 @@ MAX_RETRIES = 3
 RETRY_DELAY = 2.0  # seconds
 
 
-def get_registry_mirror_url(workspace: str | None = None) -> str:
+def get_registry_mirror_url() -> str:
     """Get the URL of running registry mirror nodes from Beaker.
 
     Queries the registry-mirror experiment for running jobs and extracts
@@ -23,9 +23,6 @@ def get_registry_mirror_url(workspace: str | None = None) -> str:
 
     Only call this function if registry mirrors are required. If mirrors
     are not needed, don't call this function.
-
-    Args:
-        workspace: Beaker workspace (uses default if None).
 
     Returns:
         Comma-separated mirror URLs (e.g., "node1:5000,node2:5000").
@@ -36,10 +33,11 @@ def get_registry_mirror_url(workspace: str | None = None) -> str:
     from beaker import Beaker
 
     last_error: Exception | None = None
+    default_workspace = "ai2/sweagent-test"
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            beaker = Beaker.from_env(default_workspace=workspace)
+            beaker = Beaker.from_env(default_workspace=default_workspace)
 
             # Get the workload (experiment) by name
             workload = beaker.workload.get(REGISTRY_MIRROR_EXPERIMENT)

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, cluster_has_weka
+from olmo_eval.launch.beaker.mirror import log
 
 if TYPE_CHECKING:
     from olmo_eval.cli.beaker.config_loader import LaunchConfig
@@ -97,6 +98,7 @@ class JobConfigAssembler:
 
         # Configure sandbox environment and registry mirror
         setup_registry_mirror = False
+        log.info(f"Sandbox enabled: {self.enable_sandbox}")
         if self.enable_sandbox:
             job_env_vars["BEAKER_ALLOW_SUBCONTAINERS"] = "1"
             job_env_vars["BEAKER_SKIP_DOCKER_SOCKET"] = "1"
@@ -104,7 +106,7 @@ class JobConfigAssembler:
             # Get registry mirror URL for faster image pulls (raises if unavailable)
             from olmo_eval.launch.beaker.mirror import get_registry_mirror_url
 
-            mirror_url = get_registry_mirror_url(self.config.workspace)
+            mirror_url = get_registry_mirror_url()
             job_env_vars["MIRROR_HOSTS"] = mirror_url
             setup_registry_mirror = True
 
