@@ -9,7 +9,7 @@ from functools import lru_cache
 from typing import Any
 
 from agents import set_trace_processors  # type: ignore[import-not-found]
-from agents.tracing import BatchTraceProcessor  # type: ignore[import-not-found]
+from agents.tracing.processors import BatchTraceProcessor  # type: ignore[import-not-found]
 
 logger = logging.getLogger(__name__)
 
