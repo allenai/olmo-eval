@@ -158,13 +158,22 @@ async def process_results(
         if tracker.error:
             continue
 
-        if result_item.error:
+        # Check for hard failures (no outputs at all)
+        # Soft failures (error with outputs, like MaxTurnsExceeded) should still be scored
+        if result_item.error and not result_item.outputs:
             logger.warning(
                 f"Instance {result_item.instance_idx} failed for {result_item.task_id}: "
                 f"{result_item.error}"
             )
             tracker.add_failure(result_item.instance_idx, result_item.error)
             continue
+
+        if result_item.error:
+            # Soft error - log warning but continue to scoring
+            logger.debug(
+                f"Instance {result_item.instance_idx} completed with warning for "
+                f"{result_item.task_id}: {result_item.error}"
+            )
 
         # Build response and send to scoring immediately
         trajectory = None

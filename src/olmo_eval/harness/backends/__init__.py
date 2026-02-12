@@ -54,6 +54,14 @@ class Backend:
         """
         raise NotImplementedError(f"Backend '{self.name}' does not support run()")
 
+    async def cleanup(self) -> None:
+        """Clean up resources held by this backend.
+
+        Subclasses should override this to clean up any resources like
+        sandbox managers, connections, etc.
+        """
+        pass
+
 
 # -----------------------------------------------------------------------------
 # Backend Registry
