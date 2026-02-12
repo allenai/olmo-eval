@@ -206,7 +206,7 @@ class OpenAIAgentsBackend(Backend):
             HarnessResult with trajectory from SDK execution.
         """
         try:
-            from agents import Runner  # type: ignore[import-not-found]
+            from agents import Runner, trace  # type: ignore[import-not-found]
         except ImportError as e:
             raise ImportError(
                 "OpenAI Agents SDK not installed. Install with: pip install openai-agents"
@@ -240,23 +240,27 @@ class OpenAIAgentsBackend(Backend):
         max_turns_reached = False
         max_turns = config.max_turns or 10
 
-        # Run agent, catching MaxTurnsExceeded to return a result instead of raising
-        try:
-            result = await Runner.run(
-                starting_agent=agent,
-                input=input_text,
-                max_turns=max_turns,
-            )
-        except Exception as e:
-            # Handle MaxTurnsExceeded - return a result with the error instead of raising
-            if type(e).__name__ == "MaxTurnsExceeded":
-                return HarnessResult(
-                    trajectory=AgentTrajectory(turns=()),
-                    final_output=LMOutput(text="[Max turns exceeded]"),
-                    max_turns_reached=True,
-                    error=f"Max turns ({max_turns}) exceeded",
+        # Build trace name from config
+        trace_name = f"Agent: {config.name}" if config.name else "Agent run"
+
+        # Run agent within trace context for observability
+        with trace(trace_name):
+            try:
+                result = await Runner.run(
+                    starting_agent=agent,
+                    input=input_text,
+                    max_turns=max_turns,
                 )
-            raise
+            except Exception as e:
+                # Handle MaxTurnsExceeded - return a result with the error instead of raising
+                if type(e).__name__ == "MaxTurnsExceeded":
+                    return HarnessResult(
+                        trajectory=AgentTrajectory(turns=()),
+                        final_output=LMOutput(text="[Max turns exceeded]"),
+                        max_turns_reached=True,
+                        error=f"Max turns ({max_turns}) exceeded",
+                    )
+                raise
 
         # Convert result to HarnessResult
         trajectory = self._convert_trajectory(result)

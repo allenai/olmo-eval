@@ -115,7 +115,7 @@ class HarnessPresets:
             tools=(semantic_scholar_search, serper_web_search, serper_fetch_page),
             system_prompt=DR_TULU_SYSTEM_PROMPT,
             max_turns=10,
-            max_concurrency=8,
+            max_concurrency=4,
             backend="openai_agents",
             required_secrets=("S2_API_KEY", "SERPER_API_KEY", "OPENAI_API_KEY"),
         )
@@ -139,23 +139,7 @@ class HarnessPresets:
         )
 
     @lazy
-    def codex_universal(name: str) -> HarnessConfig:
-        """Universal code execution preset."""
-        from .sandbox import SandboxConfig, SandboxMode
-
-        return HarnessConfig(
-            name=name,
-            sandboxes=(
-                SandboxConfig(
-                    image="volcengine/sandbox-fusion:server-20250609",
-                    mode=SandboxMode.DOCKER,
-                    startup_timeout=300.0,
-                    docker_args=_get_sandbox_docker_args(),
-                ),
-            ),
-        )
-
-    @lazy
+    # This is an example harness but needs some tweaks before using
     def codex_agent(name: str) -> HarnessConfig:
         """Coding agent preset with sandboxed shell execution."""
         from .sandbox import SandboxConfig, SandboxMode
@@ -170,6 +154,7 @@ class HarnessPresets:
             tools=(execute_bash,),
             system_prompt=CODING_AGENT_SYSTEM_PROMPT,
             max_turns=20,
+            max_concurrency=4,
             backend="openai_agents",
             required_secrets=("OPENAI_API_KEY",),
             sandboxes=(

@@ -113,6 +113,12 @@ def inference_worker(
             init_times[worker_id] = init_time
 
         try:
+            # Configure agent trace output if using openai_agents backend
+            if harness_config.backend == "openai_agents" and output_dir:
+                from olmo_eval.harness.backends.tracing import configure_trace_output
+
+                configure_trace_output(output_dir)
+
             items: list[QueueItem] = []
             while True:
                 item = item_queue.get()
