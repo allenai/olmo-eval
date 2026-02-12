@@ -116,6 +116,7 @@ class HarnessPresets:
             name=name,
             sandboxes=(
                 SandboxConfig(
+                    instances=3,
                     image="python:3.12",
                     mode=SandboxMode.DOCKER,
                     startup_timeout=60.0,

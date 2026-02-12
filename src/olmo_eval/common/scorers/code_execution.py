@@ -30,7 +30,7 @@ class CodeExecutionScorer(ExecutionScorer):
         }
     """
 
-    name: str = "code_execution"
+    name: str = "code_exec"
     timeout: float = 20.0
     language: str = "python"
 
