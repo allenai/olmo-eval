@@ -7,7 +7,7 @@ how the harness executes requests.
 from __future__ import annotations
 
 import logging
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from olmo_eval.common.types import LMRequest, SamplingParams
 from olmo_eval.harness.config import HarnessConfig
@@ -49,6 +49,7 @@ class Backend:
         config: HarnessConfig,
         request: LMRequest,
         sampling_params: SamplingParams | None = None,
+        trace_metadata: dict[str, Any] | None = None,
     ) -> HarnessResult:
         """Execute the request and return the result.
 
@@ -57,6 +58,7 @@ class Backend:
             config: Harness configuration (tools, system prompt, etc.).
             request: The initial request to process.
             sampling_params: Optional sampling parameters override.
+            trace_metadata: Optional metadata for tracing (e.g., instance_id, task_id).
 
         Returns:
             HarnessResult with trajectory and final output.

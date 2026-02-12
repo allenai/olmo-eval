@@ -209,6 +209,7 @@ class OpenAIAgentsBackend(Backend):
         config: HarnessConfig,
         request: LMRequest,
         sampling_params: SamplingParams | None = None,
+        trace_metadata: dict[str, Any] | None = None,
     ) -> HarnessResult:
         """Execute using OpenAI Agents SDK.
 
@@ -217,6 +218,7 @@ class OpenAIAgentsBackend(Backend):
             config: Harness configuration (tools, system prompt, etc.).
             request: The initial request.
             sampling_params: Optional sampling parameters.
+            trace_metadata: Optional metadata for tracing (e.g., instance_id, task_id).
 
         Returns:
             HarnessResult with trajectory from SDK execution.
@@ -256,11 +258,15 @@ class OpenAIAgentsBackend(Backend):
         max_turns_reached = False
         max_turns = config.max_turns or 10
 
-        # Build trace name from config
-        trace_name = f"Agent: {config.name}" if config.name else "Agent run"
+        # Build trace name from config and metadata
+        instance_id = (trace_metadata or {}).get("instance_id", "")
+        if instance_id:
+            trace_name = f"{config.name}:{instance_id}" if config.name else f"Agent:{instance_id}"
+        else:
+            trace_name = f"Agent: {config.name}" if config.name else "Agent run"
 
         # Run agent within trace context for observability
-        with trace(trace_name):
+        with trace(trace_name, metadata=trace_metadata):
             try:
                 result = await Runner.run(
                     starting_agent=agent,

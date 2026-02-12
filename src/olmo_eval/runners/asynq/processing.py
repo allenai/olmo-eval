@@ -62,8 +62,17 @@ async def process_chat_request(
     """
     from dataclasses import replace as dataclass_replace
 
+    # Build trace metadata for observability
+    trace_metadata = {
+        "task_id": item.task_id,
+        "instance_idx": item.instance_idx,
+        "instance_id": item.instance.metadata.get("id", str(item.instance_idx)),
+    }
+
     try:
-        harness_result = await harness.run(item.request, item.sampling_params)
+        harness_result = await harness.run(
+            item.request, item.sampling_params, trace_metadata=trace_metadata
+        )
         final_output = harness_result.final_output
 
         if harness_result.trajectory is not None:

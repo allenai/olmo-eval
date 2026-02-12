@@ -132,6 +132,7 @@ class Harness:
         self,
         request: LMRequest,
         sampling_params: SamplingParams | None = None,
+        trace_metadata: dict[str, Any] | None = None,
     ) -> HarnessResult:
         """Multi-turn execution via configured backend.
 
@@ -143,6 +144,7 @@ class Harness:
         Args:
             request: Initial request to start the conversation.
             sampling_params: Optional sampling parameters.
+            trace_metadata: Optional metadata for tracing (e.g., instance_id, task_id).
 
         Returns:
             HarnessResult with trajectory and final output.
@@ -150,7 +152,9 @@ class Harness:
         Raises:
             RuntimeError: If no backend is configured.
         """
-        return await self.backend.run(self.provider, self.config, request, sampling_params)
+        return await self.backend.run(
+            self.provider, self.config, request, sampling_params, trace_metadata
+        )
 
     async def cleanup(self) -> None:
         """Clean up resources held by the harness and its backend."""
