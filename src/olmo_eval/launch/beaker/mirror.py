@@ -46,13 +46,7 @@ def get_registry_mirror_url() -> str:
             # Find running mirror nodes from experiment tasks
             mirror_hosts: list[str] = []
             for task in experiment.tasks:
-                # Skip tasks that don't have a running job
-                if not task.idle_job:
-                    continue
-
-                # Get job details to find the node hostname
-                job = beaker.job.get(task.idle_job.id)
-
+                job = list(beaker.job.list(task=task))[0]
                 # Extract BEAKER_NODE_HOSTNAME from assigned environment variables
                 for env_var in job.assignment_details.assigned_environment_variables:
                     if env_var.name == "BEAKER_NODE_HOSTNAME" and env_var.literal:
