@@ -42,10 +42,17 @@ class SandboxManager:
     async def start(self) -> None:
         """Start all sandbox executors."""
         for config in self._configs:
-            executor = SandboxExecutor(config)
-            await executor.start()
-            self._executors.append(executor)
-            logger.info(f"Started sandbox with capabilities: {config.capabilities}")
+            for i in range(config.instances):
+                executor = SandboxExecutor(config)
+                await executor.start()
+                self._executors.append(executor)
+                if config.instances > 1:
+                    logger.info(
+                        f"Started sandbox {i + 1}/{config.instances} "
+                        f"with capabilities: {config.capabilities}"
+                    )
+                else:
+                    logger.info(f"Started sandbox with capabilities: {config.capabilities}")
 
     async def stop(self) -> None:
         """Stop all sandbox executors."""

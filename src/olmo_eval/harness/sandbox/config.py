@@ -28,6 +28,8 @@ class SandboxConfig:
         image: Container image for the sandbox environment.
         mode: How to run the sandbox.
         capabilities: Capabilities this sandbox provides (e.g., {"bash"}).
+        instances: Number of executor instances to create from this config.
+            Multiple instances enable higher throughput via round-robin.
         startup_timeout: Timeout for container startup in seconds.
         command_timeout: Default timeout for command execution in seconds.
         remove_container: Whether to remove container after use.
@@ -42,6 +44,7 @@ class SandboxConfig:
     image: str
     mode: SandboxMode
     capabilities: frozenset[str] = _DEFAULT_CAPABILITIES
+    instances: int = 1
     container_runtime: ContainerRuntime = "podman"
     startup_timeout: float = 60.0
     command_timeout: float = 30.0
@@ -65,6 +68,7 @@ class SandboxConfig:
             "image": self.image,
             "mode": self.mode.value,
             "capabilities": sorted(self.capabilities),
+            "instances": self.instances,
             "container_runtime": self.container_runtime,
             "startup_timeout": self.startup_timeout,
             "command_timeout": self.command_timeout,
@@ -93,6 +97,7 @@ class SandboxConfig:
             image=data["image"],
             mode=SandboxMode(data["mode"]),
             capabilities=frozenset(capabilities) if capabilities else _DEFAULT_CAPABILITIES,
+            instances=data.get("instances", 1),
             container_runtime=data.get("container_runtime", "podman"),
             startup_timeout=data.get("startup_timeout", 60.0),
             command_timeout=data.get("command_timeout", 30.0),
