@@ -6,7 +6,7 @@ from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, R
 from olmo_eval.common.utils import compute_pass_at_k, compute_pass_pow_k
 
 
-def make_response(task_id: str, score: float, scorer_name: str = "code_execution") -> Response:
+def make_response(task_id: str, score: float, scorer_name: str = "code_exec") -> Response:
     """Helper to create Response with given score."""
     return Response(
         instance=Instance(question="test", metadata={"id": task_id}),
