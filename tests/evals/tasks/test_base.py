@@ -140,6 +140,7 @@ class TestTask:
         assert fewshot1 is fewshot2  # Same object (cached)
 
 
+@pytest.mark.anyio
 class TestTaskScoring:
     """Tests for Task scoring functionality."""
 
@@ -147,7 +148,7 @@ class TestTaskScoring:
         """Helper to create a simple LMRequest."""
         return LMRequest(request_type=RequestType.COMPLETION, prompt=prompt)
 
-    def test_score_responses_extracts_answers(self):
+    async def test_score_responses_extracts_answers(self):
         """Test that score_responses extracts answers from outputs."""
         config = TaskConfig(name="test", data_source="test/dataset")
         task = ConcreteTask(config)
@@ -160,12 +161,12 @@ class TestTaskScoring:
             outputs=[output],
         )
 
-        scored = task.score_responses([response])
+        scored = await task.score_responses([response])
 
         assert len(scored) == 1
         assert scored[0].outputs[0].extracted_answer == "4"
 
-    def test_score_responses_applies_scorers(self):
+    async def test_score_responses_applies_scorers(self):
         """Test that score_responses applies scorers from metrics."""
         metric = AccuracyMetric(scorer=ExactMatchScorer)
         config = TaskConfig(
@@ -183,12 +184,12 @@ class TestTaskScoring:
             outputs=[output],
         )
 
-        scored = task.score_responses([response])
+        scored = await task.score_responses([response])
 
         assert "exact_match" in scored[0].scores
         assert scored[0].scores["exact_match"] == 1.0
 
-    def test_score_responses_incorrect_answer(self):
+    async def test_score_responses_incorrect_answer(self):
         """Test scoring with incorrect answer."""
         metric = AccuracyMetric(scorer=ExactMatchScorer)
         config = TaskConfig(
@@ -206,11 +207,11 @@ class TestTaskScoring:
             outputs=[output],
         )
 
-        scored = task.score_responses([response])
+        scored = await task.score_responses([response])
 
         assert scored[0].scores["exact_match"] == 0.0
 
-    def test_score_responses_multiple_outputs_takes_max(self):
+    async def test_score_responses_multiple_outputs_takes_max(self):
         """Test that scoring takes max score across multiple outputs."""
         metric = AccuracyMetric(scorer=ExactMatchScorer)
         config = TaskConfig(
@@ -232,11 +233,12 @@ class TestTaskScoring:
             outputs=outputs,
         )
 
-        scored = task.score_responses([response])
+        scored = await task.score_responses([response])
 
         assert scored[0].scores["exact_match"] == 1.0  # Max of [0, 1, 0]
 
 
+@pytest.mark.anyio
 class TestTaskMetrics:
     """Tests for Task metrics computation."""
 
@@ -244,7 +246,7 @@ class TestTaskMetrics:
         """Helper to create a simple LMRequest."""
         return LMRequest(request_type=RequestType.COMPLETION, prompt=prompt)
 
-    def test_compute_metrics(self):
+    async def test_compute_metrics(self):
         """Test compute_metrics aggregates scores."""
         metric = AccuracyMetric(scorer=ExactMatchScorer)
         config = TaskConfig(
@@ -274,7 +276,7 @@ class TestTaskMetrics:
         ]
 
         # Score first
-        scored = task.score_responses(responses)
+        scored = await task.score_responses(responses)
 
         # Compute metrics (returns nested structure: {metric: {scorer: value}})
         metrics = task.compute_metrics(scored)

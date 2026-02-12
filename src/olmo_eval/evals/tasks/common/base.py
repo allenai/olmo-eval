@@ -363,7 +363,7 @@ class Task(ABC):
         """Get data source for a specific split."""
         return self.config.get_data_source(split=split)
 
-    def score_responses(
+    async def score_responses(
         self,
         responses: Sequence[Response],
         context: ScoringContext | None = None,
@@ -388,7 +388,7 @@ class Task(ABC):
 
         if has_async_scorers and context is not None:
             # Run async scoring
-            asyncio.run(self._apply_scorers_async(responses, context))
+            await self._apply_scorers_async(responses, context)
         else:
             # Run sync scoring
             self._apply_scorers(responses)
@@ -446,8 +446,6 @@ class Task(ABC):
             SandboxRequiredError: If an ExecutionScorer is used without a valid
                 execution environment in the context.
         """
-        import asyncio
-
         from olmo_eval.common.scorers.execution import ExecutionScorer, SandboxRequiredError
 
         # Validate execution environment for execution scorers

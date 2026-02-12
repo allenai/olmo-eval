@@ -101,7 +101,7 @@ def build_requests_from_items(items: list[QueueItem], task_name: str) -> list[di
     return build_requests(instances, requests, task_name, sampling_params)
 
 
-def finalize_task(tracker: TaskTracker) -> TaskResult:
+async def finalize_task(tracker: TaskTracker) -> TaskResult:
     """Finalize a task tracker into a TaskResult.
 
     Args:
@@ -152,7 +152,7 @@ def finalize_task(tracker: TaskTracker) -> TaskResult:
     responses = [tracker.responses[i] for i in sorted(tracker.responses.keys())]
 
     # Score and compute metrics
-    scored = tracker.task.score_responses(responses)
+    scored = await tracker.task.score_responses(responses)
     metrics = tracker.task.compute_metrics(scored)
 
     # Build predictions

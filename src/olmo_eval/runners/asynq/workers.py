@@ -211,8 +211,7 @@ def scoring_worker(
         """Score a single item with semaphore-controlled concurrency."""
         async with semaphore:
             try:
-                # score_responses handles async scoring internally
-                scored_list = item.task.score_responses([item.response], context=context)
+                scored_list = await item.task.score_responses([item.response], context=context)
                 scored = scored_list[0] if scored_list else item.response
                 return ScoredResponse(
                     spec=item.spec,

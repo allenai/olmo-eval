@@ -123,7 +123,7 @@ async def process_results(
     # Pre-add error tasks to results (these don't need scoring)
     for spec, tracker in trackers.items():
         if tracker.error:
-            task_result = finalize_task(tracker)
+            task_result = await finalize_task(tracker)
             results[spec] = task_result
             tasks_complete += 1
             _report_task_completion(model_name, task_result)
