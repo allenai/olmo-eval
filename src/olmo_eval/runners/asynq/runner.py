@@ -75,6 +75,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
     inspect_instance: bool = False
     inspect_formatted: bool = False
     inspect_tokens: bool = False
+    inspect_response: bool = False
     inspect_request: bool = False
 
     # Configuration for print_config display
@@ -239,6 +240,21 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 if worker.is_alive():
                     worker.terminate()
                     worker.join()
+
+            # Optionally inspect first response of each task
+            if self.inspect_response:
+                from olmo_eval.common.inspection import inspect_response
+
+                for spec, tracker in trackers.items():
+                    if tracker.responses:
+                        first_response = next(iter(tracker.responses.values()))
+                        console.print()
+                        inspect_response(
+                            first_response,
+                            console=console,
+                            task_name=spec,
+                        )
+                        break  # Only show first task's first response
 
             # Compute experiment duration
             experiment_duration_seconds = time.time() - experiment_start

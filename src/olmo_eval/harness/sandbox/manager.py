@@ -45,8 +45,8 @@ class SandboxManager:
         type_indices: dict[str, int] = {}
 
         for config_idx, config in enumerate(self._configs):
-            # Use config name if provided, otherwise use config index
-            type_name = config.name or str(config_idx)
+            # Derive type name from capabilities
+            type_name = "+".join(sorted(config.capabilities)) or str(config_idx)
 
             for _ in range(config.instances):
                 idx = type_indices.get(type_name, 0)

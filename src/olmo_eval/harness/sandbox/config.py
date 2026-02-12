@@ -27,7 +27,6 @@ class SandboxConfig:
     Attributes:
         image: Container image for the sandbox environment.
         mode: How to run the sandbox.
-        name: Short name for this sandbox type.
         capabilities: Capabilities this sandbox provides (e.g., {"bash"}).
         instances: Number of executor instances to create from this config.
             Multiple instances enable higher throughput via round-robin.
@@ -44,7 +43,6 @@ class SandboxConfig:
 
     image: str
     mode: SandboxMode
-    name: str | None = None
     capabilities: frozenset[str] = _DEFAULT_CAPABILITIES
     instances: int = 1
     container_runtime: ContainerRuntime = "podman"
@@ -84,7 +82,6 @@ class SandboxConfig:
         return cls(
             image=data["image"],
             mode=SandboxMode(data["mode"]),
-            name=data.get("name"),
             capabilities=frozenset(capabilities) if capabilities else _DEFAULT_CAPABILITIES,
             instances=data.get("instances", 1),
             container_runtime=data.get("container_runtime", "podman"),
