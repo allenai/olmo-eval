@@ -3,7 +3,7 @@
 from collections.abc import Iterator, Sequence
 from typing import Any
 
-from olmo_eval.common.formatters import CompletionFormatter, PPLFormatter
+from olmo_eval.common.formatters import ChatFormatter, CompletionFormatter, PPLFormatter
 from olmo_eval.common.metrics import BPBMetric, PassAtKMetric
 from olmo_eval.common.scorers import CodeExecutionScorer
 from olmo_eval.common.types import (
@@ -143,6 +143,35 @@ register_variant(
     num_fewshot=3,
     fewshot_seed=1234,
     formatter=CompletionFormatter(),
+)
+
+# Chat variants for instruction-tuned models
+# Use with agent backends: humaneval:chat:pass_at_1
+# Note: System prompt is owned by the harness (e.g., codex_agent preset)
+_CHAT_USER_TEMPLATE = """\
+Complete this Python function. Write only the function body (the implementation \
+code that goes inside the function). Do not repeat the function signature or docstring.
+
+```python
+{question}
+```"""
+
+register_variant(
+    "humaneval",
+    "chat",
+    formatter=ChatFormatter(
+        user_template=_CHAT_USER_TEMPLATE,
+        assistant_template="{answer}",
+    ),
+)
+
+register_variant(
+    "humaneval_plus",
+    "chat",
+    formatter=ChatFormatter(
+        user_template=_CHAT_USER_TEMPLATE,
+        assistant_template="{answer}",
+    ),
 )
 
 # =============================================================================

@@ -31,6 +31,18 @@ class Backend:
     name: str = "base"
     required_extras: tuple[str, ...] = ()
 
+    async def initialize(self, config: HarnessConfig) -> None:
+        """Initialize backend resources like sandbox managers.
+
+        Called during worker startup before processing begins.
+        Subclasses should override to set up resources that need
+        to be ready before the first request.
+
+        Args:
+            config: Harness configuration.
+        """
+        pass
+
     async def run(
         self,
         provider: InferenceProvider,

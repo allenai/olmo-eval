@@ -125,6 +125,10 @@ def inference_worker(
 
                 configure_trace_output(output_dir)
 
+            # Initialize backend resources (e.g., sandbox manager) before processing
+            if harness_config.backend:
+                asyncio.run(harness.backend.initialize(harness_config))
+
             items: list[QueueItem] = []
             while True:
                 item = item_queue.get()

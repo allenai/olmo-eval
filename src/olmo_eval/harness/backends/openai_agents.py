@@ -46,6 +46,22 @@ class OpenAIAgentsBackend(Backend):
         self._cached_provider_id = None
         self._cached_has_sandbox = False
 
+    async def initialize(self, config: HarnessConfig) -> None:
+        """Initialize sandbox manager if needed.
+
+        Called during worker startup to create the sandbox before processing.
+        """
+        needs_sandbox = config.sandboxes and config.has_sandbox_tools
+
+        if needs_sandbox and self._sandbox_manager is None:
+            from olmo_eval.harness.sandbox import SandboxManager
+
+            self._sandbox_manager = SandboxManager(config.sandboxes, owner=config.name)
+            await self._sandbox_manager.start()
+            logger.info(
+                f"Sandbox manager started with {self._sandbox_manager.executor_count} executor(s)"
+            )
+
     async def cleanup(self) -> None:
         """Clean up resources including sandbox manager."""
         if self._sandbox_manager is not None:

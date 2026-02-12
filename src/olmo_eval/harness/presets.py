@@ -93,6 +93,33 @@ When solving coding problems:
 4. Verify it works before providing the final answer
 """
 
+CODE_COMPLETION_SYSTEM_PROMPT = """\
+You are a Python coding assistant that completes function implementations.
+
+When given a function signature and docstring, write the implementation code that \
+goes inside the function body. Output only valid Python code.
+
+You have access to tools to help you:
+- execute_bash: Run Python code in a sandbox to test your solution
+- Web search: Look up documentation or examples if needed
+
+Workflow:
+1. Read the function signature and docstring carefully
+2. Write the implementation code
+3. Test your code using execute_bash to verify it works
+4. Provide the final implementation
+
+When testing code, write it to a file using heredoc syntax:
+
+cat << 'EOF' > solution.py
+# Your implementation here
+EOF
+python solution.py
+
+Output only the function body code in your final answer - no explanations, \
+markdown formatting, or the function signature itself.
+"""
+
 
 # ─────────────────────────────────────────────────────────
 # Preset Harness Configurations
@@ -158,6 +185,36 @@ class HarnessPresets:
             ),
             tools=(execute_bash, serper_fetch_page, serper_web_search),
             system_prompt=CODING_AGENT_SYSTEM_PROMPT,
+            max_turns=10,
+            max_concurrency=4,
+            backend="openai_agents",
+            required_secrets=("OPENAI_API_KEY",),
+            sandboxes=(
+                SandboxConfig(
+                    capabilities=frozenset(Capability.BASH),
+                    image="python:3.12",
+                    mode=SandboxMode.DOCKER,
+                    startup_timeout=120.0,
+                    docker_args=_get_sandbox_docker_args(),
+                ),
+            ),
+        )
+
+    @lazy
+    def codex_completion(name: str) -> HarnessConfig:
+        """Code completion agent with sandbox for testing and web search."""
+        from .sandbox import SandboxConfig, SandboxMode
+        from .tools.search import serper_fetch_page, serper_web_search
+        from .tools.shell import execute_bash
+
+        return HarnessConfig(
+            name=name,
+            provider=ProviderConfig(
+                kind=ProviderKind.VLLM_SERVER,
+                kwargs={"timeout": 60},
+            ),
+            tools=(execute_bash, serper_fetch_page, serper_web_search),
+            system_prompt=CODE_COMPLETION_SYSTEM_PROMPT,
             max_turns=10,
             max_concurrency=4,
             backend="openai_agents",
