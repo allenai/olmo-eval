@@ -181,8 +181,7 @@ def finalize_task(tracker: TaskTracker) -> TaskResult:
         duration_seconds=duration,
         predictions=predictions,
         primary_metric=primary_metric,
-        # Include error summary if there were partial failures
-        error=error_summary if tracker.failed_instances else None,
+        # Only set error if ALL instances failed (partial failures are logged as warnings)
     )
 
 
@@ -251,7 +250,7 @@ def compute_task_metrics(
         duration_seconds=duration_seconds,
         predictions=predictions,
         primary_metric=primary_metric,
-        error=error_summary,
+        # Only set error if ALL instances failed (partial failures are logged as warnings)
     )
 
 

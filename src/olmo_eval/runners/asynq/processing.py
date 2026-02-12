@@ -213,7 +213,10 @@ async def process_items(
                 batches[key] = []
             batches[key].append(item)
 
-        for batch in batches.values():
+        n_items, n_batches = len(batchable_items), len(batches)
+        logger.info(f"Processing {n_items} batchable items in {n_batches} batch(es)")
+        for i, batch in enumerate(batches.values(), 1):
+            logger.info(f"Processing batch {i}/{len(batches)} ({len(batch)} items)")
             await process_batch(batch, harness, result_queue)
 
     if chat_items:

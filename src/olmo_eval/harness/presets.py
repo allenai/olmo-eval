@@ -169,8 +169,6 @@ class HarnessPresets:
         )
 
     @lazy
-    # TODO(undfined): We're having issues with timeouts, investigate as I think they are being
-    # miscategorized as provider timeouts instead of exceptions from the vllm server.
     def codex_agent(name: str) -> HarnessConfig:
         """Coding agent preset with sandboxed shell execution."""
         from .sandbox import SandboxConfig, SandboxMode
@@ -181,7 +179,8 @@ class HarnessPresets:
             name=name,
             provider=ProviderConfig(
                 kind=ProviderKind.VLLM_SERVER,
-                kwargs={"timeout": 60},
+                # Higher timeout for multi-turn agent runs (each turn can take time)
+                kwargs={"timeout": 300},
             ),
             tools=(execute_bash, serper_fetch_page, serper_web_search),
             system_prompt=CODING_AGENT_SYSTEM_PROMPT,
@@ -211,7 +210,8 @@ class HarnessPresets:
             name=name,
             provider=ProviderConfig(
                 kind=ProviderKind.VLLM_SERVER,
-                kwargs={"timeout": 60},
+                # Higher timeout for multi-turn agent runs (each turn can take time)
+                kwargs={"timeout": 300},
             ),
             tools=(execute_bash, serper_fetch_page, serper_web_search),
             system_prompt=CODE_COMPLETION_SYSTEM_PROMPT,
