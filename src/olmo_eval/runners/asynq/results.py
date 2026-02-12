@@ -72,33 +72,26 @@ async def process_results(
     instances_sent: dict[str, int] = {spec: 0 for spec in trackers}
     instances_scored: dict[str, int] = {spec: 0 for spec in trackers}
 
-    def handle_scored_response(scored: ScoredResponse) -> None:
-        """Process a scored response and finalize task if complete."""
+    def check_task_completion(spec: str) -> None:
+        """Check if task is complete and finalize if so."""
         nonlocal tasks_complete
-        assert scored.scored is not None, "scored.scored should not be None for valid responses"
-        scored_responses[scored.spec][scored.instance_idx] = scored.scored
-        instances_scored[scored.spec] += 1
-
-        tracker = trackers[scored.spec]
+        tracker = trackers[spec]
         expected = tracker.total_instances - len(tracker.failed_instances)
 
-        # Check if all instances for this task are scored
-        if instances_scored[scored.spec] >= expected and scored.spec not in results:
-            # All instances scored - compute metrics
+        if instances_scored[spec] >= expected and spec not in results:
             responses_list = [
-                scored_responses[scored.spec][i]
-                for i in sorted(scored_responses[scored.spec].keys())
+                scored_responses[spec][i] for i in sorted(scored_responses[spec].keys())
             ]
             assert tracker.task is not None
             task_result = compute_task_metrics(
-                spec=scored.spec,
+                spec=spec,
                 task=tracker.task,
                 scored_responses=responses_list,
                 failed_instances=tracker.failed_instances,
                 total_instances=tracker.total_instances,
                 duration_seconds=time.time() - tracker.start_time,
             )
-            results[scored.spec] = task_result
+            results[spec] = task_result
             tasks_complete += 1
             _report_task_completion(model_name, task_result)
             if save_predictions and task_result.predictions:
@@ -106,6 +99,13 @@ async def process_results(
                 write_predictions_fn(
                     model_name, task_result.spec, task_result.predictions, task_hash
                 )
+
+    def handle_scored_response(scored: ScoredResponse) -> None:
+        """Process a scored response and check if task is complete."""
+        assert scored.scored is not None, "scored.scored should not be None for valid responses"
+        scored_responses[scored.spec][scored.instance_idx] = scored.scored
+        instances_scored[scored.spec] += 1
+        check_task_completion(scored.spec)
 
     def drain_scored_queue() -> None:
         """Non-blocking drain of scored responses."""
@@ -166,6 +166,7 @@ async def process_results(
                 f"{result_item.error}"
             )
             tracker.add_failure(result_item.instance_idx, result_item.error)
+            check_task_completion(result_item.task_id)
             continue
 
         if result_item.error:
