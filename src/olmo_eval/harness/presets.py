@@ -16,10 +16,15 @@ from .config import HarnessConfig, ProviderConfig
 from .constants import DR_TULU_SYSTEM_PROMPT
 
 
-def _get_sandbox_docker_args() -> tuple[str, ...]:
-    """Get docker args for sandbox log output based on environment."""
+def _get_sandbox_docker_args(index: int = 0) -> tuple[str, ...]:
+    """Get docker args for sandbox log output based on environment.
+
+    Args:
+        index: Sandbox index for namespacing log files when multiple sandboxes exist.
+    """
     result_dir = BEAKER_RESULT_DIR if os.environ.get("BEAKER_JOB_ID") else LOCAL_RESULT_DIR
-    log_path = os.path.join(result_dir, "sandbox.log")
+    log_name = "sandbox.log" if index == 0 else f"sandbox_{index}.log"
+    log_path = os.path.join(result_dir, log_name)
     return ("--log-driver=json-file", "--log-opt", f"path={log_path}")
 
 
@@ -155,7 +160,7 @@ class HarnessPresets:
             required_secrets=("OPENAI_API_KEY",),
             sandboxes=(
                 SandboxConfig(
-                    image="volcengine/sandbox-fusion:server-20250609",
+                    image="python:3.12",
                     mode=SandboxMode.DOCKER,
                     startup_timeout=300.0,
                     docker_args=_get_sandbox_docker_args(),
