@@ -118,6 +118,10 @@ select = [
     "SIM",
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# Long strings in test fixtures
+"tests/**/fixtures.py" = ["E501"]
+
 [tool.ruff.format]
 docstring-code-format = true
 

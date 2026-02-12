@@ -3,6 +3,17 @@
 import re
 
 
+def _strip_thinking_tags(text: str) -> str:
+    """Strip <think>...</think> blocks from text.
+
+    Some models (especially reasoning models) wrap their thought process
+    in <think> tags before providing the final answer.
+    """
+    # Remove <think>...</think> blocks (including nested content)
+    pattern = re.compile(r"<think>.*?</think>\s*", re.DOTALL | re.IGNORECASE)
+    return pattern.sub("", text).strip()
+
+
 def extract_code(text: str, language: str = "python") -> str:
     """Extract code from model output.
 
@@ -12,6 +23,7 @@ def extract_code(text: str, language: str = "python") -> str:
     ```
 
     Falls back to the full text if no code block is found.
+    Strips <think>...</think> reasoning blocks before extraction.
 
     Args:
         text: The model output text.
@@ -20,6 +32,9 @@ def extract_code(text: str, language: str = "python") -> str:
     Returns:
         The extracted code string.
     """
+    # Strip thinking tags first (some reasoning models use these)
+    text = _strip_thinking_tags(text)
+
     # Try to extract from markdown code block
     pattern = re.compile(rf"```{language}\n(.*?)```", re.DOTALL)
     matches = pattern.findall(text)
