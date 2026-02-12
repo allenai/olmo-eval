@@ -17,16 +17,10 @@ from .config import HarnessConfig, ProviderConfig
 from .constants import DR_TULU_SYSTEM_PROMPT
 
 
-def _get_sandbox_docker_args(index: int = 0) -> tuple[str, ...]:
-    """Get docker args for sandbox log output based on environment.
-
-    Args:
-        index: Sandbox index for namespacing log files when multiple sandboxes exist.
-    """
+def _get_logs_dir() -> str:
+    """Get the logs directory based on environment."""
     result_dir = BEAKER_RESULT_DIR if os.environ.get("BEAKER_JOB_ID") else LOCAL_RESULT_DIR
-    log_name = "sandbox.log" if index == 0 else f"sandbox_{index}.log"
-    log_path = os.path.join(result_dir, log_name)
-    return ("--log-driver=json-file", "--log-opt", f"path={log_path}")
+    return os.path.join(result_dir, "logs")
 
 
 # ─────────────────────────────────────────────────────────
@@ -163,7 +157,7 @@ class HarnessPresets:
                     image="python:3.12",
                     mode=SandboxMode.DOCKER,
                     startup_timeout=60.0,
-                    docker_args=_get_sandbox_docker_args(),
+                    log_dir=_get_logs_dir(),
                 ),
             ),
         )
@@ -194,7 +188,7 @@ class HarnessPresets:
                     image="python:3.12",
                     mode=SandboxMode.DOCKER,
                     startup_timeout=120.0,
-                    docker_args=_get_sandbox_docker_args(),
+                    log_dir=_get_logs_dir(),
                 ),
             ),
         )
@@ -225,7 +219,7 @@ class HarnessPresets:
                     image="python:3.12",
                     mode=SandboxMode.DOCKER,
                     startup_timeout=120.0,
-                    docker_args=_get_sandbox_docker_args(),
+                    log_dir=_get_logs_dir(),
                 ),
             ),
         )

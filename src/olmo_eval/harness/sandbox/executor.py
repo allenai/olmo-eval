@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from typing import Any
 
@@ -12,6 +13,21 @@ from olmo_eval.common.execution.environment import ExecutionResult
 from .config import SandboxConfig, SandboxMode
 
 logger = logging.getLogger(__name__)
+
+
+def _get_log_docker_args(log_dir: str, name: str) -> tuple[str, ...]:
+    """Get docker args for logging to a named file.
+
+    Args:
+        log_dir: Directory to write log files.
+        name: Sandbox name for the log file.
+
+    Returns:
+        Docker args tuple for json-file logging.
+    """
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, f"{name}.log")
+    return ("--log-driver=json-file", "--log-opt", f"path={log_path}")
 
 
 async def _run_with_progress(
@@ -128,11 +144,16 @@ class SandboxExecutor:
                         "swe-rex not installed. Install with: pip install swe-rex"
                     ) from e
 
+                # Build docker args, adding log args if log_dir is configured
+                docker_args = list(self.config.docker_args) if self.config.docker_args else []
+                if self.config.log_dir and self.name:
+                    docker_args.extend(_get_log_docker_args(self.config.log_dir, self.name))
+
                 return DockerDeployment(
                     image=self.config.image,
                     container_runtime=self.config.container_runtime,
                     startup_timeout=self.config.startup_timeout,
-                    docker_args=list(self.config.docker_args) or None,
+                    docker_args=docker_args or None,
                 )
 
             case SandboxMode.LOCAL:

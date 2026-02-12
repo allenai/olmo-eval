@@ -229,21 +229,18 @@ async def process_items(
             await process_batch(batch, harness, result_queue)
 
     if chat_items:
-        from tqdm import tqdm
-        from tqdm.contrib.logging import logging_redirect_tqdm
+        from olmo_eval.common.progress import ProgressLogger
 
         semaphore = asyncio.Semaphore(max_concurrency or len(chat_items))
+        progress = ProgressLogger(total=len(chat_items), desc="Processing", logger=logger)
 
-        async def process(item: QueueItem, pbar: tqdm) -> None:
+        async def process(item: QueueItem) -> None:
             async with semaphore:
                 await process_chat_request(item, harness, result_queue)
-                pbar.update(1)
+                progress.update(1)
 
-        with (
-            logging_redirect_tqdm(),
-            tqdm(total=len(chat_items), desc="Processing instances", unit="inst") as pbar,
-        ):
-            await asyncio.gather(*[process(item, pbar) for item in chat_items])
+        await asyncio.gather(*[process(item) for item in chat_items])
+        progress.close()
 
 
 __all__ = [

@@ -87,8 +87,10 @@ def inference_worker(
         has_tools = harness_config.has_tools
         enable_auto_tool_choice = has_tools and provider_kind == "vllm_server"
 
-        # Set log_dir for vllm_server provider to persist server logs
-        log_dir = output_dir if provider_kind == "vllm_server" and output_dir else None
+        # Set log_dir for vllm_server provider to persist server logs (in logs/ subdir)
+        log_dir = None
+        if provider_kind == "vllm_server" and output_dir:
+            log_dir = os.path.join(output_dir, "logs")
 
         harness_config = harness_config.with_provider_overrides(
             tensor_parallel_size=len(gpu_ids) if gpu_ids else None,
@@ -190,16 +192,15 @@ def scoring_worker(
     """
     import sys
 
-    from tqdm import tqdm
-
     from olmo_eval.common.logging import configure_logging
 
     configure_logging()
 
     from olmo_eval.common.execution import ScoringContext
+    from olmo_eval.common.progress import ProgressLogger
     from olmo_eval.runners.asynq.types import ScoringItem
 
-    pbar: tqdm | None = None
+    progress: ProgressLogger | None = None
     sandbox_manager = None
     scoring_context: ScoringContext | None = None
 
@@ -260,12 +261,12 @@ def scoring_worker(
             if item is None:
                 break
 
-            # Create progress bar on first item (after worker startup logs)
-            if pbar is None:
-                pbar = tqdm(total=total_instances, desc="Scoring instances", unit="inst")
+            # Create progress logger on first item (after worker startup logs)
+            if progress is None:
+                progress = ProgressLogger(total=total_instances, desc="Scoring", logger=logger)
 
             score_item(item, scoring_context)
-            pbar.update(1)
+            progress.update(1)
 
     except Exception as e:
         logger.error(f"Scoring worker failed: {e}")
@@ -281,8 +282,8 @@ def scoring_worker(
         sys.exit(1)
 
     finally:
-        if pbar is not None:
-            pbar.close()
+        if progress is not None:
+            progress.close()
 
         if sandbox_manager is not None:
             try:

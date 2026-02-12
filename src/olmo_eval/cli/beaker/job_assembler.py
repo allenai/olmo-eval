@@ -101,13 +101,12 @@ class JobConfigAssembler:
             job_env_vars["BEAKER_ALLOW_SUBCONTAINERS"] = "1"
             job_env_vars["BEAKER_SKIP_DOCKER_SOCKET"] = "1"
 
-            # Get registry mirror URL for faster image pulls
+            # Get registry mirror URL for faster image pulls (raises if unavailable)
             from olmo_eval.launch.beaker.mirror import get_registry_mirror_url
 
             mirror_url = get_registry_mirror_url(self.config.workspace)
-            if mirror_url:
-                job_env_vars["MIRROR_HOSTS"] = mirror_url
-                setup_registry_mirror = True
+            job_env_vars["MIRROR_HOSTS"] = mirror_url
+            setup_registry_mirror = True
 
         task_packages = self._extract_task_dependencies(exp.tasks, exp.task_overrides)
 
