@@ -27,6 +27,7 @@ class SandboxConfig:
     Attributes:
         image: Container image for the sandbox environment.
         mode: How to run the sandbox.
+        name: Short name for this sandbox type.
         capabilities: Capabilities this sandbox provides (e.g., {"bash"}).
         instances: Number of executor instances to create from this config.
             Multiple instances enable higher throughput via round-robin.
@@ -43,6 +44,7 @@ class SandboxConfig:
 
     image: str
     mode: SandboxMode
+    name: str | None = None
     capabilities: frozenset[str] = _DEFAULT_CAPABILITIES
     instances: int = 1
     container_runtime: ContainerRuntime = "podman"
@@ -64,25 +66,11 @@ class SandboxConfig:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
-        result: dict[str, Any] = {
-            "image": self.image,
-            "mode": self.mode.value,
-            "capabilities": sorted(self.capabilities),
-            "instances": self.instances,
-            "container_runtime": self.container_runtime,
-            "startup_timeout": self.startup_timeout,
-            "command_timeout": self.command_timeout,
-            "remove_container": self.remove_container,
-            "working_dir": self.working_dir,
-            "environment": list(self.environment),
-            "volumes": list(self.volumes),
-            "runtime_timeout": self.runtime_timeout,
-            "docker_args": list(self.docker_args),
-        }
-        if self.modal_sandbox_kwargs is not None:
-            result["modal_sandbox_kwargs"] = self.modal_sandbox_kwargs
-        if self.required_secrets:
-            result["required_secrets"] = list(self.required_secrets)
+        from dataclasses import asdict
+
+        result = asdict(self)
+        result["mode"] = self.mode.value
+        result["capabilities"] = sorted(self.capabilities)
         return result
 
     @classmethod
@@ -96,6 +84,7 @@ class SandboxConfig:
         return cls(
             image=data["image"],
             mode=SandboxMode(data["mode"]),
+            name=data.get("name"),
             capabilities=frozenset(capabilities) if capabilities else _DEFAULT_CAPABILITIES,
             instances=data.get("instances", 1),
             container_runtime=data.get("container_runtime", "podman"),

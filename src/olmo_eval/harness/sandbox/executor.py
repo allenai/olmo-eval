@@ -54,15 +54,24 @@ class SandboxExecutor:
             print(result)
     """
 
-    def __init__(self, config: SandboxConfig) -> None:
+    def __init__(self, config: SandboxConfig, name: str | None = None) -> None:
         """Initialize the sandbox executor.
 
         Args:
             config: Sandbox configuration.
+            name: Optional name for logging (e.g., "sandbox-0").
         """
         self.config = config
+        self.name = name
         self._deployment: Any = None
         self._runtime: Any = None
+
+    def _log(self, level: int, msg: str) -> None:
+        """Log a message with optional name prefix."""
+        if self.name:
+            logger.log(level, f"[{self.name}] {msg}")
+        else:
+            logger.log(level, msg)
 
     async def __aenter__(self) -> SandboxExecutor:
         """Start the sandbox environment."""
@@ -85,19 +94,20 @@ class SandboxExecutor:
             ImportError: If swe-rex is not installed.
             RuntimeError: If container runtime is not available.
         """
-        logger.info("Creating sandbox deployment...")
+        self._log(logging.INFO, "Creating sandbox deployment...")
         deployment = self.get_deployment()
 
-        logger.info("Starting sandbox deployment...")
+        self._log(logging.INFO, "Starting sandbox deployment...")
+        prefix = f"[{self.name}] " if self.name else ""
         await _run_with_progress(
             deployment.start(),
-            "Waiting for sandbox runtime",
+            f"{prefix}Waiting for sandbox runtime",
             interval=5.0,
         )
 
         self._deployment = deployment
         self._runtime = deployment.runtime
-        logger.info("Sandbox deployment ready!")
+        self._log(logging.INFO, "Sandbox deployment ready!")
 
     def get_deployment(self) -> Any:
         """Create the appropriate deployment based on configuration.
@@ -133,8 +143,9 @@ class SandboxExecutor:
                         "swe-rex not installed. Install with: pip install swe-rex"
                     ) from e
 
-                logger.warning(
-                    "Using local deployment (unsandboxed). Commands will run on host system."
+                self._log(
+                    logging.WARNING,
+                    "Using local deployment (unsandboxed). Commands will run on host system.",
                 )
                 return LocalDeployment()
 
@@ -160,11 +171,11 @@ class SandboxExecutor:
             try:
                 await self._deployment.stop()
             except Exception as e:
-                logger.warning(f"Failed to stop deployment: {e}")
+                self._log(logging.WARNING, f"Failed to stop deployment: {e}")
             self._deployment = None
             self._runtime = None
 
-        logger.info("Sandbox stopped")
+        self._log(logging.INFO, "Sandbox stopped")
 
     async def execute(self, command: str, timeout: float | None = None) -> str:
         """Execute a command in the sandbox.
@@ -263,7 +274,7 @@ class SandboxExecutor:
             )
 
         except Exception as e:
-            logger.warning(f"Code execution failed: {e}")
+            self._log(logging.WARNING, f"Code execution failed: {e}")
             return ExecutionResult(
                 success=False,
                 output="",

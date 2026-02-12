@@ -41,18 +41,21 @@ class SandboxManager:
 
     async def start(self) -> None:
         """Start all sandbox executors."""
-        for config in self._configs:
-            for i in range(config.instances):
-                executor = SandboxExecutor(config)
+        # Track per-type instance indices for naming
+        type_indices: dict[str, int] = {}
+
+        for config_idx, config in enumerate(self._configs):
+            # Use config name if provided, otherwise use config index
+            type_name = config.name or str(config_idx)
+
+            for _ in range(config.instances):
+                idx = type_indices.get(type_name, 0)
+                name = f"sb-{type_name}-{idx}"
+                type_indices[type_name] = idx + 1
+
+                executor = SandboxExecutor(config, name=name)
                 await executor.start()
                 self._executors.append(executor)
-                if config.instances > 1:
-                    logger.info(
-                        f"Started sandbox {i + 1}/{config.instances} "
-                        f"with capabilities: {config.capabilities}"
-                    )
-                else:
-                    logger.info(f"Started sandbox with capabilities: {config.capabilities}")
 
     async def stop(self) -> None:
         """Stop all sandbox executors."""
