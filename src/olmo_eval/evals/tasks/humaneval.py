@@ -15,7 +15,7 @@ from olmo_eval.common.types import (
 )
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import HUMANEVAL_STOP_SEQUENCES
-from olmo_eval.evals.extract import extract_code
+from olmo_eval.evals.extract import extract_code, indent_code
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 
@@ -82,11 +82,18 @@ class HumanEval(Task):
         HumanEval follows the original paper setup by adding the prompt
         to the generated code completion as the prompt may provide additional
         library imports needed for the code execution.
+
+        Chat/instruction models often output function body code without the
+        leading indentation expected inside a function. We normalize the
+        indentation to ensure the code is valid when concatenated with the
+        function signature.
         """
         for response in responses:
             for output in response.outputs:
                 code = self.extract_answer(output)
                 if code:
+                    # Ensure code has proper indentation for function body
+                    code = indent_code(code)
                     output.extracted_answer = response.instance.metadata["answer_prefix"] + code
                 else:
                     output.extracted_answer = None

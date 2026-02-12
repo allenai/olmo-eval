@@ -11,6 +11,7 @@ from typing import Any
 
 from olmo_eval.common.constants import BEAKER_RESULT_DIR, LOCAL_RESULT_DIR
 from olmo_eval.common.types import ProviderKind
+from olmo_eval.harness.sandbox import Capability
 
 from .config import HarnessConfig, ProviderConfig
 from .constants import DR_TULU_SYSTEM_PROMPT
@@ -68,6 +69,8 @@ You can execute bash commands to:
 - Manipulate files
 - Explore the filesystem
 
+You can also search the web for documentation and examples using the provided tools.
+
 Use the execute_bash tool to run commands. The environment is isolated,
 so you can safely experiment.
 
@@ -81,11 +84,11 @@ def example():
 EOF
 python solution.py
 
-Do NOT use python -c with complex code as it causes escaping issues.
+Do NOT use python -c or inline code with lots of special characters.
 
 When solving coding problems:
 1. First understand the problem by reading any provided files
-2. Write your solution to a file using heredoc syntax
+2. Plan your approach and write code in a file using heredoc syntax
 3. Run and test your solution
 4. Verify it works before providing the final answer
 """
@@ -139,29 +142,32 @@ class HarnessPresets:
         )
 
     @lazy
-    # This is an example harness but needs some tweaks before using
+    # TODO(undfined): We're having issues with timeouts, investigate as I think they are being
+    # miscategorized as provider timeouts instead of exceptions from the vllm server.
     def codex_agent(name: str) -> HarnessConfig:
         """Coding agent preset with sandboxed shell execution."""
         from .sandbox import SandboxConfig, SandboxMode
+        from .tools.search import serper_fetch_page, serper_web_search
         from .tools.shell import execute_bash
 
         return HarnessConfig(
             name=name,
             provider=ProviderConfig(
                 kind=ProviderKind.VLLM_SERVER,
-                kwargs={"timeout": 120},
+                kwargs={"timeout": 60},
             ),
-            tools=(execute_bash,),
+            tools=(execute_bash, serper_fetch_page, serper_web_search),
             system_prompt=CODING_AGENT_SYSTEM_PROMPT,
-            max_turns=20,
+            max_turns=10,
             max_concurrency=4,
             backend="openai_agents",
             required_secrets=("OPENAI_API_KEY",),
             sandboxes=(
                 SandboxConfig(
+                    capabilities=frozenset(Capability.BASH),
                     image="python:3.12",
                     mode=SandboxMode.DOCKER,
-                    startup_timeout=300.0,
+                    startup_timeout=120.0,
                     docker_args=_get_sandbox_docker_args(),
                 ),
             ),
