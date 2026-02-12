@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Sequence
 
@@ -40,10 +41,11 @@ class SandboxManager:
         self._round_robin_indices: dict[frozenset[str], int] = {}
 
     async def start(self) -> None:
-        """Start all sandbox executors."""
+        """Start all sandbox executors in parallel."""
         # Track per-type instance indices for naming
         type_indices: dict[str, int] = {}
 
+        # Create all executors first
         for config_idx, config in enumerate(self._configs):
             # Derive type name from capabilities
             type_name = "+".join(sorted(config.capabilities)) or str(config_idx)
@@ -54,13 +56,14 @@ class SandboxManager:
                 type_indices[type_name] = idx + 1
 
                 executor = SandboxExecutor(config, name=name)
-                await executor.start()
                 self._executors.append(executor)
 
+        # Start all executors in parallel
+        await asyncio.gather(*[e.start() for e in self._executors])
+
     async def stop(self) -> None:
-        """Stop all sandbox executors."""
-        for executor in self._executors:
-            await executor.stop()
+        """Stop all sandbox executors in parallel."""
+        await asyncio.gather(*[e.stop() for e in self._executors])
         self._executors.clear()
         self._round_robin_indices.clear()
         logger.info("All sandboxes stopped")
