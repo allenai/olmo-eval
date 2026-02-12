@@ -185,6 +185,7 @@ class HarnessPresets:
             sandboxes=(
                 SandboxConfig(
                     capabilities=frozenset(Capability.BASH),
+                    instances=4,  # Match max_concurrency for parallel execution
                     image="python:3.12",
                     mode=SandboxMode.DOCKER,
                     startup_timeout=120.0,
@@ -216,6 +217,7 @@ class HarnessPresets:
             sandboxes=(
                 SandboxConfig(
                     capabilities=frozenset(Capability.BASH),
+                    instances=4,  # Match max_concurrency for parallel execution
                     image="python:3.12",
                     mode=SandboxMode.DOCKER,
                     startup_timeout=120.0,

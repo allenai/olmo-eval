@@ -36,6 +36,7 @@ class HarnessConfig:
     required_secrets: tuple[str, ...] = ()
     max_turns: int | None = None
     max_concurrency: int | None = None
+    scoring_concurrency: int | None = None
     sandboxes: tuple[SandboxConfig, ...] = ()
 
     # Cache for resolved tools
@@ -124,6 +125,8 @@ class HarnessConfig:
             d["max_turns"] = self.max_turns
         if self.max_concurrency is not None:
             d["max_concurrency"] = self.max_concurrency
+        if self.scoring_concurrency is not None:
+            d["scoring_concurrency"] = self.scoring_concurrency
         if self.sandboxes:
             d["sandboxes"] = [s.to_dict() for s in self.sandboxes]
         return d
@@ -155,6 +158,7 @@ class HarnessConfig:
             required_secrets=tuple(data.get("required_secrets", [])),
             max_turns=data.get("max_turns"),
             max_concurrency=data.get("max_concurrency"),
+            scoring_concurrency=data.get("scoring_concurrency"),
             sandboxes=sandboxes,
         )
 
@@ -177,6 +181,7 @@ class HarnessConfig:
             required_secrets=self.required_secrets,
             max_turns=self.max_turns,
             max_concurrency=self.max_concurrency,
+            scoring_concurrency=self.scoring_concurrency,
             sandboxes=self.sandboxes,
         )
 
@@ -199,6 +204,7 @@ class HarnessConfig:
             required_secrets=self.required_secrets,
             max_turns=self.max_turns,
             max_concurrency=self.max_concurrency,
+            scoring_concurrency=self.scoring_concurrency,
             sandboxes=self.sandboxes,
         )
 
@@ -221,6 +227,7 @@ class HarnessConfig:
             required_secrets=self.required_secrets,
             max_turns=self.max_turns,
             max_concurrency=self.max_concurrency,
+            scoring_concurrency=self.scoring_concurrency,
             sandboxes=self.sandboxes,
         )
 
@@ -285,6 +292,7 @@ def harness_config(
     required_secrets: Sequence[str] = (),
     max_turns: int | None = None,
     max_concurrency: int | None = None,
+    scoring_concurrency: int | None = None,
     sandboxes: Sequence[SandboxConfig] = (),
 ) -> HarnessConfig:
     """Create a HarnessConfig.
@@ -299,6 +307,7 @@ def harness_config(
         required_secrets: Environment variable names for tools.
         max_turns: Maximum turns for agent backends (None = backend default).
         max_concurrency: Maximum concurrent tool executions for agent backends.
+        scoring_concurrency: Maximum concurrent scoring operations (default 8).
         sandboxes: Sandbox configurations for isolated tool execution.
 
     Returns:
@@ -314,5 +323,6 @@ def harness_config(
         required_secrets=tuple(required_secrets),
         max_turns=max_turns,
         max_concurrency=max_concurrency,
+        scoring_concurrency=scoring_concurrency,
         sandboxes=tuple(sandboxes),
     )

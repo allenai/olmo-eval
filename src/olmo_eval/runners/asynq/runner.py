@@ -179,6 +179,8 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             scorer_ready = ctx.Event()
 
             # Start scoring worker first so it's ready to receive work
+            # Use max_concurrency from harness config, defaulting to 8
+            scoring_concurrency = self.harness_config.scoring_concurrency or 8
             scorer_proc = ctx.Process(
                 target=scoring_worker,
                 args=(
@@ -187,6 +189,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                     total_instances,
                     sandbox_configs_list,
                     scorer_ready,
+                    scoring_concurrency,
                 ),
             )
             scorer_proc.start()

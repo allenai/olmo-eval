@@ -174,10 +174,11 @@ def scoring_worker(
     total_instances: int,
     sandbox_configs_list: list[dict[str, Any]] | None = None,
     ready_event: MPEvent | None = None,
+    max_concurrency: int = 8,
 ) -> None:
-    """Worker process that scores individual responses.
+    """Worker process that scores responses with concurrent execution.
 
-    Reads ScoringItems from scoring_queue, scores each response, and puts
+    Reads ScoringItems from scoring_queue, scores them concurrently, and puts
     ScoredResponses on scored_queue.
 
     This worker manages sandbox lifecycle when sandbox configs are provided,
@@ -186,9 +187,10 @@ def scoring_worker(
     Args:
         scoring_queue: Queue of ScoringItems (None signals shutdown).
         scored_queue: Queue to put ScoredResponses.
-        total_instances: Total number of instances to score (for progress bar).
+        total_instances: Total number of instances to score (for progress).
         sandbox_configs_list: Optional list of serialized SandboxConfigs for code execution.
         ready_event: Optional event to signal when worker is ready.
+        max_concurrency: Maximum concurrent scoring operations.
     """
     import sys
 
@@ -200,32 +202,96 @@ def scoring_worker(
     from olmo_eval.common.progress import ProgressLogger
     from olmo_eval.runners.asynq.types import ScoringItem
 
-    progress: ProgressLogger | None = None
     sandbox_manager = None
     scoring_context: ScoringContext | None = None
 
-    def score_item(item: ScoringItem, context: ScoringContext | None) -> None:
-        try:
-            # Score single response, passing context for sandboxed execution
-            scored_list = item.task.score_responses([item.response], context=context)
-            scored = scored_list[0] if scored_list else item.response
-            scored_queue.put(
-                ScoredResponse(
+    async def score_item_async(
+        item: ScoringItem, context: ScoringContext | None, semaphore: asyncio.Semaphore
+    ) -> ScoredResponse:
+        """Score a single item with semaphore-controlled concurrency."""
+        async with semaphore:
+            try:
+                # score_responses handles async scoring internally
+                scored_list = item.task.score_responses([item.response], context=context)
+                scored = scored_list[0] if scored_list else item.response
+                return ScoredResponse(
                     spec=item.spec,
                     instance_idx=item.instance_idx,
                     scored=scored,
                 )
-            )
-        except Exception as e:
-            # On error, return the original response (unscored)
-            logger.warning(f"Failed to score {item.spec}[{item.instance_idx}]: {e}")
-            scored_queue.put(
-                ScoredResponse(
+            except Exception as e:
+                logger.warning(f"Failed to score {item.spec}[{item.instance_idx}]: {e}")
+                return ScoredResponse(
                     spec=item.spec,
                     instance_idx=item.instance_idx,
                     scored=item.response,
                 )
-            )
+
+    async def process_batch(
+        items: list[ScoringItem],
+        context: ScoringContext | None,
+        progress: ProgressLogger,
+    ) -> None:
+        """Process a batch of items concurrently."""
+        semaphore = asyncio.Semaphore(max_concurrency)
+        tasks = [score_item_async(item, context, semaphore) for item in items]
+        results = await asyncio.gather(*tasks)
+
+        for result in results:
+            scored_queue.put(result)
+            progress.update(1)
+
+    async def run_scoring_loop() -> None:
+        """Main async scoring loop."""
+        progress: ProgressLogger | None = None
+        batch: list[ScoringItem] = []
+        batch_size = max_concurrency * 2  # Buffer 2x concurrency for efficiency
+
+        try:
+            while True:
+                # Non-blocking check with timeout to allow batching
+                try:
+                    item: ScoringItem | None = scoring_queue.get(timeout=0.1)
+                except Exception:
+                    # Queue.get with timeout raises Empty on timeout
+                    item = None
+
+                if item is None:
+                    # Check if this is the shutdown signal or just a timeout
+                    if scoring_queue.empty():
+                        # Process remaining batch before checking for shutdown
+                        if batch:
+                            if progress is None:
+                                progress = ProgressLogger(
+                                    total=total_instances, desc="Scoring", logger=logger
+                                )
+                            await process_batch(batch, scoring_context, progress)
+                            batch = []
+                        # Try to get next item (blocking)
+                        item = scoring_queue.get()
+                        if item is None:
+                            break  # Shutdown signal
+                        batch.append(item)
+                    continue
+
+                # Create progress logger on first item
+                if progress is None:
+                    progress = ProgressLogger(total=total_instances, desc="Scoring", logger=logger)
+
+                batch.append(item)
+
+                # Process batch when full
+                if len(batch) >= batch_size:
+                    await process_batch(batch, scoring_context, progress)
+                    batch = []
+
+            # Process any remaining items
+            if batch and progress is not None:
+                await process_batch(batch, scoring_context, progress)
+
+        finally:
+            if progress is not None:
+                progress.close()
 
     try:
         if sandbox_configs_list is not None:
@@ -256,17 +322,8 @@ def scoring_worker(
         if ready_event is not None:
             ready_event.set()
 
-        while True:
-            item: ScoringItem | None = scoring_queue.get()
-            if item is None:
-                break
-
-            # Create progress logger on first item (after worker startup logs)
-            if progress is None:
-                progress = ProgressLogger(total=total_instances, desc="Scoring", logger=logger)
-
-            score_item(item, scoring_context)
-            progress.update(1)
+        # Run the async scoring loop
+        asyncio.run(run_scoring_loop())
 
     except Exception as e:
         logger.error(f"Scoring worker failed: {e}")
@@ -282,9 +339,6 @@ def scoring_worker(
         sys.exit(1)
 
     finally:
-        if progress is not None:
-            progress.close()
-
         if sandbox_manager is not None:
             try:
                 asyncio.run(sandbox_manager.stop())
