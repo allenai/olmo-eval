@@ -206,11 +206,7 @@ class OpenAIAgentsBackend(Backend):
             HarnessResult with trajectory from SDK execution.
         """
         try:
-            from agents import (  # type: ignore[import-not-found]
-                RunErrorHandlerInput,
-                RunErrorHandlerResult,
-                Runner,
-            )
+            from agents import Runner  # type: ignore[import-not-found]
         except ImportError as e:
             raise ImportError(
                 "OpenAI Agents SDK not installed. Install with: pip install openai-agents"
@@ -242,38 +238,25 @@ class OpenAIAgentsBackend(Backend):
 
         # Track if max turns was reached
         max_turns_reached = False
-
-        def on_max_turns(data: RunErrorHandlerInput[None]) -> RunErrorHandlerResult:
-            """Handle max turns exceeded by returning partial result."""
-            nonlocal max_turns_reached
-            max_turns_reached = True
-
-            # Try to extract the last assistant message from context
-            final_output = ""
-            if hasattr(data, "context") and data.context:
-                # Look for last assistant message in the input history
-                input_list = getattr(data.context, "input", None)
-                if input_list and isinstance(input_list, list):
-                    for item in reversed(input_list):
-                        if hasattr(item, "role") and item.role == "assistant":
-                            content = getattr(item, "content", "")
-                            if content:
-                                final_output = content
-                                break
-
-            return RunErrorHandlerResult(
-                final_output=final_output or "[Max turns exceeded]",
-                include_in_history=False,
-            )
-
-        # Run agent with error handler for max turns
         max_turns = config.max_turns or 10
-        result = await Runner.run(
-            starting_agent=agent,
-            input=input_text,
-            max_turns=max_turns,
-            error_handlers={"max_turns": on_max_turns},
-        )
+
+        # Run agent, catching MaxTurnsExceeded to return a result instead of raising
+        try:
+            result = await Runner.run(
+                starting_agent=agent,
+                input=input_text,
+                max_turns=max_turns,
+            )
+        except Exception as e:
+            # Handle MaxTurnsExceeded - return a result with the error instead of raising
+            if type(e).__name__ == "MaxTurnsExceeded":
+                return HarnessResult(
+                    trajectory=AgentTrajectory(turns=()),
+                    final_output=LMOutput(text="[Max turns exceeded]"),
+                    max_turns_reached=True,
+                    error=f"Max turns ({max_turns}) exceeded",
+                )
+            raise
 
         # Convert result to HarnessResult
         trajectory = self._convert_trajectory(result)
