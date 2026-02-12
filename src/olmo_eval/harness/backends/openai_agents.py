@@ -219,7 +219,7 @@ class OpenAIAgentsBackend(Backend):
         if needs_sandbox and self._sandbox_manager is None:
             from olmo_eval.harness.sandbox import SandboxManager
 
-            self._sandbox_manager = SandboxManager(config.sandboxes)
+            self._sandbox_manager = SandboxManager(config.sandboxes, owner=config.name)
             await self._sandbox_manager.start()
             logger.info(
                 f"Sandbox manager started with {self._sandbox_manager.executor_count} executor(s)"

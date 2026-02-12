@@ -106,6 +106,12 @@ def inference_worker(
         # Force provider creation to catch import errors early
         _ = harness.provider
 
+        # Validate backend requirements early to fail fast
+        if harness_config.backend:
+            from olmo_eval.harness.backends import validate_backend
+
+            validate_backend(harness_config.backend)
+
         init_time = time.time() - init_start
         worker_logger.info(f"Provider ready ({init_time:.1f}s)")
 
@@ -222,7 +228,7 @@ def scoring_worker(
 
             sandbox_configs = [SandboxConfig.from_dict(d) for d in sandbox_configs_list]
             logger.info(f"Initializing sandbox manager with {len(sandbox_configs)} config(s)...")
-            sandbox_manager = SandboxManager(sandbox_configs)
+            sandbox_manager = SandboxManager(sandbox_configs, owner="scorer")
 
             # Start sandbox synchronously using asyncio
             try:

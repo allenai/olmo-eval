@@ -24,7 +24,7 @@ class SandboxManager:
         from olmo_eval.harness.sandbox import Capability
 
         configs = [SandboxConfig(...), SandboxConfig(...)]
-        manager = SandboxManager(configs)
+        manager = SandboxManager(configs, owner="scorer")
         await manager.start()
         try:
             result = await manager.execute_with_capabilities(
@@ -34,13 +34,16 @@ class SandboxManager:
             await manager.stop()
     """
 
-    def __init__(self, configs: Sequence[SandboxConfig]) -> None:
+    def __init__(self, configs: Sequence[SandboxConfig], owner: str = "default") -> None:
         """Initialize the sandbox manager.
 
         Args:
             configs: Sequence of sandbox configurations to manage.
+            owner: Identifier for the owner of these sandboxes (e.g., "agent", "scorer").
+                Used in log messages to distinguish sandbox instances.
         """
         self._configs = list(configs)
+        self._owner = owner
         self._executors: list[SandboxExecutor] = []
         self._round_robin_indices: dict[frozenset[str], int] = {}
 
@@ -56,7 +59,7 @@ class SandboxManager:
 
             for _ in range(config.instances):
                 idx = type_indices.get(type_name, 0)
-                name = f"sb-{type_name}-{idx}"
+                name = f"sb-{type_name}-{self._owner}-{idx}"
                 type_indices[type_name] = idx + 1
 
                 executor = SandboxExecutor(config, name=name)

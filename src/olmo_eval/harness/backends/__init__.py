@@ -141,6 +141,34 @@ def get_backend_extras(name: str) -> tuple[str, ...]:
     return BACKEND_REGISTRY[name].required_extras
 
 
+def validate_backend(name: str) -> None:
+    """Validate that a backend's requirements are satisfied.
+
+    This should be called early (e.g., during worker initialization) to
+    fail fast if required dependencies are missing.
+
+    Args:
+        name: Backend name to validate.
+
+    Raises:
+        ImportError: If the backend's required dependencies are not installed.
+        ValueError: If backend name is unknown.
+    """
+    if name not in BACKEND_REGISTRY:
+        available = ", ".join(sorted(BACKEND_REGISTRY.keys()))
+        raise ValueError(f"Unknown backend: '{name}'. Available: {available}")
+
+    # Check required extras by attempting to import key modules
+    if name == "openai_agents":
+        try:
+            import agents  # type: ignore[import-not-found]  # noqa: F401
+        except ImportError as e:
+            raise ImportError(
+                f"Backend '{name}' requires the OpenAI Agents SDK. "
+                f"Install with: pip install openai-agents. Error: {e}"
+            ) from e
+
+
 # Import backends to trigger registration
 from .openai_agents import OpenAIAgentsBackend  # noqa: E402
 
@@ -152,4 +180,5 @@ __all__ = [
     "get_backend_extras",
     "list_backends",
     "register_backend",
+    "validate_backend",
 ]

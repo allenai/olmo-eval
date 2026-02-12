@@ -5,7 +5,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+from functools import lru_cache
 from typing import Any
+
+from agents import set_trace_processors  # type: ignore[import-not-found]
+from agents.tracing import BatchTraceProcessor  # type: ignore[import-not-found]
 
 logger = logging.getLogger(__name__)
 
@@ -64,10 +68,7 @@ class FileSpanExporter:
         """No-op since we write and close immediately."""
 
 
-# Module-level flag to track if trace processors have been configured
-_trace_processors_configured = False
-
-
+@lru_cache(maxsize=1)
 def configure_trace_output(output_dir: str) -> None:
     """Configure trace output to write per-agent JSONL files.
 
@@ -75,22 +76,12 @@ def configure_trace_output(output_dir: str) -> None:
     each trace to its own file: {output_dir}/traces/trace_{trace_id}.jsonl
 
     Called once per worker process at startup before concurrent work begins.
+    Uses lru_cache to ensure idempotent configuration.
 
     Args:
         output_dir: Base directory for trace output.
     """
-    global _trace_processors_configured
-    if _trace_processors_configured:
-        return
-
-    try:
-        from agents import set_trace_processors  # type: ignore[import-not-found]
-        from agents.tracing import BatchTraceProcessor  # type: ignore[import-not-found]
-
-        exporter = FileSpanExporter(output_dir)
-        processor = BatchTraceProcessor(exporter)
-        set_trace_processors([processor])
-        logger.info(f"Agent traces will be written to {output_dir}/traces/")
-        _trace_processors_configured = True
-    except ImportError:
-        logger.warning("Could not configure trace output - agents SDK not available")
+    exporter = FileSpanExporter(output_dir)
+    processor = BatchTraceProcessor(exporter)
+    set_trace_processors([processor])
+    logger.info(f"Agent traces will be written to {output_dir}/traces/")
