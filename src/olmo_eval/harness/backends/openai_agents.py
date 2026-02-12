@@ -37,6 +37,7 @@ class OpenAIAgentsBackend(Backend):
         self._cached_config: HarnessConfig | None = None
         self._cached_provider_id: int | None = None
         self._cached_has_sandbox: bool = False
+        self._sandbox_manager: SandboxManager | None = None
 
     def clear_cache(self) -> None:
         """Clear cached agent to allow recreation with new config/provider."""
@@ -44,6 +45,13 @@ class OpenAIAgentsBackend(Backend):
         self._cached_config = None
         self._cached_provider_id = None
         self._cached_has_sandbox = False
+
+    async def cleanup(self) -> None:
+        """Clean up resources including sandbox manager."""
+        if self._sandbox_manager is not None:
+            await self._sandbox_manager.stop()
+            self._sandbox_manager = None
+        self.clear_cache()
 
     def _convert_tools(
         self,
@@ -207,49 +215,43 @@ class OpenAIAgentsBackend(Backend):
         # Check if we need sandbox execution
         needs_sandbox = config.sandboxes and config.has_sandbox_tools
 
-        sandbox_manager: SandboxManager | None = None
+        # Lazily create and cache the sandbox manager
+        if needs_sandbox and self._sandbox_manager is None:
+            from olmo_eval.harness.sandbox import SandboxManager
 
-        try:
-            if needs_sandbox:
-                from olmo_eval.harness.sandbox import SandboxManager
-
-                sandbox_manager = SandboxManager(config.sandboxes)
-                await sandbox_manager.start()
-                logger.info(
-                    f"Sandbox manager started with {sandbox_manager.executor_count} executor(s)"
-                )
-
-            # Use cached agent (manager is stable, so caching works even with sandbox)
-            agent = self._get_or_create_agent(provider, config, sandbox_manager)
-
-            # Get the input message
-            input_text = ""
-            if request.messages:
-                for msg in reversed(request.messages):
-                    if msg.get("role") == "user":
-                        input_text = msg.get("content", "")
-                        break
-
-            # Run agent
-            max_turns = config.max_turns or 10
-            result = await Runner.run(
-                starting_agent=agent,
-                input=input_text,
-                max_turns=max_turns,
+            self._sandbox_manager = SandboxManager(config.sandboxes)
+            await self._sandbox_manager.start()
+            logger.info(
+                f"Sandbox manager started with {self._sandbox_manager.executor_count} executor(s)"
             )
 
-            # Convert result to HarnessResult
-            trajectory = self._convert_trajectory(result)
-            final_text = result.final_output if hasattr(result, "final_output") else ""
+        # Use cached agent (manager is stable, so caching works even with sandbox)
+        agent = self._get_or_create_agent(provider, config, self._sandbox_manager)
 
-            return HarnessResult(
-                trajectory=trajectory,
-                final_output=LMOutput(text=final_text or ""),
-            )
-        finally:
-            # Always clean up sandbox manager
-            if sandbox_manager is not None:
-                await sandbox_manager.stop()
+        # Get the input message
+        input_text = ""
+        if request.messages:
+            for msg in reversed(request.messages):
+                if msg.get("role") == "user":
+                    input_text = msg.get("content", "")
+                    break
+
+        # Run agent
+        max_turns = config.max_turns or 10
+        result = await Runner.run(
+            starting_agent=agent,
+            input=input_text,
+            max_turns=max_turns,
+        )
+
+        # Convert result to HarnessResult
+        trajectory = self._convert_trajectory(result)
+        final_text = result.final_output if hasattr(result, "final_output") else ""
+
+        return HarnessResult(
+            trajectory=trajectory,
+            final_output=LMOutput(text=final_text or ""),
+        )
 
     def _convert_trajectory(self, result: Any) -> AgentTrajectory:
         """Convert agents SDK result to AgentTrajectory.

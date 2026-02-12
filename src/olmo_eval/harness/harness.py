@@ -152,6 +152,11 @@ class Harness:
         """
         return await self.backend.run(self.provider, self.config, request, sampling_params)
 
+    async def cleanup(self) -> None:
+        """Clean up resources held by the harness and its backend."""
+        if self._backend is not None and hasattr(self._backend, "cleanup"):
+            await self._backend.cleanup()
+
     # ─────────────────────────────────────────────────────────
     # Config application (used by backends)
     # ─────────────────────────────────────────────────────────

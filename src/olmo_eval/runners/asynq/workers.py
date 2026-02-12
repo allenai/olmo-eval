@@ -127,6 +127,9 @@ def inference_worker(
 
             worker_logger.info("Processing complete")
         finally:
+            # Clean up harness resources (including sandbox manager)
+            asyncio.run(harness.cleanup())
+            # Clean up provider
             close_fn = getattr(harness.provider, "close", None)
             if callable(close_fn):
                 close_fn()
