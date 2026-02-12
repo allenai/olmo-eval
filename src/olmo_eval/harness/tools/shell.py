@@ -1,11 +1,13 @@
 """Shell execution tools for sandboxed command execution.
 
 This module provides tools for executing shell commands in a sandboxed
-environment. These tools specify sandbox_capabilities and are executed
-via the SandboxManager.
+environment. These tools specify capabilities and are executed via the
+SandboxManager.
 """
 
 from __future__ import annotations
+
+from olmo_eval.harness.sandbox import Capability
 
 from .registry import registered_tool
 
@@ -13,7 +15,7 @@ from .registry import registered_tool
 @registered_tool(
     name="execute_bash",
     description="Execute a bash command in a sandboxed environment and return the output.",
-    sandbox_capabilities={"bash"},
+    sandbox=Capability.BASH,
 )
 async def execute_bash(command: str) -> str:
     """Execute a bash command in a sandboxed environment.

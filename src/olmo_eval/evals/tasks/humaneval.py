@@ -3,7 +3,7 @@
 from collections.abc import Iterator, Sequence
 from typing import Any
 
-from olmo_eval.common.formatters import ChatFormatter, CompletionFormatter, PPLFormatter
+from olmo_eval.common.formatters import CompletionFormatter, PPLFormatter
 from olmo_eval.common.metrics import BPBMetric, PassAtKMetric
 from olmo_eval.common.scorers import CodeExecutionScorer
 from olmo_eval.common.types import (
@@ -189,10 +189,4 @@ register_variant(
         num_samples=10,
         stop_sequences=HUMANEVAL_STOP_SEQUENCES,
     ),
-)
-
-register_variant(
-    "humaneval",
-    "agent",
-    formatter=ChatFormatter(),
 )

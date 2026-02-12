@@ -74,7 +74,7 @@ class OpenAIAgentsBackend(Backend):
             execute_fn = tool.execute
 
             # Wrap sandboxed tools to use the manager
-            if tool.sandbox_capabilities and sandbox_manager is not None:
+            if tool.sandbox and sandbox_manager is not None:
                 execute_fn = self._wrap_sandboxed_tool(tool, sandbox_manager)
 
             # Use function_tool decorator to wrap the execute function
@@ -100,7 +100,7 @@ class OpenAIAgentsBackend(Backend):
         Returns:
             An async function that executes commands via the sandbox.
         """
-        required_caps = tool.sandbox_capabilities
+        required_caps = tool.sandbox
 
         async def sandboxed_execute(command: str) -> str:
             """Execute command in sandbox."""

@@ -21,11 +21,15 @@ class SandboxManager:
     required capabilities.
 
     Usage:
+        from olmo_eval.harness.sandbox import Capability
+
         configs = [SandboxConfig(...), SandboxConfig(...)]
         manager = SandboxManager(configs)
         await manager.start()
         try:
-            result = await manager.execute("echo hello", frozenset({"bash"}))
+            result = await manager.execute_with_capabilities(
+                "echo hello", Capability.BASH
+            )
         finally:
             await manager.stop()
     """

@@ -17,7 +17,18 @@ class SandboxMode(StrEnum):
     MODAL = "modal"
 
 
-_DEFAULT_CAPABILITIES: frozenset[str] = frozenset({"bash"})
+class Capability:
+    """Standard sandbox capability identifiers.
+
+    Example:
+        @registered_tool(sandbox=Capability.BASH)
+        async def execute_bash(command: str) -> str:
+            ...
+    """
+
+    BASH: frozenset[str] = frozenset({"bash"})
+    PYTHON: frozenset[str] = frozenset({"python"})
+    DEFAULT: frozenset[str] = BASH
 
 
 @dataclass(frozen=True)
@@ -43,7 +54,7 @@ class SandboxConfig:
 
     image: str
     mode: SandboxMode
-    capabilities: frozenset[str] = _DEFAULT_CAPABILITIES
+    capabilities: frozenset[str] = Capability.DEFAULT
     instances: int = 1
     container_runtime: ContainerRuntime = "podman"
     startup_timeout: float = 60.0
@@ -82,7 +93,7 @@ class SandboxConfig:
         return cls(
             image=data["image"],
             mode=SandboxMode(data["mode"]),
-            capabilities=frozenset(capabilities) if capabilities else _DEFAULT_CAPABILITIES,
+            capabilities=frozenset(capabilities) if capabilities else Capability.DEFAULT,
             instances=data.get("instances", 1),
             container_runtime=data.get("container_runtime", "podman"),
             startup_timeout=data.get("startup_timeout", 60.0),

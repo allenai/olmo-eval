@@ -87,9 +87,9 @@ class HarnessConfig:
         """Check if any configured tools require sandbox execution.
 
         Returns:
-            True if at least one tool has non-empty sandbox_capabilities.
+            True if at least one tool has non-empty capabilities.
         """
-        return any(t.sandbox_capabilities for t in self.resolved_tools)
+        return any(t.sandbox for t in self.resolved_tools)
 
     def validate_secrets(self) -> list[str]:
         """Check that all required secrets are available.
