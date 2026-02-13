@@ -9,7 +9,6 @@ import time
 from typing import Any
 
 from olmo_eval.common.execution.environment import ExecutionResult
-from olmo_eval.common.logging import _RESET, _get_color_for_owner
 
 from .config import SandboxConfig, SandboxMode
 
@@ -86,8 +85,7 @@ class SandboxExecutor:
     def _log(self, level: int, msg: str) -> None:
         """Log a message with optional name prefix."""
         if self.name:
-            color = _get_color_for_owner(self.name)
-            logger.log(level, f"{color}[{self.name}]{_RESET} {msg}")
+            logger.log(level, f"[{self.name}] {msg}")
         else:
             logger.log(level, msg)
 

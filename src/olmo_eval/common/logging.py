@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 import warnings
 from typing import Literal
 
@@ -30,6 +31,30 @@ _RESET = "\033[0m"
 def _get_color_for_owner(owner: str) -> str:
     """Get a consistent color for an owner string based on its hash."""
     return _COLORS[hash(owner) % len(_COLORS)]
+
+
+# Pattern to match [owner] at the start of a message
+_OWNER_PATTERN = re.compile(r"^(\[[\w.-]+\])")
+
+
+def _color_owner_in_message(message: str) -> str:
+    """Color any [owner] pattern at the start of a log message."""
+    match = _OWNER_PATTERN.match(message)
+    if match:
+        owner_tag = match.group(1)
+        owner = owner_tag[1:-1]  # Remove brackets
+        color = _get_color_for_owner(owner)
+        return f"{color}{owner_tag}{_RESET}{message[match.end() :]}"
+    return message
+
+
+class OwnerColoringFormatter(logging.Formatter):
+    """Formatter that colors [owner] patterns in log messages."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        # Color any [owner] pattern in the message
+        record.msg = _color_owner_in_message(str(record.msg))
+        return super().format(record)
 
 
 # Suppress noisy third-party library output BEFORE they are imported.
@@ -87,20 +112,30 @@ def configure_logging(level: LogLevel = "INFO") -> None:
 
     Set OLMO_EVAL_DEBUG=1 to bypass all log silencing and warning filters.
     """
+    root_logger = logging.getLogger()
+
     # In debug mode, use DEBUG level and don't silence anything
     if _is_debug_mode():
-        logging.basicConfig(
-            format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-            level=logging.DEBUG,
+        handler = logging.StreamHandler()
+        handler.setFormatter(
+            OwnerColoringFormatter(
+                "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
         )
+        root_logger.addHandler(handler)
+        root_logger.setLevel(logging.DEBUG)
         return
 
-    logging.basicConfig(
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        level=getattr(logging, level),
+    handler = logging.StreamHandler()
+    handler.setFormatter(
+        OwnerColoringFormatter(
+            "%(asctime)s [%(levelname)s] %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
     )
+    root_logger.addHandler(handler)
+    root_logger.setLevel(getattr(logging, level))
 
     # Suppress noisy third-party loggers
     logging.getLogger("datasets").setLevel(logging.ERROR)
