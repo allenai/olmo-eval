@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import click
 
 from olmo_eval.cli.utils import console
@@ -69,7 +71,7 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR
     "-a",
     "eval_args",
     multiple=True,
-    help="Arguments for external evals (key=value format)",
+    help="Arguments for external evals (key=value or JSON dict format)",
 )
 def run_external(
     model: str,
@@ -93,8 +95,11 @@ def run_external(
         # Run tau2_bench on a model
         olmo-eval run-external -m meta-llama/Llama-3.1-8B-Instruct -e tau2_bench
 
-        # Run with custom arguments
+        # Run with custom arguments (key=value format)
         olmo-eval run-external -m my-model -e tau2_bench -a domain=retail -a num_trials=10
+
+        # Run with custom arguments (JSON format)
+        olmo-eval run-external -m my-model -e tau2_bench -a '{"domain": "retail", "num_trials": 10}'
 
         # Run with custom output directory
         olmo-eval run-external -m my-model -e tau2_bench -O ./results
@@ -127,10 +132,16 @@ def run_external(
         tensor_parallel_size=tensor_parallel_size if tensor_parallel_size > 1 else None,
     )
 
-    # Parse eval_args
+    # Parse eval_args (supports both key=value and JSON dict format)
     parsed_args: dict[str, str] = {}
     for arg in eval_args:
-        if "=" in arg:
+        if arg.startswith("{"):
+            try:
+                parsed_args.update(json.loads(arg))
+            except json.JSONDecodeError as e:
+                console.print(f"[red]Error:[/red] Invalid JSON in -a argument: {e}")
+                raise SystemExit(1) from None
+        elif "=" in arg:
             key, value = arg.split("=", 1)
             parsed_args[key] = value
         else:

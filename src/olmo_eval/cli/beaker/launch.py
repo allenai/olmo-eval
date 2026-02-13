@@ -9,6 +9,7 @@ Configuration loading, validation, and job assembly are delegated to:
 - job_assembler.py: JobConfigAssembler for assembling BeakerJobConfig
 """
 
+import json
 from typing import TYPE_CHECKING
 
 import click
@@ -200,7 +201,7 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     "-A",
     "eval_args",
     multiple=True,
-    help="Arguments for external evals (key=value format, e.g., -A domain=retail)",
+    help="Arguments for external evals (key=value or JSON dict, e.g., -A domain=retail)",
 )
 @click.option(
     "--uv-cache-dir",
@@ -348,10 +349,16 @@ def launch(
 
     # Handle external evaluations mode
     if external_evals:
-        # Parse eval_args
+        # Parse eval_args (supports both key=value and JSON dict format)
         parsed_eval_args: dict[str, str] = {}
         for arg in eval_args:
-            if "=" in arg:
+            if arg.startswith("{"):
+                try:
+                    parsed_eval_args.update(json.loads(arg))
+                except json.JSONDecodeError as e:
+                    console.print(f"[red]Error:[/red] Invalid JSON in -A argument: {e}")
+                    raise SystemExit(1) from None
+            elif "=" in arg:
                 key, value = arg.split("=", 1)
                 parsed_eval_args[key] = value
 
