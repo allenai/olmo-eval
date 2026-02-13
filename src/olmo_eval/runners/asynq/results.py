@@ -209,6 +209,10 @@ async def process_results(
             scored: ScoredResponse = await asyncio.get_event_loop().run_in_executor(
                 None, lambda: scored_queue.get(timeout=1.0)
             )
+            # Check for fatal scorer error
+            if scored.spec == SCORER_FATAL:
+                logger.error(f"FATAL: Scoring worker crashed! {scored.error}")
+                raise RuntimeError(f"Scoring worker crashed: {scored.error}")
             handle_scored_response(scored)
         except queue.Empty:
             continue
