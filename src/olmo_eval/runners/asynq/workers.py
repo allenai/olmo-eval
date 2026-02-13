@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import multiprocessing as mp
 import os
+import queue
 import time
 from multiprocessing.synchronize import Event as MPEvent
 from typing import Any
@@ -252,30 +253,21 @@ def scoring_worker(
                 # Non-blocking check with timeout to allow batching
                 try:
                     item: ScoringItem | None = scoring_queue.get(timeout=0.1)
-                except Exception:
-                    # Queue.get with timeout raises Empty on timeout
-                    item = None
+                except queue.Empty:
+                    continue
 
                 if item is None:
-                    # Check if this is the shutdown signal or just a timeout
-                    if scoring_queue.empty():
-                        # Process remaining batch before checking for shutdown
-                        if batch:
-                            if progress is None:
-                                progress = ProgressLogger(
-                                    total=total_instances,
-                                    desc="Scored",
-                                    logger=logger,
-                                    color="blue",
-                                )
-                            await process_batch(batch, scoring_context, progress)
-                            batch = []
-                        # Try to get next item (blocking)
-                        item = scoring_queue.get()
-                        if item is None:
-                            break  # Shutdown signal
-                        batch.append(item)
-                    continue
+                    # Shutdown signal - process remaining batch and exit
+                    if batch:
+                        if progress is None:
+                            progress = ProgressLogger(
+                                total=total_instances,
+                                desc="Scored",
+                                logger=logger,
+                                color="blue",
+                            )
+                        await process_batch(batch, scoring_context, progress)
+                    break
 
                 # Create progress logger on first item
                 if progress is None:
@@ -289,10 +281,6 @@ def scoring_worker(
                 if len(batch) >= batch_size:
                     await process_batch(batch, scoring_context, progress)
                     batch = []
-
-            # Process any remaining items
-            if batch and progress is not None:
-                await process_batch(batch, scoring_context, progress)
 
         finally:
             if progress is not None:
