@@ -194,6 +194,11 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     show_default=True,
     help="UV cache directory for package downloads (on Weka shared storage)",
 )
+@click.option(
+    "--secret-env",
+    multiple=True,
+    help="Map Beaker secret to env var: BEAKER_SECRET:ENV_VAR (e.g., my-openai-key:OPENAI_API_KEY)",
+)
 def launch(
     config: str | None,
     name: str | None,
@@ -232,6 +237,7 @@ def launch(
     inspect_request: bool,
     harness: str | None,
     uv_cache_dir: str,
+    secret_env: tuple[str, ...],
 ) -> None:
     """Launch an evaluation job on Beaker.
 
@@ -276,6 +282,18 @@ def launch(
         inspect_response = True
         inspect_request = True
 
+    # Parse secret_env mappings: BEAKER_SECRET:ENV_VAR -> {beaker_secret: env_var}
+    secret_env_overrides: dict[str, str] = {}
+    for mapping in secret_env:
+        if ":" not in mapping:
+            console.print(
+                f"[red]Error:[/red] Invalid --secret-env format '{mapping}'. "
+                "Expected BEAKER_SECRET:ENV_VAR"
+            )
+            raise SystemExit(1)
+        beaker_secret, env_var = mapping.split(":", 1)
+        secret_env_overrides[beaker_secret] = env_var
+
     # Build CLI args dict
     cli_args = {
         "name": name,
@@ -309,6 +327,7 @@ def launch(
         "harness": harness,
         "harness_overrides": harness_overrides,
         "uv_cache_dir": uv_cache_dir,
+        "secret_env_overrides": secret_env_overrides,
     }
 
     # Load configuration
@@ -464,6 +483,7 @@ def launch(
         inject_aws,
         inject_gcs,
         enable_sandbox=harness_needs_sandbox,
+        secret_env_overrides=launch_config.secret_env_overrides,
     )
 
     job_configs = []

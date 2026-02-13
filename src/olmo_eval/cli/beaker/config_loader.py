@@ -60,6 +60,10 @@ class LaunchConfig:
 
     uv_cache_dir: str | None = None
 
+    # Secret env overrides: maps beaker_secret_name -> env_var_name
+    # Allows overriding default {username}_{ENV_VAR} pattern
+    secret_env_overrides: dict[str, str] = field(default_factory=dict)
+
 
 class LaunchConfigLoader:
     """Loads and merges configuration from YAML file and CLI arguments."""
@@ -197,6 +201,7 @@ class LaunchConfigLoader:
             harness=self.cli_args.get("harness"),
             harness_overrides=self.cli_args.get("harness_overrides", []),
             uv_cache_dir=self.cli_args.get("uv_cache_dir"),
+            secret_env_overrides=self.cli_args.get("secret_env_overrides", {}),
         )
 
     def _validate_required(

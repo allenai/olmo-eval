@@ -28,6 +28,7 @@ class JobConfigAssembler:
         inject_aws_credentials: bool,
         inject_gcs_credentials: bool,
         enable_sandbox: bool = False,
+        secret_env_overrides: dict[str, str] | None = None,
     ):
         self.config = config
         self.effective_image = effective_image
@@ -39,6 +40,7 @@ class JobConfigAssembler:
         self.inject_aws_credentials = inject_aws_credentials
         self.inject_gcs_credentials = inject_gcs_credentials
         self.enable_sandbox = enable_sandbox
+        self.secret_env_overrides = secret_env_overrides or {}
 
     def assemble(self, exp: ExperimentPlan) -> BeakerJobConfig:
         """Assemble a BeakerJobConfig for an experiment."""
@@ -70,14 +72,29 @@ class JobConfigAssembler:
         if provider_group and provider_group not in install_extras:
             install_extras.append(provider_group)
 
+        # Collect env vars that have explicit overrides
+        overridden_env_vars = set(self.secret_env_overrides.values())
+
+        # Add default secrets, skipping any that are overridden
         env_secrets = [
-            BeakerEnvSecret(env_var, secret_name) for env_var, secret_name in self.common_secrets
+            BeakerEnvSecret(env_var, secret_name)
+            for env_var, secret_name in self.common_secrets
+            if env_var not in overridden_env_vars
         ]
         env_secrets.extend(
-            BeakerEnvSecret(env_var, secret_name) for env_var, secret_name in self.store_secrets
+            BeakerEnvSecret(env_var, secret_name)
+            for env_var, secret_name in self.store_secrets
+            if env_var not in overridden_env_vars
         )
         env_secrets.extend(
-            BeakerEnvSecret(env_var, secret_name) for env_var, secret_name in self.task_secrets
+            BeakerEnvSecret(env_var, secret_name)
+            for env_var, secret_name in self.task_secrets
+            if env_var not in overridden_env_vars
+        )
+        # Add explicit secret overrides (beaker_secret -> env_var)
+        env_secrets.extend(
+            BeakerEnvSecret(env_var, beaker_secret)
+            for beaker_secret, env_var in self.secret_env_overrides.items()
         )
 
         job_env_vars: dict[str, str] = {
