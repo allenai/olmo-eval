@@ -269,9 +269,10 @@ config = HarnessConfig(
 
 Backends define how the Harness executes multi-turn requests with tool calling. The backend handles the agentic loop: calling the model, executing tools, and feeding results back.
 
-| Backend | Description | Required Extra |
-|---------|-------------|----------------|
-| `openai_agents` | Uses the [OpenAI Agents SDK](https://github.com/openai/openai-agents-python) for execution | `agents` |
+```bash
+# List available backends
+olmo-eval backends
+```
 
 **When to use a backend:**
 - For multi-turn execution with `harness.run()`, you must specify a backend
@@ -942,14 +943,10 @@ See `examples/beaker/configs/` for more configuration examples.
 
 ### Cluster Aliases
 
-| Alias | Clusters |
-|-------|----------|
-| `h100` | ai2/jupiter, ai2/ceres |
-| `a100` | ai2/saturn |
-| `l40` | ai2/neptune |
-| `aus` | ai2/jupiter, ai2/neptune, ai2/saturn, ai2/ceres |
-| `aus80g` | ai2/jupiter, ai2/saturn, ai2/ceres |
-| `80g` | ai2/jupiter, ai2/saturn, ai2/ceres |
+```bash
+# List available cluster aliases
+olmo-eval beaker clusters
+```
 
 ### Programmatic API
 

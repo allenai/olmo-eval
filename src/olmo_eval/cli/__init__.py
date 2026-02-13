@@ -22,6 +22,7 @@ from olmo_eval.cli.utils import console
 from olmo_eval.common.constants import get_model_presets
 from olmo_eval.evals.suites import get_suite, list_suites
 from olmo_eval.evals.tasks.common import list_regimes, list_tasks, list_variants
+from olmo_eval.harness.backends import BACKEND_REGISTRY
 from olmo_eval.harness.presets import get_harness_preset, list_harness_presets
 
 
@@ -153,6 +154,22 @@ def harnesses(filter: str) -> None:
             )
         )
         console.print()
+
+
+@main.command()
+@click.option("--filter", "-f", default="", help="Filter by name substring")
+def backends(filter: str) -> None:
+    """List available harness backends."""
+    table = Table(title="Harness Backends")
+    table.add_column("Backend", style="cyan")
+    table.add_column("Required Extra", style="yellow")
+
+    for name, cls in sorted(BACKEND_REGISTRY.items()):
+        if filter.lower() in name.lower():
+            extras = ", ".join(cls.required_extras) if cls.required_extras else "-"
+            table.add_row(name, extras)
+
+    console.print(table)
 
 
 @main.command()
