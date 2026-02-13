@@ -33,6 +33,7 @@ class Tau2Args:
     domain: Tau2Domain = "airline"
     user_llm: str = "gpt-4o-mini"
     num_trials: int = 5
+    max_steps: int = 30
     max_concurrency: int = 10
     max_tokens: int | None = None
     temperature: float | None = None
@@ -43,6 +44,7 @@ class Tau2Args:
             domain=data.get("domain", "airline"),
             user_llm=data.get("user_llm", "gpt-4o-mini"),
             num_trials=int(data.get("num_trials", 5)),
+            max_steps=int(data.get("max_steps", 30)),
             max_concurrency=int(data.get("max_concurrency", 10)),
             max_tokens=int(data["max_tokens"]) if data.get("max_tokens") else None,
             temperature=float(data["temperature"]) if data.get("temperature") else None,
@@ -86,7 +88,6 @@ class Tau2ExternalEval(ExternalEval):
 
     @property
     def run_command(self) -> str:
-        # Template for display; actual command built by _build_run_command()
         repo = f"{self.working_dir}/tau2-bench"
         return (
             f"cd {repo} && ~/.local/bin/uv run python -m tau2_bench.run "
@@ -105,6 +106,7 @@ class Tau2ExternalEval(ExternalEval):
             "domain": ("Task domain: 'airline', 'retail', or 'telecom'", "airline"),
             "user_llm": ("LLM for simulated user (requires API key)", "gpt-4o-mini"),
             "num_trials": ("Number of trials per task", 5),
+            "max_steps": ("Max agent steps per trial", 200),
             "max_concurrency": ("Max concurrent requests", 10),
             "max_tokens": ("Max tokens for agent LLM responses", None),
             "temperature": ("Temperature for agent LLM responses", None),
@@ -133,7 +135,6 @@ class Tau2ExternalEval(ExternalEval):
 
         try:
             async with SandboxExecutor(sandbox_config, name=self.name) as executor:
-                # Setup (uses base class method)
                 setup_result = await self._run_setup(executor, all_output, start_time)
                 if setup_result:
                     return setup_result
@@ -198,6 +199,7 @@ class Tau2ExternalEval(ExternalEval):
                 f"--user-llm '{tau2_args.user_llm}'",
                 f"--domain '{tau2_args.domain}'",
                 f"--num-trials '{tau2_args.num_trials}'",
+                f"--max-steps '{tau2_args.max_steps}'",
                 f"--max-concurrency '{tau2_args.max_concurrency}'",
                 f"--save-to {self.results_dir}",
             ]
