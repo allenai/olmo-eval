@@ -2,6 +2,7 @@
 
 import logging
 import os
+import sys
 import warnings
 from typing import Literal
 
@@ -9,6 +10,37 @@ LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
 
 # Package-wide logger
 PACKAGE_LOGGER_NAME = "olmo_eval"
+
+# ANSI color codes for terminal output
+_COLORS = (
+    "\033[36m",  # Cyan
+    "\033[33m",  # Yellow
+    "\033[35m",  # Magenta
+    "\033[32m",  # Green
+    "\033[34m",  # Blue
+    "\033[91m",  # Light Red
+    "\033[96m",  # Light Cyan
+    "\033[93m",  # Light Yellow
+    "\033[95m",  # Light Magenta
+    "\033[92m",  # Light Green
+    "\033[94m",  # Light Blue
+)
+_RESET = "\033[0m"
+
+
+def _get_color_for_owner(owner: str) -> str:
+    """Get a consistent color for an owner string based on its hash."""
+    return _COLORS[hash(owner) % len(_COLORS)]
+
+
+def _supports_color() -> bool:
+    """Check if the terminal supports color output."""
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.environ.get("FORCE_COLOR"):
+        return True
+    return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+
 
 # Suppress noisy third-party library output BEFORE they are imported.
 # These must be set at module load time to take effect.
@@ -121,9 +153,15 @@ def configure_worker_logging(worker_id: str) -> logging.Logger:
 
     if not logger.handlers:
         handler = FlushingStreamHandler()
+        # Apply color to worker_id if terminal supports it
+        if _supports_color():
+            color = _get_color_for_owner(worker_id)
+            colored_id = f"{color}[{worker_id}]{_RESET}"
+        else:
+            colored_id = f"[{worker_id}]"
         handler.setFormatter(
             logging.Formatter(
-                f"%(asctime)s [%(levelname)s] [{worker_id}] %(message)s",
+                f"%(asctime)s [%(levelname)s] {colored_id} %(message)s",
                 datefmt="%Y-%m-%d %H:%M:%S",
             )
         )
