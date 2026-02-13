@@ -245,7 +245,7 @@ class ConfiguredExternalEval:
             working_dir=eval_instance.working_dir,
             timeout=timeout_str,
             required_secrets=eval_instance.required_secrets,
-            setup_commands=eval_instance.setup_commands,
+            setup_commands=eval_instance.setup_command,
             run_command=eval_instance.run_command,
         )
 

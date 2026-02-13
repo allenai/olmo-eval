@@ -247,7 +247,7 @@ def external_evals(filter: str) -> None:
 
         # Setup commands - number each command
         setup_lines = "\n".join(
-            f"[dim]{i}.[/dim] {cmd}" for i, cmd in enumerate(eval_instance.setup_commands, 1)
+            f"[dim]{i}.[/dim] {cmd}" for i, cmd in enumerate(eval_instance.setup_command, 1)
         )
         details.add_row("Setup", setup_lines)
 

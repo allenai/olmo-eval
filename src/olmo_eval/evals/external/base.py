@@ -29,8 +29,6 @@ class ExternalEval(ABC):
     run commands, or result formats - those are implementation details.
     """
 
-    # --- Abstract properties (must be implemented) ---
-
     @property
     @abstractmethod
     def name(self) -> str:
@@ -63,17 +61,14 @@ class ExternalEval(ABC):
 
     @property
     @abstractmethod
-    def setup_commands(self) -> tuple[str, ...]:
-        """Commands run to set up the evaluation environment."""
+    def setup_command(self) -> tuple[str, ...]:
+        """Command run to set up the evaluation environment."""
         ...
 
     @property
-    @abstractmethod
     def run_command(self) -> str:
-        """Command used to run the evaluation."""
-        ...
-
-    # --- Optional properties (can be overridden) ---
+        """Command template for display. Override to show the run command structure."""
+        return ""
 
     @property
     def results_dir(self) -> str:
@@ -93,8 +88,6 @@ class ExternalEval(ABC):
         Use None for default_value if the argument is optional with no default.
         """
         return {}
-
-    # --- Abstract methods ---
 
     @abstractmethod
     async def execute(
@@ -124,8 +117,6 @@ class ExternalEval(ABC):
             Result of the evaluation.
         """
         ...
-
-    # --- Convenience methods ---
 
     async def execute_with_provider(
         self,
@@ -161,8 +152,6 @@ class ExternalEval(ABC):
             provider_kind=provider_config.kind,
         )
 
-    # --- Helper methods (can be overridden) ---
-
     def _build_env_vars(self) -> dict[str, str]:
         """Build environment variables for the sandbox, validating required secrets."""
         env_vars: dict[str, str] = {}
@@ -183,7 +172,7 @@ class ExternalEval(ABC):
         self, executor: Any, all_output: list[str], start_time: float
     ) -> ExternalEvalResult | None:
         """Run setup commands. Returns error result if any fail, None on success."""
-        for cmd in self.setup_commands:
+        for cmd in self.setup_command:
             logger.info(f"[{self.name}] Setup: {cmd}")
             result = await executor.execute_command(cmd, timeout=self.timeout_seconds)
             all_output.append(f"$ {cmd}\n{result.output}")

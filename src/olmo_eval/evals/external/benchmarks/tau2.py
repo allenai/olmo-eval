@@ -14,7 +14,7 @@ import logging
 import math
 import time
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Any, Literal
 
 from olmo_eval.evals.external.base import ExternalEval
@@ -33,19 +33,21 @@ class Tau2Args:
     domain: Tau2Domain = "airline"
     user_llm: str = "gpt-4o-mini"
     num_trials: int = 5
-    max_steps: int = 30
-    max_concurrency: int = 10
+    max_steps: int = 200
+    max_concurrency: int = 8
     max_tokens: int | None = None
     temperature: float | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Tau2Args:
+        # Get defaults from dataclass fields
+        defaults = {f.name: f.default for f in fields(cls)}
         return cls(
-            domain=data.get("domain", "airline"),
-            user_llm=data.get("user_llm", "gpt-4o-mini"),
-            num_trials=int(data.get("num_trials", 5)),
-            max_steps=int(data.get("max_steps", 30)),
-            max_concurrency=int(data.get("max_concurrency", 10)),
+            domain=data.get("domain", defaults["domain"]),
+            user_llm=data.get("user_llm", defaults["user_llm"]),
+            num_trials=int(data.get("num_trials", defaults["num_trials"])),
+            max_steps=int(data.get("max_steps", defaults["max_steps"])),
+            max_concurrency=int(data.get("max_concurrency", defaults["max_concurrency"])),
             max_tokens=int(data["max_tokens"]) if data.get("max_tokens") else None,
             temperature=float(data["temperature"]) if data.get("temperature") else None,
         )
@@ -78,7 +80,7 @@ class Tau2ExternalEval(ExternalEval):
         return 7200.0
 
     @property
-    def setup_commands(self) -> tuple[str, ...]:
+    def setup_command(self) -> tuple[str, ...]:
         repo = f"{self.working_dir}/tau2-bench"
         return (
             "curl -LsSf https://astral.sh/uv/install.sh | sh",
@@ -88,12 +90,12 @@ class Tau2ExternalEval(ExternalEval):
 
     @property
     def run_command(self) -> str:
-        repo = f"{self.working_dir}/tau2-bench"
-        return (
-            f"cd {repo} && ~/.local/bin/uv run python -m tau2_bench.run "
-            "--agent-llm '{agent_llm}' --user-llm '{user_llm}' --domain '{domain}' "
-            f"--num-trials '{{num_trials}}' --max-concurrency '{{max_concurrency}}' "
-            f"--save-to {self.results_dir}"
+        """Command template for display"""
+        return self._build_run_command(
+            model_name="{model}",
+            provider_url="{provider_url}",
+            provider_kind="vllm_server",
+            tau2_args=Tau2Args(),
         )
 
     @property
@@ -102,14 +104,15 @@ class Tau2ExternalEval(ExternalEval):
 
     @property
     def arguments(self) -> dict[str, tuple[str, Any | None]]:
+        defaults = {f.name: f.default for f in fields(Tau2Args)}
         return {
-            "domain": ("Task domain: 'airline', 'retail', or 'telecom'", "airline"),
-            "user_llm": ("LLM for simulated user (requires API key)", "gpt-4o-mini"),
-            "num_trials": ("Number of trials per task", 5),
-            "max_steps": ("Max agent steps per trial", 200),
-            "max_concurrency": ("Max concurrent requests", 10),
-            "max_tokens": ("Max tokens for agent LLM responses", None),
-            "temperature": ("Temperature for agent LLM responses", None),
+            "domain": ("Task domain: 'airline', 'retail', or 'telecom'", defaults["domain"]),
+            "user_llm": ("LLM for simulated user (requires API key)", defaults["user_llm"]),
+            "num_trials": ("Number of trials per task", defaults["num_trials"]),
+            "max_steps": ("Max agent steps per trial", defaults["max_steps"]),
+            "max_concurrency": ("Max concurrent requests", defaults["max_concurrency"]),
+            "max_tokens": ("Max tokens for agent LLM responses", defaults["max_tokens"]),
+            "temperature": ("Temperature for agent LLM responses", defaults["temperature"]),
         }
 
     async def execute(
