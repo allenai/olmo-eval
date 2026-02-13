@@ -144,6 +144,9 @@ class VLLMProvider(InferenceProvider):
         if tokenizer:
             engine_kwargs.setdefault("tokenizer", tokenizer)
 
+        # Disable tqdm loading bar by default, enable with --debug-provider
+        engine_kwargs.setdefault("use_tqdm_on_load", is_debug_provider())
+
         self.llm: LLM = LLM(model=model_name, **engine_kwargs)
 
     @property

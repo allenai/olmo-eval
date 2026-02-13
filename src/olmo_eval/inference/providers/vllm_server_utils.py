@@ -222,6 +222,12 @@ def _build_server_command(
     if chat_template_kwargs:
         cmd.extend(["--chat-template-kwargs", json.dumps(chat_template_kwargs)])
 
+    # Disable tqdm loading bar by default, enable with --debug-provider
+    if is_debug_provider():
+        cmd.append("--use-tqdm-on-load")
+    else:
+        cmd.append("--no-use-tqdm-on-load")
+
     # Add any extra kwargs as CLI args
     for key, value in kwargs.items():
         if value is not None:
