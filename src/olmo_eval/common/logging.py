@@ -2,7 +2,6 @@
 
 import logging
 import os
-import sys
 import warnings
 from typing import Literal
 
@@ -31,15 +30,6 @@ _RESET = "\033[0m"
 def _get_color_for_owner(owner: str) -> str:
     """Get a consistent color for an owner string based on its hash."""
     return _COLORS[hash(owner) % len(_COLORS)]
-
-
-def _supports_color() -> bool:
-    """Check if the terminal supports color output."""
-    if os.environ.get("NO_COLOR"):
-        return False
-    if os.environ.get("FORCE_COLOR"):
-        return True
-    return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
 
 
 # Suppress noisy third-party library output BEFORE they are imported.
@@ -153,12 +143,8 @@ def configure_worker_logging(worker_id: str) -> logging.Logger:
 
     if not logger.handlers:
         handler = FlushingStreamHandler()
-        # Apply color to worker_id if terminal supports it
-        if _supports_color():
-            color = _get_color_for_owner(worker_id)
-            colored_id = f"{color}[{worker_id}]{_RESET}"
-        else:
-            colored_id = f"[{worker_id}]"
+        color = _get_color_for_owner(worker_id)
+        colored_id = f"{color}[{worker_id}]{_RESET}"
         handler.setFormatter(
             logging.Formatter(
                 f"%(asctime)s [%(levelname)s] {colored_id} %(message)s",
