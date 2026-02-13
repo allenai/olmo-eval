@@ -159,7 +159,8 @@ question by reasoning through the options and selecting the best answer.
 
 End your response with "ANSWER: X" where X is the letter of your chosen answer."""
 
-_DEFAULT_METRICS = (AccuracyMetric(scorer=MultipleChoiceScorer), PrecisionMetric())
+_DEFAULT_ACCURACY = AccuracyMetric(scorer=MultipleChoiceScorer)
+_DEFAULT_METRICS = (_DEFAULT_ACCURACY, PrecisionMetric())
 _DEFAULT_SAMPLING = SamplingParams(temperature=0.0, max_tokens=1024)
 
 
@@ -185,6 +186,7 @@ for _name, _subset in _STANDARD_SUBTASKS.items():
             "data_source": DataSource(path="futurehouse/lab-bench", subset=_subset),
             "formatter": MCQAChatFormatter(system_prompt=_SYSTEM_PROMPT),
             "metrics": _DEFAULT_METRICS,
+            "primary_metric": _DEFAULT_ACCURACY,
             "sampling_params": _DEFAULT_SAMPLING,
         },
     )
@@ -202,6 +204,7 @@ class LabBenchProtocolQA(LabBenchTask):
     data_source = DataSource(path="futurehouse/lab-bench", subset="ProtocolQA")
     formatter = MCQAChatFormatter(system_prompt=_SYSTEM_PROMPT)
     metrics = _DEFAULT_METRICS
+    primary_metric = _DEFAULT_ACCURACY
     sampling_params = _DEFAULT_SAMPLING
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
