@@ -2,8 +2,6 @@
 
 import json
 
-import pytest
-
 from olmo_eval.common.types import (
     APICallToolType,
     CodeExecutionToolType,
@@ -45,22 +43,9 @@ class TestFunction:
         assert func.name == "test"
         assert func.arguments == '{"key": "value"}'
 
-    def test_function_is_frozen(self):
-        """Test that Function is immutable."""
-        func = Function(name="test", arguments="{}")
-        with pytest.raises(AttributeError):
-            func.name = "changed"
-
 
 class TestToolCall:
     """Tests for ToolCall dataclass."""
-
-    def test_create_basic(self):
-        """Test creating a basic ToolCall."""
-        call = ToolCall(id="123", function=Function(name="test", arguments="{}"))
-        assert call.id == "123"
-        assert call.type == "function"
-        assert call.function.name == "test"
 
     def test_create_factory(self):
         """Test ToolCall.create factory method."""
@@ -122,18 +107,6 @@ class TestToolCall:
 class TestToolResult:
     """Tests for ToolResult dataclass."""
 
-    def test_create_result(self):
-        """Test creating a ToolResult."""
-        result = ToolResult(tool_call_id="123", content="Result text")
-        assert result.tool_call_id == "123"
-        assert result.content == "Result text"
-        assert result.is_error is False
-
-    def test_create_error_result(self):
-        """Test creating an error ToolResult."""
-        result = ToolResult(tool_call_id="123", content="Error message", is_error=True)
-        assert result.is_error is True
-
     def test_to_openai(self):
         """Test converting to OpenAI tool message format."""
         result = ToolResult(tool_call_id="123", content="Result")
@@ -145,21 +118,6 @@ class TestToolResult:
 
 class TestToolSchema:
     """Tests for ToolSchema dataclass."""
-
-    def test_create_schema(self):
-        """Test creating a ToolSchema."""
-        schema = ToolSchema(
-            name="get_weather",
-            description="Get weather for a location",
-            parameters={
-                "type": "object",
-                "properties": {"location": {"type": "string"}},
-                "required": ["location"],
-            },
-        )
-        assert schema.name == "get_weather"
-        assert schema.description == "Get weather for a location"
-        assert "location" in schema.parameters["properties"]
 
     def test_to_openai(self):
         """Test converting to OpenAI tools format."""

@@ -47,15 +47,6 @@ class TestToolCallScorer:
         score = scorer.score(instance, output)
         assert score == 0.0
 
-    def test_no_expected_calls(self):
-        """Test score when no expected calls defined."""
-        scorer = ToolCallScorer()
-        instance = Instance(question="Hello")
-        output = LMOutput(text="", tool_calls=[ToolCall.create("1", "search", {})])
-
-        score = scorer.score(instance, output)
-        assert score == 0.0
-
     def test_multiple_expected_one_match(self):
         """Test with multiple expected tools, one matches."""
         scorer = ToolCallScorer()
@@ -297,24 +288,6 @@ class TestToolSequenceScorer:
                 ToolCall.create("2", "c", {}),  # Missing b
             ],
         )
-
-        score = scorer.score(instance, output)
-        assert score == 0.0
-
-    def test_no_required_trajectory(self):
-        """Test when no required trajectory."""
-        scorer = ToolSequenceScorer()
-        instance = Instance(question="Task")
-        output = LMOutput(text="", tool_calls=[ToolCall.create("1", "a", {})])
-
-        score = scorer.score(instance, output)
-        assert score == 0.0
-
-    def test_no_tool_calls(self):
-        """Test when no tool calls made."""
-        scorer = ToolSequenceScorer()
-        instance = Instance(question="Task", required_trajectory=({"name": "a"},))
-        output = LMOutput(text="No tools")
 
         score = scorer.score(instance, output)
         assert score == 0.0

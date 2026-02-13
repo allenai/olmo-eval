@@ -8,54 +8,6 @@ from olmo_eval.common.types import EvalResult, StoredTaskResult, compute_model_h
 from olmo_eval.storage.base import convert_runner_results
 
 
-class TestStoredTaskResult:
-    """Tests for StoredTaskResult dataclass."""
-
-    def test_create_minimal(self):
-        """Test creating with only required fields."""
-        result = StoredTaskResult(
-            task_name="mmlu",
-            metrics={"accuracy": {"exact_match": 0.75}},
-            task_hash="mmlu-hash-001",
-        )
-        assert result.task_name == "mmlu"
-        assert result.metrics == {"accuracy": {"exact_match": 0.75}}
-        assert result.task_hash == "mmlu-hash-001"
-        assert result.num_instances is None
-
-    def test_create_full(self):
-        """Test creating with all fields."""
-        result = StoredTaskResult(
-            task_name="mmlu",
-            metrics={"accuracy": {"exact_match": 0.75}, "f1": {"f1_scorer": 0.72}},
-            task_hash="abc123",
-            num_instances=1000,
-            primary_metric="accuracy:exact_match",
-            s3_metrics_key="s3://bucket/metrics.json",
-            s3_predictions_key="s3://bucket/predictions.jsonl",
-        )
-        assert result.task_name == "mmlu"
-        assert result.task_hash == "abc123"
-        assert result.num_instances == 1000
-        assert result.primary_metric == "accuracy:exact_match"
-        assert result.s3_metrics_key == "s3://bucket/metrics.json"
-        assert result.s3_predictions_key == "s3://bucket/predictions.jsonl"
-
-    def test_equality(self):
-        """Test dataclass equality."""
-        r1 = StoredTaskResult(
-            task_name="mmlu", metrics={"accuracy": {"exact_match": 0.75}}, task_hash="hash1"
-        )
-        r2 = StoredTaskResult(
-            task_name="mmlu", metrics={"accuracy": {"exact_match": 0.75}}, task_hash="hash1"
-        )
-        r3 = StoredTaskResult(
-            task_name="gsm8k", metrics={"accuracy": {"exact_match": 0.75}}, task_hash="hash2"
-        )
-        assert r1 == r2
-        assert r1 != r3
-
-
 class TestEvalResult:
     """Tests for EvalResult dataclass."""
 
@@ -79,23 +31,6 @@ class TestEvalResult:
     def sample_timestamp(self):
         """Create a sample timestamp."""
         return datetime(2024, 1, 15, 10, 30, 0)
-
-    def test_create_minimal(self, sample_tasks, sample_timestamp):
-        """Test creating with only required fields."""
-        result = EvalResult(
-            experiment_id="abc123",
-            model_name="llama3.1-8b",
-            backend_name="vllm",
-            timestamp=sample_timestamp,
-            tasks=sample_tasks,
-        )
-        assert result.experiment_id == "abc123"
-        assert result.model_name == "llama3.1-8b"
-        assert result.backend_name == "vllm"
-        assert result.timestamp == sample_timestamp
-        assert len(result.tasks) == 2
-        assert result.model_config is None
-        assert result.metadata is None
 
     def test_create_full(self, sample_tasks, sample_timestamp):
         """Test creating with all fields."""

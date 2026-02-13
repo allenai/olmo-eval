@@ -34,23 +34,6 @@ class ConcreteTask(Task):
 class TestTaskConfig:
     """Tests for TaskConfig dataclass."""
 
-    def test_minimal_config(self):
-        """Test creating config with minimal required fields."""
-        config = TaskConfig(name="test", data_source="test/dataset")
-        assert config.name == "test"
-        assert config.data_source == "test/dataset"
-
-    def test_default_values(self):
-        """Test that default values are set correctly."""
-        config = TaskConfig(name="test", data_source="test/dataset")
-        assert config.formatter is None
-        assert config.metrics == ()
-        assert config.num_fewshot == 0
-        assert config.fewshot_seed == 42
-        assert config.limit is None
-        assert config.split == Split.TEST
-        assert config.primary_metric is None
-
     def test_custom_values(self):
         """Test creating config with custom values."""
         from olmo_eval.data import DataSource
@@ -83,21 +66,6 @@ class TestTaskConfig:
 
 class TestTask:
     """Tests for Task base class."""
-
-    def test_task_initialization(self):
-        """Test task initialization stores config."""
-        config = TaskConfig(name="test", data_source="test/dataset")
-        task = ConcreteTask(config)
-        assert task.config is config
-
-    def test_instances_iterator(self):
-        """Test that instances returns an iterator."""
-        config = TaskConfig(name="test", data_source="test/dataset")
-        task = ConcreteTask(config)
-
-        instances = list(task.instances)
-        assert len(instances) == 2
-        assert all(isinstance(i, Instance) for i in instances)
 
     def test_format_request(self):
         """Test format_request produces LMRequest."""

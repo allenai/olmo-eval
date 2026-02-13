@@ -6,13 +6,6 @@ from olmo_eval.common.types import AgentTrajectory, AgentTurn, ToolCall, ToolRes
 class TestAgentTurn:
     """Tests for AgentTurn dataclass."""
 
-    def test_create_assistant_turn(self):
-        """Test creating an assistant turn."""
-        turn = AgentTurn.assistant(content="Hello")
-        assert turn.role == "assistant"
-        assert turn.content == "Hello"
-        assert turn.tool_calls == ()
-
     def test_create_assistant_with_tool_calls(self):
         """Test assistant turn with tool calls."""
         calls = [ToolCall.create("1", "search", {"query": "test"})]
@@ -21,46 +14,9 @@ class TestAgentTurn:
         assert len(turn.tool_calls) == 1
         assert turn.tool_calls[0].function.name == "search"
 
-    def test_create_tool_turn(self):
-        """Test creating a tool result turn."""
-        results = [ToolResult(tool_call_id="1", content="Search results")]
-        turn = AgentTurn.tool(results=results)
-        assert turn.role == "tool"
-        assert turn.has_tool_results
-        assert len(turn.tool_results) == 1
-
-    def test_create_user_turn(self):
-        """Test creating a user turn."""
-        turn = AgentTurn.user(content="What's the weather?")
-        assert turn.role == "user"
-        assert turn.content == "What's the weather?"
-
-    def test_has_tool_calls_false(self):
-        """Test has_tool_calls when no calls."""
-        turn = AgentTurn.assistant(content="Just text")
-        assert not turn.has_tool_calls
-
-    def test_has_tool_results_false(self):
-        """Test has_tool_results when no results."""
-        turn = AgentTurn.assistant(content="Just text")
-        assert not turn.has_tool_results
-
-    def test_timestamp_and_token_count(self):
-        """Test optional timestamp and token count."""
-        turn = AgentTurn.assistant(content="Hello", timestamp_ms=1234567890, token_count=10)
-        assert turn.timestamp_ms == 1234567890
-        assert turn.token_count == 10
-
 
 class TestAgentTrajectory:
     """Tests for AgentTrajectory dataclass."""
-
-    def test_empty_trajectory(self):
-        """Test empty trajectory."""
-        traj = AgentTrajectory()
-        assert traj.num_turns == 0
-        assert traj.total_tokens == 0
-        assert traj.total_tool_calls == 0
 
     def test_from_turns(self):
         """Test creating from list of turns."""

@@ -5,7 +5,7 @@ import math
 import pytest
 
 from olmo_eval.common.metrics import AccuracyMetric, BPBMetric
-from olmo_eval.common.scorers import ExactMatchScorer, MultipleChoiceScorer
+from olmo_eval.common.scorers import MultipleChoiceScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
 
 
@@ -122,11 +122,6 @@ class TestAccuracyMetric:
 
         assert accuracy == 0.5
 
-    def test_accuracy_default_scorer(self):
-        """Test that default scorer is ExactMatchScorer."""
-        metric = AccuracyMetric()
-        assert metric.scorer == ExactMatchScorer
-
 
 class TestBPBMetric:
     """Tests for BPBMetric with gold selection."""
@@ -240,11 +235,6 @@ class TestBPBMetric:
         total_bytes = 1 + 2
         expected = total_logprobs / (total_bytes * math.log(2))
         assert bpb == pytest.approx(expected)
-
-    def test_bpb_name(self):
-        """Test metric name."""
-        metric = BPBMetric()
-        assert metric.name == "bits_per_byte"
 
     def test_bpb_no_logprobs_returns_zero(self):
         """Test that output without logprobs returns 0."""

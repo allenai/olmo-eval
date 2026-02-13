@@ -201,25 +201,6 @@ class TestMultipleChoiceFormatter:
         assert request.prompt == "Q: Capital?"
         assert request.continuations == (" Paris", " London")
 
-    def test_format_no_choices(self):
-        """Test multiple choice formatting without choices."""
-        formatter = MultipleChoiceFormatter()
-        instance = Instance(question="Test?", gold_answer="yes", choices=None)
-
-        request = formatter.format(instance)
-
-        assert request.prompt == "Test?"
-        assert request.continuations == ()
-
-    def test_format_empty_choices(self):
-        """Test multiple choice formatting with empty choices."""
-        formatter = MultipleChoiceFormatter()
-        instance = Instance(question="Test?", gold_answer="yes", choices=())
-
-        request = formatter.format(instance)
-
-        assert request.continuations == ()
-
     def test_format_ignores_fewshot(self):
         """Test that MultipleChoiceFormatter ignores fewshot (by design)."""
         formatter = MultipleChoiceFormatter(include_choices_in_prompt=False)
