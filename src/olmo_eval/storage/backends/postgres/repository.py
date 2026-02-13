@@ -10,7 +10,7 @@ from collections.abc import Iterator
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import and_, delete, exists, or_, select
+from sqlalchemy import and_, delete, exists, insert, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -312,8 +312,12 @@ class InstancePredictionRepository:
         task_hash: str,
         instances: list[dict[str, Any]],
         experiment_group: str = "",
+        chunk_size: int = 1000,
     ) -> None:
         """Save instance predictions for an experiment's task.
+
+        Uses bulk insert for efficiency - drastically reduces DB round-trips
+        compared to row-by-row inserts.
 
         Args:
             experiment_pk: Experiment primary key (id).
@@ -322,16 +326,27 @@ class InstancePredictionRepository:
                 - native_id: Original dataset ID
                 - instance_metrics: Dict of metric names to values
             experiment_group: Experiment group for fast filtering (denormalized).
+            chunk_size: Number of instances per bulk insert batch.
         """
-        for inst_data in instances:
-            instance = InstancePrediction(
-                experiment_pk=experiment_pk,
-                task_hash=task_hash,
-                native_id=inst_data["native_id"],
-                instance_metrics=inst_data["instance_metrics"],
-                experiment_group=experiment_group,
-            )
-            self.session.add(instance)
+        if not instances:
+            return
+
+        # Prepare rows for bulk insert
+        rows = [
+            {
+                "experiment_pk": experiment_pk,
+                "task_hash": task_hash,
+                "native_id": inst_data["native_id"],
+                "instance_metrics": inst_data["instance_metrics"],
+                "experiment_group": experiment_group,
+            }
+            for inst_data in instances
+        ]
+
+        # Bulk insert in chunks to avoid statement size limits
+        for i in range(0, len(rows), chunk_size):
+            chunk = rows[i : i + chunk_size]
+            self.session.execute(insert(InstancePrediction), chunk)
 
     def get_instances(
         self,
