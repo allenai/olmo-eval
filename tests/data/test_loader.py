@@ -74,6 +74,46 @@ class TestLocalBackendIntegration:
         docs = list(loader.load(source))
         assert docs == [{"a": 1}, {"a": 2}]
 
+    def test_load_json_with_instances_key(self, tmp_path: Path):
+        file_path = tmp_path / "data.json"
+        file_path.write_text('{"instances": [{"a": 1}, {"a": 2}]}')
+
+        loader = DataLoader()
+        source = DataSource(path=str(file_path))
+
+        docs = list(loader.load(source))
+        assert docs == [{"a": 1}, {"a": 2}]
+
+    def test_load_json_with_examples_key(self, tmp_path: Path):
+        file_path = tmp_path / "data.json"
+        file_path.write_text('{"examples": [{"a": 1}, {"a": 2}]}')
+
+        loader = DataLoader()
+        source = DataSource(path=str(file_path))
+
+        docs = list(loader.load(source))
+        assert docs == [{"a": 1}, {"a": 2}]
+
+    def test_load_json_with_items_key(self, tmp_path: Path):
+        file_path = tmp_path / "data.json"
+        file_path.write_text('{"items": [{"a": 1}, {"a": 2}]}')
+
+        loader = DataLoader()
+        source = DataSource(path=str(file_path))
+
+        docs = list(loader.load(source))
+        assert docs == [{"a": 1}, {"a": 2}]
+
+    def test_load_json_with_records_key(self, tmp_path: Path):
+        file_path = tmp_path / "data.json"
+        file_path.write_text('{"records": [{"a": 1}, {"a": 2}]}')
+
+        loader = DataLoader()
+        source = DataSource(path=str(file_path))
+
+        docs = list(loader.load(source))
+        assert docs == [{"a": 1}, {"a": 2}]
+
     def test_load_csv(self, tmp_path: Path):
         file_path = tmp_path / "data.csv"
         file_path.write_text("name,value\nfoo,1\nbar,2\n")
