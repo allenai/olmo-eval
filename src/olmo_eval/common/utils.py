@@ -77,7 +77,7 @@ def compute_pass_at_k(n: int, c: int, k: int) -> float:
     """Compute pass@k metric (unbiased estimator).
 
     Pass@k measures the probability that at least one of k samples
-    is correct.
+    is correct. When n < k, uses k = min(k, n) per standard convention.
 
     Args:
         n: Total number of samples
@@ -87,11 +87,12 @@ def compute_pass_at_k(n: int, c: int, k: int) -> float:
     Returns:
         pass@k probability
     """
+    if n == 0:
+        return 0.0
+    # Clamp k to available samples (standard convention when n < k)
+    k = min(k, n)
     if n - c < k:
         return 1.0
-    if n < k:
-        return 0.0 if c == 0 else 1.0
-
     # Use math.prod to avoid overflow for large n
     # pass@k = 1 - C(n-c, k) / C(n, k)
     return 1.0 - math.prod((n - c - i) / (n - i) for i in range(k))
