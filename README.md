@@ -739,6 +739,7 @@ cluster: h100
 | `--group` | `-g` | none | Add experiments to Beaker group(s) (can specify multiple) |
 | `--dry-run` | `-d` | `false` | Print spec without launching |
 | `--follow/--no-follow` | | `true` | Follow logs after launch |
+| `--secret-env` | | none | Map Beaker secret to env var (can specify multiple) |
 
 ### Per-Model and Per-Task Overrides
 
@@ -781,6 +782,29 @@ The `-o` flag uses OmegaConf dotlist syntax, supporting:
 # Good - single quotes protect the value
 -o 'extra_config={key: value, nested: {a: 1}}'
 ```
+
+### Secret Environment Overrides
+
+By default, Beaker secrets are mapped using the pattern `{username}_{ENV_VAR}` (e.g., `ai2-tylerm_OPENAI_API_KEY`).
+Use `--secret-env` to override this with a custom Beaker secret name:
+
+```bash
+# Use a team-shared secret instead of your personal secret
+olmo-eval beaker launch -n "eval" -m gpt-4o -t mmlu \
+    --secret-env team-openai-key:OPENAI_API_KEY
+
+# Multiple secret overrides
+olmo-eval beaker launch -n "eval" -m gpt-4o -t simpleqa \
+    --secret-env team-openai-key:OPENAI_API_KEY \
+    --secret-env shared-serper-key:SERPER_API_KEY
+```
+
+Format: `BEAKER_SECRET_NAME:ENV_VAR_NAME`
+
+This is useful for:
+- Using team-shared API keys instead of personal secrets
+- Testing with different credential sets
+- Sharing jobs that use organization-level secrets
 
 ### YAML Configuration
 
