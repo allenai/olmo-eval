@@ -205,7 +205,6 @@ class HarnessPresets:
             name=name,
             provider=ProviderConfig(
                 kind=ProviderKind.VLLM_SERVER,
-                # Higher timeout for multi-turn agent runs (each turn can take time)
                 kwargs={"timeout": 300},
             ),
             tools=(execute_bash, serper_fetch_page, serper_web_search),

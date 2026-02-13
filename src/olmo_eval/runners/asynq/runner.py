@@ -26,7 +26,7 @@ from olmo_eval.runners.asynq.preparation import (
     prepare_task_items,
 )
 from olmo_eval.runners.asynq.results import aggregate_results, process_results
-from olmo_eval.runners.asynq.types import QueueItem, TaskTracker
+from olmo_eval.runners.asynq.types import DEFAULT_SCORING_CONCURRENCY, QueueItem, TaskTracker
 from olmo_eval.runners.asynq.workers import inference_worker, scoring_worker
 from olmo_eval.runners.common.base import BaseEvalRunner
 from olmo_eval.runners.common.mixins import RunnerResultsMixin
@@ -178,9 +178,13 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             # Create ready event for scoring worker
             scorer_ready = ctx.Event()
 
-            # Start scoring worker first so it's ready to receive work
-            # Use max_concurrency from harness config, defaulting to 8
-            scoring_concurrency = self.harness_config.scoring_concurrency or 8
+            workers = self._start_workers(
+                ctx, num_workers, total_gpus, item_queue, result_queue, init_times
+            )
+
+            scoring_concurrency = (
+                self.harness_config.scoring_concurrency or DEFAULT_SCORING_CONCURRENCY
+            )
             scorer_proc = ctx.Process(
                 target=scoring_worker,
                 args=(
@@ -193,11 +197,6 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 ),
             )
             scorer_proc.start()
-
-            # Start inference workers immediately (don't block on scorer initialization)
-            workers = self._start_workers(
-                ctx, num_workers, total_gpus, item_queue, result_queue, init_times
-            )
 
             # Wait for workers to initialize
             logger.info("Waiting for inference workers to initialize...")

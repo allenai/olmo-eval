@@ -11,6 +11,7 @@ from typing import Any
 
 from olmo_eval.common.logging import get_logger
 from olmo_eval.runners.asynq.types import (
+    DEFAULT_SCORING_CONCURRENCY,
     SCORER_FATAL,
     WORKER_FATAL,
     QueueItem,
@@ -174,7 +175,7 @@ def scoring_worker(
     total_instances: int,
     sandbox_configs_list: list[dict[str, Any]] | None = None,
     ready_event: MPEvent | None = None,
-    max_concurrency: int = 8,
+    max_concurrency: int = DEFAULT_SCORING_CONCURRENCY,
 ) -> None:
     """Worker process that scores responses with concurrent execution.
 

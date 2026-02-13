@@ -15,6 +15,9 @@ if TYPE_CHECKING:
 WORKER_FATAL = "__WORKER_FATAL__"
 SCORER_FATAL = "__SCORER_FATAL__"
 
+# Default concurrency for scoring worker
+DEFAULT_SCORING_CONCURRENCY = 8
+
 
 @dataclass
 class QueueItem:
