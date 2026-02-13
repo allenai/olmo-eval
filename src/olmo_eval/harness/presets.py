@@ -211,7 +211,7 @@ class HarnessPresets:
             tools=(execute_bash, serper_fetch_page, serper_web_search),
             system_prompt=CODE_COMPLETION_SYSTEM_PROMPT,
             max_turns=10,
-            max_concurrency=8,
+            max_concurrency=16,
             backend="openai_agents",
             required_secrets=("OPENAI_API_KEY",),
             sandboxes=(

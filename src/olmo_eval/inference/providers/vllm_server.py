@@ -12,7 +12,6 @@ from olmo_eval.common.logging import get_logger
 from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
 from olmo_eval.common.types.tools import ToolCall
 from olmo_eval.inference.base import InferenceProvider
-from olmo_eval.inference.retry import retry_with_backoff
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -52,11 +51,9 @@ class VLLMServerProvider(InferenceProvider):
         self,
         model_name: str,
         base_url: str | None = None,
-        timeout: float = 30.0,
+        timeout: float = 60.0,
         max_concurrency: int = 32,
         max_retries: int = 3,
-        retry_delay: float = 1.0,
-        # Server config (only used if base_url is None)
         tensor_parallel_size: int = 1,
         max_model_len: int | None = None,
         tokenizer: str | None = None,
@@ -75,7 +72,6 @@ class VLLMServerProvider(InferenceProvider):
             timeout: Request timeout in seconds.
             max_concurrency: Maximum number of concurrent requests.
             max_retries: Maximum number of retries for transient errors.
-            retry_delay: Base delay in seconds between retries (exponential backoff).
             tensor_parallel_size: Number of GPUs for tensor parallelism (server mode).
             max_model_len: Maximum model context length (server mode).
             tokenizer: Tokenizer path override (server mode).
@@ -90,7 +86,6 @@ class VLLMServerProvider(InferenceProvider):
         self.timeout = timeout
         self.max_concurrency = max_concurrency
         self.max_retries = max_retries
-        self.retry_delay = retry_delay
         self.chat_template_kwargs = chat_template_kwargs
         self._client: AsyncOpenAI | None = None
         self._http_client: httpx.AsyncClient | None = None
@@ -147,12 +142,10 @@ class VLLMServerProvider(InferenceProvider):
             self._openai_module = openai
 
             # Configure connection pool limits to prevent exhaustion with large batches.
-            # Default httpx settings (100 connections) can cause issues when processing
-            # thousands of instances with agent loops making multiple API calls each.
             limits = httpx.Limits(
                 max_keepalive_connections=20,
-                max_connections=50,
-                keepalive_expiry=30.0,  # Close idle connections after 30s
+                max_connections=100,
+                keepalive_expiry=60.0,  # Close idle connections after 120s
             )
 
             # Build event hooks for debug logging if enabled
@@ -172,7 +165,7 @@ class VLLMServerProvider(InferenceProvider):
             self._client = AsyncOpenAI(
                 base_url=self.base_url,
                 timeout=self.timeout,
-                max_retries=0,  # Disable SDK retries - we handle them ourselves
+                max_retries=self.max_retries,
                 http_client=self._http_client,
             )
         return self._client
@@ -250,13 +243,7 @@ class VLLMServerProvider(InferenceProvider):
         self, request: LMRequest, params: SamplingParams
     ) -> list[LMOutput]:
         """Generate completions for a single request."""
-        return await retry_with_backoff(
-            lambda: self._generate_single_impl(request, params),
-            max_retries=self.max_retries,
-            retry_delay=self.retry_delay,
-            context=f"generate model={self.model_name}",
-            sdk_module=self._openai_module,
-        )
+        return await self._generate_single_impl(request, params)
 
     async def agenerate(
         self,
@@ -348,13 +335,7 @@ class VLLMServerProvider(InferenceProvider):
 
     async def _logprobs_single_async(self, request: LMRequest) -> list[LMOutput]:
         """Compute logprobs for a single request."""
-        return await retry_with_backoff(
-            lambda: self._logprobs_single_impl(request),
-            max_retries=self.max_retries,
-            retry_delay=self.retry_delay,
-            context=f"logprobs model={self.model_name}",
-            sdk_module=self._openai_module,
-        )
+        return await self._logprobs_single_impl(request)
 
     async def alogprobs(self, requests: list[LMRequest]) -> list[list[LMOutput]]:
         """Async compute logprobs for continuations.
