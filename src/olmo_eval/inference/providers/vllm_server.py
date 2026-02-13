@@ -12,6 +12,7 @@ from olmo_eval.common.logging import get_logger
 from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
 from olmo_eval.common.types.tools import ToolCall
 from olmo_eval.inference.base import InferenceProvider
+from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -87,9 +88,11 @@ class VLLMServerProvider(InferenceProvider):
         self.max_concurrency = max_concurrency
         self.max_retries = max_retries
         self.chat_template_kwargs = chat_template_kwargs
+        self._tokenizer_path = tokenizer or model_name
         self._client: AsyncOpenAI | None = None
         self._http_client: httpx.AsyncClient | None = None
         self._openai_module: Any = None
+        self._tokenizer: Any = None
         self._server: VLLMServerProcess | None = None  # type: ignore[name-defined]
 
         if base_url:
@@ -182,6 +185,14 @@ class VLLMServerProvider(InferenceProvider):
     def get_openai_client(self) -> AsyncOpenAI:
         """Get the AsyncOpenAI client for this provider."""
         return self._get_or_create_client()
+
+    def _get_tokenizer(self) -> Any:
+        """Get or create the tokenizer for logprobs computation."""
+        if self._tokenizer is None:
+            from transformers import AutoTokenizer
+
+            self._tokenizer = AutoTokenizer.from_pretrained(self._tokenizer_path)
+        return self._tokenizer
 
     async def _generate_single_impl(
         self, request: LMRequest, params: SamplingParams
@@ -319,44 +330,75 @@ class VLLMServerProvider(InferenceProvider):
         return asyncio.run(self.agenerate(requests, sampling_params))
 
     async def _logprobs_single_impl(self, request: LMRequest) -> list[LMOutput]:
-        """Compute logprobs for a single request."""
+        """Compute logprobs for continuations.
+
+        Uses the completions endpoint with prompt_logprobs to get the actual
+        logprob of each continuation token given the context.
+        """
         client = self._get_or_create_client()
+        tokenizer = self._get_tokenizer()
 
+        # Get the context/prompt text
+        context = request.prompt
         if request.messages:
-            content = request.messages[0].get("content", "") if request.messages else ""
-        else:
-            content = request.prompt
-
-        response = await client.chat.completions.create(
-            model=self.model_name,
-            messages=[{"role": "user", "content": content}],
-            max_tokens=50,
-            temperature=0.0,
-            logprobs=True,
-        )
-
-        completion_logprobs: list[LogProbEntry] = []
-        if response.choices:
-            choice = response.choices[0]
-            logprobs_data = getattr(choice, "logprobs", None)
-            if logprobs_data and hasattr(logprobs_data, "content") and logprobs_data.content:
-                for lp in logprobs_data.content:
-                    entry: LogProbEntry = {"token": lp.token, "logprob": lp.logprob}
-                    lp_bytes = getattr(lp, "bytes", None)
-                    if lp_bytes is not None:
-                        entry["bytes"] = lp_bytes
-                    completion_logprobs.append(entry)
+            context = request.messages[0].get("content", "") if request.messages else ""
 
         outputs = []
         for continuation in request.continuations or ():
-            total = (
-                sum(lp["logprob"] for lp in completion_logprobs[:5]) if completion_logprobs else 0.0
+            # Use shared utility for proper tokenization (handles BOS, trailing spaces)
+            context_enc, continuation_enc = encode_context_and_continuation(
+                tokenizer, context, continuation
             )
+            context_len = len(context_enc)
+
+            # Build full token sequence and convert back to text for API
+            full_tokens = context_enc + continuation_enc
+            full_prompt = tokenizer.decode(full_tokens)
+
+            # Use completions endpoint with prompt_logprobs
+            response = await client.completions.create(
+                model=self.model_name,
+                prompt=full_prompt,
+                max_tokens=0,  # Don't generate, just get prompt logprobs
+                temperature=0.0,
+                extra_body={"prompt_logprobs": 5},
+            )
+
+            # Extract logprobs for continuation tokens only
+            logprob_entries: list[LogProbEntry] = []
+            total = 0.0
+
+            if response.choices:
+                choice = response.choices[0]
+                prompt_logprobs = getattr(choice, "prompt_logprobs", None) or []
+
+                # Skip context tokens, get continuation logprobs
+                cont_logprobs = prompt_logprobs[context_len:]
+
+                for token_id, token_probs in zip(continuation_enc, cont_logprobs, strict=False):
+                    if not token_probs:
+                        continue
+
+                    # Look up logprob for the actual continuation token
+                    lp_info = token_probs.get(token_id)
+                    if lp_info is None:
+                        continue
+
+                    if isinstance(lp_info, dict):
+                        token_str = lp_info.get("token", tokenizer.decode([token_id]))
+                        logprob = lp_info.get("logprob", 0.0)
+                    else:
+                        token_str = getattr(lp_info, "token", tokenizer.decode([token_id]))
+                        logprob = getattr(lp_info, "logprob", 0.0)
+
+                    logprob_entries.append({"token": token_str, "logprob": logprob})
+                    total += logprob
+
             outputs.append(
                 LMOutput(
                     text=continuation,
-                    logprobs=completion_logprobs[:5] if completion_logprobs else None,
-                    metadata={"total_logprob": total},
+                    logprobs=logprob_entries if logprob_entries else None,
+                    metadata={"total_logprob": total, "num_tokens": len(logprob_entries)},
                 )
             )
 

@@ -254,6 +254,17 @@ def scoring_worker(
                 try:
                     item: ScoringItem | None = scoring_queue.get(timeout=0.1)
                 except queue.Empty:
+                    # Timeout - flush any pending batch
+                    if batch:
+                        if progress is None:
+                            progress = ProgressLogger(
+                                total=total_instances,
+                                desc="Scored",
+                                logger=logger,
+                                color="blue",
+                            )
+                        await process_batch(batch, scoring_context, progress)
+                        batch = []
                     continue
 
                 if item is None:
