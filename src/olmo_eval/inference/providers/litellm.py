@@ -128,8 +128,8 @@ class LiteLLMProvider(InferenceProvider):
             kwargs["temperature"] = params.temperature
         if params.stop_sequences:
             kwargs["stop"] = list(params.stop_sequences)[:_MAX_STOP_SEQUENCES]
-        if params.logprobs is not None:
-            kwargs["logprobs"] = True
+        # Always request logprobs for metrics computation
+        kwargs["logprobs"] = True
 
         response = await self._litellm.acompletion(**kwargs)
 
@@ -139,6 +139,7 @@ class LiteLLMProvider(InferenceProvider):
 
             # Convert logprobs to standard format
             logprob_entries: list[LogProbEntry] | None = None
+            metadata: dict[str, Any] = {}
             logprobs_data = getattr(choice, "logprobs", None)
             if logprobs_data and hasattr(logprobs_data, "content") and logprobs_data.content:
                 logprob_entries = []
@@ -149,7 +150,16 @@ class LiteLLMProvider(InferenceProvider):
                         entry["bytes"] = lp_bytes
                     logprob_entries.append(entry)
 
-            outputs.append(LMOutput(text=text, logprobs=logprob_entries))
+                # Compute metadata from logprobs
+                sum_logits = sum(entry["logprob"] for entry in logprob_entries)
+                num_tokens = len(logprob_entries)
+                metadata = {
+                    "sum_logits": sum_logits,
+                    "num_tokens": num_tokens,
+                    "num_tokens_all": num_tokens,
+                }
+
+            outputs.append(LMOutput(text=text, logprobs=logprob_entries, metadata=metadata))
 
         return outputs
 

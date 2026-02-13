@@ -215,6 +215,8 @@ class VLLMServerProvider(InferenceProvider):
             kwargs["stop"] = list(params.stop_sequences)[:4]
         if tools:
             kwargs["tools"] = tools
+        # Always request logprobs for metrics computation
+        kwargs["logprobs"] = True
 
         # Pass chat_template_kwargs via extra_body for vLLM
         if self.chat_template_kwargs:
@@ -235,7 +237,34 @@ class VLLMServerProvider(InferenceProvider):
                     )
                     for tc in choice.message.tool_calls
                 ]
-            outputs.append(LMOutput(text=text, tool_calls=tool_calls))
+
+            # Convert logprobs to standard format
+            logprob_entries: list[LogProbEntry] | None = None
+            metadata: dict[str, Any] = {}
+            logprobs_data = getattr(choice, "logprobs", None)
+            if logprobs_data and hasattr(logprobs_data, "content") and logprobs_data.content:
+                logprob_entries = []
+                for lp in logprobs_data.content:
+                    entry: LogProbEntry = {"token": lp.token, "logprob": lp.logprob}
+                    lp_bytes = getattr(lp, "bytes", None)
+                    if lp_bytes is not None:
+                        entry["bytes"] = lp_bytes
+                    logprob_entries.append(entry)
+
+                # Compute metadata from logprobs
+                sum_logits = sum(entry["logprob"] for entry in logprob_entries)
+                num_tokens = len(logprob_entries)
+                metadata = {
+                    "sum_logits": sum_logits,
+                    "num_tokens": num_tokens,
+                    "num_tokens_all": num_tokens,
+                }
+
+            outputs.append(
+                LMOutput(
+                    text=text, logprobs=logprob_entries, metadata=metadata, tool_calls=tool_calls
+                )
+            )
 
         return outputs
 

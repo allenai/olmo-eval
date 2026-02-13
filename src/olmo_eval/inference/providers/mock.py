@@ -1,6 +1,6 @@
 """Mock provider for testing."""
 
-from olmo_eval.common.types import LMOutput, LMRequest, SamplingParams
+from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
 
 
@@ -23,14 +23,21 @@ class MockProvider(InferenceProvider):
         params = self._default_sampling_params(sampling_params)
         num_samples = params.num_samples
 
+        mock_logprobs: list[LogProbEntry] = [
+            {"token": " mock", "logprob": -0.034},
+            {"token": " response", "logprob": -0.123},
+            {"token": ".", "logprob": -0.057},
+            {"token": " The", "logprob": -0.089},
+        ]
+        sum_logits = sum(lp["logprob"] for lp in mock_logprobs)
         mock_output = LMOutput(
             text=" mock response. The answer is (A), or \\boxed{42}",
-            logprobs=[
-                {"token": " mock", "logprob": -0.034},
-                {"token": " response", "logprob": -0.123},
-                {"token": ".", "logprob": -0.057},
-                {"token": " The", "logprob": -0.089},
-            ],
+            logprobs=mock_logprobs,
+            metadata={
+                "sum_logits": sum_logits,
+                "num_tokens": len(mock_logprobs),
+                "num_tokens_all": len(mock_logprobs),
+            },
         )
 
         return [[mock_output for _ in range(num_samples)] for _ in requests]
@@ -52,14 +59,20 @@ class MockProvider(InferenceProvider):
             continuations = request.continuations or ()
             request_outputs = []
             for continuation in continuations:
+                mock_logprobs: list[LogProbEntry] = [
+                    {"token": " mock", "logprob": -0.034},
+                    {"token": " token", "logprob": -0.123},
+                ]
                 request_outputs.append(
                     LMOutput(
                         text=continuation,
-                        logprobs=[
-                            {"token": " mock", "logprob": -0.034},
-                            {"token": " token", "logprob": -0.123},
-                        ],
-                        metadata={"total_logprob": -0.157},
+                        logprobs=mock_logprobs,
+                        metadata={
+                            "total_logprob": -0.157,
+                            "sum_logits": -0.157,
+                            "num_tokens": len(mock_logprobs),
+                            "num_tokens_all": len(mock_logprobs),
+                        },
                     )
                 )
             results.append(request_outputs)

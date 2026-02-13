@@ -112,9 +112,10 @@ class HuggingFaceProvider(InferenceProvider):
                 gen_ids = output_ids[prompt_len:]
                 gen_ids, text = self._truncate_at_stop(gen_ids, params.stop_sequences)
 
-                # Compute logprobs if requested
+                # Always compute logprobs for metrics
                 logprob_entries = None
-                if params.logprobs is not None and len(gen_ids) > 0:
+                metadata: dict[str, Any] = {}
+                if len(gen_ids) > 0:
                     seq = torch.cat([encoded["input_ids"][0], gen_ids]).unsqueeze(0)
                     with torch.no_grad():
                         logits = self.model(seq).logits
@@ -132,7 +133,18 @@ class HuggingFaceProvider(InferenceProvider):
                             }
                         )
 
-                request_outputs.append(LMOutput(text=text, logprobs=logprob_entries))
+                    # Compute metadata from logprobs
+                    sum_logits = sum(entry["logprob"] for entry in logprob_entries)
+                    num_tokens = len(logprob_entries)
+                    metadata = {
+                        "sum_logits": sum_logits,
+                        "num_tokens": num_tokens,
+                        "num_tokens_all": num_tokens,
+                    }
+
+                request_outputs.append(
+                    LMOutput(text=text, logprobs=logprob_entries, metadata=metadata)
+                )
 
             results.append(request_outputs)
 
