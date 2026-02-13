@@ -234,6 +234,8 @@ async def process_items(
             batchable_items.append(item)
 
     if batchable_items:
+        from olmo_eval.common.progress import ProgressLogger
+
         batches: dict[tuple[RequestType, SamplingParams | None], list[QueueItem]] = {}
         for item in batchable_items:
             key = (item.request.request_type, item.sampling_params)
@@ -241,11 +243,13 @@ async def process_items(
                 batches[key] = []
             batches[key].append(item)
 
-        n_items, n_batches = len(batchable_items), len(batches)
-        logger.info(f"Processing {n_items} batchable items in {n_batches} batch(es)")
-        for i, batch in enumerate(batches.values(), 1):
-            logger.info(f"Processing batch {i}/{len(batches)} ({len(batch)} items)")
+        progress = ProgressLogger(
+            total=len(batchable_items), desc="Processed", logger=logger, color="green"
+        )
+        for batch in batches.values():
             await process_batch(batch, harness, result_queue)
+            progress.update(len(batch))
+        progress.close()
 
     if chat_items:
         from olmo_eval.common.progress import ProgressLogger
