@@ -21,7 +21,6 @@ def prepare_task_items(
     spec: str,
     model_name: str,
     overrides: dict[str, Any] | None,
-    temperature: float | None = None,
     sampling_overrides: dict[str, Any] | None = None,
 ) -> tuple[Task, list[QueueItem]]:
     """Prepare a task and its queue items.
@@ -30,7 +29,6 @@ def prepare_task_items(
         spec: Task specification string
         model_name: Model name this task is for
         overrides: Optional config overrides (num_fewshot, limit, fewshot_seed)
-        temperature: Optional temperature for sampling (deprecated, use sampling_overrides)
         sampling_overrides: Optional overrides for sampling params (temperature, max_tokens, etc.)
 
     Returns:
@@ -43,14 +41,9 @@ def prepare_task_items(
         task.config = replace(task.config, **overrides)
 
     # Build sampling params from overrides
-    # Priority: sampling_overrides > temperature > task default
     existing_params = task.config.sampling_params or SamplingParams()
 
-    # Apply legacy temperature parameter (deprecated)
-    if temperature is not None:
-        existing_params = replace(existing_params, temperature=temperature)
-
-    # Apply sampling_overrides (highest priority)
+    # Apply sampling_overrides
     if sampling_overrides:
         for key, value in sampling_overrides.items():
             if hasattr(existing_params, key):

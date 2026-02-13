@@ -29,7 +29,3 @@ class ScoringContext:
     def has_execution_env(self) -> bool:
         """Check if an execution environment is available."""
         return self.execution_env is not None and self.execution_env.is_running
-
-
-# Alias for backwards compatibility and clarity
-ExecutionContext = ScoringContext

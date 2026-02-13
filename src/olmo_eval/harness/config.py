@@ -150,7 +150,6 @@ class HarnessConfig:
         return cls(
             name=data.get("name", "default"),
             provider=ProviderConfig.from_dict(provider_data),
-            # Tool configuration (serialized as "tool_names" for backward compat)
             tools=tuple(data.get("tool_names", [])),
             system_prompt=data.get("system_prompt"),
             tool_choice=data.get("tool_choice", "auto"),
