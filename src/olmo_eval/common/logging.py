@@ -123,7 +123,7 @@ def configure_worker_logging(worker_id: str) -> logging.Logger:
         handler = FlushingStreamHandler()
         handler.setFormatter(
             logging.Formatter(
-                f"%(asctime)s [{worker_id}] [%(levelname)s] %(message)s",
+                f"%(asctime)s [%(levelname)s] [{worker_id}] %(message)s",
                 datefmt="%Y-%m-%d %H:%M:%S",
             )
         )
