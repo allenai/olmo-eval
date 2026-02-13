@@ -21,7 +21,9 @@ from rich.pretty import Pretty
 from rich.table import Table
 
 from olmo_eval.cli.utils import (
+    ConfiguredExternalEval,
     ExperimentSummary,
+    ExternalEvalSummary,
     HarnessSummary,
     OrderedMultiOption,
     RunnerConfig,
@@ -1012,24 +1014,43 @@ def _launch_external_evals(
         )
         job_configs.append(job_config)
 
-    # Print summary
+    # Build summaries
+    summaries = []
+    for i, job in enumerate(job_configs):
+        model_spec = model[i] if i < len(model) else "unknown"
+        try:
+            provider_config = get_provider_config(model_spec)
+        except Exception:
+            # Not a preset, create a default vllm_server config
+            from olmo_eval.inference.providers.config import ProviderConfig
+
+            provider_config = ProviderConfig(kind="vllm_server", model=model_spec)
+
+        configured_evals = [
+            ConfiguredExternalEval.from_eval(get_external_eval(name), provider_config, eval_args)
+            for name in external_evals
+        ]
+        summary = ExternalEvalSummary(
+            name=job.name,
+            evals=configured_evals,
+            beaker=job,
+        )
+        summaries.append(summary)
+
+    # Print summaries
     console.print()
     console.print(f"[bold]Launching {len(job_configs)} external evaluation job(s)[/bold]")
-
-    summary_table = Table(title="External Evaluation Jobs")
-    summary_table.add_column("Model", style="cyan")
-    summary_table.add_column("Evals", style="green")
-    summary_table.add_column("GPUs", style="yellow")
-
-    for i, job in enumerate(job_configs):
-        summary_table.add_row(
-            model[i] if i < len(model) else "unknown",
-            ", ".join(external_evals),
-            str(job.num_gpus),
-        )
-
-    console.print(summary_table)
     console.print()
+
+    for summary in summaries:
+        console.print(
+            Panel(
+                Pretty(summary, expand_all=True),
+                title=f"[bold]{summary.name}[/bold]",
+                border_style="cyan",
+            )
+        )
+        console.print()
 
     # Confirm and launch
     if not dry_run and not yes and not click.confirm("Proceed with launch?", default=True):

@@ -8,8 +8,10 @@ import click
 from rich.console import Console
 
 if TYPE_CHECKING:
+    from olmo_eval.evals.external.base import ExternalEval
     from olmo_eval.evals.tasks.common.base import TaskConfig
     from olmo_eval.harness import HarnessConfig
+    from olmo_eval.inference.providers.config import ProviderConfig
     from olmo_eval.launch.beaker.launcher import BeakerJobConfig
 
 
@@ -195,6 +197,65 @@ class ExperimentSummary:
     tasks: list["TaskConfig"]
     harness: HarnessSummary
     runner: RunnerConfig
+    beaker: "BeakerJobConfig"
+
+
+@dataclass
+class ConfiguredExternalEval:
+    """An external eval configured with provider and arguments."""
+
+    name: str
+    provider: "ProviderConfig"
+    args: dict[str, Any]
+    sandbox_image: str
+    working_dir: str
+    timeout: str
+    required_secrets: tuple[str, ...]
+    setup_commands: tuple[str, ...]
+    run_command: str
+
+    @classmethod
+    def from_eval(
+        cls,
+        eval_instance: "ExternalEval",
+        provider: "ProviderConfig",
+        args: dict[str, Any] | None = None,
+    ) -> "ConfiguredExternalEval":
+        """Create from an ExternalEval instance."""
+        # Merge defaults with provided args
+        merged_args: dict[str, Any] = {}
+        for arg_name, (_, default) in eval_instance.arguments.items():
+            if default is not None:
+                merged_args[arg_name] = default
+        if args:
+            merged_args.update(args)
+
+        # Format timeout
+        timeout_secs = eval_instance.timeout_seconds
+        if timeout_secs >= 3600:
+            timeout_str = f"{timeout_secs / 3600:.1f}h"
+        else:
+            timeout_str = f"{timeout_secs:.0f}s"
+
+        return cls(
+            name=eval_instance.name,
+            provider=provider,
+            args=merged_args,
+            sandbox_image=eval_instance.sandbox_image,
+            working_dir=eval_instance.working_dir,
+            timeout=timeout_str,
+            required_secrets=eval_instance.required_secrets,
+            setup_commands=eval_instance.setup_commands,
+            run_command=eval_instance.run_command,
+        )
+
+
+@dataclass
+class ExternalEvalSummary:
+    """Per-experiment summary for external eval beaker launch display."""
+
+    name: str
+    evals: list[ConfiguredExternalEval]
     beaker: "BeakerJobConfig"
 
 
