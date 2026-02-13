@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from logging import Logger
 
-DEFAULT_LOG_INTERVAL = 30.0  # seconds
+DEFAULT_LOG_INTERVAL = 10.0  # seconds
 
 # ANSI color codes
 COLORS = {
