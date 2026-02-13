@@ -8,7 +8,7 @@ from typing import Any
 
 from olmo_eval.common.types import EvalResult
 from olmo_eval.storage.backends.postgres.queries import QueryHelper
-from olmo_eval.storage.backends.postgres.session import DatabaseSession
+from olmo_eval.storage.backends.postgres.session import DatabaseSession, retry_on_transient_db_error
 from olmo_eval.storage.base import StorageBackend
 
 logger = logging.getLogger(__name__)
@@ -76,12 +76,16 @@ class PostgresBackend(StorageBackend):
         """
         self.db.initialize()
 
+    @retry_on_transient_db_error(max_retries=3, base_delay=0.5)
     def save(
         self,
         result: EvalResult,
         instances_by_task: dict[str, list[dict[str, Any]]] | None = None,
     ) -> str:
         """Save an evaluation result to PostgreSQL.
+
+        Retries automatically on transient database errors (connection issues,
+        deadlocks, serialization failures).
 
         Args:
             result: EvalResult dataclass containing run data.

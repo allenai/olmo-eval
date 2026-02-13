@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -28,10 +29,12 @@ def upload_to_s3(
     model_name: str,
     model_hash: str,
     experiment_id: str,
+    max_workers: int = 16,
 ) -> str | None:
     """Upload evaluation output to S3.
 
-    Uploads metrics.json, predictions/, and requests/ directories to S3.
+    Uploads metrics.json, predictions/, and requests/ directories to S3
+    using concurrent uploads for better performance.
 
     Path structure:
     s3://{bucket}/{prefix}/{group}/{model_name}_{hash_last_6}/{experiment_id}/
@@ -42,12 +45,14 @@ def upload_to_s3(
         model_name: Model name or path.
         model_hash: Model configuration hash.
         experiment_id: Unique experiment identifier.
+        max_workers: Maximum concurrent upload threads (default 16).
 
     Returns:
         S3 base URI if uploaded, None if upload failed.
     """
     try:
         import boto3
+        from botocore.config import Config
     except ImportError:
         logger.warning("boto3 not installed; skipping S3 upload.")
         return None
@@ -70,42 +75,68 @@ def upload_to_s3(
         experiment_id=experiment_id,
     )
 
-    # Create S3 client
-    client_kwargs: dict[str, Any] = {"region_name": s3_config.region}
+    retry_config = Config(
+        retries={
+            "max_attempts": 5,
+            "mode": "adaptive",
+        }
+    )
+
+    client_kwargs: dict[str, Any] = {"region_name": s3_config.region, "config": retry_config}
     if s3_config.endpoint_url:
         client_kwargs["endpoint_url"] = s3_config.endpoint_url
     s3 = boto3.client("s3", **client_kwargs)
 
     output_path = Path(output_dir)
+
+    # Collect all files to upload
+    files_to_upload = [p for p in output_path.rglob("*") if p.is_file()]
+
+    if not files_to_upload:
+        logger.warning(f"No files found in {output_dir}")
+        return None
+
+    def upload_single_file(local_path: Path) -> tuple[Path, bool, str | None]:
+        """Upload a single file. Returns (path, success, error_message)."""
+        relative = local_path.relative_to(output_path)
+        key = f"{prefix}/{relative}"
+
+        # Auto-detect content type
+        if local_path.suffix == ".json":
+            content_type = "application/json"
+        elif local_path.suffix == ".jsonl":
+            content_type = "application/x-ndjson"
+        else:
+            content_type = "application/octet-stream"
+
+        try:
+            s3.upload_file(
+                str(local_path),
+                s3_config.bucket,
+                key,
+                ExtraArgs={"ContentType": content_type},
+            )
+            return (local_path, True, None)
+        except Exception as e:
+            return (local_path, False, str(e))
+
+    # Upload files concurrently
     uploaded_count = 0
     failed_count = 0
+    effective_workers = min(max_workers, len(files_to_upload))
 
-    # Upload all files in output directory
-    for local_path in output_path.rglob("*"):
-        if local_path.is_file():
-            relative = local_path.relative_to(output_path)
-            key = f"{prefix}/{relative}"
+    with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+        futures = {executor.submit(upload_single_file, f): f for f in files_to_upload}
 
-            # Auto-detect content type
-            if local_path.suffix == ".json":
-                content_type = "application/json"
-            elif local_path.suffix == ".jsonl":
-                content_type = "application/x-ndjson"
-            else:
-                content_type = "application/octet-stream"
-
-            try:
-                s3.upload_file(
-                    str(local_path),
-                    s3_config.bucket,
-                    key,
-                    ExtraArgs={"ContentType": content_type},
-                )
+        for future in as_completed(futures):
+            local_path, success, error = future.result()
+            if success:
                 uploaded_count += 1
-            except Exception as e:
+            else:
                 failed_count += 1
-                logger.error(f"Failed to upload {relative} to s3://{s3_config.bucket}/{key}: {e}")
-                console.print(f"[red]Failed to upload {relative}:[/red] {e}")
+                relative = local_path.relative_to(output_path)
+                logger.error(f"Failed to upload {relative}: {error}")
+                console.print(f"[red]Failed to upload {relative}:[/red] {error}")
 
     s3_location = f"s3://{s3_config.bucket}/{prefix}"
     if failed_count > 0:
