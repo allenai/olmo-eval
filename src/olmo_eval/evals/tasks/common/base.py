@@ -467,7 +467,7 @@ class Task(ABC):
                 if execution_env is None:
                     raise SandboxRequiredError(
                         f"{scorer.__class__.__name__} requires a sandbox. "
-                        "Configure sandbox in HarnessConfig with enabled=True."
+                        "Configure sandboxes in HarnessConfig."
                     )
                 execution_scorers[name] = scorer
             else:

@@ -193,8 +193,8 @@ register_variant(
 # Pass@K Execution Variants (require sandbox)
 # =============================================================================
 # These variants execute generated code against test cases.
-# Requires HarnessConfig with sandbox enabled:
-#   sandbox=SandboxConfig(enabled=True, image="volcengine/sandbox-fusion:server-20250609")
+# Requires HarnessConfig with sandboxes configured:
+#   sandboxes=(SandboxConfig(image="..."),)
 
 register_variant(
     "mbpp",

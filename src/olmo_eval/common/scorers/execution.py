@@ -52,7 +52,7 @@ class ExecutionScorer(Scorer):
         """
         raise SandboxRequiredError(
             f"{self.__class__.__name__} requires a sandbox execution environment. "
-            "Configure sandbox in HarnessConfig with enabled=True."
+            "Configure sandboxes in HarnessConfig."
         )
 
     @abstractmethod
