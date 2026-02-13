@@ -2,15 +2,130 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, cluster_has_weka
+from olmo_eval.common.constants.infrastructure import (
+    BEAKER_DEFAULT_BUDGET,
+    BEAKER_RESULT_DIR,
+    cluster_has_weka,
+)
 from olmo_eval.launch.beaker.mirror import log
 
 if TYPE_CHECKING:
     from olmo_eval.cli.beaker.config_loader import LaunchConfig
     from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan
     from olmo_eval.launch import BeakerJobConfig
+
+
+def assemble_external_eval_job(
+    name: str,
+    model: str,
+    external_evals: list[str],
+    cluster: str,
+    num_gpus: int,
+    workspace: str,
+    beaker_image: str,
+    priority: str = "normal",
+    timeout: str = "24h",
+    budget: str | None = None,
+    groups: list[str] | None = None,
+    tensor_parallel_size: int = 1,
+    s3_bucket: str | None = None,
+    s3_prefix: str | None = None,
+    s3_region: str = "us-east-1",
+    env_secrets: list[tuple[str, str]] | None = None,
+    inject_aws_credentials: bool = False,
+    inject_gcs_credentials: bool = False,
+) -> Any:
+    """Assemble a BeakerJobConfig for running external evaluations.
+
+    Args:
+        name: Experiment name.
+        model: Model name or path.
+        external_evals: List of external evaluation names.
+        cluster: Beaker cluster name.
+        num_gpus: Number of GPUs.
+        workspace: Beaker workspace.
+        beaker_image: Container image to use.
+        priority: Job priority.
+        timeout: Job timeout.
+        budget: Beaker budget.
+        groups: Beaker groups.
+        tensor_parallel_size: Tensor parallel size for vLLM.
+        s3_bucket: S3 bucket for results.
+        s3_prefix: S3 prefix for results.
+        s3_region: S3 region.
+        env_secrets: List of (env_var, secret_name) tuples.
+        inject_aws_credentials: Whether to inject AWS credentials.
+        inject_gcs_credentials: Whether to inject GCS credentials.
+
+    Returns:
+        Configured BeakerJobConfig.
+    """
+    from olmo_eval.launch import BeakerEnvSecret, BeakerJobConfig
+
+    # Build command
+    command: list[str] = ["olmo-eval", "run-external"]
+    command.extend(["-m", model])
+    for eval_name in external_evals:
+        command.extend(["-e", eval_name])
+    command.extend(["-O", BEAKER_RESULT_DIR])
+
+    if tensor_parallel_size > 1:
+        command.extend(["--tp", str(tensor_parallel_size)])
+
+    # Environment variables
+    env_vars: dict[str, str] = {
+        "BEAKER_ALLOW_SUBCONTAINERS": "1",
+        "BEAKER_SKIP_DOCKER_SOCKET": "1",
+    }
+
+    if cluster_has_weka(cluster):
+        env_vars.update(
+            {
+                "HF_HOME": "/weka/oe-eval-default/oyvindt/hf-cache",
+                "HF_HUB_CACHE": "/weka/oe-eval-default/oyvindt/hf-cache",
+                "UV_LINK_MODE": "copy",
+            }
+        )
+
+    # Get registry mirror URL
+    try:
+        from olmo_eval.launch.beaker.mirror import get_registry_mirror_url
+
+        mirror_url = get_registry_mirror_url()
+        env_vars["MIRROR_HOSTS"] = mirror_url
+        setup_registry_mirror = True
+    except Exception:
+        setup_registry_mirror = False
+
+    # Build env secrets
+    beaker_env_secrets = []
+    if env_secrets:
+        beaker_env_secrets = [
+            BeakerEnvSecret(env_var, secret_name) for env_var, secret_name in env_secrets
+        ]
+
+    return BeakerJobConfig(
+        name=name,
+        command=command,
+        cluster=cluster,
+        num_gpus=num_gpus,
+        priority=priority,
+        timeout=timeout,
+        shared_memory="10GiB",
+        workspace=workspace,
+        budget=budget or BEAKER_DEFAULT_BUDGET,
+        groups=groups or [],
+        beaker_image=beaker_image,
+        inject_aws_credentials=inject_aws_credentials,
+        inject_gcs_credentials=inject_gcs_credentials,
+        env_vars=env_vars,
+        env_secrets=beaker_env_secrets,
+        enable_sandbox=True,
+        setup_registry_mirror=setup_registry_mirror,
+        extras=["sandbox"],
+    )
 
 
 class JobConfigAssembler:

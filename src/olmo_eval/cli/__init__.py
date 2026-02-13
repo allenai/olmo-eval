@@ -17,6 +17,7 @@ import olmo_eval.evals.tasks  # noqa: F401 - triggers task registration
 from olmo_eval.cli.beaker import beaker
 from olmo_eval.cli.results import results
 from olmo_eval.cli.run import run
+from olmo_eval.cli.run_external import run_external
 from olmo_eval.cli.task import task
 from olmo_eval.cli.utils import console
 from olmo_eval.common.constants import get_model_presets
@@ -37,6 +38,7 @@ main.add_command(run)
 main.add_command(beaker)
 main.add_command(results)
 main.add_command(task)
+main.add_command(run_external)
 
 
 @main.command()
@@ -188,6 +190,76 @@ def suites(filter: str) -> None:
             table.add_row(name, f"{task_count} tasks", suite.aggregation.value)
 
     console.print(table)
+
+
+@main.command(name="external-evals")
+@click.option("--filter", "-f", default="", help="Filter by name substring")
+def external_evals(filter: str) -> None:
+    """List available external evaluations with detailed configuration."""
+    from rich.panel import Panel
+
+    from olmo_eval.evals.external import get_external_config, list_external_evals
+
+    eval_names = list_external_evals()
+    if not eval_names:
+        console.print("[dim]No external evaluations registered.[/dim]")
+        return
+
+    for name in eval_names:
+        if filter.lower() not in name.lower():
+            continue
+
+        config = get_external_config(name)
+
+        # Format timeout
+        if config.timeout >= 3600:
+            timeout_str = f"{config.timeout / 3600:.1f}h"
+        else:
+            timeout_str = f"{config.timeout:.0f}s"
+
+        # Build details table
+        details = Table(show_header=False, box=None, padding=(0, 1))
+        details.add_column("Field", style="dim", width=18)
+        details.add_column("Value", overflow="fold")
+
+        details.add_row("Image", f"[green]{config.sandbox_image}[/green]")
+        details.add_row("Timeout", f"[yellow]{timeout_str}[/yellow]")
+        details.add_row("Working Dir", config.working_dir)
+
+        # Setup commands
+        if config.setup_commands:
+            setup_lines = "\n".join(f"  {cmd}" for cmd in config.setup_commands)
+            details.add_row("Setup Commands", f"\n{setup_lines}")
+
+        # Run command
+        if config.run_command:
+            # Wrap long commands
+            run_cmd = config.run_command
+            if len(run_cmd) > 60:
+                run_cmd = run_cmd.replace(" --", "\n    --").replace(" -", "\n    -")
+            details.add_row("Run Command", run_cmd)
+
+        # Environment variables
+        details.add_row("API Base Env", config.api_base_env_var)
+        details.add_row("Model Env", config.model_env_var)
+
+        if config.environment:
+            env_str = ", ".join(f"{k}={v}" for k, v in config.environment)
+            details.add_row("Environment", env_str)
+
+        if config.required_secrets:
+            secrets_str = ", ".join(config.required_secrets)
+            details.add_row("Required Secrets", f"[red]{secrets_str}[/red]")
+
+        console.print(
+            Panel(
+                details,
+                title=f"[bold cyan]{name}[/bold cyan]",
+                title_align="left",
+                border_style="cyan",
+            )
+        )
+        console.print()
 
 
 @main.command(name="suite-info")

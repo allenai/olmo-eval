@@ -158,7 +158,7 @@ def clusters(filter: str, aliases: bool, sort: str, reverse: bool) -> None:
 
     # Print aliases table
     console.print()
-    alias_table = Table(title="Cluster Aliases (for olmo-eval beaker launch)")
+    alias_table = Table(title="Cluster Aliases")
     alias_table.add_column("Alias", style="cyan")
     alias_table.add_column("Clusters", style="dim")
 

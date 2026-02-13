@@ -189,6 +189,13 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     help="Harness preset name",
 )
 @click.option(
+    "--external-eval",
+    "-E",
+    "external_evals",
+    multiple=True,
+    help="External evaluation name(s) to run instead of tasks (can specify multiple)",
+)
+@click.option(
     "--uv-cache-dir",
     default=BEAKER_UV_CACHE_DIR,
     show_default=True,
@@ -236,6 +243,7 @@ def launch(
     inspect_response: bool,
     inspect_request: bool,
     harness: str | None,
+    external_evals: tuple[str, ...],
     uv_cache_dir: str,
     secret_env: tuple[str, ...],
 ) -> None:
@@ -329,6 +337,31 @@ def launch(
         "uv_cache_dir": uv_cache_dir,
         "secret_env_overrides": secret_env_overrides,
     }
+
+    # Handle external evaluations mode
+    if external_evals:
+        _launch_external_evals(
+            external_evals=list(external_evals),
+            model=model,
+            name=name,
+            cluster=cluster,
+            priority=priority,
+            timeout=timeout,
+            workspace=workspace,
+            budget=budget,
+            image=image,
+            group=group,
+            dry_run=dry_run,
+            yes=yes,
+            follow=follow,
+            aws_credentials=aws_credentials,
+            gcs_credentials=gcs_credentials,
+            s3_bucket=s3_bucket,
+            s3_prefix=s3_prefix,
+            s3_region=s3_region,
+            secret_env_overrides=secret_env_overrides,
+        )
+        return
 
     # Load configuration
     config_loader = LaunchConfigLoader(config, cli_args)
@@ -782,3 +815,210 @@ def _apply_harness_overrides(harness_config, overrides: list[str]):
     merged = OmegaConf.merge(base, override_config)
     harness_dict = OmegaConf.to_container(merged, resolve=True)
     return HarnessConfig.from_dict(harness_dict)  # type: ignore[arg-type]
+
+
+def _launch_external_evals(
+    external_evals: list[str],
+    model: tuple[str, ...],
+    name: str | None,
+    cluster: str | None,
+    priority: str | None,
+    timeout: str | None,
+    workspace: str | None,
+    budget: str | None,
+    image: str | None,
+    group: tuple[str, ...],
+    dry_run: bool,
+    yes: bool,
+    follow: bool,
+    aws_credentials: bool | None,
+    gcs_credentials: bool | None,
+    s3_bucket: str | None,
+    s3_prefix: str | None,
+    s3_region: str,
+    secret_env_overrides: dict[str, str],
+) -> None:
+    """Launch external evaluation jobs on Beaker.
+
+    This is a separate path from the normal task-based evaluation launch.
+    External evaluations run in sandbox containers with subcontainer support.
+    """
+    from datetime import datetime
+
+    from olmo_eval.cli.beaker.job_assembler import assemble_external_eval_job
+    from olmo_eval.common.configs import get_provider_config
+    from olmo_eval.common.constants.infrastructure import (
+        BEAKER_DEFAULT_WORKSPACE,
+        BEAKER_SANDBOX_IMAGE,
+    )
+    from olmo_eval.evals.external import get_external_config, is_external_eval_registered
+    from olmo_eval.launch import BeakerLauncher
+    from olmo_eval.launch.beaker.secrets import ensure_common_secrets, ensure_task_secrets
+
+    # Validate external evals exist
+    for eval_name in external_evals:
+        if not is_external_eval_registered(eval_name):
+            from olmo_eval.evals.external import list_external_evals
+
+            available = list_external_evals()
+            console.print(
+                f"[red]Error:[/red] External eval '{eval_name}' not found. "
+                f"Available: {', '.join(available) or '(none)'}"
+            )
+            raise SystemExit(1)
+
+    # Validate model is provided
+    if not model:
+        console.print("[red]Error:[/red] --model is required for external evaluations")
+        raise SystemExit(1)
+
+    # Validate cluster is provided
+    if not cluster:
+        console.print(
+            "[red]Error:[/red] --cluster is required for external evaluations. "
+            "Use -c h100, -c a100, or a full cluster name."
+        )
+        raise SystemExit(1)
+
+    # Use defaults if not provided
+    effective_cluster = cluster
+    effective_workspace = workspace or BEAKER_DEFAULT_WORKSPACE
+    effective_priority = priority or "normal"
+    effective_timeout = timeout or "24h"
+    effective_image = image or BEAKER_SANDBOX_IMAGE
+
+    # Create launcher
+    launcher = BeakerLauncher(workspace=effective_workspace)
+
+    # Detect credential needs
+    inject_aws = aws_credentials or False
+    inject_gcs = gcs_credentials or False
+
+    # Check model paths for credential needs
+    for model_spec in model:
+        if model_spec.startswith("s3://"):
+            inject_aws = True
+        elif model_spec.startswith("gs://"):
+            inject_gcs = True
+
+    # Auto-generate group if needed
+    effective_groups = list(group) if group else []
+    if not effective_groups:
+        effective_groups = [f"external-eval-{datetime.now().strftime('%Y%m%d-%H%M%S')}"]
+
+    # Handle group creation
+    _handle_group_creation(launcher, effective_groups, dry_run, yes)
+
+    # Collect required secrets from external evals
+    all_required_secrets: set[str] = set()
+    for eval_name in external_evals:
+        config = get_external_config(eval_name)
+        if config.required_secrets:
+            all_required_secrets.update(config.required_secrets)
+
+    # Collect required secrets from models
+    for model_spec in model:
+        try:
+            provider_config = get_provider_config(model_spec)
+            if provider_config.required_secrets:
+                all_required_secrets.update(provider_config.required_secrets)
+        except Exception:
+            pass
+
+    # Ensure secrets
+    if dry_run:
+        common_secrets: list[tuple[str, str]] = []
+        task_secrets: list[tuple[str, str]] = []
+    else:
+        common_secrets = ensure_common_secrets(workspace=effective_workspace)
+        try:
+            task_secrets = ensure_task_secrets(
+                workspace=effective_workspace,
+                required_secrets=all_required_secrets,
+            )
+        except ValueError as e:
+            console.print(f"[red]Error:[/red] {e}")
+            raise SystemExit(1) from None
+
+    # Build env secrets list
+    env_secrets = common_secrets + task_secrets
+
+    # Add explicit secret overrides
+    env_secrets.extend(
+        (env_var, beaker_secret) for beaker_secret, env_var in secret_env_overrides.items()
+    )
+
+    if dry_run:
+        console.print("[yellow]Dry run mode - not submitting[/yellow]")
+
+    # Build jobs for each model
+    job_configs = []
+    for model_spec in model:
+        # Get provider config to determine GPU requirements
+        try:
+            provider_config = get_provider_config(model_spec)
+            num_gpus = provider_config.kwargs.get("tensor_parallel_size", 1)
+        except Exception:
+            num_gpus = 1
+
+        # Generate experiment name
+        model_alias = model_spec.split("/")[-1].replace(".", "-")[:32]
+        exp_name = name or f"external-{model_alias}-{'-'.join(external_evals)}"
+
+        job_config = assemble_external_eval_job(
+            name=exp_name,
+            model=model_spec,
+            external_evals=external_evals,
+            cluster=effective_cluster,
+            num_gpus=num_gpus,
+            workspace=effective_workspace,
+            beaker_image=effective_image,
+            priority=effective_priority,
+            timeout=effective_timeout,
+            budget=budget,
+            groups=effective_groups,
+            tensor_parallel_size=num_gpus,
+            s3_bucket=s3_bucket,
+            s3_prefix=s3_prefix,
+            s3_region=s3_region,
+            env_secrets=env_secrets,
+            inject_aws_credentials=inject_aws,
+            inject_gcs_credentials=inject_gcs,
+        )
+        job_configs.append(job_config)
+
+    # Print summary
+    console.print()
+    console.print(f"[bold]Launching {len(job_configs)} external evaluation job(s)[/bold]")
+
+    summary_table = Table(title="External Evaluation Jobs")
+    summary_table.add_column("Model", style="cyan")
+    summary_table.add_column("Evals", style="green")
+    summary_table.add_column("GPUs", style="yellow")
+
+    for i, job in enumerate(job_configs):
+        summary_table.add_row(
+            model[i] if i < len(model) else "unknown",
+            ", ".join(external_evals),
+            str(job.num_gpus),
+        )
+
+    console.print(summary_table)
+    console.print()
+
+    # Confirm and launch
+    if not dry_run and not yes and not click.confirm("Proceed with launch?", default=True):
+        console.print("[yellow]Launch cancelled[/yellow]")
+        raise SystemExit(0)
+
+    launched_experiments: list[str] = []
+    for job_config in job_configs:
+        if not dry_run:
+            experiment = launcher.launch(job_config)
+            if experiment:
+                console.print(f"[green]Launched:[/green] {launcher.experiment_url(experiment)}")
+                launched_experiments.append(experiment.id)
+
+    # Follow launched experiments
+    if launched_experiments and not dry_run:
+        _handle_follow(launcher, launched_experiments, follow)
