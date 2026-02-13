@@ -11,6 +11,15 @@ if TYPE_CHECKING:
 
 DEFAULT_LOG_INTERVAL = 30.0  # seconds
 
+# ANSI color codes
+COLORS = {
+    "green": "\033[32m",
+    "blue": "\033[34m",
+    "cyan": "\033[36m",
+    "yellow": "\033[33m",
+    "reset": "\033[0m",
+}
+
 
 class ProgressLogger:
     """Time-based progress logger that works without a TTY.
@@ -29,6 +38,7 @@ class ProgressLogger:
         desc: str = "Processing",
         logger: Logger | None = None,
         log_interval: float = DEFAULT_LOG_INTERVAL,
+        color: str | None = None,
     ) -> None:
         """Initialize progress logger.
 
@@ -37,15 +47,24 @@ class ProgressLogger:
             desc: Description prefix for log messages.
             logger: Logger to use (defaults to module logger).
             log_interval: Seconds between progress logs.
+            color: Optional color name (green, blue, cyan, yellow).
         """
         self.total = total
         self.desc = desc
+        self.color = color
         self.logger = logger or logging.getLogger(__name__)
         self.log_interval = log_interval
 
         self.count = 0
         self.start_time = time.time()
         self.last_log_time = self.start_time
+
+    def _format_desc(self) -> str:
+        """Format description with padding and optional color."""
+        padded = f"{self.desc:<9}"
+        if self.color and self.color in COLORS:
+            return f"{COLORS[self.color]}{padded}{COLORS['reset']}"
+        return padded
 
     def update(self, n: int = 1) -> None:
         """Update progress count and log if interval elapsed.
@@ -67,7 +86,8 @@ class ProgressLogger:
         pct = (self.count / self.total * 100) if self.total > 0 else 0.0
 
         self.logger.info(
-            f"{self.desc}: {self.count}/{self.total} ({pct:.0f}%) at {rate:.1f} items/sec"
+            f"{self._format_desc()} {self.count:>6}/{self.total} "
+            f"({pct:>3.0f}%) at {rate:.1f} items/sec"
         )
 
     def close(self) -> None:
@@ -76,7 +96,8 @@ class ProgressLogger:
         rate = self.count / elapsed if elapsed > 0 else 0.0
 
         self.logger.info(
-            f"{self.desc}: done {self.count}/{self.total} in {elapsed:.1f}s ({rate:.1f} items/sec)"
+            f"{self._format_desc()} done {self.count:>6}/{self.total} "
+            f"in {elapsed:.1f}s ({rate:.1f} items/sec)"
         )
 
     def __enter__(self) -> ProgressLogger:

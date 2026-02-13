@@ -38,6 +38,25 @@ ALWAYS_RETRY_EXCEPTION_TYPES = (
 )
 
 
+def _format_cause(cause: BaseException) -> str:
+    """Format the cause of an exception with fallback for empty strings."""
+    cause_type = type(cause).__qualname__
+    cause_str = str(cause)
+
+    # If str(cause) is non-empty, use it
+    if cause_str:
+        return f"{cause_type}: {cause_str}"
+
+    # Try args (often contains the real message)
+    if cause.args:
+        args_str = ", ".join(str(a) for a in cause.args if a)
+        if args_str:
+            return f"{cause_type}: {args_str}"
+
+    # Just return the type name
+    return cause_type
+
+
 def format_error(exc: Exception) -> str:
     """Build a detailed, single-log-entry description of an exception.
 
@@ -77,7 +96,7 @@ def format_error(exc: Exception) -> str:
     # The wrapped cause often has the real reason (e.g., httpx.ReadTimeout)
     cause = exc.__cause__
     if cause is not None:
-        parts.append(f"  cause: {type(cause).__qualname__}: {cause}")
+        parts.append(f"  cause: {_format_cause(cause)}")
 
     return "\n".join(parts)
 

@@ -262,7 +262,10 @@ def scoring_worker(
                         if batch:
                             if progress is None:
                                 progress = ProgressLogger(
-                                    total=total_instances, desc="Scoring", logger=logger
+                                    total=total_instances,
+                                    desc="Scored",
+                                    logger=logger,
+                                    color="blue",
                                 )
                             await process_batch(batch, scoring_context, progress)
                             batch = []
@@ -275,7 +278,9 @@ def scoring_worker(
 
                 # Create progress logger on first item
                 if progress is None:
-                    progress = ProgressLogger(total=total_instances, desc="Scoring", logger=logger)
+                    progress = ProgressLogger(
+                        total=total_instances, desc="Scored", logger=logger, color="blue"
+                    )
 
                 batch.append(item)
 
