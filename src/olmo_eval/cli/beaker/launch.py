@@ -196,6 +196,13 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     help="External evaluation name(s) to run instead of tasks (can specify multiple)",
 )
 @click.option(
+    "--eval-arg",
+    "-A",
+    "eval_args",
+    multiple=True,
+    help="Arguments for external evals (key=value format, e.g., -A domain=retail)",
+)
+@click.option(
     "--uv-cache-dir",
     default=BEAKER_UV_CACHE_DIR,
     show_default=True,
@@ -244,6 +251,7 @@ def launch(
     inspect_request: bool,
     harness: str | None,
     external_evals: tuple[str, ...],
+    eval_args: tuple[str, ...],
     uv_cache_dir: str,
     secret_env: tuple[str, ...],
 ) -> None:
@@ -340,6 +348,13 @@ def launch(
 
     # Handle external evaluations mode
     if external_evals:
+        # Parse eval_args
+        parsed_eval_args: dict[str, str] = {}
+        for arg in eval_args:
+            if "=" in arg:
+                key, value = arg.split("=", 1)
+                parsed_eval_args[key] = value
+
         _launch_external_evals(
             external_evals=list(external_evals),
             model=model,
@@ -360,6 +375,7 @@ def launch(
             s3_prefix=s3_prefix,
             s3_region=s3_region,
             secret_env_overrides=secret_env_overrides,
+            eval_args=parsed_eval_args if parsed_eval_args else None,
         )
         return
 
@@ -837,6 +853,7 @@ def _launch_external_evals(
     s3_prefix: str | None,
     s3_region: str,
     secret_env_overrides: dict[str, str],
+    eval_args: dict[str, str] | None = None,
 ) -> None:
     """Launch external evaluation jobs on Beaker.
 
@@ -851,7 +868,7 @@ def _launch_external_evals(
         BEAKER_DEFAULT_WORKSPACE,
         BEAKER_SANDBOX_IMAGE,
     )
-    from olmo_eval.evals.external import get_external_config, is_external_eval_registered
+    from olmo_eval.evals.external import get_external_eval, is_external_eval_registered
     from olmo_eval.launch import BeakerLauncher
     from olmo_eval.launch.beaker.secrets import ensure_common_secrets, ensure_task_secrets
 
@@ -912,9 +929,9 @@ def _launch_external_evals(
     # Collect required secrets from external evals
     all_required_secrets: set[str] = set()
     for eval_name in external_evals:
-        config = get_external_config(eval_name)
-        if config.required_secrets:
-            all_required_secrets.update(config.required_secrets)
+        eval_instance = get_external_eval(eval_name)
+        if eval_instance.required_secrets:
+            all_required_secrets.update(eval_instance.required_secrets)
 
     # Collect required secrets from models
     for model_spec in model:
@@ -984,6 +1001,7 @@ def _launch_external_evals(
             env_secrets=env_secrets,
             inject_aws_credentials=inject_aws,
             inject_gcs_credentials=inject_gcs,
+            eval_args=eval_args,
         )
         job_configs.append(job_config)
 

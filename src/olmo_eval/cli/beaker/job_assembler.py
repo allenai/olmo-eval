@@ -36,6 +36,7 @@ def assemble_external_eval_job(
     env_secrets: list[tuple[str, str]] | None = None,
     inject_aws_credentials: bool = False,
     inject_gcs_credentials: bool = False,
+    eval_args: dict[str, str] | None = None,
 ) -> Any:
     """Assemble a BeakerJobConfig for running external evaluations.
 
@@ -58,6 +59,7 @@ def assemble_external_eval_job(
         env_secrets: List of (env_var, secret_name) tuples.
         inject_aws_credentials: Whether to inject AWS credentials.
         inject_gcs_credentials: Whether to inject GCS credentials.
+        eval_args: Arguments to pass to external evaluations.
 
     Returns:
         Configured BeakerJobConfig.
@@ -73,6 +75,11 @@ def assemble_external_eval_job(
 
     if tensor_parallel_size > 1:
         command.extend(["--tp", str(tensor_parallel_size)])
+
+    # Add eval_args
+    if eval_args:
+        for key, value in eval_args.items():
+            command.extend(["-a", f"{key}={value}"])
 
     # Environment variables
     env_vars: dict[str, str] = {

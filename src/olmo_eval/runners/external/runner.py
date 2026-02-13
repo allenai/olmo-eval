@@ -14,8 +14,8 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.evals.external import (
     ExternalEvalResult,
     get_external_eval,
-    is_running_in_beaker,
     list_external_evals,
+    should_use_host_network,
 )
 from olmo_eval.inference.providers.config import ProviderConfig
 
@@ -37,6 +37,7 @@ class ExternalEvalRunner:
         output_dir: Directory to write results.
         container_runtime: Container runtime to use (docker or podman).
         server_port: Port for the vLLM server.
+        eval_args: Arguments to pass to external evaluations.
     """
 
     provider_config: ProviderConfig
@@ -44,6 +45,7 @@ class ExternalEvalRunner:
     output_dir: str = BEAKER_RESULT_DIR
     container_runtime: str = "podman"
     server_port: int = 8000
+    eval_args: dict[str, Any] = field(default_factory=dict)
 
     def validate(self) -> None:
         """Validate runner configuration.
@@ -78,8 +80,8 @@ class ExternalEvalRunner:
         start_time = time.time()
         results: dict[str, ExternalEvalResult] = {}
 
-        # Determine if we're in Beaker
-        in_beaker = is_running_in_beaker()
+        # Determine if host networking is needed
+        use_host_network = should_use_host_network()
 
         # Build provider URL
         base_url = self.provider_config.base_url
@@ -110,9 +112,10 @@ class ExternalEvalRunner:
                     external_eval = get_external_eval(eval_name)
                     result = await external_eval.execute_with_provider(
                         provider_config=self.provider_config.with_overrides(base_url=base_url),
+                        args=self.eval_args,
                         output_dir=self.output_dir,
                         container_runtime=self.container_runtime,
-                        in_beaker=in_beaker,
+                        use_host_network=use_host_network,
                     )
                     results[eval_name] = result
 

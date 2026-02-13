@@ -129,6 +129,26 @@ class SandboxManager:
         executor = self.get_executor(frozenset())
         return await executor.execute(command, timeout)
 
+    async def execute_command(
+        self,
+        command: str,
+        timeout: float | None = None,
+    ) -> ExecutionResult:
+        """Execute a command and return structured result.
+
+        This method implements the ExecutionEnvironment protocol.
+        For capability-based routing, use execute_command_with_capabilities.
+
+        Args:
+            command: The command to execute.
+            timeout: Optional timeout override in seconds.
+
+        Returns:
+            ExecutionResult with success status, output, and exit code.
+        """
+        executor = self.get_executor(frozenset())
+        return await executor.execute_command(command, timeout)
+
     async def execute_with_capabilities(
         self,
         command: str,

@@ -31,26 +31,27 @@ def get_host_ip() -> str:
         return "127.0.0.1"
 
 
-def is_running_in_beaker() -> bool:
-    """Check if we're running inside a Beaker job.
+def should_use_host_network() -> bool:
+    """Check if containers should use host networking.
 
-    Returns:
-        True if running in Beaker, False otherwise.
+    Returns True when running in an environment where containers need
+    --network=host to access the host's localhost services.
     """
+    # Check for containerized job environments
     return os.environ.get("BEAKER_JOB_ID") is not None
 
 
 def translate_url_for_container(
     url: str,
     runtime: str = "podman",
-    use_network_host: bool = False,
+    use_host_network: bool = False,
 ) -> str:
     """Translate a localhost URL for access from within a container.
 
     Args:
         url: Original URL (e.g., "http://localhost:8000").
         runtime: Container runtime ("docker" or "podman").
-        use_network_host: If True, container uses --network=host and
+        use_host_network: If True, container uses --network=host and
             localhost works directly.
 
     Returns:
@@ -59,7 +60,7 @@ def translate_url_for_container(
     parsed = urlparse(url)
 
     # If using network=host, localhost works directly
-    if use_network_host:
+    if use_host_network:
         return url
 
     # Only translate localhost URLs
@@ -97,46 +98,42 @@ def translate_url_for_container(
 def get_provider_url_for_container(
     base_url: str,
     runtime: str = "podman",
-    in_beaker: bool | None = None,
+    use_host_network: bool | None = None,
 ) -> str:
     """Get the provider URL translated for container access.
 
     Args:
         base_url: Base URL of the inference provider.
         runtime: Container runtime to use.
-        in_beaker: Whether running in Beaker. Auto-detected if None.
+        use_host_network: Whether to use host networking. Auto-detected if None.
 
     Returns:
         URL accessible from within the container.
     """
-    if in_beaker is None:
-        in_beaker = is_running_in_beaker()
-
-    # In Beaker with Podman subcontainers, --network=host is used
-    # so localhost works directly
-    use_network_host = in_beaker
+    if use_host_network is None:
+        use_host_network = should_use_host_network()
 
     return translate_url_for_container(
         base_url,
         runtime=runtime,
-        use_network_host=use_network_host,
+        use_host_network=use_host_network,
     )
 
 
 def get_docker_network_args(
     runtime: str = "podman",
-    use_network_host: bool = False,
+    use_host_network: bool = False,
 ) -> tuple[str, ...]:
     """Get Docker/Podman args for network configuration.
 
     Args:
         runtime: Container runtime to use.
-        use_network_host: Whether to use host networking.
+        use_host_network: Whether to use host networking.
 
     Returns:
         Tuple of docker args for network configuration.
     """
-    if use_network_host:
+    if use_host_network:
         return ("--network=host",)
 
     if runtime == "docker":

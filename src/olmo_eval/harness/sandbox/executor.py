@@ -211,6 +211,25 @@ class SandboxExecutor:
         Raises:
             RuntimeError: If the sandbox is not started.
         """
+        result = await self.execute_command(command, timeout)
+        output = result.output
+        if result.exit_code != 0:
+            output += f"\n[Exit code: {result.exit_code}]"
+        return output
+
+    async def execute_command(self, command: str, timeout: float | None = None) -> ExecutionResult:
+        """Execute a command in the sandbox and return structured result.
+
+        Args:
+            command: The bash command to execute.
+            timeout: Optional timeout override in seconds.
+
+        Returns:
+            ExecutionResult with success status, output, and exit code.
+
+        Raises:
+            RuntimeError: If the sandbox is not started.
+        """
         if self._runtime is None:
             raise RuntimeError("Sandbox not started. Call start() first or use async context.")
 
@@ -225,16 +244,18 @@ class SandboxExecutor:
             )
         )
 
-        # Combine stdout and stderr, include exit code information
+        # Combine stdout and stderr
         output_parts = []
         if response.stdout:
             output_parts.append(response.stdout)
         if response.stderr:
             output_parts.append(response.stderr)
-        if response.exit_code != 0:
-            output_parts.append(f"\n[Exit code: {response.exit_code}]")
 
-        return "".join(output_parts) if output_parts else ""
+        return ExecutionResult(
+            success=response.exit_code == 0,
+            output="".join(output_parts) if output_parts else "",
+            exit_code=response.exit_code,
+        )
 
     async def execute_code(
         self,

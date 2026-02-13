@@ -65,9 +65,11 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR
     help="Print configuration without running",
 )
 @click.option(
-    "--list-evals",
-    is_flag=True,
-    help="List available external evaluations and exit",
+    "--arg",
+    "-a",
+    "eval_args",
+    multiple=True,
+    help="Arguments for external evals (key=value format)",
 )
 def run_external(
     model: str,
@@ -79,7 +81,7 @@ def run_external(
     port: int,
     runtime: str,
     dry_run: bool,
-    list_evals: bool,
+    eval_args: tuple[str, ...],
 ) -> None:
     """Run external black-box evaluations.
 
@@ -91,6 +93,9 @@ def run_external(
         # Run tau2_bench on a model
         olmo-eval run-external -m meta-llama/Llama-3.1-8B-Instruct -e tau2_bench
 
+        # Run with custom arguments
+        olmo-eval run-external -m my-model -e tau2_bench -a domain=retail -a num_trials=10
+
         # Run with custom output directory
         olmo-eval run-external -m my-model -e tau2_bench -O ./results
 
@@ -98,20 +103,8 @@ def run_external(
         olmo-eval run-external -m my-model -e tau2_bench -e other_bench
     """
     from olmo_eval.common.logging import configure_logging
-    from olmo_eval.evals.external import list_external_evals
 
     configure_logging(level="INFO")
-
-    # Handle --list-evals flag
-    if list_evals:
-        available = list_external_evals()
-        if not available:
-            console.print("[dim]No external evaluations registered.[/dim]")
-        else:
-            console.print("[bold]Available external evaluations:[/bold]")
-            for name in available:
-                console.print(f"  - {name}")
-        return
 
     # Build provider config
     from olmo_eval.common.configs import get_provider_config
@@ -134,6 +127,15 @@ def run_external(
         tensor_parallel_size=tensor_parallel_size if tensor_parallel_size > 1 else None,
     )
 
+    # Parse eval_args
+    parsed_args: dict[str, str] = {}
+    for arg in eval_args:
+        if "=" in arg:
+            key, value = arg.split("=", 1)
+            parsed_args[key] = value
+        else:
+            console.print(f"[yellow]Warning:[/yellow] Invalid arg '{arg}', use key=value")
+
     # Create runner
     from olmo_eval.runners.external import ExternalEvalRunner
 
@@ -143,6 +145,7 @@ def run_external(
         output_dir=output_dir,
         container_runtime=runtime,
         server_port=port,
+        eval_args=parsed_args,
     )
 
     # Validate
@@ -168,6 +171,8 @@ def run_external(
     table.add_row("Container Runtime", runtime)
     if tensor_parallel_size > 1:
         table.add_row("Tensor Parallel Size", str(tensor_parallel_size))
+    if parsed_args:
+        table.add_row("Eval Args", ", ".join(f"{k}={v}" for k, v in parsed_args.items()))
 
     console.print(Panel(table))
 

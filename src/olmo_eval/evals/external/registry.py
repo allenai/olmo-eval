@@ -1,4 +1,4 @@
-"""Registry for external evaluation configurations."""
+"""Registry for external evaluations."""
 
 from __future__ import annotations
 
@@ -6,63 +6,42 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from olmo_eval.evals.external.base import ExternalEval
-    from olmo_eval.evals.external.config import ExternalEvalConfig
 
-# Global registry of external eval configs
-_EXTERNAL_EVAL_CONFIGS: dict[str, ExternalEvalConfig] = {}
+# Global registry of external evals
+_EXTERNAL_EVALS: dict[str, ExternalEval] = {}
 
 
-def register_external_config(name: str, config: ExternalEvalConfig) -> None:
-    """Register an external evaluation configuration.
+def register_external_eval(eval_instance: ExternalEval) -> None:
+    """Register an external evaluation.
 
     Args:
-        name: Unique name for the evaluation.
-        config: Configuration for the evaluation.
+        eval_instance: The evaluation instance to register.
 
     Raises:
         ValueError: If an evaluation with this name is already registered.
     """
-    if name in _EXTERNAL_EVAL_CONFIGS:
+    name = eval_instance.name
+    if name in _EXTERNAL_EVALS:
         raise ValueError(f"External eval '{name}' is already registered")
-    _EXTERNAL_EVAL_CONFIGS[name] = config
-
-
-def get_external_config(name: str) -> ExternalEvalConfig:
-    """Get an external evaluation configuration by name.
-
-    Args:
-        name: Name of the evaluation.
-
-    Returns:
-        The evaluation configuration.
-
-    Raises:
-        KeyError: If the evaluation is not registered.
-    """
-    if name not in _EXTERNAL_EVAL_CONFIGS:
-        available = ", ".join(sorted(_EXTERNAL_EVAL_CONFIGS.keys()))
-        raise KeyError(f"External eval '{name}' not found. Available: {available or '(none)'}")
-    return _EXTERNAL_EVAL_CONFIGS[name]
+    _EXTERNAL_EVALS[name] = eval_instance
 
 
 def get_external_eval(name: str) -> ExternalEval:
-    """Get an external evaluation instance by name.
-
-    This creates a BaseExternalEval using the registered configuration.
+    """Get an external evaluation by name.
 
     Args:
         name: Name of the evaluation.
 
     Returns:
-        An ExternalEval instance ready to execute.
+        The evaluation instance.
 
     Raises:
         KeyError: If the evaluation is not registered.
     """
-    from olmo_eval.evals.external.default import BaseExternalEval
-
-    config = get_external_config(name)
-    return BaseExternalEval(config)
+    if name not in _EXTERNAL_EVALS:
+        available = ", ".join(sorted(_EXTERNAL_EVALS.keys()))
+        raise KeyError(f"External eval '{name}' not found. Available: {available or '(none)'}")
+    return _EXTERNAL_EVALS[name]
 
 
 def list_external_evals() -> list[str]:
@@ -71,7 +50,7 @@ def list_external_evals() -> list[str]:
     Returns:
         Sorted list of evaluation names.
     """
-    return sorted(_EXTERNAL_EVAL_CONFIGS.keys())
+    return sorted(_EXTERNAL_EVALS.keys())
 
 
 def is_external_eval_registered(name: str) -> bool:
@@ -83,4 +62,4 @@ def is_external_eval_registered(name: str) -> bool:
     Returns:
         True if the evaluation is registered.
     """
-    return name in _EXTERNAL_EVAL_CONFIGS
+    return name in _EXTERNAL_EVALS

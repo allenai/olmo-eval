@@ -52,6 +52,22 @@ class ExecutionEnvironment(Protocol):
         """
         ...
 
+    async def execute_command(
+        self,
+        command: str,
+        timeout: float | None = None,
+    ) -> ExecutionResult:
+        """Execute a shell command and return structured result.
+
+        Args:
+            command: Shell command to execute.
+            timeout: Optional timeout in seconds.
+
+        Returns:
+            ExecutionResult with success status, output, and exit code.
+        """
+        ...
+
     async def execute_code(
         self,
         code: str,
