@@ -96,8 +96,8 @@ class ProgressLogger:
         rate = self.count / elapsed if elapsed > 0 else 0.0
 
         self.logger.info(
-            f"{self._format_desc()} done {self.count:>6}/{self.total} "
-            f"in {elapsed:.1f}s ({rate:.1f} items/sec)"
+            f"{self._format_desc()} {self.count:>6}/{self.total} "
+            f"(100%) in {elapsed:.1f}s ({rate:.1f} items/sec)"
         )
 
     def __enter__(self) -> ProgressLogger:
