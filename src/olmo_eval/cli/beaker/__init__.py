@@ -2,7 +2,7 @@
 
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 from rich.table import Table
@@ -15,6 +15,7 @@ from olmo_eval.common.constants.infrastructure import BEAKER_KNOWN_CLUSTERS
 
 if TYPE_CHECKING:
     from beaker import Beaker
+    from beaker import beaker_pb2 as pb2
 
 
 @click.group()
@@ -51,12 +52,12 @@ def _get_cluster_aliases(cluster_name: str) -> list[str]:
 
 def _fetch_cluster_details(
     b: "Beaker", cluster_name: str
-) -> tuple[str, object, list, str | None, int]:
+) -> tuple[str, "pb2.Cluster | None", list, str | None, int]:
     """Fetch cluster details and nodes."""
     try:
         # Use get() to fetch full cluster details including queue size
         cluster = b.cluster.get(cluster_name)
-        nodes = list(b.node.list(cluster=cluster_name))
+        nodes = list(b.node.list(cluster=cluster))
         if nodes:
             res = nodes[0].node_resources
             gpus_per_node = len(res.gpu_ids)
@@ -120,7 +121,7 @@ def clusters(filter: str, aliases: bool, sort: str, reverse: bool) -> None:
         # Get cluster IDs from list(), then fetch full details with get() in parallel
         cluster_ids = [c.id for c in b.cluster.list()]
         cluster_names: dict[str, str] = {}
-        all_clusters: dict[str, object] = {}
+        all_clusters: dict[str, Any] = {}
 
         # Fetch full cluster details and nodes in parallel
         with ThreadPoolExecutor(max_workers=8) as executor:
