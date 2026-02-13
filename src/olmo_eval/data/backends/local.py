@@ -66,16 +66,13 @@ class LocalBackend:
                     yield json.loads(line)
 
     def _load_json(self, path: Path) -> Iterator[dict[str, Any]]:
-        """Load a JSON file (expects array of objects or object with 'data' key)."""
+        """Load a JSON file."""
+        from olmo_eval.data.backends.base import extract_json_data
+
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
 
-        if isinstance(data, list):
-            yield from data
-        elif isinstance(data, dict) and "data" in data:
-            yield from data["data"]
-        else:
-            raise ValueError(f"JSON file must contain array or object with 'data' key: {path}")
+        yield from extract_json_data(data, str(path))
 
     def _load_parquet(self, path: Path) -> Iterator[dict[str, Any]]:
         """Load a Parquet file."""
