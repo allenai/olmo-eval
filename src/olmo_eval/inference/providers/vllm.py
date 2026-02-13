@@ -194,8 +194,8 @@ class VLLMProvider(InferenceProvider):
             kwargs["top_k"] = params.top_k
         if params.stop_sequences:
             kwargs["stop"] = list(params.stop_sequences)
-        if params.logprobs is not None:
-            kwargs["logprobs"] = params.logprobs
+        # Always request logprobs (default to 1) for metrics computation
+        kwargs["logprobs"] = params.logprobs if params.logprobs is not None else 1
 
         return VLLMSamplingParams(**kwargs)
 
@@ -216,16 +216,33 @@ class VLLMProvider(InferenceProvider):
         # Disable tqdm progress bar - we use our own worker-scoped logging
         outputs: list[RequestOutput] = self.llm.generate(prompts, vllm_params, use_tqdm=False)
 
-        return [
-            [
-                LMOutput(
-                    text=completion.text,
-                    logprobs=_convert_logprobs(completion.logprobs),
+        results: list[list[LMOutput]] = []
+        for output in outputs:
+            request_outputs: list[LMOutput] = []
+            for completion in output.outputs:
+                logprobs = _convert_logprobs(completion.logprobs)
+
+                # Compute metadata from logprobs
+                metadata: dict[str, Any] = {}
+                if logprobs:
+                    sum_logits = sum(entry.get("logprob", 0.0) for entry in logprobs)
+                    num_tokens = len(logprobs)
+                    metadata = {
+                        "sum_logits": sum_logits,
+                        "num_tokens": num_tokens,
+                        "num_tokens_all": num_tokens,
+                    }
+
+                request_outputs.append(
+                    LMOutput(
+                        text=completion.text,
+                        logprobs=logprobs,
+                        metadata=metadata,
+                    )
                 )
-                for completion in output.outputs
-            ]
-            for output in outputs
-        ]
+            results.append(request_outputs)
+
+        return results
 
     def logprobs(
         self,
