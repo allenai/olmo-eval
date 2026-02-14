@@ -1018,10 +1018,13 @@ def _launch_external_evals(
     summaries = []
     for i, job in enumerate(job_configs):
         model_spec = model[i] if i < len(model) else "unknown"
-        try:
-            provider_config = get_provider_config(model_spec)
-        except Exception:
-            # Not a preset, create a default vllm_server config
+        from olmo_eval.common.constants.models import get_model_presets
+
+        presets = get_model_presets()
+        if model_spec in presets:
+            provider_config = presets[model_spec]
+        else:
+            # External evals use vllm_server for non-preset models
             from olmo_eval.inference.providers.config import ProviderConfig
 
             provider_config = ProviderConfig(kind="vllm_server", model=model_spec)

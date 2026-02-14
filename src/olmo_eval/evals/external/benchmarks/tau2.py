@@ -151,6 +151,11 @@ class Tau2ExternalEval(ExternalEval):
                 run_result = await executor.execute_command(run_cmd, timeout=self.timeout_seconds)
                 all_output.append(f"$ {run_cmd}\n{run_result.output}")
 
+                # Debug logging
+                logger.info(f"[{self.name}] Run exit code: {run_result.exit_code}")
+                output_preview = run_result.output[:2000] if run_result.output else "(empty)"
+                logger.info(f"[{self.name}] Run output:\n{output_preview}")
+
                 result = await self._extract_results(
                     executor,
                     "\n".join(all_output),
@@ -181,7 +186,7 @@ class Tau2ExternalEval(ExternalEval):
 
         parts = [
             f"cd {self.working_dir}/tau2-bench &&",
-            "~/.local/bin/uv run python -m tau2_bench.run",
+            "~/.local/bin/uv run python -m tau2.run",
             f"--agent-llm '{agent_model}'",
         ]
 
@@ -214,9 +219,15 @@ class Tau2ExternalEval(ExternalEval):
         self, executor: Any, raw_output: str, exit_code: int, num_trials: int
     ) -> ExternalEvalResult:
         """Extract metrics from tau2-bench simulations file."""
+        # Debug: list results directory
+        ls_dir = await executor.execute_command(f"ls -la {self.results_dir} 2>&1", timeout=30.0)
+        logger.info(f"[{self.name}] Results dir contents:\n{ls_dir.output}")
+
         ls_result = await executor.execute_command(
             f"ls {self.results_dir}/*.json 2>/dev/null", timeout=30.0
         )
+        json_files = ls_result.output if ls_result.success else "(none)"
+        logger.info(f"[{self.name}] JSON files: {json_files}")
         if not ls_result.success:
             return ExternalEvalResult(
                 name=self.name,
