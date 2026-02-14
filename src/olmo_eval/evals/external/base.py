@@ -173,12 +173,47 @@ class ExternalEval(ABC):
                 )
         return None
 
-    def _get_provider_url_for_sandbox(self, provider_url: str) -> str:
-        """Get the provider URL that's accessible from within the sandbox.
-
-        Rewrites localhost URLs to use the slirp4netns gateway IP.
+    async def _discover_gateway_ip(self, executor: Any) -> str | None:
+        """Discover the gateway IP from within the sandbox.
 
         Args:
+            executor: Sandbox executor instance.
+
+        Returns:
+            Gateway IP address, or None if discovery failed.
+        """
+        # Parse /proc/net/route to find the default gateway
+        # This works in minimal containers without the `ip` command
+        cmd = """python3 -c "
+import struct
+with open('/proc/net/route') as f:
+    for line in f:
+        parts = line.split()
+        if len(parts) >= 3 and parts[1] == '00000000':
+            gw = int(parts[2], 16)
+            print('.'.join(str(b) for b in struct.pack('<I', gw)))
+            break
+"
+"""
+        result = await executor.execute_command(cmd, timeout=10.0)
+
+        if result.success and result.output.strip():
+            gateway = result.output.strip()
+            # Validate it looks like an IP address
+            if gateway.count(".") == 3 and all(p.isdigit() for p in gateway.split(".")):
+                logger.info(f"[{self.name}] Discovered gateway IP: {gateway}")
+                return gateway
+
+        logger.warning(f"[{self.name}] Failed to discover gateway: {result.output}")
+        return None
+
+    async def _get_provider_url_for_sandbox(self, executor: Any, provider_url: str) -> str:
+        """Get the provider URL that's accessible from within the sandbox.
+
+        Discovers the gateway IP and rewrites localhost URLs.
+
+        Args:
+            executor: Sandbox executor instance.
             provider_url: Original provider URL.
 
         Returns:
@@ -186,18 +221,22 @@ class ExternalEval(ABC):
         """
         from urllib.parse import urlparse, urlunparse
 
-        from olmo_eval.evals.external.network import PASTA_HOST_IP
-
         parsed = urlparse(provider_url)
 
         # Only rewrite localhost URLs
         if parsed.hostname not in ("localhost", "127.0.0.1"):
             return provider_url
 
-        # Reconstruct URL with slirp4netns gateway IP
-        new_netloc = PASTA_HOST_IP
+        # Discover gateway IP from inside the sandbox
+        gateway_ip = await self._discover_gateway_ip(executor)
+        if not gateway_ip:
+            logger.warning(f"[{self.name}] Could not discover gateway, using original URL")
+            return provider_url
+
+        # Reconstruct URL with gateway IP
+        new_netloc = gateway_ip
         if parsed.port:
-            new_netloc = f"{PASTA_HOST_IP}:{parsed.port}"
+            new_netloc = f"{gateway_ip}:{parsed.port}"
 
         new_url = urlunparse(
             (
