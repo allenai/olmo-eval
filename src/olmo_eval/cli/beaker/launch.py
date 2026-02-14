@@ -385,6 +385,9 @@ def launch(
             s3_region=s3_region,
             secret_env_overrides=secret_env_overrides,
             eval_args=parsed_eval_args if parsed_eval_args else None,
+            uv_cache_dir=uv_cache_dir,
+            preemptible=preemptible,
+            retries=retries,
         )
         return
 
@@ -863,6 +866,9 @@ def _launch_external_evals(
     s3_region: str,
     secret_env_overrides: dict[str, str],
     eval_args: dict[str, str] | None = None,
+    uv_cache_dir: str | None = None,
+    preemptible: bool | None = None,
+    retries: int | None = None,
 ) -> None:
     """Launch external evaluation jobs on Beaker.
 
@@ -915,6 +921,10 @@ def _launch_external_evals(
 
     # Create launcher
     launcher = BeakerLauncher(workspace=effective_workspace)
+    beaker_username = launcher.beaker.user_name
+
+    # Determine preemptible setting (default to True if not specified)
+    effective_preemptible = preemptible if preemptible is not None else True
 
     # Detect credential needs
     inject_aws = aws_credentials or False
@@ -1011,6 +1021,10 @@ def _launch_external_evals(
             inject_aws_credentials=inject_aws,
             inject_gcs_credentials=inject_gcs,
             eval_args=eval_args,
+            uv_cache_dir=uv_cache_dir,
+            beaker_username=beaker_username,
+            preemptible=effective_preemptible,
+            retries=retries,
         )
         job_configs.append(job_config)
 

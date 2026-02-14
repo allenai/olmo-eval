@@ -63,6 +63,10 @@ def assemble_external_eval_job(
     inject_aws_credentials: bool = False,
     inject_gcs_credentials: bool = False,
     eval_args: dict[str, str] | None = None,
+    uv_cache_dir: str | None = None,
+    beaker_username: str | None = None,
+    preemptible: bool = True,
+    retries: int | None = None,
 ) -> Any:
     """Assemble a BeakerJobConfig for running external evaluations.
 
@@ -111,7 +115,10 @@ def assemble_external_eval_job(
     env_vars: dict[str, str] = {
         "BEAKER_ALLOW_SUBCONTAINERS": "1",
         "BEAKER_SKIP_DOCKER_SOCKET": "1",
+        "BEAKER_WORKSPACE": workspace,
     }
+    if beaker_username:
+        env_vars["BEAKER_AUTHOR"] = beaker_username
 
     if cluster_has_weka(cluster):
         env_vars.update(
@@ -121,6 +128,8 @@ def assemble_external_eval_job(
                 "UV_LINK_MODE": "copy",
             }
         )
+        if uv_cache_dir:
+            env_vars["UV_CACHE_DIR"] = uv_cache_dir
 
     # Get registry mirror URL
     try:
@@ -151,8 +160,10 @@ def assemble_external_eval_job(
         cluster=cluster,
         num_gpus=num_gpus,
         priority=priority,
+        preemptible=preemptible,
         timeout=timeout,
         shared_memory="10GiB",
+        retries=retries,
         workspace=workspace,
         budget=budget or BEAKER_DEFAULT_BUDGET,
         groups=groups or [],
