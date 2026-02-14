@@ -5,7 +5,6 @@ Handles translation of provider URLs between host and container contexts.
 
 from __future__ import annotations
 
-import os
 import socket
 from urllib.parse import urlparse, urlunparse
 
@@ -34,11 +33,10 @@ def get_host_ip() -> str:
 def should_use_host_network() -> bool:
     """Check if containers should use host networking.
 
-    Returns True when running in an environment where containers need
-    --network=host to access the host's localhost services.
+    Sandboxes are intended to be isolated and should not have access to host
+    networking. We always use bridge networking and connect via IP address.
     """
-    # Check for containerized job environments
-    return os.environ.get("BEAKER_JOB_ID") is not None
+    return False
 
 
 def translate_url_for_container(
