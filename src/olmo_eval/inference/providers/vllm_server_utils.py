@@ -322,7 +322,6 @@ class VLLMServerProcess:
             log_path = pathlib.Path(self.log_dir) / "vllm_server.log"
             log_path.parent.mkdir(parents=True, exist_ok=True)
             self._log_file = open(log_path, "w")  # noqa: SIM115
-            logger.info(f"vLLM server logs will be written to {log_path}")
             self._process = subprocess.Popen(
                 cmd,
                 stdout=self._log_file,
