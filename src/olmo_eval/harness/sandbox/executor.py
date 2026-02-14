@@ -221,12 +221,20 @@ class SandboxExecutor:
             output += f"\n[Exit code: {result.exit_code}]"
         return output
 
-    async def execute_command(self, command: str, timeout: float | None = None) -> ExecutionResult:
+    async def execute_command(
+        self,
+        command: str,
+        timeout: float | None = None,
+        stream: bool = False,
+        log_prefix: str | None = None,
+    ) -> ExecutionResult:
         """Execute a command in the sandbox and return structured result.
 
         Args:
             command: The bash command to execute.
             timeout: Optional timeout override in seconds.
+            stream: If True, stream output to logs as the command runs.
+            log_prefix: Prefix for streamed log lines (defaults to self.name).
 
         Returns:
             ExecutionResult with success status, output, and exit code.
@@ -240,6 +248,10 @@ class SandboxExecutor:
         from swerex.runtime.abstract import Command
 
         effective_timeout = timeout if timeout is not None else self.config.command_timeout
+        prefix = log_prefix or self.name or "sandbox"
+
+        if stream:
+            return await self._execute_streaming(command, effective_timeout, prefix)
 
         response = await self._runtime.execute(
             Command(
@@ -249,6 +261,76 @@ class SandboxExecutor:
         )
 
         # Combine stdout and stderr
+        output_parts = []
+        if response.stdout:
+            output_parts.append(response.stdout)
+        if response.stderr:
+            output_parts.append(response.stderr)
+
+        return ExecutionResult(
+            success=response.exit_code == 0,
+            output="".join(output_parts) if output_parts else "",
+            exit_code=response.exit_code,
+        )
+
+    async def _execute_streaming(
+        self, command: str, timeout: float, prefix: str
+    ) -> ExecutionResult:
+        """Execute a command with streaming output to logs."""
+        from swerex.runtime.abstract import Command
+
+        # Use a temp file to capture output for streaming
+        output_file = "/tmp/_sandbox_output.log"
+        wrapped_cmd = f"{{ {command} ; }} 2>&1 | tee {output_file}"
+
+        # Start the command
+        exec_task = asyncio.create_task(
+            self._runtime.execute(Command(command=["bash", "-c", wrapped_cmd], timeout=timeout))
+        )
+
+        # Stream output while command runs
+        last_pos = 0
+        poll_interval = 0.5
+
+        while not exec_task.done():
+            await asyncio.sleep(poll_interval)
+
+            # Read new output
+            try:
+                tail_cmd = f"tail -c +{last_pos + 1} {output_file} 2>/dev/null"
+                tail_resp = await self._runtime.execute(
+                    Command(command=["bash", "-c", tail_cmd], timeout=5.0)
+                )
+                new_output = tail_resp.stdout or ""
+                if new_output:
+                    last_pos += len(new_output)
+                    # Log each line
+                    for line in new_output.rstrip("\n").split("\n"):
+                        if line:
+                            logger.info(f"[{prefix}] {line}")
+            except Exception:
+                pass  # Ignore errors reading output file
+
+        # Get final result
+        response = await exec_task
+
+        # Read any remaining output
+        try:
+            final_resp = await self._runtime.execute(
+                Command(
+                    command=["bash", "-c", f"tail -c +{last_pos + 1} {output_file} 2>/dev/null"],
+                    timeout=5.0,
+                )
+            )
+            remaining = final_resp.stdout or ""
+            if remaining:
+                for line in remaining.rstrip("\n").split("\n"):
+                    if line:
+                        logger.info(f"[{prefix}] {line}")
+        except Exception:
+            pass
+
+        # Get full output
         output_parts = []
         if response.stdout:
             output_parts.append(response.stdout)

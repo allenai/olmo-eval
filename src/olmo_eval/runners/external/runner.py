@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -151,11 +152,15 @@ class ExternalEvalRunner:
         logger.info(f"Starting vLLM server for model: {self.provider_config.model}")
 
         try:
+            # Set log_dir to persist vLLM server logs
+            log_dir = os.path.join(self.output_dir, "logs")
+
             # Create provider config for the server without a base_url
             # This causes VLLMServerProvider to start its own server
             server_config = self.provider_config.with_overrides(
                 kind="vllm_server",
                 base_url=None,
+                log_dir=log_dir,
             )
 
             # Create the provider - this starts the server automatically

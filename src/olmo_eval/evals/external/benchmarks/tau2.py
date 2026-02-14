@@ -135,7 +135,9 @@ class Tau2ExternalEval(ExternalEval):
         except ImportError as e:
             return self._error_result(f"SWE-ReX not installed: {e}", start_time)
 
-        sandbox_config = self._create_sandbox_config(container_runtime, use_host_network)
+        sandbox_config = self._create_sandbox_config(
+            container_runtime, use_host_network, output_dir
+        )
 
         try:
             async with SandboxExecutor(sandbox_config, name=self.name) as executor:
@@ -149,13 +151,11 @@ class Tau2ExternalEval(ExternalEval):
                 )
                 logger.info(f"[{self.name}] Running: {run_cmd}")
 
-                run_result = await executor.execute_command(run_cmd, timeout=self.timeout_seconds)
+                run_result = await executor.execute_command(
+                    run_cmd, timeout=self.timeout_seconds, stream=True, log_prefix=self.name
+                )
                 all_output.append(f"$ {run_cmd}\n{run_result.output}")
-
-                # Debug logging
                 logger.info(f"[{self.name}] Run exit code: {run_result.exit_code}")
-                output_preview = run_result.output[-3000:] if run_result.output else "(empty)"
-                logger.info(f"[{self.name}] Run output (last 3000 chars):\n{output_preview}")
 
                 result = await self._extract_results(
                     executor,

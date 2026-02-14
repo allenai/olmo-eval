@@ -174,8 +174,11 @@ class ExternalEval(ABC):
         """Run setup commands. Returns error result if any fail, None on success."""
         for cmd in self.setup_command:
             logger.info(f"[{self.name}] Setup: {cmd}")
-            result = await executor.execute_command(cmd, timeout=self.timeout_seconds)
+            result = await executor.execute_command(
+                cmd, timeout=self.timeout_seconds, stream=True, log_prefix=self.name
+            )
             all_output.append(f"$ {cmd}\n{result.output}")
+            logger.info(f"[{self.name}] Exit code: {result.exit_code}")
 
             if not result.success:
                 return ExternalEvalResult(
@@ -203,14 +206,22 @@ class ExternalEval(ABC):
         self,
         container_runtime: str,
         use_host_network: bool,
+        output_dir: str | None = None,
     ) -> Any:
         """Create sandbox configuration for this evaluation."""
+        import os
+
         from olmo_eval.evals.external.network import get_docker_network_args
         from olmo_eval.harness.sandbox.config import (
             ContainerRuntime,
             SandboxConfig,
             SandboxMode,
         )
+
+        # Set log_dir for sandbox container logs
+        log_dir = None
+        if output_dir:
+            log_dir = os.path.join(output_dir, "logs")
 
         runtime = cast(ContainerRuntime, container_runtime)
         return SandboxConfig(
@@ -225,6 +236,7 @@ class ExternalEval(ABC):
                     runtime=container_runtime, use_host_network=use_host_network
                 )
             ),
+            log_dir=log_dir,
         )
 
     def _save_results(self, result: ExternalEvalResult, output_dir: str) -> None:
