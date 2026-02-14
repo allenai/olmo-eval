@@ -123,7 +123,6 @@ class Tau2ExternalEval(ExternalEval):
         args: dict[str, Any],
         output_dir: str | None = None,
         container_runtime: str = "podman",
-        use_host_network: bool = False,
         provider_kind: str | None = None,
     ) -> ExternalEvalResult:
         start_time = time.time()
@@ -135,9 +134,7 @@ class Tau2ExternalEval(ExternalEval):
         except ImportError as e:
             return self._error_result(f"SWE-ReX not installed: {e}", start_time)
 
-        sandbox_config = self._create_sandbox_config(
-            container_runtime, use_host_network, output_dir
-        )
+        sandbox_config = self._create_sandbox_config(container_runtime, output_dir)
 
         try:
             async with SandboxExecutor(sandbox_config, name=self.name) as executor:

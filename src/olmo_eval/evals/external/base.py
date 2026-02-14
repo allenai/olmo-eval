@@ -97,19 +97,16 @@ class ExternalEval(ABC):
         args: dict[str, Any],
         output_dir: str | None = None,
         container_runtime: str = "podman",
-        use_host_network: bool = False,
         provider_kind: str | None = None,
     ) -> ExternalEvalResult:
         """Execute the external evaluation.
 
         Args:
-            provider_url: URL of the inference provider (translated for
-                container access).
+            provider_url: URL of the inference provider.
             model_name: Name/identifier of the model being evaluated.
             args: Evaluation-specific arguments (e.g., domain, num_trials).
             output_dir: Optional directory to write results.
             container_runtime: Container runtime to use (docker or podman).
-            use_host_network: Whether to use host networking for containers.
             provider_kind: Type of provider (e.g., "vllm_server", "litellm").
                 Used to determine if local server setup is needed.
 
@@ -124,31 +121,17 @@ class ExternalEval(ABC):
         args: dict[str, Any],
         output_dir: str | None = None,
         container_runtime: str = "podman",
-        use_host_network: bool | None = None,
     ) -> ExternalEvalResult:
         """Execute the evaluation using a provider configuration."""
-        from olmo_eval.evals.external.network import (
-            get_provider_url_for_container,
-            should_use_host_network,
-        )
-
-        if use_host_network is None:
-            use_host_network = should_use_host_network()
-
+        # Pass the original URL - sandbox will discover gateway dynamically
         base_url = provider_config.base_url or "http://localhost:8000"
-        provider_url = get_provider_url_for_container(
-            base_url,
-            runtime=container_runtime,
-            use_host_network=use_host_network,
-        )
 
         return await self.execute(
-            provider_url=provider_url,
+            provider_url=base_url,
             model_name=provider_config.model,
             args=args,
             output_dir=output_dir,
             container_runtime=container_runtime,
-            use_host_network=use_host_network,
             provider_kind=provider_config.kind,
         )
 
@@ -342,7 +325,6 @@ class ExternalEval(ABC):
     def _create_sandbox_config(
         self,
         container_runtime: str,
-        use_host_network: bool,
         output_dir: str | None = None,
     ) -> Any:
         """Create sandbox configuration for this evaluation."""
@@ -368,11 +350,7 @@ class ExternalEval(ABC):
             command_timeout=self.timeout_seconds,
             working_dir=self.working_dir,
             environment=tuple(self._build_env_vars().items()),
-            docker_args=tuple(
-                get_docker_network_args(
-                    runtime=container_runtime, use_host_network=use_host_network
-                )
-            ),
+            docker_args=tuple(get_docker_network_args(runtime=container_runtime)),
             log_dir=log_dir,
         )
 

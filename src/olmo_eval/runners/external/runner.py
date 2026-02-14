@@ -16,7 +16,6 @@ from olmo_eval.evals.external import (
     ExternalEvalResult,
     get_external_eval,
     list_external_evals,
-    should_use_host_network,
 )
 from olmo_eval.inference.providers.config import ProviderConfig
 
@@ -81,9 +80,6 @@ class ExternalEvalRunner:
         start_time = time.time()
         results: dict[str, ExternalEvalResult] = {}
 
-        # Determine if host networking is needed
-        use_host_network = should_use_host_network()
-
         # Start the vLLM server if needed and get the actual base_url
         server_process = None
         base_url = self.provider_config.base_url
@@ -116,7 +112,6 @@ class ExternalEvalRunner:
                         args=self.eval_args,
                         output_dir=self.output_dir,
                         container_runtime=self.container_runtime,
-                        use_host_network=use_host_network,
                     )
                     results[eval_name] = result
 

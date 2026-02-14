@@ -8,12 +8,7 @@ running in the parent process.
 # Import benchmarks to trigger registration
 from olmo_eval.evals.external import benchmarks as _benchmarks  # noqa: F401
 from olmo_eval.evals.external.base import ExternalEval
-from olmo_eval.evals.external.network import (
-    get_docker_network_args,
-    get_provider_url_for_container,
-    should_use_host_network,
-    translate_url_for_container,
-)
+from olmo_eval.evals.external.network import get_docker_network_args
 from olmo_eval.evals.external.registry import (
     get_external_eval,
     is_external_eval_registered,
@@ -29,8 +24,5 @@ __all__ = [
     "list_external_evals",
     "is_external_eval_registered",
     "register_external_eval",
-    "get_provider_url_for_container",
-    "translate_url_for_container",
-    "should_use_host_network",
     "get_docker_network_args",
 ]
