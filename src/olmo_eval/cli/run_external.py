@@ -3,11 +3,28 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 import click
 
-from olmo_eval.cli.utils import console
+from olmo_eval.cli.utils import ConfiguredExternalEval, console
 from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR
+
+if TYPE_CHECKING:
+    from olmo_eval.inference.providers.config import ProviderConfig
+
+
+@dataclass
+class ExternalRunConfig:
+    """Configuration for an external evaluation run."""
+
+    provider: ProviderConfig
+    evals: list[ConfiguredExternalEval]
+    output_dir: str
+    container_runtime: str
+    server_port: int = 8000
+    eval_args: dict[str, Any] = field(default_factory=dict)
 
 
 @click.command(name="run-external")
@@ -168,24 +185,32 @@ def run_external(
 
     # Print configuration
     from rich.panel import Panel
+    from rich.pretty import Pretty
     from rich.table import Table
 
-    table = Table(title="External Evaluation Configuration")
-    table.add_column("Setting", style="cyan")
-    table.add_column("Value")
+    from olmo_eval.evals.external import get_external_eval
 
-    table.add_row("Model", provider_config.model)
-    table.add_row("Provider", provider_config.kind)
-    table.add_row("Base URL", base_url or f"http://localhost:{port}")
-    table.add_row("Evaluations", ", ".join(evals))
-    table.add_row("Output Dir", output_dir)
-    table.add_row("Container Runtime", runtime)
-    if tensor_parallel_size > 1:
-        table.add_row("Tensor Parallel Size", str(tensor_parallel_size))
-    if parsed_args:
-        table.add_row("Eval Args", ", ".join(f"{k}={v}" for k, v in parsed_args.items()))
+    configured_evals = [
+        ConfiguredExternalEval.from_eval(get_external_eval(name), provider_config, parsed_args)
+        for name in evals
+    ]
 
-    console.print(Panel(table))
+    run_config = ExternalRunConfig(
+        provider=provider_config,
+        evals=configured_evals,
+        output_dir=output_dir,
+        container_runtime=runtime,
+        server_port=port,
+        eval_args=parsed_args,
+    )
+
+    console.print(
+        Panel(
+            Pretty(run_config, expand_all=True),
+            title="[bold]Run Configuration[/bold]",
+            border_style="cyan",
+        )
+    )
 
     if dry_run:
         console.print("\n[yellow]Dry run mode - not executing[/yellow]")

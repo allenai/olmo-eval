@@ -86,6 +86,7 @@ class Tau2ExternalEval(ExternalEval):
             "curl -LsSf https://astral.sh/uv/install.sh | sh",
             f"git clone --depth 1 https://github.com/sierra-research/tau2-bench.git {repo}",
             f"cd {repo} && ~/.local/bin/uv sync",
+            f"mkdir -p {self.results_dir}",
         )
 
     @property
@@ -153,8 +154,8 @@ class Tau2ExternalEval(ExternalEval):
 
                 # Debug logging
                 logger.info(f"[{self.name}] Run exit code: {run_result.exit_code}")
-                output_preview = run_result.output[:2000] if run_result.output else "(empty)"
-                logger.info(f"[{self.name}] Run output:\n{output_preview}")
+                output_preview = run_result.output[-3000:] if run_result.output else "(empty)"
+                logger.info(f"[{self.name}] Run output (last 3000 chars):\n{output_preview}")
 
                 result = await self._extract_results(
                     executor,
@@ -206,9 +207,9 @@ class Tau2ExternalEval(ExternalEval):
             [
                 f"--user-llm '{tau2_args.user_llm}'",
                 f"--domain '{tau2_args.domain}'",
-                f"--num-trials '{tau2_args.num_trials}'",
-                f"--max-steps '{tau2_args.max_steps}'",
-                f"--max-concurrency '{tau2_args.max_concurrency}'",
+                f"--num-trials {tau2_args.num_trials}",
+                f"--max-steps {tau2_args.max_steps}",
+                f"--max-concurrency {tau2_args.max_concurrency}",
                 f"--save-to {self.results_dir}",
             ]
         )
