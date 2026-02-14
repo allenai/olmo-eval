@@ -183,6 +183,8 @@ for _name, _subset in _STANDARD_SUBTASKS.items():
         _subset,
         (LabBenchTask,),
         {
+            "__module__": __name__,
+            "__qualname__": _subset,
             "data_source": DataSource(path="futurehouse/lab-bench", subset=_subset),
             "formatter": MCQAChatFormatter(system_prompt=_SYSTEM_PROMPT),
             "metrics": _DEFAULT_METRICS,
@@ -190,6 +192,7 @@ for _name, _subset in _STANDARD_SUBTASKS.items():
             "sampling_params": _DEFAULT_SAMPLING,
         },
     )
+    globals()[_subset] = _cls  # Make picklable by storing in module namespace
     register(_name)(_cls)
 
 
