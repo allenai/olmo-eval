@@ -149,6 +149,10 @@ class SandboxExecutor:
                 if self.config.log_dir and self.name:
                     docker_args.extend(_get_log_docker_args(self.config.log_dir, self.name))
 
+                # Add environment variables as docker args
+                for key, value in self.config.environment:
+                    docker_args.extend(["-e", f"{key}={value}"])
+
                 return DockerDeployment(
                     image=self.config.image,
                     container_runtime=self.config.container_runtime,
