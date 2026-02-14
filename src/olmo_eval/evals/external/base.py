@@ -190,6 +190,79 @@ class ExternalEval(ABC):
                 )
         return None
 
+    async def _discover_gateway_ip(self, executor: Any) -> str | None:
+        """Discover the gateway IP from within the sandbox.
+
+        This finds the default gateway that can be used to reach the host
+        from within the container.
+
+        Args:
+            executor: Sandbox executor instance.
+
+        Returns:
+            Gateway IP address, or None if discovery failed.
+        """
+        # Get the default gateway from the routing table
+        cmd = "ip route | grep default | awk '{print $3}' | head -1"
+        result = await executor.execute_command(cmd, timeout=10.0)
+
+        if result.success and result.output.strip():
+            gateway = result.output.strip()
+            logger.info(f"[{self.name}] Discovered gateway IP: {gateway}")
+            return gateway
+
+        logger.warning(f"[{self.name}] Failed to discover gateway IP: {result.output}")
+        return None
+
+    async def _get_provider_url_for_sandbox(
+        self,
+        executor: Any,
+        provider_url: str,
+    ) -> str:
+        """Get the provider URL that's accessible from within the sandbox.
+
+        Discovers the gateway IP dynamically and rewrites localhost URLs.
+
+        Args:
+            executor: Sandbox executor instance.
+            provider_url: Original provider URL.
+
+        Returns:
+            URL accessible from within the sandbox.
+        """
+        from urllib.parse import urlparse, urlunparse
+
+        parsed = urlparse(provider_url)
+
+        # Only rewrite localhost URLs
+        if parsed.hostname not in ("localhost", "127.0.0.1"):
+            return provider_url
+
+        # Discover the gateway IP from inside the sandbox
+        gateway_ip = await self._discover_gateway_ip(executor)
+        if not gateway_ip:
+            logger.warning(f"[{self.name}] Could not discover gateway, using original URL")
+            return provider_url
+
+        # Reconstruct URL with gateway IP
+        new_netloc = gateway_ip
+        if parsed.port:
+            new_netloc = f"{gateway_ip}:{parsed.port}"
+
+        new_url = urlunparse(
+            (
+                parsed.scheme,
+                new_netloc,
+                parsed.path,
+                parsed.params,
+                parsed.query,
+                parsed.fragment,
+            )
+        )
+
+        logger.info(f"[{self.name}] Rewrote provider URL: {provider_url} -> {new_url}")
+        return new_url
+
     async def _check_provider_health(
         self,
         executor: Any,
@@ -219,20 +292,33 @@ class ExternalEval(ABC):
 
         for attempt in range(1, max_attempts + 1):
             logger.info(
-                f"[{self.name}] Checking provider health (attempt {attempt}/{max_attempts})"
+                f"[{self.name}] Checking provider health at {health_url} "
+                f"(attempt {attempt}/{max_attempts})"
             )
 
-            # Use curl to check connectivity from within the sandbox
-            check_cmd = f"curl -s -o /dev/null -w '%{{http_code}}' --max-time 5 {health_url}"
+            # Use curl with verbose output to diagnose connection issues
+            # -s: silent, -S: show errors, -v: verbose (to stderr)
+            # --max-time: total timeout, --connect-timeout: connection phase timeout
+            check_cmd = (
+                f"curl -sS --max-time 5 --connect-timeout 3 "
+                f"-o /dev/null -w 'HTTP_CODE:%{{http_code}}' {health_url} 2>&1"
+            )
             result = await executor.execute_command(check_cmd, timeout=10.0)
+            output = result.output.strip()
 
-            if result.success and result.output.strip() == "200":
+            # Extract HTTP code from output
+            http_code = "000"
+            if "HTTP_CODE:" in output:
+                http_code = output.split("HTTP_CODE:")[-1].strip()
+
+            if http_code == "200":
                 logger.info(f"[{self.name}] Provider is reachable at {provider_url}")
                 return True
 
+            # Log full curl output for debugging (includes error messages)
             logger.warning(
                 f"[{self.name}] Provider not reachable (attempt {attempt}/{max_attempts}): "
-                f"status={result.output.strip()}"
+                f"http_code={http_code}, curl_output={output}"
             )
 
             if attempt < max_attempts:
