@@ -186,7 +186,7 @@ class ExternalEval(ABC):
         """
         from urllib.parse import urlparse, urlunparse
 
-        from olmo_eval.evals.external.network import SLIRP4NETNS_HOST_IP
+        from olmo_eval.evals.external.network import PASTA_HOST_IP
 
         parsed = urlparse(provider_url)
 
@@ -195,9 +195,9 @@ class ExternalEval(ABC):
             return provider_url
 
         # Reconstruct URL with pasta host IP
-        new_netloc = SLIRP4NETNS_HOST_IP
+        new_netloc = PASTA_HOST_IP
         if parsed.port:
-            new_netloc = f"{SLIRP4NETNS_HOST_IP}:{parsed.port}"
+            new_netloc = f"{PASTA_HOST_IP}:{parsed.port}"
 
         new_url = urlunparse(
             (

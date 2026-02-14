@@ -182,10 +182,15 @@ RUN git clone --depth 1 -b 1.14.3 https://github.com/containers/crun.git /tmp/cr
     && make install \
     && rm -rf /tmp/crun
 
-# Install slirp4netns for rootless container networking
-# slirp4netns provides isolated userspace networking without requiring /dev/net/tun
-RUN wget -qO /usr/bin/slirp4netns https://github.com/rootless-containers/slirp4netns/releases/download/v1.3.1/slirp4netns-x86_64 \
-    && chmod +x /usr/bin/slirp4netns
+# Install pasta from pre-built binary (latest version with --map-guest-addr support)
+RUN wget -qO /usr/bin/passt https://passt.top/builds/latest/x86_64/passt \
+    && chmod +x /usr/bin/passt \
+    && ln -sf /usr/bin/passt /usr/bin/pasta
+
+# Create /dev/net/tun device for pasta networking
+RUN mkdir -p /dev/net \
+    && mknod /dev/net/tun c 10 200 \
+    && chmod 666 /dev/net/tun
 
 # Symlink so docker commands are translated to podman
 RUN ln -sf $(which podman) /usr/local/bin/docker
