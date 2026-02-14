@@ -312,22 +312,35 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 )
                 return (spec, tracker, [])
 
+        from rich.table import Table
+
         with ThreadPoolExecutor(max_workers=min(32, len(expanded_tasks))) as executor:
             futures = {executor.submit(prepare_one, spec): spec for spec in expanded_tasks}
             for future in as_completed(futures):
                 spec, tracker, task_items = future.result()
                 trackers[spec] = tracker
                 items.extend(task_items)
-                if tracker.error:
-                    logger.error(f"  {spec}: ERROR - {tracker.error}")
-                else:
-                    logger.info(f"  {spec}: {len(task_items)} instances")
-                    if self.save_requests and task_items and tracker.task:
-                        request_objects = build_requests_from_items(
-                            task_items, tracker.task.config.name
-                        )
-                        task_hash = compute_task_hash(tracker.task.config.to_dict())
-                        self._write_requests(self.model_name, spec, request_objects, task_hash)
+                if not tracker.error and self.save_requests and task_items and tracker.task:
+                    request_objects = build_requests_from_items(
+                        task_items, tracker.task.config.name
+                    )
+                    task_hash = compute_task_hash(tracker.task.config.to_dict())
+                    self._write_requests(self.model_name, spec, request_objects, task_hash)
+
+        # Print task preparation summary table
+        table = Table(title="Tasks")
+        table.add_column("Task", style="cyan")
+        table.add_column("Instances", justify="right")
+        table.add_column("Status")
+
+        for spec in expanded_tasks:
+            tracker = trackers[spec]
+            if tracker.error:
+                table.add_row(spec, "-", f"[red]ERROR: {tracker.error}[/red]")
+            else:
+                table.add_row(spec, str(tracker.total_instances), "[green]Ready[/green]")
+
+        console.print(table)
 
         # Optionally inspect first instance of each task
         if (

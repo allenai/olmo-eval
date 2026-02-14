@@ -265,37 +265,42 @@ def log_summary(results: dict[str, Any], multi_model: bool = False) -> None:
         multi_model: If True, iterate results["models"][model]["tasks"],
                     otherwise iterate results["tasks"] directly.
     """
-    logger.info("Summary of primary scores:")
+    from rich.console import Console
+    from rich.table import Table
+
+    console = Console(force_terminal=True, width=120)
+
+    table = Table(title="Results Summary")
+    table.add_column("Task", style="cyan")
+    table.add_column("Status")
+    table.add_column("Metric")
+    table.add_column("Result")
+
+    def add_task_row(name: str, task_data: dict[str, Any]) -> None:
+        metrics = task_data.get("metrics", {})
+        error = task_data.get("error")
+        preferred = task_data.get("primary_metric")
+        primary = get_primary_metric(metrics, preferred)
+
+        metric_name = primary[0] if primary else (preferred or "-")
+
+        if error:
+            table.add_row(name, "[red]Failed[/red]", metric_name, str(error))
+        elif primary:
+            table.add_row(name, "[green]Success[/green]", metric_name, f"{primary[1]:.4f}")
+        else:
+            table.add_row(name, "[green]Success[/green]", metric_name, "-")
 
     if multi_model:
         for model_name, model_data in results.get("models", {}).items():
-            logger.info(f"  {model_name}:")
             for task_name, task_data in model_data.get("tasks", {}).items():
-                metrics = task_data.get("metrics", {})
-                preferred = task_data.get("primary_metric")
-                primary = get_primary_metric(metrics, preferred)
-                if primary:
-                    metric_scorer, score = primary
-                    logger.info(f"    {task_name}: {score:.4f} ({metric_scorer})")
-
+                add_task_row(f"{model_name}:{task_name}", task_data)
             for suite_name, suite_data in model_data.get("suites", {}).items():
-                metrics = suite_data.get("metrics", {})
-                primary = get_primary_metric(metrics)
-                if primary:
-                    metric_scorer, score = primary
-                    logger.info(f"    {suite_name}: {score:.4f} ({metric_scorer})")
+                add_task_row(f"{model_name}:{suite_name}", suite_data)
     else:
         for task_name, task_data in results["tasks"].items():
-            metrics = task_data.get("metrics", {})
-            preferred = task_data.get("primary_metric")
-            primary = get_primary_metric(metrics, preferred)
-            if primary:
-                metric_scorer, score = primary
-                logger.info(f"  {task_name}: {score:.4f} ({metric_scorer})")
-
+            add_task_row(task_name, task_data)
         for suite_name, suite_data in results.get("suites", {}).items():
-            metrics = suite_data.get("metrics", {})
-            primary = get_primary_metric(metrics)
-            if primary:
-                metric_scorer, score = primary
-                logger.info(f"  {suite_name}: {score:.4f} ({metric_scorer})")
+            add_task_row(suite_name, suite_data)
+
+    console.print(table)
