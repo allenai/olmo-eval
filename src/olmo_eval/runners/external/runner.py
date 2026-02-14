@@ -83,15 +83,12 @@ class ExternalEvalRunner:
         # Determine if host networking is needed
         use_host_network = should_use_host_network()
 
-        # Build provider URL
-        base_url = self.provider_config.base_url
-        if base_url is None:
-            base_url = f"http://localhost:{self.server_port}"
-
-        # Start the vLLM server if needed
+        # Start the vLLM server if needed and get the actual base_url
         server_process = None
+        base_url = self.provider_config.base_url
+
         if self.provider_config.kind == "vllm_server" and self.provider_config.base_url:
-            # Server already running externally, no need to start
+            # Server already running externally, use configured base_url
             pass
         elif self.provider_config.kind in ("vllm", "vllm_server"):
             server_process = self._start_server()
@@ -102,6 +99,8 @@ class ExternalEvalRunner:
                         name, "Failed to start vLLM server"
                     )
                 return results
+            # Get the actual base_url from the provider (includes dynamic port)
+            base_url = server_process.base_url
 
         try:
             # Run each evaluation

@@ -13,17 +13,33 @@ PACKAGE_LOGGER_NAME = "olmo_eval"
 
 # ANSI color codes for terminal output
 _COLORS = (
+    # Standard colors
     "\033[36m",  # Cyan
     "\033[33m",  # Yellow
     "\033[35m",  # Magenta
     "\033[32m",  # Green
     "\033[34m",  # Blue
+    "\033[31m",  # Red
+    # Bright colors
     "\033[91m",  # Light Red
     "\033[96m",  # Light Cyan
     "\033[93m",  # Light Yellow
     "\033[95m",  # Light Magenta
     "\033[92m",  # Light Green
     "\033[94m",  # Light Blue
+    # 256-color palette
+    "\033[38;5;208m",  # Orange
+    "\033[38;5;213m",  # Pink
+    "\033[38;5;51m",  # Aqua
+    "\033[38;5;220m",  # Gold
+    "\033[38;5;159m",  # Sky Blue
+    "\033[38;5;183m",  # Lavender
+    "\033[38;5;120m",  # Mint
+    "\033[38;5;216m",  # Peach
+    "\033[38;5;147m",  # Periwinkle
+    "\033[38;5;229m",  # Cream
+    "\033[38;5;174m",  # Rose
+    "\033[38;5;79m",  # Teal
 )
 _RESET = "\033[0m"
 

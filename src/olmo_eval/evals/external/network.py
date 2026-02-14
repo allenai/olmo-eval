@@ -5,29 +5,19 @@ Handles translation of provider URLs between host and container contexts.
 
 from __future__ import annotations
 
-import socket
 from urllib.parse import urlparse, urlunparse
 
 
-def get_host_ip() -> str:
-    """Get the host IP address accessible from containers.
+def get_host_ip_for_slirp4netns() -> str:
+    """Get the host IP for podman's slirp4netns networking.
 
-    For Podman on Linux, we need the actual host IP since
-    host.docker.internal may not be available.
+    When running podman in rootless mode or inside a container, it uses
+    slirp4netns for networking. The gateway to the host is at 10.0.2.2.
 
     Returns:
-        Host IP address as a string.
+        Gateway IP for slirp4netns (10.0.2.2).
     """
-    # Try to get the default route interface IP
-    try:
-        # Connect to a public IP (doesn't actually send data)
-        # This gives us the IP of the interface that would be used
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.connect(("8.8.8.8", 80))
-            return s.getsockname()[0]
-    except Exception:
-        # Fallback to localhost
-        return "127.0.0.1"
+    return "10.0.2.2"
 
 
 def should_use_host_network() -> bool:
@@ -70,11 +60,15 @@ def translate_url_for_container(
         # Docker supports host.docker.internal
         new_host = "host.docker.internal"
     else:
-        # Podman on Linux needs the actual host IP
+        # Podman uses slirp4netns networking where the gateway is 10.0.2.2
         # On macOS, podman also supports host.docker.internal
         import platform
 
-        new_host = "host.docker.internal" if platform.system() == "Darwin" else get_host_ip()
+        new_host = (
+            "host.docker.internal"
+            if platform.system() == "Darwin"
+            else get_host_ip_for_slirp4netns()
+        )
 
     # Reconstruct the URL with the new host
     new_netloc = new_host
