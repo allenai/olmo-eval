@@ -94,11 +94,12 @@ class ExternalEvalRunner:
         elif self.provider_config.kind in ("vllm", "vllm_server"):
             server_process = self._start_server()
             if server_process is None:
-                # Failed to start server
+                # Failed to start server - save error results and return
                 for name in self.external_eval_names:
                     results[name] = ExternalEvalResult.from_error(
                         name, "Failed to start vLLM server"
                     )
+                self._save_results(results, time.time() - start_time)
                 return results
             # Get the actual base_url from the provider (includes dynamic port)
             base_url = server_process.base_url
@@ -165,6 +166,7 @@ class ExternalEvalRunner:
 
             # Create the provider - this starts the server automatically
             provider = server_config.create_provider()
+            logger.info(f"Provider ready at {provider.base_url}")
             return provider
 
         except Exception as e:

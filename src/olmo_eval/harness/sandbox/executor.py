@@ -280,8 +280,9 @@ class SandboxExecutor:
         from swerex.runtime.abstract import Command
 
         # Use a temp file to capture output for streaming
+        # Use pipefail to preserve the original command's exit code through the pipe
         output_file = "/tmp/_sandbox_output.log"
-        wrapped_cmd = f"{{ {command} ; }} 2>&1 | tee {output_file}"
+        wrapped_cmd = f"set -o pipefail; {{ {command} ; }} 2>&1 | tee {output_file}"
 
         # Start the command
         exec_task = asyncio.create_task(

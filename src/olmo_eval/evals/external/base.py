@@ -190,6 +190,57 @@ class ExternalEval(ABC):
                 )
         return None
 
+    async def _check_provider_health(
+        self,
+        executor: Any,
+        provider_url: str,
+        max_attempts: int = 5,
+        retry_delay: float = 2.0,
+    ) -> bool:
+        """Check if the provider is reachable from within the sandbox.
+
+        Args:
+            executor: Sandbox executor instance.
+            provider_url: URL of the provider to check.
+            max_attempts: Maximum number of connection attempts.
+            retry_delay: Seconds to wait between attempts.
+
+        Returns:
+            True if provider is reachable, False otherwise.
+        """
+        import asyncio
+
+        # Build health check URL (try /health endpoint first, fall back to base)
+        health_url = provider_url.rstrip("/")
+        if "/v1" in health_url:
+            health_url = health_url.replace("/v1", "/health")
+        else:
+            health_url = health_url + "/health"
+
+        for attempt in range(1, max_attempts + 1):
+            logger.info(
+                f"[{self.name}] Checking provider health (attempt {attempt}/{max_attempts})"
+            )
+
+            # Use curl to check connectivity from within the sandbox
+            check_cmd = f"curl -s -o /dev/null -w '%{{http_code}}' --max-time 5 {health_url}"
+            result = await executor.execute_command(check_cmd, timeout=10.0)
+
+            if result.success and result.output.strip() == "200":
+                logger.info(f"[{self.name}] Provider is reachable at {provider_url}")
+                return True
+
+            logger.warning(
+                f"[{self.name}] Provider not reachable (attempt {attempt}/{max_attempts}): "
+                f"status={result.output.strip()}"
+            )
+
+            if attempt < max_attempts:
+                await asyncio.sleep(retry_delay)
+
+        logger.error(f"[{self.name}] Provider unreachable after {max_attempts} attempts")
+        return False
+
     def _error_result(
         self, error: str, start_time: float, raw_output: str = ""
     ) -> ExternalEvalResult:

@@ -145,6 +145,14 @@ class Tau2ExternalEval(ExternalEval):
                 if setup_result:
                     return setup_result
 
+                # Check provider is reachable from sandbox
+                if not await self._check_provider_health(executor, provider_url):
+                    return self._error_result(
+                        f"Provider not reachable at {provider_url}",
+                        start_time,
+                        "\n".join(all_output),
+                    )
+
                 # Run evaluation
                 run_cmd = self._build_run_command(
                     model_name, provider_url, provider_kind, tau2_args
