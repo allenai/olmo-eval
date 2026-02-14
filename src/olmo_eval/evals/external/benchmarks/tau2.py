@@ -142,10 +142,8 @@ class Tau2ExternalEval(ExternalEval):
                 if setup_result:
                     return setup_result
 
-                # Rewrite localhost URL to use gateway IP
-                sandbox_provider_url = await self._get_provider_url_for_sandbox(
-                    executor, provider_url
-                )
+                # Rewrite localhost URL to use pasta host IP
+                sandbox_provider_url = self._get_provider_url_for_sandbox(provider_url)
 
                 # Check provider is reachable from sandbox
                 if not await self._check_provider_health(executor, sandbox_provider_url):
