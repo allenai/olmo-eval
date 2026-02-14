@@ -150,8 +150,6 @@ class ExternalEvalRunner:
         Returns:
             The provider instance (which manages the server) or None if failed.
         """
-        logger.info(f"Starting vLLM server for model: {self.provider_config.model}")
-
         try:
             # Set log_dir to persist vLLM server logs
             log_dir = os.path.join(self.output_dir, "logs")
