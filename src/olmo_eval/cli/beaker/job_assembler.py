@@ -17,6 +17,32 @@ if TYPE_CHECKING:
     from olmo_eval.launch import BeakerJobConfig
 
 
+def get_provider_extras(model_spec: str, default_kind: str | None = None) -> list[str]:
+    """Get the pip extras required for a model's provider.
+
+    Args:
+        model_spec: Model name or path.
+        default_kind: Default provider kind if model is not a preset.
+
+    Returns:
+        List of pip extras needed for the provider.
+    """
+    from olmo_eval.common.configs import get_provider_config
+    from olmo_eval.common.constants.infrastructure import BACKEND_OPTIONAL_GROUPS
+
+    try:
+        provider_config = get_provider_config(model_spec)
+        provider_kind = provider_config.kind
+    except Exception:
+        provider_kind = default_kind
+
+    if provider_kind:
+        provider_extra = BACKEND_OPTIONAL_GROUPS.get(provider_kind)
+        if provider_extra:
+            return [provider_extra]
+    return []
+
+
 def assemble_external_eval_job(
     name: str,
     model: str,
@@ -113,6 +139,12 @@ def assemble_external_eval_job(
             BeakerEnvSecret(env_var, secret_name) for env_var, secret_name in env_secrets
         ]
 
+    extras = ["sandbox"]
+    provider_extras = get_provider_extras(model, default_kind="vllm_server")
+    for extra in provider_extras:
+        if extra not in extras:
+            extras.append(extra)
+
     return BeakerJobConfig(
         name=name,
         command=command,
@@ -131,7 +163,7 @@ def assemble_external_eval_job(
         env_secrets=beaker_env_secrets,
         enable_sandbox=True,
         setup_registry_mirror=setup_registry_mirror,
-        extras=["sandbox"],
+        extras=extras,
     )
 
 
@@ -166,7 +198,6 @@ class JobConfigAssembler:
 
     def assemble(self, exp: ExperimentPlan) -> BeakerJobConfig:
         """Assemble a BeakerJobConfig for an experiment."""
-        from olmo_eval.common.constants.infrastructure import BACKEND_OPTIONAL_GROUPS
         from olmo_eval.launch import BeakerEnvSecret, BeakerJobConfig
 
         command = self._build_command(exp)
@@ -187,12 +218,9 @@ class JobConfigAssembler:
                 install_extras.append("sandbox")
 
         # Get provider extras from model preset (takes precedence over harness default)
-        from olmo_eval.common.configs import get_provider_config
-
-        provider_config = get_provider_config(exp.model_spec)
-        provider_group = BACKEND_OPTIONAL_GROUPS.get(provider_config.kind)
-        if provider_group and provider_group not in install_extras:
-            install_extras.append(provider_group)
+        for extra in get_provider_extras(exp.model_spec):
+            if extra not in install_extras:
+                install_extras.append(extra)
 
         # Collect env vars that have explicit overrides
         overridden_env_vars = set(self.secret_env_overrides.values())
