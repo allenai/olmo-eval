@@ -143,6 +143,13 @@ class Tau2ExternalEval(ExternalEval):
                 if setup_result:
                     return setup_result
 
+                # Debug: check tau2 CLI
+                help_result = await executor.execute_command(
+                    "/workspace/tau2-bench/.venv/bin/tau2 run --help",
+                    timeout=30.0,
+                )
+                logger.info(f"[{self.name}] tau2 run --help:\n{help_result.output}")
+
                 # Run evaluation
                 run_cmd = self._build_run_command(
                     model_name, provider_url, provider_kind, tau2_args
@@ -186,8 +193,7 @@ class Tau2ExternalEval(ExternalEval):
         agent_model = f"hosted_vllm/{model_name}" if is_local else model_name
 
         parts = [
-            f"cd {self.working_dir}/tau2-bench &&",
-            "~/.local/bin/uv run python -m tau2.run",
+            f"{self.working_dir}/tau2-bench/.venv/bin/tau2 run",
             f"--agent-llm '{agent_model}'",
         ]
 
