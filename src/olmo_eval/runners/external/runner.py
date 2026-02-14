@@ -159,7 +159,8 @@ class ExternalEvalRunner:
 
             # Create the provider - this starts the server automatically
             provider = server_config.create_provider()
-            logger.info(f"Provider ready at {provider.base_url}")
+            if hasattr(provider, "base_url"):
+                logger.info(f"Provider ready at {provider.base_url}")
             return provider
 
         except Exception as e:
