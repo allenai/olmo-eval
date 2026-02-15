@@ -17,6 +17,7 @@ import shlex
 import time
 from collections import defaultdict
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from olmo_eval.evals.external.base import ExternalEval
@@ -231,7 +232,11 @@ class Tau2ExternalEval(ExternalEval):
                 logger.info(f"[{self.name}] Run exit code: {run_result.exit_code}")
 
                 result = await self._extract_results(
-                    executor, "\n".join(all_output), run_result.exit_code, tau2_args.num_trials
+                    executor,
+                    "\n".join(all_output),
+                    run_result.exit_code,
+                    tau2_args.num_trials,
+                    output_dir,
                 )
 
         except Exception as e:
@@ -350,7 +355,12 @@ sys.exit(main())
         logger.info(f"[{self.name}] Created litellm wrapper (max_tokens={max_tokens})")
 
     async def _extract_results(
-        self, executor: SandboxExecutor, raw_output: str, exit_code: int, num_trials: int
+        self,
+        executor: SandboxExecutor,
+        raw_output: str,
+        exit_code: int,
+        num_trials: int,
+        output_dir: str | None = None,
     ) -> ExternalEvalResult:
         """Extract metrics from tau2-bench results."""
         # tau2 saves results to {repo}/data/simulations/*.json
@@ -382,6 +392,15 @@ sys.exit(main())
                     predictions.extend(self._build_predictions(data))
                     metadata["simulations_file"] = json_file
                     metadata["num_tasks"] = len(data["tasks"])
+
+                    # Save simulation file with trajectories to output directory
+                    if output_dir:
+                        trajectories_path = Path(output_dir) / "tau2_trajectories.json"
+                        trajectories_path.parent.mkdir(parents=True, exist_ok=True)
+                        with open(trajectories_path, "w") as f:
+                            json.dump(data, f, indent=2)
+                        metadata["trajectories_file"] = str(trajectories_path)
+                        logger.info(f"[{self.name}] Trajectories saved to {trajectories_path}")
             except json.JSONDecodeError as e:
                 logger.warning(f"[{self.name}] Failed to parse {json_file}: {e}")
 
