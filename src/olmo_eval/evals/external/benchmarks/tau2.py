@@ -39,6 +39,17 @@ def _parse_optional(data: dict, key: str, type_fn: type) -> Any:
     return type_fn(value) if value is not None else None
 
 
+def _parse_bool(value: Any, default: bool = False) -> bool:
+    """Parse a boolean value from string or bool."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() in ("true", "1", "yes")
+    return bool(value)
+
+
 @dataclass
 class Tau2Args:
     """Arguments for tau2_bench evaluation."""
@@ -90,7 +101,7 @@ class Tau2Args:
             max_errors=_parse_optional(data, "max_errors", int),
             seed=_parse_optional(data, "seed", int),
             log_level=data.get("log_level"),
-            enforce_communication_protocol=bool(data.get("enforce_communication_protocol", False)),
+            enforce_communication_protocol=_parse_bool(data.get("enforce_communication_protocol")),
         )
 
 
