@@ -345,13 +345,19 @@ sys.exit(main())
         """Query vLLM server for max_model_len."""
         url = f"{provider_url.rstrip('/')}/v1/models"
         result = await executor.execute_command(f"curl -s {shlex.quote(url)}", timeout=30.0)
+        # DEBUG: Log raw response to diagnose max_tokens detection
+        raw_output = result.output[:2000] if result.output else "(empty)"
+        logger.info(f"[{self.name}] DEBUG /v1/models response: {raw_output}")
         if result.success and result.output:
             try:
                 data = json.loads(result.output)
                 if models := data.get("data"):
-                    return models[0].get("max_model_len", DEFAULT_MAX_TOKENS)
-            except json.JSONDecodeError:
-                pass
+                    model_data = models[0]
+                    model_json = json.dumps(model_data, indent=2, default=str)
+                    logger.info(f"[{self.name}] DEBUG model_data: {model_json}")
+                    return model_data.get("max_model_len", DEFAULT_MAX_TOKENS)
+            except json.JSONDecodeError as e:
+                logger.warning(f"[{self.name}] DEBUG JSON parse error: {e}")
         return DEFAULT_MAX_TOKENS
 
     async def _extract_results(
