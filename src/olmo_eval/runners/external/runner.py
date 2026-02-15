@@ -94,24 +94,23 @@ class ExternalEvalRunner:
         start_time = time.time()
         results: dict[str, ExternalEvalResult] = {}
 
-        # Start the vLLM server if needed and get the actual base_url
+        # Start a vLLM server only if provider is vllm/vllm_server without existing base_url
         server_process = None
         base_url = self.provider_config.base_url
 
-        if self.provider_config.kind == "vllm_server" and self.provider_config.base_url:
-            # Server already running externally, use configured base_url
-            pass
-        elif self.provider_config.kind in ("vllm", "vllm_server"):
+        needs_server = (
+            self.provider_config.kind in ("vllm", "vllm_server")
+            and not self.provider_config.base_url
+        )
+        if needs_server:
             server_process = self._start_server()
             if server_process is None:
-                # Failed to start server - save error results and return
                 for name in self.external_eval_names:
                     results[name] = ExternalEvalResult.from_error(
                         name, "Failed to start vLLM server"
                     )
                 self._save_results(results, time.time() - start_time)
                 return results
-            # Get the actual base_url from the provider (includes dynamic port)
             base_url = server_process.base_url
 
         try:
