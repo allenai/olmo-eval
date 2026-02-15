@@ -121,11 +121,18 @@ class CredentialManager:
                 storage_lines.append(f"  Group: {effective_groups[0]}")
 
         if self.store:
+            from olmo_eval.launch.beaker.constants import (
+                OLMO_EVAL_DB_ARN_SECRET_NAME,
+                OLMO_EVAL_PGHOST_SECRET_NAME,
+                STORE_DEFAULTS,
+            )
+
             storage_lines.append("[bold]PostgreSQL:[/bold]")
             storage_lines.append(
-                "  Credentials from Beaker secrets: olmo_eval_PGHOST, olmo_eval_PGPORT,"
+                f"  Beaker secrets: {OLMO_EVAL_PGHOST_SECRET_NAME}, {OLMO_EVAL_DB_ARN_SECRET_NAME}"
             )
-            storage_lines.append("    olmo_eval_PGDATABASE, olmo_eval_PGUSER, olmo_eval_PGPASSWORD")
+            defaults_str = ", ".join(f"{k}={v}" for k, v in STORE_DEFAULTS.items())
+            storage_lines.append(f"  Defaults: {defaults_str}")
 
         console.print(
             Panel(

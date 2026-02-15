@@ -352,7 +352,13 @@ class SandboxExecutor:
         script_file = "/tmp/_sandbox_script.sh"
 
         # Create script via base64 to avoid quoting issues
-        script = f"#!/bin/bash\nexport PYTHONUNBUFFERED=1\n{command}\n"
+        script = (
+            "#!/bin/bash\n"
+            "export PYTHONUNBUFFERED=1\n"
+            "export NO_COLOR=1\n"
+            "export TERM=dumb\n"
+            f"{command}\n"
+        )
         encoded = base64.b64encode(script.encode()).decode()
 
         # Setup: create script file
