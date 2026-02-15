@@ -300,34 +300,33 @@ export PYTHONUNBUFFERED=1
 """
         encoded_script = base64.b64encode(script_content.encode()).decode()
 
-        # Create script and start it in background
-        # The script's stdout/stderr goes to output_file, exit code captured separately
-        # IMPORTANT: We must fully detach the background process by:
-        # 1. Closing stdin (</dev/null) so subprocess.run() doesn't wait for it
-        # 2. Redirecting stdout/stderr to file (not inherited pipes)
-        # 3. Using nohup to ignore hangup signals
-        setup_cmd = (
+        # Step 1: Create the script file (fast, synchronous)
+        create_script_cmd = (
             f"rm -f {output_file} {exit_code_file} {pid_file} && "
             f"echo '{encoded_script}' | base64 -d > {script_file} && "
-            f"chmod +x {script_file} && "
-            f"nohup bash -c '( {script_file}; echo $? > {exit_code_file} )' "
-            f"> {output_file} 2>&1 </dev/null & "
-            f"echo $! > {pid_file}"
+            f"chmod +x {script_file}"
         )
-
-        # Start the background process (quick HTTP call)
         try:
-            setup_result = await self._runtime.execute(
-                Command(command=["bash", "-c", setup_cmd], timeout=30.0)
+            await self._runtime.execute(
+                Command(command=["bash", "-c", create_script_cmd], timeout=30.0)
             )
-            self._log(
-                logging.INFO,
-                f"Background setup: exit_code={setup_result.exit_code}",
+        except Exception as e:
+            return ExecutionResult(
+                success=False,
+                output=f"Failed to create script: {e}",
+                exit_code=-1,
             )
-            if setup_result.stdout:
-                self._log(logging.INFO, f"Setup stdout: {setup_result.stdout.strip()}")
-            if setup_result.stderr:
-                self._log(logging.INFO, f"Setup stderr: {setup_result.stderr.strip()}")
+
+        # Step 2: Start the script in a fully detached background process
+        # Use setsid to create new session, double-fork pattern via subshell
+        # The outer subshell exits immediately while inner process continues
+        start_cmd = (
+            f"( setsid bash -c "
+            f"'{script_file} > {output_file} 2>&1; echo $? > {exit_code_file}' "
+            f"< /dev/null > /dev/null 2>&1 & )"
+        )
+        try:
+            await self._runtime.execute(Command(command=["bash", "-c", start_cmd], timeout=10.0))
         except Exception as e:
             return ExecutionResult(
                 success=False,
@@ -337,25 +336,6 @@ export PYTHONUNBUFFERED=1
 
         # Give the script a moment to start
         await asyncio.sleep(0.5)
-
-        # Log initial state for debugging
-        try:
-            of = output_file
-            debug_cmd = (
-                f"echo 'PID:' $(cat {pid_file} 2>/dev/null || echo 'missing'); "
-                f"echo 'Script:' $(test -f {script_file} && echo yes || echo no); "
-                f"echo 'Output:' $(test -f {of} && wc -c < {of} || echo 'no'); "
-                f"echo 'Exit:' $(cat {exit_code_file} 2>/dev/null || echo 'pending'); "
-                f"echo 'Proc:'; ps aux | grep _sandbox_script | grep -v grep || echo '(none)'"
-            )
-            debug_result = await self._runtime.execute(
-                Command(command=["bash", "-c", debug_cmd], timeout=10.0)
-            )
-            for line in (debug_result.stdout or "").strip().split("\n"):
-                if line:
-                    self._log(logging.INFO, f"Debug: {line}")
-        except Exception as e:
-            self._log(logging.INFO, f"Debug check failed: {e}")
 
         # Poll for output and completion
         last_pos = 0
@@ -408,12 +388,6 @@ export PYTHONUNBUFFERED=1
                     )
                 )
                 if check_resp.stdout and check_resp.stdout.strip():
-                    # Process completed
-                    self._log(
-                        logging.INFO,
-                        f"Process completed after {elapsed:.1f}s, "
-                        f"exit_code_file={check_resp.stdout.strip()!r}",
-                    )
                     break
             except Exception:
                 pass
