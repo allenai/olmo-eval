@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import time
@@ -276,72 +277,138 @@ class SandboxExecutor:
     async def _execute_streaming(
         self, command: str, timeout: float, prefix: str
     ) -> ExecutionResult:
-        """Execute a command with streaming output to logs."""
+        """Execute a command with streaming output to logs.
+
+        Uses background execution to avoid HTTP timeout issues with long-running commands.
+        The command runs in a background process while we poll for output and completion.
+        """
         from swerex.runtime.abstract import Command
 
-        # Use a temp file to capture output for streaming
-        # Use pipefail to preserve the original command's exit code through the pipe
+        # File paths for background execution
         output_file = "/tmp/_sandbox_output.log"
-        wrapped_cmd = f"set -o pipefail; {{ {command} ; }} 2>&1 | tee {output_file}"
+        exit_code_file = "/tmp/_sandbox_exit_code"
+        pid_file = "/tmp/_sandbox_pid"
 
-        # Start the command
-        exec_task = asyncio.create_task(
-            self._runtime.execute(Command(command=["bash", "-c", wrapped_cmd], timeout=timeout))
+        # Start command in background, capturing output and exit code
+        # Use setsid to create a new session so the process survives
+        bg_cmd = (
+            f"export PYTHONUNBUFFERED=1; "
+            f"rm -f {output_file} {exit_code_file} {pid_file}; "
+            f"( {command} ) > {output_file} 2>&1; "
+            f"echo $? > {exit_code_file}"
         )
+        wrapped_cmd = f"nohup bash -c '{bg_cmd}' & echo $! > {pid_file}"
 
-        # Stream output while command runs
+        # Start the background process (quick HTTP call)
+        try:
+            await self._runtime.execute(Command(command=["bash", "-c", wrapped_cmd], timeout=30.0))
+        except Exception as e:
+            return ExecutionResult(
+                success=False,
+                output=f"Failed to start background command: {e}",
+                exit_code=-1,
+            )
+
+        # Poll for output and completion
         last_pos = 0
-        poll_interval = 0.5
+        poll_interval = 1.0
+        streamed_output: list[str] = []
+        start_time = time.time()
 
-        while not exec_task.done():
+        while True:
+            elapsed = time.time() - start_time
+            if elapsed > timeout:
+                self._log(logging.WARNING, f"Command timed out after {timeout}s")
+                # Try to kill the background process
+                with contextlib.suppress(Exception):
+                    await self._runtime.execute(
+                        Command(
+                            command=[
+                                "bash",
+                                "-c",
+                                f"kill $(cat {pid_file} 2>/dev/null) 2>/dev/null || true",
+                            ],
+                            timeout=5.0,
+                        )
+                    )
+                break
+
             await asyncio.sleep(poll_interval)
 
             # Read new output
             try:
                 tail_cmd = f"tail -c +{last_pos + 1} {output_file} 2>/dev/null"
                 tail_resp = await self._runtime.execute(
-                    Command(command=["bash", "-c", tail_cmd], timeout=5.0)
+                    Command(command=["bash", "-c", tail_cmd], timeout=10.0)
                 )
                 new_output = tail_resp.stdout or ""
                 if new_output:
                     last_pos += len(new_output)
-                    # Log each line
+                    streamed_output.append(new_output)
                     for line in new_output.rstrip("\n").split("\n"):
                         if line:
                             logger.info(f"[{prefix}] {line}")
             except Exception:
-                pass  # Ignore errors reading output file
+                pass
 
-        # Get final result
-        response = await exec_task
-
-        # Read any remaining output
-        try:
-            final_resp = await self._runtime.execute(
-                Command(
-                    command=["bash", "-c", f"tail -c +{last_pos + 1} {output_file} 2>/dev/null"],
-                    timeout=5.0,
+            # Check if process completed (exit code file exists)
+            try:
+                check_resp = await self._runtime.execute(
+                    Command(
+                        command=["bash", "-c", f"cat {exit_code_file} 2>/dev/null"],
+                        timeout=5.0,
+                    )
                 )
+                if check_resp.stdout and check_resp.stdout.strip():
+                    # Process completed
+                    break
+            except Exception:
+                pass
+
+        # Read final output
+        full_output = ""
+        try:
+            # Give a moment for final writes
+            await asyncio.sleep(0.5)
+            cat_resp = await self._runtime.execute(
+                Command(command=["bash", "-c", f"cat {output_file} 2>/dev/null"], timeout=30.0)
             )
-            remaining = final_resp.stdout or ""
-            if remaining:
+            full_output = cat_resp.stdout or ""
+            # Log any remaining output not yet streamed
+            if len(full_output) > last_pos:
+                remaining = full_output[last_pos:]
                 for line in remaining.rstrip("\n").split("\n"):
                     if line:
                         logger.info(f"[{prefix}] {line}")
         except Exception:
-            pass
+            full_output = "".join(streamed_output)
 
-        # Get full output
-        output_parts = []
-        if response.stdout:
-            output_parts.append(response.stdout)
-        if response.stderr:
-            output_parts.append(response.stderr)
+        # Get exit code
+        exit_code = -1
+        timed_out = time.time() - start_time > timeout
+        if not timed_out:
+            try:
+                code_resp = await self._runtime.execute(
+                    Command(
+                        command=["bash", "-c", f"cat {exit_code_file} 2>/dev/null"],
+                        timeout=5.0,
+                    )
+                )
+                if code_resp.stdout and code_resp.stdout.strip():
+                    exit_code = int(code_resp.stdout.strip())
+            except Exception:
+                pass
+
+        if timed_out:
+            if full_output:
+                full_output += "\n[Command timed out]"
+            else:
+                full_output = "[Command timed out]"
 
         return ExecutionResult(
-            success=response.exit_code == 0,
-            output="".join(output_parts) if output_parts else "",
-            exit_code=response.exit_code,
+            success=exit_code == 0,
+            output=full_output,
+            exit_code=exit_code,
         )
 
     async def execute_code(
