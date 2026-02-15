@@ -92,6 +92,7 @@ class ProviderConfig:
         "guided_decoding_backend",
         "enable_prefix_caching",
         "disable_sliding_window",
+        "rope_scaling",
         "seed",
     )
 

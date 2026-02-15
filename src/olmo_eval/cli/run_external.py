@@ -162,6 +162,13 @@ def run_external(
             parsed_provider_kwargs[key] = True
         elif value.lower() == "false":
             parsed_provider_kwargs[key] = False
+        elif value.startswith("{") or value.startswith("["):
+            # Parse JSON objects and arrays
+            try:
+                parsed_provider_kwargs[key] = json.loads(value)
+            except json.JSONDecodeError as e:
+                console.print(f"[red]Error:[/red] Invalid JSON in -K {key}: {e}")
+                raise SystemExit(1) from None
         elif value.isdigit():
             parsed_provider_kwargs[key] = int(value)
         elif value.replace(".", "", 1).isdigit():

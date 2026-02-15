@@ -30,26 +30,59 @@ Tau2Domain = Literal["airline", "retail", "telecom"]
 class Tau2Args:
     """Arguments for tau2_bench evaluation."""
 
+    # Core settings
     domain: Tau2Domain = "airline"
-    user_llm: str = "gpt-4o-mini"
     num_trials: int = 1
-    max_steps: int = 10
+    max_steps: int = 30
     max_concurrency: int = 3
+
+    # Agent LLM settings (max_tokens and temperature go into --agent-llm-args)
     max_tokens: int | None = None
     temperature: float | None = None
+
+    # User LLM settings
+    user_llm: str = "gpt-4o-mini"
+    user_temperature: float | None = None
+
+    # Task filtering
+    task_split_name: str | None = None
+    task_ids: list[str] | None = None
+    num_tasks: int | None = None
+
+    # Execution settings
+    max_errors: int | None = None
+    seed: int | None = None
+    log_level: str | None = None
+    enforce_communication_protocol: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Tau2Args:
         # Get defaults from dataclass fields
         defaults = {f.name: f.default for f in fields(cls)}
+
+        # Handle task_ids which can be a string (comma-separated) or list
+        task_ids = data.get("task_ids")
+        if isinstance(task_ids, str):
+            task_ids = [t.strip() for t in task_ids.split(",") if t.strip()]
+
         return cls(
             domain=data.get("domain", defaults["domain"]),
-            user_llm=data.get("user_llm", defaults["user_llm"]),
             num_trials=int(data.get("num_trials", defaults["num_trials"])),
             max_steps=int(data.get("max_steps", defaults["max_steps"])),
             max_concurrency=int(data.get("max_concurrency", defaults["max_concurrency"])),
             max_tokens=int(data["max_tokens"]) if data.get("max_tokens") else None,
             temperature=float(data["temperature"]) if data.get("temperature") else None,
+            user_llm=data.get("user_llm", defaults["user_llm"]),
+            user_temperature=(
+                float(data["user_temperature"]) if data.get("user_temperature") else None
+            ),
+            task_split_name=data.get("task_split_name"),
+            task_ids=task_ids,
+            num_tasks=int(data["num_tasks"]) if data.get("num_tasks") else None,
+            max_errors=int(data["max_errors"]) if data.get("max_errors") else None,
+            seed=int(data["seed"]) if data.get("seed") else None,
+            log_level=data.get("log_level"),
+            enforce_communication_protocol=bool(data.get("enforce_communication_protocol", False)),
         )
 
 
@@ -107,13 +140,29 @@ class Tau2ExternalEval(ExternalEval):
     def arguments(self) -> dict[str, tuple[str, Any | None]]:
         defaults = {f.name: f.default for f in fields(Tau2Args)}
         return {
+            # Core settings
             "domain": ("Task domain: 'airline', 'retail', or 'telecom'", defaults["domain"]),
-            "user_llm": ("LLM for simulated user (requires API key)", defaults["user_llm"]),
             "num_trials": ("Number of trials per task", defaults["num_trials"]),
             "max_steps": ("Max agent steps per trial", defaults["max_steps"]),
             "max_concurrency": ("Max concurrent requests", defaults["max_concurrency"]),
+            # Agent LLM settings
             "max_tokens": ("Max tokens for agent LLM responses", defaults["max_tokens"]),
             "temperature": ("Temperature for agent LLM responses", defaults["temperature"]),
+            # User LLM settings
+            "user_llm": ("LLM for simulated user (requires API key)", defaults["user_llm"]),
+            "user_temperature": ("Temperature for user LLM", defaults["user_temperature"]),
+            # Task filtering
+            "task_split_name": ("Task split to run (default: 'base')", defaults["task_split_name"]),
+            "task_ids": ("Comma-separated task IDs to run", defaults["task_ids"]),
+            "num_tasks": ("Number of tasks to run (default: all)", defaults["num_tasks"]),
+            # Execution settings
+            "max_errors": ("Max consecutive tool errors allowed", defaults["max_errors"]),
+            "seed": ("Random seed for reproducibility", defaults["seed"]),
+            "log_level": ("Log level (DEBUG, INFO, WARNING, ERROR)", defaults["log_level"]),
+            "enforce_communication_protocol": (
+                "Enforce communication protocol rules",
+                defaults["enforce_communication_protocol"],
+            ),
         }
 
     async def execute(
@@ -201,7 +250,8 @@ class Tau2ExternalEval(ExternalEval):
             f"--agent-llm '{agent_model}'",
         ]
 
-        llm_args = {
+        # Build agent LLM args
+        agent_llm_args = {
             k: v
             for k, v in [
                 ("api_base", provider_url if is_local else None),
@@ -210,12 +260,18 @@ class Tau2ExternalEval(ExternalEval):
             ]
             if v is not None
         }
-        if llm_args:
-            parts.append(f"--agent-llm-args '{json.dumps(llm_args)}'")
+        if agent_llm_args:
+            parts.append(f"--agent-llm-args '{json.dumps(agent_llm_args)}'")
 
+        # User LLM settings
+        parts.append(f"--user-llm '{tau2_args.user_llm}'")
+        if tau2_args.user_temperature is not None:
+            user_llm_args = {"temperature": tau2_args.user_temperature}
+            parts.append(f"--user-llm-args '{json.dumps(user_llm_args)}'")
+
+        # Core settings
         parts.extend(
             [
-                f"--user-llm '{tau2_args.user_llm}'",
                 f"--domain '{tau2_args.domain}'",
                 f"--num-trials {tau2_args.num_trials}",
                 f"--max-steps {tau2_args.max_steps}",
@@ -223,6 +279,24 @@ class Tau2ExternalEval(ExternalEval):
                 f"--save-to {self.results_dir}",
             ]
         )
+
+        # Task filtering
+        if tau2_args.task_split_name:
+            parts.append(f"--task-split-name '{tau2_args.task_split_name}'")
+        if tau2_args.task_ids:
+            parts.append(f"--task-ids {' '.join(tau2_args.task_ids)}")
+        if tau2_args.num_tasks is not None:
+            parts.append(f"--num-tasks {tau2_args.num_tasks}")
+
+        # Execution settings
+        if tau2_args.max_errors is not None:
+            parts.append(f"--max-errors {tau2_args.max_errors}")
+        if tau2_args.seed is not None:
+            parts.append(f"--seed {tau2_args.seed}")
+        if tau2_args.log_level:
+            parts.append(f"--log-level {tau2_args.log_level}")
+        if tau2_args.enforce_communication_protocol:
+            parts.append("--enforce-communication-protocol")
 
         return " ".join(parts)
 
