@@ -1,5 +1,6 @@
 """Shared utilities for the CLI."""
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -170,6 +171,74 @@ def format_timestamp(ts: datetime | None) -> str:
     if ts is None:
         return "-"
     return ts.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _coerce_value(value: str) -> Any:
+    """Coerce a string value to its appropriate Python type.
+
+    Handles booleans, integers, floats, JSON objects/arrays, and plain strings.
+    """
+    # Booleans
+    if value.lower() == "true":
+        return True
+    if value.lower() == "false":
+        return False
+
+    # JSON objects and arrays
+    if value.startswith("{") or value.startswith("["):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value
+
+    # Integers (including negative)
+    if value.isdigit() or (value.startswith("-") and value[1:].isdigit()):
+        return int(value)
+
+    # Floats (including negative)
+    stripped = value.lstrip("-")
+    if stripped.replace(".", "", 1).isdigit() and stripped.count(".") == 1:
+        return float(value)
+
+    return value
+
+
+def parse_key_value_args(
+    args: tuple[str, ...] | list[str],
+    *,
+    coerce_types: bool = True,
+) -> dict[str, Any]:
+    """Parse key=value arguments and JSON dicts into a unified dictionary.
+
+    Args:
+        args: Sequence of strings, each either "key=value" or a JSON dict string.
+        coerce_types: If True, coerce string values to bools, ints, floats, or JSON.
+            If False, keep all values as strings (except JSON dict merges).
+
+    Returns:
+        Dictionary with parsed arguments.
+
+    Raises:
+        ValueError: If a JSON dict string is invalid.
+    """
+    result: dict[str, Any] = {}
+
+    for arg in args:
+        if arg.startswith("{"):
+            # JSON dict format - merge into result
+            try:
+                parsed = json.loads(arg)
+                if not isinstance(parsed, dict):
+                    raise ValueError(f"Expected JSON object, got {type(parsed).__name__}")
+                result.update(parsed)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON: {e}") from e
+        elif "=" in arg:
+            key, value = arg.split("=", 1)
+            result[key] = _coerce_value(value) if coerce_types else value
+        # Silently ignore invalid args (no "=" and not JSON)
+
+    return result
 
 
 @dataclass

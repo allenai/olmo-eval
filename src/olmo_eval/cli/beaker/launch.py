@@ -9,7 +9,6 @@ Configuration loading, validation, and job assembly are delegated to:
 - job_assembler.py: JobConfigAssembler for assembling BeakerJobConfig
 """
 
-import json
 from typing import TYPE_CHECKING
 
 import click
@@ -29,6 +28,7 @@ from olmo_eval.cli.utils import (
     RunnerConfig,
     console,
     extract_priority_from_overrides,
+    parse_key_value_args,
     process_ordered_args,
     reconstruct_ordered_args,
 )
@@ -357,25 +357,18 @@ def launch(
 
     # Handle external evaluations mode
     if external_evals:
-        # Parse eval_args (supports both key=value and JSON dict format)
-        parsed_eval_args: dict[str, str] = {}
-        for arg in eval_args:
-            if arg.startswith("{"):
-                try:
-                    parsed_eval_args.update(json.loads(arg))
-                except json.JSONDecodeError as e:
-                    console.print(f"[red]Error:[/red] Invalid JSON in -A argument: {e}")
-                    raise SystemExit(1) from None
-            elif "=" in arg:
-                key, value = arg.split("=", 1)
-                parsed_eval_args[key] = value
+        # Parse eval_args and provider_kwargs with type coercion
+        try:
+            parsed_eval_args = parse_key_value_args(eval_args, coerce_types=True)
+        except ValueError as e:
+            console.print(f"[red]Error:[/red] Invalid eval arg: {e}")
+            raise SystemExit(1) from None
 
-        # Parse provider_kwargs (key=value format)
-        parsed_provider_kwargs: dict[str, str] = {}
-        for kwarg in provider_kwargs:
-            if "=" in kwarg:
-                key, value = kwarg.split("=", 1)
-                parsed_provider_kwargs[key] = value
+        try:
+            parsed_provider_kwargs = parse_key_value_args(provider_kwargs, coerce_types=True)
+        except ValueError as e:
+            console.print(f"[red]Error:[/red] Invalid provider kwarg: {e}")
+            raise SystemExit(1) from None
 
         _launch_external_evals(
             external_evals=list(external_evals),

@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import click
 
-from olmo_eval.cli.utils import ConfiguredExternalEval, console
+from olmo_eval.cli.utils import ConfiguredExternalEval, console, parse_key_value_args
 from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR
 
 if TYPE_CHECKING:
@@ -192,30 +191,11 @@ def run_external(
         )
 
     # Parse provider kwargs (key=value format, with type coercion)
-    parsed_provider_kwargs: dict[str, Any] = {}
-    for kwarg in provider_kwargs:
-        if "=" not in kwarg:
-            console.print(f"[red]Error:[/red] Invalid provider kwarg '{kwarg}', use key=value")
-            raise SystemExit(1)
-        key, value = kwarg.split("=", 1)
-        # Type coercion for common types
-        if value.lower() == "true":
-            parsed_provider_kwargs[key] = True
-        elif value.lower() == "false":
-            parsed_provider_kwargs[key] = False
-        elif value.startswith("{") or value.startswith("["):
-            # Parse JSON objects and arrays
-            try:
-                parsed_provider_kwargs[key] = json.loads(value)
-            except json.JSONDecodeError as e:
-                console.print(f"[red]Error:[/red] Invalid JSON in -K {key}: {e}")
-                raise SystemExit(1) from None
-        elif value.isdigit():
-            parsed_provider_kwargs[key] = int(value)
-        elif value.replace(".", "", 1).isdigit():
-            parsed_provider_kwargs[key] = float(value)
-        else:
-            parsed_provider_kwargs[key] = value
+    try:
+        parsed_provider_kwargs = parse_key_value_args(provider_kwargs, coerce_types=True)
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] Invalid provider kwarg: {e}")
+        raise SystemExit(1) from None
 
     # Apply overrides
     provider_config = provider_config.with_overrides(
@@ -226,19 +206,11 @@ def run_external(
     )
 
     # Parse eval_args (supports both key=value and JSON dict format)
-    parsed_args: dict[str, str] = {}
-    for arg in eval_args:
-        if arg.startswith("{"):
-            try:
-                parsed_args.update(json.loads(arg))
-            except json.JSONDecodeError as e:
-                console.print(f"[red]Error:[/red] Invalid JSON in -a argument: {e}")
-                raise SystemExit(1) from None
-        elif "=" in arg:
-            key, value = arg.split("=", 1)
-            parsed_args[key] = value
-        else:
-            console.print(f"[yellow]Warning:[/yellow] Invalid arg '{arg}', use key=value")
+    try:
+        parsed_args = parse_key_value_args(eval_args, coerce_types=True)
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] Invalid eval arg: {e}")
+        raise SystemExit(1) from None
 
     # Set up storage backends
     from olmo_eval.cli.run.storage import StorageSetup
