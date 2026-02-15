@@ -74,44 +74,6 @@ class ProviderConfig:
         "mock": (),
     }
 
-    # Extra kwargs accepted by each provider (from self.kwargs)
-    # vllm and vllm_server share most engine kwargs since vllm_server can spawn a vLLM process
-    _VLLM_ENGINE_KWARGS: ClassVar[tuple[str, ...]] = (
-        "tensor_parallel_size",
-        "pipeline_parallel_size",
-        "gpu_memory_utilization",
-        "max_model_len",
-        "attention_backend",
-        "load_format",
-        "model_loader_extra_config",
-        "enforce_eager",
-        "enable_chunked_prefill",
-        "quantization",
-        "max_num_seqs",
-        "max_num_batched_tokens",
-        "guided_decoding_backend",
-        "enable_prefix_caching",
-        "disable_sliding_window",
-        "rope_scaling",
-        "seed",
-    )
-
-    _PROVIDER_KWARGS: ClassVar[dict[str, tuple[str, ...]]] = {
-        "vllm": _VLLM_ENGINE_KWARGS,
-        "vllm_server": (
-            *_VLLM_ENGINE_KWARGS,
-            "enable_auto_tool_choice",
-            "timeout",
-            "max_retries",
-            "retry_delay",
-            "log_dir",
-            "chat_template_kwargs",
-        ),
-        "litellm": (),
-        "hf": ("torch_dtype", "device_map", "attn_implementation"),
-        "mock": (),
-    }
-
     def create_provider(self) -> InferenceProvider:
         """Create an InferenceProvider from this configuration."""
         from olmo_eval.inference import create_provider
@@ -121,13 +83,7 @@ class ProviderConfig:
             raise ValueError(f"Missing required secrets: {', '.join(missing)}")
 
         kind_str = str(self.kind)
-        provider_kwargs: dict[str, Any] = {}
-
-        # Filter self.kwargs to only include kwargs this provider accepts
-        allowed_kwargs = set(self._PROVIDER_KWARGS.get(kind_str, ()))
-        for key, value in self.kwargs.items():
-            if key in allowed_kwargs:
-                provider_kwargs[key] = value
+        provider_kwargs: dict[str, Any] = dict(self.kwargs)
 
         # Add config fields this provider accepts (skip None/default values)
         for field_name in self._PROVIDER_FIELDS.get(kind_str, ()):
