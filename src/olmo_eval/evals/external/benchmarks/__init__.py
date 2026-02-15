@@ -1,6 +1,4 @@
-"""External evaluation benchmark registrations.
+"""External evaluation benchmark modules.
 
-Import benchmark modules here to trigger their registration.
+Benchmark modules are loaded lazily by the registry when needed.
 """
-
-from olmo_eval.evals.external.benchmarks import tau2  # noqa: F401
