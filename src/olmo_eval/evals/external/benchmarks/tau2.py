@@ -350,6 +350,7 @@ sys.exit(main())
 
         all_metrics: dict[str, float] = {}
         metadata: dict[str, Any] = {}
+        predictions: list[dict[str, Any]] = []
 
         for json_file in ls_result.output.strip().split("\n"):
             if not (json_file := json_file.strip()):
@@ -363,6 +364,7 @@ sys.exit(main())
                 data = json.loads(cat_result.output)
                 if "simulations" in data and "tasks" in data:
                     all_metrics.update(self._compute_pass_k_metrics(data, num_trials))
+                    predictions.extend(self._build_predictions(data))
                     metadata["simulations_file"] = json_file
             except json.JSONDecodeError as e:
                 logger.warning(f"[{self.name}] Failed to parse {json_file}: {e}")
@@ -373,6 +375,7 @@ sys.exit(main())
             metrics=all_metrics,
             metadata=metadata,
             raw_output=raw_output,
+            predictions=predictions if predictions else None,
         )
 
     def _compute_pass_k_metrics(self, data: dict[str, Any], num_trials: int) -> dict[str, float]:
@@ -403,6 +406,66 @@ sys.exit(main())
                 metrics[f"pass^{k}"] = sum(pass_k_values) / len(pass_k_values)
 
         return metrics
+
+    def _build_predictions(self, data: dict[str, Any]) -> list[dict[str, Any]]:
+        """Build per-task predictions from tau2-bench simulations."""
+        # Group simulations by task
+        sims_by_task: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for sim in data["simulations"]:
+            sims_by_task[sim["task_id"]].append(sim)
+
+        predictions = []
+        for task in data["tasks"]:
+            task_id = task["id"]
+            task_sims = sims_by_task.get(task_id, [])
+
+            # Extract per-trial data
+            trials = []
+            for sim in task_sims:
+                reward_info = sim.get("reward_info", {})
+                trial_data: dict[str, Any] = {
+                    "trial": sim.get("trial"),
+                    "reward": reward_info.get("reward", 0),
+                    "duration": sim.get("duration"),
+                    "termination_reason": sim.get("termination_reason"),
+                    "agent_cost": sim.get("agent_cost"),
+                    "user_cost": sim.get("user_cost"),
+                }
+                # Include reward breakdown if present
+                if "reward_breakdown" in reward_info:
+                    trial_data["reward_breakdown"] = reward_info["reward_breakdown"]
+                if "reward_basis" in reward_info:
+                    trial_data["reward_basis"] = reward_info["reward_basis"]
+                trials.append(trial_data)
+
+            # Compute aggregated metrics
+            rewards = [t["reward"] for t in trials]
+            success_rate = sum(rewards) / len(rewards) if rewards else 0.0
+            total_duration = sum(t.get("duration") or 0 for t in trials)
+            avg_duration = total_duration / len(trials) if trials else 0.0
+            total_agent_cost = sum(t.get("agent_cost") or 0 for t in trials)
+            total_user_cost = sum(t.get("user_cost") or 0 for t in trials)
+            total_cost = total_agent_cost + total_user_cost
+
+            # Compute error rate (agent_error or user_error terminations)
+            error_reasons = {"agent_error", "user_error", "too_many_errors"}
+            error_count = sum(1 for t in trials if t.get("termination_reason") in error_reasons)
+            error_rate = error_count / len(trials) if trials else 0.0
+
+            predictions.append(
+                {
+                    "native_id": task_id,
+                    "instance_metrics": {
+                        "success_rate": {"external": success_rate},
+                        "avg_duration": {"external": avg_duration},
+                        "total_cost": {"external": total_cost},
+                        "error_rate": {"external": error_rate},
+                    },
+                    "num_trials": len(trials),
+                    "trials": trials,
+                }
+            )
+        return predictions
 
 
 register_external_eval(Tau2ExternalEval())

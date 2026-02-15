@@ -257,6 +257,7 @@ class ExternalEvalRunner:
                 "success": result.success,
                 "error": result.error,
                 "raw_output": result.raw_output,
+                "predictions": result.predictions,
             }
 
         # Write combined results (legacy format for backwards compatibility)

@@ -27,6 +27,7 @@ class ExternalEvalResult:
     error: str | None = None
     duration_seconds: float | None = None
     raw_output: str | None = None
+    predictions: list[dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -42,6 +43,8 @@ class ExternalEvalResult:
             result["duration_seconds"] = self.duration_seconds
         if self.raw_output is not None:
             result["raw_output"] = self.raw_output
+        if self.predictions is not None:
+            result["predictions"] = self.predictions
         return result
 
     @classmethod
@@ -55,6 +58,7 @@ class ExternalEvalResult:
             error=data.get("error"),
             duration_seconds=data.get("duration_seconds"),
             raw_output=data.get("raw_output"),
+            predictions=data.get("predictions"),
         )
 
     @classmethod
