@@ -63,6 +63,7 @@ class Tau2Args:
 
     # Agent LLM settings
     max_tokens: int | None = None
+    max_model_len: int | None = None
     temperature: float | None = None
 
     # User LLM settings
@@ -93,6 +94,7 @@ class Tau2Args:
             max_steps=int(data.get("max_steps", 30)),
             max_concurrency=int(data.get("max_concurrency", 3)),
             max_tokens=_parse_optional(data, "max_tokens", int),
+            max_model_len=_parse_optional(data, "max_model_len", int),
             temperature=_parse_optional(data, "temperature", float),
             user_llm=data.get("user_llm", "gpt-4o-mini"),
             user_temperature=_parse_optional(data, "user_temperature", float),
@@ -163,6 +165,7 @@ class Tau2ExternalEval(ExternalEval):
             "max_steps": ("Max agent steps per trial", 30),
             "max_concurrency": ("Max concurrent requests", 3),
             "max_tokens": ("Max tokens for agent LLM responses", None),
+            "max_model_len": ("Model context length for litellm registration", None),
             "temperature": ("Temperature for agent LLM responses", None),
             "user_llm": ("LLM for simulated user (requires API key)", "gpt-4o-mini"),
             "user_temperature": ("Temperature for user LLM", None),
@@ -187,7 +190,7 @@ class Tau2ExternalEval(ExternalEval):
         start_time = time.time()
         tau2_args = Tau2Args.from_dict(args)
         all_output: list[str] = []
-        is_local = provider_kind in ("vllm", "vllm_server")
+        is_local = provider_kind == "vllm_server"
 
         try:
             from olmo_eval.harness.sandbox.executor import SandboxExecutor
@@ -211,7 +214,12 @@ class Tau2ExternalEval(ExternalEval):
                     )
 
                 if is_local:
-                    await self._setup_litellm_wrapper(executor, model_name, sandbox_url)
+                    # TODO(undfined): Get this from the source  model config in the future.
+                    # OpenAI-compatible servers do not expose /v1/models endpoint.
+                    max_model_len = tau2_args.max_model_len or DEFAULT_MAX_TOKENS
+                    await self._setup_litellm_wrapper(
+                        executor, model_name, sandbox_url, max_model_len
+                    )
 
                 run_cmd = self._build_run_command(model_name, sandbox_url, provider_kind, tau2_args)
                 logger.info(f"[{self.name}] Running: {run_cmd}")
@@ -244,7 +252,7 @@ class Tau2ExternalEval(ExternalEval):
         tau2_args: Tau2Args,
     ) -> str:
         """Build the tau2 run command."""
-        is_local = provider_kind in ("vllm", "vllm_server")
+        is_local = provider_kind == "vllm_server"
         agent_model = f"hosted_vllm/{model_name}" if is_local else model_name
         repo = f"{self.working_dir}/tau2-bench"
 
@@ -309,10 +317,10 @@ class Tau2ExternalEval(ExternalEval):
         return " ".join(parts)
 
     async def _setup_litellm_wrapper(
-        self, executor: SandboxExecutor, model_name: str, provider_url: str
+        self, executor: SandboxExecutor, model_name: str, provider_url: str, max_model_len: int
     ) -> None:
         """Create wrapper script that registers the model with litellm."""
-        max_tokens = await self._query_max_tokens(executor, provider_url)
+        max_tokens = max_model_len
         repo = f"{self.working_dir}/tau2-bench"
 
         # Use json.dumps to safely escape the model name for Python string literal
@@ -340,20 +348,6 @@ sys.exit(main())
             f"echo '{encoded}' | base64 -d > {wrapper_path}", timeout=30.0
         )
         logger.info(f"[{self.name}] Created litellm wrapper (max_tokens={max_tokens})")
-
-    async def _query_max_tokens(self, executor: SandboxExecutor, provider_url: str) -> int:
-        """Query vLLM server for max_model_len."""
-        url = f"{provider_url.rstrip('/')}/v1/models"
-        result = await executor.execute_command(f"curl -s {shlex.quote(url)}", timeout=30.0)
-        logger.info(f"[{self.name}] DEBUG /v1/models: {result.output}")
-        if result.success and result.output:
-            try:
-                data = json.loads(result.output)
-                if models := data.get("data"):
-                    return models[0].get("max_model_len", DEFAULT_MAX_TOKENS)
-            except json.JSONDecodeError:
-                pass
-        return DEFAULT_MAX_TOKENS
 
     async def _extract_results(
         self, executor: SandboxExecutor, raw_output: str, exit_code: int, num_trials: int
