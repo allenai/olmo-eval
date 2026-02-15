@@ -32,8 +32,8 @@ class Tau2Args:
 
     domain: Tau2Domain = "airline"
     user_llm: str = "gpt-4o-mini"
-    num_trials: int = 4
-    max_steps: int = 200
+    num_trials: int = 1
+    max_steps: int = 10
     max_concurrency: int = 3
     max_tokens: int | None = None
     temperature: float | None = None
