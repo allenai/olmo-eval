@@ -551,6 +551,7 @@ class BeakerLauncher:
         provider_package: str | None = None,
         task_packages: list[str] | None = None,
         setup_registry_mirror: bool = False,
+        enable_sandbox: bool = False,
     ) -> str:
         """Build installation command for gantry's install_cmd parameter.
 
@@ -565,6 +566,7 @@ class BeakerLauncher:
             provider_package: Optional custom provider package to install (overrides default).
             task_packages: Optional list of task-specific packages to install.
             setup_registry_mirror: If True, run setup_dockerio_mirror script with MIRROR_HOSTS.
+            enable_sandbox: If True, set up /dev/net/tun for pasta networking.
 
         Returns:
             Shell command string for installation.
@@ -572,6 +574,14 @@ class BeakerLauncher:
         # Build the install steps
         # Export UV_PROJECT_ENVIRONMENT so all uv commands use Docker's /opt/venv
         steps = ["export UV_PROJECT_ENVIRONMENT=/opt/venv"]
+
+        # Set up /dev/net/tun for pasta networking (sandbox jobs)
+        if enable_sandbox:
+            steps.append(
+                "mkdir -p /dev/net && "
+                "[ -e /dev/net/tun ] || mknod /dev/net/tun c 10 200 && "
+                "chmod 666 /dev/net/tun"
+            )
 
         # Set up registry mirror for Docker Hub if configured (for sandbox jobs)
         if setup_registry_mirror:
@@ -633,6 +643,7 @@ class BeakerLauncher:
             config.provider_package,
             config.task_packages,
             config.setup_registry_mirror,
+            config.enable_sandbox,
         )
 
         # Build weka mounts as tuples: (bucket, mount_path)
