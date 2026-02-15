@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
+import base64
 import logging
 import os
 import time
@@ -89,6 +89,70 @@ class SandboxExecutor:
             logger.log(level, f"[{self.name}] {msg}")
         else:
             logger.log(level, msg)
+
+    async def _get_container_diagnostics(self) -> str:
+        """Gather diagnostic info when sandbox becomes unresponsive."""
+        import subprocess
+
+        diag_lines = ["--- Container Diagnostics ---"]
+
+        # Check if deployment reports alive
+        if self._deployment is not None:
+            try:
+                is_alive = await self._deployment.is_alive()
+                diag_lines.append(f"Deployment is_alive: {is_alive}")
+            except Exception as e:
+                diag_lines.append(f"Deployment is_alive check failed: {e}")
+
+            # Get container name and fetch logs from host
+            container_name = getattr(self._deployment, "container_name", None)
+            if container_name:
+                diag_lines.append(f"Container name: {container_name}")
+
+                # Try to get container status and logs via subprocess
+                runtime = self.config.container_runtime or "docker"
+                try:
+                    # Get container state
+                    inspect_result = subprocess.run(
+                        [runtime, "inspect", "--format", "{{.State.Status}}", container_name],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
+                    if inspect_result.returncode == 0:
+                        diag_lines.append(f"Container status: {inspect_result.stdout.strip()}")
+                    else:
+                        err = inspect_result.stderr.strip()
+                        diag_lines.append(f"Container inspect failed: {err}")
+                except Exception as e:
+                    diag_lines.append(f"Container inspect error: {e}")
+
+                try:
+                    # Get last 50 lines of container logs
+                    logs_result = subprocess.run(
+                        [runtime, "logs", "--tail", "50", container_name],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
+                    if logs_result.returncode == 0:
+                        logs = logs_result.stdout.strip() or logs_result.stderr.strip()
+                        if logs:
+                            diag_lines.append(f"Container logs (last 50 lines):\n{logs}")
+                        else:
+                            diag_lines.append("Container logs: (empty)")
+                    else:
+                        diag_lines.append(f"Container logs failed: {logs_result.stderr.strip()}")
+                except Exception as e:
+                    diag_lines.append(f"Container logs error: {e}")
+            else:
+                diag_lines.append("Container name: not available")
+        else:
+            diag_lines.append("Deployment: None")
+
+        diag = "\n".join(diag_lines)
+        self._log(logging.ERROR, diag)
+        return diag
 
     async def __aenter__(self) -> SandboxExecutor:
         """Start the sandbox environment."""
@@ -279,164 +343,130 @@ class SandboxExecutor:
     ) -> ExecutionResult:
         """Execute a command with streaming output to logs.
 
-        Uses background execution to avoid HTTP timeout issues with long-running commands.
-        The command runs in a background process while we poll for output and completion.
+        Uses background execution to avoid swerex HTTP timeout issues.
         """
         from swerex.runtime.abstract import Command
 
-        # File paths for background execution
         output_file = "/tmp/_sandbox_output.log"
         exit_code_file = "/tmp/_sandbox_exit_code"
-        pid_file = "/tmp/_sandbox_pid"
         script_file = "/tmp/_sandbox_script.sh"
 
-        # Write the command to a script file to avoid quoting issues
-        # Use base64 encoding to safely transfer the command
-        import base64
+        # Create script via base64 to avoid quoting issues
+        script = f"#!/bin/bash\nexport PYTHONUNBUFFERED=1\n{command}\n"
+        encoded = base64.b64encode(script.encode()).decode()
 
-        script_content = f"""#!/bin/bash
-export PYTHONUNBUFFERED=1
-{command}
-"""
-        encoded_script = base64.b64encode(script_content.encode()).decode()
-
-        # Step 1: Create the script file (fast, synchronous)
-        create_script_cmd = (
-            f"rm -f {output_file} {exit_code_file} {pid_file} && "
-            f"echo '{encoded_script}' | base64 -d > {script_file} && "
+        # Setup: create script file
+        setup = (
+            f"rm -f {output_file} {exit_code_file} && "
+            f"echo '{encoded}' | base64 -d > {script_file} && "
             f"chmod +x {script_file}"
         )
         try:
-            await self._runtime.execute(
-                Command(command=["bash", "-c", create_script_cmd], timeout=30.0)
-            )
+            await self._runtime.execute(Command(command=["bash", "-c", setup], timeout=30.0))
         except Exception as e:
-            return ExecutionResult(
-                success=False,
-                output=f"Failed to create script: {e}",
-                exit_code=-1,
-            )
+            return ExecutionResult(False, f"Failed to create script: {e}", -1)
 
-        # Step 2: Start the script in a fully detached background process
-        # Use setsid to create new session, double-fork pattern via subshell
-        # The outer subshell exits immediately while inner process continues
-        start_cmd = (
-            f"( setsid bash -c "
-            f"'{script_file} > {output_file} 2>&1; echo $? > {exit_code_file}' "
-            f"< /dev/null > /dev/null 2>&1 & )"
+        # Start script in detached background process (setsid creates new session)
+        start = (
+            f"( setsid bash -c '{script_file} > {output_file} 2>&1; "
+            f"echo $? > {exit_code_file}' < /dev/null > /dev/null 2>&1 & )"
         )
         try:
-            await self._runtime.execute(Command(command=["bash", "-c", start_cmd], timeout=10.0))
+            await self._runtime.execute(Command(command=["bash", "-c", start], timeout=10.0))
         except Exception as e:
-            return ExecutionResult(
-                success=False,
-                output=f"Failed to start background command: {e}",
-                exit_code=-1,
-            )
-
-        # Give the script a moment to start
-        await asyncio.sleep(0.5)
+            return ExecutionResult(False, f"Failed to start command: {e}", -1)
 
         # Poll for output and completion
         last_pos = 0
-        poll_interval = 1.0
-        streamed_output: list[str] = []
         start_time = time.time()
+        timed_out = False
+        consecutive_failures = 0
+        max_consecutive_failures = 3
 
         while True:
-            elapsed = time.time() - start_time
-            if elapsed > timeout:
+            await asyncio.sleep(1.0)
+
+            if time.time() - start_time > timeout:
                 self._log(logging.WARNING, f"Command timed out after {timeout}s")
-                # Try to kill the background process
-                with contextlib.suppress(Exception):
-                    await self._runtime.execute(
-                        Command(
-                            command=[
-                                "bash",
-                                "-c",
-                                f"kill $(cat {pid_file} 2>/dev/null) 2>/dev/null || true",
-                            ],
-                            timeout=5.0,
-                        )
-                    )
+                timed_out = True
                 break
 
-            await asyncio.sleep(poll_interval)
-
-            # Read new output
+            # Stream new output and check for completion in one pass
             try:
-                tail_cmd = f"tail -c +{last_pos + 1} {output_file} 2>/dev/null"
-                tail_resp = await self._runtime.execute(
-                    Command(command=["bash", "-c", tail_cmd], timeout=10.0)
+                resp = await self._runtime.execute(
+                    Command(
+                        command=[
+                            "bash",
+                            "-c",
+                            f"tail -c +{last_pos + 1} {output_file} 2>/dev/null; "
+                            f"echo '---EXIT_CODE---'; "
+                            f"cat {exit_code_file} 2>/dev/null",
+                        ],
+                        timeout=10.0,
+                    )
                 )
-                new_output = tail_resp.stdout or ""
+                consecutive_failures = 0  # Reset on success
+
+                parts = (resp.stdout or "").split("---EXIT_CODE---")
+                new_output = parts[0] if parts else ""
+                exit_marker = parts[1].strip() if len(parts) > 1 else ""
+
                 if new_output:
                     last_pos += len(new_output)
-                    streamed_output.append(new_output)
                     for line in new_output.rstrip("\n").split("\n"):
                         if line:
                             logger.info(f"[{prefix}] {line}")
-            except Exception:
-                pass
 
-            # Check if process completed (exit code file exists)
-            try:
-                check_resp = await self._runtime.execute(
-                    Command(
-                        command=["bash", "-c", f"cat {exit_code_file} 2>/dev/null"],
-                        timeout=5.0,
-                    )
-                )
-                if check_resp.stdout and check_resp.stdout.strip():
+                if exit_marker:
                     break
-            except Exception:
-                pass
 
-        # Read final output
+            except Exception as e:
+                consecutive_failures += 1
+                self._log(
+                    logging.WARNING,
+                    f"Poll failed ({consecutive_failures}/{max_consecutive_failures}): {e}",
+                )
+                if consecutive_failures >= max_consecutive_failures:
+                    self._log(logging.ERROR, "Sandbox unresponsive, aborting")
+                    diag = await self._get_container_diagnostics()
+                    msg = f"Sandbox unresponsive after {consecutive_failures} polls\n{diag}"
+                    return ExecutionResult(False, msg, -1)
+
+        # Read final output and exit code
         full_output = ""
+        exit_code = -1
+
         try:
-            # Give a moment for final writes
-            await asyncio.sleep(0.5)
-            cat_resp = await self._runtime.execute(
-                Command(command=["bash", "-c", f"cat {output_file} 2>/dev/null"], timeout=30.0)
+            await asyncio.sleep(0.2)
+            resp = await self._runtime.execute(
+                Command(
+                    command=[
+                        "bash",
+                        "-c",
+                        f"cat {output_file} 2>/dev/null; "
+                        f"echo '---EXIT_CODE---'; "
+                        f"cat {exit_code_file} 2>/dev/null",
+                    ],
+                    timeout=30.0,
+                )
             )
-            full_output = cat_resp.stdout or ""
-            # Log any remaining output not yet streamed
+            parts = (resp.stdout or "").split("---EXIT_CODE---")
+            full_output = parts[0] if parts else ""
+            if len(parts) > 1 and parts[1].strip():
+                exit_code = int(parts[1].strip())
+        except Exception as e:
+            self._log(logging.WARNING, f"Failed to read final output: {e}")
+
+            # Log any output we missed during streaming
             if len(full_output) > last_pos:
-                remaining = full_output[last_pos:]
-                for line in remaining.rstrip("\n").split("\n"):
+                for line in full_output[last_pos:].rstrip("\n").split("\n"):
                     if line:
                         logger.info(f"[{prefix}] {line}")
-        except Exception:
-            full_output = "".join(streamed_output)
-
-        # Get exit code
-        exit_code = -1
-        timed_out = time.time() - start_time > timeout
-        if not timed_out:
-            try:
-                code_resp = await self._runtime.execute(
-                    Command(
-                        command=["bash", "-c", f"cat {exit_code_file} 2>/dev/null"],
-                        timeout=5.0,
-                    )
-                )
-                if code_resp.stdout and code_resp.stdout.strip():
-                    exit_code = int(code_resp.stdout.strip())
-            except Exception:
-                pass
 
         if timed_out:
-            if full_output:
-                full_output += "\n[Command timed out]"
-            else:
-                full_output = "[Command timed out]"
+            full_output = (full_output + "\n[Command timed out]") if full_output else "[Timed out]"
 
-        return ExecutionResult(
-            success=exit_code == 0,
-            output=full_output,
-            exit_code=exit_code,
-        )
+        return ExecutionResult(exit_code == 0, full_output, exit_code)
 
     async def execute_code(
         self,

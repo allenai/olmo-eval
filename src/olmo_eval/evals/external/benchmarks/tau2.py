@@ -193,8 +193,11 @@ class Tau2ExternalEval(ExternalEval):
         is_local = provider_kind in ("vllm", "vllm_server")
         agent_model = f"hosted_vllm/{model_name}" if is_local else model_name
 
+        # Run from the tau2-bench repo directory (required for git hash lookup)
+        repo_dir = f"{self.working_dir}/tau2-bench"
         parts = [
-            f"{self.working_dir}/tau2-bench/.venv/bin/tau2 run",
+            f"cd {repo_dir} &&",
+            f"{repo_dir}/.venv/bin/tau2 run",
             f"--agent-llm '{agent_model}'",
         ]
 
