@@ -317,6 +317,11 @@ class VLLMServerProcess:
         # Start the server process
         env = os.environ.copy()
 
+        # Allow extended max_model_len when user specifies it (e.g., with rope_scaling)
+        # This is needed when max_model_len > model's max_position_embeddings
+        if self.server_kwargs.get("max_model_len"):
+            env["VLLM_ALLOW_LONG_MAX_MODEL_LEN"] = "1"
+
         # Enable verbose vLLM logging when debugging
         if is_debug_provider():
             env["VLLM_LOGGING_LEVEL"] = "DEBUG"
