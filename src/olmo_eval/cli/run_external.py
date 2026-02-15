@@ -63,8 +63,8 @@ class ExternalRunConfig:
     "--tensor-parallel-size",
     "--tp",
     type=int,
-    default=1,
-    help="Tensor parallel size for vLLM",
+    default=None,
+    help="Tensor parallel size for vLLM (overrides model preset)",
 )
 @click.option(
     "--port",
@@ -131,7 +131,7 @@ def run_external(
     output_dir: str,
     provider: str,
     base_url: str | None,
-    tensor_parallel_size: int,
+    tensor_parallel_size: int | None,
     port: int,
     runtime: str,
     dry_run: bool,
@@ -221,7 +221,7 @@ def run_external(
     provider_config = provider_config.with_overrides(
         kind=provider,
         base_url=base_url,
-        tensor_parallel_size=tensor_parallel_size if tensor_parallel_size > 1 else None,
+        tensor_parallel_size=tensor_parallel_size,
         **parsed_provider_kwargs,
     )
 
