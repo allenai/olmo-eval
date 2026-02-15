@@ -361,7 +361,7 @@ class SandboxExecutor:
             "export PYTHONUNBUFFERED=1\n"
             "export NO_COLOR=1\n"
             "export TERM=dumb\n"
-            "export COLUMNS=1000\n"
+            "export TTY_COMPATIBLE=0\n"
             f"{command}\n"
         )
         encoded = base64.b64encode(script.encode()).decode()
