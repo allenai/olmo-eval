@@ -59,6 +59,7 @@ def assemble_external_eval_job(
     s3_bucket: str | None = None,
     s3_prefix: str | None = None,
     s3_region: str = "us-east-1",
+    store: bool = False,
     env_secrets: list[tuple[str, str]] | None = None,
     inject_aws_credentials: bool = False,
     inject_gcs_credentials: bool = False,
@@ -117,6 +118,23 @@ def assemble_external_eval_job(
         for key, value in provider_kwargs.items():
             command.extend(["-K", f"{key}={value}"])
 
+    # Add storage options
+    if s3_bucket and s3_prefix:
+        command.extend(["--s3-bucket", s3_bucket])
+        command.extend(["--s3-prefix", s3_prefix])
+        if groups:
+            command.extend(["--s3-group", groups[0]])
+        if s3_region != "us-east-1":
+            command.extend(["--s3-region", s3_region])
+
+    if store:
+        command.append("--store")
+
+    # Add experiment metadata
+    if groups:
+        command.extend(["--experiment-group", groups[0]])
+    command.extend(["--experiment-name", name])
+
     # Environment variables
     env_vars: dict[str, str] = {
         "BEAKER_ALLOW_SUBCONTAINERS": "1",
@@ -154,7 +172,14 @@ def assemble_external_eval_job(
             BeakerEnvSecret(env_var, secret_name) for env_var, secret_name in env_secrets
         ]
 
+    # Add store secrets if store is enabled
+    if store:
+        for env_var in ["PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD"]:
+            beaker_env_secrets.append(BeakerEnvSecret(env_var, f"olmo_eval_{env_var}"))
+
     extras = ["sandbox"]
+    if store:
+        extras.append("postgres")
     provider_extras = get_provider_extras(model, default_kind="vllm_server")
     for extra in provider_extras:
         if extra not in extras:

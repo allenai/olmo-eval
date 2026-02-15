@@ -97,6 +97,34 @@ class ExternalRunConfig:
     multiple=True,
     help="Provider kwargs (key=value, e.g., -K enable_chunked_prefill=true)",
 )
+# Storage options
+@click.option(
+    "--store",
+    is_flag=True,
+    help="Persist results to the configured database",
+)
+@click.option("--s3-bucket", help="S3 bucket for storing evaluation results")
+@click.option("--s3-prefix", help="S3 prefix/path within bucket for results")
+@click.option("--s3-group", help="S3 group name (used in path structure)")
+@click.option(
+    "--s3-endpoint-url",
+    envvar="S3_ENDPOINT_URL",
+    help="S3 endpoint URL (for S3-compatible storage)",
+)
+@click.option(
+    "--s3-region",
+    default="us-east-1",
+    envvar="AWS_REGION",
+    help="S3 region (default: us-east-1)",
+)
+@click.option("--db-host", default="localhost", envvar="PGHOST", help="PostgreSQL host")
+@click.option("--db-port", default=5432, type=int, envvar="PGPORT", help="PostgreSQL port")
+@click.option("--db-name", default="olmo_eval", envvar="PGDATABASE", help="PostgreSQL database")
+@click.option("--db-user", default="postgres", envvar="PGUSER", help="PostgreSQL user")
+@click.option("--db-password", default="postgres", envvar="PGPASSWORD", help="PostgreSQL password")
+# Experiment metadata
+@click.option("--experiment-name", help="Human-readable experiment name")
+@click.option("--experiment-group", help="Experiment group for grouping related experiments")
 def run_external(
     model: str,
     evals: tuple[str, ...],
@@ -109,6 +137,19 @@ def run_external(
     dry_run: bool,
     eval_args: tuple[str, ...],
     provider_kwargs: tuple[str, ...],
+    store: bool,
+    s3_bucket: str | None,
+    s3_prefix: str | None,
+    s3_group: str | None,
+    s3_endpoint_url: str | None,
+    s3_region: str,
+    db_host: str,
+    db_port: int,
+    db_name: str,
+    db_user: str,
+    db_password: str,
+    experiment_name: str | None,
+    experiment_group: str | None,
 ) -> None:
     """Run external black-box evaluations.
 
@@ -199,6 +240,24 @@ def run_external(
         else:
             console.print(f"[yellow]Warning:[/yellow] Invalid arg '{arg}', use key=value")
 
+    # Set up storage backends
+    from olmo_eval.cli.run.storage import StorageSetup
+
+    storage_setup = StorageSetup(
+        store=store,
+        db_host=db_host,
+        db_port=db_port,
+        db_name=db_name,
+        db_user=db_user,
+        db_password=db_password,
+        s3_bucket=s3_bucket,
+        s3_prefix=s3_prefix,
+        s3_group=s3_group,
+        s3_endpoint_url=s3_endpoint_url,
+        s3_region=s3_region,
+    )
+    storages, s3_config = storage_setup.setup()
+
     # Create runner
     from olmo_eval.runners.external import ExternalEvalRunner
 
@@ -209,6 +268,10 @@ def run_external(
         container_runtime=runtime,
         server_port=port,
         eval_args=parsed_args,
+        s3_config=s3_config,
+        storages=storages,
+        experiment_name=experiment_name,
+        experiment_group=experiment_group,
     )
 
     # Validate

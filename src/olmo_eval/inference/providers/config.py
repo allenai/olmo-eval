@@ -68,7 +68,13 @@ class ProviderConfig:
     # Config fields accepted by each provider kind (fields with non-default values are passed)
     _PROVIDER_FIELDS: ClassVar[dict[str, tuple[str, ...]]] = {
         "vllm": ("tokenizer", "revision", "trust_remote_code", "dtype", "max_model_len"),
-        "vllm_server": ("base_url", "tokenizer", "max_concurrency", "tool_call_parser"),
+        "vllm_server": (
+            "base_url",
+            "tokenizer",
+            "max_concurrency",
+            "tool_call_parser",
+            "max_model_len",
+        ),
         "litellm": ("base_url", "max_concurrency"),
         "hf": ("tokenizer", "trust_remote_code", "dtype"),
         "mock": (),

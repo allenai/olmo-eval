@@ -8,16 +8,23 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR
+from olmo_eval.common.types import compute_model_hash, compute_task_hash
 from olmo_eval.evals.external import (
     ExternalEvalResult,
     get_external_eval,
     list_external_evals,
 )
 from olmo_eval.inference.providers.config import ProviderConfig
+from olmo_eval.runners.common.models import S3Config
+from olmo_eval.runners.processing.utils import generate_experiment_id
+
+if TYPE_CHECKING:
+    from olmo_eval.storage import StorageBackend
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +36,7 @@ class ExternalEvalRunner:
     This runner:
     1. Starts a vLLM server to serve the model
     2. Runs each external evaluation in a sandbox container
-    3. Collects and saves results
+    3. Collects and saves results to local files, S3, and storage backends
 
     Attributes:
         provider_config: Configuration for the inference provider.
@@ -38,6 +45,10 @@ class ExternalEvalRunner:
         container_runtime: Container runtime to use (docker or podman).
         server_port: Port for the vLLM server.
         eval_args: Arguments to pass to external evaluations.
+        s3_config: S3 configuration for uploading results.
+        storages: List of storage backends for persisting results.
+        experiment_name: Human-readable experiment name.
+        experiment_group: Experiment group for grouping related experiments.
     """
 
     provider_config: ProviderConfig
@@ -46,6 +57,10 @@ class ExternalEvalRunner:
     container_runtime: str = "podman"
     server_port: int = 8000
     eval_args: dict[str, Any] = field(default_factory=dict)
+    s3_config: S3Config | None = None
+    storages: list[StorageBackend] = field(default_factory=list)
+    experiment_name: str | None = None
+    experiment_group: str | None = None
 
     def validate(self) -> None:
         """Validate runner configuration.
@@ -189,7 +204,7 @@ class ExternalEvalRunner:
         results: dict[str, ExternalEvalResult],
         total_duration: float,
     ) -> None:
-        """Save combined results to the output directory.
+        """Save combined results to local files, S3, and storage backends.
 
         Args:
             results: Dictionary of evaluation results.
@@ -198,51 +213,152 @@ class ExternalEvalRunner:
         output_path = Path(self.output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
-        # Build combined results
+        # Generate experiment tracking identifiers
+        experiment_id = generate_experiment_id()
+        model_config = self.provider_config.to_dict()
+        model_hash = compute_model_hash(model_config) or "unknown"
+        timestamp = datetime.now(UTC).isoformat()
+
+        # Build results in the format expected by convert_runner_results()
+        # Each external eval becomes a "task" with its metrics
+        runner_results: dict[str, Any] = {
+            "model": self.provider_config.alias or self.provider_config.model,
+            "model_path": self.provider_config.model,
+            "provider": str(self.provider_config.kind),
+            "timestamp": timestamp,
+            "model_config": model_config,
+            "tasks": {},
+        }
+
+        for eval_name, result in results.items():
+            # Convert flat metrics to nested format (metric_name: {scorer: value})
+            # External evals have simple metrics like "pass^1", use "external" as scorer
+            nested_metrics: dict[str, dict[str, float]] = {}
+            for metric_name, value in result.metrics.items():
+                nested_metrics[metric_name] = {"external": value}
+
+            # Build task config from eval args
+            task_config = {"eval_name": eval_name, **self.eval_args}
+            task_hash = compute_task_hash(task_config) or "unknown"
+
+            # Determine primary metric (first metric if any exist)
+            primary_metric = None
+            if result.metrics:
+                first_metric = next(iter(result.metrics.keys()))
+                primary_metric = f"{first_metric}:external"
+
+            runner_results["tasks"][eval_name] = {
+                "metrics": nested_metrics,
+                "task_hash": task_hash,
+                "config": task_config,
+                "num_instances": result.metadata.get("num_tasks"),
+                "primary_metric": primary_metric,
+                "duration_seconds": result.duration_seconds,
+                "success": result.success,
+                "error": result.error,
+                "raw_output": result.raw_output,
+            }
+
+        # Write combined results (legacy format for backwards compatibility)
         combined: dict[str, Any] = {
             "model": self.provider_config.model,
-            "model_config": self.provider_config.to_dict(),
+            "model_config": model_config,
+            "experiment_id": experiment_id,
+            "timestamp": timestamp,
             "total_duration_seconds": total_duration,
             "evaluations": {},
         }
-
-        # Add individual evaluation results
         all_metrics: dict[str, float] = {}
         for name, result in results.items():
             combined["evaluations"][name] = result.to_dict()
-            # Prefix metrics with evaluation name
             for metric, value in result.metrics.items():
                 all_metrics[f"{name}/{metric}"] = value
-
         combined["metrics"] = all_metrics
 
-        # Write combined results
         results_file = output_path / "external_eval_results.json"
         with open(results_file, "w") as f:
             json.dump(combined, f, indent=2)
-
         logger.info(f"Combined results saved to {results_file}")
 
-        # Also write metrics.json in the standard format
-        metrics_file = output_path / "metrics.json"
-        metrics_output: dict[str, Any] = {
-            "model_name": self.provider_config.model,
-            "evaluations": {},
-        }
+        # Write metrics.json in standard runner format
+        self._write_metrics_json(runner_results, experiment_id, total_duration)
 
-        for name, result in results.items():
-            if result.success:
-                metrics_output["evaluations"][name] = {
-                    "metrics": result.metrics,
-                    "success": True,
-                }
-            else:
-                metrics_output["evaluations"][name] = {
-                    "error": result.error,
-                    "success": False,
-                }
+        # Upload to S3 if configured
+        s3_location = None
+        if self.s3_config:
+            from olmo_eval.runners.io.storage import upload_to_s3
 
+            s3_location = upload_to_s3(
+                output_dir=self.output_dir,
+                s3_config=self.s3_config,
+                model_name=self.provider_config.alias or self.provider_config.model,
+                model_hash=model_hash,
+                experiment_id=experiment_id,
+            )
+
+        # Save to storage backends if configured
+        if self.storages:
+            from olmo_eval.runners.io.storage import save_results
+
+            save_results(
+                results=runner_results,
+                storages=self.storages,
+                s3_config=self.s3_config,
+                experiment_id=experiment_id,
+                model_hash=model_hash,
+                s3_location=s3_location,
+                experiment_name=self.experiment_name,
+                experiment_group=self.experiment_group,
+                experiment_duration_seconds=total_duration,
+            )
+
+    def _write_metrics_json(
+        self,
+        runner_results: dict[str, Any],
+        experiment_id: str,
+        total_duration: float,
+    ) -> None:
+        """Write metrics.json in standard runner format."""
+        from olmo_eval.runners.common.models import MetricsOutput, TaskMetricsEntry
+
+        tasks_output: list[dict[str, Any]] = []
+        summary: dict[str, Any] = {}
+
+        for task_name, task_data in runner_results["tasks"].items():
+            entry = TaskMetricsEntry(
+                task=task_name,
+                metrics=task_data["metrics"],
+                num_instances=task_data.get("num_instances") or 0,
+                model=runner_results["model"],
+                primary_metric=task_data.get("primary_metric"),
+                config=task_data.get("config"),
+                duration_seconds=task_data.get("duration_seconds"),
+                task_hash=task_data.get("task_hash"),
+            )
+            tasks_output.append(entry.to_dict())
+
+            # Add to summary
+            if task_data.get("primary_metric") and task_data["metrics"]:
+                metric_name = task_data["primary_metric"].split(":")[0]
+                if metric_name in task_data["metrics"]:
+                    score = task_data["metrics"][metric_name].get("external", 0.0)
+                    summary[task_name] = {
+                        "metric": task_data["primary_metric"],
+                        "score": score,
+                    }
+
+        metrics_output = MetricsOutput(
+            timestamp=runner_results["timestamp"],
+            config=runner_results["model_config"],
+            tasks=tasks_output,
+            summary=summary,
+            experiment_id=experiment_id,
+            experiment_name=self.experiment_name,
+            experiment_group=self.experiment_group,
+            experiment_duration_seconds=total_duration,
+        )
+
+        metrics_file = Path(self.output_dir) / "metrics.json"
         with open(metrics_file, "w") as f:
-            json.dump(metrics_output, f, indent=2)
-
+            json.dump(metrics_output.to_dict(), f, indent=2)
         logger.info(f"Metrics saved to {metrics_file}")

@@ -270,8 +270,6 @@ def launch(
 
     Requires beaker-gantry to be installed: pip install 'olmo-eval-internal[beaker]'
     """
-    from datetime import datetime
-
     try:
         from olmo_eval.launch import BeakerLauncher, EvalConfig
     except ImportError:
@@ -398,6 +396,7 @@ def launch(
             s3_bucket=s3_bucket,
             s3_prefix=s3_prefix,
             s3_region=s3_region,
+            store=store,
             secret_env_overrides=secret_env_overrides,
             eval_args=parsed_eval_args if parsed_eval_args else None,
             provider_kwargs=parsed_provider_kwargs if parsed_provider_kwargs else None,
@@ -448,9 +447,7 @@ def launch(
         console.print("[yellow]Dry run mode - not submitting[/yellow]")
 
     # Auto-generate group if needed
-    effective_groups = list(launch_config.groups)
-    if not effective_groups:
-        effective_groups = [f"{launch_config.name}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"]
+    effective_groups = _auto_generate_group(launch_config.name, list(launch_config.groups))
 
     # Display storage info
     cred_manager.display_storage_info(
@@ -595,13 +592,7 @@ def launch(
         console.print("[yellow]Launch cancelled[/yellow]")
         raise SystemExit(0)
 
-    launched_experiments: list[str] = []
-    for job_config in job_configs:
-        if not dry_run:
-            experiment = launcher.launch(job_config)
-            if experiment:
-                console.print(f"[green]Launched:[/green] {launcher.experiment_url(experiment)}")
-                launched_experiments.append(experiment.id)
+    launched_experiments = _launch_jobs(launcher, job_configs, dry_run)
 
     # Follow launched experiments
     if launched_experiments and not dry_run:
@@ -839,6 +830,94 @@ def _handle_follow(launcher, launched_experiments: list[str], follow: bool) -> N
                 console.print(f"  - {url}")
 
 
+def _auto_generate_group(prefix: str, existing_groups: list[str]) -> list[str]:
+    """Auto-generate a group name if none provided.
+
+    Args:
+        prefix: Prefix for the auto-generated group name.
+        existing_groups: List of existing group names.
+
+    Returns:
+        List of group names (original if non-empty, or auto-generated).
+    """
+    from datetime import datetime
+
+    if existing_groups:
+        return existing_groups
+    return [f"{prefix}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"]
+
+
+def _prepare_secrets(
+    dry_run: bool,
+    workspace: str,
+    all_required_secrets: set[str],
+    beaker_username: str,
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """Prepare common and task secrets for Beaker jobs.
+
+    Args:
+        dry_run: If True, return mock secrets without creating them.
+        workspace: Beaker workspace name.
+        all_required_secrets: Set of required secret environment variable names.
+        beaker_username: Beaker username for dry-run secret naming.
+
+    Returns:
+        Tuple of (common_secrets, task_secrets) as lists of (env_var, secret_name) tuples.
+    """
+    from olmo_eval.launch.beaker.secrets import (
+        ensure_common_secrets,
+        ensure_task_secrets,
+        get_local_hf_token,
+        get_local_wandb_api_key,
+    )
+
+    if dry_run:
+        common_secrets: list[tuple[str, str]] = []
+        if get_local_hf_token():
+            common_secrets.append(("HF_TOKEN", f"{beaker_username}_HF_TOKEN"))
+        if get_local_wandb_api_key():
+            common_secrets.append(("WANDB_API_KEY", f"{beaker_username}_WANDB_API_KEY"))
+        task_secrets = [(s, f"{beaker_username}_{s}") for s in sorted(all_required_secrets)]
+        return common_secrets, task_secrets
+
+    common_secrets = ensure_common_secrets(workspace=workspace)
+    try:
+        task_secrets = ensure_task_secrets(
+            workspace=workspace,
+            required_secrets=all_required_secrets,
+        )
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise SystemExit(1) from None
+
+    return common_secrets, task_secrets
+
+
+def _launch_jobs(
+    launcher,
+    job_configs: list,
+    dry_run: bool,
+) -> list[str]:
+    """Launch job configs and return experiment IDs.
+
+    Args:
+        launcher: BeakerLauncher instance.
+        job_configs: List of BeakerJobConfig to launch.
+        dry_run: If True, skip actual launch.
+
+    Returns:
+        List of launched experiment IDs.
+    """
+    launched_experiments: list[str] = []
+    for job_config in job_configs:
+        if not dry_run:
+            experiment = launcher.launch(job_config)
+            if experiment:
+                console.print(f"[green]Launched:[/green] {launcher.experiment_url(experiment)}")
+                launched_experiments.append(experiment.id)
+    return launched_experiments
+
+
 def _apply_harness_overrides(harness_config, overrides: list[str]):
     """Apply CLI overrides to harness config.
 
@@ -880,7 +959,8 @@ def _launch_external_evals(
     s3_bucket: str | None,
     s3_prefix: str | None,
     s3_region: str,
-    secret_env_overrides: dict[str, str],
+    store: bool = False,
+    secret_env_overrides: dict[str, str] | None = None,
     eval_args: dict[str, str] | None = None,
     provider_kwargs: dict[str, str] | None = None,
     uv_cache_dir: str | None = None,
@@ -889,11 +969,10 @@ def _launch_external_evals(
 ) -> None:
     """Launch external evaluation jobs on Beaker.
 
-    This is a separate path from the normal task-based evaluation launch.
-    External evaluations run in sandbox containers with subcontainer support.
+    This path mirrors the task-based launch flow but for external evaluations
+    that run in sandbox containers with subcontainer support.
     """
-    from datetime import datetime
-
+    from olmo_eval.cli.beaker.credentials import CredentialManager
     from olmo_eval.cli.beaker.job_assembler import assemble_external_eval_job
     from olmo_eval.common.configs import get_provider_config
     from olmo_eval.common.constants.infrastructure import (
@@ -901,8 +980,9 @@ def _launch_external_evals(
         BEAKER_SANDBOX_IMAGE,
     )
     from olmo_eval.evals.external import get_external_eval, is_external_eval_registered
-    from olmo_eval.launch import BeakerLauncher
-    from olmo_eval.launch.beaker.secrets import ensure_common_secrets, ensure_task_secrets
+    from olmo_eval.launch import BeakerLauncher, get_model_short_name
+
+    secret_env_overrides = secret_env_overrides or {}
 
     # Validate external evals exist
     for eval_name in external_evals:
@@ -930,46 +1010,49 @@ def _launch_external_evals(
         raise SystemExit(1)
 
     # Use defaults if not provided
-    effective_cluster = cluster
     effective_workspace = workspace or BEAKER_DEFAULT_WORKSPACE
     effective_priority = priority or "normal"
     effective_timeout = timeout or "24h"
     effective_image = image or BEAKER_SANDBOX_IMAGE
+    effective_preemptible = preemptible if preemptible is not None else True
 
     # Create launcher
     launcher = BeakerLauncher(workspace=effective_workspace)
     beaker_username = launcher.beaker.user_name
 
-    # Determine preemptible setting (default to True if not specified)
-    effective_preemptible = preemptible if preemptible is not None else True
+    # Use CredentialManager for consistent credential detection (same as task path)
+    cred_manager = CredentialManager(
+        model_specs=list(model),
+        store=store,
+        aws_credentials=aws_credentials,
+        gcs_credentials=gcs_credentials,
+    )
+    inject_aws, inject_gcs = cred_manager.detect_and_setup(launcher)
 
-    # Detect credential needs
-    inject_aws = aws_credentials or False
-    inject_gcs = gcs_credentials or False
-
-    # Check model paths for credential needs
-    for model_spec in model:
-        if model_spec.startswith("s3://"):
-            inject_aws = True
-        elif model_spec.startswith("gs://"):
-            inject_gcs = True
-
-    # Auto-generate group if needed
-    effective_groups = list(group) if group else []
-    if not effective_groups:
-        effective_groups = [f"external-eval-{datetime.now().strftime('%Y%m%d-%H%M%S')}"]
+    # Auto-generate group if needed (using shared helper)
+    effective_groups = _auto_generate_group("external-eval", list(group))
 
     # Handle group creation
     _handle_group_creation(launcher, effective_groups, dry_run, yes)
 
-    # Collect required secrets from external evals
+    # Display storage info (same as task path)
+    cred_manager.display_storage_info(
+        launcher,
+        s3_bucket,
+        s3_prefix,
+        s3_region,
+        None,  # s3_endpoint_url not supported yet
+        effective_groups,
+        inject_aws,
+    )
+
+    # Collect required secrets from external evals and models
     all_required_secrets: set[str] = set()
     for eval_name in external_evals:
         eval_instance = get_external_eval(eval_name)
         if eval_instance.required_secrets:
             all_required_secrets.update(eval_instance.required_secrets)
 
-    # Collect required secrets from models
     for model_spec in model:
         try:
             provider_config = get_provider_config(model_spec)
@@ -978,20 +1061,13 @@ def _launch_external_evals(
         except Exception:
             pass
 
-    # Ensure secrets
-    if dry_run:
-        common_secrets: list[tuple[str, str]] = []
-        task_secrets: list[tuple[str, str]] = []
-    else:
-        common_secrets = ensure_common_secrets(workspace=effective_workspace)
-        try:
-            task_secrets = ensure_task_secrets(
-                workspace=effective_workspace,
-                required_secrets=all_required_secrets,
-            )
-        except ValueError as e:
-            console.print(f"[red]Error:[/red] {e}")
-            raise SystemExit(1) from None
+    # Prepare secrets (using shared helper)
+    common_secrets, task_secrets = _prepare_secrets(
+        dry_run=dry_run,
+        workspace=effective_workspace,
+        all_required_secrets=all_required_secrets,
+        beaker_username=beaker_username,
+    )
 
     # Build env secrets list
     env_secrets = common_secrets + task_secrets
@@ -1011,18 +1087,20 @@ def _launch_external_evals(
         try:
             provider_config = get_provider_config(model_spec)
             num_gpus = provider_config.kwargs.get("tensor_parallel_size", 1)
+            model_alias = provider_config.alias
         except Exception:
             num_gpus = 1
+            model_alias = None
 
-        # Generate experiment name
-        model_alias = model_spec.split("/")[-1].replace(".", "-")[:32]
-        exp_name = name or f"external-{model_alias}-{'-'.join(external_evals)}"
+        # Generate experiment name using shared utility
+        short_name = get_model_short_name(model_spec, model_alias)
+        exp_name = name or f"external-{short_name}-{'-'.join(external_evals)}"
 
         job_config = assemble_external_eval_job(
             name=exp_name,
             model=model_spec,
             external_evals=external_evals,
-            cluster=effective_cluster,
+            cluster=cluster,
             num_gpus=num_gpus,
             workspace=effective_workspace,
             beaker_image=effective_image,
@@ -1034,6 +1112,7 @@ def _launch_external_evals(
             s3_bucket=s3_bucket,
             s3_prefix=s3_prefix,
             s3_region=s3_region,
+            store=store,
             env_secrets=env_secrets,
             inject_aws_credentials=inject_aws,
             inject_gcs_credentials=inject_gcs,
@@ -1050,20 +1129,16 @@ def _launch_external_evals(
     summaries = []
     for i, job in enumerate(job_configs):
         model_spec = model[i] if i < len(model) else "unknown"
-        from olmo_eval.common.constants.models import get_model_presets
-
-        presets = get_model_presets()
-        if model_spec in presets:
-            provider_config = presets[model_spec]
-        else:
-            # External evals use vllm_server for non-preset models
+        try:
+            provider_config = get_provider_config(model_spec)
+        except Exception:
             from olmo_eval.inference.providers.config import ProviderConfig
 
             provider_config = ProviderConfig(kind="vllm_server", model=model_spec)
 
         configured_evals = [
-            ConfiguredExternalEval.from_eval(get_external_eval(name), provider_config, eval_args)
-            for name in external_evals
+            ConfiguredExternalEval.from_eval(get_external_eval(e), provider_config, eval_args)
+            for e in external_evals
         ]
         summary = ExternalEvalSummary(
             name=job.name,
@@ -1087,18 +1162,12 @@ def _launch_external_evals(
         )
         console.print()
 
-    # Confirm and launch
+    # Confirm and launch (using shared helper)
     if not dry_run and not yes and not click.confirm("Proceed with launch?", default=True):
         console.print("[yellow]Launch cancelled[/yellow]")
         raise SystemExit(0)
 
-    launched_experiments: list[str] = []
-    for job_config in job_configs:
-        if not dry_run:
-            experiment = launcher.launch(job_config)
-            if experiment:
-                console.print(f"[green]Launched:[/green] {launcher.experiment_url(experiment)}")
-                launched_experiments.append(experiment.id)
+    launched_experiments = _launch_jobs(launcher, job_configs, dry_run)
 
     # Follow launched experiments
     if launched_experiments and not dry_run:
