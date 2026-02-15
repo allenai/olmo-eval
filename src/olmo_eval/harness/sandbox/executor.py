@@ -288,26 +288,40 @@ class SandboxExecutor:
         output_file = "/tmp/_sandbox_output.log"
         exit_code_file = "/tmp/_sandbox_exit_code"
         pid_file = "/tmp/_sandbox_pid"
+        script_file = "/tmp/_sandbox_script.sh"
 
-        # Start command in background, capturing output and exit code
-        # Use setsid to create a new session so the process survives
-        bg_cmd = (
-            f"export PYTHONUNBUFFERED=1; "
-            f"rm -f {output_file} {exit_code_file} {pid_file}; "
-            f"( {command} ) > {output_file} 2>&1; "
-            f"echo $? > {exit_code_file}"
+        # Write the command to a script file to avoid quoting issues
+        # Use base64 encoding to safely transfer the command
+        import base64
+
+        script_content = f"""#!/bin/bash
+export PYTHONUNBUFFERED=1
+{command}
+"""
+        encoded_script = base64.b64encode(script_content.encode()).decode()
+
+        # Create script and start it in background
+        # The script's stdout/stderr goes to output_file, exit code captured separately
+        setup_cmd = (
+            f"rm -f {output_file} {exit_code_file} {pid_file} && "
+            f"echo '{encoded_script}' | base64 -d > {script_file} && "
+            f"chmod +x {script_file} && "
+            f"( {script_file}; echo $? > {exit_code_file} ) > {output_file} 2>&1 & "
+            f"echo $! > {pid_file}"
         )
-        wrapped_cmd = f"nohup bash -c '{bg_cmd}' & echo $! > {pid_file}"
 
         # Start the background process (quick HTTP call)
         try:
-            await self._runtime.execute(Command(command=["bash", "-c", wrapped_cmd], timeout=30.0))
+            await self._runtime.execute(Command(command=["bash", "-c", setup_cmd], timeout=30.0))
         except Exception as e:
             return ExecutionResult(
                 success=False,
                 output=f"Failed to start background command: {e}",
                 exit_code=-1,
             )
+
+        # Give the script a moment to start
+        await asyncio.sleep(0.5)
 
         # Poll for output and completion
         last_pos = 0
