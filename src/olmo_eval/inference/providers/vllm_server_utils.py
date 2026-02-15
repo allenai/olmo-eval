@@ -235,6 +235,9 @@ def _build_server_command(
             if isinstance(value, bool):
                 if value:
                     cmd.append(arg_name)
+            elif isinstance(value, (dict, list)):
+                # JSON-encode complex values
+                cmd.extend([arg_name, json.dumps(value)])
             else:
                 cmd.extend([arg_name, str(value)])
 
