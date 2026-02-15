@@ -386,6 +386,7 @@ sys.exit(main())
                     all_metrics.update(self._compute_pass_k_metrics(data, num_trials))
                     predictions.extend(self._build_predictions(data))
                     metadata["simulations_file"] = json_file
+                    metadata["num_tasks"] = len(data["tasks"])
             except json.JSONDecodeError as e:
                 logger.warning(f"[{self.name}] Failed to parse {json_file}: {e}")
 
