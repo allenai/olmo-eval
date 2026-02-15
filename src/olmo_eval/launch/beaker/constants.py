@@ -10,3 +10,7 @@ STORE_DEFAULTS = {
     "PGDATABASE": "olmo_eval",
     "PGUSER": "postgres",
 }
+
+# Default S3 storage parameters
+DEFAULT_S3_BUCKET = "ai2-llm"
+DEFAULT_S3_PREFIX = "olmo-eval"

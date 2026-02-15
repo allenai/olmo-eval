@@ -118,17 +118,16 @@ def assemble_external_eval_job(
         for key, value in provider_kwargs.items():
             command.extend(["-K", f"{key}={value}"])
 
-    # Add storage options
-    if s3_bucket and s3_prefix:
-        command.extend(["--s3-bucket", s3_bucket])
-        command.extend(["--s3-prefix", s3_prefix])
-        if groups:
-            command.extend(["--s3-group", groups[0]])
-        if s3_region != "us-east-1":
-            command.extend(["--s3-region", s3_region])
-
+    # Add storage options (only when --store is enabled)
     if store:
         command.append("--store")
+        if s3_bucket and s3_prefix:
+            command.extend(["--s3-bucket", s3_bucket])
+            command.extend(["--s3-prefix", s3_prefix])
+            if groups:
+                command.extend(["--s3-group", groups[0]])
+            if s3_region != "us-east-1":
+                command.extend(["--s3-region", s3_region])
 
     # Add experiment metadata
     if groups:
@@ -396,7 +395,13 @@ class JobConfigAssembler:
         if exp.parallelism > 1:
             command.extend(["--parallelism", str(exp.parallelism)])
 
-        if self.config.s3_bucket and self.config.s3_prefix:
+        if self.effective_groups:
+            command.extend(["--experiment-group", self.effective_groups[0]])
+
+        command.extend(["--experiment-name", exp.name])
+
+        if self.config.store:
+            command.append("--store")
             command.extend(["--s3-bucket", self.config.s3_bucket])
             command.extend(["--s3-prefix", self.config.s3_prefix])
             if self.effective_groups:
@@ -405,14 +410,6 @@ class JobConfigAssembler:
                 command.extend(["--s3-endpoint-url", self.config.s3_endpoint_url])
             if self.config.s3_region != "us-east-1":
                 command.extend(["--s3-region", self.config.s3_region])
-
-        if self.effective_groups:
-            command.extend(["--experiment-group", self.effective_groups[0]])
-
-        command.extend(["--experiment-name", exp.name])
-
-        if self.config.store:
-            command.append("--store")
 
         if self.config.debug_requests:
             command.append("--debug-requests")

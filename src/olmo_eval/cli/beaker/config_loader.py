@@ -36,8 +36,8 @@ class LaunchConfig:
 
     gpus: int = 0
 
-    s3_bucket: str | None = None
-    s3_prefix: str | None = None
+    s3_bucket: str = "ai2-llm"
+    s3_prefix: str = "olmo-eval"
     s3_endpoint_url: str | None = None
     s3_region: str = "us-east-1"
 
@@ -158,9 +158,10 @@ class LaunchConfigLoader:
         assert workspace is not None
         assert budget is not None
 
-        s3_bucket = self.cli_args.get("s3_bucket")
-        s3_prefix = self.cli_args.get("s3_prefix")
-        self._validate_s3(s3_bucket, s3_prefix, self.cli_args.get("store", False))
+        from olmo_eval.launch.beaker.constants import DEFAULT_S3_BUCKET, DEFAULT_S3_PREFIX
+
+        s3_bucket = self.cli_args.get("s3_bucket") or DEFAULT_S3_BUCKET
+        s3_prefix = self.cli_args.get("s3_prefix") or DEFAULT_S3_PREFIX
 
         effective_groups = list(cli_groups)
         if cfg is not None and cfg.groups:
@@ -230,19 +231,6 @@ class LaunchConfigLoader:
             raise SystemExit(1) from None
         if not budget:
             console.print("[red]Error:[/red] --budget/-B is required")
-            raise SystemExit(1) from None
-
-    def _validate_s3(self, s3_bucket: str | None, s3_prefix: str | None, store: bool) -> None:
-        if s3_bucket and not s3_prefix:
-            console.print("[red]Error:[/red] --s3-prefix is required when --s3-bucket is set")
-            raise SystemExit(1) from None
-        if s3_prefix and not s3_bucket:
-            console.print("[red]Error:[/red] --s3-bucket is required when --s3-prefix is set")
-            raise SystemExit(1) from None
-        if store and (not s3_bucket or not s3_prefix):
-            console.print(
-                "[red]Error:[/red] --s3-bucket and --s3-prefix are required when --store is enabled"
-            )
             raise SystemExit(1) from None
 
     def _detect_gpu_requirement(self, model_spec: str) -> int:
