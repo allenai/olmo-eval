@@ -9,21 +9,34 @@ Repository: https://github.com/sierra-research/tau2-bench
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import math
 import time
 from collections import defaultdict
-from dataclasses import dataclass, fields
-from typing import Any, Literal
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Literal
 
 from olmo_eval.evals.external.base import ExternalEval
 from olmo_eval.evals.external.registry import register_external_eval
 from olmo_eval.evals.external.result import ExternalEvalResult
 
+if TYPE_CHECKING:
+    from olmo_eval.harness.sandbox.executor import SandboxExecutor
+
 logger = logging.getLogger(__name__)
 
 Tau2Domain = Literal["airline", "retail", "telecom"]
+
+# Default max tokens if we can't query the server
+DEFAULT_MAX_TOKENS = 32768
+
+
+def _parse_optional(data: dict, key: str, type_fn: type) -> Any:
+    """Parse an optional value from a dict with type conversion."""
+    value = data.get(key)
+    return type_fn(value) if value is not None else None
 
 
 @dataclass
@@ -36,7 +49,7 @@ class Tau2Args:
     max_steps: int = 30
     max_concurrency: int = 3
 
-    # Agent LLM settings (max_tokens and temperature go into --agent-llm-args)
+    # Agent LLM settings
     max_tokens: int | None = None
     temperature: float | None = None
 
@@ -57,30 +70,25 @@ class Tau2Args:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Tau2Args:
-        # Get defaults from dataclass fields
-        defaults = {f.name: f.default for f in fields(cls)}
-
-        # Handle task_ids which can be a string (comma-separated) or list
+        # Handle task_ids which can be comma-separated string or list
         task_ids = data.get("task_ids")
         if isinstance(task_ids, str):
             task_ids = [t.strip() for t in task_ids.split(",") if t.strip()]
 
         return cls(
-            domain=data.get("domain", defaults["domain"]),
-            num_trials=int(data.get("num_trials", defaults["num_trials"])),
-            max_steps=int(data.get("max_steps", defaults["max_steps"])),
-            max_concurrency=int(data.get("max_concurrency", defaults["max_concurrency"])),
-            max_tokens=int(data["max_tokens"]) if data.get("max_tokens") else None,
-            temperature=float(data["temperature"]) if data.get("temperature") else None,
-            user_llm=data.get("user_llm", defaults["user_llm"]),
-            user_temperature=(
-                float(data["user_temperature"]) if data.get("user_temperature") else None
-            ),
+            domain=data.get("domain", "airline"),
+            num_trials=int(data.get("num_trials", 1)),
+            max_steps=int(data.get("max_steps", 30)),
+            max_concurrency=int(data.get("max_concurrency", 3)),
+            max_tokens=_parse_optional(data, "max_tokens", int),
+            temperature=_parse_optional(data, "temperature", float),
+            user_llm=data.get("user_llm", "gpt-4o-mini"),
+            user_temperature=_parse_optional(data, "user_temperature", float),
             task_split_name=data.get("task_split_name"),
             task_ids=task_ids,
-            num_tasks=int(data["num_tasks"]) if data.get("num_tasks") else None,
-            max_errors=int(data["max_errors"]) if data.get("max_errors") else None,
-            seed=int(data["seed"]) if data.get("seed") else None,
+            num_tasks=_parse_optional(data, "num_tasks", int),
+            max_errors=_parse_optional(data, "max_errors", int),
+            seed=_parse_optional(data, "seed", int),
             log_level=data.get("log_level"),
             enforce_communication_protocol=bool(data.get("enforce_communication_protocol", False)),
         )
@@ -124,7 +132,6 @@ class Tau2ExternalEval(ExternalEval):
 
     @property
     def run_command(self) -> str:
-        """Command template for display"""
         return self._build_run_command(
             model_name="{model}",
             provider_url="{provider_url}",
@@ -138,31 +145,22 @@ class Tau2ExternalEval(ExternalEval):
 
     @property
     def arguments(self) -> dict[str, tuple[str, Any | None]]:
-        defaults = {f.name: f.default for f in fields(Tau2Args)}
         return {
-            # Core settings
-            "domain": ("Task domain: 'airline', 'retail', or 'telecom'", defaults["domain"]),
-            "num_trials": ("Number of trials per task", defaults["num_trials"]),
-            "max_steps": ("Max agent steps per trial", defaults["max_steps"]),
-            "max_concurrency": ("Max concurrent requests", defaults["max_concurrency"]),
-            # Agent LLM settings
-            "max_tokens": ("Max tokens for agent LLM responses", defaults["max_tokens"]),
-            "temperature": ("Temperature for agent LLM responses", defaults["temperature"]),
-            # User LLM settings
-            "user_llm": ("LLM for simulated user (requires API key)", defaults["user_llm"]),
-            "user_temperature": ("Temperature for user LLM", defaults["user_temperature"]),
-            # Task filtering
-            "task_split_name": ("Task split to run (default: 'base')", defaults["task_split_name"]),
-            "task_ids": ("Comma-separated task IDs to run", defaults["task_ids"]),
-            "num_tasks": ("Number of tasks to run (default: all)", defaults["num_tasks"]),
-            # Execution settings
-            "max_errors": ("Max consecutive tool errors allowed", defaults["max_errors"]),
-            "seed": ("Random seed for reproducibility", defaults["seed"]),
-            "log_level": ("Log level (DEBUG, INFO, WARNING, ERROR)", defaults["log_level"]),
-            "enforce_communication_protocol": (
-                "Enforce communication protocol rules",
-                defaults["enforce_communication_protocol"],
-            ),
+            "domain": ("Task domain: 'airline', 'retail', or 'telecom'", "airline"),
+            "num_trials": ("Number of trials per task", 1),
+            "max_steps": ("Max agent steps per trial", 30),
+            "max_concurrency": ("Max concurrent requests", 3),
+            "max_tokens": ("Max tokens for agent LLM responses", None),
+            "temperature": ("Temperature for agent LLM responses", None),
+            "user_llm": ("LLM for simulated user (requires API key)", "gpt-4o-mini"),
+            "user_temperature": ("Temperature for user LLM", None),
+            "task_split_name": ("Task split to run (default: 'base')", None),
+            "task_ids": ("Comma-separated task IDs to run", None),
+            "num_tasks": ("Number of tasks to run (default: all)", None),
+            "max_errors": ("Max consecutive tool errors allowed", None),
+            "seed": ("Random seed for reproducibility", None),
+            "log_level": ("Log level (DEBUG, INFO, WARNING, ERROR)", None),
+            "enforce_communication_protocol": ("Enforce communication protocol rules", False),
         }
 
     async def execute(
@@ -177,6 +175,7 @@ class Tau2ExternalEval(ExternalEval):
         start_time = time.time()
         tau2_args = Tau2Args.from_dict(args)
         all_output: list[str] = []
+        is_local = provider_kind in ("vllm", "vllm_server")
 
         try:
             from olmo_eval.harness.sandbox.executor import SandboxExecutor
@@ -187,25 +186,22 @@ class Tau2ExternalEval(ExternalEval):
 
         try:
             async with SandboxExecutor(sandbox_config, name=self.name) as executor:
-                setup_result = await self._run_setup(executor, all_output, start_time)
-                if setup_result:
-                    return setup_result
+                if err := await self._run_setup(executor, all_output, start_time):
+                    return err
 
-                # Rewrite localhost URL to use pasta host IP
-                sandbox_provider_url = self._get_provider_url_for_sandbox(provider_url)
+                sandbox_url = self._get_provider_url_for_sandbox(provider_url)
 
-                # Check provider is reachable from sandbox
-                if not await self._check_provider_health(executor, sandbox_provider_url):
+                if not await self._check_provider_health(executor, sandbox_url):
                     return self._error_result(
-                        f"Provider not reachable at {sandbox_provider_url}",
+                        f"Provider not reachable at {sandbox_url}",
                         start_time,
                         "\n".join(all_output),
                     )
 
-                # Run evaluation
-                run_cmd = self._build_run_command(
-                    model_name, sandbox_provider_url, provider_kind, tau2_args
-                )
+                if is_local:
+                    await self._setup_litellm_wrapper(executor, model_name, sandbox_url)
+
+                run_cmd = self._build_run_command(model_name, sandbox_url, provider_kind, tau2_args)
                 logger.info(f"[{self.name}] Running: {run_cmd}")
 
                 run_result = await executor.execute_command(
@@ -215,10 +211,7 @@ class Tau2ExternalEval(ExternalEval):
                 logger.info(f"[{self.name}] Run exit code: {run_result.exit_code}")
 
                 result = await self._extract_results(
-                    executor,
-                    "\n".join(all_output),
-                    run_result.exit_code,
-                    tau2_args.num_trials,
+                    executor, "\n".join(all_output), run_result.exit_code, tau2_args.num_trials
                 )
 
         except Exception as e:
@@ -238,36 +231,35 @@ class Tau2ExternalEval(ExternalEval):
         provider_kind: str | None,
         tau2_args: Tau2Args,
     ) -> str:
-        """Build the full run command with all arguments."""
+        """Build the tau2 run command."""
         is_local = provider_kind in ("vllm", "vllm_server")
         agent_model = f"hosted_vllm/{model_name}" if is_local else model_name
+        repo = f"{self.working_dir}/tau2-bench"
 
-        # Run from the tau2-bench repo directory (required for git hash lookup)
-        repo_dir = f"{self.working_dir}/tau2-bench"
-        parts = [
-            f"cd {repo_dir} &&",
-            f"{repo_dir}/.venv/bin/tau2 run",
-            f"--agent-llm '{agent_model}'",
-        ]
+        # Use wrapper for local providers (registers model with litellm)
+        if is_local:
+            tau2_cmd = f"{repo}/.venv/bin/python {repo}/tau2_wrapper.py run"
+        else:
+            tau2_cmd = f"{repo}/.venv/bin/tau2 run"
 
-        # Build agent LLM args
-        agent_llm_args = {
-            k: v
-            for k, v in [
-                ("api_base", provider_url if is_local else None),
-                ("max_tokens", tau2_args.max_tokens),
-                ("temperature", tau2_args.temperature),
-            ]
-            if v is not None
-        }
+        parts = [f"cd {repo} &&", tau2_cmd, f"--agent-llm '{agent_model}'"]
+
+        # Agent LLM args
+        agent_llm_args: dict[str, Any] = {}
+        if is_local:
+            agent_llm_args["api_base"] = provider_url
+        if tau2_args.max_tokens:
+            agent_llm_args["max_tokens"] = tau2_args.max_tokens
+        if tau2_args.temperature is not None:
+            agent_llm_args["temperature"] = tau2_args.temperature
         if agent_llm_args:
             parts.append(f"--agent-llm-args '{json.dumps(agent_llm_args)}'")
 
-        # User LLM settings
+        # User LLM
         parts.append(f"--user-llm '{tau2_args.user_llm}'")
         if tau2_args.user_temperature is not None:
-            user_llm_args = {"temperature": tau2_args.user_temperature}
-            parts.append(f"--user-llm-args '{json.dumps(user_llm_args)}'")
+            user_args = json.dumps({"temperature": tau2_args.user_temperature})
+            parts.append(f"--user-llm-args '{user_args}'")
 
         # Core settings
         parts.extend(
@@ -276,19 +268,17 @@ class Tau2ExternalEval(ExternalEval):
                 f"--num-trials {tau2_args.num_trials}",
                 f"--max-steps {tau2_args.max_steps}",
                 f"--max-concurrency {tau2_args.max_concurrency}",
-                f"--save-to {self.results_dir}",
+                "--save-to results",  # Saves to {repo}/data/simulations/results.json
             ]
         )
 
-        # Task filtering
+        # Optional args
         if tau2_args.task_split_name:
             parts.append(f"--task-split-name '{tau2_args.task_split_name}'")
         if tau2_args.task_ids:
             parts.append(f"--task-ids {' '.join(tau2_args.task_ids)}")
         if tau2_args.num_tasks is not None:
             parts.append(f"--num-tasks {tau2_args.num_tasks}")
-
-        # Execution settings
         if tau2_args.max_errors is not None:
             parts.append(f"--max-errors {tau2_args.max_errors}")
         if tau2_args.seed is not None:
@@ -300,47 +290,80 @@ class Tau2ExternalEval(ExternalEval):
 
         return " ".join(parts)
 
-    async def _extract_results(
-        self, executor: Any, raw_output: str, exit_code: int, num_trials: int
-    ) -> ExternalEvalResult:
-        """Extract metrics from tau2-bench simulations file."""
-        # Debug: list results directory
-        ls_dir = await executor.execute_command(f"ls -la {self.results_dir} 2>&1", timeout=30.0)
-        logger.info(f"[{self.name}] Results dir contents:\n{ls_dir.output}")
+    async def _setup_litellm_wrapper(
+        self, executor: SandboxExecutor, model_name: str, provider_url: str
+    ) -> None:
+        """Create wrapper script that registers the model with litellm."""
+        max_tokens = await self._query_max_tokens(executor, provider_url)
+        repo = f"{self.working_dir}/tau2-bench"
 
-        ls_result = await executor.execute_command(
-            f"ls {self.results_dir}/*.json 2>/dev/null", timeout=30.0
+        script = f'''\
+#!/usr/bin/env python
+"""Wrapper to register local vLLM model with litellm."""
+import litellm
+import sys
+
+litellm.register_model({{
+    "hosted_vllm/{model_name}": {{
+        "max_tokens": {max_tokens},
+        "input_cost_per_token": 0.0,
+        "output_cost_per_token": 0.0,
+    }}
+}})
+
+from tau2.cli import main
+sys.exit(main())
+'''
+        encoded = base64.b64encode(script.encode()).decode()
+        await executor.execute_command(
+            f"echo '{encoded}' | base64 -d > {repo}/tau2_wrapper.py", timeout=30.0
         )
-        json_files = ls_result.output if ls_result.success else "(none)"
-        logger.info(f"[{self.name}] JSON files: {json_files}")
+        logger.info(f"[{self.name}] Created litellm wrapper (max_tokens={max_tokens})")
+
+    async def _query_max_tokens(self, executor: SandboxExecutor, provider_url: str) -> int:
+        """Query vLLM server for max_model_len."""
+        result = await executor.execute_command(
+            f"curl -s {provider_url.rstrip('/')}/v1/models", timeout=30.0
+        )
+        if result.success and result.output:
+            try:
+                data = json.loads(result.output)
+                if models := data.get("data"):
+                    return models[0].get("max_model_len", DEFAULT_MAX_TOKENS)
+            except json.JSONDecodeError:
+                pass
+        return DEFAULT_MAX_TOKENS
+
+    async def _extract_results(
+        self, executor: SandboxExecutor, raw_output: str, exit_code: int, num_trials: int
+    ) -> ExternalEvalResult:
+        """Extract metrics from tau2-bench results."""
+        # tau2 saves results to {repo}/data/simulations/*.json
+        results_path = f"{self.working_dir}/tau2-bench/data/simulations"
+        ls_result = await executor.execute_command(
+            f"ls {results_path}/*.json 2>/dev/null", timeout=30.0
+        )
         if not ls_result.success:
             return ExternalEvalResult(
-                name=self.name,
-                success=False,
-                error="No results files found",
-                raw_output=raw_output,
+                name=self.name, success=False, error="No results files found", raw_output=raw_output
             )
 
         all_metrics: dict[str, float] = {}
         metadata: dict[str, Any] = {}
 
         for json_file in ls_result.output.strip().split("\n"):
-            json_file = json_file.strip()
-            if not json_file:
+            if not (json_file := json_file.strip()):
+                continue
+
+            cat_result = await executor.execute_command(f"cat {json_file}", timeout=30.0)
+            if not cat_result.success:
                 continue
 
             try:
-                cat_result = await executor.execute_command(f"cat {json_file}", timeout=30.0)
-                if not cat_result.success:
-                    continue
-
                 data = json.loads(cat_result.output)
-
                 if "simulations" in data and "tasks" in data:
-                    domain_metrics = self._compute_pass_k_metrics(data, num_trials)
-                    all_metrics.update(domain_metrics)
+                    all_metrics.update(self._compute_pass_k_metrics(data, num_trials))
                     metadata["simulations_file"] = json_file
-
             except json.JSONDecodeError as e:
                 logger.warning(f"[{self.name}] Failed to parse {json_file}: {e}")
 
@@ -355,41 +378,29 @@ class Tau2ExternalEval(ExternalEval):
     def _compute_pass_k_metrics(self, data: dict[str, Any], num_trials: int) -> dict[str, float]:
         """Compute pass^k metrics from tau2-bench simulations.
 
-        Tau-bench reports pass^k metrics. See for details: https://arxiv.org/abs/2406.12045
+        See: https://arxiv.org/abs/2406.12045
         """
         task_ids = {task["id"] for task in data["tasks"]}
         simulation_ids = {sim["task_id"] for sim in data["simulations"]}
 
         if task_ids != simulation_ids:
-            missing = task_ids - simulation_ids
-            logger.warning(f"[{self.name}] Missing simulations for tasks: {missing}")
+            logger.warning(f"[{self.name}] Missing simulations: {task_ids - simulation_ids}")
             return {}
 
+        # Group rewards by task
+        rewards_by_task: dict[str, list[float]] = defaultdict(list)
+        for sim in data["simulations"]:
+            rewards_by_task[sim["task_id"]].append(sim["reward_info"]["reward"])
+
+        # Compute pass^k for each k
         metrics: dict[str, float] = {}
-
-        if num_trials == 1:
-            rewards = [sim["reward_info"]["reward"] for sim in data["simulations"]]
-            metrics["pass^1"] = sum(rewards) / len(rewards) if rewards else 0.0
-        else:
-            rewards_by_task: dict[str, list[float]] = defaultdict(list)
-            for sim in data["simulations"]:
-                rewards_by_task[sim["task_id"]].append(sim["reward_info"]["reward"])
-
-            instance_pass_k: list[dict[int, float]] = []
-            for instance_rewards in rewards_by_task.values():
-                c = int(sum(instance_rewards))
-                instance_pass_k.append(
-                    {
-                        k: math.comb(c, k) / math.comb(num_trials, k)
-                        for k in range(1, num_trials + 1)
-                    }
-                )
-
-            if instance_pass_k:
-                for k in range(1, num_trials + 1):
-                    metrics[f"pass^{k}"] = sum(inst[k] for inst in instance_pass_k) / len(
-                        instance_pass_k
-                    )
+        for k in range(1, num_trials + 1):
+            pass_k_values = []
+            for rewards in rewards_by_task.values():
+                c = int(sum(rewards))
+                pass_k_values.append(math.comb(c, k) / math.comb(num_trials, k))
+            if pass_k_values:
+                metrics[f"pass^{k}"] = sum(pass_k_values) / len(pass_k_values)
 
         return metrics
 
