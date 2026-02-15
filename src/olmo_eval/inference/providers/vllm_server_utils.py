@@ -90,12 +90,17 @@ def _wait_for_server(
         if process is not None:
             exit_code = process.poll()
             if exit_code is not None:
-                # Process exited - read its output
+                # Process exited - use communicate() to get all output
                 output = None
-                if process.stdout:
-                    with suppress(Exception):
-                        output = process.stdout.read().decode("utf-8", errors="replace")
+                try:
+                    stdout, _ = process.communicate(timeout=5)
+                    if stdout:
+                        output = stdout.decode("utf-8", errors="replace")
+                except Exception as e:
+                    logger.warning(f"Failed to read process output: {e}")
                 logger.error(f"vLLM server process exited with code {exit_code}")
+                if output:
+                    logger.error(f"vLLM server output:\n{output}")
                 return False, RuntimeError(f"Process exited with code {exit_code}"), output
 
         try:
@@ -303,7 +308,9 @@ class VLLMServerProcess:
             **self.server_kwargs,
         )
 
-        logger.info(f"Starting vLLM server: {' '.join(cmd)}")
+        import shlex
+
+        logger.info(f"Starting vLLM server: {shlex.join(cmd)}")
         if progress_callback:
             progress_callback(f"Starting vLLM server for {self.model_name}...")
 
