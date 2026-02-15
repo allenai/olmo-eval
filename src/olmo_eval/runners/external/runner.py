@@ -33,17 +33,16 @@ logger = logging.getLogger(__name__)
 class ExternalEvalRunner:
     """Runner for executing external black-box evaluations.
 
-    This runner:
-    1. Starts a vLLM server to serve the model
-    2. Runs each external evaluation in a sandbox container
-    3. Collects and saves results to local files, S3, and storage backends
+    Runs external evaluations in sandbox containers against a model provider.
+    For local providers (vllm_server), starts a vLLM server. For remote
+    providers, connects to the existing endpoint.
 
     Attributes:
         provider_config: Configuration for the inference provider.
         external_eval_names: Names of external evaluations to run.
         output_dir: Directory to write results.
         container_runtime: Container runtime to use (docker or podman).
-        server_port: Port for the vLLM server.
+        server_port: Port for the vLLM server (when using local provider).
         eval_args: Arguments to pass to external evaluations.
         s3_config: S3 configuration for uploading results.
         storages: List of storage backends for persisting results.
