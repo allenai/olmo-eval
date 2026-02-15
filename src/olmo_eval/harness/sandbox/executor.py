@@ -302,11 +302,16 @@ export PYTHONUNBUFFERED=1
 
         # Create script and start it in background
         # The script's stdout/stderr goes to output_file, exit code captured separately
+        # IMPORTANT: We must fully detach the background process by:
+        # 1. Closing stdin (</dev/null) so subprocess.run() doesn't wait for it
+        # 2. Redirecting stdout/stderr to file (not inherited pipes)
+        # 3. Using nohup to ignore hangup signals
         setup_cmd = (
             f"rm -f {output_file} {exit_code_file} {pid_file} && "
             f"echo '{encoded_script}' | base64 -d > {script_file} && "
             f"chmod +x {script_file} && "
-            f"( {script_file}; echo $? > {exit_code_file} ) > {output_file} 2>&1 & "
+            f"nohup bash -c '( {script_file}; echo $? > {exit_code_file} )' "
+            f"> {output_file} 2>&1 </dev/null & "
             f"echo $! > {pid_file}"
         )
 
