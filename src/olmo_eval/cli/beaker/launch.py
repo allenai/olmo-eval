@@ -357,6 +357,14 @@ def launch(
 
     # Handle external evaluations mode
     if external_evals:
+        if task:
+            console.print(
+                "[red]Error:[/red] Cannot mix --external-eval (-E) with --task (-t). "
+                "This will be supported in a future release. "
+                "For now, use separate commands for external evals and tasks."
+            )
+            raise SystemExit(1)
+
         # Parse eval_args and provider_kwargs with type coercion
         try:
             parsed_eval_args = parse_key_value_args(eval_args, coerce_types=True)
