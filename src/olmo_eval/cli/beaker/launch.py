@@ -709,6 +709,7 @@ def _ensure_secrets(
         ensure_task_secrets,
         get_local_hf_token,
         get_local_wandb_api_key,
+        get_store_secret_mappings,
     )
 
     beaker_username = launcher.beaker.user_name
@@ -730,10 +731,7 @@ def _ensure_secrets(
             console.print(f"[red]Error:[/red] {e}")
             raise SystemExit(1) from None
 
-    store_secrets = []
-    if launch_config.store:
-        for env_var in ["PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD"]:
-            store_secrets.append((env_var, f"olmo_eval_{env_var}"))
+    store_secrets = get_store_secret_mappings() if launch_config.store else []
 
     return common_secrets, store_secrets, task_secrets
 
@@ -852,23 +850,27 @@ def _prepare_secrets(
     workspace: str,
     all_required_secrets: set[str],
     beaker_username: str,
-) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
-    """Prepare common and task secrets for Beaker jobs.
+    store: bool = False,
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]], list[tuple[str, str]]]:
+    """Prepare common, task, and store secrets for Beaker jobs.
 
     Args:
         dry_run: If True, return mock secrets without creating them.
         workspace: Beaker workspace name.
         all_required_secrets: Set of required secret environment variable names.
         beaker_username: Beaker username for dry-run secret naming.
+        store: If True, include database secret mappings.
 
     Returns:
-        Tuple of (common_secrets, task_secrets) as lists of (env_var, secret_name) tuples.
+        Tuple of (common_secrets, task_secrets, store_secrets) as lists of
+        (env_var, secret_name) tuples.
     """
     from olmo_eval.launch.beaker.secrets import (
         ensure_common_secrets,
         ensure_task_secrets,
         get_local_hf_token,
         get_local_wandb_api_key,
+        get_store_secret_mappings,
     )
 
     if dry_run:
@@ -878,19 +880,20 @@ def _prepare_secrets(
         if get_local_wandb_api_key():
             common_secrets.append(("WANDB_API_KEY", f"{beaker_username}_WANDB_API_KEY"))
         task_secrets = [(s, f"{beaker_username}_{s}") for s in sorted(all_required_secrets)]
-        return common_secrets, task_secrets
+    else:
+        common_secrets = ensure_common_secrets(workspace=workspace)
+        try:
+            task_secrets = ensure_task_secrets(
+                workspace=workspace,
+                required_secrets=all_required_secrets,
+            )
+        except ValueError as e:
+            console.print(f"[red]Error:[/red] {e}")
+            raise SystemExit(1) from None
 
-    common_secrets = ensure_common_secrets(workspace=workspace)
-    try:
-        task_secrets = ensure_task_secrets(
-            workspace=workspace,
-            required_secrets=all_required_secrets,
-        )
-    except ValueError as e:
-        console.print(f"[red]Error:[/red] {e}")
-        raise SystemExit(1) from None
+    store_secrets = get_store_secret_mappings() if store else []
 
-    return common_secrets, task_secrets
+    return common_secrets, task_secrets, store_secrets
 
 
 def _launch_jobs(
@@ -1062,15 +1065,16 @@ def _launch_external_evals(
             pass
 
     # Prepare secrets (using shared helper)
-    common_secrets, task_secrets = _prepare_secrets(
+    common_secrets, task_secrets, store_secrets = _prepare_secrets(
         dry_run=dry_run,
         workspace=effective_workspace,
         all_required_secrets=all_required_secrets,
         beaker_username=beaker_username,
+        store=store,
     )
 
     # Build env secrets list
-    env_secrets = common_secrets + task_secrets
+    env_secrets = common_secrets + task_secrets + store_secrets
 
     # Add explicit secret overrides
     env_secrets.extend(

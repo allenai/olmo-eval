@@ -172,10 +172,11 @@ def assemble_external_eval_job(
             BeakerEnvSecret(env_var, secret_name) for env_var, secret_name in env_secrets
         ]
 
-    # Add store secrets if store is enabled
+    # Add store defaults if enabled
     if store:
-        for env_var in ["PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD"]:
-            beaker_env_secrets.append(BeakerEnvSecret(env_var, f"olmo_eval_{env_var}"))
+        from olmo_eval.launch.beaker.secrets import get_store_env_defaults
+
+        env_vars.update(get_store_env_defaults())
 
     extras = ["sandbox"]
     if store:
@@ -205,6 +206,7 @@ def assemble_external_eval_job(
         env_secrets=beaker_env_secrets,
         enable_sandbox=True,
         setup_registry_mirror=setup_registry_mirror,
+        setup_store_secrets=store,
         extras=extras,
     )
 
@@ -305,6 +307,12 @@ class JobConfigAssembler:
             if self.config.uv_cache_dir:
                 job_env_vars["UV_CACHE_DIR"] = self.config.uv_cache_dir
 
+        # Add store defaults if enabled
+        if self.config.store:
+            from olmo_eval.launch.beaker.secrets import get_store_env_defaults
+
+            job_env_vars.update(get_store_env_defaults())
+
         # Configure sandbox environment and registry mirror
         setup_registry_mirror = False
         log.info(f"Sandbox enabled: {self.enable_sandbox}")
@@ -343,6 +351,7 @@ class JobConfigAssembler:
             task_packages=task_packages,
             enable_sandbox=self.enable_sandbox,
             setup_registry_mirror=setup_registry_mirror,
+            setup_store_secrets=self.config.store,
         )
 
     def _extract_task_dependencies(
