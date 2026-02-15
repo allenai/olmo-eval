@@ -7,6 +7,7 @@ import base64
 import logging
 import os
 import time
+import uuid
 from typing import Any
 
 from olmo_eval.common.execution.environment import ExecutionResult
@@ -347,9 +348,12 @@ class SandboxExecutor:
         """
         from swerex.runtime.abstract import Command
 
-        output_file = "/tmp/_sandbox_output.log"
-        exit_code_file = "/tmp/_sandbox_exit_code"
-        script_file = "/tmp/_sandbox_script.sh"
+        # Use unique temp paths to avoid conflicts with concurrent executions
+        cmd_id = uuid.uuid4().hex[:12]
+        output_file = f"/tmp/_sandbox_output_{cmd_id}.log"
+        exit_code_file = f"/tmp/_sandbox_exit_code_{cmd_id}"
+        script_file = f"/tmp/_sandbox_script_{cmd_id}.sh"
+        pid_file = f"/tmp/_sandbox_pid_{cmd_id}"
 
         # Create script via base64 to avoid quoting issues
         script = (
@@ -363,7 +367,7 @@ class SandboxExecutor:
 
         # Setup: create script file
         setup = (
-            f"rm -f {output_file} {exit_code_file} && "
+            f"rm -f {output_file} {exit_code_file} {pid_file} && "
             f"echo '{encoded}' | base64 -d > {script_file} && "
             f"chmod +x {script_file}"
         )
@@ -373,9 +377,11 @@ class SandboxExecutor:
             return ExecutionResult(False, f"Failed to create script: {e}", -1)
 
         # Start script in detached background process (setsid creates new session)
+        # Store the PID so we can kill the process group on timeout
         start = (
-            f"( setsid bash -c '{script_file} > {output_file} 2>&1; "
-            f"echo $? > {exit_code_file}' < /dev/null > /dev/null 2>&1 & )"
+            f"setsid bash -c '{script_file} > {output_file} 2>&1; "
+            f"echo $? > {exit_code_file}' < /dev/null > /dev/null 2>&1 & "
+            f"echo $! > {pid_file}"
         )
         try:
             await self._runtime.execute(Command(command=["bash", "-c", start], timeout=10.0))
@@ -389,12 +395,38 @@ class SandboxExecutor:
         consecutive_failures = 0
         max_consecutive_failures = 3
 
+        async def kill_process_group() -> None:
+            """Kill the background process group."""
+            try:
+                # Read the PID and kill its process group (negative PID kills group)
+                kill_cmd = (
+                    f"pid=$(cat {pid_file} 2>/dev/null) && "
+                    f'[ -n "$pid" ] && kill -TERM -$pid 2>/dev/null; '
+                    f"sleep 0.5; "
+                    f'[ -n "$pid" ] && kill -KILL -$pid 2>/dev/null; '
+                    "true"
+                )
+                await self._runtime.execute(Command(command=["bash", "-c", kill_cmd], timeout=5.0))
+            except Exception as e:
+                self._log(logging.DEBUG, f"Process group kill (may be already exited): {e}")
+
+        async def cleanup_temp_files() -> None:
+            """Remove temporary files."""
+            try:
+                cleanup_cmd = f"rm -f {output_file} {exit_code_file} {script_file} {pid_file}"
+                await self._runtime.execute(
+                    Command(command=["bash", "-c", cleanup_cmd], timeout=5.0)
+                )
+            except Exception:
+                pass  # Best effort cleanup
+
         while True:
             await asyncio.sleep(1.0)
 
             if time.time() - start_time > timeout:
                 self._log(logging.WARNING, f"Command timed out after {timeout}s")
                 timed_out = True
+                await kill_process_group()
                 break
 
             # Stream new output and check for completion in one pass
@@ -434,6 +466,8 @@ class SandboxExecutor:
                 )
                 if consecutive_failures >= max_consecutive_failures:
                     self._log(logging.ERROR, "Sandbox unresponsive, aborting")
+                    await kill_process_group()
+                    await cleanup_temp_files()
                     diag = await self._get_container_diagnostics()
                     msg = f"Sandbox unresponsive after {consecutive_failures} polls\n{diag}"
                     return ExecutionResult(False, msg, -1)
@@ -468,6 +502,9 @@ class SandboxExecutor:
                 for line in full_output[last_pos:].rstrip("\n").split("\n"):
                     if line:
                         logger.info(f"[{prefix}] {line}")
+
+        # Clean up temp files
+        await cleanup_temp_files()
 
         if timed_out:
             full_output = (full_output + "\n[Command timed out]") if full_output else "[Timed out]"
