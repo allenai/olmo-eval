@@ -206,6 +206,13 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     help="Arguments for external evals (key=value or JSON dict, e.g., -A domain=retail)",
 )
 @click.option(
+    "--provider-kwarg",
+    "-K",
+    "provider_kwargs",
+    multiple=True,
+    help="Provider kwargs for external evals (key=value, e.g., -K enable_chunked_prefill=true)",
+)
+@click.option(
     "--uv-cache-dir",
     default=BEAKER_UV_CACHE_DIR,
     show_default=True,
@@ -255,6 +262,7 @@ def launch(
     harness: str | None,
     external_evals: tuple[str, ...],
     eval_args: tuple[str, ...],
+    provider_kwargs: tuple[str, ...],
     uv_cache_dir: str,
     secret_env: tuple[str, ...],
 ) -> None:
@@ -364,6 +372,13 @@ def launch(
                 key, value = arg.split("=", 1)
                 parsed_eval_args[key] = value
 
+        # Parse provider_kwargs (key=value format)
+        parsed_provider_kwargs: dict[str, str] = {}
+        for kwarg in provider_kwargs:
+            if "=" in kwarg:
+                key, value = kwarg.split("=", 1)
+                parsed_provider_kwargs[key] = value
+
         _launch_external_evals(
             external_evals=list(external_evals),
             model=model,
@@ -385,6 +400,7 @@ def launch(
             s3_region=s3_region,
             secret_env_overrides=secret_env_overrides,
             eval_args=parsed_eval_args if parsed_eval_args else None,
+            provider_kwargs=parsed_provider_kwargs if parsed_provider_kwargs else None,
             uv_cache_dir=uv_cache_dir,
             preemptible=preemptible,
             retries=retries,
@@ -866,6 +882,7 @@ def _launch_external_evals(
     s3_region: str,
     secret_env_overrides: dict[str, str],
     eval_args: dict[str, str] | None = None,
+    provider_kwargs: dict[str, str] | None = None,
     uv_cache_dir: str | None = None,
     preemptible: bool | None = None,
     retries: int | None = None,
@@ -1021,6 +1038,7 @@ def _launch_external_evals(
             inject_aws_credentials=inject_aws,
             inject_gcs_credentials=inject_gcs,
             eval_args=eval_args,
+            provider_kwargs=provider_kwargs,
             uv_cache_dir=uv_cache_dir,
             beaker_username=beaker_username,
             preemptible=effective_preemptible,

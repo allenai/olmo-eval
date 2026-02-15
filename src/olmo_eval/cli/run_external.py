@@ -90,6 +90,13 @@ class ExternalRunConfig:
     multiple=True,
     help="Arguments for external evals (key=value or JSON dict format)",
 )
+@click.option(
+    "--provider-kwarg",
+    "-K",
+    "provider_kwargs",
+    multiple=True,
+    help="Provider kwargs (key=value, e.g., -K enable_chunked_prefill=true)",
+)
 def run_external(
     model: str,
     evals: tuple[str, ...],
@@ -101,6 +108,7 @@ def run_external(
     runtime: str,
     dry_run: bool,
     eval_args: tuple[str, ...],
+    provider_kwargs: tuple[str, ...],
 ) -> None:
     """Run external black-box evaluations.
 
@@ -142,11 +150,31 @@ def run_external(
             model=model,
         )
 
+    # Parse provider kwargs (key=value format, with type coercion)
+    parsed_provider_kwargs: dict[str, Any] = {}
+    for kwarg in provider_kwargs:
+        if "=" not in kwarg:
+            console.print(f"[red]Error:[/red] Invalid provider kwarg '{kwarg}', use key=value")
+            raise SystemExit(1)
+        key, value = kwarg.split("=", 1)
+        # Type coercion for common types
+        if value.lower() == "true":
+            parsed_provider_kwargs[key] = True
+        elif value.lower() == "false":
+            parsed_provider_kwargs[key] = False
+        elif value.isdigit():
+            parsed_provider_kwargs[key] = int(value)
+        elif value.replace(".", "", 1).isdigit():
+            parsed_provider_kwargs[key] = float(value)
+        else:
+            parsed_provider_kwargs[key] = value
+
     # Apply overrides
     provider_config = provider_config.with_overrides(
         kind=provider,
         base_url=base_url,
         tensor_parallel_size=tensor_parallel_size if tensor_parallel_size > 1 else None,
+        **parsed_provider_kwargs,
     )
 
     # Parse eval_args (supports both key=value and JSON dict format)

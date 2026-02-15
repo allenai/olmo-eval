@@ -63,6 +63,7 @@ def assemble_external_eval_job(
     inject_aws_credentials: bool = False,
     inject_gcs_credentials: bool = False,
     eval_args: dict[str, str] | None = None,
+    provider_kwargs: dict[str, str] | None = None,
     uv_cache_dir: str | None = None,
     beaker_username: str | None = None,
     preemptible: bool = True,
@@ -110,6 +111,11 @@ def assemble_external_eval_job(
     if eval_args:
         for key, value in eval_args.items():
             command.extend(["-a", f"{key}={value}"])
+
+    # Add provider_kwargs
+    if provider_kwargs:
+        for key, value in provider_kwargs.items():
+            command.extend(["-K", f"{key}={value}"])
 
     # Environment variables
     env_vars: dict[str, str] = {
