@@ -4,7 +4,7 @@ This directory contains integration tests that require external services like Do
 
 ## Prerequisites
 
-### For vLLM Backend Tests
+### For vLLM Provider Tests
 
 1. **Docker with GPU support** (recommended):
    ```bash
@@ -26,7 +26,7 @@ This directory contains integration tests that require external services like Do
 
 ```bash
 # Run all vLLM integration tests
-pytest tests/integration/test_vllm_backend.py -v --integration
+pytest tests/integration/test_vllm_provider.py -v --integration
 
 # The test harness will automatically:
 # 1. Start a vLLM Docker container with a small model (Qwen2-0.5B)
@@ -41,14 +41,14 @@ If you already have vLLM running (locally or in Docker):
 
 ```bash
 # Skip Docker management
-pytest tests/integration/test_vllm_backend.py -v --integration --no-docker
+pytest tests/integration/test_vllm_provider.py -v --integration --no-docker
 ```
 
 ### Using a Different Model
 
 ```bash
 # Use a different model (must be compatible with vLLM)
-pytest tests/integration/test_vllm_backend.py -v --integration \
+pytest tests/integration/test_vllm_provider.py -v --integration \
     --vllm-model "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 ```
 
@@ -64,7 +64,7 @@ docker compose -f tests/integration/docker-compose.vllm.yml up -d vllm
 docker compose -f tests/integration/docker-compose.vllm.yml ps
 
 # Run tests (skip Docker management)
-pytest tests/integration/test_vllm_backend.py -v --integration --no-docker
+pytest tests/integration/test_vllm_provider.py -v --integration --no-docker
 
 # Stop container when done
 docker compose -f tests/integration/docker-compose.vllm.yml down
@@ -89,12 +89,12 @@ tests/integration/
 ├── conftest.py              # Pytest fixtures and configuration
 ├── docker-compose.vllm.yml  # Docker Compose for vLLM
 ├── README.md                # This file
-└── test_vllm_backend.py     # vLLM backend integration tests
+└── test_vllm_provider.py     # vLLM provider integration tests
 ```
 
 ## Test Categories
 
-### `TestVLLMBackendGenerate`
+### `TestVLLMProviderGenerate`
 Tests for text generation:
 - Single/multiple prompts
 - Sampling parameters (temperature, top_p, etc.)
@@ -103,20 +103,20 @@ Tests for text generation:
 - Logprobs during generation
 - Deterministic generation
 
-### `TestVLLMBackendLogprobs`
+### `TestVLLMProviderLogprobs`
 Tests for multiple-choice scoring via logprobs:
 - Single/multiple requests
 - Continuation scoring
 - Correct answer detection
 
-### `TestVLLMBackendEdgeCases`
+### `TestVLLMProviderEdgeCases`
 Edge case handling:
 - Empty prompts
 - Long prompts
 - Special characters
 - Empty continuations
 
-### `TestVLLMBackendWithTasks`
+### `TestVLLMProviderWithTasks`
 End-to-end task integration:
 - ARC-style multiple choice
 - Batch processing

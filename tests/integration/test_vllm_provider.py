@@ -25,7 +25,7 @@ pytestmark = [pytest.mark.gpu]
 class TestVLLMProviderGenerate:
     """Tests for VLLMProvider.generate method."""
 
-    def test_generate_single_prompt(self, vllm_backend):
+    def test_generate_single_prompt(self, vllm_provider):
         """Test generating from a single prompt."""
         requests = [
             LMRequest(
@@ -34,27 +34,27 @@ class TestVLLMProviderGenerate:
             )
         ]
 
-        results = vllm_backend.generate(requests)
+        results = vllm_provider.generate(requests)
 
         assert len(results) == 1
         assert len(results[0]) >= 1  # At least one output
         assert isinstance(results[0][0].text, str)
         assert len(results[0][0].text) > 0
 
-    def test_generate_multiple_prompts(self, vllm_backend, small_test_prompts):
+    def test_generate_multiple_prompts(self, vllm_provider, small_test_prompts):
         """Test generating from multiple prompts."""
         requests = [
             LMRequest(request_type=RequestType.COMPLETION, prompt=p) for p in small_test_prompts
         ]
 
-        results = vllm_backend.generate(requests)
+        results = vllm_provider.generate(requests)
 
         assert len(results) == len(small_test_prompts)
         for result in results:
             assert len(result) >= 1
             assert isinstance(result[0].text, str)
 
-    def test_generate_with_sampling_params(self, vllm_backend):
+    def test_generate_with_sampling_params(self, vllm_provider):
         """Test generating with custom sampling parameters."""
         requests = [
             LMRequest(
@@ -68,12 +68,12 @@ class TestVLLMProviderGenerate:
             top_p=0.9,
         )
 
-        results = vllm_backend.generate(requests, sampling_params=params)
+        results = vllm_provider.generate(requests, sampling_params=params)
 
         assert len(results) == 1
         assert len(results[0][0].text) > 0
 
-    def test_generate_with_stop_sequences(self, vllm_backend):
+    def test_generate_with_stop_sequences(self, vllm_provider):
         """Test generating with stop sequences."""
         requests = [
             LMRequest(
@@ -86,14 +86,14 @@ class TestVLLMProviderGenerate:
             stop_sequences=("\n", "."),
         )
 
-        results = vllm_backend.generate(requests, sampling_params=params)
+        results = vllm_provider.generate(requests, sampling_params=params)
 
         assert len(results) == 1
         # Output should not contain stop sequences (they terminate generation)
         output = results[0][0].text
         assert "\n" not in output or output.endswith("\n") is False
 
-    def test_generate_multiple_samples(self, vllm_backend):
+    def test_generate_multiple_samples(self, vllm_provider):
         """Test generating multiple samples per prompt."""
         requests = [
             LMRequest(
@@ -107,7 +107,7 @@ class TestVLLMProviderGenerate:
             num_samples=3,
         )
 
-        results = vllm_backend.generate(requests, sampling_params=params)
+        results = vllm_provider.generate(requests, sampling_params=params)
 
         assert len(results) == 1
         assert len(results[0]) == 3  # 3 samples
@@ -115,7 +115,7 @@ class TestVLLMProviderGenerate:
         texts = [r.text for r in results[0]]
         assert len(texts) == 3
 
-    def test_generate_with_logprobs(self, vllm_backend):
+    def test_generate_with_logprobs(self, vllm_provider):
         """Test generating with logprobs enabled."""
         requests = [
             LMRequest(
@@ -128,7 +128,7 @@ class TestVLLMProviderGenerate:
             logprobs=5,
         )
 
-        results = vllm_backend.generate(requests, sampling_params=params)
+        results = vllm_provider.generate(requests, sampling_params=params)
 
         assert len(results) == 1
         output = results[0][0]
@@ -140,7 +140,7 @@ class TestVLLMProviderGenerate:
             assert "logprob" in entry
             assert isinstance(entry["logprob"], float)
 
-    def test_generate_deterministic(self, vllm_backend):
+    def test_generate_deterministic(self, vllm_provider):
         """Test that temperature=0 gives deterministic results."""
         requests = [
             LMRequest(
@@ -150,8 +150,8 @@ class TestVLLMProviderGenerate:
         ]
         params = SamplingParams(max_tokens=5, temperature=0.0)
 
-        results1 = vllm_backend.generate(requests, sampling_params=params)
-        results2 = vllm_backend.generate(requests, sampling_params=params)
+        results1 = vllm_provider.generate(requests, sampling_params=params)
+        results2 = vllm_provider.generate(requests, sampling_params=params)
 
         assert results1[0][0].text == results2[0][0].text
 
@@ -159,7 +159,7 @@ class TestVLLMProviderGenerate:
 class TestVLLMProviderLogprobs:
     """Tests for VLLMProvider.logprobs method (multiple choice scoring)."""
 
-    def test_logprobs_single_request(self, vllm_backend):
+    def test_logprobs_single_request(self, vllm_provider):
         """Test logprobs for a single request with continuations."""
         requests = [
             LMRequest(
@@ -169,7 +169,7 @@ class TestVLLMProviderLogprobs:
             )
         ]
 
-        results = vllm_backend.logprobs(requests)
+        results = vllm_provider.logprobs(requests)
 
         assert len(results) == 1
         assert len(results[0]) == 3  # One output per continuation
@@ -187,7 +187,7 @@ class TestVLLMProviderLogprobs:
             assert isinstance(output.metadata["num_tokens_all"], int)
             assert isinstance(output.metadata["is_greedy"], bool)
 
-    def test_logprobs_multiple_requests(self, vllm_backend):
+    def test_logprobs_multiple_requests(self, vllm_provider):
         """Test logprobs for multiple requests."""
         requests = [
             LMRequest(
@@ -202,13 +202,13 @@ class TestVLLMProviderLogprobs:
             ),
         ]
 
-        results = vllm_backend.logprobs(requests)
+        results = vllm_provider.logprobs(requests)
 
         assert len(results) == 2
         assert len(results[0]) == 3
         assert len(results[1]) == 3
 
-    def test_logprobs_correct_answer_higher(self, vllm_backend):
+    def test_logprobs_correct_answer_higher(self, vllm_provider):
         """Test that correct answers tend to have higher logprobs."""
         requests = [
             LMRequest(
@@ -218,7 +218,7 @@ class TestVLLMProviderLogprobs:
             )
         ]
 
-        results = vllm_backend.logprobs(requests)
+        results = vllm_provider.logprobs(requests)
 
         # Paris should have the highest logprob (most likely correct)
         logprobs = [r.metadata["total_logprob"] for r in results[0]]
@@ -229,7 +229,7 @@ class TestVLLMProviderLogprobs:
         # Paris should be more likely than other capitals
         assert paris_logprob > tokyo_logprob or paris_logprob > moscow_logprob
 
-    def test_logprobs_text_matches_continuation(self, vllm_backend):
+    def test_logprobs_text_matches_continuation(self, vllm_provider):
         """Test that output text matches the continuation."""
         continuations = (" yes", " no", " maybe")
         requests = [
@@ -240,7 +240,7 @@ class TestVLLMProviderLogprobs:
             )
         ]
 
-        results = vllm_backend.logprobs(requests)
+        results = vllm_provider.logprobs(requests)
 
         for output, expected in zip(results[0], continuations, strict=True):
             assert output.text == expected
@@ -249,7 +249,7 @@ class TestVLLMProviderLogprobs:
 class TestVLLMProviderEdgeCases:
     """Edge case tests for VLLMProvider."""
 
-    def test_empty_prompt(self, vllm_backend):
+    def test_empty_prompt(self, vllm_provider):
         """Test handling of empty prompt."""
         requests = [
             LMRequest(
@@ -259,12 +259,12 @@ class TestVLLMProviderEdgeCases:
         ]
         params = SamplingParams(max_tokens=10)
 
-        results = vllm_backend.generate(requests, sampling_params=params)
+        results = vllm_provider.generate(requests, sampling_params=params)
 
         assert len(results) == 1
         assert isinstance(results[0][0].text, str)
 
-    def test_long_prompt(self, vllm_backend):
+    def test_long_prompt(self, vllm_provider):
         """Test handling of longer prompt."""
         long_prompt = "Hello world. " * 50  # ~100 tokens
         requests = [
@@ -275,12 +275,12 @@ class TestVLLMProviderEdgeCases:
         ]
         params = SamplingParams(max_tokens=20)
 
-        results = vllm_backend.generate(requests, sampling_params=params)
+        results = vllm_provider.generate(requests, sampling_params=params)
 
         assert len(results) == 1
         assert isinstance(results[0][0].text, str)
 
-    def test_special_characters(self, vllm_backend):
+    def test_special_characters(self, vllm_provider):
         """Test handling of special characters in prompt."""
         requests = [
             LMRequest(
@@ -290,12 +290,12 @@ class TestVLLMProviderEdgeCases:
         ]
         params = SamplingParams(max_tokens=10)
 
-        results = vllm_backend.generate(requests, sampling_params=params)
+        results = vllm_provider.generate(requests, sampling_params=params)
 
         assert len(results) == 1
         assert isinstance(results[0][0].text, str)
 
-    def test_single_continuation(self, vllm_backend):
+    def test_single_continuation(self, vllm_provider):
         """Test logprobs with single continuation."""
         requests = [
             LMRequest(
@@ -305,12 +305,12 @@ class TestVLLMProviderEdgeCases:
             )
         ]
 
-        results = vllm_backend.logprobs(requests)
+        results = vllm_provider.logprobs(requests)
 
         assert len(results) == 1
         assert len(results[0]) == 1
 
-    def test_empty_continuations(self, vllm_backend):
+    def test_empty_continuations(self, vllm_provider):
         """Test logprobs with no continuations."""
         requests = [
             LMRequest(
@@ -320,12 +320,12 @@ class TestVLLMProviderEdgeCases:
             )
         ]
 
-        results = vllm_backend.logprobs(requests)
+        results = vllm_provider.logprobs(requests)
 
         assert len(results) == 1
         assert len(results[0]) == 0
 
-    def test_logprobs_empty_context(self, vllm_backend):
+    def test_logprobs_empty_context(self, vllm_provider):
         """Test logprobs with empty context (BOS token handling)."""
         requests = [
             LMRequest(
@@ -335,7 +335,7 @@ class TestVLLMProviderEdgeCases:
             )
         ]
 
-        results = vllm_backend.logprobs(requests)
+        results = vllm_provider.logprobs(requests)
 
         assert len(results) == 1
         assert len(results[0]) == 1
@@ -349,7 +349,7 @@ class TestVLLMProviderEdgeCases:
 class TestVLLMProviderWithTasks:
     """Integration tests running actual evaluation tasks through vLLM."""
 
-    def test_arc_task_format(self, vllm_backend):
+    def test_arc_task_format(self, vllm_provider):
         """Test running ARC-style multiple choice through vLLM."""
         # Simulate ARC task format
         requests = [
@@ -363,7 +363,7 @@ class TestVLLMProviderWithTasks:
             )
         ]
 
-        results = vllm_backend.logprobs(requests)
+        results = vllm_provider.logprobs(requests)
 
         assert len(results) == 1
         assert len(results[0]) == 4
@@ -378,7 +378,7 @@ class TestVLLMProviderWithTasks:
         # H2O (answer A) should be selected
         assert best_answer == "A"
 
-    def test_batch_processing(self, vllm_backend):
+    def test_batch_processing(self, vllm_provider):
         """Test that batch processing works correctly."""
         # Create a batch of requests
         requests = [
@@ -390,7 +390,7 @@ class TestVLLMProviderWithTasks:
         ]
         params = SamplingParams(max_tokens=20)
 
-        results = vllm_backend.generate(requests, sampling_params=params)
+        results = vllm_provider.generate(requests, sampling_params=params)
 
         assert len(results) == 5
         for result in results:

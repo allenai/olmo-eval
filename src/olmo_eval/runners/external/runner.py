@@ -260,27 +260,6 @@ class ExternalEvalRunner:
                 "predictions": result.predictions,
             }
 
-        # Write combined results (legacy format for backwards compatibility)
-        combined: dict[str, Any] = {
-            "model": self.provider_config.model,
-            "model_config": model_config,
-            "experiment_id": experiment_id,
-            "timestamp": timestamp,
-            "total_duration_seconds": total_duration,
-            "evaluations": {},
-        }
-        all_metrics: dict[str, float] = {}
-        for name, result in results.items():
-            combined["evaluations"][name] = result.to_dict()
-            for metric, value in result.metrics.items():
-                all_metrics[f"{name}/{metric}"] = value
-        combined["metrics"] = all_metrics
-
-        results_file = output_path / "external_eval_results.json"
-        with open(results_file, "w") as f:
-            json.dump(combined, f, indent=2)
-        logger.info(f"Combined results saved to {results_file}")
-
         # Write metrics.json in standard runner format
         self._write_metrics_json(runner_results, experiment_id, total_duration)
 
