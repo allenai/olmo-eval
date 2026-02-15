@@ -356,14 +356,8 @@ class SandboxExecutor:
         pid_file = f"/tmp/_sandbox_pid_{cmd_id}"
 
         # Create script via base64 to avoid quoting issues
-        script = (
-            "#!/bin/bash\n"
-            "export PYTHONUNBUFFERED=1\n"
-            "export NO_COLOR=1\n"
-            "export TERM=dumb\n"
-            "export TTY_COMPATIBLE=0\n"
-            f"{command}\n"
-        )
+        env_prefix = "PYTHONUNBUFFERED=1 NO_COLOR=1 TERM=dumb TTY_COMPATIBLE=0 TTY_INTERACTIVE=0"
+        script = f"#!/bin/bash\n{env_prefix} {command}\n"
         encoded = base64.b64encode(script.encode()).decode()
 
         # Setup: create script file
