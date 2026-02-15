@@ -151,10 +151,12 @@ class ExternalEvalRunner:
 
             # Create provider config for the server without a base_url
             # This causes VLLMServerProvider to start its own server
+            # Enable auto tool choice by default for external evals (e.g., tau2_bench)
             server_config = self.provider_config.with_overrides(
                 kind="vllm_server",
                 base_url=None,
                 log_dir=log_dir,
+                enable_auto_tool_choice=True,
             )
 
             # Create the provider - this starts the server automatically
