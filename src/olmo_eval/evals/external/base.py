@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shlex
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -251,7 +252,7 @@ class ExternalEval(ABC):
             # --max-time: total timeout, --connect-timeout: connection phase timeout
             check_cmd = (
                 f"curl -sS --max-time 5 --connect-timeout 3 "
-                f"-o /dev/null -w 'HTTP_CODE:%{{http_code}}' {health_url} 2>&1"
+                f"-o /dev/null -w 'HTTP_CODE:%{{http_code}}' {shlex.quote(health_url)} 2>&1"
             )
             result = await executor.execute_command(check_cmd, timeout=10.0)
             output = result.output.strip()

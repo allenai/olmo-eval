@@ -13,6 +13,7 @@ import base64
 import json
 import logging
 import math
+import shlex
 import time
 from collections import defaultdict
 from dataclasses import dataclass
@@ -253,7 +254,7 @@ class Tau2ExternalEval(ExternalEval):
         else:
             tau2_cmd = f"{repo}/.venv/bin/tau2 run"
 
-        parts = [f"cd {repo} &&", tau2_cmd, f"--agent-llm '{agent_model}'"]
+        parts = [f"cd {repo} &&", tau2_cmd, "--agent-llm", shlex.quote(agent_model)]
 
         # Agent LLM args
         agent_llm_args: dict[str, Any] = {}
@@ -264,38 +265,44 @@ class Tau2ExternalEval(ExternalEval):
         if tau2_args.temperature is not None:
             agent_llm_args["temperature"] = tau2_args.temperature
         if agent_llm_args:
-            parts.append(f"--agent-llm-args '{json.dumps(agent_llm_args)}'")
+            parts.extend(["--agent-llm-args", shlex.quote(json.dumps(agent_llm_args))])
 
         # User LLM
-        parts.append(f"--user-llm '{tau2_args.user_llm}'")
+        parts.extend(["--user-llm", shlex.quote(tau2_args.user_llm)])
         if tau2_args.user_temperature is not None:
             user_args = json.dumps({"temperature": tau2_args.user_temperature})
-            parts.append(f"--user-llm-args '{user_args}'")
+            parts.extend(["--user-llm-args", shlex.quote(user_args)])
 
         # Core settings
         parts.extend(
             [
-                f"--domain '{tau2_args.domain}'",
-                f"--num-trials {tau2_args.num_trials}",
-                f"--max-steps {tau2_args.max_steps}",
-                f"--max-concurrency {tau2_args.max_concurrency}",
-                "--save-to results",  # Saves to {repo}/data/simulations/results.json
+                "--domain",
+                shlex.quote(tau2_args.domain),
+                "--num-trials",
+                str(tau2_args.num_trials),
+                "--max-steps",
+                str(tau2_args.max_steps),
+                "--max-concurrency",
+                str(tau2_args.max_concurrency),
+                "--save-to",
+                "results",  # Saves to {repo}/data/simulations/results.json
             ]
         )
 
         # Optional args
         if tau2_args.task_split_name:
-            parts.append(f"--task-split-name '{tau2_args.task_split_name}'")
+            parts.extend(["--task-split-name", shlex.quote(tau2_args.task_split_name)])
         if tau2_args.task_ids:
-            parts.append(f"--task-ids {' '.join(tau2_args.task_ids)}")
+            parts.append("--task-ids")
+            parts.extend(shlex.quote(task_id) for task_id in tau2_args.task_ids)
         if tau2_args.num_tasks is not None:
-            parts.append(f"--num-tasks {tau2_args.num_tasks}")
+            parts.extend(["--num-tasks", str(tau2_args.num_tasks)])
         if tau2_args.max_errors is not None:
-            parts.append(f"--max-errors {tau2_args.max_errors}")
+            parts.extend(["--max-errors", str(tau2_args.max_errors)])
         if tau2_args.seed is not None:
-            parts.append(f"--seed {tau2_args.seed}")
+            parts.extend(["--seed", str(tau2_args.seed)])
         if tau2_args.log_level:
-            parts.append(f"--log-level {tau2_args.log_level}")
+            parts.extend(["--log-level", shlex.quote(tau2_args.log_level)])
         if tau2_args.enforce_communication_protocol:
             parts.append("--enforce-communication-protocol")
 
@@ -308,6 +315,8 @@ class Tau2ExternalEval(ExternalEval):
         max_tokens = await self._query_max_tokens(executor, provider_url)
         repo = f"{self.working_dir}/tau2-bench"
 
+        # Use json.dumps to safely escape the model name for Python string literal
+        model_key = f"hosted_vllm/{model_name}"
         script = f'''\
 #!/usr/bin/env python
 """Wrapper to register local vLLM model with litellm."""
@@ -315,7 +324,7 @@ import litellm
 import sys
 
 litellm.register_model({{
-    "hosted_vllm/{model_name}": {{
+    {json.dumps(model_key)}: {{
         "max_tokens": {max_tokens},
         "input_cost_per_token": 0.0,
         "output_cost_per_token": 0.0,
@@ -326,16 +335,16 @@ from tau2.cli import main
 sys.exit(main())
 '''
         encoded = base64.b64encode(script.encode()).decode()
+        wrapper_path = shlex.quote(f"{repo}/tau2_wrapper.py")
         await executor.execute_command(
-            f"echo '{encoded}' | base64 -d > {repo}/tau2_wrapper.py", timeout=30.0
+            f"echo '{encoded}' | base64 -d > {wrapper_path}", timeout=30.0
         )
         logger.info(f"[{self.name}] Created litellm wrapper (max_tokens={max_tokens})")
 
     async def _query_max_tokens(self, executor: SandboxExecutor, provider_url: str) -> int:
         """Query vLLM server for max_model_len."""
-        result = await executor.execute_command(
-            f"curl -s {provider_url.rstrip('/')}/v1/models", timeout=30.0
-        )
+        url = f"{provider_url.rstrip('/')}/v1/models"
+        result = await executor.execute_command(f"curl -s {shlex.quote(url)}", timeout=30.0)
         if result.success and result.output:
             try:
                 data = json.loads(result.output)
