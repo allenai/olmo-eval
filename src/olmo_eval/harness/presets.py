@@ -93,7 +93,7 @@ class HarnessPresets:
             sandboxes=(
                 SandboxConfig(
                     instances=3,
-                    image="python:3.12",
+                    image="ghcr.io/astral-sh/uv:python3.12-bookworm-slim",
                     mode=SandboxMode.DOCKER,
                     startup_timeout=60.0,
                     log_dir=_get_logs_dir(),
@@ -125,7 +125,7 @@ class HarnessPresets:
                 SandboxConfig(
                     capabilities=frozenset(Capability.BASH),
                     instances=4,  # Match max_concurrency for parallel execution
-                    image="python:3.12",
+                    image="ghcr.io/astral-sh/uv:python3.12-bookworm-slim",
                     mode=SandboxMode.DOCKER,
                     startup_timeout=120.0,
                     log_dir=_get_logs_dir(),
@@ -156,7 +156,7 @@ class HarnessPresets:
                 SandboxConfig(
                     capabilities=frozenset(Capability.BASH),
                     instances=1,  # Match max_concurrency for parallel execution
-                    image="python:3.12",
+                    image="ghcr.io/astral-sh/uv:python3.12-bookworm-slim",
                     mode=SandboxMode.DOCKER,
                     startup_timeout=120.0,
                     log_dir=_get_logs_dir(),

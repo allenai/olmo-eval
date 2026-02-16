@@ -125,7 +125,7 @@ class Tau2ExternalEval(ExternalEval):
 
     @property
     def sandbox_image(self) -> str:
-        return "python:3.11"
+        return "ghcr.io/astral-sh/uv:python3.11-bookworm-slim"
 
     @property
     def working_dir(self) -> str:
@@ -139,9 +139,8 @@ class Tau2ExternalEval(ExternalEval):
     def setup_command(self) -> tuple[str, ...]:
         repo = f"{self.working_dir}/tau2-bench"
         return (
-            "curl -LsSf https://astral.sh/uv/install.sh | sh",
             f"git clone --depth 1 https://github.com/sierra-research/tau2-bench.git {repo}",
-            f"cd {repo} && ~/.local/bin/uv sync",
+            f"cd {repo} && uv sync",
             f"mkdir -p {self.results_dir}",
         )
 
