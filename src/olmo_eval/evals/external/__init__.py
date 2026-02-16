@@ -5,7 +5,7 @@ themselves in a sandbox container while communicating with a model provider
 running in the parent process.
 """
 
-from olmo_eval.evals.external.base import ExternalEval
+from olmo_eval.evals.external.base import ExternalEval, SandboxedExternalEval
 from olmo_eval.evals.external.network import get_docker_network_args
 from olmo_eval.evals.external.registry import (
     clear_registry,
@@ -20,6 +20,7 @@ from olmo_eval.evals.external.result import ExternalEvalResult
 __all__ = [
     "ExternalEval",
     "ExternalEvalResult",
+    "SandboxedExternalEval",
     "clear_registry",
     "get_docker_network_args",
     "get_external_eval",

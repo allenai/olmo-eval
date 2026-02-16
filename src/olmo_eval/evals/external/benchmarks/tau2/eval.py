@@ -1,11 +1,4 @@
-"""Tau2-bench external evaluation.
-
-tau2_bench is a benchmark for evaluating language model agents on realistic
-customer service tasks. It measures both task completion and constraint
-satisfaction.
-
-Repository: https://github.com/sierra-research/tau2-bench
-"""
+"""Tau2-bench external evaluation implementation."""
 
 from __future__ import annotations
 
@@ -20,8 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from olmo_eval.evals.external.base import ExternalEval
-from olmo_eval.evals.external.registry import register_external_eval
+from olmo_eval.evals.external.base import SandboxedExternalEval
 from olmo_eval.evals.external.result import ExternalEvalResult
 
 if TYPE_CHECKING:
@@ -109,7 +101,7 @@ class Tau2Args:
         )
 
 
-class Tau2ExternalEval(ExternalEval):
+class Tau2ExternalEval(SandboxedExternalEval):
     """Tau2-bench evaluation for customer service agent tasks."""
 
     @property
@@ -500,6 +492,3 @@ sys.exit(main())
                 }
             )
         return predictions
-
-
-register_external_eval(Tau2ExternalEval())

@@ -276,12 +276,12 @@ class ConfiguredExternalEval:
     name: str
     provider: "ProviderConfig"
     args: dict[str, Any]
-    sandbox_image: str
-    working_dir: str
     timeout: str
     required_secrets: tuple[str, ...]
-    setup_commands: tuple[str, ...]
     run_command: str
+    sandbox_image: str | None = None
+    working_dir: str | None = None
+    setup_commands: tuple[str, ...] = ()
 
     @classmethod
     def from_eval(
@@ -291,6 +291,8 @@ class ConfiguredExternalEval:
         args: dict[str, Any] | None = None,
     ) -> "ConfiguredExternalEval":
         """Create from an ExternalEval instance."""
+        from olmo_eval.evals.external import SandboxedExternalEval
+
         # Merge defaults with provided args
         merged_args: dict[str, Any] = {}
         for arg_name, (_, default) in eval_instance.arguments.items():
@@ -306,15 +308,24 @@ class ConfiguredExternalEval:
         else:
             timeout_str = f"{timeout_secs:.0f}s"
 
+        # Extract sandbox-specific fields if available
+        sandbox_image = None
+        working_dir = None
+        setup_commands: tuple[str, ...] = ()
+        if isinstance(eval_instance, SandboxedExternalEval):
+            sandbox_image = eval_instance.sandbox_image
+            working_dir = eval_instance.working_dir
+            setup_commands = eval_instance.setup_command
+
         return cls(
             name=eval_instance.name,
             provider=provider,
             args=merged_args,
-            sandbox_image=eval_instance.sandbox_image,
-            working_dir=eval_instance.working_dir,
+            sandbox_image=sandbox_image,
+            working_dir=working_dir,
             timeout=timeout_str,
             required_secrets=eval_instance.required_secrets,
-            setup_commands=eval_instance.setup_command,
+            setup_commands=setup_commands,
             run_command=eval_instance.run_command,
         )
 

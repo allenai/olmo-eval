@@ -1,0 +1,486 @@
+"""Terminal-Bench 2.0 external evaluation."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
+
+from olmo_eval.common.types import LMRequest, RequestType
+from olmo_eval.common.types.trajectory import AgentTrajectory
+from olmo_eval.evals.external.base import ExternalEval
+from olmo_eval.evals.external.network import get_docker_network_args
+from olmo_eval.evals.external.result import ExternalEvalResult
+from olmo_eval.harness.sandbox.config import ContainerRuntime, SandboxConfig, SandboxMode
+
+from .loader import TerminalBenchLoader
+from .task import TerminalBenchTask
+from .verifier import TerminalBenchVerifier
+
+if TYPE_CHECKING:
+    from olmo_eval.harness.sandbox import SandboxManager
+
+logger = logging.getLogger(__name__)
+
+SYSTEM_PROMPT = """\
+You are an AI assistant helping complete tasks in a Linux terminal.
+You have access to the following tools:
+- execute_bash_session(command): Execute a bash command in a persistent shell session
+- submit(): Call when you have completed the task
+
+Focus on completing the task described in the instructions. Work step by step,
+checking your progress as you go. When you believe the task is complete, call
+the submit() tool.
+"""
+
+
+@dataclass
+class TerminalBenchArgs:
+    """Arguments for Terminal-Bench 2.0 evaluation."""
+
+    task_ids: list[str] | None = None
+    repo_path: str | None = None
+    repo_ref: str = "main"
+    max_concurrency: int = 1
+    max_turns: int = 50
+    oracle: bool = False
+    sandbox_mode: str = "docker"
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TerminalBenchArgs:
+        task_ids = data.get("task_ids")
+        if isinstance(task_ids, str):
+            task_ids = [t.strip() for t in task_ids.split(",") if t.strip()]
+        return cls(
+            task_ids=task_ids,
+            repo_path=data.get("repo_path"),
+            repo_ref=data.get("repo_ref", "main"),
+            max_concurrency=int(data.get("max_concurrency", 1)),
+            max_turns=int(data.get("max_turns", 50)),
+            oracle=data.get("oracle", False) in (True, "true", "True", "1"),
+            sandbox_mode=data.get("sandbox_mode", "docker"),
+        )
+
+
+@dataclass
+class TaskResult:
+    """Result of executing a single Terminal-Bench task."""
+
+    task_id: str
+    reward: float
+    trajectory: AgentTrajectory
+    completion_reason: str
+    agent_duration: float
+    verification_output: str
+    verification_exit_code: int
+    error: str | None = None
+    difficulty: str = "unknown"
+    category: str = "unknown"
+
+
+class TerminalBenchExternalEval(ExternalEval):
+    """Terminal-Bench 2.0 evaluation with per-task container orchestration."""
+
+    @property
+    def name(self) -> str:
+        return "terminal_bench_2"
+
+    @property
+    def description(self) -> str:
+        return "Evaluates LLM agents on 89 diverse terminal tasks"
+
+    @property
+    def timeout_seconds(self) -> float:
+        return 12000.0  # Max timeout across all tasks
+
+    @property
+    def arguments(self) -> dict[str, tuple[str, Any | None]]:
+        return {
+            "task_ids": ("Comma-separated task IDs to run (default: all)", None),
+            "repo_path": ("Local repo path (default: clone fresh)", None),
+            "repo_ref": ("Git ref to checkout", "main"),
+            "max_concurrency": ("Max parallel containers", 1),
+            "max_turns": ("Max agent turns per task", 50),
+            "oracle": ("Run solve.sh instead of LLM agent", False),
+            "sandbox_mode": ("Sandbox mode: docker, modal (default: docker)", "docker"),
+        }
+
+    async def execute(
+        self,
+        provider_url: str,
+        model_name: str,
+        args: dict[str, Any],
+        output_dir: str | None = None,
+        container_runtime: str = "podman",
+        provider_kind: str | None = None,
+    ) -> ExternalEvalResult:
+        """Execute Terminal-Bench evaluation.
+
+        Args:
+            provider_url: URL of the inference provider.
+            model_name: Model name to use.
+            args: Evaluation-specific arguments.
+            output_dir: Directory to write results.
+            container_runtime: Container runtime (docker or podman).
+            provider_kind: Type of provider.
+
+        Returns:
+            ExternalEvalResult with metrics and per-task results.
+        """
+        start_time = time.time()
+        tb_args = TerminalBenchArgs.from_dict(args)
+
+        # Load tasks
+        loader = TerminalBenchLoader()
+        if tb_args.repo_path:
+            repo_dir = Path(tb_args.repo_path)
+        else:
+            # Clone to a temp directory under output_dir or /tmp
+            if output_dir:
+                repo_dir = Path(output_dir) / "terminal-bench-2"
+            else:
+                repo_dir = Path("/tmp") / "terminal-bench-2"
+            loader.ensure_repo(repo_dir, tb_args.repo_ref)
+
+        tasks = loader.load_tasks(repo_dir, tb_args.task_ids)
+        if not tasks:
+            return self._error_result(
+                "No tasks found", start_time, f"repo_dir={repo_dir}, task_ids={tb_args.task_ids}"
+            )
+
+        logger.info(f"Loaded {len(tasks)} tasks")
+
+        # Get sandbox URL accessible from containers
+        sandbox_url = self._get_provider_url_for_sandbox(provider_url)
+
+        # Execute tasks with concurrency limit
+        semaphore = asyncio.Semaphore(tb_args.max_concurrency)
+
+        async def run_task(task: TerminalBenchTask) -> TaskResult:
+            async with semaphore:
+                return await self._execute_task(
+                    task=task,
+                    provider_url=sandbox_url,
+                    model_name=model_name,
+                    container_runtime=container_runtime,
+                    max_turns=tb_args.max_turns,
+                    oracle_mode=tb_args.oracle,
+                    sandbox_mode=tb_args.sandbox_mode,
+                )
+
+        results = await asyncio.gather(*[run_task(t) for t in tasks], return_exceptions=True)
+
+        # Process results
+        task_results: list[TaskResult] = []
+        for i, result in enumerate(results):
+            if isinstance(result, BaseException):
+                task = tasks[i]
+                logger.error(f"Task {task.task_id} failed with exception: {result}")
+                task_results.append(
+                    TaskResult(
+                        task_id=task.task_id,
+                        reward=0.0,
+                        trajectory=AgentTrajectory(turns=()),
+                        completion_reason="error",
+                        agent_duration=0.0,
+                        verification_output="",
+                        verification_exit_code=-1,
+                        error=str(result),
+                        difficulty=task.difficulty,
+                        category=task.category,
+                    )
+                )
+            else:
+                task_results.append(result)
+
+        # Compute metrics
+        rewards = [r.reward for r in task_results]
+        pass_rate = sum(rewards) / len(rewards) if rewards else 0.0
+
+        # Compute metrics by difficulty and category
+        metrics: dict[str, float] = {
+            "pass_rate": pass_rate,
+            "num_tasks": len(task_results),
+            "num_passed": sum(1 for r in task_results if r.reward == 1.0),
+        }
+
+        # Group by difficulty
+        by_difficulty: dict[str, list[float]] = {}
+        by_category: dict[str, list[float]] = {}
+        for r in task_results:
+            by_difficulty.setdefault(r.difficulty, []).append(r.reward)
+            by_category.setdefault(r.category, []).append(r.reward)
+
+        for difficulty, rewards_list in by_difficulty.items():
+            metrics[f"pass_rate_{difficulty}"] = sum(rewards_list) / len(rewards_list)
+
+        for category, rewards_list in by_category.items():
+            safe_name = category.replace(" ", "_").lower()
+            metrics[f"pass_rate_{safe_name}"] = sum(rewards_list) / len(rewards_list)
+
+        # Build predictions
+        predictions = self._build_predictions(task_results)
+
+        # Build result
+        result = ExternalEvalResult(
+            name=self.name,
+            success=True,
+            metrics=metrics,
+            metadata={
+                "model_name": model_name,
+                "oracle_mode": tb_args.oracle,
+                "max_turns": tb_args.max_turns,
+                "repo_ref": tb_args.repo_ref,
+            },
+            duration_seconds=time.time() - start_time,
+            predictions=predictions,
+        )
+
+        # Save results
+        if output_dir:
+            self._save_results(result, output_dir)
+            # Also save detailed task results
+            self._save_task_results(task_results, output_dir)
+
+        return result
+
+    async def _execute_task(
+        self,
+        task: TerminalBenchTask,
+        provider_url: str,
+        model_name: str,
+        container_runtime: str,
+        max_turns: int,
+        oracle_mode: bool,
+        sandbox_mode: str,
+    ) -> TaskResult:
+        """Execute a single Terminal-Bench task.
+
+        Args:
+            task: The task to execute.
+            provider_url: Provider URL accessible from sandbox.
+            model_name: Model name to use.
+            container_runtime: Container runtime.
+            max_turns: Maximum agent turns.
+            oracle_mode: Whether to run the solution script instead of agent.
+            sandbox_mode: Sandbox mode (docker, modal).
+
+        Returns:
+            TaskResult with reward and trajectory.
+        """
+        from olmo_eval.harness.sandbox import SandboxManager
+
+        logger.info(f"Executing task: {task.task_id}")
+        task_start = time.time()
+
+        # Create sandbox config for this task
+        mode = SandboxMode.DOCKER if sandbox_mode == "docker" else SandboxMode.MODAL
+        runtime = cast(ContainerRuntime, container_runtime)
+
+        docker_args: tuple[str, ...] = ()
+        if mode == SandboxMode.DOCKER:
+            docker_args = tuple(get_docker_network_args(runtime))
+
+        sandbox_config = SandboxConfig(
+            image=task.image,
+            mode=mode,
+            container_runtime=runtime if mode == SandboxMode.DOCKER else "docker",
+            working_dir=task.working_dir,
+            command_timeout=task.agent_timeout,
+            docker_args=docker_args,
+        )
+
+        # Create sandbox manager for this task
+        sandbox_manager = SandboxManager([sandbox_config], owner=f"tb2-{task.task_id}")
+
+        try:
+            await sandbox_manager.start()
+
+            if oracle_mode:
+                trajectory, completion_reason = await self._run_oracle(sandbox_manager, task)
+            else:
+                trajectory, completion_reason = await self._run_agent(
+                    sandbox_manager, task, provider_url, model_name, max_turns
+                )
+
+            agent_duration = time.time() - task_start
+
+            # Run verification
+            executor = sandbox_manager._executors[0]
+            verifier = TerminalBenchVerifier()
+            await verifier.inject_tests(executor, task.test_files)
+            verification = await verifier.run_verification(
+                executor, task.verifier_timeout, task.working_dir
+            )
+
+            return TaskResult(
+                task_id=task.task_id,
+                reward=verification.reward,
+                trajectory=trajectory,
+                completion_reason=completion_reason,
+                agent_duration=agent_duration,
+                verification_output=verification.test_output,
+                verification_exit_code=verification.test_exit_code,
+                difficulty=task.difficulty,
+                category=task.category,
+            )
+
+        except Exception as e:
+            logger.exception(f"Task {task.task_id} failed")
+            return TaskResult(
+                task_id=task.task_id,
+                reward=0.0,
+                trajectory=AgentTrajectory(turns=()),
+                completion_reason="error",
+                agent_duration=time.time() - task_start,
+                verification_output="",
+                verification_exit_code=-1,
+                error=str(e),
+                difficulty=task.difficulty,
+                category=task.category,
+            )
+        finally:
+            await sandbox_manager.stop()
+
+    async def _run_oracle(
+        self,
+        sandbox_manager: SandboxManager,
+        task: TerminalBenchTask,
+    ) -> tuple[AgentTrajectory, str]:
+        """Run the oracle (solution script).
+
+        Args:
+            sandbox_manager: The sandbox manager.
+            task: The task to run.
+
+        Returns:
+            Tuple of (trajectory, completion_reason).
+        """
+        executor = sandbox_manager._executors[0]
+
+        # Run solve.sh via heredoc to avoid quoting issues
+        result = await executor.execute_in_session(
+            f"bash << 'SOLVEEOF'\n{task.solution_script}\nSOLVEOF",
+            timeout=task.agent_timeout,
+            stream=True,
+            log_prefix=f"tb2-{task.task_id}-oracle",
+        )
+
+        logger.info(f"Oracle exit code: {result.exit_code}")
+        return AgentTrajectory(turns=()), "oracle"
+
+    async def _run_agent(
+        self,
+        sandbox_manager: SandboxManager,
+        task: TerminalBenchTask,
+        provider_url: str,
+        model_name: str,
+        max_turns: int,
+    ) -> tuple[AgentTrajectory, str]:
+        """Run the LLM agent.
+
+        Args:
+            sandbox_manager: The sandbox manager.
+            task: The task to run.
+            provider_url: Provider URL.
+            model_name: Model name.
+            max_turns: Maximum turns.
+
+        Returns:
+            Tuple of (trajectory, completion_reason).
+        """
+        from olmo_eval.harness.backends.openai_agents import OpenAIAgentsBackend
+        from olmo_eval.harness.config import HarnessConfig
+        from olmo_eval.harness.tools import get_tools
+        from olmo_eval.inference.providers import VLLMServerProvider
+
+        # Get the tools
+        tools = get_tools(("execute_bash_session", "submit"))
+
+        # Create harness config
+        harness_config = HarnessConfig(
+            name=f"terminal_bench_{task.task_id}",
+            tools=tools,
+            system_prompt=SYSTEM_PROMPT,
+            max_turns=max_turns,
+        )
+
+        # Create provider - use VLLMServerProvider in remote mode
+        provider = VLLMServerProvider(
+            model_name=model_name,
+            base_url=provider_url,
+        )
+
+        # Create backend with our sandbox manager
+        backend = OpenAIAgentsBackend()
+        backend._sandbox_manager = sandbox_manager
+
+        # Create request
+        request = LMRequest(
+            request_type=RequestType.CHAT,
+            messages=({"role": "user", "content": task.instruction},),
+        )
+
+        # Run agent
+        harness_result = await backend.run(
+            provider,
+            harness_config,
+            request,
+            trace_metadata={"task_id": task.task_id},
+        )
+
+        completion_reason = "max_turns" if harness_result.max_turns_reached else "complete"
+        trajectory = harness_result.trajectory or AgentTrajectory(turns=())
+        return trajectory, completion_reason
+
+    def _build_predictions(self, task_results: list[TaskResult]) -> list[dict[str, Any]]:
+        """Build predictions list from task results."""
+        predictions = []
+        for r in task_results:
+            predictions.append(
+                {
+                    "native_id": r.task_id,
+                    "instance_metrics": {
+                        "reward": {"external": r.reward},
+                        "agent_duration": {"external": r.agent_duration},
+                    },
+                    "completion_reason": r.completion_reason,
+                    "verification_exit_code": r.verification_exit_code,
+                    "difficulty": r.difficulty,
+                    "category": r.category,
+                    "error": r.error,
+                }
+            )
+        return predictions
+
+    def _save_task_results(self, task_results: list[TaskResult], output_dir: str) -> None:
+        """Save detailed task results to a file."""
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        results_file = output_path / "terminal_bench_tasks.json"
+        data = []
+        for r in task_results:
+            output = r.verification_output[:10000] if r.verification_output else ""
+            data.append(
+                {
+                    "task_id": r.task_id,
+                    "reward": r.reward,
+                    "completion_reason": r.completion_reason,
+                    "agent_duration": r.agent_duration,
+                    "verification_exit_code": r.verification_exit_code,
+                    "verification_output": output,
+                    "difficulty": r.difficulty,
+                    "category": r.category,
+                    "error": r.error,
+                }
+            )
+
+        with open(results_file, "w") as f:
+            json.dump(data, f, indent=2)
+
+        logger.info(f"Task results saved to {results_file}")
