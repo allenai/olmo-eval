@@ -20,11 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class ExternalEval(ABC):
-    """Abstract base class for external evaluations.
-
-    Subclass this directly for evals with per-task containers (e.g., Terminal-Bench).
-    Subclass SandboxedExternalEval for single-container evals (e.g., tau2-bench).
-    """
+    """Abstract base class for external evaluations."""
 
     @property
     @abstractmethod
