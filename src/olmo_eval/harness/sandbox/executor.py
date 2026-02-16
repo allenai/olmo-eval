@@ -83,6 +83,7 @@ class SandboxExecutor:
         self.name = name
         self._deployment: Any = None
         self._runtime: Any = None
+        self._session_created: bool = False
 
     def _log(self, level: int, msg: str) -> None:
         """Log a message with optional name prefix."""
@@ -258,6 +259,16 @@ class SandboxExecutor:
 
     async def stop(self) -> None:
         """Stop the sandbox deployment and clean up resources."""
+        # Close session before stopping deployment
+        if self._session_created and self._runtime is not None:
+            try:
+                from swerex.runtime.abstract import CloseBashSessionRequest
+
+                await self._runtime.close_session(CloseBashSessionRequest(session="default"))
+            except Exception as e:
+                self._log(logging.DEBUG, f"Failed to close session: {e}")
+            self._session_created = False
+
         if self._deployment is not None:
             try:
                 await self._deployment.stop()
@@ -571,6 +582,72 @@ class SandboxExecutor:
                 output="",
                 error=str(e),
             )
+
+    async def _ensure_session(self) -> None:
+        """Create the session if it doesn't exist."""
+        if self._session_created:
+            return
+        from swerex.runtime.abstract import CreateBashSessionRequest
+
+        await self._runtime.create_session(CreateBashSessionRequest(session="default"))
+        self._session_created = True
+
+    async def execute_in_session(
+        self,
+        command: str,
+        timeout: float | None = None,
+        stream: bool = False,
+        log_prefix: str | None = None,
+    ) -> ExecutionResult:
+        """Execute a command in the persistent bash session.
+
+        Shell state (cd, export, aliases) persists between calls.
+        Session is auto-created on first use.
+
+        Args:
+            command: The bash command to execute.
+            timeout: Optional timeout override in seconds.
+            stream: If True, stream output to logs as the command runs.
+            log_prefix: Prefix for streamed log lines (defaults to self.name).
+
+        Returns:
+            ExecutionResult with success status, output, and exit code.
+
+        Raises:
+            RuntimeError: If the sandbox is not started.
+        """
+        if self._runtime is None:
+            raise RuntimeError("Sandbox not started.")
+
+        await self._ensure_session()
+
+        from swerex.runtime.abstract import BashAction
+
+        effective_timeout = timeout if timeout is not None else self.config.command_timeout
+        prefix = log_prefix or self.name or "sandbox"
+
+        observation = await self._runtime.run_in_session(
+            BashAction(
+                command=command,
+                session="default",
+                timeout=effective_timeout,
+                check="silent",
+            )
+        )
+
+        output = observation.output or ""
+
+        if stream and output:
+            for line in output.rstrip("\n").split("\n"):
+                if line:
+                    logger.info(f"[{prefix}] {line}")
+
+        return ExecutionResult(
+            success=observation.exit_code == 0,
+            output=output,
+            exit_code=observation.exit_code or 0,
+            error=observation.failure_reason or None,
+        )
 
     @property
     def is_running(self) -> bool:

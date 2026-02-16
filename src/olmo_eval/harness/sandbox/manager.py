@@ -193,6 +193,29 @@ class SandboxManager:
         executor = self.get_executor(frozenset())
         return await executor.execute_code(code, language, timeout)
 
+    async def execute_in_session_with_capabilities(
+        self,
+        command: str,
+        required_capabilities: frozenset[str],
+        timeout: float | None = None,
+    ) -> str:
+        """Execute in session on a sandbox with required capabilities.
+
+        Args:
+            command: The command to execute.
+            required_capabilities: Capabilities needed for execution.
+            timeout: Optional timeout override in seconds.
+
+        Returns:
+            The command output.
+        """
+        executor = self.get_executor(required_capabilities)
+        result = await executor.execute_in_session(command, timeout)
+        output = result.output
+        if result.exit_code != 0:
+            output += f"\n[Exit code: {result.exit_code}]"
+        return output
+
     @property
     def is_running(self) -> bool:
         """Check if any executors are running."""

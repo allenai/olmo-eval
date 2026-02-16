@@ -37,3 +37,32 @@ async def execute_bash(command: str) -> str:
     raise NotImplementedError(
         "execute_bash requires sandbox execution. Ensure sandbox is enabled in HarnessConfig."
     )
+
+
+@registered_tool(
+    name="execute_bash_session",
+    description="Execute a bash command in a persistent shell session. "
+    "Working directory changes, exported variables, and aliases persist between calls.",
+    sandbox=Capability.BASH,
+    session=True,
+)
+async def execute_bash_session(command: str) -> str:
+    """Execute a bash command in a persistent shell session.
+
+    Unlike execute_bash, this tool maintains shell state between calls:
+    - Working directory changes persist (cd /tmp stays in /tmp)
+    - Exported variables persist (export FOO=bar available in later calls)
+    - Aliases and shell functions persist
+
+    Use this when you need to build up shell state across multiple commands.
+
+    Args:
+        command: The bash command to execute.
+
+    Returns:
+        The command output (stdout + stderr combined).
+    """
+    raise NotImplementedError(
+        "execute_bash_session requires sandbox execution. "
+        "Ensure sandbox is enabled in HarnessConfig."
+    )

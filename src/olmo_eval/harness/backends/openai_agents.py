@@ -118,9 +118,16 @@ class OpenAIAgentsBackend(Backend):
         """
         required_caps = tool.sandbox
 
-        async def sandboxed_execute(command: str) -> str:
-            """Execute command in sandbox."""
-            return await manager.execute_with_capabilities(command, required_caps)
+        if tool.session:
+
+            async def sandboxed_execute(command: str) -> str:
+                """Execute command in sandbox session."""
+                return await manager.execute_in_session_with_capabilities(command, required_caps)
+        else:
+
+            async def sandboxed_execute(command: str) -> str:
+                """Execute command in sandbox."""
+                return await manager.execute_with_capabilities(command, required_caps)
 
         return sandboxed_execute
 

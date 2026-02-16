@@ -129,6 +129,7 @@ class Tool:
     parameters: dict[str, Any] = field(default_factory=dict)
     strict: bool = False
     sandbox: frozenset[str] = field(default_factory=frozenset)
+    session: bool = False
 
     @property
     def schema(self) -> ToolSchema:
@@ -168,6 +169,7 @@ class Tool:
         description: str | None = None,
         strict: bool = False,
         sandbox: set[str] | frozenset[str] | None = None,
+        session: bool = False,
     ) -> Tool:
         """Create a Tool from a function, deriving schema from type hints.
 
@@ -177,6 +179,7 @@ class Tool:
             description: Optional description override (defaults to docstring).
             strict: Whether to use OpenAI strict mode.
             sandbox: Required sandbox capabilities for execution.
+            session: Whether tool requires persistent shell session.
 
         Returns:
             A new Tool instance.
@@ -205,6 +208,7 @@ class Tool:
             execute=fn,
             strict=strict,
             sandbox=frozenset(sandbox or ()),
+            session=session,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -222,6 +226,7 @@ class Tool:
             "parameters": self.parameters,
             "strict": self.strict,
             "sandbox": sorted(self.sandbox),
+            "session": self.session,
         }
 
 
@@ -230,6 +235,7 @@ def tool(
     description: str | None = None,
     strict: bool = False,
     sandbox: set[str] | None = None,
+    session: bool = False,
 ) -> Callable[[F], Tool]:
     """Decorator to create a Tool from a function.
 
@@ -247,6 +253,7 @@ def tool(
         description: Optional description override.
         strict: Whether to use OpenAI strict mode.
         sandbox: Required sandbox capabilities for execution.
+        session: Whether tool requires persistent shell session.
 
     Returns:
         Decorator function that converts a function to a Tool.
@@ -259,6 +266,7 @@ def tool(
             description=description,
             strict=strict,
             sandbox=sandbox,
+            session=session,
         )
 
     # Handle @tool without parentheses
