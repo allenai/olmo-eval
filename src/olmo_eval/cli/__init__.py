@@ -17,6 +17,7 @@ import olmo_eval.evals.tasks  # noqa: F401 - triggers task registration
 from olmo_eval.cli.beaker import beaker
 from olmo_eval.cli.results import results
 from olmo_eval.cli.run import run
+from olmo_eval.cli.run_external import run_external
 from olmo_eval.cli.task import task
 from olmo_eval.cli.utils import console
 from olmo_eval.common.constants import get_model_presets
@@ -37,6 +38,7 @@ main.add_command(run)
 main.add_command(beaker)
 main.add_command(results)
 main.add_command(task)
+main.add_command(run_external)
 
 
 @main.command()
@@ -188,6 +190,82 @@ def suites(filter: str) -> None:
             table.add_row(name, f"{task_count} tasks", suite.aggregation.value)
 
     console.print(table)
+
+
+@main.command(name="external-evals")
+@click.option("--filter", "-f", default="", help="Filter by name substring")
+def external_evals(filter: str) -> None:
+    """List available external evaluations with usage information."""
+    from rich.panel import Panel
+
+    from olmo_eval.evals.external import get_external_eval, list_external_evals
+
+    eval_names = list_external_evals()
+    if not eval_names:
+        console.print("[dim]No external evaluations registered.[/dim]")
+        return
+
+    for name in eval_names:
+        if filter.lower() not in name.lower():
+            continue
+
+        eval_instance = get_external_eval(name)
+
+        # Build details table
+        details = Table(show_header=False, box=None, padding=(0, 1))
+        details.add_column("Field", style="dim", width=16)
+        details.add_column("Value", overflow="fold")
+
+        # Description
+        details.add_row("Description", eval_instance.description)
+
+        # Sandbox
+        details.add_row("Image", f"[blue]{eval_instance.sandbox_image}[/blue]")
+        details.add_row("Working Dir", eval_instance.working_dir)
+
+        # Timeout
+        timeout = eval_instance.timeout_seconds
+        timeout_str = f"{timeout / 3600:.1f}h" if timeout >= 3600 else f"{timeout:.0f}s"
+        details.add_row("Timeout", f"[yellow]{timeout_str}[/yellow]")
+
+        # Arguments
+        if eval_instance.arguments:
+            args_lines = []
+            for arg_name, (desc, default) in eval_instance.arguments.items():
+                if default is not None:
+                    args_lines.append(
+                        f"[green]{arg_name}[/green]: {desc} [dim](default: {default})[/dim]"
+                    )
+                else:
+                    args_lines.append(f"[green]{arg_name}[/green]: {desc} [dim](optional)[/dim]")
+            details.add_row("Arguments", "\n".join(args_lines))
+
+        # Required secrets
+        if eval_instance.required_secrets:
+            secrets_str = ", ".join(eval_instance.required_secrets)
+            details.add_row("Required Secrets", f"[red]{secrets_str}[/red]")
+
+        # Setup commands - number each command
+        setup_lines = "\n".join(
+            f"[dim]{i}.[/dim] {cmd}" for i, cmd in enumerate(eval_instance.setup_command, 1)
+        )
+        details.add_row("Setup", setup_lines)
+
+        # Run command - format with line breaks for readability
+        run_cmd = eval_instance.run_command
+        # Break long commands at argument boundaries
+        run_cmd = run_cmd.replace(" --", " \\\n    --")
+        details.add_row("Run", run_cmd)
+
+        console.print(
+            Panel(
+                details,
+                title=f"[bold cyan]{name}[/bold cyan]",
+                title_align="left",
+                border_style="cyan",
+            )
+        )
+        console.print()
 
 
 @main.command(name="suite-info")

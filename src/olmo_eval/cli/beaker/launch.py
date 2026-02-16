@@ -20,12 +20,15 @@ from rich.pretty import Pretty
 from rich.table import Table
 
 from olmo_eval.cli.utils import (
+    ConfiguredExternalEval,
     ExperimentSummary,
+    ExternalEvalSummary,
     HarnessSummary,
     OrderedMultiOption,
     RunnerConfig,
     console,
     extract_priority_from_overrides,
+    parse_key_value_args,
     process_ordered_args,
     reconstruct_ordered_args,
 )
@@ -189,6 +192,27 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     help="Harness preset name",
 )
 @click.option(
+    "--external-eval",
+    "-E",
+    "external_evals",
+    multiple=True,
+    help="External evaluation name(s) to run instead of tasks (can specify multiple)",
+)
+@click.option(
+    "--eval-arg",
+    "-A",
+    "eval_args",
+    multiple=True,
+    help="Arguments for external evals (key=value or JSON dict, e.g., -A domain=retail)",
+)
+@click.option(
+    "--provider-kwarg",
+    "-K",
+    "provider_kwargs",
+    multiple=True,
+    help="Provider kwargs for external evals (key=value, e.g., -K enable_chunked_prefill=true)",
+)
+@click.option(
     "--uv-cache-dir",
     default=BEAKER_UV_CACHE_DIR,
     show_default=True,
@@ -236,6 +260,9 @@ def launch(
     inspect_response: bool,
     inspect_request: bool,
     harness: str | None,
+    external_evals: tuple[str, ...],
+    eval_args: tuple[str, ...],
+    provider_kwargs: tuple[str, ...],
     uv_cache_dir: str,
     secret_env: tuple[str, ...],
 ) -> None:
@@ -243,8 +270,6 @@ def launch(
 
     Requires beaker-gantry to be installed: pip install 'olmo-eval-internal[beaker]'
     """
-    from datetime import datetime
-
     try:
         from olmo_eval.launch import BeakerLauncher, EvalConfig
     except ImportError:
@@ -330,6 +355,58 @@ def launch(
         "secret_env_overrides": secret_env_overrides,
     }
 
+    # Handle external evaluations mode
+    if external_evals:
+        if task:
+            console.print(
+                "[red]Error:[/red] Cannot mix --external-eval (-E) with --task (-t). "
+                "This will be supported in a future release. "
+                "For now, use separate commands for external evals and tasks."
+            )
+            raise SystemExit(1)
+
+        # Parse eval_args and provider_kwargs with type coercion
+        try:
+            parsed_eval_args = parse_key_value_args(eval_args, coerce_types=True)
+        except ValueError as e:
+            console.print(f"[red]Error:[/red] Invalid eval arg: {e}")
+            raise SystemExit(1) from None
+
+        try:
+            parsed_provider_kwargs = parse_key_value_args(provider_kwargs, coerce_types=True)
+        except ValueError as e:
+            console.print(f"[red]Error:[/red] Invalid provider kwarg: {e}")
+            raise SystemExit(1) from None
+
+        _launch_external_evals(
+            external_evals=list(external_evals),
+            model=model,
+            name=name,
+            cluster=cluster,
+            priority=priority,
+            timeout=timeout,
+            workspace=workspace,
+            budget=budget,
+            image=image,
+            group=group,
+            dry_run=dry_run,
+            yes=yes,
+            follow=follow,
+            aws_credentials=aws_credentials,
+            gcs_credentials=gcs_credentials,
+            s3_bucket=s3_bucket,
+            s3_prefix=s3_prefix,
+            s3_region=s3_region,
+            store=store,
+            secret_env_overrides=secret_env_overrides,
+            eval_args=parsed_eval_args if parsed_eval_args else None,
+            provider_kwargs=parsed_provider_kwargs if parsed_provider_kwargs else None,
+            uv_cache_dir=uv_cache_dir,
+            preemptible=preemptible,
+            retries=retries,
+        )
+        return
+
     # Load configuration
     config_loader = LaunchConfigLoader(config, cli_args)
     launch_config = config_loader.load()
@@ -371,9 +448,7 @@ def launch(
         console.print("[yellow]Dry run mode - not submitting[/yellow]")
 
     # Auto-generate group if needed
-    effective_groups = list(launch_config.groups)
-    if not effective_groups:
-        effective_groups = [f"{launch_config.name}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"]
+    effective_groups = _auto_generate_group(launch_config.name, list(launch_config.groups))
 
     # Display storage info
     cred_manager.display_storage_info(
@@ -518,13 +593,7 @@ def launch(
         console.print("[yellow]Launch cancelled[/yellow]")
         raise SystemExit(0)
 
-    launched_experiments: list[str] = []
-    for job_config in job_configs:
-        if not dry_run:
-            experiment = launcher.launch(job_config)
-            if experiment:
-                console.print(f"[green]Launched:[/green] {launcher.experiment_url(experiment)}")
-                launched_experiments.append(experiment.id)
+    launched_experiments = _launch_jobs(launcher, job_configs, dry_run)
 
     # Follow launched experiments
     if launched_experiments and not dry_run:
@@ -641,6 +710,7 @@ def _ensure_secrets(
         ensure_task_secrets,
         get_local_hf_token,
         get_local_wandb_api_key,
+        get_store_secret_mappings,
     )
 
     beaker_username = launcher.beaker.user_name
@@ -662,10 +732,7 @@ def _ensure_secrets(
             console.print(f"[red]Error:[/red] {e}")
             raise SystemExit(1) from None
 
-    store_secrets = []
-    if launch_config.store:
-        for env_var in ["PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD"]:
-            store_secrets.append((env_var, f"olmo_eval_{env_var}"))
+    store_secrets = get_store_secret_mappings() if launch_config.store else []
 
     return common_secrets, store_secrets, task_secrets
 
@@ -762,6 +829,99 @@ def _handle_follow(launcher, launched_experiments: list[str], follow: bool) -> N
                 console.print(f"  - {url}")
 
 
+def _auto_generate_group(prefix: str, existing_groups: list[str]) -> list[str]:
+    """Auto-generate a group name if none provided.
+
+    Args:
+        prefix: Prefix for the auto-generated group name.
+        existing_groups: List of existing group names.
+
+    Returns:
+        List of group names (original if non-empty, or auto-generated).
+    """
+    from datetime import datetime
+
+    if existing_groups:
+        return existing_groups
+    return [f"{prefix}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"]
+
+
+def _prepare_secrets(
+    dry_run: bool,
+    workspace: str,
+    all_required_secrets: set[str],
+    beaker_username: str,
+    store: bool = False,
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]], list[tuple[str, str]]]:
+    """Prepare common, task, and store secrets for Beaker jobs.
+
+    Args:
+        dry_run: If True, return mock secrets without creating them.
+        workspace: Beaker workspace name.
+        all_required_secrets: Set of required secret environment variable names.
+        beaker_username: Beaker username for dry-run secret naming.
+        store: If True, include database secret mappings.
+
+    Returns:
+        Tuple of (common_secrets, task_secrets, store_secrets) as lists of
+        (env_var, secret_name) tuples.
+    """
+    from olmo_eval.launch.beaker.secrets import (
+        ensure_common_secrets,
+        ensure_task_secrets,
+        get_local_hf_token,
+        get_local_wandb_api_key,
+        get_store_secret_mappings,
+    )
+
+    if dry_run:
+        common_secrets: list[tuple[str, str]] = []
+        if get_local_hf_token():
+            common_secrets.append(("HF_TOKEN", f"{beaker_username}_HF_TOKEN"))
+        if get_local_wandb_api_key():
+            common_secrets.append(("WANDB_API_KEY", f"{beaker_username}_WANDB_API_KEY"))
+        task_secrets = [(s, f"{beaker_username}_{s}") for s in sorted(all_required_secrets)]
+    else:
+        common_secrets = ensure_common_secrets(workspace=workspace)
+        try:
+            task_secrets = ensure_task_secrets(
+                workspace=workspace,
+                required_secrets=all_required_secrets,
+            )
+        except ValueError as e:
+            console.print(f"[red]Error:[/red] {e}")
+            raise SystemExit(1) from None
+
+    store_secrets = get_store_secret_mappings() if store else []
+
+    return common_secrets, task_secrets, store_secrets
+
+
+def _launch_jobs(
+    launcher,
+    job_configs: list,
+    dry_run: bool,
+) -> list[str]:
+    """Launch job configs and return experiment IDs.
+
+    Args:
+        launcher: BeakerLauncher instance.
+        job_configs: List of BeakerJobConfig to launch.
+        dry_run: If True, skip actual launch.
+
+    Returns:
+        List of launched experiment IDs.
+    """
+    launched_experiments: list[str] = []
+    for job_config in job_configs:
+        if not dry_run:
+            experiment = launcher.launch(job_config)
+            if experiment:
+                console.print(f"[green]Launched:[/green] {launcher.experiment_url(experiment)}")
+                launched_experiments.append(experiment.id)
+    return launched_experiments
+
+
 def _apply_harness_overrides(harness_config, overrides: list[str]):
     """Apply CLI overrides to harness config.
 
@@ -782,3 +942,238 @@ def _apply_harness_overrides(harness_config, overrides: list[str]):
     merged = OmegaConf.merge(base, override_config)
     harness_dict = OmegaConf.to_container(merged, resolve=True)
     return HarnessConfig.from_dict(harness_dict)  # type: ignore[arg-type]
+
+
+def _launch_external_evals(
+    external_evals: list[str],
+    model: tuple[str, ...],
+    name: str | None,
+    cluster: str | None,
+    priority: str | None,
+    timeout: str | None,
+    workspace: str | None,
+    budget: str | None,
+    image: str | None,
+    group: tuple[str, ...],
+    dry_run: bool,
+    yes: bool,
+    follow: bool,
+    aws_credentials: bool | None,
+    gcs_credentials: bool | None,
+    s3_bucket: str | None,
+    s3_prefix: str | None,
+    s3_region: str,
+    store: bool = False,
+    secret_env_overrides: dict[str, str] | None = None,
+    eval_args: dict[str, str] | None = None,
+    provider_kwargs: dict[str, str] | None = None,
+    uv_cache_dir: str | None = None,
+    preemptible: bool | None = None,
+    retries: int | None = None,
+) -> None:
+    """Launch external evaluation jobs on Beaker.
+
+    This path mirrors the task-based launch flow but for external evaluations
+    that run in sandbox containers with subcontainer support.
+    """
+    from olmo_eval.cli.beaker.credentials import CredentialManager
+    from olmo_eval.cli.beaker.job_assembler import assemble_external_eval_job
+    from olmo_eval.common.configs import get_provider_config
+    from olmo_eval.common.constants.infrastructure import (
+        BEAKER_DEFAULT_WORKSPACE,
+        BEAKER_SANDBOX_IMAGE,
+    )
+    from olmo_eval.evals.external import get_external_eval, is_external_eval_registered
+    from olmo_eval.launch import BeakerLauncher, get_model_short_name
+
+    secret_env_overrides = secret_env_overrides or {}
+
+    # Validate external evals exist
+    for eval_name in external_evals:
+        if not is_external_eval_registered(eval_name):
+            from olmo_eval.evals.external import list_external_evals
+
+            available = list_external_evals()
+            console.print(
+                f"[red]Error:[/red] External eval '{eval_name}' not found. "
+                f"Available: {', '.join(available) or '(none)'}"
+            )
+            raise SystemExit(1)
+
+    # Validate model is provided
+    if not model:
+        console.print("[red]Error:[/red] --model is required for external evaluations")
+        raise SystemExit(1)
+
+    # Validate cluster is provided
+    if not cluster:
+        console.print(
+            "[red]Error:[/red] --cluster is required for external evaluations. "
+            "Use -c h100, -c a100, or a full cluster name."
+        )
+        raise SystemExit(1)
+
+    # Use defaults if not provided
+    effective_workspace = workspace or BEAKER_DEFAULT_WORKSPACE
+    effective_priority = priority or "normal"
+    effective_timeout = timeout or "24h"
+    effective_image = image or BEAKER_SANDBOX_IMAGE
+    effective_preemptible = preemptible if preemptible is not None else True
+
+    # Create launcher
+    launcher = BeakerLauncher(workspace=effective_workspace)
+    beaker_username = launcher.beaker.user_name
+
+    # Use CredentialManager for consistent credential detection (same as task path)
+    cred_manager = CredentialManager(
+        model_specs=list(model),
+        store=store,
+        aws_credentials=aws_credentials,
+        gcs_credentials=gcs_credentials,
+    )
+    inject_aws, inject_gcs = cred_manager.detect_and_setup(launcher)
+
+    # Auto-generate group if needed (using shared helper)
+    effective_groups = _auto_generate_group("external-eval", list(group))
+
+    # Handle group creation
+    _handle_group_creation(launcher, effective_groups, dry_run, yes)
+
+    # Display storage info (same as task path)
+    cred_manager.display_storage_info(
+        launcher,
+        s3_bucket,
+        s3_prefix,
+        s3_region,
+        None,  # s3_endpoint_url not supported yet
+        effective_groups,
+        inject_aws,
+    )
+
+    # Collect required secrets from external evals and models
+    all_required_secrets: set[str] = set()
+    for eval_name in external_evals:
+        eval_instance = get_external_eval(eval_name)
+        if eval_instance.required_secrets:
+            all_required_secrets.update(eval_instance.required_secrets)
+
+    for model_spec in model:
+        try:
+            provider_config = get_provider_config(model_spec)
+            if provider_config.required_secrets:
+                all_required_secrets.update(provider_config.required_secrets)
+        except Exception:
+            pass
+
+    # Prepare secrets (using shared helper)
+    common_secrets, task_secrets, store_secrets = _prepare_secrets(
+        dry_run=dry_run,
+        workspace=effective_workspace,
+        all_required_secrets=all_required_secrets,
+        beaker_username=beaker_username,
+        store=store,
+    )
+
+    # Build env secrets list
+    env_secrets = common_secrets + task_secrets + store_secrets
+
+    # Add explicit secret overrides
+    env_secrets.extend(
+        (env_var, beaker_secret) for beaker_secret, env_var in secret_env_overrides.items()
+    )
+
+    if dry_run:
+        console.print("[yellow]Dry run mode - not submitting[/yellow]")
+
+    # Build jobs for each model
+    job_configs = []
+    for model_spec in model:
+        # Get provider config to determine GPU requirements
+        try:
+            provider_config = get_provider_config(model_spec)
+            num_gpus = provider_config.kwargs.get("tensor_parallel_size", 1)
+            model_alias = provider_config.alias
+        except Exception:
+            num_gpus = 1
+            model_alias = None
+
+        # Generate experiment name using shared utility
+        short_name = get_model_short_name(model_spec, model_alias)
+        exp_name = name or f"external-{short_name}-{'-'.join(external_evals)}"
+
+        job_config = assemble_external_eval_job(
+            name=exp_name,
+            model=model_spec,
+            external_evals=external_evals,
+            cluster=cluster,
+            num_gpus=num_gpus,
+            workspace=effective_workspace,
+            beaker_image=effective_image,
+            priority=effective_priority,
+            timeout=effective_timeout,
+            budget=budget,
+            groups=effective_groups,
+            tensor_parallel_size=num_gpus,
+            s3_bucket=s3_bucket,
+            s3_prefix=s3_prefix,
+            s3_region=s3_region,
+            store=store,
+            env_secrets=env_secrets,
+            inject_aws_credentials=inject_aws,
+            inject_gcs_credentials=inject_gcs,
+            eval_args=eval_args,
+            provider_kwargs=provider_kwargs,
+            uv_cache_dir=uv_cache_dir,
+            beaker_username=beaker_username,
+            preemptible=effective_preemptible,
+            retries=retries,
+        )
+        job_configs.append(job_config)
+
+    # Build summaries
+    summaries = []
+    for i, job in enumerate(job_configs):
+        model_spec = model[i] if i < len(model) else "unknown"
+        try:
+            provider_config = get_provider_config(model_spec)
+        except Exception:
+            from olmo_eval.inference.providers.config import ProviderConfig
+
+            provider_config = ProviderConfig(kind="vllm_server", model=model_spec)
+
+        configured_evals = [
+            ConfiguredExternalEval.from_eval(get_external_eval(e), provider_config, eval_args)
+            for e in external_evals
+        ]
+        summary = ExternalEvalSummary(
+            name=job.name,
+            evals=configured_evals,
+            beaker=job,
+        )
+        summaries.append(summary)
+
+    # Print summaries
+    console.print()
+    console.print(f"[bold]Launching {len(job_configs)} external evaluation job(s)[/bold]")
+    console.print()
+
+    for summary in summaries:
+        console.print(
+            Panel(
+                Pretty(summary, expand_all=True),
+                title=f"[bold]{summary.name}[/bold]",
+                border_style="cyan",
+            )
+        )
+        console.print()
+
+    # Confirm and launch (using shared helper)
+    if not dry_run and not yes and not click.confirm("Proceed with launch?", default=True):
+        console.print("[yellow]Launch cancelled[/yellow]")
+        raise SystemExit(0)
+
+    launched_experiments = _launch_jobs(launcher, job_configs, dry_run)
+
+    # Follow launched experiments
+    if launched_experiments and not dry_run:
+        _handle_follow(launcher, launched_experiments, follow)

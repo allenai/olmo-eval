@@ -1,5 +1,6 @@
 """Shared utilities for the CLI."""
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -8,8 +9,10 @@ import click
 from rich.console import Console
 
 if TYPE_CHECKING:
+    from olmo_eval.evals.external.base import ExternalEval
     from olmo_eval.evals.tasks.common.base import TaskConfig
     from olmo_eval.harness import HarnessConfig
+    from olmo_eval.inference.providers.config import ProviderConfig
     from olmo_eval.launch.beaker.launcher import BeakerJobConfig
 
 
@@ -170,6 +173,74 @@ def format_timestamp(ts: datetime | None) -> str:
     return ts.strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _coerce_value(value: str) -> Any:
+    """Coerce a string value to its appropriate Python type.
+
+    Handles booleans, integers, floats, JSON objects/arrays, and plain strings.
+    """
+    # Booleans
+    if value.lower() == "true":
+        return True
+    if value.lower() == "false":
+        return False
+
+    # JSON objects and arrays
+    if value.startswith("{") or value.startswith("["):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value
+
+    # Integers (including negative)
+    if value.isdigit() or (value.startswith("-") and value[1:].isdigit()):
+        return int(value)
+
+    # Floats (including negative)
+    stripped = value.lstrip("-")
+    if stripped.replace(".", "", 1).isdigit() and stripped.count(".") == 1:
+        return float(value)
+
+    return value
+
+
+def parse_key_value_args(
+    args: tuple[str, ...] | list[str],
+    *,
+    coerce_types: bool = True,
+) -> dict[str, Any]:
+    """Parse key=value arguments and JSON dicts into a unified dictionary.
+
+    Args:
+        args: Sequence of strings, each either "key=value" or a JSON dict string.
+        coerce_types: If True, coerce string values to bools, ints, floats, or JSON.
+            If False, keep all values as strings (except JSON dict merges).
+
+    Returns:
+        Dictionary with parsed arguments.
+
+    Raises:
+        ValueError: If a JSON dict string is invalid.
+    """
+    result: dict[str, Any] = {}
+
+    for arg in args:
+        if arg.startswith("{"):
+            # JSON dict format - merge into result
+            try:
+                parsed = json.loads(arg)
+                if not isinstance(parsed, dict):
+                    raise ValueError(f"Expected JSON object, got {type(parsed).__name__}")
+                result.update(parsed)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON: {e}") from e
+        elif "=" in arg:
+            key, value = arg.split("=", 1)
+            result[key] = _coerce_value(value) if coerce_types else value
+        # Silently ignore invalid args (no "=" and not JSON)
+
+    return result
+
+
 @dataclass
 class RunnerConfig:
     """Runner configuration for display."""
@@ -195,6 +266,65 @@ class ExperimentSummary:
     tasks: list["TaskConfig"]
     harness: HarnessSummary
     runner: RunnerConfig
+    beaker: "BeakerJobConfig"
+
+
+@dataclass
+class ConfiguredExternalEval:
+    """An external eval configured with provider and arguments."""
+
+    name: str
+    provider: "ProviderConfig"
+    args: dict[str, Any]
+    sandbox_image: str
+    working_dir: str
+    timeout: str
+    required_secrets: tuple[str, ...]
+    setup_commands: tuple[str, ...]
+    run_command: str
+
+    @classmethod
+    def from_eval(
+        cls,
+        eval_instance: "ExternalEval",
+        provider: "ProviderConfig",
+        args: dict[str, Any] | None = None,
+    ) -> "ConfiguredExternalEval":
+        """Create from an ExternalEval instance."""
+        # Merge defaults with provided args
+        merged_args: dict[str, Any] = {}
+        for arg_name, (_, default) in eval_instance.arguments.items():
+            if default is not None:
+                merged_args[arg_name] = default
+        if args:
+            merged_args.update(args)
+
+        # Format timeout
+        timeout_secs = eval_instance.timeout_seconds
+        if timeout_secs >= 3600:
+            timeout_str = f"{timeout_secs / 3600:.1f}h"
+        else:
+            timeout_str = f"{timeout_secs:.0f}s"
+
+        return cls(
+            name=eval_instance.name,
+            provider=provider,
+            args=merged_args,
+            sandbox_image=eval_instance.sandbox_image,
+            working_dir=eval_instance.working_dir,
+            timeout=timeout_str,
+            required_secrets=eval_instance.required_secrets,
+            setup_commands=eval_instance.setup_command,
+            run_command=eval_instance.run_command,
+        )
+
+
+@dataclass
+class ExternalEvalSummary:
+    """Per-experiment summary for external eval beaker launch display."""
+
+    name: str
+    evals: list[ConfiguredExternalEval]
     beaker: "BeakerJobConfig"
 
 

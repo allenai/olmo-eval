@@ -138,13 +138,6 @@ def vllm_provider(vllm_service, vllm_model):
     yield provider
 
 
-# Backwards compatibility alias for existing tests
-@pytest.fixture(scope="session")
-def vllm_backend(vllm_provider):
-    """Backwards compatibility alias for vllm_provider fixture."""
-    return vllm_provider
-
-
 @pytest.fixture
 def small_test_prompts() -> list[str]:
     """Provide a small set of test prompts."""

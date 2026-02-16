@@ -90,12 +90,17 @@ def _wait_for_server(
         if process is not None:
             exit_code = process.poll()
             if exit_code is not None:
-                # Process exited - read its output
+                # Process exited - use communicate() to get all output
                 output = None
-                if process.stdout:
-                    with suppress(Exception):
-                        output = process.stdout.read().decode("utf-8", errors="replace")
+                try:
+                    stdout, _ = process.communicate(timeout=5)
+                    if stdout:
+                        output = stdout.decode("utf-8", errors="replace")
+                except Exception as e:
+                    logger.warning(f"Failed to read process output: {e}")
                 logger.error(f"vLLM server process exited with code {exit_code}")
+                if output:
+                    logger.error(f"vLLM server output:\n{output}")
                 return False, RuntimeError(f"Process exited with code {exit_code}"), output
 
         try:
@@ -235,6 +240,9 @@ def _build_server_command(
             if isinstance(value, bool):
                 if value:
                     cmd.append(arg_name)
+            elif isinstance(value, (dict, list)):
+                # JSON-encode complex values
+                cmd.extend([arg_name, json.dumps(value)])
             else:
                 cmd.extend([arg_name, str(value)])
 
@@ -300,12 +308,19 @@ class VLLMServerProcess:
             **self.server_kwargs,
         )
 
-        logger.info(f"Starting vLLM server: {' '.join(cmd)}")
+        import shlex
+
+        logger.info(f"Starting vLLM server: {shlex.join(cmd)}")
         if progress_callback:
             progress_callback(f"Starting vLLM server for {self.model_name}...")
 
         # Start the server process
         env = os.environ.copy()
+
+        # Allow extended max_model_len when user specifies it (e.g., with rope_scaling)
+        # This is needed when max_model_len > model's max_position_embeddings
+        if self.server_kwargs.get("max_model_len"):
+            env["VLLM_ALLOW_LONG_MAX_MODEL_LEN"] = "1"
 
         # Enable verbose vLLM logging when debugging
         if is_debug_provider():
@@ -322,7 +337,6 @@ class VLLMServerProcess:
             log_path = pathlib.Path(self.log_dir) / "vllm_server.log"
             log_path.parent.mkdir(parents=True, exist_ok=True)
             self._log_file = open(log_path, "w")  # noqa: SIM115
-            logger.info(f"vLLM server logs will be written to {log_path}")
             self._process = subprocess.Popen(
                 cmd,
                 stdout=self._log_file,
@@ -362,6 +376,21 @@ class VLLMServerProcess:
             if process_output is None and self._process and self._process.stdout:
                 with suppress(Exception):
                     process_output = self._process.stdout.read().decode("utf-8", errors="replace")
+
+            # If log_dir is set, output went to file - read it from there
+            if process_output is None and self.log_dir:
+                with suppress(Exception):
+                    # Flush and close the log file first
+                    if self._log_file is not None:
+                        self._log_file.flush()
+                        self._log_file.close()
+                        self._log_file = None
+                    # Read the log file contents
+                    import pathlib
+
+                    log_path = pathlib.Path(self.log_dir) / "vllm_server.log"
+                    if log_path.exists():
+                        process_output = log_path.read_text(errors="replace")
 
             # Log the captured output for debugging
             if process_output:

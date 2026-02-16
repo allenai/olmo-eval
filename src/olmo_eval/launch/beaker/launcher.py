@@ -417,6 +417,9 @@ class BeakerJobConfig:
     # Registry mirror setup script to run during install (for sandbox jobs)
     setup_registry_mirror: bool = False
 
+    # Run setup_store_secrets during install to configure database access
+    setup_store_secrets: bool = False
+
 
 def resolve_clusters(cluster: str | list[str]) -> list[str]:
     """Resolve cluster aliases to full cluster names.
@@ -551,6 +554,8 @@ class BeakerLauncher:
         provider_package: str | None = None,
         task_packages: list[str] | None = None,
         setup_registry_mirror: bool = False,
+        enable_sandbox: bool = False,
+        setup_store_secrets: bool = False,
     ) -> str:
         """Build installation command for gantry's install_cmd parameter.
 
@@ -565,6 +570,8 @@ class BeakerLauncher:
             provider_package: Optional custom provider package to install (overrides default).
             task_packages: Optional list of task-specific packages to install.
             setup_registry_mirror: If True, run setup_dockerio_mirror script with MIRROR_HOSTS.
+            enable_sandbox: If True, set up /dev/net/tun for pasta networking.
+            setup_store_secrets: If True, run setup_store_secrets to configure database access.
 
         Returns:
             Shell command string for installation.
@@ -572,6 +579,14 @@ class BeakerLauncher:
         # Build the install steps
         # Export UV_PROJECT_ENVIRONMENT so all uv commands use Docker's /opt/venv
         steps = ["export UV_PROJECT_ENVIRONMENT=/opt/venv"]
+
+        # Set up /dev/net/tun for pasta networking (sandbox jobs)
+        if enable_sandbox:
+            steps.append(
+                "mkdir -p /dev/net && "
+                "[ -e /dev/net/tun ] || mknod /dev/net/tun c 10 200 && "
+                "chmod 666 /dev/net/tun"
+            )
 
         # Set up registry mirror for Docker Hub if configured (for sandbox jobs)
         if setup_registry_mirror:
@@ -605,6 +620,11 @@ class BeakerLauncher:
                 install_spec = normalize_provider_package(pkg)
                 steps.append(f"uv pip install '{install_spec}' -c {constraints}")
 
+        # Set up database credentials for --store
+        if setup_store_secrets:
+            script = "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/setup_store_secrets"
+            steps.append(f"source {script}")
+
         return " && ".join(steps)
 
     def launch(self, config: BeakerJobConfig, dry_run: bool = False) -> BeakerExperiment | None:
@@ -633,6 +653,8 @@ class BeakerLauncher:
             config.provider_package,
             config.task_packages,
             config.setup_registry_mirror,
+            config.enable_sandbox,
+            config.setup_store_secrets,
         )
 
         # Build weka mounts as tuples: (bucket, mount_path)

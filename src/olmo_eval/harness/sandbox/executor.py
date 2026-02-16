@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import os
 import time
+import uuid
 from typing import Any
 
 from olmo_eval.common.execution.environment import ExecutionResult
@@ -89,6 +91,70 @@ class SandboxExecutor:
         else:
             logger.log(level, msg)
 
+    async def _get_container_diagnostics(self) -> str:
+        """Gather diagnostic info when sandbox becomes unresponsive."""
+        import subprocess
+
+        diag_lines = ["--- Container Diagnostics ---"]
+
+        # Check if deployment reports alive
+        if self._deployment is not None:
+            try:
+                is_alive = await self._deployment.is_alive()
+                diag_lines.append(f"Deployment is_alive: {is_alive}")
+            except Exception as e:
+                diag_lines.append(f"Deployment is_alive check failed: {e}")
+
+            # Get container name and fetch logs from host
+            container_name = getattr(self._deployment, "container_name", None)
+            if container_name:
+                diag_lines.append(f"Container name: {container_name}")
+
+                # Try to get container status and logs via subprocess
+                runtime = self.config.container_runtime or "docker"
+                try:
+                    # Get container state
+                    inspect_result = subprocess.run(
+                        [runtime, "inspect", "--format", "{{.State.Status}}", container_name],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
+                    if inspect_result.returncode == 0:
+                        diag_lines.append(f"Container status: {inspect_result.stdout.strip()}")
+                    else:
+                        err = inspect_result.stderr.strip()
+                        diag_lines.append(f"Container inspect failed: {err}")
+                except Exception as e:
+                    diag_lines.append(f"Container inspect error: {e}")
+
+                try:
+                    # Get last 50 lines of container logs
+                    logs_result = subprocess.run(
+                        [runtime, "logs", "--tail", "50", container_name],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
+                    if logs_result.returncode == 0:
+                        logs = logs_result.stdout.strip() or logs_result.stderr.strip()
+                        if logs:
+                            diag_lines.append(f"Container logs (last 50 lines):\n{logs}")
+                        else:
+                            diag_lines.append("Container logs: (empty)")
+                    else:
+                        diag_lines.append(f"Container logs failed: {logs_result.stderr.strip()}")
+                except Exception as e:
+                    diag_lines.append(f"Container logs error: {e}")
+            else:
+                diag_lines.append("Container name: not available")
+        else:
+            diag_lines.append("Deployment: None")
+
+        diag = "\n".join(diag_lines)
+        self._log(logging.ERROR, diag)
+        return diag
+
     async def __aenter__(self) -> SandboxExecutor:
         """Start the sandbox environment."""
         await self.start()
@@ -148,6 +214,10 @@ class SandboxExecutor:
                 docker_args = list(self.config.docker_args) if self.config.docker_args else []
                 if self.config.log_dir and self.name:
                     docker_args.extend(_get_log_docker_args(self.config.log_dir, self.name))
+
+                # Add environment variables as docker args
+                for key, value in self.config.environment:
+                    docker_args.extend(["-e", f"{key}={value}"])
 
                 return DockerDeployment(
                     image=self.config.image,
@@ -211,12 +281,43 @@ class SandboxExecutor:
         Raises:
             RuntimeError: If the sandbox is not started.
         """
+        result = await self.execute_command(command, timeout)
+        output = result.output
+        if result.exit_code != 0:
+            output += f"\n[Exit code: {result.exit_code}]"
+        return output
+
+    async def execute_command(
+        self,
+        command: str,
+        timeout: float | None = None,
+        stream: bool = False,
+        log_prefix: str | None = None,
+    ) -> ExecutionResult:
+        """Execute a command in the sandbox and return structured result.
+
+        Args:
+            command: The bash command to execute.
+            timeout: Optional timeout override in seconds.
+            stream: If True, stream output to logs as the command runs.
+            log_prefix: Prefix for streamed log lines (defaults to self.name).
+
+        Returns:
+            ExecutionResult with success status, output, and exit code.
+
+        Raises:
+            RuntimeError: If the sandbox is not started.
+        """
         if self._runtime is None:
             raise RuntimeError("Sandbox not started. Call start() first or use async context.")
 
         from swerex.runtime.abstract import Command
 
         effective_timeout = timeout if timeout is not None else self.config.command_timeout
+        prefix = log_prefix or self.name or "sandbox"
+
+        if stream:
+            return await self._execute_streaming(command, effective_timeout, prefix)
 
         response = await self._runtime.execute(
             Command(
@@ -225,16 +326,185 @@ class SandboxExecutor:
             )
         )
 
-        # Combine stdout and stderr, include exit code information
+        # Combine stdout and stderr
         output_parts = []
         if response.stdout:
             output_parts.append(response.stdout)
         if response.stderr:
             output_parts.append(response.stderr)
-        if response.exit_code != 0:
-            output_parts.append(f"\n[Exit code: {response.exit_code}]")
 
-        return "".join(output_parts) if output_parts else ""
+        return ExecutionResult(
+            success=response.exit_code == 0,
+            output="".join(output_parts) if output_parts else "",
+            exit_code=response.exit_code,
+        )
+
+    async def _execute_streaming(
+        self, command: str, timeout: float, prefix: str
+    ) -> ExecutionResult:
+        """Execute a command with streaming output to logs.
+
+        Uses background execution to avoid swerex HTTP timeout issues.
+        """
+        from swerex.runtime.abstract import Command
+
+        # Use unique temp paths to avoid conflicts with concurrent executions
+        cmd_id = uuid.uuid4().hex[:12]
+        output_file = f"/tmp/_sandbox_output_{cmd_id}.log"
+        exit_code_file = f"/tmp/_sandbox_exit_code_{cmd_id}"
+        script_file = f"/tmp/_sandbox_script_{cmd_id}.sh"
+        pid_file = f"/tmp/_sandbox_pid_{cmd_id}"
+
+        # Create script via base64 to avoid quoting issues
+        env_prefix = "PYTHONUNBUFFERED=1 NO_COLOR=1 TERM=dumb TTY_COMPATIBLE=0 TTY_INTERACTIVE=0"
+        script = f"#!/bin/bash\n{env_prefix} {command}\n"
+        encoded = base64.b64encode(script.encode()).decode()
+
+        # Setup: create script file
+        setup = (
+            f"rm -f {output_file} {exit_code_file} {pid_file} && "
+            f"echo '{encoded}' | base64 -d > {script_file} && "
+            f"chmod +x {script_file}"
+        )
+        try:
+            await self._runtime.execute(Command(command=["bash", "-c", setup], timeout=30.0))
+        except Exception as e:
+            return ExecutionResult(False, f"Failed to create script: {e}", -1)
+
+        # Start script in detached background process (setsid creates new session)
+        # Store the PID so we can kill the process group on timeout
+        start = (
+            f"setsid bash -c '{script_file} > {output_file} 2>&1; "
+            f"echo $? > {exit_code_file}' < /dev/null > /dev/null 2>&1 & "
+            f"echo $! > {pid_file}"
+        )
+        try:
+            await self._runtime.execute(Command(command=["bash", "-c", start], timeout=10.0))
+        except Exception as e:
+            return ExecutionResult(False, f"Failed to start command: {e}", -1)
+
+        # Poll for output and completion
+        last_pos = 0
+        start_time = time.time()
+        timed_out = False
+        consecutive_failures = 0
+        max_consecutive_failures = 3
+
+        async def kill_process_group() -> None:
+            """Kill the background process group."""
+            try:
+                # Read the PID and kill its process group (negative PID kills group)
+                kill_cmd = (
+                    f"pid=$(cat {pid_file} 2>/dev/null) && "
+                    f'[ -n "$pid" ] && kill -TERM -$pid 2>/dev/null; '
+                    f"sleep 0.5; "
+                    f'[ -n "$pid" ] && kill -KILL -$pid 2>/dev/null; '
+                    "true"
+                )
+                await self._runtime.execute(Command(command=["bash", "-c", kill_cmd], timeout=5.0))
+            except Exception as e:
+                self._log(logging.DEBUG, f"Process group kill (may be already exited): {e}")
+
+        async def cleanup_temp_files() -> None:
+            """Remove temporary files."""
+            try:
+                cleanup_cmd = f"rm -f {output_file} {exit_code_file} {script_file} {pid_file}"
+                await self._runtime.execute(
+                    Command(command=["bash", "-c", cleanup_cmd], timeout=5.0)
+                )
+            except Exception:
+                pass  # Best effort cleanup
+
+        while True:
+            await asyncio.sleep(1.0)
+
+            if time.time() - start_time > timeout:
+                self._log(logging.WARNING, f"Command timed out after {timeout}s")
+                timed_out = True
+                await kill_process_group()
+                break
+
+            # Stream new output and check for completion in one pass
+            try:
+                resp = await self._runtime.execute(
+                    Command(
+                        command=[
+                            "bash",
+                            "-c",
+                            f"tail -c +{last_pos + 1} {output_file} 2>/dev/null; "
+                            f"echo '---EXIT_CODE---'; "
+                            f"cat {exit_code_file} 2>/dev/null",
+                        ],
+                        timeout=10.0,
+                    )
+                )
+                consecutive_failures = 0  # Reset on success
+
+                parts = (resp.stdout or "").split("---EXIT_CODE---")
+                new_output = parts[0] if parts else ""
+                exit_marker = parts[1].strip() if len(parts) > 1 else ""
+
+                if new_output:
+                    last_pos += len(new_output)
+                    for line in new_output.rstrip("\n").split("\n"):
+                        if line:
+                            logger.info(f"[{prefix}] {line}")
+
+                if exit_marker:
+                    break
+
+            except Exception as e:
+                consecutive_failures += 1
+                self._log(
+                    logging.WARNING,
+                    f"Poll failed ({consecutive_failures}/{max_consecutive_failures}): {e}",
+                )
+                if consecutive_failures >= max_consecutive_failures:
+                    self._log(logging.ERROR, "Sandbox unresponsive, aborting")
+                    await kill_process_group()
+                    await cleanup_temp_files()
+                    diag = await self._get_container_diagnostics()
+                    msg = f"Sandbox unresponsive after {consecutive_failures} polls\n{diag}"
+                    return ExecutionResult(False, msg, -1)
+
+        # Read final output and exit code
+        full_output = ""
+        exit_code = -1
+
+        try:
+            await asyncio.sleep(0.2)
+            resp = await self._runtime.execute(
+                Command(
+                    command=[
+                        "bash",
+                        "-c",
+                        f"cat {output_file} 2>/dev/null; "
+                        f"echo '---EXIT_CODE---'; "
+                        f"cat {exit_code_file} 2>/dev/null",
+                    ],
+                    timeout=30.0,
+                )
+            )
+            parts = (resp.stdout or "").split("---EXIT_CODE---")
+            full_output = parts[0] if parts else ""
+            if len(parts) > 1 and parts[1].strip():
+                exit_code = int(parts[1].strip())
+        except Exception as e:
+            self._log(logging.WARNING, f"Failed to read final output: {e}")
+
+            # Log any output we missed during streaming
+            if len(full_output) > last_pos:
+                for line in full_output[last_pos:].rstrip("\n").split("\n"):
+                    if line:
+                        logger.info(f"[{prefix}] {line}")
+
+        # Clean up temp files
+        await cleanup_temp_files()
+
+        if timed_out:
+            full_output = (full_output + "\n[Command timed out]") if full_output else "[Timed out]"
+
+        return ExecutionResult(exit_code == 0, full_output, exit_code)
 
     async def execute_code(
         self,

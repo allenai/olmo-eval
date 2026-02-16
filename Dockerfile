@@ -145,7 +145,6 @@ RUN rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* && \
     libselinux1-dev \
     libsystemd-dev \
     netavark \
-    passt \
     pkg-config \
     uidmap \
     conmon \
@@ -182,6 +181,12 @@ RUN git clone --depth 1 -b 1.14.3 https://github.com/containers/crun.git /tmp/cr
     && make \
     && make install \
     && rm -rf /tmp/crun
+
+# Install pasta from pre-built binary (latest version with --map-guest-addr support)
+# Note: /dev/net/tun is created at runtime by the sandbox executor
+RUN wget -qO /usr/bin/passt https://passt.top/builds/latest/x86_64/passt \
+    && chmod +x /usr/bin/passt \
+    && ln -sf /usr/bin/passt /usr/bin/pasta
 
 # Symlink so docker commands are translated to podman
 RUN ln -sf $(which podman) /usr/local/bin/docker
