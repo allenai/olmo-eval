@@ -16,6 +16,7 @@ from olmo_eval.inference.base import InferenceProvider
 
 if TYPE_CHECKING:
     from olmo_eval.harness.sandbox import SandboxManager
+    from olmo_eval.harness.sandbox.executor import SandboxExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,17 @@ class OpenHandsBackend(Backend):
             await self._sandbox_manager.stop()
             self._sandbox_manager = None
 
+    def _get_sandbox_executor(self) -> SandboxExecutor | None:
+        """Get the first available sandbox executor.
+
+        Returns:
+            SandboxExecutor instance or None if not available.
+        """
+        if self._sandbox_manager is None:
+            return None
+        executors = self._sandbox_manager._executors
+        return executors[0] if executors else None
+
     async def run(
         self,
         provider: InferenceProvider,
@@ -79,9 +91,7 @@ class OpenHandsBackend(Backend):
         try:
             from openhands.sdk import (
                 LLM,
-                Agent,
                 Conversation,
-                Tool,
             )
             from openhands.sdk.conversation.state import (
                 ConversationExecutionStatus,
@@ -94,8 +104,6 @@ class OpenHandsBackend(Backend):
             from openhands.sdk.event.conversation_error import (
                 ConversationErrorEvent,
             )
-            from openhands.tools.file_editor import FileEditorTool
-            from openhands.tools.terminal import TerminalTool
         except ImportError as e:
             raise ImportError(
                 "OpenHands SDK not installed. Install with: pip install openhands-ai"
@@ -118,52 +126,54 @@ class OpenHandsBackend(Backend):
         client = provider.get_openai_client()
 
         if isinstance(provider, LiteLLMProvider):
-            # LiteLLM provider already has model in correct format (e.g., "anthropic/claude-3")
             model_name = provider.model_name
             api_key = client.api_key
             base_url = str(client.base_url) if client.base_url else None
+            is_self_hosted = False
         else:
-            # For self-hosted vLLM servers, use hosted_vllm/ prefix
-            # See: https://docs.litellm.ai/docs/providers/vllm
             model_name = f"hosted_vllm/{provider.model_name}"
             api_key = client.api_key or "dummy"  # vLLM doesn't require auth
             base_url = str(client.base_url) if client.base_url else None
+            is_self_hosted = True
 
-        llm = LLM(
-            model=model_name,
-            api_key=api_key,
-            base_url=base_url,
+        llm_kwargs: dict[str, Any] = {
+            "model": model_name,
+            "api_key": api_key,
+            "base_url": base_url,
+        }
+        if is_self_hosted:
             # Disable cost tracking for self-hosted models (not in LiteLLM's pricing DB)
-            input_cost_per_token=0.0,
-            output_cost_per_token=0.0,
-        )
+            llm_kwargs["input_cost_per_token"] = 0.0
+            llm_kwargs["output_cost_per_token"] = 0.0
 
-        # Configure tools - use OpenHands built-in tools
-        tools = [
-            Tool(name=TerminalTool.name),
-            Tool(name=FileEditorTool.name),
-        ]
+        llm = LLM(**llm_kwargs)
 
-        # Create agent
-        agent = Agent(
+        if self._sandbox_manager is None:
+            raise RuntimeError(
+                "OpenHands backend requires a sandbox configuration. "
+                "Add 'sandboxes' to your HarnessConfig."
+            )
+
+        executor = self._get_sandbox_executor()
+        if executor is None:
+            raise RuntimeError("Sandbox configured but no executor available")
+        if executor._runtime is None:
+            raise RuntimeError("Sandbox executor not started")
+
+        from olmo_eval.harness.adapters.openhands import create_swerex_agent
+
+        agent = create_swerex_agent(
             llm=llm,
-            tools=tools,
-            instructions=config.system_prompt or "",
+            runtime=executor._runtime,
+            working_dir=executor.config.working_dir,
+            timeout=executor.config.command_timeout,
         )
-
-        # Configure workspace
-        workspace = None
-        if self._sandbox_manager is not None:
-            # Use sandbox working directory if available
-            executors = self._sandbox_manager._executors
-            executor = executors[0] if executors else None
-            if executor:
-                workspace = getattr(executor, "working_dir", None)
+        logger.info("OpenHands agent ready with sandbox execution")
 
         # Create conversation with visualizer=None to disable console output
         conversation = Conversation(
             agent=agent,
-            workspace=workspace or "/tmp",
+            workspace=executor.config.working_dir,
             max_iteration_per_run=max_turns,
             visualizer=None,  # Disable console output
         )

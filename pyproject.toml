@@ -123,6 +123,12 @@ include = ["src/olmo_eval/harness/backends/**"]
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"
 
+# ty overrides for adapters module (uses optional openhands/swe-rex dependencies)
+[[tool.ty.overrides]]
+include = ["src/olmo_eval/harness/adapters/**"]
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"
