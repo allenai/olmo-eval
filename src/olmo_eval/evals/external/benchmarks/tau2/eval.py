@@ -118,7 +118,8 @@ class Tau2ExternalEval(SandboxedExternalEval):
 
     @property
     def sandbox_image(self) -> str:
-        return "ghcr.io/astral-sh/uv:python3.11-bookworm-slim"
+        # TODO(undfined): Create a custom image with some core utilities (e.g. git, curl, etc)
+        return "ghcr.io/astral-sh/uv:python3.11-bookworm"
 
     @property
     def working_dir(self) -> str:
