@@ -155,9 +155,6 @@ class TerminalBenchExternalEval(ExternalEval):
 
         logger.info(f"Loaded {len(tasks)} tasks")
 
-        # Get sandbox URL accessible from containers
-        sandbox_url = self._get_provider_url_for_sandbox(provider_url)
-
         # Execute tasks with concurrency limit
         semaphore = asyncio.Semaphore(tb_args.max_concurrency)
 
@@ -165,7 +162,7 @@ class TerminalBenchExternalEval(ExternalEval):
             async with semaphore:
                 return await self._execute_task(
                     task=task,
-                    provider_url=sandbox_url,
+                    provider_url=provider_url,
                     model_name=model_name,
                     container_runtime=container_runtime,
                     max_turns=tb_args.max_turns,
