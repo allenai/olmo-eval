@@ -223,6 +223,13 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     multiple=True,
     help="Map Beaker secret to env var: BEAKER_SECRET:ENV_VAR (e.g., my-openai-key:OPENAI_API_KEY)",
 )
+@click.option(
+    "--gpus",
+    "-G",
+    type=int,
+    default=None,
+    help="Number of GPUs for external eval jobs. tensor_parallel_size defaults to this value.",
+)
 def launch(
     config: str | None,
     name: str | None,
@@ -265,6 +272,7 @@ def launch(
     provider_kwargs: tuple[str, ...],
     uv_cache_dir: str,
     secret_env: tuple[str, ...],
+    gpus: int | None,
 ) -> None:
     """Launch an evaluation job on Beaker.
 
@@ -404,6 +412,7 @@ def launch(
             uv_cache_dir=uv_cache_dir,
             preemptible=preemptible,
             retries=retries,
+            gpus=gpus,
         )
         return
 
@@ -970,6 +979,7 @@ def _launch_external_evals(
     uv_cache_dir: str | None = None,
     preemptible: bool | None = None,
     retries: int | None = None,
+    gpus: int | None = None,
 ) -> None:
     """Launch external evaluation jobs on Beaker.
 
@@ -1088,14 +1098,20 @@ def _launch_external_evals(
     # Build jobs for each model
     job_configs = []
     for model_spec in model:
-        # Get provider config to determine GPU requirements
+        # Get model alias from provider config if available
         try:
             provider_config = get_provider_config(model_spec)
-            num_gpus = provider_config.kwargs.get("tensor_parallel_size", 1)
             model_alias = provider_config.alias
         except Exception:
-            num_gpus = 1
             model_alias = None
+
+        # Determine num_gpus: CLI --gpus takes precedence, then default to 1
+        num_gpus = gpus if gpus is not None else 1
+
+        # tensor_parallel_size defaults to num_gpus unless explicitly overridden via -K
+        tensor_parallel_size = num_gpus
+        if provider_kwargs and "tensor_parallel_size" in provider_kwargs:
+            tensor_parallel_size = int(provider_kwargs["tensor_parallel_size"])
 
         # Generate experiment name using shared utility
         short_name = get_model_short_name(model_spec, model_alias)
@@ -1113,7 +1129,7 @@ def _launch_external_evals(
             timeout=effective_timeout,
             budget=budget,
             groups=effective_groups,
-            tensor_parallel_size=num_gpus,
+            tensor_parallel_size=tensor_parallel_size,
             s3_bucket=s3_bucket,
             s3_prefix=s3_prefix,
             s3_region=s3_region,
