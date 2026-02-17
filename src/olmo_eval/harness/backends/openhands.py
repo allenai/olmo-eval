@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -82,6 +83,15 @@ class OpenHandsBackend(Backend):
                 Conversation,
                 Tool,
             )
+            from openhands.sdk.conversation.state import (  # type: ignore[import-not-found]
+                ConversationExecutionStatus,
+            )
+            from openhands.sdk.event import (  # type: ignore[import-not-found]
+                ActionEvent,
+                ConversationErrorEvent,
+                MessageEvent,
+                ObservationEvent,
+            )
             from openhands.tools.file_editor import FileEditorTool  # type: ignore[import-not-found]
             from openhands.tools.terminal import TerminalTool  # type: ignore[import-not-found]
         except ImportError as e:
@@ -129,85 +139,137 @@ class OpenHandsBackend(Backend):
             if executor:
                 workspace = getattr(executor, "working_dir", None)
 
-        # Create conversation and run
+        # Create conversation with visualizer=None to disable console output
         conversation = Conversation(
             agent=agent,
             workspace=workspace or "/tmp",
+            max_iteration_per_run=max_turns,
+            visualizer=None,  # Disable console output
         )
 
-        # Send message and run
+        # Send message and run (run() takes no arguments)
+        conversation.send_message(input_text)
+        conversation.run()
+
+        # Check if max iterations was reached
         max_turns_reached = False
-        try:
-            conversation.send_message(input_text)
-            conversation.run(max_iterations=max_turns)
-        except Exception as e:
-            error_name = type(e).__name__
-            if "MaxIterations" in error_name or "MaxTurns" in error_name:
-                max_turns_reached = True
-            else:
-                raise
-
-        # Convert conversation state to trajectory
-        trajectory = self._convert_conversation_to_trajectory(conversation)
-
-        # Get final output from conversation state
-        final_text = ""
-        if hasattr(conversation, "state") and conversation.state:
-            # Extract last assistant message from state
-            for msg in reversed(conversation.state):
-                if isinstance(msg, dict) and msg.get("role") == "assistant":
-                    final_text = msg.get("content", "")
+        error_msg = None
+        if conversation.state.execution_status == ConversationExecutionStatus.ERROR:
+            # Check events for MaxIterationsReached error
+            for event in reversed(conversation.state.events):
+                if isinstance(event, ConversationErrorEvent):
+                    if event.code == "MaxIterationsReached":
+                        max_turns_reached = True
+                        error_msg = "Max turns exceeded"
+                    else:
+                        error_msg = f"{event.code}: {event.detail}"
                     break
+
+        # Convert conversation events to trajectory
+        trajectory = self._convert_events_to_trajectory(
+            conversation.state.events,
+            MessageEvent,
+            ActionEvent,
+            ObservationEvent,
+        )
+
+        # Get final output from last agent message
+        final_text = ""
+        for event in reversed(conversation.state.events):
+            if isinstance(event, MessageEvent) and event.source == "agent":
+                # Extract text content from message
+                if event.llm_message and event.llm_message.content:
+                    for content in event.llm_message.content:
+                        if hasattr(content, "text"):
+                            final_text = content.text
+                            break
+                break
 
         return HarnessResult(
             trajectory=trajectory,
             final_output=LMOutput(text=final_text),
             max_turns_reached=max_turns_reached,
-            error="Max turns exceeded" if max_turns_reached else None,
+            error=error_msg,
         )
 
-    def _convert_conversation_to_trajectory(self, conversation: Any) -> AgentTrajectory:
-        """Convert OpenHands conversation state to AgentTrajectory.
+    def _convert_events_to_trajectory(
+        self,
+        events: list[Any],
+        message_event_cls: type,
+        action_event_cls: type,
+        observation_event_cls: type,
+    ) -> AgentTrajectory:
+        """Convert OpenHands events to AgentTrajectory.
 
         Args:
-            conversation: The conversation object with state.
+            events: List of OpenHands events from conversation.state.events.
+            message_event_cls: The MessageEvent class.
+            action_event_cls: The ActionEvent class.
+            observation_event_cls: The ObservationEvent class.
 
         Returns:
             AgentTrajectory with converted turns.
         """
         turns: list[AgentTurn] = []
 
-        # Get state from conversation (list of message dicts)
-        state = getattr(conversation, "state", []) or []
+        for event in events:
+            if isinstance(event, message_event_cls):
+                # MessageEvent contains user or agent messages
+                content = ""
+                if event.llm_message and event.llm_message.content:
+                    for c in event.llm_message.content:
+                        if hasattr(c, "text"):
+                            content = c.text
+                            break
 
-        for msg in state:
-            if not isinstance(msg, dict):
-                continue
-
-            role = msg.get("role", "")
-            content = msg.get("content", "")
-            tool_calls = msg.get("tool_calls", [])
-
-            if role == "user":
-                turns.append(AgentTurn.user(content=content))
-            elif role == "assistant":
-                if tool_calls:
-                    # Convert tool calls
-                    converted_calls = []
-                    for tc in tool_calls:
-                        if isinstance(tc, dict):
-                            call = ToolCall.create(
-                                call_id=tc.get("id", ""),
-                                name=tc.get("function", {}).get("name", ""),
-                                arguments=tc.get("function", {}).get("arguments", "{}"),
-                            )
-                            converted_calls.append(call)
-                    turns.append(AgentTurn.assistant(content=content, tool_calls=converted_calls))
-                else:
+                if event.source == "user":
+                    turns.append(AgentTurn.user(content=content))
+                elif event.source == "agent":
                     turns.append(AgentTurn.assistant(content=content))
-            elif role == "tool":
+
+            elif isinstance(event, action_event_cls):
+                # ActionEvent contains agent tool calls
+                content = ""
+                if event.thought:
+                    # Extract thought text
+                    for t in event.thought:
+                        if hasattr(t, "text"):
+                            content = t.text
+                            break
+
+                # Convert tool call
+                tool_calls = []
+                if event.tool_call:
+                    # Get arguments from the action object
+                    args = "{}"
+                    if event.action:
+                        # Serialize the action to get arguments
+                        try:
+                            args = json.dumps(event.action.model_dump())
+                        except Exception:
+                            args = "{}"
+
+                    call = ToolCall.create(
+                        call_id=event.tool_call_id or event.id,
+                        name=event.tool_name,
+                        arguments=args,
+                    )
+                    tool_calls.append(call)
+
+                turns.append(AgentTurn.assistant(content=content, tool_calls=tool_calls))
+
+            elif isinstance(event, observation_event_cls):
+                # ObservationEvent contains tool results
+                content = ""
+                if event.observation:
+                    # Serialize observation to get content
+                    try:
+                        content = json.dumps(event.observation.model_dump())
+                    except Exception:
+                        content = str(event.observation)
+
                 tool_result = ToolResult(
-                    tool_call_id=msg.get("tool_call_id", ""),
+                    tool_call_id=event.tool_call_id or event.action_id,
                     content=content,
                 )
                 turns.append(AgentTurn.tool([tool_result]))
