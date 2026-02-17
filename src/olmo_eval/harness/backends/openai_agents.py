@@ -318,7 +318,16 @@ class OpenAIAgentsBackend(Backend):
                 raise
 
         # Convert result to HarnessResult
+        # Log result details for debugging empty trajectories
+        new_items = getattr(result, "new_items", None)
+        new_items_count = len(new_items) if new_items else 0
+        result_attrs = [a for a in dir(result) if not a.startswith("_")]
+        logger.info(
+            f"Runner.run completed. Result type: {type(result).__name__}, "
+            f"new_items count: {new_items_count}, attrs: {result_attrs}"
+        )
         trajectory = self._convert_trajectory(result)
+        logger.info(f"Trajectory converted: {len(trajectory.turns)} turns")
         final_text = result.final_output if hasattr(result, "final_output") else ""
 
         return HarnessResult(
@@ -342,16 +351,30 @@ class OpenAIAgentsBackend(Backend):
         # Get items from new_items (primary source in agents SDK)
         items = getattr(result, "new_items", None) or []
         if items:
-            logger.info(f"Converting trajectory with {len(items)} items")
+            item_types = [type(item).__name__ for item in items]
+            logger.info(f"Converting trajectory with {len(items)} items: {item_types}")
         else:
             # Log available attributes for debugging
             attrs = [a for a in dir(result) if not a.startswith("_")]
             logger.warning(f"No items in result.new_items. Available attributes: {attrs}")
+
+            # Check raw_responses
+            raw_responses = getattr(result, "raw_responses", None)
+            if raw_responses:
+                logger.info(f"Found {len(raw_responses)} raw_responses")
+                for i, resp in enumerate(raw_responses[:3]):  # Log first 3
+                    resp_attrs = [a for a in dir(resp) if not a.startswith("_")]
+                    resp_type = type(resp).__name__
+                    logger.info(f"raw_response[{i}] type: {resp_type}, attrs: {resp_attrs}")
+
             # Try to_input_list() as fallback
             if hasattr(result, "to_input_list"):
                 try:
                     input_list = result.to_input_list()
                     logger.info(f"Using to_input_list() with {len(input_list)} items")
+                    if input_list:
+                        for i, item in enumerate(input_list[:3]):  # Log first 3
+                            logger.info(f"input_list[{i}]: {type(item).__name__} = {item}")
                     return self._convert_input_list_to_trajectory(input_list)
                 except Exception as e:
                     logger.warning(f"to_input_list() failed: {e}")
