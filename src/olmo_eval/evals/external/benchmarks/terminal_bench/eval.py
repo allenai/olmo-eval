@@ -565,16 +565,18 @@ class TerminalBenchExternalEval(ExternalEval):
                     "difficulty": r.difficulty,
                     "category": r.category,
                     "error": r.error,
+                    "trajectory": r.trajectory.to_dict() if r.trajectory else None,
                 }
             )
         return predictions
 
     def _save_task_results(self, task_results: list[TaskResult], output_dir: str) -> None:
-        """Save detailed task results to a file."""
+        """Save detailed task results and trajectories to files."""
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
-        results_file = output_path / "terminal_bench_tasks.json"
+        # Save task results
+        results_file = output_path / f"{self.name}_tasks.json"
         data = []
         for r in task_results:
             output = r.verification_output[:10000] if r.verification_output else ""
@@ -594,5 +596,15 @@ class TerminalBenchExternalEval(ExternalEval):
 
         with open(results_file, "w") as f:
             json.dump(data, f, indent=2)
-
         logger.info(f"Task results saved to {results_file}")
+
+        # Save trajectories to JSONL (one per line for easier streaming/processing)
+        trajectories_file = output_path / f"{self.name}_trajectories.jsonl"
+        with open(trajectories_file, "w") as f:
+            for r in task_results:
+                trajectory_data = {
+                    "task_id": r.task_id,
+                    "trajectory": r.trajectory.to_dict() if r.trajectory else None,
+                }
+                f.write(json.dumps(trajectory_data) + "\n")
+        logger.info(f"Trajectories saved to {trajectories_file}")
