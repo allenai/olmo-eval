@@ -282,7 +282,7 @@ class TerminalBenchExternalEval(ExternalEval):
 
         # Terminal-Bench images may not have Python or have externally-managed Python (PEP 668).
         # Use python-build-standalone pre-compiled binaries - fast extraction, no compilation.
-        # This is faster than uv since it's a single ~25MB download with no installer overhead.
+        # Try wget first (more common in minimal images), fall back to curl.
         python_url = (
             "https://github.com/indygreg/python-build-standalone/releases/download/"
             "20240107/cpython-3.11.7+20240107-x86_64-unknown-linux-gnu-install_only.tar.gz"
@@ -291,7 +291,13 @@ class TerminalBenchExternalEval(ExternalEval):
             "/bin/sh",
             "-c",
             "if ! command -v swerex-remote >/dev/null 2>&1; then "
-            f"  curl -LsSf {python_url} | tar xz -C /root && "
+            "  if command -v wget >/dev/null 2>&1; then "
+            f"    wget -qO- {python_url} | tar xz -C /root; "
+            "  elif command -v curl >/dev/null 2>&1; then "
+            f"    curl -LsSf {python_url} | tar xz -C /root; "
+            "  else "
+            "    echo 'Neither wget nor curl available' >&2; exit 1; "
+            "  fi && "
             "  /root/python/bin/pip install --no-cache-dir swe-rex >/dev/null 2>&1 && "
             '  export PATH="/root/python/bin:$PATH"; '
             "fi; "
