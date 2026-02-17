@@ -251,6 +251,11 @@ class TerminalBenchExternalEval(ExternalEval):
         start_time = time.time()
         tb_args = TerminalBenchArgs.from_dict(args)
 
+        # Validate backend early to fail fast before spinning up sandboxes
+        from olmo_eval.harness.backends import validate_backend
+
+        validate_backend(tb_args.backend)
+
         # Load tasks
         loader = TerminalBenchLoader()
         if tb_args.repo_path:

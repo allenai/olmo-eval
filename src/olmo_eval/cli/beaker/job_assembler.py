@@ -221,13 +221,21 @@ def assemble_external_eval_job(
         env_vars.update(get_store_env_defaults())
 
     # Collect backend names from external evals
+    # Check eval_args for backend override, otherwise use eval's default
     from olmo_eval.evals.external.registry import get_external_eval
 
     backend_names: list[str] = []
-    for eval_name in external_evals:
-        eval_instance = get_external_eval(eval_name)
-        if eval_instance.backend and eval_instance.backend not in backend_names:
-            backend_names.append(eval_instance.backend)
+
+    # Check if backend is specified in eval_args (overrides eval default)
+    args_backend = eval_args.get("backend") if eval_args else None
+    if args_backend:
+        backend_names.append(args_backend)
+    else:
+        # Fall back to each eval's default backend
+        for eval_name in external_evals:
+            eval_instance = get_external_eval(eval_name)
+            if eval_instance.backend and eval_instance.backend not in backend_names:
+                backend_names.append(eval_instance.backend)
 
     # Collect extras from all backends
     extras: list[str] = collect_install_extras(
