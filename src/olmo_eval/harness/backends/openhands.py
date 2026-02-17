@@ -88,9 +88,11 @@ class OpenHandsBackend(Backend):
             )
             from openhands.sdk.event import (  # type: ignore[import-not-found]
                 ActionEvent,
-                ConversationErrorEvent,
                 MessageEvent,
                 ObservationEvent,
+            )
+            from openhands.sdk.event.conversation_error import (  # type: ignore[import-not-found]
+                ConversationErrorEvent,
             )
             from openhands.tools.file_editor import FileEditorTool  # type: ignore[import-not-found]
             from openhands.tools.terminal import TerminalTool  # type: ignore[import-not-found]
