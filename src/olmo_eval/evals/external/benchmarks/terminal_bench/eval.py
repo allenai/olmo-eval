@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
+import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +28,62 @@ if TYPE_CHECKING:
     from olmo_eval.inference.base import InferenceProvider
 
 logger = logging.getLogger(__name__)
+
+# Python standalone URL for building derived images
+PYTHON_STANDALONE_URL = (
+    "https://github.com/indygreg/python-build-standalone/releases/download/"
+    "20240107/cpython-3.11.7+20240107-x86_64-unknown-linux-gnu-install_only.tar.gz"
+)
+
+
+def _get_swerex_image(base_image: str, container_runtime: str = "docker") -> str:
+    """Build a derived image with Python and swe-rex pre-installed.
+
+    Args:
+        base_image: The base container image.
+        container_runtime: Container runtime (docker or podman).
+
+    Returns:
+        The derived image name (tagged with hash for caching).
+    """
+    # Create a deterministic tag based on base image and Python URL
+    hash_input = f"{base_image}:{PYTHON_STANDALONE_URL}"
+    tag_hash = hashlib.sha256(hash_input.encode()).hexdigest()[:12]
+    derived_image = f"swerex-{base_image.replace('/', '-').replace(':', '-')}:{tag_hash}"
+
+    # Check if image already exists locally
+    result = subprocess.run(
+        [container_runtime, "image", "inspect", derived_image],
+        capture_output=True,
+    )
+    if result.returncode == 0:
+        logger.info(f"Using cached swerex image: {derived_image}")
+        return derived_image
+
+    logger.info(f"Building swerex image from {base_image}...")
+
+    # Build Dockerfile that adds Python and swe-rex
+    dockerfile = f"""\
+FROM {base_image}
+ADD {PYTHON_STANDALONE_URL} /tmp/python.tar.gz
+RUN tar xzf /tmp/python.tar.gz -C /root && rm /tmp/python.tar.gz && \\
+    /root/python/bin/pip install --no-cache-dir swe-rex
+ENV PATH="/root/python/bin:$PATH"
+"""
+
+    # Build the image
+    result = subprocess.run(
+        [container_runtime, "build", "-t", derived_image, "-"],
+        input=dockerfile.encode(),
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.decode() if result.stderr else ""
+        raise RuntimeError(f"Failed to build swerex image: {stderr}")
+
+    logger.info(f"Built swerex image: {derived_image}")
+    return derived_image
+
 
 SYSTEM_PROMPT = """\
 You are an AI assistant helping complete tasks in a Linux terminal.
@@ -280,39 +338,17 @@ class TerminalBenchExternalEval(ExternalEval):
         if mode == SandboxMode.DOCKER:
             docker_args = tuple(get_docker_network_args(runtime))
 
-        # Terminal-Bench images may not have Python or have externally-managed Python (PEP 668).
-        # Use python-build-standalone pre-compiled binaries - fast extraction, no compilation.
-        # Try wget first (more common in minimal images), fall back to curl.
-        python_url = (
-            "https://github.com/indygreg/python-build-standalone/releases/download/"
-            "20240107/cpython-3.11.7+20240107-x86_64-unknown-linux-gnu-install_only.tar.gz"
-        )
-        exec_shell = (
-            "/bin/sh",
-            "-c",
-            "if ! command -v swerex-remote >/dev/null 2>&1; then "
-            "  if command -v wget >/dev/null 2>&1; then "
-            f"    wget -qO- {python_url} | tar xz -C /root; "
-            "  elif command -v curl >/dev/null 2>&1; then "
-            f"    curl -LsSf {python_url} | tar xz -C /root; "
-            "  else "
-            "    echo 'Neither wget nor curl available' >&2; exit 1; "
-            "  fi && "
-            "  /root/python/bin/pip install --no-cache-dir swe-rex >/dev/null 2>&1 && "
-            '  export PATH="/root/python/bin:$PATH"; '
-            "fi; "
-            'exec /bin/sh -c "$@"',
-            "--",
-        )
+        # Build derived image with Python and swe-rex pre-installed.
+        # Cached locally by Docker so subsequent runs reuse the built image.
+        image = _get_swerex_image(task.image, runtime)
 
         sandbox_config = SandboxConfig(
-            image=task.image,
+            image=image,
             mode=mode,
             container_runtime=runtime if mode == SandboxMode.DOCKER else "docker",
             working_dir=task.working_dir,
             command_timeout=task.agent_timeout,
             docker_args=docker_args,
-            exec_shell=exec_shell,
         )
 
         # Create sandbox manager for this task
