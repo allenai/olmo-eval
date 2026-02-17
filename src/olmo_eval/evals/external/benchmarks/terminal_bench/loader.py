@@ -18,20 +18,22 @@ class TerminalBenchLoader:
     REPO_URL = "https://github.com/laude-institute/terminal-bench-2.git"
     DEFAULT_REF = "f5b891cb4f7c20e306f9d05887628b43af740f43"
 
-    def ensure_repo(self, target_dir: Path, ref: str = "main") -> Path:
+    def ensure_repo(self, target_dir: Path, ref: str | None = None) -> Path:
         """Clone or update the Terminal-Bench repository.
 
         Args:
             target_dir: Directory to clone/update the repo in.
-            ref: Git ref to checkout.
+            ref: Git ref to checkout (commit, branch, or tag).
 
         Returns:
             Path to the repository.
         """
+        ref = ref or self.DEFAULT_REF
+
         if (target_dir / ".git").exists():
             logger.info(f"Updating Terminal-Bench repo at {target_dir}")
             subprocess.run(
-                ["git", "-C", str(target_dir), "fetch", "origin", ref],
+                ["git", "-C", str(target_dir), "fetch", "origin"],
                 check=True,
                 capture_output=True,
             )
@@ -40,25 +42,17 @@ class TerminalBenchLoader:
                 check=True,
                 capture_output=True,
             )
-            subprocess.run(
-                ["git", "-C", str(target_dir), "pull", "--ff-only"],
-                check=False,  # May fail if not on a branch
-                capture_output=True,
-            )
         else:
             logger.info(f"Cloning Terminal-Bench repo to {target_dir}")
             target_dir.parent.mkdir(parents=True, exist_ok=True)
+            # Clone without --depth to support checking out specific commits
             subprocess.run(
-                [
-                    "git",
-                    "clone",
-                    "--depth",
-                    "1",
-                    "--branch",
-                    ref,
-                    self.REPO_URL,
-                    str(target_dir),
-                ],
+                ["git", "clone", self.REPO_URL, str(target_dir)],
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(target_dir), "checkout", ref],
                 check=True,
                 capture_output=True,
             )
