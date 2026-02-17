@@ -50,6 +50,7 @@ class Backend:
         request: LMRequest,
         sampling_params: SamplingParams | None = None,
         trace_metadata: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> HarnessResult:
         """Execute the request and return the result.
 
@@ -59,6 +60,7 @@ class Backend:
             request: The initial request to process.
             sampling_params: Optional sampling parameters override.
             trace_metadata: Optional metadata for tracing (e.g., instance_id, task_id).
+            **kwargs: Backend-specific keyword arguments (e.g., enable_compaction).
 
         Returns:
             HarnessResult with trajectory and final output.

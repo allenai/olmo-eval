@@ -50,6 +50,7 @@ class TerminalBenchArgs:
     max_turns: int = 50
     oracle: bool = False
     sandbox_mode: str = "docker"
+    enable_compaction: bool = True
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TerminalBenchArgs:
@@ -64,6 +65,7 @@ class TerminalBenchArgs:
             max_turns=int(data.get("max_turns", 50)),
             oracle=data.get("oracle", False) in (True, "true", "True", "1"),
             sandbox_mode=data.get("sandbox_mode", "docker"),
+            enable_compaction=data.get("enable_compaction", True) in (True, "true", "True", "1", 1),
         )
 
 
@@ -162,6 +164,7 @@ class TerminalBenchExternalEval(ExternalEval):
                     max_turns=tb_args.max_turns,
                     oracle_mode=tb_args.oracle,
                     sandbox_mode=tb_args.sandbox_mode,
+                    enable_compaction=tb_args.enable_compaction,
                 )
 
         results = await asyncio.gather(*[run_task(t) for t in tasks], return_exceptions=True)
@@ -248,6 +251,7 @@ class TerminalBenchExternalEval(ExternalEval):
         max_turns: int,
         oracle_mode: bool,
         sandbox_mode: str,
+        enable_compaction: bool = True,
     ) -> TaskResult:
         """Execute a single Terminal-Bench task.
 
@@ -258,6 +262,7 @@ class TerminalBenchExternalEval(ExternalEval):
             max_turns: Maximum agent turns.
             oracle_mode: Whether to run the solution script instead of agent.
             sandbox_mode: Sandbox mode (docker, modal).
+            enable_compaction: Enable context compaction for long conversations.
 
         Returns:
             TaskResult with reward and trajectory.
@@ -306,7 +311,7 @@ class TerminalBenchExternalEval(ExternalEval):
                 trajectory, completion_reason = await self._run_oracle(sandbox_manager, task)
             else:
                 trajectory, completion_reason = await self._run_agent(
-                    sandbox_manager, task, provider, max_turns
+                    sandbox_manager, task, provider, max_turns, enable_compaction
                 )
 
             agent_duration = time.time() - task_start
@@ -381,6 +386,7 @@ class TerminalBenchExternalEval(ExternalEval):
         task: TerminalBenchTask,
         provider: InferenceProvider,
         max_turns: int,
+        enable_compaction: bool = True,
     ) -> tuple[AgentTrajectory, str]:
         """Run the LLM agent.
 
@@ -389,6 +395,7 @@ class TerminalBenchExternalEval(ExternalEval):
             task: The task to run.
             provider: Inference provider for LLM calls.
             max_turns: Maximum turns.
+            enable_compaction: Enable context compaction for long conversations.
 
         Returns:
             Tuple of (trajectory, completion_reason).
@@ -425,6 +432,7 @@ class TerminalBenchExternalEval(ExternalEval):
             harness_config,
             request,
             trace_metadata={"task_id": task.task_id},
+            enable_compaction=enable_compaction,
         )
 
         completion_reason = "max_turns" if harness_result.max_turns_reached else "complete"

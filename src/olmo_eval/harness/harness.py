@@ -153,7 +153,12 @@ class Harness:
             RuntimeError: If no backend is configured.
         """
         return await self.backend.run(
-            self.provider, self.config, request, sampling_params, trace_metadata
+            self.provider,
+            self.config,
+            request,
+            sampling_params,
+            trace_metadata,
+            **self.config.backend_kwargs,
         )
 
     async def cleanup(self) -> None:

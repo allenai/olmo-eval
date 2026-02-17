@@ -38,6 +38,7 @@ class HarnessConfig:
     max_concurrency: int | None = None
     scoring_concurrency: int | None = None
     sandboxes: tuple[SandboxConfig, ...] = ()
+    backend_kwargs: dict[str, Any] = field(default_factory=dict)
 
     # Cache for resolved tools
     _resolved_tools_cache: tuple[Tool, ...] | None = field(
@@ -129,6 +130,8 @@ class HarnessConfig:
             d["scoring_concurrency"] = self.scoring_concurrency
         if self.sandboxes:
             d["sandboxes"] = [s.to_dict() for s in self.sandboxes]
+        if self.backend_kwargs:
+            d["backend_kwargs"] = self.backend_kwargs
         return d
 
     @classmethod
@@ -159,6 +162,7 @@ class HarnessConfig:
             max_concurrency=data.get("max_concurrency"),
             scoring_concurrency=data.get("scoring_concurrency"),
             sandboxes=sandboxes,
+            backend_kwargs=data.get("backend_kwargs", {}),
         )
 
     def with_tools(self, *new_tools: Tool | str) -> HarnessConfig:
@@ -182,6 +186,7 @@ class HarnessConfig:
             max_concurrency=self.max_concurrency,
             scoring_concurrency=self.scoring_concurrency,
             sandboxes=self.sandboxes,
+            backend_kwargs=self.backend_kwargs,
         )
 
     def with_system_prompt(self, system_prompt: str) -> HarnessConfig:
@@ -205,6 +210,7 @@ class HarnessConfig:
             max_concurrency=self.max_concurrency,
             scoring_concurrency=self.scoring_concurrency,
             sandboxes=self.sandboxes,
+            backend_kwargs=self.backend_kwargs,
         )
 
     def with_provider(self, provider: ProviderConfig) -> HarnessConfig:
@@ -228,6 +234,7 @@ class HarnessConfig:
             max_concurrency=self.max_concurrency,
             scoring_concurrency=self.scoring_concurrency,
             sandboxes=self.sandboxes,
+            backend_kwargs=self.backend_kwargs,
         )
 
     def merge_provider(self, provider: ProviderConfig) -> HarnessConfig:
@@ -293,6 +300,7 @@ def harness_config(
     max_concurrency: int | None = None,
     scoring_concurrency: int | None = None,
     sandboxes: Sequence[SandboxConfig] = (),
+    backend_kwargs: dict[str, Any] | None = None,
 ) -> HarnessConfig:
     """Create a HarnessConfig.
 
@@ -308,6 +316,7 @@ def harness_config(
         max_concurrency: Maximum concurrent tool executions for agent backends.
         scoring_concurrency: Maximum concurrent scoring operations (default 8).
         sandboxes: Sandbox configurations for isolated tool execution.
+        backend_kwargs: Backend-specific kwargs (e.g., enable_compaction for openai_agents).
 
     Returns:
         A new HarnessConfig instance.
@@ -324,4 +333,5 @@ def harness_config(
         max_concurrency=max_concurrency,
         scoring_concurrency=scoring_concurrency,
         sandboxes=tuple(sandboxes),
+        backend_kwargs=backend_kwargs or {},
     )

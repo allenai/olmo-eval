@@ -216,6 +216,7 @@ class OpenAIAgentsBackend(Backend):
         request: LMRequest,
         sampling_params: SamplingParams | None = None,
         trace_metadata: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> HarnessResult:
         """Execute using OpenAI Agents SDK.
 
@@ -225,16 +226,33 @@ class OpenAIAgentsBackend(Backend):
             request: The initial request.
             sampling_params: Optional sampling parameters.
             trace_metadata: Optional metadata for tracing (e.g., instance_id, task_id).
+            **kwargs: Backend-specific options:
+                - enable_compaction: Enable context compaction (default: True).
 
         Returns:
             HarnessResult with trajectory from SDK execution.
         """
+        enable_compaction = kwargs.get("enable_compaction", True)
         try:
             from agents import Runner, trace  # type: ignore[import-not-found]
         except ImportError as e:
             raise ImportError(
                 "OpenAI Agents SDK not installed. Install with: pip install openai-agents"
             ) from e
+
+        # Create compaction session if enabled
+        session = None
+        if enable_compaction:
+            try:
+                from agents.memory import (  # type: ignore[import-not-found]
+                    OpenAIResponsesCompactionSession,
+                )
+
+                session_id = (trace_metadata or {}).get("task_id", "default")
+                session = OpenAIResponsesCompactionSession(session_id=session_id)
+                logger.info(f"Context compaction enabled for session {session_id}")
+            except ImportError:
+                logger.warning("Context compaction not available - agents.memory not found")
 
         # Check if we need sandbox execution
         needs_sandbox = config.sandboxes and config.has_sandbox_tools
@@ -274,11 +292,15 @@ class OpenAIAgentsBackend(Backend):
         # Run agent within trace context for observability
         with trace(trace_name, metadata=trace_metadata):
             try:
-                result = await Runner.run(
-                    starting_agent=agent,
-                    input=input_text,
-                    max_turns=max_turns,
-                )
+                run_kwargs: dict[str, Any] = {
+                    "starting_agent": agent,
+                    "input": input_text,
+                    "max_turns": max_turns,
+                }
+                if session is not None:
+                    run_kwargs["session"] = session
+
+                result = await Runner.run(**run_kwargs)
             except Exception as e:
                 # Handle MaxTurnsExceeded - return a result with the error instead of raising
                 if type(e).__name__ == "MaxTurnsExceeded":
