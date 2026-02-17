@@ -133,8 +133,11 @@ class TerminalBenchVerifier:
         if reward_result.success:
             try:
                 reward = float(reward_result.output.strip())
+                logger.info(f"Reward: {reward}")
             except ValueError:
                 logger.warning(f"Failed to parse reward: {reward_result.output[:100]}")
+        else:
+            logger.warning(f"Failed to read reward.txt: {reward_result.output[:100]}")
 
         return VerificationResult(
             reward=reward,
