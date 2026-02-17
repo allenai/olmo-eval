@@ -23,7 +23,7 @@ def get_provider_kind(model_spec: str, default_kind: str | None = None) -> str |
 
     Args:
         model_spec: Model name or path.
-        default_kind: Default provider kind if model is not a preset.
+        default_kind: Default provider kind if model is not a preset or has no kind.
 
     Returns:
         Provider kind string (e.g., "vllm", "vllm_server", "litellm") or None.
@@ -32,7 +32,8 @@ def get_provider_kind(model_spec: str, default_kind: str | None = None) -> str |
 
     try:
         provider_config = get_provider_config(model_spec)
-        return provider_config.kind
+        # Fall back to default_kind if config has no kind set
+        return provider_config.kind or default_kind
     except Exception:
         return default_kind
 
@@ -251,9 +252,9 @@ def assemble_external_eval_job(
             if eval_instance.backend and eval_instance.backend not in backend_names:
                 backend_names.append(eval_instance.backend)
 
-    # Determine provider kind and whether to use separate venv for vLLM
-    provider_kind = get_provider_kind(model, default_kind="vllm_server")
-    vllm_separate_venv = provider_kind == "vllm_server"
+    # External evals always run vLLM as a server subprocess, so use separate venv
+    # to avoid dependency conflicts with other packages (e.g., openhands)
+    vllm_separate_venv = True
 
     # Collect extras from all backends
     extras: list[str] = collect_install_extras(
