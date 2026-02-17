@@ -68,13 +68,14 @@ def _get_swerex_image(base_image: str, container_runtime: str = "docker") -> str
         capture_output=True,
     )
     if result.returncode == 0:
-        logger.info(f"Using cached local swerex image: {local_image}")
+        logger.info(f"Using cached swerex image: {local_image}")
         return local_image
+
+    logger.debug(f"Local image {local_image} not found, checking registry...")
 
     # Try to pull from registry (if configured)
     if registry:
         registry_image = f"{registry}/swerex-{tag_hash}:latest"
-        logger.info(f"Pulling swerex image from registry: {registry_image}")
         result = subprocess.run(
             [container_runtime, "pull", registry_image],
             capture_output=True,
@@ -85,11 +86,12 @@ def _get_swerex_image(base_image: str, container_runtime: str = "docker") -> str
                 [container_runtime, "tag", registry_image, local_image],
                 capture_output=True,
             )
-            logger.info(f"Pulled and tagged swerex image: {local_image}")
+            logger.info(f"Pulled swerex image from registry: {local_image}")
             return local_image
+        logger.debug("Registry pull failed, will build locally")
 
     # Build the image with Python, swe-rex, curl, git, and uv
-    logger.info(f"Building swerex image from {base_image}...")
+    logger.info(f"Building swerex image from {base_image} (this may take a few minutes)...")
 
     dockerfile = f"""\
 FROM {base_image}
@@ -316,7 +318,6 @@ class TerminalBenchExternalEval(ExternalEval):
         rewards = [r.reward for r in task_results]
         pass_rate = sum(rewards) / len(rewards) if rewards else 0.0
 
-        # Compute metrics by difficulty and category
         metrics: dict[str, float] = {
             "pass_rate": pass_rate,
             "num_tasks": len(task_results),
@@ -337,10 +338,8 @@ class TerminalBenchExternalEval(ExternalEval):
             safe_name = category.replace(" ", "_").lower()
             metrics[f"pass_rate_{safe_name}"] = sum(rewards_list) / len(rewards_list)
 
-        # Build predictions
         predictions = self._build_predictions(task_results)
 
-        # Build result
         result = ExternalEvalResult(
             name=self.name,
             success=True,
@@ -358,7 +357,6 @@ class TerminalBenchExternalEval(ExternalEval):
         # Save results
         if output_dir:
             self._save_results(result, output_dir)
-            # Also save detailed task results
             self._save_task_results(task_results, output_dir)
 
         return result
@@ -401,8 +399,6 @@ class TerminalBenchExternalEval(ExternalEval):
         if mode == SandboxMode.DOCKER:
             docker_args = tuple(get_docker_network_args(runtime))
 
-        # Build derived image with Python and swe-rex pre-installed.
-        # Cached locally by Docker so subsequent runs reuse the built image.
         image = _get_swerex_image(task.image, runtime)
 
         sandbox_config = SandboxConfig(
@@ -414,7 +410,6 @@ class TerminalBenchExternalEval(ExternalEval):
             docker_args=docker_args,
         )
 
-        # Create sandbox manager for this task
         sandbox_manager = SandboxManager([sandbox_config], owner=f"tb2-{task.task_id}")
 
         try:
@@ -429,7 +424,6 @@ class TerminalBenchExternalEval(ExternalEval):
 
             agent_duration = time.time() - task_start
 
-            # Run verification
             executor = sandbox_manager._executors[0]
             verifier = TerminalBenchVerifier()
             await verifier.inject_tests(executor, task.test_files)
@@ -482,7 +476,6 @@ class TerminalBenchExternalEval(ExternalEval):
         """
         executor = sandbox_manager._executors[0]
 
-        # Run solve.sh via heredoc to avoid quoting issues
         result = await executor.execute_in_session(
             f"bash << 'SOLVEEOF'\n{task.solution_script}\nSOLVEOF",
             timeout=task.agent_timeout,
@@ -519,13 +512,8 @@ class TerminalBenchExternalEval(ExternalEval):
         from olmo_eval.harness.config import HarnessConfig
         from olmo_eval.harness.tools import get_tools
 
-        # Validate backend is available
         validate_backend(backend_name)
-
-        # Get the tools
         tools = get_tools(("execute_bash_session", "submit"))
-
-        # Create harness config
         harness_config = HarnessConfig(
             name=f"terminal_bench_{task.task_id}",
             tools=tools,
@@ -533,17 +521,14 @@ class TerminalBenchExternalEval(ExternalEval):
             max_turns=max_turns,
         )
 
-        # Get backend from registry and set sandbox manager
         backend = get_backend(backend_name)
         backend._sandbox_manager = sandbox_manager
 
-        # Create request
         request = LMRequest(
             request_type=RequestType.CHAT,
             messages=({"role": "user", "content": task.instruction},),
         )
 
-        # Run agent
         run_config = {
             "backend": backend.name,
             "task_id": task.task_id,
@@ -594,7 +579,6 @@ class TerminalBenchExternalEval(ExternalEval):
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
-        # Save task results
         results_file = output_path / f"{self.name}_tasks.json"
         data = []
         for r in task_results:
@@ -617,7 +601,6 @@ class TerminalBenchExternalEval(ExternalEval):
             json.dump(data, f, indent=2)
         logger.info(f"Task results saved to {results_file}")
 
-        # Save trajectories to traces/ directory (one file per task)
         traces_dir = output_path / "traces"
         traces_dir.mkdir(parents=True, exist_ok=True)
 
@@ -625,15 +608,12 @@ class TerminalBenchExternalEval(ExternalEval):
             if not r.trajectory:
                 continue
 
-            # Sanitize task_id for filename
             sanitized_id = re.sub(r"[^\w\-]", "_", r.task_id)
             sanitized_id = re.sub(r"_+", "_", sanitized_id).strip("_").lower()
 
-            # Create short hash for uniqueness
             hash_input = f"{self.name}:{r.task_id}"
             short_hash = hashlib.sha256(hash_input.encode()).hexdigest()[:6]
 
-            # Filename: {eval_name}_{task_id}_{hash}.jsonl
             trace_file = traces_dir / f"{self.name}_{sanitized_id}_{short_hash}.jsonl"
 
             trajectory_data = {

@@ -263,8 +263,8 @@ class SweRexTerminalTool(ToolDefinition[TerminalAction, TerminalObservation]):
     SWE-ReX managed container environment.
     """
 
-    name = "terminal"
-    description = TOOL_DESCRIPTION
+    name: str = "terminal"
+    description: str = TOOL_DESCRIPTION
 
     def __init__(
         self,
