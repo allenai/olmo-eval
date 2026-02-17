@@ -162,6 +162,7 @@ class TerminalBenchArgs:
     oracle: bool = False
     sandbox_mode: str = "docker"
     enable_compaction: bool = True
+    backend: str = "openai_agents"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TerminalBenchArgs:
@@ -177,6 +178,7 @@ class TerminalBenchArgs:
             oracle=data.get("oracle", False) in (True, "true", "True", "1"),
             sandbox_mode=data.get("sandbox_mode", "docker"),
             enable_compaction=data.get("enable_compaction", True) in (True, "true", "True", "1", 1),
+            backend=data.get("backend", "openai_agents"),
         )
 
 
@@ -221,6 +223,7 @@ class TerminalBenchExternalEval(ExternalEval):
             "max_turns": ("Max agent turns per task", 50),
             "oracle": ("Run solve.sh instead of LLM agent", False),
             "sandbox_mode": ("Sandbox mode: docker, modal (default: docker)", "docker"),
+            "backend": ("Backend to use for agent execution", "openai_agents"),
         }
 
     @property
@@ -276,6 +279,7 @@ class TerminalBenchExternalEval(ExternalEval):
                     oracle_mode=tb_args.oracle,
                     sandbox_mode=tb_args.sandbox_mode,
                     enable_compaction=tb_args.enable_compaction,
+                    backend_name=tb_args.backend,
                 )
 
         results = await asyncio.gather(*[run_task(t) for t in tasks], return_exceptions=True)
@@ -363,6 +367,7 @@ class TerminalBenchExternalEval(ExternalEval):
         oracle_mode: bool,
         sandbox_mode: str,
         enable_compaction: bool = True,
+        backend_name: str = "openai_agents",
     ) -> TaskResult:
         """Execute a single Terminal-Bench task.
 
@@ -414,7 +419,7 @@ class TerminalBenchExternalEval(ExternalEval):
                 trajectory, completion_reason = await self._run_oracle(sandbox_manager, task)
             else:
                 trajectory, completion_reason = await self._run_agent(
-                    sandbox_manager, task, provider, max_turns, enable_compaction
+                    sandbox_manager, task, provider, max_turns, enable_compaction, backend_name
                 )
 
             agent_duration = time.time() - task_start
@@ -490,6 +495,7 @@ class TerminalBenchExternalEval(ExternalEval):
         provider: InferenceProvider,
         max_turns: int,
         enable_compaction: bool = True,
+        backend_name: str = "openai_agents",
     ) -> tuple[AgentTrajectory, str]:
         """Run the LLM agent.
 
@@ -499,13 +505,17 @@ class TerminalBenchExternalEval(ExternalEval):
             provider: Inference provider for LLM calls.
             max_turns: Maximum turns.
             enable_compaction: Enable context compaction for long conversations.
+            backend_name: Name of the backend to use.
 
         Returns:
             Tuple of (trajectory, completion_reason).
         """
-        from olmo_eval.harness.backends.openai_agents import OpenAIAgentsBackend
+        from olmo_eval.harness.backends import get_backend, validate_backend
         from olmo_eval.harness.config import HarnessConfig
         from olmo_eval.harness.tools import get_tools
+
+        # Validate backend is available
+        validate_backend(backend_name)
 
         # Get the tools
         tools = get_tools(("execute_bash_session", "submit"))
@@ -518,8 +528,8 @@ class TerminalBenchExternalEval(ExternalEval):
             max_turns=max_turns,
         )
 
-        # Create backend with our sandbox manager
-        backend = OpenAIAgentsBackend()
+        # Get backend from registry and set sandbox manager
+        backend = get_backend(backend_name)
         backend._sandbox_manager = sandbox_manager
 
         # Create request

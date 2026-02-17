@@ -26,10 +26,14 @@ class Backend:
     Class Attributes:
         name: Human-readable name for this backend.
         required_extras: Tuple of pyproject.toml extra names required by this backend.
+
+    Instance Attributes:
+        _sandbox_manager: Optional sandbox manager for backends that need sandbox access.
     """
 
     name: str = "base"
     required_extras: tuple[str, ...] = ()
+    _sandbox_manager: Any = None
 
     async def initialize(self, config: HarnessConfig) -> None:
         """Initialize backend resources like sandbox managers.
@@ -174,24 +178,34 @@ def validate_backend(name: str) -> None:
         available = ", ".join(sorted(BACKEND_REGISTRY.keys()))
         raise ValueError(f"Unknown backend: '{name}'. Available: {available}")
 
-    # Check required extras by attempting to import key modules
-    if name == "openai_agents":
+    # Maps backend name -> (import_module, display_name, extra_name)
+    backend_checks = {
+        "openai_agents": ("agents", "OpenAI Agents SDK", "agents"),
+        "openhands": ("openhands_ai", "OpenHands SDK", "openhands"),
+    }
+
+    if name in backend_checks:
+        module, display_name, extra = backend_checks[name]
         try:
-            import agents  # type: ignore[import-not-found]  # noqa: F401
+            import importlib
+
+            importlib.import_module(module)
         except ImportError as e:
             raise ImportError(
-                f"Backend '{name}' requires the OpenAI Agents SDK. "
-                f"Install with: pip install openai-agents. Error: {e}"
+                f"Backend '{name}' requires {display_name}. "
+                f"Install with: uv pip install -e '.[{extra}]'"
             ) from e
 
 
 # Import backends to trigger registration
 from .openai_agents import OpenAIAgentsBackend  # noqa: E402
+from .openhands import OpenHandsBackend  # noqa: E402
 
 __all__ = [
     "Backend",
     "BACKEND_REGISTRY",
     "OpenAIAgentsBackend",
+    "OpenHandsBackend",
     "get_backend",
     "get_backend_extras",
     "list_backends",
