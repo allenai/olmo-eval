@@ -1095,14 +1095,18 @@ def _launch_external_evals(
     if dry_run:
         console.print("[yellow]Dry run mode - not submitting[/yellow]")
 
-    # Build jobs for each model
+    # Build jobs and summaries for each model
     job_configs = []
+    summaries = []
     for model_spec in model:
-        # Get model alias from provider config if available
+        # Get provider config for model alias and as base for summary
         try:
             provider_config = get_provider_config(model_spec)
             model_alias = provider_config.alias
         except Exception:
+            from olmo_eval.inference.providers.config import ProviderConfig
+
+            provider_config = ProviderConfig(kind="vllm_server", model=model_spec)
             model_alias = None
 
         # Determine num_gpus: CLI --gpus takes precedence, then default to 1
@@ -1112,6 +1116,11 @@ def _launch_external_evals(
         tensor_parallel_size = num_gpus
         if provider_kwargs and "tensor_parallel_size" in provider_kwargs:
             tensor_parallel_size = int(provider_kwargs["tensor_parallel_size"])
+
+        # Update provider_config with tensor_parallel_size for display
+        display_provider_config = provider_config.with_overrides(
+            tensor_parallel_size=tensor_parallel_size
+        )
 
         # Generate experiment name using shared utility
         short_name = get_model_short_name(model_spec, model_alias)
@@ -1146,25 +1155,17 @@ def _launch_external_evals(
         )
         job_configs.append(job_config)
 
-    # Build summaries
-    summaries = []
-    for i, job in enumerate(job_configs):
-        model_spec = model[i] if i < len(model) else "unknown"
-        try:
-            provider_config = get_provider_config(model_spec)
-        except Exception:
-            from olmo_eval.inference.providers.config import ProviderConfig
-
-            provider_config = ProviderConfig(kind="vllm_server", model=model_spec)
-
+        # Build summary with updated provider config
         configured_evals = [
-            ConfiguredExternalEval.from_eval(get_external_eval(e), provider_config, eval_args)
+            ConfiguredExternalEval.from_eval(
+                get_external_eval(e), display_provider_config, eval_args
+            )
             for e in external_evals
         ]
         summary = ExternalEvalSummary(
-            name=job.name,
+            name=job_config.name,
             evals=configured_evals,
-            beaker=job,
+            beaker=job_config,
         )
         summaries.append(summary)
 
