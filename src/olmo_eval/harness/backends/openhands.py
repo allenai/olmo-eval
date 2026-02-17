@@ -113,12 +113,29 @@ class OpenHandsBackend(Backend):
 
         # Configure LLM using the provider
         # OpenHands uses LiteLLM internally, which requires provider prefix
-        # For OpenAI-compatible endpoints (like vLLM), prefix with "openai/"
+        from olmo_eval.inference.providers.litellm import LiteLLMProvider
+
         client = provider.get_openai_client()
+
+        if isinstance(provider, LiteLLMProvider):
+            # LiteLLM provider already has model in correct format (e.g., "anthropic/claude-3")
+            model_name = provider.model_name
+            api_key = client.api_key
+            base_url = str(client.base_url) if client.base_url else None
+        else:
+            # For self-hosted vLLM servers, use hosted_vllm/ prefix
+            # See: https://docs.litellm.ai/docs/providers/vllm
+            model_name = f"hosted_vllm/{provider.model_name}"
+            api_key = client.api_key or "dummy"  # vLLM doesn't require auth
+            base_url = str(client.base_url) if client.base_url else None
+
         llm = LLM(
-            model=f"openai/{provider.model_name}",
-            api_key=client.api_key or "dummy",  # vLLM doesn't require auth
-            base_url=str(client.base_url) if client.base_url else None,
+            model=model_name,
+            api_key=api_key,
+            base_url=base_url,
+            # Disable cost tracking for self-hosted models (not in LiteLLM's pricing DB)
+            input_cost_per_token=0.0,
+            output_cost_per_token=0.0,
         )
 
         # Configure tools - use OpenHands built-in tools
