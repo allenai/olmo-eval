@@ -37,7 +37,7 @@ PYTHON_STANDALONE_URL = (
 )
 
 # Version bump this when changing the Dockerfile to invalidate cached images
-SWEREX_IMAGE_VERSION = "20260217"
+SWEREX_IMAGE_VERSION = "20260217.1"
 
 
 def _get_swerex_image(base_image: str, container_runtime: str = "docker") -> str:
@@ -94,6 +94,8 @@ def _get_swerex_image(base_image: str, container_runtime: str = "docker") -> str
     dockerfile = f"""\
 FROM {base_image}
 USER root
+# Disable apt sandboxing to avoid setgroups/setegid errors in rootless containers
+RUN echo 'APT::Sandbox::User "root";' > /etc/apt/apt.conf.d/99-disable-sandbox
 RUN apt-get update && \\
     apt-get install -y --no-install-recommends curl git ca-certificates && \\
     rm -rf /var/lib/apt/lists/*
