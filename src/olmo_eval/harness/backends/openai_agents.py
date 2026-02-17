@@ -244,12 +244,18 @@ class OpenAIAgentsBackend(Backend):
         session = None
         if enable_compaction:
             try:
+                from agents import SQLiteSession  # type: ignore[import-not-found]
                 from agents.memory import (  # type: ignore[import-not-found]
                     OpenAIResponsesCompactionSession,
                 )
 
                 session_id = (trace_metadata or {}).get("task_id", "default")
-                session = OpenAIResponsesCompactionSession(session_id=session_id)
+                # Use an in-memory SQLite session as the underlying storage
+                underlying = SQLiteSession(session_id, db_path=":memory:")
+                session = OpenAIResponsesCompactionSession(
+                    session_id=session_id,
+                    underlying_session=underlying,
+                )
                 logger.info(f"Context compaction enabled for session {session_id}")
             except ImportError:
                 logger.warning("Context compaction not available - agents.memory not found")
