@@ -164,11 +164,6 @@ class OpenAIAgentsBackend(Backend):
         # Create model using provider's OpenAI client
         client = provider.get_openai_client()
 
-        # Log client configuration for debugging
-        base_url = getattr(client, "base_url", "unknown")
-        timeout = getattr(client, "timeout", "unknown")
-        logger.info(f"OpenAI client configured: base_url={base_url}, timeout={timeout}")
-
         model = OpenAIChatCompletionsModel(
             openai_client=client,
             model=provider.model_name,

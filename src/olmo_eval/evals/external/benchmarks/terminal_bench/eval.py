@@ -23,6 +23,7 @@ from .verifier import TerminalBenchVerifier
 
 if TYPE_CHECKING:
     from olmo_eval.harness.sandbox import SandboxManager
+    from olmo_eval.inference.base import InferenceProvider
 
 logger = logging.getLogger(__name__)
 
@@ -115,22 +116,18 @@ class TerminalBenchExternalEval(ExternalEval):
 
     async def execute(
         self,
-        provider_url: str,
-        model_name: str,
+        provider: InferenceProvider,
         args: dict[str, Any],
         output_dir: str | None = None,
         container_runtime: str = "podman",
-        provider_kind: str | None = None,
     ) -> ExternalEvalResult:
         """Execute Terminal-Bench evaluation.
 
         Args:
-            provider_url: URL of the inference provider.
-            model_name: Model name to use.
+            provider: Inference provider for LLM calls.
             args: Evaluation-specific arguments.
             output_dir: Directory to write results.
             container_runtime: Container runtime (docker or podman).
-            provider_kind: Type of provider.
 
         Returns:
             ExternalEvalResult with metrics and per-task results.
@@ -160,8 +157,7 @@ class TerminalBenchExternalEval(ExternalEval):
             async with semaphore:
                 return await self._execute_task(
                     task=task,
-                    provider_url=provider_url,
-                    model_name=model_name,
+                    provider=provider,
                     container_runtime=container_runtime,
                     max_turns=tb_args.max_turns,
                     oracle_mode=tb_args.oracle,
@@ -227,7 +223,7 @@ class TerminalBenchExternalEval(ExternalEval):
             success=True,
             metrics=metrics,
             metadata={
-                "model_name": model_name,
+                "model_name": provider.model_name,
                 "oracle_mode": tb_args.oracle,
                 "max_turns": tb_args.max_turns,
                 "repo_ref": tb_args.repo_ref,
@@ -247,8 +243,7 @@ class TerminalBenchExternalEval(ExternalEval):
     async def _execute_task(
         self,
         task: TerminalBenchTask,
-        provider_url: str,
-        model_name: str,
+        provider: InferenceProvider,
         container_runtime: str,
         max_turns: int,
         oracle_mode: bool,
@@ -258,8 +253,7 @@ class TerminalBenchExternalEval(ExternalEval):
 
         Args:
             task: The task to execute.
-            provider_url: Provider URL accessible from sandbox.
-            model_name: Model name to use.
+            provider: Inference provider for LLM calls.
             container_runtime: Container runtime.
             max_turns: Maximum agent turns.
             oracle_mode: Whether to run the solution script instead of agent.
@@ -312,7 +306,7 @@ class TerminalBenchExternalEval(ExternalEval):
                 trajectory, completion_reason = await self._run_oracle(sandbox_manager, task)
             else:
                 trajectory, completion_reason = await self._run_agent(
-                    sandbox_manager, task, provider_url, model_name, max_turns
+                    sandbox_manager, task, provider, max_turns
                 )
 
             agent_duration = time.time() - task_start
@@ -385,8 +379,7 @@ class TerminalBenchExternalEval(ExternalEval):
         self,
         sandbox_manager: SandboxManager,
         task: TerminalBenchTask,
-        provider_url: str,
-        model_name: str,
+        provider: InferenceProvider,
         max_turns: int,
     ) -> tuple[AgentTrajectory, str]:
         """Run the LLM agent.
@@ -394,8 +387,7 @@ class TerminalBenchExternalEval(ExternalEval):
         Args:
             sandbox_manager: The sandbox manager.
             task: The task to run.
-            provider_url: Provider URL.
-            model_name: Model name.
+            provider: Inference provider for LLM calls.
             max_turns: Maximum turns.
 
         Returns:
@@ -404,7 +396,6 @@ class TerminalBenchExternalEval(ExternalEval):
         from olmo_eval.harness.backends.openai_agents import OpenAIAgentsBackend
         from olmo_eval.harness.config import HarnessConfig
         from olmo_eval.harness.tools import get_tools
-        from olmo_eval.inference.providers import VLLMServerProvider
 
         # Get the tools
         tools = get_tools(("execute_bash_session", "submit"))
@@ -415,12 +406,6 @@ class TerminalBenchExternalEval(ExternalEval):
             tools=tools,
             system_prompt=SYSTEM_PROMPT,
             max_turns=max_turns,
-        )
-
-        # Create provider - use VLLMServerProvider in remote mode
-        provider = VLLMServerProvider(
-            model_name=model_name,
-            base_url=provider_url,
         )
 
         # Create backend with our sandbox manager

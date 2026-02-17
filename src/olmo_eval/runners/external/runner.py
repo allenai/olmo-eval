@@ -115,13 +115,21 @@ class ExternalEvalRunner:
 
         try:
             # Run each evaluation
+            # Create provider once for all evals
+            if server_process is not None:
+                # Use the provider we already started
+                provider = server_process
+            else:
+                # Create provider from config with the base_url
+                provider = self.provider_config.with_overrides(base_url=base_url).create_provider()
+
             for eval_name in self.external_eval_names:
                 logger.info(f"Running external evaluation: {eval_name}")
 
                 try:
                     external_eval = get_external_eval(eval_name)
                     result = await external_eval.execute_with_provider(
-                        provider_config=self.provider_config.with_overrides(base_url=base_url),
+                        provider=provider,
                         args=self.eval_args,
                         output_dir=self.output_dir,
                         container_runtime=self.container_runtime,

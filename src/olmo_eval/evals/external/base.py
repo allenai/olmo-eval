@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, cast
 from olmo_eval.evals.external.result import ExternalEvalResult
 
 if TYPE_CHECKING:
+    from olmo_eval.inference.base import InferenceProvider
     from olmo_eval.inference.providers.config import ProviderConfig
 
 logger = logging.getLogger(__name__)
@@ -67,23 +68,18 @@ class ExternalEval(ABC):
     @abstractmethod
     async def execute(
         self,
-        provider_url: str,
-        model_name: str,
+        provider: InferenceProvider,
         args: dict[str, Any],
         output_dir: str | None = None,
         container_runtime: str = "podman",
-        provider_kind: str | None = None,
     ) -> ExternalEvalResult:
         """Execute the external evaluation.
 
         Args:
-            provider_url: URL of the inference provider.
-            model_name: Name/identifier of the model being evaluated.
+            provider: Inference provider for LLM calls.
             args: Evaluation-specific arguments (e.g., domain, num_trials).
             output_dir: Optional directory to write results.
             container_runtime: Container runtime to use (docker or podman).
-            provider_kind: Type of provider (e.g., "vllm_server", "litellm").
-                Used to determine if local server setup is needed.
 
         Returns:
             Result of the evaluation.
@@ -92,22 +88,34 @@ class ExternalEval(ABC):
 
     async def execute_with_provider(
         self,
-        provider_config: ProviderConfig,
-        args: dict[str, Any],
+        provider: InferenceProvider | None = None,
+        provider_config: ProviderConfig | None = None,
+        args: dict[str, Any] | None = None,
         output_dir: str | None = None,
         container_runtime: str = "podman",
     ) -> ExternalEvalResult:
-        """Execute the evaluation using a provider configuration."""
-        # Pass the original URL - sandbox will discover gateway dynamically
-        base_url = provider_config.base_url or "http://localhost:8000"
+        """Execute the evaluation using a provider or provider configuration.
+
+        Args:
+            provider: Inference provider instance (preferred).
+            provider_config: Provider configuration to create a provider from.
+            args: Evaluation-specific arguments.
+            output_dir: Optional directory to write results.
+            container_runtime: Container runtime to use.
+
+        Returns:
+            Result of the evaluation.
+        """
+        if provider is None:
+            if provider_config is None:
+                raise ValueError("Either provider or provider_config must be provided")
+            provider = provider_config.create_provider()
 
         return await self.execute(
-            provider_url=base_url,
-            model_name=provider_config.model,
-            args=args,
+            provider=provider,
+            args=args or {},
             output_dir=output_dir,
             container_runtime=container_runtime,
-            provider_kind=provider_config.kind,
         )
 
     def _build_env_vars(self, secrets: tuple[str, ...] | None = None) -> dict[str, str]:
