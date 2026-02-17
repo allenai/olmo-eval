@@ -79,13 +79,9 @@ class TerminalBenchLoader:
             List of TerminalBenchTask instances.
         """
         tasks = []
-        tasks_dir = repo_dir / "tasks"
 
-        if not tasks_dir.exists():
-            logger.warning(f"Tasks directory not found at {tasks_dir}")
-            return tasks
-
-        for task_dir in sorted(tasks_dir.iterdir()):
+        # Tasks are at the repo root (each directory with task.toml is a task)
+        for task_dir in sorted(repo_dir.iterdir()):
             if not task_dir.is_dir():
                 continue
             if not (task_dir / "task.toml").exists():
@@ -100,7 +96,7 @@ class TerminalBenchLoader:
             except Exception as e:
                 logger.warning(f"Failed to load task {task_dir.name}: {e}")
 
-        logger.info(f"Loaded {len(tasks)} tasks from {tasks_dir}")
+        logger.info(f"Loaded {len(tasks)} tasks from {repo_dir}")
         return tasks
 
     def _load_task(self, task_dir: Path) -> TerminalBenchTask:
