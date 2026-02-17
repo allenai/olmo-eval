@@ -16,6 +16,7 @@ class TerminalBenchLoader:
     """Loads Terminal-Bench tasks from a git repository."""
 
     REPO_URL = "https://github.com/laude-institute/terminal-bench-2.git"
+    DEFAULT_REF = "f5b891cb4f7c20e306f9d05887628b43af740f43"
 
     def ensure_repo(self, target_dir: Path, ref: str = "main") -> Path:
         """Clone or update the Terminal-Bench repository.

@@ -44,7 +44,7 @@ class TerminalBenchArgs:
 
     task_ids: list[str] | None = None
     repo_path: str | None = None
-    repo_ref: str = "main"
+    repo_ref: str = TerminalBenchLoader.DEFAULT_REF
     max_concurrency: int = 1
     max_turns: int = 50
     oracle: bool = False
@@ -58,7 +58,7 @@ class TerminalBenchArgs:
         return cls(
             task_ids=task_ids,
             repo_path=data.get("repo_path"),
-            repo_ref=data.get("repo_ref", "main"),
+            repo_ref=data.get("repo_ref", TerminalBenchLoader.DEFAULT_REF),
             max_concurrency=int(data.get("max_concurrency", 1)),
             max_turns=int(data.get("max_turns", 50)),
             oracle=data.get("oracle", False) in (True, "true", "True", "1"),
@@ -102,7 +102,7 @@ class TerminalBenchExternalEval(ExternalEval):
         return {
             "task_ids": ("Comma-separated task IDs to run (default: all)", None),
             "repo_path": ("Local repo path (default: clone fresh)", None),
-            "repo_ref": ("Git ref to checkout", "main"),
+            "repo_ref": ("Git ref to checkout", TerminalBenchLoader.DEFAULT_REF),
             "max_concurrency": ("Max parallel containers", 1),
             "max_turns": ("Max agent turns per task", 50),
             "oracle": ("Run solve.sh instead of LLM agent", False),
