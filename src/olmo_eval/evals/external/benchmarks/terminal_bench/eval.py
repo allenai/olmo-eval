@@ -434,6 +434,7 @@ class TerminalBenchExternalEval(ExternalEval):
         )
 
         # Run agent
+        logger.info(f"Starting agent loop for task {task.task_id} (max_turns={max_turns})")
         harness_result = await backend.run(
             provider,
             harness_config,
@@ -442,6 +443,7 @@ class TerminalBenchExternalEval(ExternalEval):
         )
 
         completion_reason = "max_turns" if harness_result.max_turns_reached else "complete"
+        logger.info(f"Agent completed task {task.task_id}: {completion_reason}")
         trajectory = harness_result.trajectory or AgentTrajectory(turns=())
         return trajectory, completion_reason
 
