@@ -84,6 +84,7 @@ class SandboxExecutor:
         self._deployment: Any = None
         self._runtime: Any = None
         self._session_created: bool = False
+        self._session_lock: asyncio.Lock = asyncio.Lock()
 
     def _log(self, level: int, msg: str) -> None:
         """Log a message with optional name prefix."""
@@ -588,10 +589,16 @@ class SandboxExecutor:
         """Create the session if it doesn't exist."""
         if self._session_created:
             return
-        from swerex.runtime.abstract import CreateBashSessionRequest
 
-        await self._runtime.create_session(CreateBashSessionRequest(session="default"))
-        self._session_created = True
+        async with self._session_lock:
+            # Double-check after acquiring lock
+            if self._session_created:
+                return
+
+            from swerex.runtime.abstract import CreateBashSessionRequest
+
+            await self._runtime.create_session(CreateBashSessionRequest(session="default"))
+            self._session_created = True
 
     async def execute_in_session(
         self,
