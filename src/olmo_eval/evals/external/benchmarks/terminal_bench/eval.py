@@ -281,18 +281,19 @@ class TerminalBenchExternalEval(ExternalEval):
             docker_args = tuple(get_docker_network_args(runtime))
 
         # Terminal-Bench images may not have Python or have externally-managed Python (PEP 668).
-        # Use uv to install Python and swe-rex in a venv, then run swerex-remote from there.
-        # uv is a single binary that can bootstrap Python without needing Python pre-installed.
+        # Use python-build-standalone pre-compiled binaries - fast extraction, no compilation.
+        # This is faster than uv since it's a single ~25MB download with no installer overhead.
+        python_url = (
+            "https://github.com/indygreg/python-build-standalone/releases/download/"
+            "20240107/cpython-3.11.7+20240107-x86_64-unknown-linux-gnu-install_only.tar.gz"
+        )
         exec_shell = (
             "/bin/sh",
             "-c",
             "if ! command -v swerex-remote >/dev/null 2>&1; then "
-            "  curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1 && "
-            '  export PATH="$HOME/.local/bin:$PATH" && '
-            "  uv python install 3.11 >/dev/null 2>&1 && "
-            "  uv venv /root/.swerex-venv >/dev/null 2>&1 && "
-            "  uv pip install --python /root/.swerex-venv/bin/python swe-rex >/dev/null 2>&1 && "
-            '  export PATH="/root/.swerex-venv/bin:$PATH"; '
+            f"  curl -LsSf {python_url} | tar xz -C /root && "
+            "  /root/python/bin/pip install --no-cache-dir swe-rex >/dev/null 2>&1 && "
+            '  export PATH="/root/python/bin:$PATH"; '
             "fi; "
             'exec /bin/sh -c "$@"',
             "--",
