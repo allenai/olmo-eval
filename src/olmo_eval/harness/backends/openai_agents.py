@@ -339,11 +339,27 @@ class OpenAIAgentsBackend(Backend):
         """
         turns: list[AgentTurn] = []
 
-        if not hasattr(result, "new_items"):
+        # Get items from new_items (primary source in agents SDK)
+        items = getattr(result, "new_items", None) or []
+        if items:
+            logger.info(f"Converting trajectory with {len(items)} items")
+        else:
+            # Log available attributes for debugging
+            attrs = [a for a in dir(result) if not a.startswith("_")]
+            logger.warning(f"No items in result.new_items. Available attributes: {attrs}")
+            # Try to_input_list() as fallback
+            if hasattr(result, "to_input_list"):
+                try:
+                    input_list = result.to_input_list()
+                    logger.info(f"Using to_input_list() with {len(input_list)} items")
+                    return self._convert_input_list_to_trajectory(input_list)
+                except Exception as e:
+                    logger.warning(f"to_input_list() failed: {e}")
             return AgentTrajectory(turns=tuple(turns))
 
-        for item in result.new_items:
+        for item in items:
             item_class = type(item).__name__
+            logger.debug(f"Processing item: {item_class}")
 
             if item_class == "MessageOutputItem":
                 raw = getattr(item, "raw_item", None)
@@ -354,16 +370,20 @@ class OpenAIAgentsBackend(Backend):
                         for part in raw_content:
                             if hasattr(part, "text"):
                                 content += part.text
-                turns.append(AgentTurn.assistant(content=content))
+                if content:
+                    turns.append(AgentTurn.assistant(content=content))
 
             elif item_class == "ToolCallItem":
                 raw = getattr(item, "raw_item", None)
                 if raw is not None:
+                    call_id = getattr(raw, "call_id", "") or getattr(raw, "id", "") or ""
+                    name = getattr(raw, "name", "") or ""
+                    arguments = getattr(raw, "arguments", "{}") or "{}"
                     raw_dict = raw.model_dump() if hasattr(raw, "model_dump") else {}
                     tool_call = ToolCall.create(
-                        call_id=raw.call_id,
-                        name=raw.name,
-                        arguments=raw.arguments or "{}",
+                        call_id=call_id,
+                        name=name,
+                        arguments=arguments,
                         metadata=raw_dict,
                     )
                     turns.append(AgentTurn.assistant(content="", tool_calls=[tool_call]))
@@ -371,14 +391,112 @@ class OpenAIAgentsBackend(Backend):
             elif item_class == "ToolCallOutputItem":
                 output = getattr(item, "output", None)
                 raw = getattr(item, "raw_item", None)
-                raw_dict = dict(raw) if isinstance(raw, dict) else {}
-                tool_call_id = raw_dict.get("call_id", "")
+                # Extract tool_call_id from raw_item
+                tool_call_id = ""
+                if raw is not None:
+                    tool_call_id = getattr(raw, "call_id", "") or getattr(raw, "id", "") or ""
                 content = str(output) if output is not None else ""
                 tool_result = ToolResult(
                     tool_call_id=tool_call_id,
                     content=content,
-                    metadata=raw_dict,
                 )
                 turns.append(AgentTurn.tool([tool_result]))
 
+        logger.debug(f"Converted {len(turns)} turns from trajectory")
+        return AgentTrajectory(turns=tuple(turns))
+
+    def _extract_items_from_raw_responses(self, raw_responses: list[Any]) -> list[Any]:
+        """Extract trajectory items from raw API responses.
+
+        Args:
+            raw_responses: List of raw API response objects.
+
+        Returns:
+            List of items that can be processed by _convert_trajectory.
+        """
+        items = []
+        for response in raw_responses:
+            # Handle different response formats
+            if hasattr(response, "output"):
+                # Response with output list
+                for output_item in response.output:
+                    items.append(output_item)
+            elif hasattr(response, "choices"):
+                # Standard OpenAI chat completion format
+                for choice in response.choices:
+                    if hasattr(choice, "message"):
+                        items.append(choice.message)
+        return items
+
+    def _convert_input_list_to_trajectory(self, input_list: list[Any]) -> AgentTrajectory:
+        """Convert input list (from to_input_list()) to AgentTrajectory.
+
+        This is a fallback for when new_items is empty but we have the full
+        conversation history available via to_input_list().
+
+        Args:
+            input_list: List of input items from result.to_input_list().
+
+        Returns:
+            AgentTrajectory with converted turns.
+        """
+        turns: list[AgentTurn] = []
+
+        for item in input_list:
+            # Items can be dicts or objects
+            if isinstance(item, dict):
+                role = item.get("role", "")
+                content = item.get("content", "")
+                tool_calls = item.get("tool_calls", [])
+
+                if role == "assistant":
+                    if tool_calls:
+                        converted_calls = []
+                        for tc in tool_calls:
+                            if isinstance(tc, dict):
+                                call_id = tc.get("id", "")
+                                func = tc.get("function", {})
+                                is_dict = isinstance(func, dict)
+                                name = func.get("name", "") if is_dict else ""
+                                args = func.get("arguments", "{}") if is_dict else "{}"
+                            else:
+                                call_id = getattr(tc, "id", "")
+                                func = getattr(tc, "function", None)
+                                name = getattr(func, "name", "") if func else ""
+                                args = getattr(func, "arguments", "{}") if func else "{}"
+                            converted_calls.append(
+                                ToolCall.create(call_id=call_id, name=name, arguments=args)
+                            )
+                        turns.append(
+                            AgentTurn.assistant(content=content, tool_calls=converted_calls)
+                        )
+                    elif content:
+                        turns.append(AgentTurn.assistant(content=content))
+
+                elif role == "tool":
+                    tool_call_id = item.get("tool_call_id", "")
+                    tool_result = ToolResult(tool_call_id=tool_call_id, content=content)
+                    turns.append(AgentTurn.tool([tool_result]))
+
+                elif role == "user":
+                    turns.append(AgentTurn.user(content=content))
+            else:
+                # Handle object-based items
+                item_type = type(item).__name__
+                role = getattr(item, "role", None) or getattr(item, "type", "")
+
+                is_assistant = item_type in ("ResponseOutputMessage", "MessageOutputItem")
+                if is_assistant or role == "assistant":
+                    content = ""
+                    raw_content = getattr(item, "content", None)
+                    if isinstance(raw_content, str):
+                        content = raw_content
+                    elif raw_content:
+                        for part in raw_content:
+                            if hasattr(part, "text"):
+                                content += part.text
+                    if content:
+                        turns.append(AgentTurn.assistant(content=content))
+
+        logger.info(f"Converted {len(turns)} turns from input_list")
         return AgentTrajectory(turns=tuple(turns))

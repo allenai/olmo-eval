@@ -530,6 +530,7 @@ class TerminalBenchExternalEval(ExternalEval):
 
         # Run agent
         run_config = {
+            "backend": backend.name,
             "task_id": task.task_id,
             "max_turns": max_turns,
             "enable_compaction": enable_compaction,
