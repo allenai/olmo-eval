@@ -420,6 +420,11 @@ class BeakerJobConfig:
     # Run setup_store_secrets during install to configure database access
     setup_store_secrets: bool = False
 
+    # Install vLLM in separate venv (for server mode to avoid dependency conflicts)
+    # When True, vLLM is installed in /opt/vllm-venv and VLLM_PYTHON points to it.
+    # Use this for external evals that run vLLM as a server subprocess.
+    vllm_separate_venv: bool = False
+
 
 def resolve_clusters(cluster: str | list[str]) -> list[str]:
     """Resolve cluster aliases to full cluster names.
@@ -556,6 +561,7 @@ class BeakerLauncher:
         setup_registry_mirror: bool = False,
         enable_sandbox: bool = False,
         setup_store_secrets: bool = False,
+        vllm_separate_venv: bool = False,
     ) -> str:
         """Build installation command for gantry's install_cmd parameter.
 
@@ -563,6 +569,11 @@ class BeakerLauncher:
         1. Install olmo-eval from the cloned source with optional extras
         2. Optionally install a custom provider package to override the default
         3. Optionally install task-specific dependencies
+
+        When vllm_separate_venv is True, vLLM is installed in a separate venv
+        (/opt/vllm-venv) to avoid dependency conflicts. The vLLM server runs as
+        a subprocess using VLLM_PYTHON env var, while the main app uses /opt/venv.
+        Use this for server mode (external evals), not for batch mode (regular evals).
 
         Args:
             extras: Optional dependency group names from pyproject.toml.
@@ -572,10 +583,14 @@ class BeakerLauncher:
             setup_registry_mirror: If True, run setup_dockerio_mirror script with MIRROR_HOSTS.
             enable_sandbox: If True, set up /dev/net/tun for pasta networking.
             setup_store_secrets: If True, run setup_store_secrets to configure database access.
+            vllm_separate_venv: If True, install vLLM in separate venv for server mode.
 
         Returns:
             Shell command string for installation.
         """
+        has_vllm = "vllm" in extras
+        use_separate_vllm_venv = has_vllm and vllm_separate_venv
+
         # Build the install steps
         # Export UV_PROJECT_ENVIRONMENT so all uv commands use Docker's /opt/venv
         steps = ["export UV_PROJECT_ENVIRONMENT=/opt/venv"]
@@ -598,12 +613,24 @@ class BeakerLauncher:
             for key, value in env_exports.items():
                 steps.append(f"export {key}={value}")
 
-        # Install olmo-eval from gantry-cloned source with optional extras
         # Generate constraints from pre-installed CUDA packages to prevent uv from changing them
         constraints = "/tmp/cuda-constraints.txt"
         steps.append(f"uv pip freeze -q | grep -E '^(torch|nvidia-)' > {constraints}")
-        if extras:
-            extras_str = ",".join(extras)
+
+        # Install vLLM in separate venv when requested (for server mode)
+        if use_separate_vllm_venv:
+            vllm_venv = "/opt/vllm-venv"
+            steps.append(f"uv venv {vllm_venv}")
+            steps.append(
+                f"VIRTUAL_ENV={vllm_venv} uv pip install 'vllm[runai]==0.13.0' -c {constraints}"
+            )
+            # Set VLLM_PYTHON so VLLMServerProcess uses the separate venv
+            steps.append(f"export VLLM_PYTHON={vllm_venv}/bin/python")
+
+        # Install main package (without vllm extra since it's in separate venv)
+        main_extras = [e for e in extras if e != "vllm"]
+        if main_extras:
+            extras_str = ",".join(main_extras)
             install_cmd = f"uv pip install -e '.[{extras_str}]' -c {constraints}"
             steps.append(f"cd /gantry-runtime && {install_cmd}")
         else:
@@ -655,6 +682,7 @@ class BeakerLauncher:
             config.setup_registry_mirror,
             config.enable_sandbox,
             config.setup_store_secrets,
+            config.vllm_separate_venv,
         )
 
         # Build weka mounts as tuples: (bucket, mount_path)

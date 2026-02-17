@@ -152,6 +152,18 @@ def _infer_tool_call_parser(model_name: str) -> str:
         return "hermes"
 
 
+def _get_vllm_python() -> str:
+    """Get the Python interpreter to use for vLLM server.
+
+    Checks VLLM_PYTHON env var first (for separate venv setups),
+    falls back to current interpreter.
+
+    Returns:
+        Path to Python interpreter.
+    """
+    return os.environ.get("VLLM_PYTHON", sys.executable)
+
+
 def _build_server_command(
     model_name: str,
     port: int,
@@ -188,8 +200,11 @@ def _build_server_command(
     """
     import json
 
+    # Use VLLM_PYTHON env var if set (for separate venv setups)
+    python_executable = _get_vllm_python()
+
     cmd = [
-        sys.executable,
+        python_executable,
         "-m",
         "vllm.entrypoints.openai.api_server",
         "--model",

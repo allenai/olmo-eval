@@ -18,6 +18,25 @@ if TYPE_CHECKING:
     from olmo_eval.launch import BeakerJobConfig
 
 
+def get_provider_kind(model_spec: str, default_kind: str | None = None) -> str | None:
+    """Get the provider kind for a model.
+
+    Args:
+        model_spec: Model name or path.
+        default_kind: Default provider kind if model is not a preset.
+
+    Returns:
+        Provider kind string (e.g., "vllm", "vllm_server", "litellm") or None.
+    """
+    from olmo_eval.common.configs import get_provider_config
+
+    try:
+        provider_config = get_provider_config(model_spec)
+        return provider_config.kind
+    except Exception:
+        return default_kind
+
+
 def get_provider_extras(model_spec: str, default_kind: str | None = None) -> list[str]:
     """Get the pip extras required for a model's provider.
 
@@ -28,14 +47,9 @@ def get_provider_extras(model_spec: str, default_kind: str | None = None) -> lis
     Returns:
         List of pip extras needed for the provider.
     """
-    from olmo_eval.common.configs import get_provider_config
     from olmo_eval.common.constants.infrastructure import BACKEND_OPTIONAL_GROUPS
 
-    try:
-        provider_config = get_provider_config(model_spec)
-        provider_kind = provider_config.kind
-    except Exception:
-        provider_kind = default_kind
+    provider_kind = get_provider_kind(model_spec, default_kind)
 
     if provider_kind:
         provider_extra = BACKEND_OPTIONAL_GROUPS.get(provider_kind)
@@ -237,6 +251,10 @@ def assemble_external_eval_job(
             if eval_instance.backend and eval_instance.backend not in backend_names:
                 backend_names.append(eval_instance.backend)
 
+    # Determine provider kind and whether to use separate venv for vLLM
+    provider_kind = get_provider_kind(model, default_kind="vllm_server")
+    vllm_separate_venv = provider_kind == "vllm_server"
+
     # Collect extras from all backends
     extras: list[str] = collect_install_extras(
         store=store,
@@ -270,6 +288,7 @@ def assemble_external_eval_job(
         setup_registry_mirror=setup_registry_mirror,
         setup_store_secrets=store,
         extras=extras,
+        vllm_separate_venv=vllm_separate_venv,
     )
 
 
@@ -317,6 +336,10 @@ class JobConfigAssembler:
             preset = get_harness_preset(self.config.harness)
             backend_name = preset.backend
             sandbox_enabled = bool(preset.sandboxes)
+
+        # Determine provider kind and whether to use separate venv for vLLM
+        provider_kind = get_provider_kind(exp.model_spec)
+        vllm_separate_venv = provider_kind == "vllm_server"
 
         install_extras = collect_install_extras(
             store=self.config.store,
@@ -413,6 +436,7 @@ class JobConfigAssembler:
             enable_sandbox=self.enable_sandbox,
             setup_registry_mirror=setup_registry_mirror,
             setup_store_secrets=self.config.store,
+            vllm_separate_venv=vllm_separate_venv,
         )
 
     def _extract_task_dependencies(
