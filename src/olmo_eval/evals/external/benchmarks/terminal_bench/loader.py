@@ -90,7 +90,8 @@ class TerminalBenchLoader:
             except Exception as e:
                 logger.warning(f"Failed to load task {task_dir.name}: {e}")
 
-        logger.info(f"Loaded {len(tasks)} tasks from {repo_dir}")
+        task_ids = [t.task_id for t in tasks]
+        logger.info(f"Loaded {len(tasks)} tasks: {task_ids}")
         return tasks
 
     def _load_task(self, task_dir: Path) -> TerminalBenchTask:

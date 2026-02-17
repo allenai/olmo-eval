@@ -153,8 +153,6 @@ class TerminalBenchExternalEval(ExternalEval):
                 "No tasks found", start_time, f"repo_dir={repo_dir}, task_ids={tb_args.task_ids}"
             )
 
-        logger.info(f"Loaded {len(tasks)} tasks")
-
         # Execute tasks with concurrency limit
         semaphore = asyncio.Semaphore(tb_args.max_concurrency)
 

@@ -151,9 +151,13 @@ class OpenAIAgentsBackend(Backend):
             Agent,
             OpenAIChatCompletionsModel,
             function_tool,
+            set_tracing_disabled,
         )
 
         from olmo_eval.inference.utils import patch_openai_agents_for_vllm
+
+        # Disable trace export to OpenAI's backend (we don't have OPENAI_API_KEY set)
+        set_tracing_disabled(True)
 
         patch_openai_agents_for_vllm()
 
