@@ -109,6 +109,10 @@ class TerminalBenchExternalEval(ExternalEval):
             "sandbox_mode": ("Sandbox mode: docker, modal (default: docker)", "docker"),
         }
 
+    @property
+    def backend(self) -> str | None:
+        return "openai_agents"
+
     async def execute(
         self,
         provider_url: str,

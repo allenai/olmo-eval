@@ -43,6 +43,45 @@ def get_provider_extras(model_spec: str, default_kind: str | None = None) -> lis
     return []
 
 
+def collect_install_extras(
+    *,
+    store: bool = False,
+    sandbox: bool = False,
+    backend_name: str | None = None,
+    provider_extras: list[str] | None = None,
+) -> list[str]:
+    """Collect pip extras needed for a job.
+
+    Args:
+        store: Whether storage is enabled.
+        sandbox: Whether sandbox is enabled.
+        backend_name: Harness backend name (e.g., "openai_agents").
+        provider_extras: Provider-specific extras.
+
+    Returns:
+        List of pip extras to install.
+    """
+    extras: list[str] = []
+
+    if store:
+        extras.append("storage")
+    if sandbox:
+        extras.append("sandbox")
+
+    if backend_name:
+        from olmo_eval.harness import get_backend_extras
+
+        for extra in get_backend_extras(backend_name):
+            if extra not in extras:
+                extras.append(extra)
+
+    for extra in provider_extras or []:
+        if extra not in extras:
+            extras.append(extra)
+
+    return extras
+
+
 def assemble_external_eval_job(
     name: str,
     model: str,
@@ -177,13 +216,25 @@ def assemble_external_eval_job(
 
         env_vars.update(get_store_env_defaults())
 
-    extras = ["sandbox"]
-    if store:
-        extras.append("postgres")
-    provider_extras = get_provider_extras(model, default_kind="vllm_server")
-    for extra in provider_extras:
-        if extra not in extras:
-            extras.append(extra)
+    # Collect backend names from external evals
+    from olmo_eval.evals.external.registry import get_external_eval
+
+    backend_names: list[str] = []
+    for eval_name in external_evals:
+        eval_instance = get_external_eval(eval_name)
+        if eval_instance.backend and eval_instance.backend not in backend_names:
+            backend_names.append(eval_instance.backend)
+
+    # Collect extras from all backends
+    extras: list[str] = collect_install_extras(
+        store=store,
+        sandbox=True,
+        provider_extras=get_provider_extras(model, default_kind="vllm_server"),
+    )
+    for backend_name in backend_names:
+        for extra in collect_install_extras(backend_name=backend_name):
+            if extra not in extras:
+                extras.append(extra)
 
     return BeakerJobConfig(
         name=name,
@@ -245,25 +296,22 @@ class JobConfigAssembler:
 
         command = self._build_command(exp)
 
-        install_extras: list[str] = []
-        if self.config.store:
-            install_extras.append("postgres")
-
+        # Determine backend and sandbox requirements from harness preset
+        backend_name: str | None = None
+        sandbox_enabled = False
         if self.config.harness:
-            from olmo_eval.harness import get_backend_extras, get_harness_preset
+            from olmo_eval.harness import get_harness_preset
 
             preset = get_harness_preset(self.config.harness)
-            if preset.backend:
-                backend_extras = get_backend_extras(preset.backend)
-                install_extras.extend(backend_extras)
-            # Install sandbox extra for any sandbox mode (local, docker, or modal)
-            if preset.sandboxes:
-                install_extras.append("sandbox")
+            backend_name = preset.backend
+            sandbox_enabled = bool(preset.sandboxes)
 
-        # Get provider extras from model preset (takes precedence over harness default)
-        for extra in get_provider_extras(exp.model_spec):
-            if extra not in install_extras:
-                install_extras.append(extra)
+        install_extras = collect_install_extras(
+            store=self.config.store,
+            sandbox=sandbox_enabled,
+            backend_name=backend_name,
+            provider_extras=get_provider_extras(exp.model_spec),
+        )
 
         # Collect env vars that have explicit overrides
         overridden_env_vars = set(self.secret_env_overrides.values())

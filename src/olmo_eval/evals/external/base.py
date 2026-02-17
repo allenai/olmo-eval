@@ -59,6 +59,11 @@ class ExternalEval(ABC):
         """
         return {}
 
+    @property
+    def backend(self) -> str | None:
+        """Backend name used by this evaluation, if any."""
+        return None
+
     @abstractmethod
     async def execute(
         self,
