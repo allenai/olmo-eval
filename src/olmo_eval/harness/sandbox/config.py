@@ -68,6 +68,7 @@ class SandboxConfig:
     required_secrets: tuple[str, ...] = ()
     docker_args: tuple[str, ...] = ()
     log_dir: str | None = None
+    exec_shell: tuple[str, ...] | None = None
 
     @property
     def is_local(self) -> bool:
@@ -108,4 +109,5 @@ class SandboxConfig:
             required_secrets=tuple(data.get("required_secrets", [])),
             docker_args=tuple(data.get("docker_args", [])),
             log_dir=data.get("log_dir"),
+            exec_shell=tuple(data["exec_shell"]) if data.get("exec_shell") else None,
         )

@@ -282,6 +282,17 @@ class TerminalBenchExternalEval(ExternalEval):
         if mode == SandboxMode.DOCKER:
             docker_args = tuple(get_docker_network_args(runtime))
 
+        # Terminal-Bench images use externally-managed Python (PEP 668) and lack python3-venv.
+        # swe-rex tries pipx which needs venv. Use custom exec_shell that pre-installs swe-rex
+        # via pip so swerex-remote is found directly, bypassing the pipx fallback.
+        exec_shell = (
+            "/bin/sh",
+            "-c",
+            "pip install --break-system-packages swe-rex >/dev/null 2>&1 || true; "
+            'exec /bin/sh -c "$@"',
+            "--",
+        )
+
         sandbox_config = SandboxConfig(
             image=task.image,
             mode=mode,
@@ -289,9 +300,7 @@ class TerminalBenchExternalEval(ExternalEval):
             working_dir=task.working_dir,
             command_timeout=task.agent_timeout,
             docker_args=docker_args,
-            # Terminal-Bench images use externally-managed Python environments (PEP 668)
-            # This env var allows pip to install swerex-remote in the container
-            environment=(("PIP_BREAK_SYSTEM_PACKAGES", "1"),),
+            exec_shell=exec_shell,
         )
 
         # Create sandbox manager for this task
