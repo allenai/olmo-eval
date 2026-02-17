@@ -221,14 +221,20 @@ class SandboxExecutor:
                 for key, value in self.config.environment:
                     docker_args.extend(["-e", f"{key}={value}"])
 
-                return DockerDeployment(
-                    image=self.config.image,
-                    container_runtime=self.config.container_runtime,
-                    startup_timeout=self.config.startup_timeout,
-                    docker_args=docker_args or None,
-                    exec_shell=list(self.config.exec_shell) if self.config.exec_shell else None,
-                    python_standalone_dir=self.config.python_standalone_dir,
-                )
+                # Build kwargs, omitting None values (swerex doesn't accept None for some fields)
+                deployment_kwargs: dict[str, Any] = {
+                    "image": self.config.image,
+                    "container_runtime": self.config.container_runtime,
+                    "startup_timeout": self.config.startup_timeout,
+                }
+                if docker_args:
+                    deployment_kwargs["docker_args"] = docker_args
+                if self.config.exec_shell:
+                    deployment_kwargs["exec_shell"] = list(self.config.exec_shell)
+                if self.config.python_standalone_dir:
+                    deployment_kwargs["python_standalone_dir"] = self.config.python_standalone_dir
+
+                return DockerDeployment(**deployment_kwargs)
 
             case SandboxMode.LOCAL:
                 try:
