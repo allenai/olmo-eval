@@ -256,7 +256,6 @@ class OpenAIAgentsBackend(Backend):
                     session_id=session_id,
                     underlying_session=underlying,
                 )
-                logger.info(f"Context compaction enabled for session {session_id}")
             except ImportError:
                 logger.warning("Context compaction not available - agents.memory not found")
 
