@@ -227,6 +227,7 @@ class SandboxExecutor:
                     startup_timeout=self.config.startup_timeout,
                     docker_args=docker_args or None,
                     exec_shell=list(self.config.exec_shell) if self.config.exec_shell else None,
+                    python_standalone_dir=self.config.python_standalone_dir,
                 )
 
             case SandboxMode.LOCAL:
