@@ -307,7 +307,17 @@ def run_external(
     for name, result in results.items():
         if result.success:
             status = "[green]Success[/green]"
-            metrics = ", ".join(f"{k}={v:.4f}" for k, v in result.metrics.items())
+            # Format metrics vertically, one per line
+            metrics_lines = []
+            for k, v in result.metrics.items():
+                if isinstance(v, float):
+                    if v == int(v):
+                        metrics_lines.append(f"{k}: [bold]{int(v)}[/bold]")
+                    else:
+                        metrics_lines.append(f"{k}: [bold]{v:.4f}[/bold]")
+                else:
+                    metrics_lines.append(f"{k}: [bold]{v}[/bold]")
+            metrics = "\n".join(metrics_lines)
         else:
             status = "[red]Failed[/red]"
             metrics = result.error or "Unknown error"
