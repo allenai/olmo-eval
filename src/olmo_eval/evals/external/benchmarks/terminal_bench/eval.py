@@ -581,19 +581,19 @@ class TerminalBenchExternalEval(ExternalEval):
 
         results_file = output_path / f"{self.name}_tasks.json"
         data = []
-        for r in task_results:
-            output = r.verification_output[:10000] if r.verification_output else ""
+        for result in task_results:
+            output = result.verification_output[:10000] if result.verification_output else ""
             data.append(
                 {
-                    "task_id": r.task_id,
-                    "reward": r.reward,
-                    "completion_reason": r.completion_reason,
-                    "agent_duration": r.agent_duration,
-                    "verification_exit_code": r.verification_exit_code,
+                    "task_id": result.task_id,
+                    "reward": result.reward,
+                    "completion_reason": result.completion_reason,
+                    "agent_duration": result.agent_duration,
+                    "verification_exit_code": result.verification_exit_code,
                     "verification_output": output,
-                    "difficulty": r.difficulty,
-                    "category": r.category,
-                    "error": r.error,
+                    "difficulty": result.difficulty,
+                    "category": result.category,
+                    "error": result.error,
                 }
             )
 
@@ -604,21 +604,21 @@ class TerminalBenchExternalEval(ExternalEval):
         traces_dir = output_path / "traces"
         traces_dir.mkdir(parents=True, exist_ok=True)
 
-        for r in task_results:
-            if not r.trajectory:
+        for result in task_results:
+            if not result.trajectory:
                 continue
 
-            sanitized_id = re.sub(r"[^\w\-]", "_", r.task_id)
+            sanitized_id = re.sub(r"[^\w\-]", "_", result.task_id)
             sanitized_id = re.sub(r"_+", "_", sanitized_id).strip("_").lower()
 
-            hash_input = f"{self.name}:{r.task_id}"
+            hash_input = f"{self.name}:{result.task_id}"
             short_hash = hashlib.sha256(hash_input.encode()).hexdigest()[:6]
 
             trace_file = traces_dir / f"{self.name}_{sanitized_id}_{short_hash}.jsonl"
 
             trajectory_data = {
-                "task_id": r.task_id,
-                "trajectory": r.trajectory.to_dict(),
+                "task_id": result.task_id,
+                "trajectory": result.trajectory.to_dict(),
             }
             with open(trace_file, "w") as f:
                 f.write(json.dumps(trajectory_data) + "\n")

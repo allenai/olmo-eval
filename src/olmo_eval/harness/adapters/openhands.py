@@ -263,9 +263,6 @@ class SweRexTerminalTool(ToolDefinition[TerminalAction, TerminalObservation]):
     SWE-ReX managed container environment.
     """
 
-    name: str = "terminal"
-    description: str = TOOL_DESCRIPTION
-
     def __init__(
         self,
         executor: SweRexTerminalExecutor,
@@ -275,7 +272,12 @@ class SweRexTerminalTool(ToolDefinition[TerminalAction, TerminalObservation]):
         Args:
             executor: The SWE-ReX terminal executor.
         """
-        super().__init__(executor=executor)
+        super().__init__(
+            description=TOOL_DESCRIPTION,
+            action_type=TerminalAction,
+            observation_type=TerminalObservation,
+            executor=executor,
+        )
         self._executor = executor
 
     @classmethod
