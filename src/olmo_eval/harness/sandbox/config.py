@@ -68,7 +68,6 @@ class SandboxConfig:
     required_secrets: tuple[str, ...] = ()
     docker_args: tuple[str, ...] = ()
     log_dir: str | None = None
-    pip_install_args: tuple[str, ...] = ()
 
     @property
     def is_local(self) -> bool:
@@ -109,5 +108,4 @@ class SandboxConfig:
             required_secrets=tuple(data.get("required_secrets", [])),
             docker_args=tuple(data.get("docker_args", [])),
             log_dir=data.get("log_dir"),
-            pip_install_args=tuple(data.get("pip_install_args", [])),
         )

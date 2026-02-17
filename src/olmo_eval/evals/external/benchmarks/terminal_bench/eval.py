@@ -289,8 +289,9 @@ class TerminalBenchExternalEval(ExternalEval):
             working_dir=task.working_dir,
             command_timeout=task.agent_timeout,
             docker_args=docker_args,
-            # Terminal-Bench images use externally-managed Python environments
-            pip_install_args=("--break-system-packages",),
+            # Terminal-Bench images use externally-managed Python environments (PEP 668)
+            # This env var allows pip to install swerex-remote in the container
+            environment=(("PIP_BREAK_SYSTEM_PACKAGES", "1"),),
         )
 
         # Create sandbox manager for this task
