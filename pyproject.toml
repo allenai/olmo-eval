@@ -82,6 +82,17 @@ olmo-eval = "olmo_eval.cli:main"
 
 [tool.uv]
 package = true
+# These extras have incompatible transitive dependencies and cannot be installed together
+conflicts = [
+    [
+        { extra = "agents" },
+        { extra = "openhands" },
+    ],
+    [
+        { extra = "vllm" },
+        { extra = "openhands" },
+    ],
+]
 
 [dependency-groups]
 dev = [
