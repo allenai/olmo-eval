@@ -181,7 +181,7 @@ def validate_backend(name: str) -> None:
     # Maps backend name -> (import_module, display_name, extra_name)
     backend_checks = {
         "openai_agents": ("agents", "OpenAI Agents SDK", "agents"),
-        "openhands": ("openhands_ai", "OpenHands SDK", "openhands"),
+        "openhands": ("openhands", "OpenHands SDK", "openhands"),
     }
 
     if name in backend_checks:

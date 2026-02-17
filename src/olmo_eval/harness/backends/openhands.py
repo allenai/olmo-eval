@@ -76,12 +76,12 @@ class OpenHandsBackend(Backend):
             HarnessResult with trajectory from SDK execution.
         """
         try:
-            from openhands_ai import (  # type: ignore[import-not-found]
+            from openhands import (  # type: ignore[import-not-found]
                 LLM,
                 Agent,
                 Conversation,
             )
-            from openhands_ai.tools import (  # type: ignore[import-not-found]
+            from openhands.tools import (  # type: ignore[import-not-found]
                 FileEditorTool,
                 TerminalTool,
             )
@@ -143,7 +143,7 @@ class OpenHandsBackend(Backend):
         has_stream = hasattr(conversation, "event_stream")
         has_subscribe = has_stream and hasattr(conversation.event_stream, "subscribe")
         if has_subscribe:
-            from openhands_ai.events import EventStreamSubscriber  # type: ignore[import-not-found]
+            from openhands.events import EventStreamSubscriber  # type: ignore[import-not-found]
 
             conversation.event_stream.subscribe(EventStreamSubscriber.MAIN, on_event)
 
