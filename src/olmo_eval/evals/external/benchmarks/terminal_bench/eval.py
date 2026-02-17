@@ -139,11 +139,8 @@ class TerminalBenchExternalEval(ExternalEval):
         if tb_args.repo_path:
             repo_dir = Path(tb_args.repo_path)
         else:
-            # Clone to a temp directory under output_dir or /tmp
-            if output_dir:
-                repo_dir = Path(output_dir) / "terminal-bench-2"
-            else:
-                repo_dir = Path("/tmp") / "terminal-bench-2"
+            # Clone to a cache directory (not output_dir to avoid copying repo to results)
+            repo_dir = Path("/tmp") / "terminal-bench-2-cache"
             loader.ensure_repo(repo_dir, tb_args.repo_ref)
 
         tasks = loader.load_tasks(repo_dir, tb_args.task_ids)
@@ -292,6 +289,8 @@ class TerminalBenchExternalEval(ExternalEval):
             working_dir=task.working_dir,
             command_timeout=task.agent_timeout,
             docker_args=docker_args,
+            # Terminal-Bench images use externally-managed Python environments
+            pip_install_args=("--break-system-packages",),
         )
 
         # Create sandbox manager for this task

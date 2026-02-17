@@ -225,6 +225,7 @@ class SandboxExecutor:
                     container_runtime=self.config.container_runtime,
                     startup_timeout=self.config.startup_timeout,
                     docker_args=docker_args or None,
+                    pip_install_args=list(self.config.pip_install_args) or None,
                 )
 
             case SandboxMode.LOCAL:
