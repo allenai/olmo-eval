@@ -318,16 +318,7 @@ class OpenAIAgentsBackend(Backend):
                 raise
 
         # Convert result to HarnessResult
-        # Log result details for debugging empty trajectories
-        new_items = getattr(result, "new_items", None)
-        new_items_count = len(new_items) if new_items else 0
-        result_attrs = [a for a in dir(result) if not a.startswith("_")]
-        logger.info(
-            f"Runner.run completed. Result type: {type(result).__name__}, "
-            f"new_items count: {new_items_count}, attrs: {result_attrs}"
-        )
         trajectory = self._convert_trajectory(result)
-        logger.info(f"Trajectory converted: {len(trajectory.turns)} turns")
         final_text = result.final_output if hasattr(result, "final_output") else ""
 
         return HarnessResult(
@@ -350,39 +341,19 @@ class OpenAIAgentsBackend(Backend):
 
         # Get items from new_items (primary source in agents SDK)
         items = getattr(result, "new_items", None) or []
-        if items:
-            item_types = [type(item).__name__ for item in items]
-            logger.info(f"Converting trajectory with {len(items)} items: {item_types}")
-        else:
-            # Log available attributes for debugging
-            attrs = [a for a in dir(result) if not a.startswith("_")]
-            logger.warning(f"No items in result.new_items. Available attributes: {attrs}")
-
-            # Check raw_responses
-            raw_responses = getattr(result, "raw_responses", None)
-            if raw_responses:
-                logger.info(f"Found {len(raw_responses)} raw_responses")
-                for i, resp in enumerate(raw_responses[:3]):  # Log first 3
-                    resp_attrs = [a for a in dir(resp) if not a.startswith("_")]
-                    resp_type = type(resp).__name__
-                    logger.info(f"raw_response[{i}] type: {resp_type}, attrs: {resp_attrs}")
-
-            # Try to_input_list() as fallback
+        if not items:
+            # Fallback to to_input_list() for full conversation history
             if hasattr(result, "to_input_list"):
                 try:
                     input_list = result.to_input_list()
-                    logger.info(f"Using to_input_list() with {len(input_list)} items")
                     if input_list:
-                        for i, item in enumerate(input_list[:3]):  # Log first 3
-                            logger.info(f"input_list[{i}]: {type(item).__name__} = {item}")
-                    return self._convert_input_list_to_trajectory(input_list)
-                except Exception as e:
-                    logger.warning(f"to_input_list() failed: {e}")
+                        return self._convert_input_list_to_trajectory(input_list)
+                except Exception:
+                    pass
             return AgentTrajectory(turns=tuple(turns))
 
         for item in items:
             item_class = type(item).__name__
-            logger.debug(f"Processing item: {item_class}")
 
             if item_class == "MessageOutputItem":
                 raw = getattr(item, "raw_item", None)
@@ -425,31 +396,7 @@ class OpenAIAgentsBackend(Backend):
                 )
                 turns.append(AgentTurn.tool([tool_result]))
 
-        logger.debug(f"Converted {len(turns)} turns from trajectory")
         return AgentTrajectory(turns=tuple(turns))
-
-    def _extract_items_from_raw_responses(self, raw_responses: list[Any]) -> list[Any]:
-        """Extract trajectory items from raw API responses.
-
-        Args:
-            raw_responses: List of raw API response objects.
-
-        Returns:
-            List of items that can be processed by _convert_trajectory.
-        """
-        items = []
-        for response in raw_responses:
-            # Handle different response formats
-            if hasattr(response, "output"):
-                # Response with output list
-                for output_item in response.output:
-                    items.append(output_item)
-            elif hasattr(response, "choices"):
-                # Standard OpenAI chat completion format
-                for choice in response.choices:
-                    if hasattr(choice, "message"):
-                        items.append(choice.message)
-        return items
 
     def _convert_input_list_to_trajectory(self, input_list: list[Any]) -> AgentTrajectory:
         """Convert input list (from to_input_list()) to AgentTrajectory.
@@ -521,5 +468,4 @@ class OpenAIAgentsBackend(Backend):
                     if content:
                         turns.append(AgentTurn.assistant(content=content))
 
-        logger.info(f"Converted {len(turns)} turns from input_list")
         return AgentTrajectory(turns=tuple(turns))

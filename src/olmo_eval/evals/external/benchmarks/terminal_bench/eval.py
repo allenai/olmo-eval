@@ -573,6 +573,9 @@ class TerminalBenchExternalEval(ExternalEval):
 
     def _save_task_results(self, task_results: list[TaskResult], output_dir: str) -> None:
         """Save detailed task results and trajectories to files."""
+        import hashlib
+        import re
+
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
@@ -599,13 +602,30 @@ class TerminalBenchExternalEval(ExternalEval):
             json.dump(data, f, indent=2)
         logger.info(f"Task results saved to {results_file}")
 
-        # Save trajectories to JSONL (one per line for easier streaming/processing)
-        trajectories_file = output_path / f"{self.name}_trajectories.jsonl"
-        with open(trajectories_file, "w") as f:
-            for r in task_results:
-                trajectory_data = {
-                    "task_id": r.task_id,
-                    "trajectory": r.trajectory.to_dict() if r.trajectory else None,
-                }
+        # Save trajectories to traces/ directory (one file per task)
+        traces_dir = output_path / "traces"
+        traces_dir.mkdir(parents=True, exist_ok=True)
+
+        for r in task_results:
+            if not r.trajectory:
+                continue
+
+            # Sanitize task_id for filename
+            sanitized_id = re.sub(r"[^\w\-]", "_", r.task_id)
+            sanitized_id = re.sub(r"_+", "_", sanitized_id).strip("_").lower()
+
+            # Create short hash for uniqueness
+            hash_input = f"{self.name}:{r.task_id}"
+            short_hash = hashlib.sha256(hash_input.encode()).hexdigest()[:6]
+
+            # Filename: {eval_name}_{task_id}_{hash}.jsonl
+            trace_file = traces_dir / f"{self.name}_{sanitized_id}_{short_hash}.jsonl"
+
+            trajectory_data = {
+                "task_id": r.task_id,
+                "trajectory": r.trajectory.to_dict(),
+            }
+            with open(trace_file, "w") as f:
                 f.write(json.dumps(trajectory_data) + "\n")
-        logger.info(f"Trajectories saved to {trajectories_file}")
+
+        logger.info(f"Trajectories saved to {traces_dir}/")
