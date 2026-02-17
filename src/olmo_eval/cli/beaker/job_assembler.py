@@ -9,6 +9,7 @@ from olmo_eval.common.constants.infrastructure import (
     BEAKER_RESULT_DIR,
     cluster_has_weka,
 )
+from olmo_eval.launch.beaker.constants import BEAKER_INFRA_ENV_VARS
 from olmo_eval.launch.beaker.mirror import log
 
 if TYPE_CHECKING:
@@ -179,6 +180,9 @@ def assemble_external_eval_job(
         "BEAKER_SKIP_DOCKER_SOCKET": "1",
         "BEAKER_WORKSPACE": workspace,
     }
+    # Add infrastructure config for olmo-eval
+    env_vars.update(BEAKER_INFRA_ENV_VARS)
+
     if beaker_username:
         env_vars["BEAKER_AUTHOR"] = beaker_username
 
@@ -342,6 +346,8 @@ class JobConfigAssembler:
             "BEAKER_AUTHOR": self.beaker_username,
             "BEAKER_WORKSPACE": self.config.workspace,
         }
+        # Add infrastructure config for olmo-eval
+        job_env_vars.update(BEAKER_INFRA_ENV_VARS)
 
         if cluster_has_weka(self.config.cluster):
             job_env_vars.update(

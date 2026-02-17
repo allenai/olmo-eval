@@ -6,13 +6,13 @@ import asyncio
 import hashlib
 import json
 import logging
-import os
 import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from olmo_eval.common.config import get_infra_config
 from olmo_eval.common.types import LMRequest, RequestType
 from olmo_eval.common.types.trajectory import AgentTrajectory
 from olmo_eval.evals.external.base import ExternalEval
@@ -36,9 +36,6 @@ PYTHON_STANDALONE_URL = (
     "20240107/cpython-3.11.7+20240107-x86_64-unknown-linux-gnu-install_only.tar.gz"
 )
 
-# Registry for caching derived swerex images (set SWEREX_REGISTRY env var to override)
-SWEREX_REGISTRY = os.environ.get("SWEREX_REGISTRY", "docker.io/olmo-eval")
-
 # Version bump this when changing the Dockerfile to invalidate cached images
 SWEREX_IMAGE_VERSION = "20260217"
 
@@ -46,7 +43,7 @@ SWEREX_IMAGE_VERSION = "20260217"
 def _get_swerex_image(base_image: str, container_runtime: str = "docker") -> str:
     """Build a derived image with Python, swe-rex, and common tools pre-installed.
 
-    Checks local cache first, then registry, then builds and pushes if not found.
+    Checks local cache first, then registry (if configured), then builds and pushes.
 
     Args:
         base_image: The base container image.
@@ -55,15 +52,15 @@ def _get_swerex_image(base_image: str, container_runtime: str = "docker") -> str
     Returns:
         The derived image name.
     """
+    config = get_infra_config()
+    registry = config.swerex_registry
+
     # Create a deterministic tag based on base image, Python URL, and version
     hash_input = f"{base_image}:{PYTHON_STANDALONE_URL}:{SWEREX_IMAGE_VERSION}"
     tag_hash = hashlib.sha256(hash_input.encode()).hexdigest()[:12]
 
     # Local image name
     local_image = f"swerex-{tag_hash}:latest"
-
-    # Registry image name
-    registry_image = f"{SWEREX_REGISTRY}/swerex-{tag_hash}:latest"
 
     # Check if image exists locally
     result = subprocess.run(
@@ -74,20 +71,22 @@ def _get_swerex_image(base_image: str, container_runtime: str = "docker") -> str
         logger.info(f"Using cached local swerex image: {local_image}")
         return local_image
 
-    # Try to pull from registry
-    logger.info(f"Pulling swerex image from registry: {registry_image}")
-    result = subprocess.run(
-        [container_runtime, "pull", registry_image],
-        capture_output=True,
-    )
-    if result.returncode == 0:
-        # Tag locally for consistency
-        subprocess.run(
-            [container_runtime, "tag", registry_image, local_image],
+    # Try to pull from registry (if configured)
+    if registry:
+        registry_image = f"{registry}/swerex-{tag_hash}:latest"
+        logger.info(f"Pulling swerex image from registry: {registry_image}")
+        result = subprocess.run(
+            [container_runtime, "pull", registry_image],
             capture_output=True,
         )
-        logger.info(f"Pulled and tagged swerex image: {local_image}")
-        return local_image
+        if result.returncode == 0:
+            # Tag locally for consistency
+            subprocess.run(
+                [container_runtime, "tag", registry_image, local_image],
+                capture_output=True,
+            )
+            logger.info(f"Pulled and tagged swerex image: {local_image}")
+            return local_image
 
     # Build the image with Python, swe-rex, curl, git, and uv
     logger.info(f"Building swerex image from {base_image}...")
@@ -115,22 +114,24 @@ ENV PATH="/root/python/bin:$PATH"
 
     logger.info(f"Built swerex image: {local_image}")
 
-    # Push to registry for caching
-    logger.info(f"Pushing swerex image to registry: {registry_image}")
-    subprocess.run(
-        [container_runtime, "tag", local_image, registry_image],
-        capture_output=True,
-    )
-    result = subprocess.run(
-        [container_runtime, "push", registry_image],
-        capture_output=True,
-    )
-    if result.returncode == 0:
-        logger.info(f"Pushed swerex image to registry: {registry_image}")
-    else:
-        # Push failed but we can still use local image
-        stderr = result.stderr.decode() if result.stderr else ""
-        logger.warning(f"Failed to push to registry (continuing with local): {stderr[:200]}")
+    # Push to registry for caching (if configured)
+    if registry:
+        registry_image = f"{registry}/swerex-{tag_hash}:latest"
+        logger.info(f"Pushing swerex image to registry: {registry_image}")
+        subprocess.run(
+            [container_runtime, "tag", local_image, registry_image],
+            capture_output=True,
+        )
+        push_result = subprocess.run(
+            [container_runtime, "push", registry_image],
+            capture_output=True,
+        )
+        if push_result.returncode == 0:
+            logger.info(f"Pushed swerex image to registry: {registry_image}")
+        else:
+            # Push failed but we can still use local image
+            stderr = push_result.stderr.decode() if push_result.stderr else ""
+            logger.warning(f"Failed to push to registry (continuing with local): {stderr[:200]}")
 
     return local_image
 
