@@ -5,7 +5,7 @@ import pytest
 from olmo_eval.common.scorers import MultipleChoiceScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
 from olmo_eval.evals.tasks.common import get_task, list_tasks
-from olmo_eval.evals.tasks.lab_bench import PrecisionMetric
+from olmo_eval.evals.tasks.lab_bench import CoverageMetric, PrecisionMetric
 
 
 @pytest.fixture(autouse=True)
@@ -276,6 +276,53 @@ class TestPrecisionMetric:
 
     def test_all_refused(self, metric):
         """All responses refused: returns 0.0."""
+        responses = [
+            self._make_response("A", "C", 0.0),
+            self._make_response("A", "C", 0.0),
+        ]
+        assert metric.compute(responses) == pytest.approx(0.0)
+
+    def test_empty_responses(self, metric):
+        assert metric.compute([]) == pytest.approx(0.0)
+
+
+class TestCoverageMetric:
+    """Tests for CoverageMetric (fraction of non-refused responses)."""
+
+    @pytest.fixture
+    def metric(self):
+        return CoverageMetric()
+
+    def _make_response(
+        self, gold: str, extracted: str, score: float, refuse_idx: int = 2
+    ) -> Response:
+        return Response(
+            instance=Instance(
+                question="Q?",
+                gold_answer=gold,
+                choices=("A", "B", "C"),
+                metadata={"gold_idx": 0, "gold_text": "Answer", "refuse_idx": refuse_idx},
+            ),
+            request=LMRequest(request_type=RequestType.CHAT, messages=()),
+            outputs=[LMOutput(text="", extracted_answer=extracted)],
+            scores={MultipleChoiceScorer().name: score},
+        )
+
+    def test_all_committed(self, metric):
+        responses = [
+            self._make_response("A", "A", 1.0),
+            self._make_response("A", "B", 0.0),
+        ]
+        assert metric.compute(responses) == pytest.approx(1.0)
+
+    def test_some_refused(self, metric):
+        responses = [
+            self._make_response("A", "A", 1.0),  # committed
+            self._make_response("A", "C", 0.0),  # refused
+        ]
+        assert metric.compute(responses) == pytest.approx(0.5)
+
+    def test_all_refused(self, metric):
         responses = [
             self._make_response("A", "C", 0.0),
             self._make_response("A", "C", 0.0),

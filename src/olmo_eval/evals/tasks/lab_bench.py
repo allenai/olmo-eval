@@ -45,13 +45,18 @@ _ANSWER_PATTERN = re.compile(r"ANSWER\s*:\s*([A-Z])", re.IGNORECASE)
 _REFUSE_CHOICE = "Insufficient information to answer the question"
 
 
+def _is_refusal(r: Response) -> bool:
+    """Check if a response chose the refuse option."""
+    refuse_letter = chr(ord("A") + r.instance.metadata["refuse_idx"])
+    extracted = r.outputs[0].extracted_answer if r.outputs else None
+    return extracted is not None and extracted.strip().upper() == refuse_letter
+
+
 @dataclass(frozen=True, slots=True)
 class PrecisionMetric(Metric):
     """Accuracy excluding refusals (correct / non-refused).
 
     Matches the "precision" metric from the LAB-Bench evaluation protocol.
-    A response is a refusal if the model chose the refuse option
-    (identified by `refuse_idx` in instance metadata).
     """
 
     name: str = "precision"
@@ -61,16 +66,27 @@ class PrecisionMetric(Metric):
         if not responses:
             return 0.0
         scorer_name = self.scorer().name
-        committed = 0
-        correct = 0.0
-        for r in responses:
-            refuse_letter = chr(ord("A") + r.instance.metadata["refuse_idx"])
-            extracted = r.outputs[0].extracted_answer if r.outputs else None
-            if extracted is not None and extracted.strip().upper() == refuse_letter:
-                continue
-            committed += 1
-            correct += r.scores.get(scorer_name, 0.0)
-        return correct / committed if committed > 0 else 0.0
+        committed = [r for r in responses if not _is_refusal(r)]
+        if not committed:
+            return 0.0
+        return sum(r.scores.get(scorer_name, 0.0) for r in committed) / len(committed)
+
+
+@dataclass(frozen=True, slots=True)
+class CoverageMetric(Metric):
+    """Fraction of responses where the model committed (did not refuse).
+
+    Matches the "coverage" metric from the LAB-Bench evaluation protocol.
+    """
+
+    name: str = "coverage"
+    scorer: type[Scorer] = MultipleChoiceScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        if not responses:
+            return 0.0
+        committed = sum(1 for r in responses if not _is_refusal(r))
+        return committed / len(responses)
 
 
 class LabBenchTask(Task):
@@ -160,7 +176,7 @@ question by reasoning through the options and selecting the best answer.
 End your response with "ANSWER: X" where X is the letter of your chosen answer."""
 
 _DEFAULT_ACCURACY = AccuracyMetric(scorer=MultipleChoiceScorer)
-_DEFAULT_METRICS = (_DEFAULT_ACCURACY, PrecisionMetric())
+_DEFAULT_METRICS = (_DEFAULT_ACCURACY, PrecisionMetric(), CoverageMetric())
 _DEFAULT_SAMPLING = SamplingParams(temperature=0.0, max_tokens=1024)
 
 
