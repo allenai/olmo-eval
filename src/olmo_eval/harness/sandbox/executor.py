@@ -231,8 +231,6 @@ class SandboxExecutor:
                     deployment_kwargs["docker_args"] = docker_args
                 if self.config.exec_shell:
                     deployment_kwargs["exec_shell"] = list(self.config.exec_shell)
-                if self.config.python_standalone_dir:
-                    deployment_kwargs["python_standalone_dir"] = self.config.python_standalone_dir
 
                 return DockerDeployment(**deployment_kwargs)
 

@@ -50,9 +50,6 @@ class SandboxConfig:
         modal_sandbox_kwargs: Additional kwargs for Modal sandbox configuration.
         runtime_timeout: Timeout for Modal runtime in seconds.
         required_secrets: Environment variable names that must be set.
-        python_standalone_dir: Directory to install standalone Python for containers
-            without Python. When set, swerex downloads and installs a standalone
-            Python distribution to run swerex-remote.
     """
 
     image: str
@@ -72,7 +69,6 @@ class SandboxConfig:
     docker_args: tuple[str, ...] = ()
     log_dir: str | None = None
     exec_shell: tuple[str, ...] | None = None
-    python_standalone_dir: str | None = None
 
     @property
     def is_local(self) -> bool:
@@ -114,5 +110,4 @@ class SandboxConfig:
             docker_args=tuple(data.get("docker_args", [])),
             log_dir=data.get("log_dir"),
             exec_shell=tuple(data["exec_shell"]) if data.get("exec_shell") else None,
-            python_standalone_dir=data.get("python_standalone_dir"),
         )

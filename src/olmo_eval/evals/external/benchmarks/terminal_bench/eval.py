@@ -280,8 +280,24 @@ class TerminalBenchExternalEval(ExternalEval):
         if mode == SandboxMode.DOCKER:
             docker_args = tuple(get_docker_network_args(runtime))
 
-        # Terminal-Bench images may not have Python. Use python_standalone_dir to install
-        # a standalone Python inside the container for swerex-remote to use.
+        # Terminal-Bench images may not have Python or have externally-managed Python (PEP 668).
+        # Use uv to install Python and swe-rex in a venv, then run swerex-remote from there.
+        # uv is a single binary that can bootstrap Python without needing Python pre-installed.
+        exec_shell = (
+            "/bin/sh",
+            "-c",
+            "if ! command -v swerex-remote >/dev/null 2>&1; then "
+            "  curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1 && "
+            '  export PATH="$HOME/.local/bin:$PATH" && '
+            "  uv python install 3.11 >/dev/null 2>&1 && "
+            "  uv venv /root/.swerex-venv >/dev/null 2>&1 && "
+            "  uv pip install --python /root/.swerex-venv/bin/python swe-rex >/dev/null 2>&1 && "
+            '  export PATH="/root/.swerex-venv/bin:$PATH"; '
+            "fi; "
+            'exec /bin/sh -c "$@"',
+            "--",
+        )
+
         sandbox_config = SandboxConfig(
             image=task.image,
             mode=mode,
@@ -289,7 +305,7 @@ class TerminalBenchExternalEval(ExternalEval):
             working_dir=task.working_dir,
             command_timeout=task.agent_timeout,
             docker_args=docker_args,
-            python_standalone_dir="/root/.swerex-python",
+            exec_shell=exec_shell,
         )
 
         # Create sandbox manager for this task
