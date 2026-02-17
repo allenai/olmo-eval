@@ -117,6 +117,12 @@ include = ["src/olmo_eval/harness/sandbox/**"]
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"
 
+# ty overrides for backends module (uses optional openhands/agents dependencies)
+[[tool.ty.overrides]]
+include = ["src/olmo_eval/harness/backends/**"]
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"

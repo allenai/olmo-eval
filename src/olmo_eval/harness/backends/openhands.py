@@ -77,25 +77,25 @@ class OpenHandsBackend(Backend):
             HarnessResult with trajectory from SDK execution.
         """
         try:
-            from openhands.sdk import (  # type: ignore[import-not-found]
+            from openhands.sdk import (
                 LLM,
                 Agent,
                 Conversation,
                 Tool,
             )
-            from openhands.sdk.conversation.state import (  # type: ignore[import-not-found]
+            from openhands.sdk.conversation.state import (
                 ConversationExecutionStatus,
             )
-            from openhands.sdk.event import (  # type: ignore[import-not-found]
+            from openhands.sdk.event import (
                 ActionEvent,
                 MessageEvent,
                 ObservationEvent,
             )
-            from openhands.sdk.event.conversation_error import (  # type: ignore[import-not-found]
+            from openhands.sdk.event.conversation_error import (
                 ConversationErrorEvent,
             )
-            from openhands.tools.file_editor import FileEditorTool  # type: ignore[import-not-found]
-            from openhands.tools.terminal import TerminalTool  # type: ignore[import-not-found]
+            from openhands.tools.file_editor import FileEditorTool
+            from openhands.tools.terminal import TerminalTool
         except ImportError as e:
             raise ImportError(
                 "OpenHands SDK not installed. Install with: pip install openhands-ai"
