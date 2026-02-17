@@ -112,10 +112,12 @@ class OpenHandsBackend(Backend):
                     break
 
         # Configure LLM using the provider
+        # OpenHands uses LiteLLM internally, which requires provider prefix
+        # For OpenAI-compatible endpoints (like vLLM), prefix with "openai/"
         client = provider.get_openai_client()
         llm = LLM(
-            model=provider.model_name,
-            api_key=client.api_key,
+            model=f"openai/{provider.model_name}",
+            api_key=client.api_key or "dummy",  # vLLM doesn't require auth
             base_url=str(client.base_url) if client.base_url else None,
         )
 
