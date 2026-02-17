@@ -167,6 +167,7 @@ class VLLMServerProvider(InferenceProvider):
 
             self._client = AsyncOpenAI(
                 base_url=self.base_url,
+                api_key="EMPTY",
                 timeout=self.timeout,
                 max_retries=self.max_retries,
                 http_client=self._http_client,
