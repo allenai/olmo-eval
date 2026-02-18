@@ -91,7 +91,11 @@ def db_options(func: Any) -> Any:
 def _is_auth_failure(error: Exception) -> bool:
     """Check if error is a database authentication failure."""
     msg = str(error).lower()
-    return "password authentication failed" in msg or "authentication failed" in msg
+    return (
+        "password authentication failed" in msg
+        or "authentication failed" in msg
+        or "no password supplied" in msg
+    )
 
 
 def _fetch_password_from_aws(arn: str) -> str:
@@ -110,7 +114,7 @@ def _fetch_password_from_aws(arn: str) -> str:
         from olmo_eval.launch.beaker.secrets import get_aws_secret_value
 
         logger.info("Fetching database password from AWS Secrets Manager")
-        return get_aws_secret_value(arn)
+        return get_aws_secret_value(arn, key="password")
     except Exception as e:
         raise click.ClickException(f"Failed to fetch password from AWS Secrets Manager: {e}") from e
 
