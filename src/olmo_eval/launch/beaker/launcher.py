@@ -629,7 +629,8 @@ class BeakerLauncher:
             )
             # Install vLLM (torch already available via symlink)
             steps.append(
-                f"VIRTUAL_ENV={vllm_venv} uv pip install 'vllm[runai]==0.13.0' -c {constraints}"
+                f"VIRTUAL_ENV={vllm_venv} uv pip install "
+                f"--cache-dir \"$UV_CACHE_DIR\" 'vllm[runai]==0.13.0'"
             )
             # Set VLLM_PYTHON so VLLMServerProcess uses the separate venv
             steps.append(f"export VLLM_PYTHON={vllm_venv}/bin/python")
