@@ -607,7 +607,10 @@ class HarnessToolDefinition(ToolDefinition[HarnessToolAction, HarnessToolObserva
             if param_docs:
                 description = f"{description}\n\nParameters:\n" + "\n".join(param_docs)
 
-        return cls(
+        # OpenHands derives tool names from class.__name__, so create a unique subclass.
+        tool_class = type(tool.name, (cls,), {})
+
+        return tool_class(
             description=description,
             action_type=HarnessToolAction,
             observation_type=HarnessToolObservation,
