@@ -35,10 +35,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any
+from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from openhands.sdk import LLM, Agent, Tool
 from openhands.sdk.tool import (
+    ToolAnnotations,
     ToolDefinition,
     ToolExecutor,
     register_tool,
@@ -57,6 +59,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "SweRexTerminalExecutor",
+    "SweRexTerminalTool",
     "create_swerex_tools",
     "register_swerex_tools",
     "create_swerex_agent",
@@ -254,21 +257,88 @@ class SweRexTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation]):
             )
 
 
+class SweRexTerminalTool(ToolDefinition[TerminalAction, TerminalObservation]):
+    """Terminal tool backed by a SWE-ReX runtime.
+
+    This is a concrete implementation of ToolDefinition that executes terminal
+    commands via a SWE-ReX runtime instead of local shell execution.
+    """
+
+    @classmethod
+    def create(
+        cls,
+        conv_state: ConversationState | None = None,
+        executor: SweRexTerminalExecutor | None = None,
+        runtime: AbstractRuntime | None = None,
+        working_dir: str = "/workspace",
+        session_name: str = "default",
+        timeout: float = 120.0,
+    ) -> Sequence[SweRexTerminalTool]:
+        """Create SweRexTerminalTool instances.
+
+        Can be called either with a pre-created executor, or with runtime
+        parameters to create a new executor.
+
+        Args:
+            conv_state: Conversation state (unused, for interface compatibility).
+            executor: Pre-created SweRexTerminalExecutor (takes precedence).
+            runtime: SWE-ReX runtime to create executor from.
+            working_dir: Initial working directory.
+            session_name: Name for the bash session.
+            timeout: Default command timeout in seconds.
+
+        Returns:
+            List containing a single SweRexTerminalTool instance.
+        """
+        if executor is None:
+            if runtime is None:
+                raise ValueError("Either executor or runtime must be provided")
+            executor = SweRexTerminalExecutor(
+                runtime=runtime,
+                session_name=session_name,
+                timeout=timeout,
+                working_dir=working_dir,
+            )
+
+        return [
+            cls(
+                description=TOOL_DESCRIPTION,
+                action_type=TerminalAction,
+                observation_type=TerminalObservation,
+                annotations=ToolAnnotations(
+                    title="terminal",
+                    readOnlyHint=False,
+                    destructiveHint=True,
+                    idempotentHint=False,
+                    openWorldHint=True,
+                ),
+                executor=executor,
+            )
+        ]
+
+
 def _create_swerex_terminal_tool(
     executor: SweRexTerminalExecutor,
-) -> ToolDefinition[TerminalAction, TerminalObservation]:
+) -> SweRexTerminalTool:
     """Create a SWE-ReX terminal tool instance.
 
     Args:
         executor: The SWE-ReX terminal executor.
 
     Returns:
-        ToolDefinition configured for terminal execution.
+        SweRexTerminalTool configured for terminal execution.
     """
-    return ToolDefinition(
+    return SweRexTerminalTool(
         description=TOOL_DESCRIPTION,
         action_type=TerminalAction,
         observation_type=TerminalObservation,
+        annotations=ToolAnnotations(
+            title="terminal",
+            readOnlyHint=False,
+            destructiveHint=True,
+            idempotentHint=False,
+            openWorldHint=True,
+        ),
         executor=executor,
     )
 
@@ -278,7 +348,7 @@ def create_swerex_tools(
     working_dir: str = "/workspace",
     session_name: str = "default",
     timeout: float = 120.0,
-) -> list[ToolDefinition[Any, Any]]:
+) -> list[SweRexTerminalTool]:
     """Create OpenHands tools backed by a SWE-ReX runtime.
 
     This factory function creates ready-to-use tool instances without
@@ -341,7 +411,7 @@ def register_swerex_tools(
 
     def tool_factory(
         conv_state: ConversationState,
-    ) -> list[ToolDefinition[TerminalAction, TerminalObservation]]:
+    ) -> list[SweRexTerminalTool]:
         """Factory function for OpenHands tool registry."""
         return [_create_swerex_terminal_tool(executor)]
 
