@@ -51,6 +51,7 @@ from openhands.tools.terminal.definition import (
     TerminalAction,
     TerminalObservation,
 )
+from openhands.tools.terminal.metadata import CmdOutputMetadata
 
 if TYPE_CHECKING:
     from openhands.sdk.conversation.impl.local_conversation import LocalConversation
@@ -203,6 +204,41 @@ class SweRexTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation]):
         """
         return _run_coroutine_sync(self._execute_async(action))
 
+    def _make_observation(
+        self,
+        text: str,
+        command: str,
+        exit_code: int,
+        is_error: bool = False,
+        timeout: bool = False,
+        working_dir: str | None = None,
+    ) -> TerminalObservation:
+        """Create a TerminalObservation with properly populated metadata.
+
+        Args:
+            text: The output text from the command.
+            command: The command that was executed.
+            exit_code: The exit code of the command.
+            is_error: Whether this observation represents an error.
+            timeout: Whether the command timed out.
+            working_dir: The working directory (defaults to self._working_dir).
+
+        Returns:
+            TerminalObservation with metadata populated.
+        """
+        metadata = CmdOutputMetadata(
+            exit_code=exit_code,
+            working_dir=working_dir or self._working_dir,
+        )
+        return TerminalObservation(
+            content=[{"type": "text", "text": text}],
+            command=command,
+            exit_code=exit_code,
+            is_error=is_error,
+            timeout=timeout,
+            metadata=metadata,
+        )
+
     async def _execute_async(self, action: TerminalAction) -> TerminalObservation:
         """Execute the terminal action asynchronously.
 
@@ -216,7 +252,7 @@ class SweRexTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation]):
 
         # Handle special cases
         if action.command == "C-c":
-            return TerminalObservation.from_text(
+            return self._make_observation(
                 text="[Interrupt (C-c) not directly supported in SWE-ReX sessions. "
                 "Consider using 'kill' command or starting a new session.]",
                 command=action.command,
@@ -224,7 +260,7 @@ class SweRexTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation]):
             )
 
         if getattr(action, "is_input", False):
-            return TerminalObservation.from_text(
+            return self._make_observation(
                 text="[Interactive input not supported. SWE-ReX run_in_session "
                 "does not support sending input to running processes.]",
                 command=action.command,
@@ -234,7 +270,7 @@ class SweRexTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation]):
 
         if getattr(action, "reset", False):
             await self._reset_session()
-            return TerminalObservation.from_text(
+            return self._make_observation(
                 text="[Session reset successfully]",
                 command=action.command,
                 exit_code=0,
@@ -261,21 +297,21 @@ class SweRexTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation]):
 
             # Check for timeout in failure reason
             if observation.failure_reason and "timeout" in observation.failure_reason.lower():
-                return TerminalObservation.from_text(
+                return self._make_observation(
                     text=f"{output}\n[Command timed out after {timeout}s]",
                     command=action.command,
                     exit_code=-1,
                     timeout=True,
                 )
 
-            return TerminalObservation.from_text(
+            return self._make_observation(
                 text=output,
                 command=action.command,
                 exit_code=exit_code,
             )
 
         except TimeoutError:
-            return TerminalObservation.from_text(
+            return self._make_observation(
                 text=f"[Command timed out after {timeout}s]",
                 command=action.command,
                 exit_code=-1,
@@ -283,7 +319,7 @@ class SweRexTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation]):
             )
         except Exception as e:
             logger.error(f"SWE-ReX execution error: {e}")
-            return TerminalObservation.from_text(
+            return self._make_observation(
                 text=f"[Infrastructure error: {e}]",
                 command=action.command,
                 exit_code=-1,
