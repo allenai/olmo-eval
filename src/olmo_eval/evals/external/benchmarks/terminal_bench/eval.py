@@ -416,7 +416,7 @@ class TerminalBenchExternalEval(ExternalEval):
 
             agent_duration = time.time() - task_start
 
-            executor = sandbox_manager._executors[0]
+            executor = sandbox_manager.get_executor(frozenset())
             verifier = TerminalBenchVerifier()
             await verifier.inject_tests(executor, task.test_files)
             verification = await verifier.run_verification(
@@ -466,7 +466,7 @@ class TerminalBenchExternalEval(ExternalEval):
         Returns:
             Tuple of (trajectory, completion_reason).
         """
-        executor = sandbox_manager._executors[0]
+        executor = sandbox_manager.get_executor(frozenset())
 
         result = await executor.execute_in_session(
             f"bash << 'SOLVEEOF'\n{task.solution_script}\nSOLVEOF",
@@ -514,7 +514,7 @@ class TerminalBenchExternalEval(ExternalEval):
         )
 
         backend = get_backend(backend_name)
-        backend._sandbox_manager = sandbox_manager
+        backend.set_sandbox_manager(sandbox_manager)
 
         request = LMRequest(
             request_type=RequestType.CHAT,

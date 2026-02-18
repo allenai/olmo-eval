@@ -35,6 +35,17 @@ class Backend:
     required_extras: tuple[str, ...] = ()
     _sandbox_manager: Any = None
 
+    def set_sandbox_manager(self, sandbox_manager: Any) -> None:
+        """Set an external sandbox manager for this backend.
+
+        Use this to inject a pre-configured sandbox manager instead of
+        letting the backend create its own during initialize().
+
+        Args:
+            sandbox_manager: SandboxManager instance to use.
+        """
+        self._sandbox_manager = sandbox_manager
+
     async def initialize(self, config: HarnessConfig) -> None:
         """Initialize backend resources like sandbox managers.
 

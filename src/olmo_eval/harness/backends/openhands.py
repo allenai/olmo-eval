@@ -62,8 +62,10 @@ class OpenHandsBackend(Backend):
         """
         if self._sandbox_manager is None:
             return None
-        executors = self._sandbox_manager._executors
-        return executors[0] if executors else None
+        try:
+            return self._sandbox_manager.get_executor(frozenset())
+        except ValueError:
+            return None
 
     async def run(
         self,
