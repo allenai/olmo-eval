@@ -91,7 +91,7 @@ def _get_swerex_image(base_image: str, container_runtime: str = "docker") -> str
         logger.debug("Registry pull failed, will build locally")
 
     # Build the image with Python, swe-rex, curl, git, and uv
-    logger.info(f"Building swerex image from {base_image} (this may take a few minutes)...")
+    logger.info(f"Building swerex image from {base_image}...")
 
     dockerfile = f"""\
 FROM {base_image}

@@ -178,6 +178,28 @@ class OpenHandsBackend(Backend):
             visualizer=None,  # Disable console output
         )
 
+        # Pretty print conversation state and agent config
+        if logger.isEnabledFor(logging.DEBUG):
+            from rich.console import Console
+            from rich.panel import Panel
+            from rich.pretty import Pretty
+
+            console = Console()
+            console.print(
+                Panel(
+                    Pretty(conversation.state.model_dump()),
+                    title="[bold blue]Conversation State[/bold blue]",
+                    expand=False,
+                )
+            )
+            console.print(
+                Panel(
+                    Pretty(agent.model_dump()),
+                    title="[bold green]Agent[/bold green]",
+                    expand=False,
+                )
+            )
+
         # Send message and run (run() takes no arguments)
         conversation.send_message(input_text)
         conversation.run()

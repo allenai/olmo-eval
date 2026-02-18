@@ -1090,8 +1090,21 @@ class BeakerLauncher:
         _console.print("\n[bold]Logs:[/bold]")
         try:
             since = datetime.now(UTC) - timedelta(seconds=10) if tail else None
-            for log_entry in self.beaker.job.logs(job, follow=True, since=since):
-                # log_entry.message is bytes, decode it
+            log_iter = iter(self.beaker.job.logs(job, follow=True, since=since))
+
+            # Wait for first log entry with spinner
+            first_entry = None
+            with _console.status("[dim]Waiting for logs to start streaming...[/dim]"):
+                first_entry = next(log_iter, None)
+
+            # Print first entry if we got one
+            if first_entry and first_entry.message:
+                line = first_entry.message.decode(errors="ignore").rstrip("\n")
+                if line:
+                    print(line)
+
+            # Continue with remaining logs
+            for log_entry in log_iter:
                 if log_entry.message:
                     line = log_entry.message.decode(errors="ignore").rstrip("\n")
                     if line:
