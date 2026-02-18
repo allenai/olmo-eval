@@ -39,7 +39,15 @@ import logging
 from collections.abc import Coroutine, Sequence
 from typing import TYPE_CHECKING, Any
 
-from openhands.sdk import LLM, Agent, Tool
+from openhands.sdk import (
+    LLM,
+    Action,
+    Agent,
+    ImageContent,
+    Observation,
+    TextContent,
+    Tool,
+)
 from openhands.sdk.tool import (
     ToolAnnotations,
     ToolDefinition,
@@ -52,7 +60,6 @@ from openhands.tools.terminal.definition import (
     TerminalObservation,
 )
 from openhands.tools.terminal.metadata import CmdOutputMetadata
-from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from openhands.sdk.conversation.impl.local_conversation import LocalConversation
@@ -497,17 +504,22 @@ def register_sandbox_tools(
 # ---------------------------------------------------------------------------
 
 
-class HarnessToolAction(BaseModel):
+class HarnessToolAction(Action):
     """Generic action wrapping harness tool arguments."""
 
     arguments: dict[str, Any]
 
 
-class HarnessToolObservation(BaseModel):
+class HarnessToolObservation(Observation):
     """Observation wrapping harness tool string result."""
 
     content: str
     is_error: bool = False
+
+    @property
+    def to_llm_content(self) -> Sequence[TextContent | ImageContent]:
+        """Convert observation to LLM-consumable content."""
+        return [TextContent(type="text", text=self.content)]
 
 
 class HarnessToolExecutor(ToolExecutor[HarnessToolAction, HarnessToolObservation]):

@@ -147,6 +147,8 @@ select = [
 [tool.ruff.lint.per-file-ignores]
 # Long strings in test fixtures
 "tests/**/fixtures.py" = ["E501"]
+# Long URLs in model configs
+"src/olmo_eval/common/constants/models.py" = ["E501"]
 
 [tool.ruff.format]
 docstring-code-format = true
