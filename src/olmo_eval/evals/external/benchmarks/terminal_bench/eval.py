@@ -384,7 +384,14 @@ class TerminalBenchExternalEval(ExternalEval):
         task_start = time.time()
 
         # Create sandbox config for this task
-        mode = SandboxMode.DOCKER if sandbox_mode == "docker" else SandboxMode.MODAL
+        if sandbox_mode == "docker":
+            mode = SandboxMode.DOCKER
+        elif sandbox_mode == "modal":
+            mode = SandboxMode.MODAL
+        else:
+            raise ValueError(
+                f"Invalid sandbox_mode: {sandbox_mode!r}. Must be 'docker' or 'modal'."
+            )
         runtime = cast(ContainerRuntime, container_runtime)
 
         docker_args: tuple[str, ...] = ()
