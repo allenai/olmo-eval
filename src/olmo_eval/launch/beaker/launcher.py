@@ -620,7 +620,8 @@ class BeakerLauncher:
         # Install vLLM in separate venv when requested (for server mode)
         if use_separate_vllm_venv:
             vllm_venv = "/opt/vllm-venv"
-            steps.append(f"uv venv {vllm_venv}")
+            # Use explicit --cache-dir to ensure UV_CACHE_DIR is respected
+            steps.append(f'uv venv --cache-dir "$UV_CACHE_DIR" {vllm_venv}')
             # Symlink torch and nvidia packages from main venv (already installed)
             steps.append(
                 f"for pkg in /opt/venv/lib/python*/site-packages/torch* "
@@ -628,7 +629,10 @@ class BeakerLauncher:
                 f'ln -sf "$pkg" {vllm_venv}/lib/python*/site-packages/; done'
             )
             # Install vLLM (torch already available via symlink)
-            steps.append(f"VIRTUAL_ENV={vllm_venv} uv pip install 'vllm[runai]==0.13.0'")
+            steps.append(
+                f"VIRTUAL_ENV={vllm_venv} uv pip install "
+                f"--cache-dir \"$UV_CACHE_DIR\" 'vllm[runai]==0.13.0' -c {constraints}"
+            )
             # Set VLLM_PYTHON so VLLMServerProcess uses the separate venv
             steps.append(f"export VLLM_PYTHON={vllm_venv}/bin/python")
 
