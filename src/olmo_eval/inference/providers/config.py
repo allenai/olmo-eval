@@ -1,4 +1,4 @@
-"""Provider configuration for inference providers."""
+"""Configuration for inference providers."""
 
 from __future__ import annotations
 
@@ -31,8 +31,6 @@ class ProviderConfig:
         dtype: Data type for model weights (auto, float16, bfloat16, float32).
         max_model_len: Maximum sequence length (overrides model default).
         max_concurrency: Maximum concurrent requests.
-        tool_call_parser: Tool call parser for vLLM server (llama3_json, mistral,
-            hermes). Auto-detected from model name if not specified.
         required_secrets: Environment variable names that must be set.
         package: Optional custom package specifier for runtime installation.
         kwargs: Additional arguments passed to the provider constructor.
@@ -48,7 +46,6 @@ class ProviderConfig:
     dtype: str = "auto"
     max_model_len: int | None = None
     max_concurrency: int | None = None
-    tool_call_parser: str | None = None
     required_secrets: tuple[str, ...] = ()
     package: str | None = None
     kwargs: Mapping[str, Any] = field(default_factory=dict)
@@ -72,7 +69,6 @@ class ProviderConfig:
             "base_url",
             "tokenizer",
             "max_concurrency",
-            "tool_call_parser",
             "max_model_len",
         ),
         "litellm": ("base_url", "max_concurrency"),
@@ -149,8 +145,6 @@ class ProviderConfig:
             d["max_model_len"] = self.max_model_len
         if self.max_concurrency is not None:
             d["max_concurrency"] = self.max_concurrency
-        if self.tool_call_parser is not None:
-            d["tool_call_parser"] = self.tool_call_parser
         if self.required_secrets:
             d["required_secrets"] = list(self.required_secrets)
         if self.package is not None:
@@ -179,7 +173,6 @@ class ProviderConfig:
             dtype=data.get("dtype", "auto"),
             max_model_len=data.get("max_model_len"),
             max_concurrency=data.get("max_concurrency"),
-            tool_call_parser=data.get("tool_call_parser"),
             required_secrets=tuple(data.get("required_secrets", [])),
             package=data.get("package"),
             kwargs=data.get("kwargs", {}),

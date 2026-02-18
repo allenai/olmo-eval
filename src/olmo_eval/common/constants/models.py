@@ -53,8 +53,7 @@ def get_model_presets() -> dict[str, ProviderConfig]:
         "qwen3-coder-30b": ProviderConfig(
             kind=ProviderKind.VLLM_SERVER,
             model="Qwen/Qwen3-Coder-30B-A3B-Instruct",
-            tool_call_parser="qwen3_coder",
-            kwargs={"enable_expert_parallel": True},
+            kwargs={"enable_expert_parallel": True, "tool_call_parser": "qwen3_coder"},
         ),
         "mistral-7b": ProviderConfig(
             kind=ProviderKind.VLLM,
