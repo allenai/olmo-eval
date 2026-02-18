@@ -129,7 +129,7 @@ ENV PATH="/root/python/bin:$PATH"
             logger.info(f"Pushed swerex image to registry: {registry_image}")
         else:
             stderr = push_result.stderr.decode() if push_result.stderr else ""
-            logger.warning(f"Failed to push to registry (continuing with local): {stderr}")
+            logger.warning(f"Failed to push to registry (using local image): {stderr}")
 
     return local_image
 
