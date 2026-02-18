@@ -554,6 +554,17 @@ class HarnessToolDefinition(ToolDefinition[HarnessToolAction, HarnessToolObserva
     """OpenHands ToolDefinition wrapping a harness Tool."""
 
     @classmethod
+    def create(
+        cls,
+        conv_state: ConversationState | None = None,
+    ) -> Sequence[HarnessToolDefinition]:
+        """Create method required by ToolDefinition.
+
+        This is not used directly - use from_tool() instead.
+        """
+        raise NotImplementedError("Use HarnessToolDefinition.from_tool() instead")
+
+    @classmethod
     def from_tool(
         cls,
         tool: HarnessTool,
