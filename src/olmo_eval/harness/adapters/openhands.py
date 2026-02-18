@@ -76,7 +76,6 @@ __all__ = [
     "create_sandbox_tools",
     "register_sandbox_tools",
     "create_sandbox_agent",
-    "HarnessToolAction",
     "HarnessToolObservation",
     "HarnessToolExecutor",
     "HarnessToolDefinition",
@@ -504,10 +503,53 @@ def register_sandbox_tools(
 # ---------------------------------------------------------------------------
 
 
-class HarnessToolAction(Action):
-    """Generic action wrapping harness tool arguments."""
+def _json_type_to_python(json_type: str) -> type:
+    """Convert JSON schema type to Python type for Pydantic field."""
+    type_map = {
+        "string": str,
+        "integer": int,
+        "number": float,
+        "boolean": bool,
+        "array": list,
+        "object": dict,
+    }
+    return type_map.get(json_type, str)
 
-    arguments: dict[str, Any]
+
+def _create_action_class_for_tool(tool: HarnessTool) -> type[Action]:
+    """Dynamically create an Action subclass with fields matching the tool's parameters.
+
+    OpenHands generates tool schemas from Action class fields, so we need
+    action classes with the correct parameter names and types.
+    """
+    from pydantic import Field, create_model
+
+    field_definitions: dict[str, Any] = {}
+    properties = tool.parameters.get("properties", {})
+    required = set(tool.parameters.get("required", []))
+
+    for param_name, param_schema in properties.items():
+        python_type = _json_type_to_python(param_schema.get("type", "string"))
+        description = param_schema.get("description", "")
+
+        if param_name in required:
+            # Required field
+            field_definitions[param_name] = (python_type, Field(description=description))
+        else:
+            # Optional field with default
+            default = param_schema.get("default", None)
+            field_definitions[param_name] = (
+                python_type | None,
+                Field(default=default, description=description),
+            )
+
+    # Create dynamic Pydantic model inheriting from Action
+    action_class = create_model(
+        f"{tool.name}Action",
+        __base__=Action,
+        **field_definitions,
+    )
+    return action_class
 
 
 class HarnessToolObservation(Observation):
@@ -522,7 +564,7 @@ class HarnessToolObservation(Observation):
         return [TextContent(type="text", text=self.content)]
 
 
-class HarnessToolExecutor(ToolExecutor[HarnessToolAction, HarnessToolObservation]):
+class HarnessToolExecutor(ToolExecutor[Action, HarnessToolObservation]):
     """Executor that bridges harness Tool to OpenHands execution model."""
 
     def __init__(
@@ -533,19 +575,28 @@ class HarnessToolExecutor(ToolExecutor[HarnessToolAction, HarnessToolObservation
         self._tool = tool
         self._sandbox_executor = sandbox_executor
 
+    def _extract_arguments(self, action: Action) -> dict[str, Any]:
+        """Extract tool arguments from a dynamic action class instance."""
+        # Get all fields from the action that aren't inherited from Action base
+        base_fields = set(Action.model_fields.keys())
+        return {
+            name: getattr(action, name) for name in action.model_fields if name not in base_fields
+        }
+
     def __call__(
         self,
-        action: HarnessToolAction,
+        action: Action,
         conversation: LocalConversation | None = None,
     ) -> HarnessToolObservation:
         """Execute the harness tool."""
         try:
+            arguments = self._extract_arguments(action)
             if self._tool.sandbox and self._sandbox_executor:
                 # Execute via sandbox
-                result = self._execute_in_sandbox(action.arguments)
+                result = self._execute_in_sandbox(arguments)
             else:
                 # Direct execution
-                result = self._tool.execute(**action.arguments)
+                result = self._tool.execute(**arguments)
                 if asyncio.iscoroutine(result):
                     result = _run_coroutine_sync(result)
             return HarnessToolObservation(content=str(result))
@@ -568,7 +619,7 @@ class HarnessToolExecutor(ToolExecutor[HarnessToolAction, HarnessToolObservation
         return getattr(item, "text", str(item))
 
 
-class HarnessToolDefinition(ToolDefinition[HarnessToolAction, HarnessToolObservation]):
+class HarnessToolDefinition(ToolDefinition[Action, HarnessToolObservation]):
     """OpenHands ToolDefinition wrapping a harness Tool."""
 
     @classmethod
@@ -602,23 +653,15 @@ class HarnessToolDefinition(ToolDefinition[HarnessToolAction, HarnessToolObserva
 
         executor = HarnessToolExecutor(tool, sandbox_executor)
 
-        # Build description from tool schema
-        description = tool.description
-        if tool.parameters.get("properties"):
-            param_docs = []
-            for name, schema in tool.parameters["properties"].items():
-                param_type = schema.get("type", "any")
-                param_desc = schema.get("description", "")
-                param_docs.append(f"- {name} ({param_type}): {param_desc}")
-            if param_docs:
-                description = f"{description}\n\nParameters:\n" + "\n".join(param_docs)
+        # Create dynamic action class with correct parameter fields
+        action_class = _create_action_class_for_tool(tool)
 
         # OpenHands derives tool names from class.__name__, so create a unique subclass.
         tool_class = type(tool.name, (cls,), {})
 
         return tool_class(
-            description=description,
-            action_type=HarnessToolAction,
+            description=tool.description,
+            action_type=action_class,
             observation_type=HarnessToolObservation,
             annotations=ToolAnnotations(
                 title=tool.name,

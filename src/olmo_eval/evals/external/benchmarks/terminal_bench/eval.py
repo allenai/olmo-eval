@@ -420,7 +420,7 @@ class TerminalBenchExternalEval(ExternalEval):
             verifier = TerminalBenchVerifier()
             await verifier.inject_tests(executor, task.test_files)
             verification = await verifier.run_verification(
-                executor, task.verifier_timeout, task.working_dir
+                executor, task.verifier_timeout, task.working_dir, task.task_id
             )
 
             return TaskResult(

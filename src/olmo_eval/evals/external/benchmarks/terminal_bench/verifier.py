@@ -100,6 +100,7 @@ class TerminalBenchVerifier:
         executor: SandboxExecutor,
         timeout: float,
         working_dir: str = "/app",
+        task_id: str | None = None,
     ) -> VerificationResult:
         """Run verification tests.
 
@@ -109,16 +110,19 @@ class TerminalBenchVerifier:
             executor: The sandbox executor.
             timeout: Timeout for test execution in seconds.
             working_dir: Working directory for running tests.
+            task_id: Task identifier for log prefix.
 
         Returns:
             VerificationResult with reward, output, and exit code.
         """
+        log_prefix = f"{task_id}_verifier" if task_id else "terminal_bench_verifier"
+
         # Run test.sh
         test_result = await executor.execute_command(
             f"cd {working_dir} && bash /tests/test.sh",
             timeout=timeout,
             stream=True,
-            log_prefix="terminal_bench_verifier",
+            log_prefix=log_prefix,
         )
 
         logger.info(f"Test script exit code: {test_result.exit_code}")
