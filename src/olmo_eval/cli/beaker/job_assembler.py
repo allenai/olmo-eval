@@ -59,6 +59,24 @@ def get_provider_extras(model_spec: str, default_kind: str | None = None) -> lis
     return []
 
 
+def get_provider_dependencies(model_spec: str) -> list[str]:
+    """Get runtime dependencies from a model's provider config.
+
+    Args:
+        model_spec: Model name or path.
+
+    Returns:
+        List of package specifiers to install.
+    """
+    from olmo_eval.common.configs import get_provider_config
+
+    try:
+        provider_config = get_provider_config(model_spec)
+        return list(provider_config.dependencies)
+    except Exception:
+        return []
+
+
 def collect_install_extras(
     *,
     store: bool = False,
@@ -267,6 +285,8 @@ def assemble_external_eval_job(
             if extra not in extras:
                 extras.append(extra)
 
+    task_packages = get_provider_dependencies(model) or None
+
     return BeakerJobConfig(
         name=name,
         command=command,
@@ -289,6 +309,7 @@ def assemble_external_eval_job(
         setup_registry_mirror=setup_registry_mirror,
         setup_store_secrets=store,
         extras=extras,
+        task_packages=task_packages,
         vllm_separate_venv=vllm_separate_venv,
     )
 
@@ -412,7 +433,13 @@ class JobConfigAssembler:
             job_env_vars["MIRROR_HOSTS"] = mirror_url
             setup_registry_mirror = True
 
-        task_packages = self._extract_task_dependencies(exp.tasks, exp.task_overrides)
+        # Collect task dependencies and provider dependencies
+        task_packages = self._extract_task_dependencies(exp.tasks, exp.task_overrides) or []
+        provider_deps = get_provider_dependencies(exp.model_spec)
+        for dep in provider_deps:
+            if dep not in task_packages:
+                task_packages.append(dep)
+        task_packages = task_packages or None
 
         return BeakerJobConfig(
             name=exp.name,

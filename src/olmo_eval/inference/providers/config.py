@@ -32,7 +32,7 @@ class ProviderConfig:
         max_model_len: Maximum sequence length (overrides model default).
         max_concurrency: Maximum concurrent requests.
         required_secrets: Environment variable names that must be set.
-        package: Optional custom package specifier for runtime installation.
+        dependencies: Package specifiers for runtime installation.
         kwargs: Additional arguments passed to the provider constructor.
     """
 
@@ -47,7 +47,7 @@ class ProviderConfig:
     max_model_len: int | None = None
     max_concurrency: int | None = None
     required_secrets: tuple[str, ...] = ()
-    package: str | None = None
+    dependencies: tuple[str, ...] = ()
     kwargs: Mapping[str, Any] = field(default_factory=dict)
 
     # Providers that require GPU resources for local inference
@@ -147,8 +147,8 @@ class ProviderConfig:
             d["max_concurrency"] = self.max_concurrency
         if self.required_secrets:
             d["required_secrets"] = list(self.required_secrets)
-        if self.package is not None:
-            d["package"] = self.package
+        if self.dependencies:
+            d["dependencies"] = list(self.dependencies)
         if self.kwargs:
             d["kwargs"] = dict(self.kwargs)
         return d
@@ -174,7 +174,7 @@ class ProviderConfig:
             max_model_len=data.get("max_model_len"),
             max_concurrency=data.get("max_concurrency"),
             required_secrets=tuple(data.get("required_secrets", [])),
-            package=data.get("package"),
+            dependencies=tuple(data.get("dependencies", [])),
             kwargs=data.get("kwargs", {}),
         )
 

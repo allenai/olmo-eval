@@ -749,7 +749,7 @@ Use the `-o/--override` flag to apply configuration overrides to the preceding `
 ```bash
 # Model overrides (apply to the preceding -m)
 olmo-eval beaker launch -n "eval" \
-    -m llama3.1-8b -o provider.kind=vllm -o provider.package=vllm==0.14.0 \
+    -m llama3.1-8b -o provider.kind=vllm -o 'provider.dependencies=[vllm==0.14.0]' \
     -m gpt-4o -o provider.kind=litellm \
     -t mmlu -t gsm8k
 
@@ -774,7 +774,7 @@ The `-o` flag uses OmegaConf dotlist syntax, supporting:
 | String | `key=value` | `-o provider.kind=vllm` |
 | Number | `key=123` | `-o limit=100` |
 | Boolean | `key=true` | `-o preemptible=false` |
-| Nested | `a.b.c=val` | `-o provider.package=vllm==0.14.0` |
+| Nested | `a.b.c=val` | `-o provider.base_url=http://...` |
 | List | `key=[a,b]` | `-o 'args=[--flag1, --flag2]'` |
 | Dict | `key={a: 1}` | `-o 'config={distributed: true}'` |
 

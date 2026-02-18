@@ -174,7 +174,7 @@ def get_provider_config(name: str, **overrides: Any) -> ProviderConfig:
                 required_secrets=tuple(
                     filtered_overrides.get("required_secrets", base.required_secrets)
                 ),
-                package=filtered_overrides.get("package", base.package),
+                dependencies=tuple(filtered_overrides.get("dependencies", base.dependencies)),
                 kwargs={**base.kwargs, **filtered_overrides.get("kwargs", {})},
             )
         return base

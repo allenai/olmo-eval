@@ -59,7 +59,9 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             kind=ProviderKind.VLLM_SERVER,
             model="Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8",
             kwargs={"enable_expert_parallel": True, "tool_call_parser": "qwen3_coder"},
-            package="git+https://github.com/deepseek-ai/DeepGEMM.git@v2.1.1.post3 --no-build-isolation",
+            dependencies=(
+                "git+https://github.com/deepseek-ai/DeepGEMM.git@v2.1.1.post3 --no-build-isolation",
+            ),
         ),
         "mistral-7b": ProviderConfig(
             kind=ProviderKind.VLLM,
