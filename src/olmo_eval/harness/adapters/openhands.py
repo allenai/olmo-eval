@@ -580,7 +580,9 @@ class HarnessToolExecutor(ToolExecutor[Action, HarnessToolObservation]):
         # Get all fields from the action that aren't inherited from Action base
         base_fields = set(Action.model_fields.keys())
         return {
-            name: getattr(action, name) for name in action.model_fields if name not in base_fields
+            name: getattr(action, name)
+            for name in type(action).model_fields
+            if name not in base_fields
         }
 
     def __call__(
