@@ -7,8 +7,10 @@ from olmo_eval.launch.beaker import (
     BeakerJobConfig,
     BeakerWekaBucket,
     _parse_timeout,
+    build_install_command,
     calculate_experiment_splits,
     normalize_provider_package,
+    parse_install_spec,
     parse_task_with_priority,
     resolve_clusters,
     validate_priority_configuration,
@@ -619,3 +621,73 @@ class TestNormalizeProviderPackage:
         """Test package name only passes through unchanged."""
         result = normalize_provider_package("vllm")
         assert result == "vllm"
+
+    def test_strips_install_flags(self):
+        """Test that install flags are stripped from package spec."""
+        result = normalize_provider_package(
+            "git+https://github.com/user/repo@v1.0 --no-build-isolation"
+        )
+        assert result == "git+https://github.com/user/repo@v1.0"
+
+
+class TestParseInstallSpec:
+    """Tests for parse_install_spec function."""
+
+    def test_no_flags(self):
+        """Test package without flags."""
+        pkg, flags = parse_install_spec("vllm==0.14.0")
+        assert pkg == "vllm==0.14.0"
+        assert flags == []
+
+    def test_single_flag(self):
+        """Test package with single flag."""
+        pkg, flags = parse_install_spec(
+            "git+https://github.com/user/repo@v1.0 --no-build-isolation"
+        )
+        assert pkg == "git+https://github.com/user/repo@v1.0"
+        assert flags == ["--no-build-isolation"]
+
+    def test_multiple_flags(self):
+        """Test package with multiple flags."""
+        pkg, flags = parse_install_spec("vllm==0.14.0 --no-deps --force-reinstall")
+        assert pkg == "vllm==0.14.0"
+        assert flags == ["--no-deps", "--force-reinstall"]
+
+    def test_flag_with_value(self):
+        """Test flag with value."""
+        pkg, flags = parse_install_spec("pkg==1.0 --config-settings build=release")
+        assert pkg == "pkg==1.0"
+        assert flags == ["--config-settings", "build=release"]
+
+
+class TestBuildInstallCommand:
+    """Tests for build_install_command function."""
+
+    def test_simple_package(self):
+        """Test simple package without flags."""
+        cmd = build_install_command("vllm==0.14.0", "/tmp/constraints.txt")
+        assert cmd == "uv pip install 'vllm==0.14.0' -c /tmp/constraints.txt"
+
+    def test_package_with_flag(self):
+        """Test package with install flag."""
+        cmd = build_install_command(
+            "git+https://github.com/user/repo@v1.0 --no-build-isolation",
+            "/tmp/constraints.txt",
+        )
+        expected = (
+            "uv pip install --no-build-isolation "
+            "'git+https://github.com/user/repo@v1.0' -c /tmp/constraints.txt"
+        )
+        assert cmd == expected
+
+    def test_github_url_normalized(self):
+        """Test GitHub URL gets git+ prefix."""
+        cmd = build_install_command("https://github.com/user/repo@v1.0", "/tmp/constraints.txt")
+        assert (
+            cmd == "uv pip install 'git+https://github.com/user/repo@v1.0' -c /tmp/constraints.txt"
+        )
+
+    def test_no_constraints(self):
+        """Test without constraints file."""
+        cmd = build_install_command("vllm==0.14.0", None)
+        assert cmd == "uv pip install 'vllm==0.14.0'"
