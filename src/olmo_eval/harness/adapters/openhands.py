@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from openhands.sdk import LLM, Agent, Tool
@@ -58,7 +57,6 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "SweRexTerminalExecutor",
-    "SweRexTerminalTool",
     "create_swerex_tools",
     "register_swerex_tools",
     "create_swerex_agent",
@@ -256,71 +254,23 @@ class SweRexTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation]):
             )
 
 
-class SweRexTerminalTool(ToolDefinition[TerminalAction, TerminalObservation]):
-    """Terminal tool definition backed by SWE-ReX runtime.
+def _create_swerex_terminal_tool(
+    executor: SweRexTerminalExecutor,
+) -> ToolDefinition[TerminalAction, TerminalObservation]:
+    """Create a SWE-ReX terminal tool instance.
 
-    This tool allows OpenHands agents to execute bash commands in a
-    SWE-ReX managed container environment.
+    Args:
+        executor: The SWE-ReX terminal executor.
+
+    Returns:
+        ToolDefinition configured for terminal execution.
     """
-
-    def __init__(
-        self,
-        executor: SweRexTerminalExecutor,
-    ) -> None:
-        """Initialize the tool.
-
-        Args:
-            executor: The SWE-ReX terminal executor.
-        """
-        super().__init__(
-            description=TOOL_DESCRIPTION,
-            action_type=TerminalAction,
-            observation_type=TerminalObservation,
-            executor=executor,
-        )
-        self._executor = executor
-
-    @classmethod
-    def create(
-        cls,
-        conv_state: ConversationState,
-        runtime: AbstractRuntime | None = None,
-        session_name: str = "default",
-        timeout: float = 120.0,
-        working_dir: str | None = None,
-        executor: ToolExecutor[TerminalAction, TerminalObservation] | None = None,
-    ) -> Sequence[SweRexTerminalTool]:
-        """Create terminal tool instances.
-
-        Args:
-            conv_state: OpenHands conversation state (not used, for interface compat).
-            runtime: SWE-ReX runtime instance.
-            session_name: Name for the bash session.
-            timeout: Default command timeout in seconds.
-            working_dir: Initial working directory.
-            executor: Optional pre-configured executor (overrides other params).
-
-        Returns:
-            Sequence containing a single SweRexTerminalTool instance.
-
-        Raises:
-            ValueError: If neither runtime nor executor is provided.
-        """
-        if executor is not None:
-            if not isinstance(executor, SweRexTerminalExecutor):
-                raise TypeError("executor must be a SweRexTerminalExecutor")
-            return [cls(executor=executor)]
-
-        if runtime is None:
-            raise ValueError("Either runtime or executor must be provided")
-
-        exec_instance = SweRexTerminalExecutor(
-            runtime=runtime,
-            session_name=session_name,
-            timeout=timeout,
-            working_dir=working_dir,
-        )
-        return [cls(executor=exec_instance)]
+    return ToolDefinition(
+        description=TOOL_DESCRIPTION,
+        action_type=TerminalAction,
+        observation_type=TerminalObservation,
+        executor=executor,
+    )
 
 
 def create_swerex_tools(
@@ -353,7 +303,7 @@ def create_swerex_tools(
         timeout=timeout,
         working_dir=working_dir,
     )
-    return [SweRexTerminalTool(executor=executor)]
+    return [_create_swerex_terminal_tool(executor)]
 
 
 def register_swerex_tools(
@@ -389,9 +339,11 @@ def register_swerex_tools(
         working_dir=working_dir,
     )
 
-    def tool_factory(conv_state: ConversationState) -> list[SweRexTerminalTool]:
+    def tool_factory(
+        conv_state: ConversationState,
+    ) -> list[ToolDefinition[TerminalAction, TerminalObservation]]:
         """Factory function for OpenHands tool registry."""
-        return [SweRexTerminalTool(executor=executor)]
+        return [_create_swerex_terminal_tool(executor)]
 
     register_tool(tool_name, tool_factory)
     return tool_name
