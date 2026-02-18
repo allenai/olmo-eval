@@ -24,7 +24,6 @@ classifiers = [
 dependencies = [
     "click~=8.3.1",
     "datasets>=3.2.0",
-    "lark>=1.0",  # sympy parse_latex(backend="lark") for minerva_math; avoids antlr4 conflict with omegaconf
     "numpy>=1.20.0",
     "omegaconf~=2.3.0",
     "rich~=14.3.1",
