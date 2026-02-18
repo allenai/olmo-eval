@@ -52,6 +52,7 @@ from openhands.tools.terminal.definition import (
 )
 
 if TYPE_CHECKING:
+    from openhands.sdk.conversation.impl.local_conversation import LocalConversation
     from openhands.sdk.conversation.state import ConversationState
     from swerex.runtime.abstract import AbstractRuntime
 
@@ -155,7 +156,11 @@ class SweRexTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation]):
         await self._close_session()
         await self._ensure_session()
 
-    def __call__(self, action: TerminalAction) -> TerminalObservation:
+    def __call__(
+        self,
+        action: TerminalAction,
+        conversation: LocalConversation | None = None,
+    ) -> TerminalObservation:
         """Execute a terminal action synchronously.
 
         OpenHands executors are called from sync context, so we use
@@ -163,6 +168,7 @@ class SweRexTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation]):
 
         Args:
             action: The terminal action to execute.
+            conversation: Conversation context (unused, for interface compatibility).
 
         Returns:
             TerminalObservation with command output and exit code.
