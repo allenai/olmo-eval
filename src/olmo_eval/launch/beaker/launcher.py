@@ -47,8 +47,10 @@ __all__ = [
     "BeakerWekaBucket",
     "BeakerJobConfig",
     "BeakerLauncher",
+    "build_install_command",
     "calculate_experiment_splits",
     "normalize_provider_package",
+    "parse_install_spec",
     "parse_task_with_priority",
     "validate_priority_configuration",
     "print_experiment_config",
@@ -405,6 +407,9 @@ class BeakerJobConfig:
     # Custom provider package to install (overrides default from pyproject.toml extras)
     provider_package: str | None = None
 
+    # Provider-specific dependencies (from provider config)
+    provider_packages: list[str] | None = None
+
     # Task-specific packages to install at runtime
     task_packages: list[str] | None = None
 
@@ -457,6 +462,42 @@ def resolve_clusters(cluster: str | list[str]) -> list[str]:
     return list(set(resolved))  # Deduplicate
 
 
+def parse_install_spec(package: str) -> tuple[str, list[str]]:
+    """Parse a package specifier into package URL and install flags.
+
+    Separates pip/uv install flags (like --no-build-isolation) from the
+    package specifier. Flags must start with '-' and come after the package.
+
+    Args:
+        package: Package specifier with optional install flags.
+
+    Returns:
+        Tuple of (package_spec, install_flags).
+
+    Examples:
+        >>> parse_install_spec("git+https://github.com/user/repo@v1.0 --no-build-isolation")
+        ("git+https://github.com/user/repo@v1.0", ["--no-build-isolation"])
+        >>> parse_install_spec("vllm==0.14.0")
+        ("vllm==0.14.0", [])
+    """
+    parts = package.split()
+    if len(parts) == 1:
+        return package, []
+
+    # Find where flags start (first part starting with -)
+    pkg_parts = []
+    flags = []
+    in_flags = False
+    for part in parts:
+        if part.startswith("-") or in_flags:
+            in_flags = True
+            flags.append(part)
+        else:
+            pkg_parts.append(part)
+
+    return " ".join(pkg_parts), flags
+
+
 def normalize_provider_package(package: str) -> str:
     """Normalize a provider package specifier for pip installation.
 
@@ -468,22 +509,52 @@ def normalize_provider_package(package: str) -> str:
     - PyPI version: vllm==0.14.0 (unchanged)
     - PyPI with extras: vllm[runai]==0.14.0 (unchanged)
 
+    Note: This function strips install flags. Use parse_install_spec() first
+    if you need to preserve flags.
+
     Args:
-        package: Package specifier string.
+        package: Package specifier string (may include install flags).
 
     Returns:
-        Normalized package specifier suitable for pip install.
+        Normalized package specifier suitable for pip install (without flags).
     """
+    # Strip any install flags first
+    pkg_spec, _ = parse_install_spec(package)
+
     # Already a git+ URL, return as-is
-    if package.startswith("git+"):
-        return package
+    if pkg_spec.startswith("git+"):
+        return pkg_spec
 
     # GitHub or GitLab URLs need git+ prefix
-    if "github.com" in package or "gitlab.com" in package:
-        return f"git+{package}"
+    if "github.com" in pkg_spec or "gitlab.com" in pkg_spec:
+        return f"git+{pkg_spec}"
 
     # Everything else (local paths, PyPI specs) passes through unchanged
-    return package
+    return pkg_spec
+
+
+def build_install_command(package: str, constraints: str | None = None) -> str:
+    """Build a uv pip install command for a package with optional flags.
+
+    Handles package specifiers that include install flags like --no-build-isolation.
+
+    Args:
+        package: Package specifier with optional install flags.
+        constraints: Optional constraints file path.
+
+    Returns:
+        Complete uv pip install command string.
+    """
+    pkg_spec, flags = parse_install_spec(package)
+    normalized = normalize_provider_package(pkg_spec)
+
+    cmd_parts = ["uv", "pip", "install"]
+    cmd_parts.extend(flags)
+    cmd_parts.append(f"'{normalized}'")
+    if constraints:
+        cmd_parts.extend(["-c", constraints])
+
+    return " ".join(cmd_parts)
 
 
 def _parse_timeout(timeout: str) -> int:
@@ -557,6 +628,7 @@ class BeakerLauncher:
         extras: list[str],
         env_exports: dict[str, str] | None = None,
         provider_package: str | None = None,
+        provider_packages: list[str] | None = None,
         task_packages: list[str] | None = None,
         setup_registry_mirror: bool = False,
         enable_sandbox: bool = False,
@@ -568,7 +640,7 @@ class BeakerLauncher:
         Gantry clones the source code to /gantry-runtime, so we:
         1. Install olmo-eval from the cloned source with optional extras
         2. Optionally install a custom provider package to override the default
-        3. Optionally install task-specific dependencies
+        3. Optionally install provider-specific and task-specific dependencies
 
         When vllm_separate_venv is True, vLLM is installed in a separate venv
         (/opt/vllm-venv) to avoid dependency conflicts. The vLLM server runs as
@@ -579,6 +651,7 @@ class BeakerLauncher:
             extras: Optional dependency group names from pyproject.toml.
             env_exports: Optional dict of environment variables to export before running.
             provider_package: Optional custom provider package to install (overrides default).
+            provider_packages: Optional list of provider-specific dependencies.
             task_packages: Optional list of task-specific packages to install.
             setup_registry_mirror: If True, run setup_dockerio_mirror script with MIRROR_HOSTS.
             enable_sandbox: If True, set up /dev/net/tun for pasta networking.
@@ -646,14 +719,17 @@ class BeakerLauncher:
 
         # Install custom provider package to override default version from extras
         if provider_package:
-            install_spec = normalize_provider_package(provider_package)
-            steps.append(f"uv pip install '{install_spec}' -c {constraints}")
+            steps.append(build_install_command(provider_package, constraints))
+
+        # Install provider-specific dependencies
+        if provider_packages:
+            for pkg in provider_packages:
+                steps.append(build_install_command(pkg, constraints))
 
         # Install task-specific dependencies
         if task_packages:
             for pkg in task_packages:
-                install_spec = normalize_provider_package(pkg)
-                steps.append(f"uv pip install '{install_spec}' -c {constraints}")
+                steps.append(build_install_command(pkg, constraints))
 
         # Set up database credentials for --store
         if setup_store_secrets:
@@ -686,6 +762,7 @@ class BeakerLauncher:
             config.extras,
             env_exports,
             config.provider_package,
+            config.provider_packages,
             config.task_packages,
             config.setup_registry_mirror,
             config.enable_sandbox,

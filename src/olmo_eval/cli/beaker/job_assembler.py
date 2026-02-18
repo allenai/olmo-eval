@@ -285,7 +285,7 @@ def assemble_external_eval_job(
             if extra not in extras:
                 extras.append(extra)
 
-    task_packages = get_provider_dependencies(model) or None
+    provider_packages = get_provider_dependencies(model) or None
 
     return BeakerJobConfig(
         name=name,
@@ -309,7 +309,7 @@ def assemble_external_eval_job(
         setup_registry_mirror=setup_registry_mirror,
         setup_store_secrets=store,
         extras=extras,
-        task_packages=task_packages,
+        provider_packages=provider_packages,
         vllm_separate_venv=vllm_separate_venv,
     )
 
@@ -433,13 +433,9 @@ class JobConfigAssembler:
             job_env_vars["MIRROR_HOSTS"] = mirror_url
             setup_registry_mirror = True
 
-        # Collect task dependencies and provider dependencies
-        task_packages = self._extract_task_dependencies(exp.tasks, exp.task_overrides) or []
-        provider_deps = get_provider_dependencies(exp.model_spec)
-        for dep in provider_deps:
-            if dep not in task_packages:
-                task_packages.append(dep)
-        task_packages = task_packages or None
+        # Collect task dependencies and provider dependencies separately
+        task_packages = self._extract_task_dependencies(exp.tasks, exp.task_overrides) or None
+        provider_packages = get_provider_dependencies(exp.model_spec) or None
 
         return BeakerJobConfig(
             name=exp.name,
@@ -460,6 +456,7 @@ class JobConfigAssembler:
             inject_gcs_credentials=self.inject_gcs_credentials,
             env_vars=job_env_vars,
             env_secrets=env_secrets,
+            provider_packages=provider_packages,
             task_packages=task_packages,
             enable_sandbox=self.enable_sandbox,
             setup_registry_mirror=setup_registry_mirror,
