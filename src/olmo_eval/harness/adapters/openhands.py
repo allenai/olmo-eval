@@ -559,7 +559,13 @@ class HarnessToolExecutor(ToolExecutor[HarnessToolAction, HarnessToolObservation
         command = arguments.get("command", "")
         action = TerminalAction(command=command)
         obs = self._sandbox_executor(action)
-        return obs.content[0]["text"] if obs.content else ""
+        if not obs.content:
+            return ""
+        item = obs.content[0]
+        # Handle both dict and TextContent object forms
+        if isinstance(item, dict):
+            return item.get("text", "")
+        return getattr(item, "text", str(item))
 
 
 class HarnessToolDefinition(ToolDefinition[HarnessToolAction, HarnessToolObservation]):
