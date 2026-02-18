@@ -119,23 +119,17 @@ ENV PATH="/root/python/bin:$PATH"
     logger.info(f"Built swerex image: {local_image}")
 
     # Push to registry for caching (if configured)
+    # Requires prior `docker login` or credential helper configuration
     if registry:
         registry_image = f"{registry}/swerex-{tag_hash}:latest"
         logger.info(f"Pushing swerex image to registry: {registry_image}")
-        subprocess.run(
-            [container_runtime, "tag", local_image, registry_image],
-            capture_output=True,
-        )
-        push_result = subprocess.run(
-            [container_runtime, "push", registry_image],
-            capture_output=True,
-        )
+        subprocess.run(["docker", "tag", local_image, registry_image], capture_output=True)
+        push_result = subprocess.run(["docker", "push", registry_image], capture_output=True)
         if push_result.returncode == 0:
             logger.info(f"Pushed swerex image to registry: {registry_image}")
         else:
-            # Push failed but we can still use local image
             stderr = push_result.stderr.decode() if push_result.stderr else ""
-            logger.warning(f"Failed to push to registry (continuing with local): {stderr[:200]}")
+            logger.warning(f"Failed to push to registry (continuing with local): {stderr}")
 
     return local_image
 
