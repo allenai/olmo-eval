@@ -50,6 +50,12 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             kind=ProviderKind.VLLM,
             model="Qwen/Qwen2.5-7B",
         ),
+        "qwen3-coder-30b": ProviderConfig(
+            kind=ProviderKind.VLLM_SERVER,
+            model="Qwen/Qwen3-Coder-30B-A3B-Instruct",
+            tool_call_parser="qwen3_coder",
+            kwargs={"enable_expert_parallel": True},
+        ),
         "mistral-7b": ProviderConfig(
             kind=ProviderKind.VLLM,
             model="mistralai/Mistral-7B-v0.3",

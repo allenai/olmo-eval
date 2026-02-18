@@ -216,7 +216,7 @@ class TerminalBenchExternalEval(ExternalEval):
             "max_concurrency": ("Max parallel containers", 1),
             "max_turns": ("Max agent turns per task", 50),
             "oracle": ("Run solve.sh instead of LLM agent", False),
-            "sandbox_mode": ("Sandbox mode: docker, modal (default: docker)", "docker"),
+            "sandbox_mode": ("Sandbox mode: docker, modal", "docker"),
             "backend": ("Backend to use for agent execution", "openai_agents"),
         }
 
