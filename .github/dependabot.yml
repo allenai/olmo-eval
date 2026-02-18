@@ -22,8 +22,6 @@ updates:
         patterns:
           - "torch*"
           - "transformers"
-          - "vllm"
-          - "litellm"
         update-types:
           - "minor"
           - "patch"
@@ -31,6 +29,9 @@ updates:
       # Ignore major version updates for stability
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # vllm and litellm have breaking changes frequently - update manually
+      - dependency-name: "vllm"
+      - dependency-name: "litellm"
 
   # GitHub Actions
   - package-ecosystem: "github-actions"

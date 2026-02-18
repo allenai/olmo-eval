@@ -7,12 +7,15 @@ from typing import Any
 
 HUMANEVAL_STOP_SEQUENCES: tuple[str, ...] = (
     "\nclass",
+    "\ndef",
     "\nif",
     "\nprint",
     "\n#",
     "\n```",
     "\n```\n\n",
     "<|eot_id|>",
+    "<|endoftext|>",
+    "<|im_end|>",
 )
 """Stop sequences for HumanEval and similar code generation tasks."""
 

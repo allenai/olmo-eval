@@ -14,5 +14,4 @@ def results() -> None:
 # Register subcommands
 results.add_command(query)
 
-# Re-export for backwards compatibility
 __all__ = ["results", "query"]

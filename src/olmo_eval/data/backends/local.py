@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -10,11 +11,13 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from olmo_eval.data.sources import DataSource
 
+logger = logging.getLogger(__name__)
+
 
 class LocalBackend:
     """Load datasets from local files.
 
-    Supports JSONL, Parquet, CSV files, and directories containing these files.
+    Supports JSONL, JSON, Parquet, CSV files, and directories containing these files.
 
     Examples:
         >>> backend = LocalBackend()
@@ -22,6 +25,8 @@ class LocalBackend:
         >>> for doc in backend.load(source):
         ...     print(doc)
     """
+
+    SUPPORTED_EXTENSIONS = {".jsonl", ".json", ".parquet", ".csv"}
 
     def load(
         self,
@@ -60,22 +65,22 @@ class LocalBackend:
     def _load_jsonl(self, path: Path) -> Iterator[dict[str, Any]]:
         """Load a JSONL file."""
         with open(path, encoding="utf-8") as f:
-            for line in f:
+            for line_num, line in enumerate(f, 1):
                 line = line.strip()
                 if line:
-                    yield json.loads(line)
+                    try:
+                        yield json.loads(line)
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Skipping invalid JSON at {path}:{line_num}: {e}")
 
     def _load_json(self, path: Path) -> Iterator[dict[str, Any]]:
-        """Load a JSON file (expects array of objects or object with 'data' key)."""
+        """Load a JSON file."""
+        from olmo_eval.data.backends.base import extract_json_data
+
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
 
-        if isinstance(data, list):
-            yield from data
-        elif isinstance(data, dict) and "data" in data:
-            yield from data["data"]
-        else:
-            raise ValueError(f"JSON file must contain array or object with 'data' key: {path}")
+        yield from extract_json_data(data, str(path))
 
     def _load_parquet(self, path: Path) -> Iterator[dict[str, Any]]:
         """Load a Parquet file."""
@@ -104,13 +109,11 @@ class LocalBackend:
         If split is specified, looks for files matching the split name.
         Otherwise, loads all supported files in the directory.
         """
-        supported_suffixes = {".jsonl", ".json", ".parquet", ".csv"}
-
         # If split specified, look for split-specific files first
         if split:
             from olmo_eval.data.sources import DataSource
 
-            for suffix in supported_suffixes:
+            for suffix in self.SUPPORTED_EXTENSIONS:
                 split_file = path / f"{split}{suffix}"
                 if split_file.exists():
                     yield from self.load(
@@ -120,7 +123,7 @@ class LocalBackend:
                     return
 
         # Load all supported files in directory
-        files = sorted(f for f in path.iterdir() if f.suffix in supported_suffixes)
+        files = sorted(f for f in path.iterdir() if f.suffix in self.SUPPORTED_EXTENSIONS)
         if not files:
             raise ValueError(f"No supported files found in directory: {path}")
 
@@ -133,3 +136,15 @@ class LocalBackend:
                 yield from self._load_parquet(file_path)
             elif file_path.suffix == ".csv":
                 yield from self._load_csv(file_path)
+
+    def exists(self, path: str) -> bool:
+        """Check if a local path exists.
+
+        Args:
+            path: Local file path to check.
+
+        Returns:
+            True if the path exists (as file or directory).
+        """
+        path_str = path.removeprefix("file://")
+        return Path(path_str).exists()

@@ -1,12 +1,12 @@
 """Tests for olmo_eval.core.trajectory_scorers module."""
 
-from olmo_eval.core.scorers import (
+from olmo_eval.common.scorers import (
     TrajectoryCombinedScorer,
     TrajectoryEfficiencyScorer,
     TrajectoryResponseScorer,
     TrajectoryStateScorer,
 )
-from olmo_eval.core.types import (
+from olmo_eval.common.types import (
     AgentTrajectory,
     AgentTurn,
     Instance,

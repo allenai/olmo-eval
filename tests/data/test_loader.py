@@ -74,6 +74,46 @@ class TestLocalBackendIntegration:
         docs = list(loader.load(source))
         assert docs == [{"a": 1}, {"a": 2}]
 
+    def test_load_json_with_instances_key(self, tmp_path: Path):
+        file_path = tmp_path / "data.json"
+        file_path.write_text('{"instances": [{"a": 1}, {"a": 2}]}')
+
+        loader = DataLoader()
+        source = DataSource(path=str(file_path))
+
+        docs = list(loader.load(source))
+        assert docs == [{"a": 1}, {"a": 2}]
+
+    def test_load_json_with_examples_key(self, tmp_path: Path):
+        file_path = tmp_path / "data.json"
+        file_path.write_text('{"examples": [{"a": 1}, {"a": 2}]}')
+
+        loader = DataLoader()
+        source = DataSource(path=str(file_path))
+
+        docs = list(loader.load(source))
+        assert docs == [{"a": 1}, {"a": 2}]
+
+    def test_load_json_with_items_key(self, tmp_path: Path):
+        file_path = tmp_path / "data.json"
+        file_path.write_text('{"items": [{"a": 1}, {"a": 2}]}')
+
+        loader = DataLoader()
+        source = DataSource(path=str(file_path))
+
+        docs = list(loader.load(source))
+        assert docs == [{"a": 1}, {"a": 2}]
+
+    def test_load_json_with_records_key(self, tmp_path: Path):
+        file_path = tmp_path / "data.json"
+        file_path.write_text('{"records": [{"a": 1}, {"a": 2}]}')
+
+        loader = DataLoader()
+        source = DataSource(path=str(file_path))
+
+        docs = list(loader.load(source))
+        assert docs == [{"a": 1}, {"a": 2}]
+
     def test_load_csv(self, tmp_path: Path):
         file_path = tmp_path / "data.csv"
         file_path.write_text("name,value\nfoo,1\nbar,2\n")
@@ -120,3 +160,37 @@ class TestLocalBackendIntegration:
 
         docs = list(loader.load(source))
         assert docs == [{"a": 1}, {"a": 2}, {"a": 3}]
+
+    def test_invalid_json_lines_skipped(self, tmp_path: Path):
+        """Test that invalid JSON lines are skipped with warning (matches S3/GCS behavior)."""
+        file_path = tmp_path / "data.jsonl"
+        file_path.write_text('{"a": 1}\ninvalid json\n{"a": 2}\n')
+
+        loader = DataLoader()
+        source = DataSource(path=str(file_path))
+
+        docs = list(loader.load(source))
+        assert docs == [{"a": 1}, {"a": 2}]
+
+    def test_local_backend_exists(self, tmp_path: Path):
+        """Test LocalBackend.exists() method."""
+        from olmo_eval.data.backends.local import LocalBackend
+
+        file_path = tmp_path / "data.jsonl"
+        file_path.write_text('{"a": 1}\n')
+
+        backend = LocalBackend()
+        assert backend.exists(str(file_path)) is True
+        assert backend.exists(str(tmp_path / "nonexistent.jsonl")) is False
+        assert backend.exists(str(tmp_path)) is True  # Directory exists
+
+    def test_local_backend_exists_with_file_prefix(self, tmp_path: Path):
+        """Test LocalBackend.exists() handles file:// prefix."""
+        from olmo_eval.data.backends.local import LocalBackend
+
+        file_path = tmp_path / "data.jsonl"
+        file_path.write_text('{"a": 1}\n')
+
+        backend = LocalBackend()
+        assert backend.exists(f"file://{file_path}") is True
+        assert backend.exists(f"file://{tmp_path}/nonexistent.jsonl") is False

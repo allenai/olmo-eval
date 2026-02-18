@@ -1,0 +1,39 @@
+#!/bin/bash
+# Setup docker.io registry mirror
+# Usage: setup_dockerio_mirror <mirror_hosts>
+# Example: setup_dockerio_mirror host1:5000,host2:5000
+
+MIRROR_HOSTS="$1"
+
+if [ -z "$MIRROR_HOSTS" ]; then
+    echo "Usage: setup_dockerio_mirror <mirror_hosts>"
+    echo "  mirror_hosts: comma-separated list of mirror hosts (e.g., host1:5000,host2:5000)"
+    exit 1
+fi
+
+# Start the config file with the registry prefix
+cat > /etc/containers/registries.conf.d/00-docker-mirror.conf << EOF
+[[registry]]
+location = "docker.io"
+EOF
+
+# Add each mirror as a separate [[registry.mirror]] block
+IFS=',' read -ra MIRRORS <<< "$MIRROR_HOSTS"
+for mirror in "${MIRRORS[@]}"; do
+    # Strip any protocol prefix and whitespace
+    mirror="${mirror#http://}"
+    mirror="${mirror#https://}"
+    mirror="${mirror// /}"
+
+    cat >> /etc/containers/registries.conf.d/00-docker-mirror.conf << EOF
+
+[[registry.mirror]]
+location = "$mirror"
+insecure = true
+EOF
+done
+
+echo "Configured docker.io mirror(s): $MIRROR_HOSTS"
+echo "=== Generated registry config ==="
+cat /etc/containers/registries.conf.d/00-docker-mirror.conf
+echo "=== End registry config ==="

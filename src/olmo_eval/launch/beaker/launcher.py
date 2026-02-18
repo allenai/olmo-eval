@@ -30,7 +30,7 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.text import Text
 
-from olmo_eval.core.constants.infrastructure import (
+from olmo_eval.common.constants.infrastructure import (
     BEAKER_DEFAULT_IMAGE,
     BEAKER_DEFAULT_WORKSPACE,
     BEAKER_KNOWN_CLUSTERS,
@@ -172,62 +172,40 @@ def parse_task_with_priority(task_spec: str, default_priority: str = "normal") -
 
 def validate_priority_configuration(
     tasks: tuple[str, ...] | list[str],
-    cli_priority: str | None,
     default_priority: str = "normal",
 ) -> dict[str, list[str]]:
-    """Validate priority configuration and group tasks by priority.
+    """Group tasks by priority.
 
     Tasks can specify priority via @priority suffix (e.g., "mmlu@high").
-    Tasks without @priority use the default_priority from the config file.
+    Tasks without @priority use the default_priority.
 
     Args:
         tasks: Task specifications (may include @priority suffixes).
-        cli_priority: Global priority override (typically None, kept for API compatibility).
         default_priority: Default priority for tasks without @priority suffix.
 
     Returns:
         Dictionary mapping priority levels to lists of task names.
 
-    Raises:
-        ValueError: If cli_priority is set while tasks have @priority suffixes.
-
     Examples:
-        # Tasks without @priority suffix use default
-        >>> validate_priority_configuration(["mmlu", "gsm8k"], None)
+        >>> validate_priority_configuration(["mmlu", "gsm8k"])
         {"normal": ["mmlu", "gsm8k"]}
 
-        # Tasks with @priority suffixes
-        >>> validate_priority_configuration(["mmlu@high", "gsm8k@normal"], None)
+        >>> validate_priority_configuration(["mmlu@high", "gsm8k@normal"])
         {"high": ["mmlu"], "normal": ["gsm8k"]}
 
-        # Custom default priority
-        >>> validate_priority_configuration(["mmlu", "gsm8k"], None, "high")
+        >>> validate_priority_configuration(["mmlu", "gsm8k"], "high")
         {"high": ["mmlu", "gsm8k"]}
     """
     from collections import defaultdict
 
     tasks_by_priority: dict[str, list[str]] = defaultdict(list)
-    tasks_with_priority_suffix: list[str] = []
 
     for task_spec in tasks:
         if "@" in task_spec:
-            tasks_with_priority_suffix.append(task_spec)
             task_name, task_priority = parse_task_with_priority(task_spec)
             tasks_by_priority[task_priority].append(task_name)
         else:
-            # Use CLI priority if provided, otherwise use default
-            effective_priority = cli_priority if cli_priority is not None else default_priority
-            tasks_by_priority[effective_priority].append(task_spec)
-
-    # Conflict check: global priority used with @priority suffixes
-    if cli_priority is not None and tasks_with_priority_suffix:
-        raise ValueError(
-            f"Conflicting priority specification: cli_priority={cli_priority} "
-            f"cannot be used together with @priority suffixes on tasks.\n\n"
-            f"Use @priority suffixes to set priority per-task.\n\n"
-            f"Tasks with @priority suffixes:\n"
-            + "\n".join(f"  - {t}" for t in tasks_with_priority_suffix)
-        )
+            tasks_by_priority[default_priority].append(task_spec)
 
     return dict(tasks_by_priority)
 
@@ -378,7 +356,7 @@ class BeakerJobConfig:
     budget: str  # Beaker budget
 
     # Resources
-    num_gpus: int = 1
+    num_gpus: int = 0
     shared_memory: str = "10GiB"
 
     # Job settings
@@ -432,6 +410,15 @@ class BeakerJobConfig:
 
     # Follow mode - when True, wait for experiment to complete
     follow: bool = False
+
+    # Sandbox mode - when True, use Podman-enabled base image and set sandbox env vars
+    enable_sandbox: bool = False
+
+    # Registry mirror setup script to run during install (for sandbox jobs)
+    setup_registry_mirror: bool = False
+
+    # Run setup_store_secrets during install to configure database access
+    setup_store_secrets: bool = False
 
 
 def resolve_clusters(cluster: str | list[str]) -> list[str]:
@@ -566,6 +553,9 @@ class BeakerLauncher:
         env_exports: dict[str, str] | None = None,
         provider_package: str | None = None,
         task_packages: list[str] | None = None,
+        setup_registry_mirror: bool = False,
+        enable_sandbox: bool = False,
+        setup_store_secrets: bool = False,
     ) -> str:
         """Build installation command for gantry's install_cmd parameter.
 
@@ -579,6 +569,9 @@ class BeakerLauncher:
             env_exports: Optional dict of environment variables to export before running.
             provider_package: Optional custom provider package to install (overrides default).
             task_packages: Optional list of task-specific packages to install.
+            setup_registry_mirror: If True, run setup_dockerio_mirror script with MIRROR_HOSTS.
+            enable_sandbox: If True, set up /dev/net/tun for pasta networking.
+            setup_store_secrets: If True, run setup_store_secrets to configure database access.
 
         Returns:
             Shell command string for installation.
@@ -586,6 +579,19 @@ class BeakerLauncher:
         # Build the install steps
         # Export UV_PROJECT_ENVIRONMENT so all uv commands use Docker's /opt/venv
         steps = ["export UV_PROJECT_ENVIRONMENT=/opt/venv"]
+
+        # Set up /dev/net/tun for pasta networking (sandbox jobs)
+        if enable_sandbox:
+            steps.append(
+                "mkdir -p /dev/net && "
+                "[ -e /dev/net/tun ] || mknod /dev/net/tun c 10 200 && "
+                "chmod 666 /dev/net/tun"
+            )
+
+        # Set up registry mirror for Docker Hub if configured (for sandbox jobs)
+        if setup_registry_mirror:
+            script = "/gantry-runtime/src/olmo_eval/launch/beaker/podman/setup_dockerio_mirror"
+            steps.append(f'if [ -n "$MIRROR_HOSTS" ]; then {script} "$MIRROR_HOSTS"; fi')
 
         # Export additional environment variables (e.g., UV_CACHE_DIR)
         if env_exports:
@@ -614,6 +620,11 @@ class BeakerLauncher:
                 install_spec = normalize_provider_package(pkg)
                 steps.append(f"uv pip install '{install_spec}' -c {constraints}")
 
+        # Set up database credentials for --store
+        if setup_store_secrets:
+            script = "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/setup_store_secrets"
+            steps.append(f"source {script}")
+
         return " && ".join(steps)
 
     def launch(self, config: BeakerJobConfig, dry_run: bool = False) -> BeakerExperiment | None:
@@ -641,6 +652,9 @@ class BeakerLauncher:
             env_exports,
             config.provider_package,
             config.task_packages,
+            config.setup_registry_mirror,
+            config.enable_sandbox,
+            config.setup_store_secrets,
         )
 
         # Build weka mounts as tuples: (bucket, mount_path)
@@ -672,6 +686,9 @@ class BeakerLauncher:
 
         # Build env vars as tuples: (name, value)
         env_vars: list[tuple[str, str]] = list(config.env_vars.items())
+
+        if config.enable_sandbox:
+            log.info("Enabling sandbox mode with Podman subcontainers")
 
         # Build mounts for NFS if requested
         mounts: list[tuple[str, str]] | None = None
