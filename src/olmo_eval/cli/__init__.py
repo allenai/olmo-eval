@@ -221,6 +221,10 @@ def external_evals(filter: str) -> None:
         # Description
         details.add_row("Description", eval_instance.description)
 
+        # Backend (if specified)
+        if eval_instance.backend:
+            details.add_row("Backend", f"[magenta]{eval_instance.backend}[/magenta]")
+
         # Sandbox info (only for sandboxed evals)
         if isinstance(eval_instance, SandboxedExternalEval):
             details.add_row("Image", f"[blue]{eval_instance.sandbox_image}[/blue]")
@@ -255,11 +259,12 @@ def external_evals(filter: str) -> None:
             )
             details.add_row("Setup", setup_lines)
 
-        # Run command - format with line breaks for readability
+        # Run command - only show if non-empty (sandboxed evals with explicit command)
         run_cmd = eval_instance.run_command
-        # Break long commands at argument boundaries
-        run_cmd = run_cmd.replace(" --", " \\\n    --")
-        details.add_row("Run", run_cmd)
+        if run_cmd:
+            # Break long commands at argument boundaries for readability
+            run_cmd = run_cmd.replace(" --", " \\\n    --")
+            details.add_row("Run", run_cmd)
 
         console.print(
             Panel(

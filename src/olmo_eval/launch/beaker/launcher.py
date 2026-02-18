@@ -1094,7 +1094,7 @@ class BeakerLauncher:
 
             # Wait for first log entry with spinner
             first_entry = None
-            with _console.status("[dim]Waiting for logs to start streaming...[/dim]"):
+            with _console.status("[dim]Waiting for job to start...[/dim]"):
                 first_entry = next(log_iter, None)
 
             # Print first entry if we got one

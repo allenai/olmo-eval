@@ -34,8 +34,9 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
-from collections.abc import Sequence
+from collections.abc import Coroutine, Sequence
 from typing import TYPE_CHECKING
 
 from openhands.sdk import LLM, Agent, Tool
@@ -68,6 +69,32 @@ __all__ = [
 
 # Counter for unique tool registration names
 _tool_registration_counter = 0
+
+
+def _run_coroutine_sync[T](coro: Coroutine[None, None, T]) -> T:
+    """Run a coroutine synchronously, handling nested event loop scenarios.
+
+    When called from outside an event loop, uses asyncio.run().
+    When called from within a running event loop (e.g., from an async context),
+    runs the coroutine in a separate thread to avoid the "cannot call asyncio.run()
+    from a running event loop" error.
+
+    Args:
+        coro: The coroutine to execute.
+
+    Returns:
+        The result of the coroutine.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # No running loop - safe to use asyncio.run()
+        return asyncio.run(coro)
+
+    # Already in an event loop - run in a thread pool with its own loop
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(asyncio.run, coro)
+        return future.result()
 
 
 class SweRexTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation]):
@@ -163,8 +190,9 @@ class SweRexTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation]):
     ) -> TerminalObservation:
         """Execute a terminal action synchronously.
 
-        OpenHands executors are called from sync context, so we use
-        asyncio.run() to bridge to the async SWE-ReX runtime.
+        OpenHands executors are called from sync context, so we bridge to
+        the async SWE-ReX runtime. Handles the case where we're already
+        inside an event loop (e.g., when called from an async context).
 
         Args:
             action: The terminal action to execute.
@@ -173,7 +201,7 @@ class SweRexTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation]):
         Returns:
             TerminalObservation with command output and exit code.
         """
-        return asyncio.run(self._execute_async(action))
+        return _run_coroutine_sync(self._execute_async(action))
 
     async def _execute_async(self, action: TerminalAction) -> TerminalObservation:
         """Execute the terminal action asynchronously.
