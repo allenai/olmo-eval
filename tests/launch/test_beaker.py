@@ -517,7 +517,6 @@ class TestBuildCommandWithTaskPackages:
         install_cmd = launcher._build_install_cmd(
             extras=[],
             env_exports=None,
-            provider_package=None,
             task_packages=["special-lib==1.0", "another-pkg"],
         )
 
@@ -525,19 +524,19 @@ class TestBuildCommandWithTaskPackages:
         assert "uv pip install 'special-lib==1.0'" in install_cmd
         assert "uv pip install 'another-pkg'" in install_cmd
 
-    def test_task_packages_installed_after_provider(self):
-        """Test that task packages are installed after provider package."""
+    def test_provider_packages_installed_before_task_packages(self):
+        """Test that provider packages are installed before task packages."""
         from olmo_eval.launch import BeakerLauncher
 
         launcher = BeakerLauncher()
         install_cmd = launcher._build_install_cmd(
             extras=[],
             env_exports=None,
-            provider_package="vllm==0.14.0",
+            provider_packages=["vllm==0.14.0"],
             task_packages=["task-dep==1.0"],
         )
 
-        # Provider should be installed before task packages
+        # Provider packages should be installed before task packages
         provider_pos = install_cmd.find("uv pip install 'vllm==0.14.0'")
         task_pos = install_cmd.find("uv pip install 'task-dep==1.0'")
         assert provider_pos < task_pos
@@ -550,7 +549,6 @@ class TestBuildCommandWithTaskPackages:
         install_cmd = launcher._build_install_cmd(
             extras=[],
             env_exports=None,
-            provider_package=None,
             task_packages=None,
         )
 
@@ -567,7 +565,6 @@ class TestBuildCommandWithTaskPackages:
         install_cmd = launcher._build_install_cmd(
             extras=[],
             env_exports=None,
-            provider_package=None,
             task_packages=["https://github.com/user/repo@v1.0"],
         )
 

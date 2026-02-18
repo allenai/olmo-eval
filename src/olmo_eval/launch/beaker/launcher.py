@@ -404,9 +404,6 @@ class BeakerJobConfig:
     # GCS access - when True, injects user's GCS credentials as env secret
     inject_gcs_credentials: bool = False
 
-    # Custom provider package to install (overrides default from pyproject.toml extras)
-    provider_package: str | None = None
-
     # Provider-specific dependencies (from provider config)
     provider_packages: list[str] | None = None
 
@@ -627,7 +624,6 @@ class BeakerLauncher:
         self,
         extras: list[str],
         env_exports: dict[str, str] | None = None,
-        provider_package: str | None = None,
         provider_packages: list[str] | None = None,
         task_packages: list[str] | None = None,
         setup_registry_mirror: bool = False,
@@ -639,8 +635,7 @@ class BeakerLauncher:
 
         Gantry clones the source code to /gantry-runtime, so we:
         1. Install olmo-eval from the cloned source with optional extras
-        2. Optionally install a custom provider package to override the default
-        3. Optionally install provider-specific and task-specific dependencies
+        2. Optionally install provider-specific and task-specific dependencies
 
         When vllm_separate_venv is True, vLLM is installed in a separate venv
         (/opt/vllm-venv) to avoid dependency conflicts. The vLLM server runs as
@@ -650,7 +645,6 @@ class BeakerLauncher:
         Args:
             extras: Optional dependency group names from pyproject.toml.
             env_exports: Optional dict of environment variables to export before running.
-            provider_package: Optional custom provider package to install (overrides default).
             provider_packages: Optional list of provider-specific dependencies.
             task_packages: Optional list of task-specific packages to install.
             setup_registry_mirror: If True, run setup_dockerio_mirror script with MIRROR_HOSTS.
@@ -717,10 +711,6 @@ class BeakerLauncher:
         else:
             steps.append(f"cd /gantry-runtime && uv pip install -e . -c {constraints}")
 
-        # Install custom provider package to override default version from extras
-        if provider_package:
-            steps.append(build_install_command(provider_package, constraints))
-
         # Install provider-specific dependencies
         if provider_packages:
             for pkg in provider_packages:
@@ -761,7 +751,6 @@ class BeakerLauncher:
         install_cmd = self._build_install_cmd(
             config.extras,
             env_exports,
-            config.provider_package,
             config.provider_packages,
             config.task_packages,
             config.setup_registry_mirror,
