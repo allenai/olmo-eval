@@ -7,7 +7,7 @@ from olmo_eval.common.scorers import MinervaMathScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.extract import MathExtractor
-from olmo_eval.evals.tasks.common import Task, TaskConfig, register, register_variant
+from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 MATH_SUBSETS = [
     "algebra",
@@ -19,8 +19,7 @@ MATH_SUBSETS = [
     "precalculus",
 ]
 
-# Fixed 4 few-shot examples (same as oe-eval Minerva:MATH:fixed) for reproducible olmes evaluation.
-# From https://github.com/huggingface/lm-evaluation-harness/blob/add_leaderboard_tasks/lm_eval/tasks/leaderboard/math/utils.py
+# Fixed 4 few-shot examples (from as oe-eval)
 MINERVA_MATH_FIXED_FEWSHOT = [
     {
         "problem": "Find the domain of the expression  $\\frac{\\sqrt{x-2}}{\\sqrt{5-x}}$.}",
@@ -153,7 +152,6 @@ class Math500Task(MinervaMathTask):
         )
 
 
-# Metrics for olmes_n4_v2 variant (4 samples, pass@1,2,4; matches oe-eval minerva_math::olmes:n4:v2)
 _minerva_pass_at_1 = PassAtKMetric(k=1, scorer=MinervaMathScorer)
 _minerva_olmes_n4_v2_metrics = (
     AccuracyMetric(scorer=MinervaMathScorer),
@@ -194,8 +192,6 @@ for _subset in MATH_SUBSETS:
         ),
     )
 
-    # 4 samples per instance, pass@1/2/4, temperature 0.6 / top_p 0.6, fixed few-shot (matches oe-eval olmes:n4:v2)
-    # Use olmes_n4_v2 (no colon) so spec minerva_math_X:olmes_n4_v2 parses as one variant
     register_variant(
         _task_name,
         "olmes_n4_v2",
