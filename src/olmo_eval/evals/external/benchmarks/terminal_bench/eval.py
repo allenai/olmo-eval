@@ -118,8 +118,6 @@ ENV PATH="/root/python/bin:$PATH"
 
     logger.info(f"Built swerex image: {local_image}")
 
-    # Push to registry for caching (if configured)
-    # Requires prior `docker login` or credential helper configuration
     if registry:
         registry_image = f"{registry}/swerex-{tag_hash}:latest"
         logger.info(f"Pushing swerex image to registry: {registry_image}")
