@@ -33,6 +33,8 @@ class LiteLLMProvider(InferenceProvider):
         "AZURE_API_KEY": "azure_api_key",
         "AZURE_API_BASE": "azure_api_base",
         "AZURE_API_VERSION": "azure_api_version",
+        "LITELLM_PROXY_API_KEY": "litellm_proxy_api_key",
+        "LITELLM_PROXY_API_BASE": "litellm_proxy_api_base",
     }
 
     def __init__(

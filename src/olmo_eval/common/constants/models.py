@@ -103,4 +103,15 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             kind=ProviderKind.MOCK,
             model="mock",
         ),
+        # Ai2 deployed models on Litellm Proxy
+        "cirrascale-olmo-2-7b-instruct": ProviderConfig(
+            kind=ProviderKind.LITELLM,
+            model="litellm_proxy/openai/OLMo-2-1124-7B-Instruct",
+            required_secrets=("LITELLM_PROXY_API_KEY", "LITELLM_PROXY_API_BASE"),
+        ),
+        "modal-olmo-3-7b-instruct": ProviderConfig(
+            kind=ProviderKind.LITELLM,
+            model="litellm_proxy/openai/ai2-release-partners/Olmo-3-7B-Instruct",
+            required_secrets=("LITELLM_PROXY_API_KEY", "LITELLM_PROXY_API_BASE"),
+        ),
     }
