@@ -148,32 +148,42 @@ class OpenHandsBackend(Backend):
 
         llm = LLM(**llm_kwargs)
 
-        if self._sandbox_manager is None:
-            raise RuntimeError(
-                "OpenHands backend requires a sandbox configuration. "
-                "Add 'sandboxes' to your HarnessConfig."
-            )
+        from olmo_eval.harness.adapters.openhands import create_sandbox_agent
 
-        executor = self._get_sandbox_executor()
-        if executor is None:
-            raise RuntimeError("Sandbox configured but no executor available")
-        if executor._runtime is None:
-            raise RuntimeError("Sandbox executor not started")
+        # Get sandbox runtime if available and needed
+        runtime = None
+        working_dir = "/workspace"
+        command_timeout = 120.0
 
-        from olmo_eval.harness.adapters.openhands import create_swerex_agent
+        if config.has_sandbox_tools:
+            if self._sandbox_manager is None:
+                raise RuntimeError(
+                    "Sandbox tools configured but no sandbox available. "
+                    "Add 'sandboxes' to your HarnessConfig."
+                )
+            executor = self._get_sandbox_executor()
+            if executor is None:
+                raise RuntimeError("Sandbox configured but no executor available")
+            if executor._runtime is None:
+                raise RuntimeError("Sandbox executor not started")
+            runtime = executor._runtime
+            working_dir = executor.config.working_dir
+            command_timeout = executor.config.command_timeout
 
-        agent = create_swerex_agent(
+        agent = create_sandbox_agent(
             llm=llm,
-            runtime=executor._runtime,
-            working_dir=executor.config.working_dir,
-            timeout=executor.config.command_timeout,
+            runtime=runtime,
+            working_dir=working_dir,
+            timeout=command_timeout,
+            system_prompt=config.system_prompt,
+            harness_tools=config.resolved_tools,
         )
-        logger.info("OpenHands agent ready with sandbox execution")
+        logger.info(f"OpenHands agent ready with {len(config.resolved_tools)} tool(s)")
 
         # Create conversation with visualizer=None to disable console output
         conversation = Conversation(
             agent=agent,
-            workspace=executor.config.working_dir,
+            workspace=working_dir,
             max_iteration_per_run=max_turns,
             visualizer=None,  # Disable console output
         )

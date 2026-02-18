@@ -1,23 +1,23 @@
-"""SWE-ReX → OpenHands SDK Tool Adapter.
+"""OpenHands SDK Tool Adapter.
 
-This module provides a bridge between SWE-ReX runtimes and the OpenHands SDK,
-enabling OpenHands agents to execute commands in SWE-ReX managed containers.
+This module provides a bridge between sandbox runtimes and the OpenHands SDK,
+enabling OpenHands agents to execute commands in sandbox-managed containers.
 
 Usage:
     import asyncio
     from swerex.deployment.docker import DockerDeployment
     from openhands.sdk import LLM, Conversation
 
-    from olmo_eval.harness.adapters.openhands import create_swerex_agent
+    from olmo_eval.harness.adapters.openhands import create_sandbox_agent
 
     async def main():
         # Start Docker deployment
         deployment = DockerDeployment(image="python:3.11")
         await deployment.start()
 
-        # Create agent with SWE-ReX backend
+        # Create agent with sandbox backend
         llm = LLM(model="anthropic/claude-sonnet-4-20250514", api_key="...")
-        agent = create_swerex_agent(llm, deployment.runtime)
+        agent = create_sandbox_agent(llm, deployment.runtime)
 
         # Run conversation
         conversation = Conversation(agent=agent, workspace="/workspace")
@@ -37,7 +37,7 @@ import asyncio
 import concurrent.futures
 import logging
 from collections.abc import Coroutine, Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from openhands.sdk import LLM, Agent, Tool
 from openhands.sdk.tool import (
@@ -52,24 +52,28 @@ from openhands.tools.terminal.definition import (
     TerminalObservation,
 )
 from openhands.tools.terminal.metadata import CmdOutputMetadata
+from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from openhands.sdk.conversation.impl.local_conversation import LocalConversation
     from openhands.sdk.conversation.state import ConversationState
     from swerex.runtime.abstract import AbstractRuntime
 
+    from olmo_eval.harness.tools import Tool as HarnessTool
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "SweRexTerminalExecutor",
-    "SweRexTerminalTool",
-    "create_swerex_tools",
-    "register_swerex_tools",
-    "create_swerex_agent",
+    "SandboxTerminalExecutor",
+    "SandboxTerminalTool",
+    "create_sandbox_tools",
+    "register_sandbox_tools",
+    "create_sandbox_agent",
+    "HarnessToolAction",
+    "HarnessToolObservation",
+    "HarnessToolExecutor",
+    "HarnessToolDefinition",
 ]
-
-# Counter for unique tool registration names
-_tool_registration_counter = 0
 
 
 def _run_coroutine_sync[T](coro: Coroutine[None, None, T]) -> T:
@@ -93,16 +97,18 @@ def _run_coroutine_sync[T](coro: Coroutine[None, None, T]) -> T:
         return asyncio.run(coro)
 
     # Already in an event loop - run in a thread pool with its own loop
+    def _run() -> T:
+        return asyncio.run(coro)
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(asyncio.run, coro)
-        return future.result()
+        return pool.submit(_run).result()
 
 
-class SweRexTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation]):
-    """Terminal executor that delegates to a SWE-ReX runtime.
+class SandboxTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation]):
+    """Terminal executor that delegates to a sandbox runtime.
 
-    This executor wraps a SWE-ReX AbstractRuntime to execute bash commands,
-    bridging the OpenHands SDK's terminal tool interface with SWE-ReX's
+    This executor wraps a sandbox AbstractRuntime to execute bash commands,
+    bridging the OpenHands SDK's terminal tool interface with the sandbox's
     session-based command execution.
 
     The executor manages bash session lifecycle lazily - the session is created
@@ -120,7 +126,7 @@ class SweRexTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation]):
         """Initialize the executor.
 
         Args:
-            runtime: SWE-ReX runtime instance (from a started deployment).
+            runtime: Sandbox runtime instance (from a started deployment).
             session_name: Name for the bash session (default: "default").
             timeout: Default command timeout in seconds (default: 120).
             working_dir: Initial working directory (optional).
@@ -192,7 +198,7 @@ class SweRexTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation]):
         """Execute a terminal action synchronously.
 
         OpenHands executors are called from sync context, so we bridge to
-        the async SWE-ReX runtime. Handles the case where we're already
+        the async sandbox runtime. Handles the case where we're already
         inside an event loop (e.g., when called from an async context).
 
         Args:
@@ -253,7 +259,7 @@ class SweRexTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation]):
         # Handle special cases
         if action.command == "C-c":
             return self._make_observation(
-                text="[Interrupt (C-c) not directly supported in SWE-ReX sessions. "
+                text="[Interrupt (C-c) not directly supported in sandbox sessions. "
                 "Consider using 'kill' command or starting a new session.]",
                 command=action.command,
                 exit_code=0,
@@ -261,7 +267,7 @@ class SweRexTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation]):
 
         if getattr(action, "is_input", False):
             return self._make_observation(
-                text="[Interactive input not supported. SWE-ReX run_in_session "
+                text="[Interactive input not supported. Sandbox run_in_session "
                 "does not support sending input to running processes.]",
                 command=action.command,
                 exit_code=1,
@@ -318,7 +324,7 @@ class SweRexTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation]):
                 timeout=True,
             )
         except Exception as e:
-            logger.error(f"SWE-ReX execution error: {e}")
+            logger.error(f"Sandbox execution error: {e}")
             return self._make_observation(
                 text=f"[Infrastructure error: {e}]",
                 command=action.command,
@@ -327,43 +333,43 @@ class SweRexTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation]):
             )
 
 
-class SweRexTerminalTool(ToolDefinition[TerminalAction, TerminalObservation]):
-    """Terminal tool backed by a SWE-ReX runtime.
+class SandboxTerminalTool(ToolDefinition[TerminalAction, TerminalObservation]):
+    """Terminal tool backed by a sandbox runtime.
 
     This is a concrete implementation of ToolDefinition that executes terminal
-    commands via a SWE-ReX runtime instead of local shell execution.
+    commands via a sandbox runtime instead of local shell execution.
     """
 
     @classmethod
     def create(
         cls,
         conv_state: ConversationState | None = None,
-        executor: SweRexTerminalExecutor | None = None,
+        executor: SandboxTerminalExecutor | None = None,
         runtime: AbstractRuntime | None = None,
         working_dir: str = "/workspace",
         session_name: str = "default",
         timeout: float = 120.0,
-    ) -> Sequence[SweRexTerminalTool]:
-        """Create SweRexTerminalTool instances.
+    ) -> Sequence[SandboxTerminalTool]:
+        """Create SandboxTerminalTool instances.
 
         Can be called either with a pre-created executor, or with runtime
         parameters to create a new executor.
 
         Args:
             conv_state: Conversation state (unused, for interface compatibility).
-            executor: Pre-created SweRexTerminalExecutor (takes precedence).
-            runtime: SWE-ReX runtime to create executor from.
+            executor: Pre-created SandboxTerminalExecutor (takes precedence).
+            runtime: Sandbox runtime to create executor from.
             working_dir: Initial working directory.
             session_name: Name for the bash session.
             timeout: Default command timeout in seconds.
 
         Returns:
-            List containing a single SweRexTerminalTool instance.
+            List containing a single SandboxTerminalTool instance.
         """
         if executor is None:
             if runtime is None:
                 raise ValueError("Either executor or runtime must be provided")
-            executor = SweRexTerminalExecutor(
+            executor = SandboxTerminalExecutor(
                 runtime=runtime,
                 session_name=session_name,
                 timeout=timeout,
@@ -387,18 +393,18 @@ class SweRexTerminalTool(ToolDefinition[TerminalAction, TerminalObservation]):
         ]
 
 
-def _create_swerex_terminal_tool(
-    executor: SweRexTerminalExecutor,
-) -> SweRexTerminalTool:
-    """Create a SWE-ReX terminal tool instance.
+def _create_sandbox_terminal_tool(
+    executor: SandboxTerminalExecutor,
+) -> SandboxTerminalTool:
+    """Create a sandbox terminal tool instance.
 
     Args:
-        executor: The SWE-ReX terminal executor.
+        executor: The sandbox terminal executor.
 
     Returns:
-        SweRexTerminalTool configured for terminal execution.
+        SandboxTerminalTool configured for terminal execution.
     """
-    return SweRexTerminalTool(
+    return SandboxTerminalTool(
         description=TOOL_DESCRIPTION,
         action_type=TerminalAction,
         observation_type=TerminalObservation,
@@ -413,19 +419,19 @@ def _create_swerex_terminal_tool(
     )
 
 
-def create_swerex_tools(
+def create_sandbox_tools(
     runtime: AbstractRuntime,
     working_dir: str = "/workspace",
     session_name: str = "default",
     timeout: float = 120.0,
-) -> list[SweRexTerminalTool]:
-    """Create OpenHands tools backed by a SWE-ReX runtime.
+) -> list[SandboxTerminalTool]:
+    """Create OpenHands tools backed by a sandbox runtime.
 
     This factory function creates ready-to-use tool instances without
     requiring a ConversationState.
 
     Args:
-        runtime: SWE-ReX runtime instance (from a started deployment).
+        runtime: Sandbox runtime instance (from a started deployment).
         working_dir: Initial working directory (default: "/workspace").
         session_name: Name for the bash session (default: "default").
         timeout: Default command timeout in seconds (default: 120).
@@ -437,29 +443,29 @@ def create_swerex_tools(
         Currently only provides TerminalTool. File editing can be done
         via terminal commands (cat, echo, sed) in the sandbox.
     """
-    executor = SweRexTerminalExecutor(
+    executor = SandboxTerminalExecutor(
         runtime=runtime,
         session_name=session_name,
         timeout=timeout,
         working_dir=working_dir,
     )
-    return [_create_swerex_terminal_tool(executor)]
+    return [_create_sandbox_terminal_tool(executor)]
 
 
-def register_swerex_tools(
+def register_sandbox_tools(
     runtime: AbstractRuntime,
     working_dir: str = "/workspace",
     session_name: str = "default",
     timeout: float = 120.0,
 ) -> str:
-    """Register SWE-ReX tools with the OpenHands tool registry.
+    """Register sandbox tools with the OpenHands tool registry.
 
-    This function creates SWE-ReX-backed tools and registers them with
+    This function creates sandbox-backed tools and registers them with
     OpenHands' tool registry, returning the registered tool name that
     can be used with Agent(tools=[Tool(name=...)]).
 
     Args:
-        runtime: SWE-ReX runtime instance (from a started deployment).
+        runtime: Sandbox runtime instance (from a started deployment).
         working_dir: Initial working directory (default: "/workspace").
         session_name: Name for the bash session (default: "default").
         timeout: Default command timeout in seconds (default: 120).
@@ -467,49 +473,177 @@ def register_swerex_tools(
     Returns:
         The registered tool name to use with Tool(name=...).
     """
-    global _tool_registration_counter
-    _tool_registration_counter += 1
-    tool_name = f"SweRexTerminal_{_tool_registration_counter}"
-
-    # Create the executor once, captured by the factory closure
-    executor = SweRexTerminalExecutor(
+    executor = SandboxTerminalExecutor(
         runtime=runtime,
         session_name=session_name,
         timeout=timeout,
         working_dir=working_dir,
     )
 
+    tool_name = f"SandboxTerminal_{id(executor)}"
+
     def tool_factory(
         conv_state: ConversationState,
-    ) -> list[SweRexTerminalTool]:
+    ) -> list[SandboxTerminalTool]:
         """Factory function for OpenHands tool registry."""
-        return [_create_swerex_terminal_tool(executor)]
+        return [_create_sandbox_terminal_tool(executor)]
 
     register_tool(tool_name, tool_factory)
     return tool_name
 
 
-def create_swerex_agent(
+# ---------------------------------------------------------------------------
+# Harness Tool Translation
+# ---------------------------------------------------------------------------
+
+
+class HarnessToolAction(BaseModel):
+    """Generic action wrapping harness tool arguments."""
+
+    arguments: dict[str, Any]
+
+
+class HarnessToolObservation(BaseModel):
+    """Observation wrapping harness tool string result."""
+
+    content: str
+    is_error: bool = False
+
+
+class HarnessToolExecutor(ToolExecutor[HarnessToolAction, HarnessToolObservation]):
+    """Executor that bridges harness Tool to OpenHands execution model."""
+
+    def __init__(
+        self,
+        tool: HarnessTool,
+        sandbox_executor: SandboxTerminalExecutor | None = None,
+    ) -> None:
+        self._tool = tool
+        self._sandbox_executor = sandbox_executor
+
+    def __call__(
+        self,
+        action: HarnessToolAction,
+        conversation: LocalConversation | None = None,
+    ) -> HarnessToolObservation:
+        """Execute the harness tool."""
+        try:
+            if self._tool.sandbox and self._sandbox_executor:
+                # Execute via sandbox
+                result = self._execute_in_sandbox(action.arguments)
+            else:
+                # Direct execution
+                result = self._tool.execute(**action.arguments)
+                if asyncio.iscoroutine(result):
+                    result = _run_coroutine_sync(result)
+            return HarnessToolObservation(content=str(result))
+        except Exception as e:
+            logger.error(f"Harness tool {self._tool.name} failed: {e}")
+            return HarnessToolObservation(content=str(e), is_error=True)
+
+    def _execute_in_sandbox(self, arguments: dict[str, Any]) -> str:
+        """Execute tool via sandbox runtime."""
+        # The harness bash tools expect 'command' argument
+        command = arguments.get("command", "")
+        action = TerminalAction(command=command)
+        obs = self._sandbox_executor(action)
+        return obs.content[0]["text"] if obs.content else ""
+
+
+class HarnessToolDefinition(ToolDefinition[HarnessToolAction, HarnessToolObservation]):
+    """OpenHands ToolDefinition wrapping a harness Tool."""
+
+    @classmethod
+    def from_tool(
+        cls,
+        tool: HarnessTool,
+        sandbox_executor: SandboxTerminalExecutor | None = None,
+    ) -> HarnessToolDefinition:
+        """Create from a harness Tool.
+
+        Args:
+            tool: Harness Tool instance.
+            sandbox_executor: Executor for sandbox tools.
+
+        Returns:
+            HarnessToolDefinition wrapping the harness tool.
+        """
+        if tool.sandbox and sandbox_executor is None:
+            raise ValueError(f"Sandbox executor required for tool {tool.name}")
+
+        executor = HarnessToolExecutor(tool, sandbox_executor)
+
+        # Build description from tool schema
+        description = tool.description
+        if tool.parameters.get("properties"):
+            param_docs = []
+            for name, schema in tool.parameters["properties"].items():
+                param_type = schema.get("type", "any")
+                param_desc = schema.get("description", "")
+                param_docs.append(f"- {name} ({param_type}): {param_desc}")
+            if param_docs:
+                description = f"{description}\n\nParameters:\n" + "\n".join(param_docs)
+
+        return cls(
+            description=description,
+            action_type=HarnessToolAction,
+            observation_type=HarnessToolObservation,
+            annotations=ToolAnnotations(
+                title=tool.name,
+                readOnlyHint=not bool(tool.sandbox),
+                destructiveHint=bool(tool.sandbox),
+                idempotentHint=False,
+                openWorldHint=True,
+            ),
+            executor=executor,
+        )
+
+
+def _register_harness_tool(
+    tool: HarnessTool,
+    sandbox_executor: SandboxTerminalExecutor | None = None,
+) -> str:
+    """Register a harness tool with OpenHands registry.
+
+    Args:
+        tool: Harness Tool to register.
+        sandbox_executor: Executor for sandbox tools (required if tool.sandbox).
+
+    Returns:
+        Registered tool name.
+    """
+    tool_def = HarnessToolDefinition.from_tool(tool, sandbox_executor)
+    tool_name = f"{tool.name}_{id(tool_def)}"
+
+    def tool_factory(conv_state: ConversationState) -> list[ToolDefinition]:
+        return [tool_def]
+
+    register_tool(tool_name, tool_factory)
+    return tool_name
+
+
+def create_sandbox_agent(
     llm: LLM,
-    runtime: AbstractRuntime,
+    runtime: AbstractRuntime | None = None,
     working_dir: str = "/workspace",
     session_name: str = "default",
     timeout: float = 120.0,
+    system_prompt: str | None = None,
+    harness_tools: tuple[HarnessTool, ...] | None = None,
 ) -> Agent:
-    """Create an OpenHands Agent with SWE-ReX-backed tools.
-
-    This factory function creates a fully configured OpenHands Agent
-    that executes commands in a SWE-ReX managed container.
+    """Create an OpenHands Agent with the specified tools.
 
     Args:
-        llm: OpenHands LLM instance configured with model and API settings.
-        runtime: SWE-ReX runtime instance (from a started deployment).
-        working_dir: Initial working directory (default: "/workspace").
-        session_name: Name for the bash session (default: "default").
-        timeout: Default command timeout in seconds (default: 120).
+        llm: OpenHands LLM instance.
+        runtime: Sandbox runtime (required if any tools need sandbox).
+        working_dir: Initial working directory for sandbox.
+        session_name: Bash session name.
+        timeout: Command timeout in seconds.
+        system_prompt: Optional system prompt suffix.
+        harness_tools: Tools to make available to the agent.
 
     Returns:
-        Configured OpenHands Agent instance.
+        Configured OpenHands Agent.
 
     Example:
         >>> from swerex.deployment.docker import DockerDeployment
@@ -520,7 +654,7 @@ def create_swerex_agent(
         ...     await deployment.start()
         ...
         ...     llm = LLM(model="anthropic/claude-sonnet-4-20250514", api_key="...")
-        ...     agent = create_swerex_agent(llm, deployment.runtime)
+        ...     agent = create_sandbox_agent(llm, deployment.runtime)
         ...
         ...     conv = Conversation(agent=agent, workspace="/workspace")
         ...     conv.send_message("List files")
@@ -528,15 +662,40 @@ def create_swerex_agent(
         ...
         ...     await deployment.stop()
     """
-    # Register tools and get the tool name
-    tool_name = register_swerex_tools(
-        runtime=runtime,
-        working_dir=working_dir,
-        session_name=session_name,
-        timeout=timeout,
-    )
+    from openhands.sdk import AgentContext
+
+    tools_list: list[Tool] = []
+    sandbox_executor: SandboxTerminalExecutor | None = None
+
+    if harness_tools:
+        # Check if any tools need sandbox
+        needs_sandbox = any(t.sandbox for t in harness_tools)
+
+        if needs_sandbox:
+            if runtime is None:
+                raise ValueError("Sandbox runtime required for sandbox tools")
+            sandbox_executor = SandboxTerminalExecutor(
+                runtime=runtime,
+                session_name=session_name,
+                timeout=timeout,
+                working_dir=working_dir,
+            )
+
+        for tool in harness_tools:
+            if tool.sandbox:
+                # Sandbox tool - execute via sandbox runtime
+                tool_name = _register_harness_tool(tool, sandbox_executor=sandbox_executor)
+            else:
+                # Non-sandbox tool - execute directly
+                tool_name = _register_harness_tool(tool)
+            tools_list.append(Tool(name=tool_name))
+
+    agent_context = None
+    if system_prompt:
+        agent_context = AgentContext(system_message_suffix=system_prompt)
 
     return Agent(
         llm=llm,
-        tools=[Tool(name=tool_name)],
+        tools=tools_list,
+        agent_context=agent_context,
     )
