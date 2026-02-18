@@ -1119,7 +1119,19 @@ JSON output includes pagination metadata:
 
 ### Database Configuration
 
-Configure via environment variables:
+#### AI2 Users (Recommended)
+
+Set these two environment variables to connect to the shared database:
+
+```bash
+export OLMO_EVAL_DB_HOST="<database-host>"
+export OLMO_EVAL_DB_SECRET_ARN="arn:aws:secretsmanager:us-west-2:..."
+```
+
+The password is automatically fetched from AWS Secrets Manager on first connection.
+This requires AWS credentials configured (via `~/.aws/credentials` or environment variables).
+
+#### All Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -1127,7 +1139,8 @@ Configure via environment variables:
 | `OLMO_EVAL_DB_PORT` | `5432` | Database port |
 | `OLMO_EVAL_DB_NAME` | `olmo_eval` | Database name |
 | `OLMO_EVAL_DB_USER` | `postgres` | Database user |
-| `OLMO_EVAL_DB_PASSWORD` | `postgres` | Database password |
+| `OLMO_EVAL_DB_PASSWORD` | - | Database password (use this OR `OLMO_EVAL_DB_SECRET_ARN`) |
+| `OLMO_EVAL_DB_SECRET_ARN` | - | AWS Secrets Manager ARN for password (fetched on auth failure) |
 
 ## Advanced Usage
 
