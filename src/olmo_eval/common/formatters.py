@@ -182,7 +182,8 @@ class MultipleChoiceLogprobFormatter(Formatter):
                 prompt = f"{prompt}\n\n{choices_text}"
             if self.answer_suffix:
                 prompt = prompt + self.answer_suffix
-            # Continuations are the answer letters (A, B, C, D) with optional prefix for tokenization
+            # Continuations are the answer letters (A, B, C, D) with optional prefix for
+            # tokenization
             letters = tuple(chr(ord("A") + i) for i in range(len(instance.choices)))
             continuations = tuple(self.label_prefix + letter for letter in letters)
         return LMRequest(

@@ -423,7 +423,7 @@ class Task(ABC):
         for response in responses:
             for scorer in scorers_by_name.values():
                 if hasattr(scorer, "score_response"):
-                    response.scores[scorer.name] = scorer.score_response(response)
+                    response.scores[scorer.name] = scorer.score_response(response)  # type: ignore[misc]
                 else:
                     scores = [scorer.score(response.instance, o) for o in response.outputs]
                     response.scores[scorer.name] = max(scores) if scores else 0.0
@@ -475,7 +475,7 @@ class Task(ABC):
         for response in responses:
             for scorer in sync_scorers.values():
                 if hasattr(scorer, "score_response"):
-                    response.scores[scorer.name] = scorer.score_response(response)
+                    response.scores[scorer.name] = scorer.score_response(response)  # type: ignore[misc]
                 else:
                     scores = [scorer.score(response.instance, o) for o in response.outputs]
                     response.scores[scorer.name] = max(scores) if scores else 0.0

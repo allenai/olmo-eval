@@ -72,7 +72,8 @@ class MultipleChoiceScorer(Scorer):
 
 @dataclass(frozen=True, slots=True)
 class MultipleChoiceLogprobScorer(Scorer):
-    """Score multiple choice by logprob: pick choice with highest total logprob, compare to gold_idx.
+    """Score multiple choice by logprob: pick choice with highest total logprob,
+    compare to gold_idx.
 
     Uses the full response (one output per continuation). Implements score_response()
     so that Task.score_responses calls it once per response instead of per-output.
