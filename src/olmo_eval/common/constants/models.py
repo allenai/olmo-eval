@@ -103,4 +103,11 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             kind=ProviderKind.MOCK,
             model="mock",
         ),
+        "OLMo3.1-7B-6T-30h-midtrain-deux-soup_step23842-hf5": ProviderConfig(
+            kind=ProviderKind.VLLM,
+            model="/weka/oe-training-default/ai2-llm/checkpoints/willm/linear-rnns/OLMo3.1-7B-6T-30h-midtrain-deux-soup/step23842-hf5",
+            trust_remote_code=True,
+            max_model_len=4096,
+            kwargs={"gpu_memory_utilization": 0.7},
+        ),
     }
