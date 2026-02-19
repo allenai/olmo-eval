@@ -126,7 +126,7 @@ class MultipleChoiceFormatter(Formatter):
 
     @property
     def request_type(self) -> RequestType:
-        return RequestType.COMPLETION
+        return RequestType.LOGLIKELIHOOD
 
     def format(
         self,
