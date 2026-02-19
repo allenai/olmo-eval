@@ -15,14 +15,14 @@ import os
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.core.formatters import PPLFormatter
-from olmo_eval.core.metrics import AccuracyMetric, BPBMetric, F1Metric, RecallMetric
-from olmo_eval.core.scorers import ExactMatchScorer, F1Scorer
-from olmo_eval.core.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
+from olmo_eval.common.formatters import PPLFormatter
+from olmo_eval.common.metrics import AccuracyMetric, BPBMetric, F1Metric, RecallMetric
+from olmo_eval.common.scorers import ExactMatchScorer, F1Scorer
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.data.ruler_loader import download_ruler_data, load_ruler_dataset
 from olmo_eval.data.ruler_tasks import RULER_TASKS
-from olmo_eval.evals.tasks.core.base import Task, TaskConfig
-from olmo_eval.evals.tasks.core.registry import register, register_variant
+from olmo_eval.evals.tasks.common.base import Task, TaskConfig
+from olmo_eval.evals.tasks.common.registry import register, register_variant
 
 
 class RulerTask(Task):
@@ -188,62 +188,48 @@ class RulerTask(Task):
         return output.text
 
 
+def _make_ruler_task_class(task_name: str, task_cfg: dict) -> type:
+    """Create and register a task class for a RULER task variant."""
+    # Determine metrics based on task type
+    if task_cfg["tag"] == "qa":
+        task_metrics: tuple = (
+            AccuracyMetric(scorer=ExactMatchScorer),
+            F1Metric(scorer=F1Scorer),
+        )
+        task_primary_metric = "exact_match"
+    else:
+        task_metrics = (RecallMetric(),)
+        task_primary_metric = "recall"
+
+    # Build sampling params
+    stop_sequences = []
+    if task_cfg.get("stop_new_line", False):
+        stop_sequences = ["\n", "Ċ", "ĊĊ", "<0x0A>"]
+
+    task_sampling_params = SamplingParams(
+        temperature=0.0,
+        top_p=1.0,
+        max_tokens=task_cfg.get("max_gen_toks", 50),
+        stop_sequences=stop_sequences if stop_sequences else None,
+    )
+
+    class _RulerTask(RulerTask):
+        metrics = task_metrics
+        primary_metric = task_primary_metric
+        sampling_params = task_sampling_params
+        limit = 100
+
+        def __init__(self, config: TaskConfig) -> None:
+            super().__init__(config, task_name, task_cfg)
+
+    _RulerTask.__name__ = f"Ruler_{task_name}"
+    _RulerTask.__qualname__ = f"Ruler_{task_name}"
+    return _RulerTask
+
+
 # Dynamically register all RULER tasks
 for _task_name, _task_config in RULER_TASKS.items():
-
-    def _make_config_factory(task_name: str = _task_name, task_cfg: dict = _task_config):
-        """Create config factory for this RULER task variant."""
-
-        def config_factory() -> TaskConfig:
-            # Determine metrics based on task type
-            if task_cfg["tag"] == "qa":
-                # QA tasks use multiple metrics
-                metrics = (
-                    AccuracyMetric(scorer=ExactMatchScorer),
-                    F1Metric(scorer=F1Scorer),
-                )
-                primary_metric = "exact_match"
-            else:
-                # Other tasks use substring recall
-                metrics = (RecallMetric(),)
-                primary_metric = "recall"
-
-            # Build sampling params
-            stop_sequences = []
-            if task_cfg.get("stop_new_line", False):
-                stop_sequences = ["\n", "Ċ", "ĊĊ", "<0x0A>"]
-
-            sampling_params = SamplingParams(
-                temperature=0.0,
-                top_p=1.0,
-                max_tokens=task_cfg.get("max_gen_toks", 50),
-                stop_sequences=stop_sequences if len(stop_sequences) > 0 else None,
-            )
-
-            return TaskConfig(
-                name=f"ruler_{task_name}",
-                data_source=None,  # Data loading handled internally
-                metrics=metrics,
-                primary_metric=primary_metric,
-                sampling_params=sampling_params,
-                limit=100,  # Default limit, can be overridden
-            )
-
-        return config_factory
-
-    def _make_task_class(task_name: str = _task_name, task_cfg: dict = _task_config):
-        """Create task class for this RULER task variant."""
-
-        class _RulerTask(RulerTask):
-            def __init__(self, config: TaskConfig) -> None:
-                super().__init__(config, task_name, task_cfg)
-
-        _RulerTask.__name__ = f"Ruler_{task_name}"
-        _RulerTask.__qualname__ = f"Ruler_{task_name}"
-        return _RulerTask
-
-    # Register the task
-    register(f"ruler_{_task_name}", _make_config_factory())(_make_task_class())
+    register(f"ruler_{_task_name}")(_make_ruler_task_class(_task_name, _task_config))
 
 # Register BPB variant for all RULER tasks
 # This allows perplexity-based evaluation as an alternative to generation-based
