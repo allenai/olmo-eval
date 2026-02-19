@@ -8,10 +8,15 @@ import os
 import queue
 import time
 from multiprocessing.synchronize import Event as MPEvent
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from olmo_eval.harness import Harness
 
 from olmo_eval.common.logging import get_logger
 from olmo_eval.runners.asynq.types import (
+    DEFAULT_CHUNK_SIZE,
+    DEFAULT_CHUNK_TIMEOUT,
     DEFAULT_SCORING_CONCURRENCY,
     SCORER_FATAL,
     WORKER_FATAL,
@@ -21,6 +26,55 @@ from olmo_eval.runners.asynq.types import (
 )
 
 logger = get_logger(__name__)
+
+
+async def process_items_streaming(
+    item_queue: mp.Queue[QueueItem | None],
+    harness: Harness,
+    result_queue: mp.Queue[ResultItem],
+    max_concurrency: int | None,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+    chunk_timeout: float = DEFAULT_CHUNK_TIMEOUT,
+) -> None:
+    """Process items in chunks for balanced latency and throughput.
+
+    Collects items until chunk_size is reached or chunk_timeout expires,
+    then processes the chunk while continuing to accept new items.
+    This allows processing to start before all items are enqueued.
+
+    Args:
+        item_queue: Queue of QueueItems (None signals shutdown).
+        harness: Harness instance for execution.
+        result_queue: Queue to put ResultItems.
+        max_concurrency: Maximum concurrent requests.
+        chunk_size: Maximum items per chunk (default 256, matches vLLM max_num_seqs).
+        chunk_timeout: Seconds to wait for chunk to fill before processing partial.
+    """
+    import time
+
+    from olmo_eval.runners.asynq.processing import process_items
+
+    while True:
+        items: list[QueueItem] = []
+        deadline = time.time() + chunk_timeout
+
+        # Collect items until chunk is full or timeout
+        while len(items) < chunk_size:
+            remaining = max(0.01, deadline - time.time())
+            try:
+                item = item_queue.get(timeout=remaining)
+                if item is None:
+                    # Poison pill - process remaining items and exit
+                    if items:
+                        await process_items(items, harness, result_queue, max_concurrency)
+                    return
+                items.append(item)
+            except queue.Empty:
+                # Timeout - process what we have
+                break
+
+        if items:
+            await process_items(items, harness, result_queue, max_concurrency)
 
 
 def inference_worker(
@@ -34,8 +88,9 @@ def inference_worker(
 ) -> None:
     """Worker process that initializes a harness and processes items.
 
-    Collects all items from the queue, then processes them with batching
-    for COMPLETION/LOGLIKELIHOOD and async concurrency for CHAT requests.
+    Processes items in streaming chunks for balanced latency and throughput.
+    COMPLETION/LOGLIKELIHOOD requests are batched, CHAT requests use async
+    concurrency.
 
     Args:
         worker_id: Unique worker identifier.
@@ -133,17 +188,7 @@ def inference_worker(
             if harness_config.backend:
                 asyncio.run(harness.backend.initialize(harness_config))
 
-            items: list[QueueItem] = []
-            while True:
-                item = item_queue.get()
-                if item is None:
-                    break
-                items.append(item)
-
-            if items:
-                from olmo_eval.runners.asynq.processing import process_items
-
-                asyncio.run(process_items(items, harness, result_queue, max_concurrency))
+            asyncio.run(process_items_streaming(item_queue, harness, result_queue, max_concurrency))
 
             worker_logger.info("Processing complete")
         finally:
@@ -355,5 +400,6 @@ def scoring_worker(
 
 __all__ = [
     "inference_worker",
+    "process_items_streaming",
     "scoring_worker",
 ]
