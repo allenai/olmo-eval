@@ -199,8 +199,8 @@ for _task_name, _task_config in RULER_TASKS.items():
             if task_cfg["tag"] == "qa":
                 # QA tasks use multiple metrics
                 metrics = (
-                    AccuracyMetric(scorer=ExactMatchScorer(name="exact_match")),
-                    F1Metric(scorer=F1Scorer()),
+                    AccuracyMetric(scorer=ExactMatchScorer),
+                    F1Metric(scorer=F1Scorer),
                 )
                 primary_metric = "exact_match"
             else:
