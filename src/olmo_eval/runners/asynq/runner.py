@@ -26,7 +26,7 @@ from olmo_eval.runners.asynq.preparation import (
     prepare_task_items,
 )
 from olmo_eval.runners.asynq.results import aggregate_results, process_results
-from olmo_eval.runners.asynq.types import DEFAULT_SCORING_CONCURRENCY, QueueItem, TaskTracker
+from olmo_eval.runners.asynq.types import QueueItem, TaskTracker
 from olmo_eval.runners.asynq.workers import inference_worker, scoring_worker
 from olmo_eval.runners.common.base import BaseEvalRunner
 from olmo_eval.runners.common.mixins import RunnerResultsMixin
@@ -187,18 +187,15 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             if self.harness_config.scoring_concurrency:
                 scoring_concurrency = self.harness_config.scoring_concurrency
             elif sandbox_configs_list is not None:
-                # Sandboxes handle concurrency differently - warn user to set explicit value
-                scoring_concurrency = DEFAULT_SCORING_CONCURRENCY
-                runner_logger.warning(
-                    f"Using default scoring_concurrency={scoring_concurrency} with sandboxes. "
-                    "Consider setting harness_config.scoring_concurrency explicitly as "
-                    "sandboxes handle concurrency differently."
-                )
+                # Match sandbox pool size (sum of instances across all configs)
+                sandbox_pool_size = sum(cfg.get("instances", 1) for cfg in sandbox_configs_list)
+                scoring_concurrency = max(1, sandbox_pool_size)
             else:
+                # CPU-bound scoring - use available cores
                 import os
 
                 cpu_count = os.cpu_count() or 4
-                scoring_concurrency = max(1, int(cpu_count * 0.5))
+                scoring_concurrency = max(1, int(cpu_count * 0.75))
 
             runner_logger.info(f"Scoring concurrency: {scoring_concurrency}")
 
