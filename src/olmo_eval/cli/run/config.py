@@ -69,9 +69,10 @@ class RunConfig:
     @property
     def tasks(self) -> list:
         """Resolve task_specs to TaskConfig objects for display."""
+        from olmo_eval.common.configs import expand_tasks
         from olmo_eval.evals.tasks.common import get_task
 
-        return [get_task(spec).config for spec in self.task_specs]
+        return [get_task(spec).config for spec in expand_tasks(self.task_specs)]
 
     def __rich_repr__(self):
         """Rich repr that shows resolved tasks instead of task_specs."""

@@ -3,71 +3,82 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.core.formatters import MultipleChoiceLogprobFormatter
-from olmo_eval.core.metrics import MultipleChoiceLogprobMetric
-from olmo_eval.core.types import Instance, LMOutput, LMRequest, SamplingParams, Split
+from olmo_eval.common.formatters import MultipleChoiceLogprobFormatter
+from olmo_eval.common.metrics import MultipleChoiceLogprobMetric
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams, Split
 from olmo_eval.data import DataSource
-from olmo_eval.evals.tasks.core import Task, TaskConfig, register
+from olmo_eval.evals.tasks.common import Task, TaskConfig, register
 
-MMLU_SUBJECTS = [
+_STEM = (
     "abstract_algebra",
-    "anatomy",
     "astronomy",
-    "business_ethics",
-    "clinical_knowledge",
     "college_biology",
     "college_chemistry",
     "college_computer_science",
     "college_mathematics",
-    "college_medicine",
     "college_physics",
     "computer_security",
     "conceptual_physics",
-    "econometrics",
     "electrical_engineering",
     "elementary_mathematics",
-    "formal_logic",
-    "global_facts",
     "high_school_biology",
     "high_school_chemistry",
     "high_school_computer_science",
-    "high_school_european_history",
-    "high_school_geography",
-    "high_school_government_and_politics",
-    "high_school_macroeconomics",
     "high_school_mathematics",
-    "high_school_microeconomics",
     "high_school_physics",
-    "high_school_psychology",
     "high_school_statistics",
+    "machine_learning",
+)
+
+_HUMANITIES = (
+    "formal_logic",
+    "high_school_european_history",
     "high_school_us_history",
     "high_school_world_history",
-    "human_aging",
-    "human_sexuality",
     "international_law",
     "jurisprudence",
     "logical_fallacies",
-    "machine_learning",
-    "management",
-    "marketing",
-    "medical_genetics",
-    "miscellaneous",
     "moral_disputes",
     "moral_scenarios",
-    "nutrition",
     "philosophy",
     "prehistory",
-    "professional_accounting",
     "professional_law",
-    "professional_medicine",
+    "world_religions",
+)
+
+_SOCIAL_SCIENCES = (
+    "econometrics",
+    "high_school_geography",
+    "high_school_government_and_politics",
+    "high_school_macroeconomics",
+    "high_school_microeconomics",
+    "high_school_psychology",
+    "human_sexuality",
     "professional_psychology",
     "public_relations",
     "security_studies",
     "sociology",
     "us_foreign_policy",
+)
+
+_OTHER = (
+    "anatomy",
+    "business_ethics",
+    "clinical_knowledge",
+    "college_medicine",
+    "global_facts",
+    "human_aging",
+    "management",
+    "marketing",
+    "medical_genetics",
+    "miscellaneous",
+    "nutrition",
+    "professional_accounting",
+    "professional_medicine",
     "virology",
-    "world_religions",
-]
+)
+
+MMLU_SUBJECTS = _STEM + _HUMANITIES + _SOCIAL_SCIENCES + _OTHER
 
 DEFAULT_MMLU_PATH = "cais/mmlu"
 
@@ -152,31 +163,29 @@ class MMLUMCTask(Task):
         return all_fewshot[:k] if k else all_fewshot
 
 
-def _mmlu_config(subject: str) -> TaskConfig:
-    """Config for a single MMLU subject: mc (logprob) variant."""
-    return TaskConfig(
-        name=f"mmlu_{subject}",
-        data_source=DataSource(path=DEFAULT_MMLU_PATH, subset=subject, split="test"),
-        formatter=MultipleChoiceLogprobFormatter(
-            template="{question}",
-            label_prefix=" ",
-            include_choices_in_prompt=False,  # question already has choices from process_doc
-            answer_suffix="\n\nAnswer: ",
-        ),
-        metrics=(MultipleChoiceLogprobMetric(),),
-        primary_metric=MultipleChoiceLogprobMetric(),
-        num_fewshot=0,
-        split=Split.TEST,
-        sampling_params=SamplingParams(max_tokens=1, temperature=0.0),
-    )
-
+_MMLU_FORMATTER = MultipleChoiceLogprobFormatter(
+    template="{question}",
+    label_prefix=" ",
+    include_choices_in_prompt=False,
+    answer_suffix="\n\nAnswer: ",
+)
 
 # Register one task per subject (mmlu_abstract_algebra, mmlu_anatomy, ...)
 for _subject in MMLU_SUBJECTS:
-    _name = f"mmlu_{_subject}"
-
-    @register(_name, lambda s=_subject: _mmlu_config(s))
-    class _MMLUMC(MMLUMCTask):
-        """MMLU MC task for a single subject."""
-
-        pass
+    _cls = type(
+        f"MMLU_{_subject}",
+        (MMLUMCTask,),
+        {
+            "data_source": DataSource(path=DEFAULT_MMLU_PATH, subset=_subject, split="test"),
+            "formatter": _MMLU_FORMATTER,
+            "metrics": (MultipleChoiceLogprobMetric(),),
+            "primary_metric": MultipleChoiceLogprobMetric(),
+            "num_fewshot": 0,
+            "split": Split.TEST,
+            "sampling_params": SamplingParams(max_tokens=1, temperature=0.0),
+            "__module__": __name__,
+            "__qualname__": f"MMLU_{_subject}",
+        },
+    )
+    register(f"mmlu_{_subject}")(_cls)
+    globals()[f"MMLU_{_subject}"] = _cls
