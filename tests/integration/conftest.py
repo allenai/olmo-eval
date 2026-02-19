@@ -138,13 +138,6 @@ def vllm_provider(vllm_service, vllm_model):
     yield provider
 
 
-# Backwards compatibility alias for existing tests
-@pytest.fixture(scope="session")
-def vllm_backend(vllm_provider):
-    """Backwards compatibility alias for vllm_provider fixture."""
-    return vllm_provider
-
-
 @pytest.fixture
 def small_test_prompts() -> list[str]:
     """Provide a small set of test prompts."""
@@ -274,7 +267,7 @@ def sample_eval_result():
     """Create a sample EvalResult for storage testing."""
     from datetime import datetime
 
-    from olmo_eval.core.types import EvalResult, StoredTaskResult
+    from olmo_eval.common.types import EvalResult, StoredTaskResult
 
     return EvalResult(
         experiment_id="test-integration-001",
@@ -315,7 +308,7 @@ def multiple_eval_results():
     """Create multiple EvalResults for query testing."""
     from datetime import datetime
 
-    from olmo_eval.core.types import EvalResult, StoredTaskResult
+    from olmo_eval.common.types import EvalResult, StoredTaskResult
 
     results = []
     models = ["llama3.1-8b", "llama3.1-70b", "olmo-2-7b"]

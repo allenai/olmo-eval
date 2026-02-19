@@ -3,22 +3,18 @@
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.core.formatters import PPLFormatter
-from olmo_eval.core.metrics import BPBMetric
-from olmo_eval.core.types import Instance, LMOutput, LMRequest, SamplingParams
+from olmo_eval.common.formatters import PPLFormatter
+from olmo_eval.common.metrics import BPBMetric, PassAtKMetric
+from olmo_eval.common.scorers import CodeExecutionScorer
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import MBPP_STOP_SEQUENCES
 from olmo_eval.evals.extract import extract_code
-from olmo_eval.evals.tasks.core import Task, TaskConfig, register, register_variant
+from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 
-class MBPPTask(Task):
-    """MBPP (Mostly Basic Python Problems) task."""
-
-    default_source: str = "google-research-datasets/mbpp"
-
-    def __init__(self, config: TaskConfig) -> None:
-        super().__init__(config)
+class MBPPBase(Task):
+    """Base class for MBPP (Mostly Basic Python Problems) tasks."""
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -30,16 +26,6 @@ class MBPPTask(Task):
             for doc in loader.load(source):
                 self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
-
-    def _get_source_for_split(self, split: str) -> DataSource:
-        """Get data source for a specific split."""
-        try:
-            return self.config.get_data_source(split=split)
-        except ValueError:
-            return DataSource(
-                path=self.default_source,
-                split=split,
-            )
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
@@ -92,14 +78,22 @@ class MBPPTask(Task):
         )
 
 
-class MBPPPlusTask(Task):
-    """MBPP+ task with additional test cases."""
+@register("mbpp")
+class MBPP(MBPPBase):
+    """MBPP code generation task."""
 
-    default_source: str = "evalplus/mbppplus"
+    data_source = DataSource(path="google-research-datasets/mbpp")
+    sampling_params = SamplingParams(
+        max_tokens=1024,
+        temperature=0.0,
+        stop_sequences=MBPP_STOP_SEQUENCES,
+    )
+
+
+class MBPPPlusBase(Task):
+    """Base class for MBPP+ tasks with additional test cases."""
+
     fewshot_split: str = "test"  # MBPP+ doesn't have a dedicated prompt split
-
-    def __init__(self, config: TaskConfig) -> None:
-        super().__init__(config)
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -111,16 +105,6 @@ class MBPPPlusTask(Task):
             for doc in loader.load(source):
                 self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
-
-    def _get_source_for_split(self, split: str) -> DataSource:
-        """Get data source for a specific split."""
-        try:
-            return self.config.get_data_source(split=split)
-        except ValueError:
-            return DataSource(
-                path=self.default_source,
-                split=split,
-            )
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
@@ -161,54 +145,16 @@ class MBPPPlusTask(Task):
         return code
 
 
-# =============================================================================
-# Task Configs
-# =============================================================================
-
-
-def _mbpp_config() -> TaskConfig:
-    return TaskConfig(
-        name="mbpp",
-        data_source=DataSource(path="google-research-datasets/mbpp"),
-        metrics=(),
-        sampling_params=SamplingParams(
-            max_tokens=1024,
-            temperature=0.0,
-            stop_sequences=MBPP_STOP_SEQUENCES,
-        ),
-    )
-
-
-def _mbpp_plus_config() -> TaskConfig:
-    return TaskConfig(
-        name="mbpp_plus",
-        data_source=DataSource(path="evalplus/mbppplus"),
-        metrics=(),
-        sampling_params=SamplingParams(
-            max_tokens=1024,
-            temperature=0.0,
-            stop_sequences=MBPP_STOP_SEQUENCES,
-        ),
-    )
-
-
-# =============================================================================
-# Task Registrations
-# =============================================================================
-
-
-@register("mbpp", _mbpp_config)
-class MBPP(MBPPTask):
-    """MBPP code generation task."""
-
-    pass
-
-
-@register("mbpp_plus", _mbpp_plus_config)
-class MBPPPlus(MBPPPlusTask):
+@register("mbpp_plus")
+class MBPPPlus(MBPPPlusBase):
     """MBPP+ code generation task."""
 
-    pass
+    data_source = DataSource(path="evalplus/mbppplus")
+    sampling_params = SamplingParams(
+        max_tokens=1024,
+        temperature=0.0,
+        stop_sequences=MBPP_STOP_SEQUENCES,
+    )
 
 
 # =============================================================================
@@ -221,7 +167,6 @@ register_variant(
     "bpb",
     formatter=PPLFormatter(leading_space=False),
     metrics=(BPBMetric(),),
-    primary_metric=BPBMetric(),
 )
 
 register_variant(
@@ -229,7 +174,6 @@ register_variant(
     "bpb",
     formatter=PPLFormatter(leading_space=False),
     metrics=(BPBMetric(),),
-    primary_metric=BPBMetric(),
 )
 
 # 3shot variant - composable with bpb (e.g., mbpp:3shot:bpb)
@@ -243,4 +187,57 @@ register_variant(
     "mbpp_plus",
     "3shot",
     num_fewshot=3,
+)
+
+# =============================================================================
+# Pass@K Execution Variants (require sandbox)
+# =============================================================================
+# These variants execute generated code against test cases.
+# Requires HarnessConfig with sandboxes configured:
+#   sandboxes=(SandboxConfig(image="..."),)
+
+register_variant(
+    "mbpp",
+    "pass_at_1",
+    metrics=(PassAtKMetric(k=1, scorer=CodeExecutionScorer),),
+    sampling_params=SamplingParams(
+        max_tokens=1024,
+        temperature=0.2,
+        stop_sequences=MBPP_STOP_SEQUENCES,
+    ),
+)
+
+register_variant(
+    "mbpp",
+    "pass_at_10",
+    metrics=(PassAtKMetric(k=10, scorer=CodeExecutionScorer),),
+    sampling_params=SamplingParams(
+        max_tokens=1024,
+        temperature=0.8,
+        num_samples=10,
+        stop_sequences=MBPP_STOP_SEQUENCES,
+    ),
+)
+
+register_variant(
+    "mbpp_plus",
+    "pass_at_1",
+    metrics=(PassAtKMetric(k=1, scorer=CodeExecutionScorer),),
+    sampling_params=SamplingParams(
+        max_tokens=1024,
+        temperature=0.2,
+        stop_sequences=MBPP_STOP_SEQUENCES,
+    ),
+)
+
+register_variant(
+    "mbpp_plus",
+    "pass_at_10",
+    metrics=(PassAtKMetric(k=10, scorer=CodeExecutionScorer),),
+    sampling_params=SamplingParams(
+        max_tokens=1024,
+        temperature=0.8,
+        num_samples=10,
+        stop_sequences=MBPP_STOP_SEQUENCES,
+    ),
 )

@@ -101,7 +101,7 @@ class TestPostgresBackend:
         """Test that same model config produces same model_hash across different experiments."""
         from datetime import datetime
 
-        from olmo_eval.core.types import EvalResult, StoredTaskResult
+        from olmo_eval.common.types import EvalResult, StoredTaskResult
         from olmo_eval.storage import compute_model_hash
 
         # Same config, different authors
@@ -185,7 +185,7 @@ class TestPostgresBackend:
     @pytest.mark.integration
     def test_get_all_returns_multiple_experiments(self, postgres_backend):
         """Test that get_all() returns all experiments with shared experiment_id."""
-        from olmo_eval.core.types import EvalResult, StoredTaskResult
+        from olmo_eval.common.types import EvalResult, StoredTaskResult
 
         # Create two experiments with the same experiment_id (simulating multi-model launch)
         shared_experiment_id = "beaker-multi-model-run"

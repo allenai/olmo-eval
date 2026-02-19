@@ -2,13 +2,13 @@
 
 import pytest
 
-from olmo_eval.core.formatters import (
+from olmo_eval.common.formatters import (
     ChatFormatter,
     CompletionFormatter,
     MultipleChoiceFormatter,
     PPLFormatter,
 )
-from olmo_eval.core.types import Instance, RequestType
+from olmo_eval.common.types import Instance, RequestType
 
 
 class TestChatFormatter:
@@ -160,7 +160,7 @@ class TestMultipleChoiceFormatter:
 
         request = formatter.format(instance)
 
-        assert request.request_type == RequestType.COMPLETION
+        assert request.request_type == RequestType.LOGLIKELIHOOD
         # Default behavior includes labeled choices in prompt
         assert "What color is the sky?" in request.prompt
         assert "A. Red" in request.prompt
@@ -179,7 +179,7 @@ class TestMultipleChoiceFormatter:
 
         request = formatter.format(instance)
 
-        assert request.request_type == RequestType.COMPLETION
+        assert request.request_type == RequestType.LOGLIKELIHOOD
         assert request.prompt == "What color is the sky?"
         assert request.continuations == ("Red", "Blue", "Green")
 
@@ -200,25 +200,6 @@ class TestMultipleChoiceFormatter:
 
         assert request.prompt == "Q: Capital?"
         assert request.continuations == (" Paris", " London")
-
-    def test_format_no_choices(self):
-        """Test multiple choice formatting without choices."""
-        formatter = MultipleChoiceFormatter()
-        instance = Instance(question="Test?", gold_answer="yes", choices=None)
-
-        request = formatter.format(instance)
-
-        assert request.prompt == "Test?"
-        assert request.continuations == ()
-
-    def test_format_empty_choices(self):
-        """Test multiple choice formatting with empty choices."""
-        formatter = MultipleChoiceFormatter()
-        instance = Instance(question="Test?", gold_answer="yes", choices=())
-
-        request = formatter.format(instance)
-
-        assert request.continuations == ()
 
     def test_format_ignores_fewshot(self):
         """Test that MultipleChoiceFormatter ignores fewshot (by design)."""

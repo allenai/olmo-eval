@@ -30,7 +30,7 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.text import Text
 
-from olmo_eval.core.constants.infrastructure import (
+from olmo_eval.common.constants.infrastructure import (
     BEAKER_DEFAULT_IMAGE,
     BEAKER_DEFAULT_WORKSPACE,
     BEAKER_KNOWN_CLUSTERS,
@@ -47,8 +47,10 @@ __all__ = [
     "BeakerWekaBucket",
     "BeakerJobConfig",
     "BeakerLauncher",
+    "build_install_command",
     "calculate_experiment_splits",
     "normalize_provider_package",
+    "parse_install_spec",
     "parse_task_with_priority",
     "validate_priority_configuration",
     "print_experiment_config",
@@ -172,62 +174,40 @@ def parse_task_with_priority(task_spec: str, default_priority: str = "normal") -
 
 def validate_priority_configuration(
     tasks: tuple[str, ...] | list[str],
-    cli_priority: str | None,
     default_priority: str = "normal",
 ) -> dict[str, list[str]]:
-    """Validate priority configuration and group tasks by priority.
+    """Group tasks by priority.
 
     Tasks can specify priority via @priority suffix (e.g., "mmlu@high").
-    Tasks without @priority use the default_priority from the config file.
+    Tasks without @priority use the default_priority.
 
     Args:
         tasks: Task specifications (may include @priority suffixes).
-        cli_priority: Global priority override (typically None, kept for API compatibility).
         default_priority: Default priority for tasks without @priority suffix.
 
     Returns:
         Dictionary mapping priority levels to lists of task names.
 
-    Raises:
-        ValueError: If cli_priority is set while tasks have @priority suffixes.
-
     Examples:
-        # Tasks without @priority suffix use default
-        >>> validate_priority_configuration(["mmlu", "gsm8k"], None)
+        >>> validate_priority_configuration(["mmlu", "gsm8k"])
         {"normal": ["mmlu", "gsm8k"]}
 
-        # Tasks with @priority suffixes
-        >>> validate_priority_configuration(["mmlu@high", "gsm8k@normal"], None)
+        >>> validate_priority_configuration(["mmlu@high", "gsm8k@normal"])
         {"high": ["mmlu"], "normal": ["gsm8k"]}
 
-        # Custom default priority
-        >>> validate_priority_configuration(["mmlu", "gsm8k"], None, "high")
+        >>> validate_priority_configuration(["mmlu", "gsm8k"], "high")
         {"high": ["mmlu", "gsm8k"]}
     """
     from collections import defaultdict
 
     tasks_by_priority: dict[str, list[str]] = defaultdict(list)
-    tasks_with_priority_suffix: list[str] = []
 
     for task_spec in tasks:
         if "@" in task_spec:
-            tasks_with_priority_suffix.append(task_spec)
             task_name, task_priority = parse_task_with_priority(task_spec)
             tasks_by_priority[task_priority].append(task_name)
         else:
-            # Use CLI priority if provided, otherwise use default
-            effective_priority = cli_priority if cli_priority is not None else default_priority
-            tasks_by_priority[effective_priority].append(task_spec)
-
-    # Conflict check: global priority used with @priority suffixes
-    if cli_priority is not None and tasks_with_priority_suffix:
-        raise ValueError(
-            f"Conflicting priority specification: cli_priority={cli_priority} "
-            f"cannot be used together with @priority suffixes on tasks.\n\n"
-            f"Use @priority suffixes to set priority per-task.\n\n"
-            f"Tasks with @priority suffixes:\n"
-            + "\n".join(f"  - {t}" for t in tasks_with_priority_suffix)
-        )
+            tasks_by_priority[default_priority].append(task_spec)
 
     return dict(tasks_by_priority)
 
@@ -378,7 +358,7 @@ class BeakerJobConfig:
     budget: str  # Beaker budget
 
     # Resources
-    num_gpus: int = 1
+    num_gpus: int = 0
     shared_memory: str = "10GiB"
 
     # Job settings
@@ -424,14 +404,28 @@ class BeakerJobConfig:
     # GCS access - when True, injects user's GCS credentials as env secret
     inject_gcs_credentials: bool = False
 
-    # Custom provider package to install (overrides default from pyproject.toml extras)
-    provider_package: str | None = None
+    # Provider-specific dependencies (from provider config)
+    provider_packages: list[str] | None = None
 
     # Task-specific packages to install at runtime
     task_packages: list[str] | None = None
 
     # Follow mode - when True, wait for experiment to complete
     follow: bool = False
+
+    # Sandbox mode - when True, use Podman-enabled base image and set sandbox env vars
+    enable_sandbox: bool = False
+
+    # Registry mirror setup script to run during install (for sandbox jobs)
+    setup_registry_mirror: bool = False
+
+    # Run setup_store_secrets during install to configure database access
+    setup_store_secrets: bool = False
+
+    # Install vLLM in separate venv (for server mode to avoid dependency conflicts)
+    # When True, vLLM is installed in /opt/vllm-venv and VLLM_PYTHON points to it.
+    # Use this for external evals that run vLLM as a server subprocess.
+    vllm_separate_venv: bool = False
 
 
 def resolve_clusters(cluster: str | list[str]) -> list[str]:
@@ -465,6 +459,42 @@ def resolve_clusters(cluster: str | list[str]) -> list[str]:
     return list(set(resolved))  # Deduplicate
 
 
+def parse_install_spec(package: str) -> tuple[str, list[str]]:
+    """Parse a package specifier into package URL and install flags.
+
+    Separates pip/uv install flags (like --no-build-isolation) from the
+    package specifier. Flags must start with '-' and come after the package.
+
+    Args:
+        package: Package specifier with optional install flags.
+
+    Returns:
+        Tuple of (package_spec, install_flags).
+
+    Examples:
+        >>> parse_install_spec("git+https://github.com/user/repo@v1.0 --no-build-isolation")
+        ("git+https://github.com/user/repo@v1.0", ["--no-build-isolation"])
+        >>> parse_install_spec("vllm==0.14.0")
+        ("vllm==0.14.0", [])
+    """
+    parts = package.split()
+    if len(parts) == 1:
+        return package, []
+
+    # Find where flags start (first part starting with -)
+    pkg_parts = []
+    flags = []
+    in_flags = False
+    for part in parts:
+        if part.startswith("-") or in_flags:
+            in_flags = True
+            flags.append(part)
+        else:
+            pkg_parts.append(part)
+
+    return " ".join(pkg_parts), flags
+
+
 def normalize_provider_package(package: str) -> str:
     """Normalize a provider package specifier for pip installation.
 
@@ -476,22 +506,52 @@ def normalize_provider_package(package: str) -> str:
     - PyPI version: vllm==0.14.0 (unchanged)
     - PyPI with extras: vllm[runai]==0.14.0 (unchanged)
 
+    Note: This function strips install flags. Use parse_install_spec() first
+    if you need to preserve flags.
+
     Args:
-        package: Package specifier string.
+        package: Package specifier string (may include install flags).
 
     Returns:
-        Normalized package specifier suitable for pip install.
+        Normalized package specifier suitable for pip install (without flags).
     """
+    # Strip any install flags first
+    pkg_spec, _ = parse_install_spec(package)
+
     # Already a git+ URL, return as-is
-    if package.startswith("git+"):
-        return package
+    if pkg_spec.startswith("git+"):
+        return pkg_spec
 
     # GitHub or GitLab URLs need git+ prefix
-    if "github.com" in package or "gitlab.com" in package:
-        return f"git+{package}"
+    if "github.com" in pkg_spec or "gitlab.com" in pkg_spec:
+        return f"git+{pkg_spec}"
 
     # Everything else (local paths, PyPI specs) passes through unchanged
-    return package
+    return pkg_spec
+
+
+def build_install_command(package: str, constraints: str | None = None) -> str:
+    """Build a uv pip install command for a package with optional flags.
+
+    Handles package specifiers that include install flags like --no-build-isolation.
+
+    Args:
+        package: Package specifier with optional install flags.
+        constraints: Optional constraints file path.
+
+    Returns:
+        Complete uv pip install command string.
+    """
+    pkg_spec, flags = parse_install_spec(package)
+    normalized = normalize_provider_package(pkg_spec)
+
+    cmd_parts = ["uv", "pip", "install"]
+    cmd_parts.extend(flags)
+    cmd_parts.append(f"'{normalized}'")
+    if constraints:
+        cmd_parts.extend(["-c", constraints])
+
+    return " ".join(cmd_parts)
 
 
 def _parse_timeout(timeout: str) -> int:
@@ -564,55 +624,107 @@ class BeakerLauncher:
         self,
         extras: list[str],
         env_exports: dict[str, str] | None = None,
-        provider_package: str | None = None,
+        provider_packages: list[str] | None = None,
         task_packages: list[str] | None = None,
+        setup_registry_mirror: bool = False,
+        enable_sandbox: bool = False,
+        setup_store_secrets: bool = False,
+        vllm_separate_venv: bool = False,
     ) -> str:
         """Build installation command for gantry's install_cmd parameter.
 
         Gantry clones the source code to /gantry-runtime, so we:
         1. Install olmo-eval from the cloned source with optional extras
-        2. Optionally install a custom provider package to override the default
-        3. Optionally install task-specific dependencies
+        2. Optionally install provider-specific and task-specific dependencies
+
+        When vllm_separate_venv is True, vLLM is installed in a separate venv
+        (/opt/vllm-venv) to avoid dependency conflicts. The vLLM server runs as
+        a subprocess using VLLM_PYTHON env var, while the main app uses /opt/venv.
+        Use this for server mode (external evals), not for batch mode (regular evals).
 
         Args:
             extras: Optional dependency group names from pyproject.toml.
             env_exports: Optional dict of environment variables to export before running.
-            provider_package: Optional custom provider package to install (overrides default).
+            provider_packages: Optional list of provider-specific dependencies.
             task_packages: Optional list of task-specific packages to install.
+            setup_registry_mirror: If True, run setup_dockerio_mirror script with MIRROR_HOSTS.
+            enable_sandbox: If True, set up /dev/net/tun for pasta networking.
+            setup_store_secrets: If True, run setup_store_secrets to configure database access.
+            vllm_separate_venv: If True, install vLLM in separate venv for server mode.
 
         Returns:
             Shell command string for installation.
         """
+        has_vllm = "vllm" in extras
+        use_separate_vllm_venv = has_vllm and vllm_separate_venv
+
         # Build the install steps
         # Export UV_PROJECT_ENVIRONMENT so all uv commands use Docker's /opt/venv
         steps = ["export UV_PROJECT_ENVIRONMENT=/opt/venv"]
+
+        # Set up /dev/net/tun for pasta networking (sandbox jobs)
+        if enable_sandbox:
+            steps.append(
+                "mkdir -p /dev/net && "
+                "[ -e /dev/net/tun ] || mknod /dev/net/tun c 10 200 && "
+                "chmod 666 /dev/net/tun"
+            )
+
+        # Set up registry mirror for Docker Hub if configured (for sandbox jobs)
+        if setup_registry_mirror:
+            script = "/gantry-runtime/src/olmo_eval/launch/beaker/podman/setup_dockerio_mirror"
+            steps.append(f'if [ -n "$MIRROR_HOSTS" ]; then {script} "$MIRROR_HOSTS"; fi')
 
         # Export additional environment variables (e.g., UV_CACHE_DIR)
         if env_exports:
             for key, value in env_exports.items():
                 steps.append(f"export {key}={value}")
 
-        # Install olmo-eval from gantry-cloned source with optional extras
         # Generate constraints from pre-installed CUDA packages to prevent uv from changing them
         constraints = "/tmp/cuda-constraints.txt"
         steps.append(f"uv pip freeze -q | grep -E '^(torch|nvidia-)' > {constraints}")
-        if extras:
-            extras_str = ",".join(extras)
+
+        # Install vLLM in separate venv when requested (for server mode)
+        if use_separate_vllm_venv:
+            vllm_venv = "/opt/vllm-venv"
+            steps.append(f"uv venv {vllm_venv}")
+            # Symlink torch and nvidia packages from main venv (already installed)
+            steps.append(
+                f"for pkg in /opt/venv/lib/python*/site-packages/torch* "
+                f"/opt/venv/lib/python*/site-packages/nvidia*; do "
+                f'ln -sf "$pkg" {vllm_venv}/lib/python*/site-packages/; done'
+            )
+            # Install vLLM (torch already available via symlink)
+            steps.append(
+                f"VIRTUAL_ENV={vllm_venv} uv pip install "
+                f"--cache-dir \"$UV_CACHE_DIR\" 'vllm[runai]==0.13.0'"
+            )
+            # Set VLLM_PYTHON so VLLMServerProcess uses the separate venv
+            steps.append(f"export VLLM_PYTHON={vllm_venv}/bin/python")
+
+        # Install main package (without vllm extra only when using separate venv)
+        main_extras = [e for e in extras if e != "vllm"] if use_separate_vllm_venv else list(extras)
+        if main_extras:
+            extras_str = ",".join(main_extras)
             install_cmd = f"uv pip install -e '.[{extras_str}]' -c {constraints}"
             steps.append(f"cd /gantry-runtime && {install_cmd}")
         else:
             steps.append(f"cd /gantry-runtime && uv pip install -e . -c {constraints}")
 
-        # Install custom provider package to override default version from extras
-        if provider_package:
-            install_spec = normalize_provider_package(provider_package)
-            steps.append(f"uv pip install '{install_spec}' -c {constraints}")
+        # Install provider-specific dependencies
+        if provider_packages:
+            for pkg in provider_packages:
+                steps.append(build_install_command(pkg, constraints))
 
         # Install task-specific dependencies
         if task_packages:
             for pkg in task_packages:
-                install_spec = normalize_provider_package(pkg)
-                steps.append(f"uv pip install '{install_spec}' -c {constraints}")
+                steps.append(build_install_command(pkg, constraints))
+
+        # Set up database credentials for --store
+        if setup_store_secrets:
+            script = "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/setup_store_secrets"
+            steps.append(f"source {script}")
 
         return " && ".join(steps)
 
@@ -639,8 +751,12 @@ class BeakerLauncher:
         install_cmd = self._build_install_cmd(
             config.extras,
             env_exports,
-            config.provider_package,
+            config.provider_packages,
             config.task_packages,
+            config.setup_registry_mirror,
+            config.enable_sandbox,
+            config.setup_store_secrets,
+            config.vllm_separate_venv,
         )
 
         # Build weka mounts as tuples: (bucket, mount_path)
@@ -672,6 +788,9 @@ class BeakerLauncher:
 
         # Build env vars as tuples: (name, value)
         env_vars: list[tuple[str, str]] = list(config.env_vars.items())
+
+        if config.enable_sandbox:
+            log.info("Enabling sandbox mode with Podman subcontainers")
 
         # Build mounts for NFS if requested
         mounts: list[tuple[str, str]] | None = None
@@ -1040,8 +1159,21 @@ class BeakerLauncher:
         _console.print("\n[bold]Logs:[/bold]")
         try:
             since = datetime.now(UTC) - timedelta(seconds=10) if tail else None
-            for log_entry in self.beaker.job.logs(job, follow=True, since=since):
-                # log_entry.message is bytes, decode it
+            log_iter = iter(self.beaker.job.logs(job, follow=True, since=since))
+
+            # Wait for first log entry with spinner
+            first_entry = None
+            with _console.status("[dim]Waiting for job to start...[/dim]"):
+                first_entry = next(log_iter, None)
+
+            # Print first entry if we got one
+            if first_entry and first_entry.message:
+                line = first_entry.message.decode(errors="ignore").rstrip("\n")
+                if line:
+                    print(line)
+
+            # Continue with remaining logs
+            for log_entry in log_iter:
                 if log_entry.message:
                     line = log_entry.message.decode(errors="ignore").rstrip("\n")
                     if line:

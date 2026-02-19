@@ -2,8 +2,8 @@
 
 # Import to ensure suites are registered
 import olmo_eval.evals  # noqa: F401
-from olmo_eval.core.configs import ModelConfig, expand_tasks, get_model_config
-from olmo_eval.launch.config import ProviderConfig
+from olmo_eval.common.configs import expand_tasks, get_provider_config
+from olmo_eval.harness.config import ProviderConfig
 
 
 class TestExpandTasks:
@@ -59,36 +59,36 @@ class TestExpandTasks:
         assert all(t.endswith("@high") for t in result)
 
 
-class TestGetModelConfig:
-    """Tests for get_model_config function."""
+class TestGetProviderConfig:
+    """Tests for get_provider_config function."""
 
     def test_get_preset_model(self):
         """Test getting a preset model config."""
-        config = get_model_config("llama3.1-8b")
+        config = get_provider_config("llama3.1-8b")
 
-        assert isinstance(config, ModelConfig)
+        assert isinstance(config, ProviderConfig)
         assert config.model == "meta-llama/Meta-Llama-3.1-8B"
         assert config.get_provider_name() == "vllm"
 
     def test_get_unknown_model_as_hf_path(self):
         """Test that unknown model name is treated as HF path."""
-        config = get_model_config("some-org/custom-model")
+        config = get_provider_config("some-org/custom-model")
 
         assert config.model == "some-org/custom-model"
         assert config.get_provider_name() == "vllm"  # Default
 
     def test_get_model_with_override(self):
         """Test getting model with field override."""
-        config = get_model_config("llama3.1-8b", provider=ProviderConfig(kind="hf"))
+        config = get_provider_config("llama3.1-8b", kind="hf")
 
         assert config.model == "meta-llama/Meta-Llama-3.1-8B"
         assert config.get_provider_name() == "hf"
 
     def test_get_model_with_multiple_overrides(self):
         """Test getting model with multiple overrides."""
-        config = get_model_config(
+        config = get_provider_config(
             "llama3.1-8b",
-            provider=ProviderConfig(kind="hf"),
+            kind="hf",
             dtype="float16",
             revision="main",
         )
@@ -99,43 +99,43 @@ class TestGetModelConfig:
 
     def test_get_unknown_model_with_overrides(self):
         """Test unknown model with overrides."""
-        config = get_model_config(
+        config = get_provider_config(
             "custom/model",
-            provider=ProviderConfig(kind="hf"),
+            kind="hf",
         )
 
         assert config.model == "custom/model"
         assert config.get_provider_name() == "hf"
 
     def test_get_model_extra_args_merged(self):
-        """Test that extra_args are merged for presets."""
-        # Override with additional extra_args
-        config = get_model_config(
+        """Test that kwargs are merged for presets."""
+        # Override with additional kwargs
+        config = get_provider_config(
             "llama3.1-8b",
-            extra_args={"custom_arg": "value"},
+            kwargs={"custom_arg": "value"},
         )
 
-        assert "custom_arg" in config.extra_args
-        assert config.extra_args["custom_arg"] == "value"
+        assert "custom_arg" in config.kwargs
+        assert config.kwargs["custom_arg"] == "value"
 
     def test_preset_not_mutated(self):
         """Test that getting with overrides doesn't mutate preset."""
-        original = get_model_config("llama3.1-8b")
-        _ = get_model_config("llama3.1-8b", provider=ProviderConfig(kind="hf"))
-        after = get_model_config("llama3.1-8b")
+        original = get_provider_config("llama3.1-8b")
+        _ = get_provider_config("llama3.1-8b", kind="hf")
+        after = get_provider_config("llama3.1-8b")
 
         assert original.get_provider_name() == after.get_provider_name() == "vllm"
 
     def test_tokenizer_override_preset(self):
         """Test tokenizer override on a preset model."""
-        config = get_model_config("llama3.1-8b", tokenizer="allenai/dolma2-tokenizer")
+        config = get_provider_config("llama3.1-8b", tokenizer="allenai/dolma2-tokenizer")
 
         assert config.model == "meta-llama/Meta-Llama-3.1-8B"
         assert config.tokenizer == "allenai/dolma2-tokenizer"
 
     def test_tokenizer_override_custom_model(self):
         """Test tokenizer override on a custom (non-preset) model."""
-        config = get_model_config(
+        config = get_provider_config(
             "custom/my-model",
             tokenizer="custom/my-tokenizer",
         )
@@ -145,7 +145,7 @@ class TestGetModelConfig:
 
     def test_tokenizer_default_is_none(self):
         """Test that tokenizer defaults to None for models without preset tokenizer."""
-        config = get_model_config("llama3.1-8b")
+        config = get_provider_config("llama3.1-8b")
 
         # llama3.1 doesn't have a preset tokenizer - defaults to None
         assert config.tokenizer is None

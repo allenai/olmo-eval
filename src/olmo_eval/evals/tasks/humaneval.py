@@ -3,9 +3,10 @@
 from collections.abc import Iterator, Sequence
 from typing import Any
 
-from olmo_eval.core.formatters import CompletionFormatter, PPLFormatter
-from olmo_eval.core.metrics import BPBMetric
-from olmo_eval.core.types import (
+from olmo_eval.common.formatters import ChatFormatter, CompletionFormatter, PPLFormatter
+from olmo_eval.common.metrics import BPBMetric, PassAtKMetric
+from olmo_eval.common.scorers import CodeExecutionScorer
+from olmo_eval.common.types import (
     Instance,
     LMOutput,
     LMRequest,
@@ -14,18 +15,21 @@ from olmo_eval.core.types import (
 )
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import HUMANEVAL_STOP_SEQUENCES
-from olmo_eval.evals.extract import extract_code
-from olmo_eval.evals.tasks.core import Task, TaskConfig, register, register_variant
+from olmo_eval.evals.extract import extract_code, indent_code
+from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 
-class HumanEvalTask(Task):
+@register("humaneval")
+class HumanEval(Task):
     """HumanEval code generation task."""
 
-    default_source: str = "openai_humaneval"
+    data_source = DataSource(path="openai_humaneval")
+    sampling_params = SamplingParams(
+        max_tokens=1024,
+        temperature=0.0,
+        stop_sequences=HUMANEVAL_STOP_SEQUENCES,
+    )
     fewshot_split: str = "test"  # HumanEval only has a test split
-
-    def __init__(self, config: TaskConfig) -> None:
-        super().__init__(config)
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -37,16 +41,6 @@ class HumanEvalTask(Task):
             for doc in loader.load(source):
                 self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
-
-    def _get_source_for_split(self, split: str) -> DataSource:
-        """Get data source for a specific split."""
-        try:
-            return self.config.get_data_source(split=split)
-        except ValueError:
-            return DataSource(
-                path=self.default_source,
-                split=split,
-            )
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
@@ -82,75 +76,34 @@ class HumanEvalTask(Task):
         """
         return extract_code(output.text)
 
-    def score_responses(self, responses: Sequence[Response]) -> Sequence[Response]:
-        """Apply all scorers to extract answers and compute scores."""
+    def _extract_answers(self, responses: Sequence[Response]) -> None:
+        """Extract code and prepend answer prefix.
+
+        HumanEval follows the original paper setup by adding the prompt
+        to the generated code completion as the prompt may provide additional
+        library imports needed for the code execution.
+
+        Chat/instruction models often output function body code without the
+        leading indentation expected inside a function. We normalize the
+        indentation to ensure the code is valid when concatenated with the
+        function signature.
+        """
         for response in responses:
             for output in response.outputs:
                 code = self.extract_answer(output)
                 if code:
-                    # For Humaneval, we follow the original paper setup by adding the prompt
-                    # to the generated code completion as the prompt may provide additional
-                    # library imports needed for the code execution.
+                    # Ensure code has proper indentation for function body
+                    code = indent_code(code)
                     output.extracted_answer = response.instance.metadata["answer_prefix"] + code
                 else:
                     output.extracted_answer = None
-        return responses
 
 
-class HumanEvalPlusTask(HumanEvalTask):
+@register("humaneval_plus")
+class HumanEvalPlus(HumanEval):
     """HumanEval+ task with additional test cases."""
 
-    default_source: str = "evalplus/humanevalplus"
-
-
-# =============================================================================
-# Task Configs
-# =============================================================================
-
-
-def _humaneval_config() -> TaskConfig:
-    return TaskConfig(
-        name="humaneval",
-        data_source=DataSource(path="openai_humaneval"),
-        metrics=(),
-        sampling_params=SamplingParams(
-            max_tokens=1024,
-            temperature=0.0,
-            stop_sequences=HUMANEVAL_STOP_SEQUENCES,
-        ),
-    )
-
-
-def _humaneval_plus_config() -> TaskConfig:
-    return TaskConfig(
-        name="humaneval_plus",
-        data_source=DataSource(path="evalplus/humanevalplus"),
-        metrics=(),
-        sampling_params=SamplingParams(
-            max_tokens=1024,
-            temperature=0.0,
-            stop_sequences=HUMANEVAL_STOP_SEQUENCES,
-        ),
-    )
-
-
-# =============================================================================
-# Task Registrations
-# =============================================================================
-
-
-@register("humaneval", _humaneval_config)
-class HumanEval(HumanEvalTask):
-    """HumanEval code generation task."""
-
-    pass
-
-
-@register("humaneval_plus", _humaneval_plus_config)
-class HumanEvalPlus(HumanEvalPlusTask):
-    """HumanEval+ code generation task."""
-
-    pass
+    data_source = DataSource(path="evalplus/humanevalplus")
 
 
 # =============================================================================
@@ -165,7 +118,6 @@ register_variant(
     "bpb",
     formatter=PPLFormatter(leading_space=True, answer_prefix=" "),
     metrics=(BPBMetric(),),
-    primary_metric=BPBMetric(),
 )
 
 register_variant(
@@ -173,7 +125,6 @@ register_variant(
     "bpb",
     formatter=PPLFormatter(leading_space=True, answer_prefix=" "),
     metrics=(BPBMetric(),),
-    primary_metric=BPBMetric(),
 )
 
 # 3shot variants - composable with bpb (e.g., humaneval:3shot:bpb)
@@ -192,4 +143,86 @@ register_variant(
     num_fewshot=3,
     fewshot_seed=1234,
     formatter=CompletionFormatter(),
+)
+
+# Chat variants for instruction-tuned models
+# Use with agent backends: humaneval:chat:pass_at_1
+# Note: System prompt is owned by the harness (e.g., codex_agent preset)
+_CHAT_USER_TEMPLATE = """\
+Complete this Python function. Write only the function body (the implementation \
+code that goes inside the function). Do not repeat the function signature or docstring.
+
+```python
+{question}
+```"""
+
+register_variant(
+    "humaneval",
+    "chat",
+    formatter=ChatFormatter(
+        user_template=_CHAT_USER_TEMPLATE,
+        assistant_template="{answer}",
+    ),
+)
+
+register_variant(
+    "humaneval_plus",
+    "chat",
+    formatter=ChatFormatter(
+        user_template=_CHAT_USER_TEMPLATE,
+        assistant_template="{answer}",
+    ),
+)
+
+# =============================================================================
+# Pass@K Execution Variants (require sandbox)
+# =============================================================================
+# These variants execute generated code against test cases.
+# Requires HarnessConfig with sandboxes configured:
+#   sandboxes=(SandboxConfig(image="..."),)
+
+register_variant(
+    "humaneval",
+    "pass_at_1",
+    metrics=(PassAtKMetric(k=1, scorer=CodeExecutionScorer),),
+    sampling_params=SamplingParams(
+        max_tokens=1024,
+        temperature=0.2,
+        stop_sequences=HUMANEVAL_STOP_SEQUENCES,
+    ),
+)
+
+register_variant(
+    "humaneval",
+    "pass_at_10",
+    metrics=(PassAtKMetric(k=10, scorer=CodeExecutionScorer),),
+    sampling_params=SamplingParams(
+        max_tokens=1024,
+        temperature=0.8,
+        num_samples=10,
+        stop_sequences=HUMANEVAL_STOP_SEQUENCES,
+    ),
+)
+
+register_variant(
+    "humaneval_plus",
+    "pass_at_1",
+    metrics=(PassAtKMetric(k=1, scorer=CodeExecutionScorer),),
+    sampling_params=SamplingParams(
+        max_tokens=1024,
+        temperature=0.2,
+        stop_sequences=HUMANEVAL_STOP_SEQUENCES,
+    ),
+)
+
+register_variant(
+    "humaneval_plus",
+    "pass_at_10",
+    metrics=(PassAtKMetric(k=10, scorer=CodeExecutionScorer),),
+    sampling_params=SamplingParams(
+        max_tokens=1024,
+        temperature=0.8,
+        num_samples=10,
+        stop_sequences=HUMANEVAL_STOP_SEQUENCES,
+    ),
 )

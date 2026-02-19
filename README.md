@@ -37,10 +37,10 @@ olmo-eval suites
 olmo-eval tasks
 
 # Run evaluation (dry run)
-olmo-eval run -m llama3.1-8b -t arc_challenge:olmes --dry-run
+olmo-eval run -m llama3.1-8b -t humaneval:3shot --dry-run
 
-# Run evaluation
-olmo-eval run -m olmo-2-7b -t olmes_core --limit 100
+# Run evaluation with limit
+olmo-eval run -m olmo-2-7b -t humaneval:bpb -o limit=100
 
 ```
 
@@ -52,6 +52,7 @@ The evaluation framework is built around these core abstractions:
 |-------------|-------------|
 | **Task** | Defines a single evaluation (data loading, formatting, scoring) |
 | **Suite** | Groups tasks and/or nested suites with aggregation |
+| **Harness** | A model provider configured with specific capabilities |
 | **Formatter** | Converts instances into LM requests |
 | **Scorer** | Scores individual instance/output pairs |
 | **Metric** | Aggregates scores into final metrics |
@@ -61,21 +62,20 @@ The evaluation framework is built around these core abstractions:
 Tasks define how to load data, format prompts, and score outputs. Register with `@register`:
 
 ```python
-from olmo_eval.evals.tasks import Task, TaskConfig, register
+from olmo_eval.evals.tasks.common import Task, register
+from olmo_eval.data import DataSource
 
-@register("my_task", lambda: TaskConfig(
-    name="my_task",
-    data_source="hf://dataset/path",
-    formatter=MultipleChoiceFormatter(),
-    metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
-))
-class MyTask(Task): ...
+@register("my_task")
+class MyTask(Task):
+    # DataSource specifies path, subset (optional), and split
+    data_source = DataSource(path="cais/mmlu", subset="abstract_algebra", split="test")
+    ...
 ```
 
 **Regimes** are named presets that override task settings (e.g., few-shot count):
 
 ```python
-from olmo_eval.evals.tasks import register_regime
+from olmo_eval.evals.tasks.common import register_regime
 
 register_regime("my_task", "olmes", num_fewshot=5, fewshot_seed=42)
 # Usage: olmo-eval run -m model -t my_task:olmes
@@ -84,12 +84,11 @@ register_regime("my_task", "olmes", num_fewshot=5, fewshot_seed=42)
 **Runtime Dependencies** allow tasks to specify packages installed at job startup:
 
 ```python
-@register("code_eval", lambda: TaskConfig(
-    name="code_eval",
-    data_source="my-org/code-dataset",
-    dependencies=["code-sandbox==1.0", "git+https://github.com/user/repo@v2.0"],
-))
-class CodeEvalTask(Task): ...
+@register("code_eval")
+class CodeEvalTask(Task):
+    data_source = DataSource(path="my-org/code-dataset", split="test")
+    dependencies = ["code-sandbox==1.0", "git+https://github.com/user/repo@v2.0"]
+    ...
 ```
 
 ### Suites
@@ -150,24 +149,24 @@ Note: Currently `AVERAGE_OF_AVERAGES` gives each child equal weight regardless o
 
 ### Formatters
 
-Formatters convert instances into LM requests. See `olmo_eval.core.formatters` for available options.
+Formatters convert instances into LM requests. See `olmo_eval.common.formatters` for available options.
 
 ```python
-from olmo_eval.core import MultipleChoiceFormatter, ChatFormatter
+from olmo_eval.common.formatters import MultipleChoiceFormatter, ChatFormatter
 
 # Multiple choice with logprob scoring
 formatter = MultipleChoiceFormatter(template="Q: {question}\n\nA:")
 
 # Chat-based formatting
-formatter = ChatFormatter(system="You are a helpful assistant.")
+formatter = ChatFormatter(system_prompt="You are a helpful assistant.")
 ```
 
 ### Scorers
 
-Scorers compute a score for each instance/output pair. See `olmo_eval.core.scorers` for available options.
+Scorers compute a score for each instance/output pair. See `olmo_eval.common.scorers` for available options.
 
 ```python
-from olmo_eval.core import ExactMatchScorer, MultipleChoiceScorer
+from olmo_eval.common.scorers import ExactMatchScorer, MultipleChoiceScorer
 
 # Exact string match
 scorer = ExactMatchScorer()
@@ -178,10 +177,11 @@ scorer = MultipleChoiceScorer()
 
 ### Metrics
 
-Metrics aggregate scores across responses. See `olmo_eval.core.metrics` for available options.
+Metrics aggregate scores across responses. See `olmo_eval.common.metrics` for available options.
 
 ```python
-from olmo_eval.core import AccuracyMetric, F1Metric
+from olmo_eval.common.metrics import AccuracyMetric, F1Metric
+from olmo_eval.common.scorers import ExactMatchScorer, F1Scorer
 
 # Mean accuracy
 metric = AccuracyMetric(scorer=ExactMatchScorer)
@@ -192,10 +192,10 @@ metric = F1Metric(scorer=F1Scorer)
 
 ### Model Presets
 
-Pre-configured model settings in `olmo_eval/core/constants/models.py`:
+Pre-configured model settings in `olmo_eval/common/constants/models.py`:
 
 ```python
-from olmo_eval.core import get_model_presets
+from olmo_eval.common.constants import get_model_presets
 
 # Returns dict of preset name -> ModelConfig
 presets = get_model_presets()
@@ -204,6 +204,199 @@ presets = get_model_presets()
 #     "olmo-2-7b": ModelConfig(model="allenai/OLMo-2-1124-7B"),
 #     ...
 # }
+```
+
+### Harness
+
+A **Harness** configures a model provider with specific capabilities like tools, system prompts, and backends. It wraps an inference provider and injects configuration into requests, enabling tool-augmented evaluation or multi-turn execution.
+
+**Key concept**: Any task can be run with or without tools—that's determined by the Harness configuration, not the task definition. This allows comparing baseline vs tool-augmented performance on the same task.
+
+#### Using Harness via CLI
+
+```bash
+# Run task without tools or backend (baseline)
+olmo-eval run -m llama3.1-8b -t simpleqa
+
+# Run task with search tools via harness preset
+olmo-eval run -m llama3.1-8b -t simpleqa --harness dr_tulu
+
+# Use a custom harness config file
+olmo-eval run -m llama3.1-8b -t simpleqa --harness-config ./my_harness.yaml
+```
+
+#### HarnessConfig
+
+Configuration for a harness:
+
+```python
+from olmo_eval.harness import HarnessConfig, ProviderConfig, get_harness_preset
+from olmo_eval.harness.tools.search import (
+    semantic_scholar_search,
+    serper_web_search,
+    serper_fetch_page,
+)
+
+# Get a preset
+config = get_harness_preset("dr_tulu")
+
+# Or create custom config with tools
+config = HarnessConfig(
+    name="my_harness",
+    provider=ProviderConfig(model="gpt-4o", kind="litellm"),
+    tools=(semantic_scholar_search, serper_web_search, serper_fetch_page),
+    system_prompt="You are a helpful assistant with search tools.",
+    max_turns=10,
+    max_concurrency=8,
+    backend="openai_agents",
+    required_secrets=("S2_API_KEY", "SERPER_API_KEY"),
+)
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | `str` | Required | Harness identifier |
+| `provider` | `ProviderConfig` | `ProviderConfig()` | Model provider configuration |
+| `tools` | `tuple[Tool, ...]` | `()` | Tool instances (use `@registered_tool` decorator) |
+| `system_prompt` | `str \| None` | `None` | System prompt to inject |
+| `tool_choice` | `str` | `"auto"` | Tool selection mode (`auto`, `none`, `required`) |
+| `backend` | `str \| None` | `None` | Execution backend (e.g., `openai_agents`) |
+| `max_turns` | `int \| None` | `None` | Max turns for multi-turn execution |
+| `max_concurrency` | `int \| None` | `None` | Concurrent executions |
+| `required_secrets` | `tuple[str, ...]` | `()` | Required environment variables |
+
+#### Backends
+
+Backends define how the Harness executes multi-turn requests with tool calling. The backend handles the agentic loop: calling the model, executing tools, and feeding results back.
+
+```bash
+# List available backends
+olmo-eval backends
+```
+
+**When to use a backend:**
+- For multi-turn execution with `harness.run()`, you must specify a backend
+- For single-turn generation with `harness.generate()`, no backend is needed
+
+```python
+# Multi-turn execution requires a backend
+config = HarnessConfig(
+    name="my_agent",
+    provider=ProviderConfig(model="gpt-4o", kind="litellm"),
+    tools=(semantic_scholar_search, serper_web_search),
+    backend="openai_agents",  # Required for run()
+)
+harness = Harness(config)
+result = await harness.run(request)  # Uses the backend
+
+# Single-turn generation works without a backend
+config = HarnessConfig(
+    name="simple",
+    provider=ProviderConfig(model="gpt-4o", kind="litellm"),
+)
+harness = Harness(config)
+outputs = harness.generate(requests)  # No backend needed
+```
+
+#### Defining Tools
+
+Tools combine schema (for the LLM) and implementation (for execution) in a single definition:
+
+```python
+from olmo_eval.harness import tool, registered_tool
+
+# Option 1: @tool decorator (local use)
+@tool(description="Search the web for information")
+async def web_search(query: str) -> str:
+    """Search implementation."""
+    return await search_api(query)
+
+# Option 2: @registered_tool decorator (global registry, for cross-process use)
+@registered_tool(description="Fetch a webpage")
+async def fetch_page(url: str) -> str:
+    """Fetch implementation."""
+    return await fetch_url(url)
+```
+
+Tools are automatically registered when using `@registered_tool`, making them available by name in HarnessConfig.
+
+#### Custom Harness Config File
+
+Create a YAML file for custom harness configurations:
+
+```yaml
+# my_harness.yaml
+name: custom_search
+tool_names:
+  - semantic_scholar_snippet_search
+  - serper_google_webpage_search
+system_prompt: |
+  You are a research assistant with web search capabilities.
+  Use search tools to find accurate information before answering.
+max_turns: 15
+max_concurrency: 4
+required_secrets:
+  - S2_API_KEY
+  - SERPER_API_KEY
+```
+
+```bash
+olmo-eval run -m llama3.1-8b -t simpleqa --harness-config my_harness.yaml
+```
+
+#### Programmatic Usage
+
+```python
+from olmo_eval.harness import Harness, HarnessConfig, ProviderConfig, get_harness_preset
+from olmo_eval.harness.tools.search import (
+    semantic_scholar_search,
+    serper_web_search,
+)
+
+# Create harness with preset and provider override
+config = get_harness_preset("dr_tulu").with_provider(
+    ProviderConfig(model="meta-llama/Llama-3.1-8B-Instruct", kind="vllm")
+)
+harness = Harness(config)
+
+# Or create from scratch
+config = HarnessConfig(
+    name="my_harness",
+    provider=ProviderConfig(model="gpt-4o", kind="litellm"),
+    tools=(semantic_scholar_search, serper_web_search),
+    system_prompt="You are a helpful assistant.",
+    backend="openai_agents",
+)
+harness = Harness(config)
+
+# Multi-turn execution with tool calling
+result = await harness.run(request, sampling_params)
+print(result.trajectory)  # Shows all turns including tool calls
+print(result.final_output)  # Final model response
+```
+
+#### Beaker Launch with Harness
+
+```bash
+# Launch evaluation with search harness
+olmo-eval beaker launch -n "eval-with-tools" \
+    -m llama3.1-8b \
+    -t simpleqa \
+    --harness dr_tulu \
+    --cluster h100
+```
+
+Or in a config file:
+
+```yaml
+name: eval-with-tools
+models:
+  - name_or_path: llama3.1-8b
+    provider: vllm
+tasks:
+  - simpleqa
+harness: dr_tulu  # Preset name
+cluster: h100
 ```
 
 ## Adding New Tasks
@@ -219,23 +412,20 @@ Here's a complete, minimal task implementation:
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.core import (
-    AccuracyMetric,
-    Instance,
-    LMOutput,
-    LMRequest,
-    MultipleChoiceFormatter,
-    MultipleChoiceScorer,
-    RequestType,
-)
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType
 from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.tasks.core import Task, TaskConfig, register
+from olmo_eval.evals.tasks.common import Task, register
 
 
+@register("my_task")
 class MyTask(Task):
-    """Base class for my task."""
+    """My task implementation."""
 
-    default_source: str = "my-org/my-dataset"
+    # DataSource arguments:
+    #   path: HuggingFace dataset path (e.g., "cais/mmlu")
+    #   subset: Dataset subset/config (e.g., "abstract_algebra")
+    #   split: Dataset split (e.g., "test", "validation")
+    data_source = DataSource(path="cais/mmlu", subset="abstract_algebra", split="test")
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -243,17 +433,10 @@ class MyTask(Task):
         if self._instances_cache is None:
             self._instances_cache = []
             loader = DataLoader()
-            source = self._get_source_for_split("test")
+            source = self.config.get_data_source()
             for doc in loader.load(source):
                 self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
-
-    def _get_source_for_split(self, split: str) -> DataSource:
-        """Get data source for a specific split."""
-        try:
-            return self.config.get_data_source(split=split)
-        except ValueError:
-            return DataSource(path=self.default_source, split=split)
 
     def process_doc(self, doc: dict[str, Any]) -> Instance:
         """Convert a dataset document to an Instance."""
@@ -274,21 +457,6 @@ class MyTask(Task):
     def extract_answer(self, output: LMOutput) -> str | None:
         """Extract the answer from model output."""
         return output.text.strip()
-
-
-def _my_task_config() -> TaskConfig:
-    return TaskConfig(
-        name="my_task",
-        data_source=DataSource(path="my-org/my-dataset"),
-        formatter=MultipleChoiceFormatter(template="Q: {question}\n\nA:"),
-        metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
-    )
-
-
-@register("my_task", _my_task_config)
-class MyTaskImpl(MyTask):
-    """Registered task implementation."""
-    pass
 ```
 
 ### Task Class Overview
@@ -326,8 +494,11 @@ Tasks can load data from multiple sources using `DataSource`:
 ```python
 from olmo_eval.data import DataSource
 
-# HuggingFace datasets
-DataSource(path="cais/mmlu", subset="abstract_algebra")
+# HuggingFace datasets - specify path, subset, and split
+DataSource(path="cais/mmlu", subset="abstract_algebra", split="test")
+
+# Without subset (for datasets that don't have subsets)
+DataSource(path="openai_humaneval", split="test")
 
 # Local JSONL files
 DataSource(path="/path/to/dataset.jsonl")
@@ -337,12 +508,6 @@ DataSource(path="s3://my-bucket/datasets/data.jsonl")
 
 # GCS
 DataSource(path="gs://my-bucket/datasets/data.parquet")
-
-# URI strings are also supported in TaskConfig
-TaskConfig(
-    name="my_task",
-    data_source="hf://cais/mmlu?subset=abstract_algebra",
-)
 ```
 
 ### Common Patterns
@@ -361,23 +526,25 @@ metrics=(AccuracyMetric(scorer=ExactMatchScorer),)
 
 **Tasks with Multiple Subsets** (like MMLU with 57 subjects):
 ```python
+# Base class with shared logic
 class MMLUTask(Task):
-    def __init__(self, config: TaskConfig, subset: str) -> None:
-        super().__init__(config)
-        self.subset = subset
+    ...
 
-# Register each subset
-@register("mmlu_anatomy", _mmlu_anatomy_config)
+# Register each subset - the subset is specified in DataSource
+@register("mmlu_anatomy")
 class MMLUAnatomy(MMLUTask):
-    def __init__(self, config: TaskConfig) -> None:
-        super().__init__(config, subset="anatomy")
+    data_source = DataSource(path="cais/mmlu", subset="anatomy", split="test")
+
+@register("mmlu_physics")
+class MMLUPhysics(MMLUTask):
+    data_source = DataSource(path="cais/mmlu", subset="high_school_physics", split="test")
 ```
 
 ### Adding Variants and Regimes
 
 **Variants** modify how a task is formatted/scored (e.g., `:mc`, `:bpb`):
 ```python
-from olmo_eval.evals.tasks import register_variant
+from olmo_eval.evals.tasks.common import register_variant
 
 # Register after task is defined
 register_variant("my_task", "bpb", formatter=PPLFormatter(), metrics=(BPBMetric(scorer=BitsPerByteScorer),))
@@ -385,7 +552,7 @@ register_variant("my_task", "bpb", formatter=PPLFormatter(), metrics=(BPBMetric(
 
 **Regimes** are configuration presets (e.g., `:olmes`, `:zero`):
 ```python
-from olmo_eval.evals.tasks import register_regime
+from olmo_eval.evals.tasks.common import register_regime
 
 register_regime("my_task", "olmes", num_fewshot=5, fewshot_seed=1234)
 register_regime("my_task", "3shot", num_fewshot=3)
@@ -393,133 +560,26 @@ register_regime("my_task", "3shot", num_fewshot=3)
 
 Usage: `olmo-eval run -t my_task:bpb:3shot`
 
-## Agent Tasks
+## Tool-Augmented Evaluation
 
-Agent tasks support multi-turn evaluations with tool use, enabling evaluation of models' ability to use tools to complete tasks. They use the OpenAI Agents SDK for orchestration and support vLLM as the inference backend.
+olmo-eval supports evaluating models with tool use through the **Harness** abstraction. This enables comparing baseline model performance against tool-augmented performance on the same tasks.
 
-### Creating an Agent Task
+### Recommended Approach: Harness
 
-Agent tasks extend `AgentTask` instead of `Task` and use `AgentTaskConfig` instead of `TaskConfig`:
-
-```python
-from collections.abc import AsyncGenerator, Iterator
-from contextlib import asynccontextmanager
-from typing import Any
-
-from olmo_eval.core import AccuracyMetric, Instance
-from olmo_eval.core.formatters import ChatFormatter
-from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.tasks.core import AgentTask, AgentTaskConfig, register
-
-
-async def my_tool(query: str) -> str:
-    """A tool the agent can use.
-
-    Args:
-        query: The search query.
-
-    Returns:
-        Tool result as a string.
-    """
-    # Tool implementation
-    return f"Result for: {query}"
-
-
-class MyAgentTask(AgentTask):
-    """Agent task with custom tools."""
-
-    @property
-    def instances(self) -> Iterator[Instance]:
-        """Yield instances from the dataset."""
-        if self._instances_cache is None:
-            self._instances_cache = []
-            loader = DataLoader()
-            source = self.config.get_data_source()
-            for idx, doc in enumerate(loader.load(source)):
-                self._instances_cache.append(
-                    Instance(
-                        question=doc["question"],
-                        gold_answer=doc["answer"],
-                        metadata={"id": idx},
-                    )
-                )
-        yield from self._instances_cache
-
-    @asynccontextmanager
-    async def _get_agent(
-        self,
-        model: str,
-        model_url: str,
-        system_prompt: str | None = None,
-        temperature: float = 0.0,
-        **kwargs: Any,
-    ) -> AsyncGenerator[Any, None]:
-        """Create agent with tools."""
-        from agents import Agent, ModelSettings, OpenAIChatCompletionsModel, function_tool
-        from openai import AsyncOpenAI
-
-        client = AsyncOpenAI(base_url=model_url, api_key="EMPTY")
-        llm = OpenAIChatCompletionsModel(openai_client=client, model=model)
-
-        # Create tools using function_tool decorator
-        tools = [function_tool(strict_mode=False)(my_tool)]
-
-        agent = Agent(
-            name="MyAgent",
-            instructions=system_prompt or "You are a helpful assistant.",
-            model=llm,
-            model_settings=ModelSettings(temperature=temperature),
-            tools=tools,
-        )
-        yield agent
-
-
-def _my_agent_config() -> AgentTaskConfig:
-    return AgentTaskConfig(
-        name="my_agent_task",
-        data_source=DataSource(path="my-org/my-dataset", split="test"),
-        formatter=ChatFormatter(system_prompt="You are a helpful assistant with tools."),
-        metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
-        max_turns=10,
-        max_concurrency=1,
-        required_secrets=("MY_API_KEY",),
-    )
-
-
-@register("my_agent_task", _my_agent_config)
-class MyAgent(MyAgentTask):
-    pass
-```
-
-### AgentTaskConfig Reference
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `formatter` | `Formatter` | `ChatFormatter()` | Formatter with system prompt (use `ChatFormatter(system_prompt="...")`) |
-| `max_turns` | `int` | `10` | Maximum agent turns |
-| `max_concurrency` | `int` | `1` | Concurrent agent executions |
-| `required_secrets` | `tuple[str, ...]` | `()` | Required environment variables |
-| `tools` | `tuple[ToolSchema, ...]` | `()` | Tool schemas for display |
-
-### Running Agent Tasks
+The **Harness** is the preferred way to add tools to evaluations. It separates tool configuration from task definition, allowing any task to be run with or without tools:
 
 ```bash
-# Local run
-olmo-eval run --task simpleqa_agent --model Qwen/Qwen3-8B -o limit=10
+# Baseline evaluation (no tools)
+olmo-eval run -m llama3.1-8b -t simpleqa
 
-# Beaker launch
-olmo-eval beaker launch -n "agent-eval" -m Qwen/Qwen3-8B -t simpleqa_agent -o limit=10
+# Same task with search tools
+olmo-eval run -m llama3.1-8b -t simpleqa --harness dr_tulu
 ```
 
-### vLLM Configuration
-
-For agent tasks using vLLM, the tool call parser is auto-detected based on model name. You can override it via model overrides:
-
-```bash
-olmo-eval run --task simpleqa_agent -m my-model -o tool_call_parser=hermes
-```
-
-Supported parsers: `hermes`, `llama3_json`, `mistral`
+See the [Harness](#harness) section above for full documentation on:
+- Creating custom harness configurations
+- Defining tools with the `@tool` decorator
+- Programmatic usage
 
 ## Launching on Beaker
 
@@ -659,20 +719,6 @@ tasks:
 cluster: h100
 ```
 
-**Via CLI override flag:**
-
-```bash
-olmo-eval beaker launch -n "eval" -m llama3.1-8b -o provider.kind=vllm -t mmlu
-```
-
-Models with the same provider (and other compatible settings) are grouped into the same experiment.
-Models with different providers run in separate experiments.
-
-Available inference providers:
-- `vllm` - vLLM inference engine
-- `hf` - HuggingFace transformers
-- `litellm` - LiteLLM for API-based models (OpenAI, Anthropic, etc.)
-
 ### CLI Options
 
 | Option | Short | Default | Description |
@@ -692,11 +738,9 @@ Available inference providers:
 | `--workspace` | `-w` | required | Beaker workspace |
 | `--budget` | `-B` | required | Beaker budget |
 | `--group` | `-g` | none | Add experiments to Beaker group(s) (can specify multiple) |
-| `--runner-type` | `-R` | `async` | Runner type: `async` (default) or `agent` |
-| `--num-workers` | `-W` | auto | Number of workers for async mode |
-| `--gpus-per-worker` | | `1` | GPUs per worker for async mode |
 | `--dry-run` | `-d` | `false` | Print spec without launching |
 | `--follow/--no-follow` | | `true` | Follow logs after launch |
+| `--secret-env` | | none | Map Beaker secret to env var (can specify multiple) |
 
 ### Per-Model and Per-Task Overrides
 
@@ -705,7 +749,7 @@ Use the `-o/--override` flag to apply configuration overrides to the preceding `
 ```bash
 # Model overrides (apply to the preceding -m)
 olmo-eval beaker launch -n "eval" \
-    -m llama3.1-8b -o provider.kind=vllm -o provider.package=vllm==0.14.0 \
+    -m llama3.1-8b -o provider.kind=vllm -o 'provider.dependencies=[vllm==0.14.0]' \
     -m gpt-4o -o provider.kind=litellm \
     -t mmlu -t gsm8k
 
@@ -730,7 +774,7 @@ The `-o` flag uses OmegaConf dotlist syntax, supporting:
 | String | `key=value` | `-o provider.kind=vllm` |
 | Number | `key=123` | `-o limit=100` |
 | Boolean | `key=true` | `-o preemptible=false` |
-| Nested | `a.b.c=val` | `-o provider.package=vllm==0.14.0` |
+| Nested | `a.b.c=val` | `-o provider.base_url=http://...` |
 | List | `key=[a,b]` | `-o 'args=[--flag1, --flag2]'` |
 | Dict | `key={a: 1}` | `-o 'config={distributed: true}'` |
 
@@ -739,6 +783,29 @@ The `-o` flag uses OmegaConf dotlist syntax, supporting:
 # Good - single quotes protect the value
 -o 'extra_config={key: value, nested: {a: 1}}'
 ```
+
+### Secret Environment Overrides
+
+By default, Beaker secrets are mapped using the pattern `{username}_{ENV_VAR}` (e.g., `ai2-tylerm_OPENAI_API_KEY`).
+Use `--secret-env` to override this with a custom Beaker secret name:
+
+```bash
+# Use a team-shared secret instead of your personal secret
+olmo-eval beaker launch -n "eval" -m gpt-4o -t mmlu \
+    --secret-env team-openai-key:OPENAI_API_KEY
+
+# Multiple secret overrides
+olmo-eval beaker launch -n "eval" -m gpt-4o -t simpleqa \
+    --secret-env team-openai-key:OPENAI_API_KEY \
+    --secret-env shared-serper-key:SERPER_API_KEY
+```
+
+Format: `BEAKER_SECRET_NAME:ENV_VAR_NAME`
+
+This is useful for:
+- Using team-shared API keys instead of personal secrets
+- Testing with different credential sets
+- Sharing jobs that use organization-level secrets
 
 ### YAML Configuration
 
@@ -870,23 +937,16 @@ description: "Full evaluation suite for Llama 70B"
 | `budget` | string | yes | Beaker budget |
 | `beaker_image` | string | no | Container image to use (config-only) |
 | `groups` | list | no | Beaker groups to add experiments to |
-| `runner_type` | string | no | Runner type: `async` (default) or `agent` |
-| `num_workers` | int | no | Number of workers for async modes |
-| `gpus_per_worker` | int | no | GPUs per worker for async modes (default: `1`) |
 | `description` | string | no | Experiment description (config-only) |
 
 See `examples/beaker/configs/` for more configuration examples.
 
 ### Cluster Aliases
 
-| Alias | Clusters |
-|-------|----------|
-| `h100` | ai2/jupiter, ai2/ceres |
-| `a100` | ai2/saturn |
-| `l40` | ai2/neptune |
-| `aus` | ai2/jupiter, ai2/neptune, ai2/saturn, ai2/ceres |
-| `aus80g` | ai2/jupiter, ai2/saturn, ai2/ceres |
-| `80g` | ai2/jupiter, ai2/saturn, ai2/ceres |
+```bash
+# List available cluster aliases
+olmo-eval beaker clusters
+```
 
 ### Programmatic API
 
@@ -1059,7 +1119,19 @@ JSON output includes pagination metadata:
 
 ### Database Configuration
 
-Configure via environment variables:
+#### AI2 Users (Recommended)
+
+Set these two environment variables to connect to the shared database:
+
+```bash
+export OLMO_EVAL_DB_HOST="<database-host>"
+export OLMO_EVAL_DB_SECRET_ARN="arn:aws:secretsmanager:us-west-2:..."
+```
+
+The password is automatically fetched from AWS Secrets Manager on first connection.
+This requires AWS credentials configured (via `~/.aws/credentials` or environment variables).
+
+#### All Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -1067,36 +1139,22 @@ Configure via environment variables:
 | `OLMO_EVAL_DB_PORT` | `5432` | Database port |
 | `OLMO_EVAL_DB_NAME` | `olmo_eval` | Database name |
 | `OLMO_EVAL_DB_USER` | `postgres` | Database user |
-| `OLMO_EVAL_DB_PASSWORD` | `postgres` | Database password |
+| `OLMO_EVAL_DB_PASSWORD` | - | Database password (use this OR `OLMO_EVAL_DB_SECRET_ARN`) |
+| `OLMO_EVAL_DB_SECRET_ARN` | - | AWS Secrets Manager ARN for password (fetched on auth failure) |
 
 ## Advanced Usage
 
-### Runner Types
-
-Two runner types are available:
-
-| Runner | Flag | Backend | Best For |
-|--------|------|---------|----------|
-| Async | (default) | Any | Multi-GPU batch processing |
-| Agent | `--runner-type agent` | vLLM | Multi-turn agent tasks |
-
-**Async Mode (Default)** - Spawns worker processes that each load the model and process batches in parallel:
+### Multi-GPU and Tool-Augmented Evaluation
 
 ```bash
-# Auto-detect workers from available GPUs
+# Basic evaluation
 olmo-eval run -m llama3.1-8b -t mmlu -t gsm8k -t arc
 
-# Specify number of workers
-olmo-eval run --num-workers 4 -m llama3.1-8b -t mmlu -t gsm8k
+# Large models with multi-GPU tensor parallelism
+olmo-eval run -m llama3.1-70b -t mmlu --num-gpus 4
 
-# Multi-GPU models (e.g., 70B on 4 GPUs per worker)
-olmo-eval run --num-workers 2 --gpus-per-worker 4 -m llama3.1-70b -t mmlu
-```
-
-**Agent Mode** - For multi-turn agent tasks with tool use:
-
-```bash
-olmo-eval run --runner-type agent -m llama3.1-8b -t simpleqa_agent
+# Tool-augmented evaluation with harness
+olmo-eval run -m llama3.1-8b -t simpleqa --harness dr_tulu
 ```
 
 ## Debugging and Inspection

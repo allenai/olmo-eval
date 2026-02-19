@@ -97,7 +97,7 @@ class TestQueryHelpers:
     @pytest.mark.integration
     def test_get_model_task_instances(self, postgres_backend):
         """Test getting instances for a task."""
-        from olmo_eval.core.types import EvalResult, StoredTaskResult
+        from olmo_eval.common.types import EvalResult, StoredTaskResult
         from olmo_eval.storage.backends.postgres.queries import QueryHelper
 
         exp = EvalResult(
@@ -136,7 +136,7 @@ class TestQueryHelpers:
     @pytest.mark.integration
     def test_get_model_task_instances_multiple_tasks(self, postgres_backend):
         """Test getting instances for multiple tasks."""
-        from olmo_eval.core.types import EvalResult, StoredTaskResult
+        from olmo_eval.common.types import EvalResult, StoredTaskResult
         from olmo_eval.storage.backends.postgres.queries import QueryHelper
 
         exp = EvalResult(
@@ -213,7 +213,7 @@ class TestUserIsolation:
     @pytest.mark.integration
     def test_concurrent_users_same_model_different_experiments(self, postgres_backend):
         """Test that same model config from different users creates separate experiments."""
-        from olmo_eval.core.types import EvalResult, StoredTaskResult
+        from olmo_eval.common.types import EvalResult, StoredTaskResult
         from olmo_eval.storage.backends.postgres.repository import InstancePredictionRepository
 
         # Same config, tasks, and model - only difference is author and experiment_id

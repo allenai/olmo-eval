@@ -264,3 +264,109 @@ class TestGetTransaction:
 
         mock_session.rollback.assert_called_once()
         mock_session.commit.assert_not_called()
+
+
+class TestRetryOnTransientDbError:
+    """Tests for retry_on_transient_db_error decorator."""
+
+    def test_no_error_no_retry(self):
+        """Test that successful calls don't retry."""
+        from olmo_eval.storage.backends.postgres.session import retry_on_transient_db_error
+
+        call_count = 0
+
+        @retry_on_transient_db_error(max_retries=3)
+        def succeed():
+            nonlocal call_count
+            call_count += 1
+            return "success"
+
+        result = succeed()
+        assert result == "success"
+        assert call_count == 1
+
+    def test_retries_on_connection_error(self):
+        """Test that connection errors are retried."""
+        from sqlalchemy.exc import OperationalError
+
+        from olmo_eval.storage.backends.postgres.session import retry_on_transient_db_error
+
+        call_count = 0
+
+        @retry_on_transient_db_error(max_retries=3, base_delay=0.01)
+        def fail_then_succeed():
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise OperationalError("connection", {}, Exception("connection reset"))
+            return "success"
+
+        result = fail_then_succeed()
+        assert result == "success"
+        assert call_count == 3
+
+    def test_retries_on_deadlock(self):
+        """Test that deadlock errors are retried."""
+        from sqlalchemy.exc import OperationalError
+
+        from olmo_eval.storage.backends.postgres.session import retry_on_transient_db_error
+
+        call_count = 0
+
+        @retry_on_transient_db_error(max_retries=3, base_delay=0.01)
+        def fail_then_succeed():
+            nonlocal call_count
+            call_count += 1
+            if call_count < 2:
+                orig = MagicMock()
+                orig.pgcode = "40P01"  # deadlock_detected
+                exc = OperationalError("deadlock", {}, orig)
+                exc.orig = orig
+                raise exc
+            return "success"
+
+        result = fail_then_succeed()
+        assert result == "success"
+        assert call_count == 2
+
+    def test_exhausts_retries(self):
+        """Test that retries are exhausted and exception is raised."""
+        from sqlalchemy.exc import OperationalError
+
+        from olmo_eval.storage.backends.postgres.session import retry_on_transient_db_error
+
+        call_count = 0
+
+        @retry_on_transient_db_error(max_retries=2, base_delay=0.01)
+        def always_fail():
+            nonlocal call_count
+            call_count += 1
+            raise OperationalError("connection", {}, Exception("connection refused"))
+
+        with pytest.raises(OperationalError):
+            always_fail()
+
+        assert call_count == 3  # Initial + 2 retries
+
+    def test_non_retryable_error_not_retried(self):
+        """Test that non-connection OperationalErrors are not retried."""
+        from sqlalchemy.exc import OperationalError
+
+        from olmo_eval.storage.backends.postgres.session import retry_on_transient_db_error
+
+        call_count = 0
+
+        @retry_on_transient_db_error(max_retries=3, base_delay=0.01)
+        def fail_with_syntax_error():
+            nonlocal call_count
+            call_count += 1
+            orig = MagicMock()
+            orig.pgcode = "42601"  # syntax_error - not retryable
+            exc = OperationalError("syntax error", {}, orig)
+            exc.orig = orig
+            raise exc
+
+        with pytest.raises(OperationalError):
+            fail_with_syntax_error()
+
+        assert call_count == 1  # No retries

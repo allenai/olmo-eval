@@ -232,25 +232,14 @@ class GCSBackend:
 
     def _load_json(self, path: str) -> Iterator[dict[str, Any]]:
         """Load a JSON file from GCS."""
+        from olmo_eval.data.backends.base import extract_json_data
+
         smart_open, transport_params = self._get_smart_open()
 
         with smart_open(path, "r", encoding="utf-8", transport_params=transport_params) as f:
             data = json.load(f)
 
-        if isinstance(data, list):
-            yield from data
-        elif isinstance(data, dict):
-            # Try common keys for data arrays
-            for key in ("data", "instances", "examples", "items", "records"):
-                if key in data and isinstance(data[key], list):
-                    yield from data[key]
-                    return
-            raise ValueError(
-                f"JSON file must contain array or object with "
-                f"'data'/'instances'/'examples' key: {path}"
-            )
-        else:
-            raise ValueError(f"JSON file must contain array or object: {path}")
+        yield from extract_json_data(data, path)
 
     def _load_parquet(self, path: str) -> Iterator[dict[str, Any]]:
         """Load a Parquet file from GCS."""
