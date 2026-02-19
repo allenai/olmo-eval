@@ -28,6 +28,8 @@ TORCH_VERSION="${DEFAULT_TORCH_VERSION}"
 PYTHON_VERSION="3.12"
 PLATFORM=""
 NO_CACHE=""
+BUILD_SANDBOX=""
+TARGET="runtime"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -59,6 +61,11 @@ while [[ $# -gt 0 ]]; do
             PLATFORM="$2"
             shift 2
             ;;
+        --sandbox)
+            BUILD_SANDBOX="1"
+            TARGET="runtime-sandbox"
+            shift
+            ;;
         --help)
             echo "Usage: $0 [OPTIONS]"
             echo ""
@@ -70,6 +77,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --python-version VER  Python version (default: ${PYTHON_VERSION})"
             echo "  --platform PLATFORM   Target platform (default: auto-detect)"
             echo "                        Options: linux/amd64, linux/arm64"
+            echo "  --sandbox             Build runtime-sandbox target with Podman support"
             echo "  --no-cache            Force rebuild without cache"
             echo "  --help                Show this help"
             echo ""
@@ -79,6 +87,7 @@ while [[ $# -gt 0 ]]; do
             echo "  $0 --cuda-version 12.8.0"
             echo "  $0 --torch-version 2.6.0"
             echo "  $0 --platform linux/amd64"
+            echo "  $0 --sandbox          # Build with Podman for sandboxed execution"
             echo "  FORCE_AMD64=1 $0"
             exit 0
             ;;
@@ -106,16 +115,21 @@ PLATFORM_ARCH=$(echo "$PLATFORM" | cut -d'/' -f2)
 
 # Auto-generate tag if not specified
 if [[ -z "$TAG" ]]; then
-    # Format: cu{version}-trc{version}-{arch}
+    # Format: cu{version}-trc{version}-{arch}[-sandbox]
     # Example: cu128-trc290-amd64 (for CUDA 12.8.x, PyTorch 2.9.0)
+    # Example: cu128-trc290-amd64-sandbox (with Podman support)
     CUDA_SHORT=$(cuda_short "$CUDA_VERSION")
     TORCH_SHORT=$(echo "${TORCH_VERSION}" | sed 's/\.//g')
     TAG="cu${CUDA_SHORT}-trc${TORCH_SHORT}-${PLATFORM_ARCH}"
+    if [[ -n "$BUILD_SANDBOX" ]]; then
+        TAG="${TAG}-sandbox"
+    fi
     echo "Auto-generated tag: ${TAG}"
 fi
 
 echo "Building Docker image..."
 echo "  Image:          ${IMAGE_NAME}:${TAG}"
+echo "  Target:         ${TARGET}"
 echo "  CUDA version:   ${CUDA_VERSION}"
 echo "  Python version: ${PYTHON_VERSION}"
 echo "  Torch version:  ${TORCH_VERSION}"
@@ -124,6 +138,7 @@ echo ""
 
 docker build \
     --platform "${PLATFORM}" \
+    --target "${TARGET}" \
     ${NO_CACHE} \
     --build-arg CUDA_VERSION="${CUDA_VERSION}" \
     --build-arg TORCH_VERSION="${TORCH_VERSION}" \
@@ -141,7 +156,13 @@ echo ""
 echo "Image includes:"
 echo "  - Python ${PYTHON_VERSION}"
 echo "  - PyTorch ${TORCH_VERSION}"
+if [[ -n "$BUILD_SANDBOX" ]]; then
+    echo "  - Podman (for sandboxed execution)"
+fi
 echo ""
 echo "To test locally:"
 echo "  docker run --rm -v \$(pwd):/workspace ${IMAGE_NAME}:${TAG} python -c 'import torch; print(torch.__version__)'"
+if [[ -n "$BUILD_SANDBOX" ]]; then
+    echo "  docker run --rm ${IMAGE_NAME}:${TAG} podman --version"
+fi
 echo ""

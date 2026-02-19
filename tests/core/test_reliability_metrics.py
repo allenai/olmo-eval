@@ -1,12 +1,12 @@
 """Tests for pass@k and pass^k reliability metrics."""
 
-from olmo_eval.core.metrics import PassAtKMetric, PassPowKMetric
-from olmo_eval.core.scorers import CodeExecutionScorer
-from olmo_eval.core.types import Instance, LMOutput, LMRequest, RequestType, Response
-from olmo_eval.core.utils import compute_pass_at_k, compute_pass_pow_k
+from olmo_eval.common.metrics import PassAtKMetric, PassPowKMetric
+from olmo_eval.common.scorers import CodeExecutionScorer
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
+from olmo_eval.common.utils import compute_pass_at_k, compute_pass_pow_k
 
 
-def make_response(task_id: str, score: float, scorer_name: str = "code_execution") -> Response:
+def make_response(task_id: str, score: float, scorer_name: str = "code_exec") -> Response:
     """Helper to create Response with given score."""
     return Response(
         instance=Instance(question="test", metadata={"id": task_id}),
@@ -48,6 +48,30 @@ class TestComputePassAtK:
         """Test pass@1 with 50% success rate."""
         result = compute_pass_at_k(n=10, c=5, k=1)
         assert result == 0.5
+
+    def test_n_less_than_k_no_correct(self):
+        """Test when n < k with no correct samples."""
+        # n=3, c=0, k=5: effectively pass@3 with 0 correct = 0.0
+        result = compute_pass_at_k(n=3, c=0, k=5)
+        assert result == 0.0
+
+    def test_n_less_than_k_some_correct(self):
+        """Test when n < k with some correct samples."""
+        # n=3, c=1, k=5: effectively pass@3 with 1 correct
+        # Drawing all 3 samples guarantees getting the 1 correct one
+        result = compute_pass_at_k(n=3, c=1, k=5)
+        assert result == 1.0
+
+    def test_n_less_than_k_all_correct(self):
+        """Test when n < k with all correct samples."""
+        # n=3, c=3, k=5: effectively pass@3 with 3 correct = 1.0
+        result = compute_pass_at_k(n=3, c=3, k=5)
+        assert result == 1.0
+
+    def test_zero_samples(self):
+        """Test with zero samples."""
+        result = compute_pass_at_k(n=0, c=0, k=1)
+        assert result == 0.0
 
 
 class TestComputePassPowK:

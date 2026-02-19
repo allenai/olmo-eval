@@ -7,7 +7,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from olmo_eval.core.types import EvalResult
+from olmo_eval.common.types import EvalResult
 from olmo_eval.storage.backends.postgres.repository import (
     ExperimentRepository,
     InstancePredictionRepository,
@@ -209,7 +209,7 @@ class QueryHelper:
             if tasks and task.task_name not in tasks:
                 continue
             # Extract primary score from nested metrics using primary_metric identifier
-            from olmo_eval.runners.common import extract_score_from_metrics
+            from olmo_eval.runners.processing.utils import extract_score_from_metrics
 
             primary_score = extract_score_from_metrics(task.metrics, task.primary_metric)
             results[task.task_name] = primary_score

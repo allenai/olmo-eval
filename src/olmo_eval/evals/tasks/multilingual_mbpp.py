@@ -13,11 +13,11 @@ Dataset: allenai/multilingual_mbpp
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.core.formatters import PPLFormatter
-from olmo_eval.core.metrics import BPBMetric
-from olmo_eval.core.types import Instance, LMOutput, LMRequest, SamplingParams
-from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.tasks.core import Task, TaskConfig, register, register_variant
+from olmo_eval.common.formatters import PPLFormatter
+from olmo_eval.common.metrics import BPBMetric
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams
+from olmo_eval.data import DataLoader
+from olmo_eval.evals.tasks.common import Task, register_subtasks
 
 # Supported languages in multilingual MBPP
 MULTILINGUAL_MBPP_LANGUAGES: tuple[str, ...] = (
@@ -48,12 +48,8 @@ class MultilingualMBPPTask(Task):
     The v2fix version normalizes Windows line endings (\\r\\n -> \\n).
     """
 
-    default_source: str = "allenai/multilingual_mbpp"
     normalize_line_endings: bool = False  # Set True for v2fix
-
-    def __init__(self, config: TaskConfig, language: str) -> None:
-        super().__init__(config)
-        self.language = language
+    language: str = "python"  # Override in subclasses
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -65,17 +61,6 @@ class MultilingualMBPPTask(Task):
             for doc in loader.load(source):
                 self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
-
-    def _get_source_for_split(self, split: str) -> DataSource:
-        """Get data source for a specific split."""
-        try:
-            return self.config.get_data_source(split=split).with_subset(self.language)
-        except ValueError:
-            return DataSource(
-                path=self.default_source,
-                subset=self.language,
-                split=split,
-            )
 
     def _normalize(self, text: str) -> str:
         """Normalize line endings if v2fix mode."""
@@ -145,115 +130,34 @@ class MultilingualMBPPV2FixTask(MultilingualMBPPTask):
 
 
 # =============================================================================
-# Task Configurations and Registration
+# Task Registration
 # =============================================================================
 
+_SHARED_ATTRS: dict = {
+    "metrics": (),
+    "sampling_params": SamplingParams(max_tokens=1024, temperature=0.0, stop_sequences=("\n\n",)),
+}
 
-def _make_mt_mbpp_config(language: str) -> TaskConfig:
-    """Create config for mt_mbpp_{language} task."""
-    return TaskConfig(
-        name=f"mt_mbpp_{language}",
-        data_source=DataSource(path="allenai/multilingual_mbpp", subset=language),
-        metrics=(),
-        sampling_params=SamplingParams(
-            max_tokens=1024,
-            temperature=0.0,
-            stop_sequences=("\n\n",),
-        ),
-    )
+_VARIANTS: dict = {
+    "bpb": {
+        "formatter": PPLFormatter(leading_space=False, always_prepend_separator=True),
+        "metrics": (BPBMetric(),),
+    },
+    "3shot": {"num_fewshot": 3},
+}
 
-
-def _make_mt_mbpp_v2fix_config(language: str) -> TaskConfig:
-    """Create config for mt_mbpp_v2fix_{language} task."""
-    return TaskConfig(
-        name=f"mt_mbpp_v2fix_{language}",
-        data_source=DataSource(path="allenai/multilingual_mbpp", subset=language),
-        metrics=(),
-        sampling_params=SamplingParams(
-            max_tokens=1024,
-            temperature=0.0,
-            stop_sequences=("\n\n",),
-        ),
-    )
-
-
-# Register all mt_mbpp_{language} tasks
-for _lang in MULTILINGUAL_MBPP_LANGUAGES:
-
-    def _make_config_factory(lang: str):
-        return lambda: _make_mt_mbpp_config(lang)
-
-    def _make_class_factory(lang: str):
-        class _MultilingualMBPP(MultilingualMBPPTask):
-            def __init__(self, config: TaskConfig) -> None:
-                super().__init__(config, language=lang)
-
-        _MultilingualMBPP.__name__ = f"MultilingualMBPP_{lang.title()}"
-        return _MultilingualMBPP
-
-    register(f"mt_mbpp_{_lang}", _make_config_factory(_lang))(_make_class_factory(_lang))
-
-
-# Register all mt_mbpp_v2fix_{language} tasks
-for _lang in MULTILINGUAL_MBPP_LANGUAGES:
-
-    def _make_v2fix_config_factory(lang: str):
-        return lambda: _make_mt_mbpp_v2fix_config(lang)
-
-    def _make_v2fix_class_factory(lang: str):
-        class _MultilingualMBPPV2Fix(MultilingualMBPPV2FixTask):
-            def __init__(self, config: TaskConfig) -> None:
-                super().__init__(config, language=lang)
-
-        _MultilingualMBPPV2Fix.__name__ = f"MultilingualMBPPV2Fix_{lang.title()}"
-        return _MultilingualMBPPV2Fix
-
-    register(f"mt_mbpp_v2fix_{_lang}", _make_v2fix_config_factory(_lang))(
-        _make_v2fix_class_factory(_lang)
-    )
-
-
-# =============================================================================
-# Variant Registrations
-# =============================================================================
-
-# Register bpb and 3shot variants for all mt_mbpp_{language} tasks
-for _lang in MULTILINGUAL_MBPP_LANGUAGES:
-    # BPB variant - use mt_mbpp_{language}:bpb
-    register_variant(
-        f"mt_mbpp_{_lang}",
-        "bpb",
-        # Matches oe-eval: no leading space, always prepend \n\n separator
-        formatter=PPLFormatter(leading_space=False, always_prepend_separator=True),
-        metrics=(BPBMetric(),),
-        primary_metric=BPBMetric(),
-    )
-
-    # 3shot variant - composable with bpb (e.g., mt_mbpp_{language}:3shot:bpb)
-    register_variant(
-        f"mt_mbpp_{_lang}",
-        "3shot",
-        num_fewshot=3,
-    )
-
-
-# Register bpb and 3shot variants for all mt_mbpp_v2fix_{language} tasks
-for _lang in MULTILINGUAL_MBPP_LANGUAGES:
-    # BPB variant - use mt_mbpp_v2fix_{language}:bpb
-    register_variant(
-        f"mt_mbpp_v2fix_{_lang}",
-        "bpb",
-        # Matches oe-eval: no leading space, always prepend \n\n separator
-        formatter=PPLFormatter(leading_space=False, always_prepend_separator=True),
-        metrics=(BPBMetric(),),
-        primary_metric=BPBMetric(),
-    )
-
-    # 3shot variant - composable with bpb (e.g., mt_mbpp_v2fix_{language}:3shot:bpb)
-    register_variant(
-        f"mt_mbpp_v2fix_{_lang}",
-        "3shot",
-        num_fewshot=3,
+for _base, _prefix in [
+    (MultilingualMBPPTask, "mt_mbpp"),
+    (MultilingualMBPPV2FixTask, "mt_mbpp_v2fix"),
+]:
+    register_subtasks(
+        _base,
+        list(MULTILINGUAL_MBPP_LANGUAGES),
+        task_prefix=_prefix,
+        data_source="allenai/multilingual_mbpp",
+        subtask_attr="language",
+        class_attrs=_SHARED_ATTRS,
+        variants=_VARIANTS,
     )
 
 

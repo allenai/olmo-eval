@@ -13,10 +13,17 @@ Example:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from olmo_eval.launch.beaker.constants import (
+    OLMO_EVAL_DB_ARN_SECRET_NAME,
+    OLMO_EVAL_PGHOST_SECRET_NAME,
+    STORE_DEFAULTS,
+)
 
 if TYPE_CHECKING:
     from beaker import Beaker
@@ -28,6 +35,10 @@ __all__ = [
     "get_local_wandb_api_key",
     "ensure_common_secrets",
     "ensure_task_secrets",
+    "get_aws_secret_value",
+    "get_store_secret_mappings",
+    "get_store_env_defaults",
+    "setup_pgpassword_from_arn",
 ]
 
 
@@ -264,3 +275,85 @@ def ensure_task_secrets(
         )
 
     return secrets
+
+
+def get_aws_secret_value(secret_arn: str, key: str | None = None) -> str:
+    """Fetch a secret value from AWS Secrets Manager.
+
+    Args:
+        secret_arn: The ARN of the secret.
+        key: If provided, parse secret as JSON and extract this key.
+
+    Returns:
+        The secret value.
+    """
+    import boto3
+
+    # Extract region from ARN (format: arn:aws:secretsmanager:REGION:ACCOUNT:secret:NAME)
+    parts = secret_arn.split(":")
+    region = parts[3] if len(parts) >= 4 else "us-east-1"
+
+    client = boto3.client("secretsmanager", region_name=region)
+    response = client.get_secret_value(SecretId=secret_arn)
+    secret_string = response["SecretString"]
+
+    if key is None:
+        return secret_string
+
+    return json.loads(secret_string)[key]
+
+
+def get_store_secret_mappings() -> list[tuple[str, str]]:
+    """Get environment variable to Beaker secret mappings for --store.
+
+    Returns:
+        List of (env_var_name, secret_name) tuples.
+    """
+    return [
+        ("DB_SECRET_ARN", OLMO_EVAL_DB_ARN_SECRET_NAME),
+        ("PGHOST", OLMO_EVAL_PGHOST_SECRET_NAME),
+    ]
+
+
+def get_store_env_defaults() -> dict[str, str]:
+    """Get default environment variables for --store.
+
+    These can be overridden by the user in the launch command.
+
+    Returns:
+        Dict of env_var_name -> default_value.
+    """
+    return STORE_DEFAULTS.copy()
+
+
+PGPASSWORD_FILE = "/tmp/.pgpassword"
+
+
+def setup_pgpassword_from_arn() -> None:
+    """Fetch PGPASSWORD from AWS Secrets Manager and write to secure file.
+
+    Writes to /tmp/.pgpassword with mode 600. The shell should source this
+    file and then delete it.
+
+    Raises:
+        SystemExit: If DB_SECRET_ARN is not set or password fetch fails.
+    """
+    import sys
+
+    arn = os.environ.get("DB_SECRET_ARN")
+    if arn is None:
+        print("Error: DB_SECRET_ARN environment variable not set", file=sys.stderr)
+        sys.exit(1)
+        return  # unreachable, helps type checker
+
+    try:
+        password = get_aws_secret_value(arn, key="password")
+        pgpass_file = Path(PGPASSWORD_FILE)
+        pgpass_file.write_text(f"export PGPASSWORD='{password}'\n")
+        pgpass_file.chmod(0o600)
+    except Exception:
+        print(
+            f"Error: Failed to fetch password from {OLMO_EVAL_DB_ARN_SECRET_NAME}",
+            file=sys.stderr,
+        )
+        sys.exit(1)

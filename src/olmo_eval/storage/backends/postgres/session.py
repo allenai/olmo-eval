@@ -4,16 +4,120 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Generator
+import time
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from typing import Any
+from functools import wraps
+from typing import Any, ParamSpec, TypeVar
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import NullPool, QueuePool
 
 logger = logging.getLogger(__name__)
+
+# PostgreSQL error codes for transient failures that should be retried
+# See: https://www.postgresql.org/docs/current/errcodes-appendix.html
+RETRYABLE_PG_CODES = frozenset(
+    {
+        "40001",  # serialization_failure
+        "40P01",  # deadlock_detected
+        "08000",  # connection_exception
+        "08003",  # connection_does_not_exist
+        "08006",  # connection_failure
+        "08001",  # sqlclient_unable_to_establish_sqlconnection
+        "08004",  # sqlserver_rejected_establishment_of_sqlconnection
+        "57P01",  # admin_shutdown
+        "57P02",  # crash_shutdown
+        "57P03",  # cannot_connect_now
+    }
+)
+
+P = ParamSpec("P")
+T = TypeVar("T")
+
+
+def retry_on_transient_db_error(
+    max_retries: int = 3,
+    base_delay: float = 0.5,
+    max_delay: float = 10.0,
+) -> Callable[[Callable[P, T]], Callable[P, T]]:
+    """Decorator to retry database operations on transient errors.
+
+    Retries on connection errors, deadlocks, and serialization failures
+    with exponential backoff.
+
+    Args:
+        max_retries: Maximum number of retry attempts.
+        base_delay: Initial delay in seconds (doubles each retry).
+        max_delay: Maximum delay between retries.
+
+    Returns:
+        Decorated function with retry logic.
+    """
+
+    def decorator(func: Callable[P, T]) -> Callable[P, T]:
+        @wraps(func)
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+            last_exception: Exception | None = None
+
+            for attempt in range(max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except OperationalError as e:
+                    last_exception = e
+
+                    # Check if this is a retryable PostgreSQL error
+                    pg_code = getattr(e.orig, "pgcode", None) if e.orig else None
+                    is_retryable = pg_code in RETRYABLE_PG_CODES or _is_connection_error(e)
+
+                    if not is_retryable or attempt >= max_retries:
+                        if is_retryable:
+                            logger.error(
+                                f"Database operation failed after {attempt + 1} attempts: {e}"
+                            )
+                        raise
+
+                    delay = min(base_delay * (2**attempt), max_delay)
+                    logger.warning(
+                        f"Transient database error (attempt {attempt + 1}/{max_retries + 1}): "
+                        f"{type(e).__name__}: {e}. Retrying in {delay:.1f}s..."
+                    )
+                    time.sleep(delay)
+
+            # Should not reach here, but raise last exception if we do
+            if last_exception:
+                raise last_exception
+            raise RuntimeError("Unexpected retry loop exit")
+
+        return wrapper
+
+    return decorator
+
+
+def _is_connection_error(exc: OperationalError) -> bool:
+    """Check if an OperationalError is a connection-related error.
+
+    Args:
+        exc: The OperationalError to check.
+
+    Returns:
+        True if this appears to be a connection error.
+    """
+    error_str = str(exc).lower()
+    connection_indicators = (
+        "connection",
+        "ssl",
+        "closed",
+        "timeout",
+        "refused",
+        "reset",
+        "broken pipe",
+        "network",
+    )
+    return any(indicator in error_str for indicator in connection_indicators)
 
 
 def create_postgres_engine(

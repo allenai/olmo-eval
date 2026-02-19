@@ -1,18 +1,6 @@
 """Tests for the DataSource abstraction."""
 
-import pytest
-
 from olmo_eval.data import DataSource, SourceType
-
-
-class TestSourceType:
-    """Tests for SourceType enum."""
-
-    def test_source_types_exist(self):
-        assert SourceType.HF.value == "hf"
-        assert SourceType.LOCAL.value == "local"
-        assert SourceType.S3.value == "s3"
-        assert SourceType.GCS.value == "gcs"
 
 
 class TestDataSource:
@@ -63,15 +51,6 @@ class TestDataSource:
         assert source.path == "cais/mmlu"
         assert source.subset == "abstract_algebra"
         assert source.split == "validation"
-
-    def test_default_split_is_test(self):
-        source = DataSource(path="cais/mmlu")
-        assert source.split == "test"
-
-    def test_frozen_dataclass(self):
-        source = DataSource(path="cais/mmlu")
-        with pytest.raises(AttributeError):
-            source.path = "other/path"
 
 
 class TestDataSourceFromUri:

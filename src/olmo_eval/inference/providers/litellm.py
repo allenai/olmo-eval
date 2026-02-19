@@ -1,0 +1,343 @@
+"""LiteLLM provider for API-based inference."""
+
+from __future__ import annotations
+
+import asyncio
+import os
+from typing import TYPE_CHECKING, Any
+
+from olmo_eval.common.debug import is_debug_provider
+from olmo_eval.common.logging import get_logger
+from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
+from olmo_eval.inference.base import InferenceProvider
+from olmo_eval.inference.retry import retry_with_backoff
+
+if TYPE_CHECKING:
+    from openai import AsyncOpenAI
+
+# Maximum stop sequences supported by OpenAI-compatible APIs
+_MAX_STOP_SEQUENCES = 4
+
+logger = get_logger(__name__)
+
+
+class LiteLLMProvider(InferenceProvider):
+    """Provider using LiteLLM for unified API access to various providers."""
+
+    # Environment variable to LiteLLM attribute mappings
+    _API_KEY_MAPPINGS = {
+        "OPENAI_API_KEY": "openai_api_key",
+        "ANTHROPIC_API_KEY": "anthropic_api_key",
+        "COHERE_API_KEY": "cohere_api_key",
+        "TOGETHER_API_KEY": "together_api_key",
+        "AZURE_API_KEY": "azure_api_key",
+        "AZURE_API_BASE": "azure_api_base",
+        "AZURE_API_VERSION": "azure_api_version",
+    }
+
+    def __init__(
+        self,
+        model_name: str,
+        base_url: str | None = None,
+        max_concurrency: int = 32,
+        max_retries: int = 3,
+        retry_delay: float = 1.0,
+        **api_kwargs,
+    ) -> None:
+        """Initialize the provider.
+
+        Args:
+            model_name: Model identifier (e.g., "gpt-4", "claude-3-opus").
+            base_url: Optional base URL for OpenAI-compatible endpoints.
+            max_concurrency: Maximum number of concurrent API requests.
+            max_retries: Maximum number of retries for transient errors.
+            retry_delay: Base delay in seconds between retries (exponential backoff).
+            **api_kwargs: Additional arguments passed to litellm.completion.
+        """
+        try:
+            import litellm
+        except ImportError as e:
+            raise ImportError(
+                "litellm is required for LiteLLMProvider. Install with: uv pip install litellm"
+            ) from e
+
+        super().__init__(model_name)
+        self._litellm = litellm
+        self.base_url = base_url
+        self.max_concurrency = max_concurrency
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
+        self.api_kwargs = api_kwargs
+        self._client: AsyncOpenAI | None = None  # Cached client
+
+        if is_debug_provider():
+            litellm._turn_on_debug()
+        else:
+            litellm.suppress_debug_info = True
+
+        self._setup_api_keys()
+
+    def _setup_api_keys(self) -> None:
+        """Configure LiteLLM with API keys from environment."""
+        for env_var, litellm_attr in self._API_KEY_MAPPINGS.items():
+            value = os.getenv(env_var)
+            if value:
+                setattr(self._litellm, litellm_attr, value)
+
+    def get_openai_client(self) -> AsyncOpenAI | None:
+        """Get an AsyncOpenAI client if base_url is configured.
+
+        Returns cached client on subsequent calls to avoid connection pool leaks.
+
+        Returns:
+            AsyncOpenAI client if base_url is set, None otherwise.
+        """
+        if self.base_url is None:
+            return None
+
+        if self._client is None:
+            from openai import AsyncOpenAI
+
+            self._client = AsyncOpenAI(
+                base_url=self.base_url,
+                api_key=os.getenv("OPENAI_API_KEY", "EMPTY"),
+            )
+
+        return self._client
+
+    async def _generate_single_impl(
+        self, request: LMRequest, params: SamplingParams
+    ) -> list[LMOutput]:
+        """Generate completions for a single request."""
+        # Build messages from request
+        if request.messages:
+            messages = [dict(m) for m in request.messages]
+        else:
+            messages = [{"role": "user", "content": request.prompt}]
+
+        # Prepare API kwargs
+        kwargs: dict[str, Any] = {
+            "model": self.model_name,
+            "messages": messages,
+            "n": params.num_samples,
+            "max_completion_tokens": params.max_tokens,
+            **self.api_kwargs,
+        }
+
+        if params.temperature > 0:
+            kwargs["temperature"] = params.temperature
+        if params.stop_sequences:
+            kwargs["stop"] = list(params.stop_sequences)[:_MAX_STOP_SEQUENCES]
+        # Always request logprobs for metrics computation
+        kwargs["logprobs"] = True
+
+        response = await self._litellm.acompletion(**kwargs)
+
+        outputs = []
+        for choice in response.choices:
+            text = choice.message.content or ""
+
+            # Convert logprobs to standard format
+            logprob_entries: list[LogProbEntry] | None = None
+            metadata: dict[str, Any] = {}
+            logprobs_data = getattr(choice, "logprobs", None)
+            if logprobs_data and hasattr(logprobs_data, "content") and logprobs_data.content:
+                logprob_entries = []
+                for lp in logprobs_data.content:
+                    entry: LogProbEntry = {"token": lp.token, "logprob": lp.logprob}
+                    lp_bytes = getattr(lp, "bytes", None)
+                    if lp_bytes is not None:
+                        entry["bytes"] = lp_bytes
+                    logprob_entries.append(entry)
+
+                # Compute metadata from logprobs
+                sum_logits = sum(entry["logprob"] for entry in logprob_entries)
+                num_tokens = len(logprob_entries)
+                metadata = {
+                    "sum_logits": sum_logits,
+                    "num_tokens": num_tokens,
+                    "num_tokens_all": num_tokens,
+                }
+
+            outputs.append(LMOutput(text=text, logprobs=logprob_entries, metadata=metadata))
+
+        return outputs
+
+    async def _generate_single_async(
+        self, request: LMRequest, params: SamplingParams
+    ) -> list[LMOutput]:
+        """Generate completions for a single request."""
+        return await retry_with_backoff(
+            lambda: self._generate_single_impl(request, params),
+            max_retries=self.max_retries,
+            retry_delay=self.retry_delay,
+            context=f"generate model={self.model_name}",
+            sdk_module=self._litellm,
+        )
+
+    async def agenerate(
+        self,
+        requests: list[LMRequest],
+        sampling_params: SamplingParams | None = None,
+    ) -> list[list[LMOutput]]:
+        """Async generate completions.
+
+        This is the native async implementation that should be used
+        in async contexts to avoid nested event loops.
+
+        Args:
+            requests: Batch of requests to process.
+            sampling_params: Sampling configuration.
+
+        Returns:
+            List of output lists, one per request.
+        """
+        from olmo_eval.common.progress import ProgressLogger
+
+        logger.info(
+            f"Sending {len(requests)} requests for {self.model_name}"
+            f" with max_concurrency {self.max_concurrency}"
+        )
+
+        params = self._default_sampling_params(sampling_params)
+        semaphore = asyncio.Semaphore(self.max_concurrency)
+        progress = ProgressLogger(total=len(requests), desc="Generating", logger=logger)
+
+        async def process(req: LMRequest) -> list[LMOutput]:
+            async with semaphore:
+                result = await self._generate_single_async(req, params)
+                progress.update(1)
+                return result
+
+        results = await asyncio.gather(*[process(r) for r in requests])
+        progress.close()
+        return list(results)
+
+    def generate(
+        self,
+        requests: list[LMRequest],
+        sampling_params: SamplingParams | None = None,
+    ) -> list[list[LMOutput]]:
+        """Generate completions (sync wrapper).
+
+        For async contexts, prefer using agenerate() directly.
+
+        Args:
+            requests: Batch of requests to process.
+            sampling_params: Sampling configuration.
+
+        Returns:
+            List of output lists, one per request.
+        """
+        return asyncio.run(self.agenerate(requests, sampling_params))
+
+    async def _logprobs_single_impl(self, request: LMRequest) -> list[LMOutput]:
+        """Compute logprobs for a single request."""
+        if request.messages:
+            content = request.messages[0].get("content", "") if request.messages else ""
+        else:
+            content = request.prompt
+
+        response = await self._litellm.acompletion(
+            model=self.model_name,
+            messages=[{"role": "user", "content": content}],
+            max_completion_tokens=50,
+            temperature=0.0,
+            logprobs=True,
+            **self.api_kwargs,
+        )
+
+        # Extract logprobs from response
+        completion_logprobs: list[LogProbEntry] = []
+        if response.choices:
+            choice = response.choices[0]
+            logprobs_data = getattr(choice, "logprobs", None)
+            if logprobs_data and hasattr(logprobs_data, "content") and logprobs_data.content:
+                for lp in logprobs_data.content:
+                    entry: LogProbEntry = {"token": lp.token, "logprob": lp.logprob}
+                    lp_bytes = getattr(lp, "bytes", None)
+                    if lp_bytes is not None:
+                        entry["bytes"] = lp_bytes
+                    completion_logprobs.append(entry)
+
+        # Map to continuations
+        outputs = []
+        for continuation in request.continuations or ():
+            total = (
+                sum(lp["logprob"] for lp in completion_logprobs[:5]) if completion_logprobs else 0.0
+            )
+            outputs.append(
+                LMOutput(
+                    text=continuation,
+                    logprobs=completion_logprobs[:5] if completion_logprobs else None,
+                    metadata={"total_logprob": total},
+                )
+            )
+
+        return outputs
+
+    async def _logprobs_single_async(self, request: LMRequest) -> list[LMOutput]:
+        """Compute logprobs for a single request."""
+        return await retry_with_backoff(
+            lambda: self._logprobs_single_impl(request),
+            max_retries=self.max_retries,
+            retry_delay=self.retry_delay,
+            context=f"logprobs model={self.model_name}",
+            sdk_module=self._litellm,
+        )
+
+    async def alogprobs(
+        self,
+        requests: list[LMRequest],
+    ) -> list[list[LMOutput]]:
+        """Async compute logprobs for continuations.
+
+        Note: Most API providers don't support true continuation logprobs.
+        This implementation provides an approximation by generating a response
+        and returning those logprobs.
+
+        Args:
+            requests: Batch of requests with continuations to score.
+
+        Returns:
+            List of output lists with logprobs populated.
+        """
+        from olmo_eval.common.progress import ProgressLogger
+
+        logger.info(
+            f"Sending {len(requests)} logprob requests for {self.model_name}"
+            f" with max_concurrency {self.max_concurrency}"
+        )
+
+        semaphore = asyncio.Semaphore(self.max_concurrency)
+        progress = ProgressLogger(total=len(requests), desc="Logprobs", logger=logger)
+
+        async def process(req: LMRequest) -> list[LMOutput]:
+            async with semaphore:
+                result = await self._logprobs_single_async(req)
+                progress.update(1)
+                return result
+
+        results = await asyncio.gather(*[process(r) for r in requests])
+        progress.close()
+        return list(results)
+
+    def logprobs(
+        self,
+        requests: list[LMRequest],
+    ) -> list[list[LMOutput]]:
+        """Compute logprobs for continuations (sync wrapper).
+
+        Note: Most API providers don't support true continuation logprobs.
+        This implementation provides an approximation by generating a response
+        and returning those logprobs.
+
+        For async contexts, prefer using alogprobs() directly.
+
+        Args:
+            requests: Batch of requests with continuations to score.
+
+        Returns:
+            List of output lists with logprobs populated.
+        """
+        return asyncio.run(self.alogprobs(requests))

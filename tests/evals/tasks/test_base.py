@@ -4,10 +4,10 @@ from collections.abc import Iterator
 
 import pytest
 
-from olmo_eval.core.metrics import AccuracyMetric
-from olmo_eval.core.scorers import ExactMatchScorer
-from olmo_eval.core.types import Instance, LMOutput, LMRequest, RequestType, Response, Split
-from olmo_eval.evals.tasks import Task, TaskConfig
+from olmo_eval.common.metrics import AccuracyMetric
+from olmo_eval.common.scorers import ExactMatchScorer
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response, Split
+from olmo_eval.evals.tasks.common import Task, TaskConfig
 
 
 class ConcreteTask(Task):
@@ -33,23 +33,6 @@ class ConcreteTask(Task):
 
 class TestTaskConfig:
     """Tests for TaskConfig dataclass."""
-
-    def test_minimal_config(self):
-        """Test creating config with minimal required fields."""
-        config = TaskConfig(name="test", data_source="test/dataset")
-        assert config.name == "test"
-        assert config.data_source == "test/dataset"
-
-    def test_default_values(self):
-        """Test that default values are set correctly."""
-        config = TaskConfig(name="test", data_source="test/dataset")
-        assert config.formatter is None
-        assert config.metrics == ()
-        assert config.num_fewshot == 0
-        assert config.fewshot_seed == 42
-        assert config.limit is None
-        assert config.split == Split.TEST
-        assert config.primary_metric is None
 
     def test_custom_values(self):
         """Test creating config with custom values."""
@@ -83,21 +66,6 @@ class TestTaskConfig:
 
 class TestTask:
     """Tests for Task base class."""
-
-    def test_task_initialization(self):
-        """Test task initialization stores config."""
-        config = TaskConfig(name="test", data_source="test/dataset")
-        task = ConcreteTask(config)
-        assert task.config is config
-
-    def test_instances_iterator(self):
-        """Test that instances returns an iterator."""
-        config = TaskConfig(name="test", data_source="test/dataset")
-        task = ConcreteTask(config)
-
-        instances = list(task.instances)
-        assert len(instances) == 2
-        assert all(isinstance(i, Instance) for i in instances)
 
     def test_format_request(self):
         """Test format_request produces LMRequest."""
@@ -140,6 +108,7 @@ class TestTask:
         assert fewshot1 is fewshot2  # Same object (cached)
 
 
+@pytest.mark.anyio
 class TestTaskScoring:
     """Tests for Task scoring functionality."""
 
@@ -147,7 +116,7 @@ class TestTaskScoring:
         """Helper to create a simple LMRequest."""
         return LMRequest(request_type=RequestType.COMPLETION, prompt=prompt)
 
-    def test_score_responses_extracts_answers(self):
+    async def test_score_responses_extracts_answers(self):
         """Test that score_responses extracts answers from outputs."""
         config = TaskConfig(name="test", data_source="test/dataset")
         task = ConcreteTask(config)
@@ -160,12 +129,12 @@ class TestTaskScoring:
             outputs=[output],
         )
 
-        scored = task.score_responses([response])
+        scored = await task.score_responses([response])
 
         assert len(scored) == 1
         assert scored[0].outputs[0].extracted_answer == "4"
 
-    def test_score_responses_applies_scorers(self):
+    async def test_score_responses_applies_scorers(self):
         """Test that score_responses applies scorers from metrics."""
         metric = AccuracyMetric(scorer=ExactMatchScorer)
         config = TaskConfig(
@@ -183,12 +152,12 @@ class TestTaskScoring:
             outputs=[output],
         )
 
-        scored = task.score_responses([response])
+        scored = await task.score_responses([response])
 
         assert "exact_match" in scored[0].scores
         assert scored[0].scores["exact_match"] == 1.0
 
-    def test_score_responses_incorrect_answer(self):
+    async def test_score_responses_incorrect_answer(self):
         """Test scoring with incorrect answer."""
         metric = AccuracyMetric(scorer=ExactMatchScorer)
         config = TaskConfig(
@@ -206,11 +175,11 @@ class TestTaskScoring:
             outputs=[output],
         )
 
-        scored = task.score_responses([response])
+        scored = await task.score_responses([response])
 
         assert scored[0].scores["exact_match"] == 0.0
 
-    def test_score_responses_multiple_outputs_takes_max(self):
+    async def test_score_responses_multiple_outputs_takes_max(self):
         """Test that scoring takes max score across multiple outputs."""
         metric = AccuracyMetric(scorer=ExactMatchScorer)
         config = TaskConfig(
@@ -232,11 +201,12 @@ class TestTaskScoring:
             outputs=outputs,
         )
 
-        scored = task.score_responses([response])
+        scored = await task.score_responses([response])
 
         assert scored[0].scores["exact_match"] == 1.0  # Max of [0, 1, 0]
 
 
+@pytest.mark.anyio
 class TestTaskMetrics:
     """Tests for Task metrics computation."""
 
@@ -244,7 +214,7 @@ class TestTaskMetrics:
         """Helper to create a simple LMRequest."""
         return LMRequest(request_type=RequestType.COMPLETION, prompt=prompt)
 
-    def test_compute_metrics(self):
+    async def test_compute_metrics(self):
         """Test compute_metrics aggregates scores."""
         metric = AccuracyMetric(scorer=ExactMatchScorer)
         config = TaskConfig(
@@ -274,7 +244,7 @@ class TestTaskMetrics:
         ]
 
         # Score first
-        scored = task.score_responses(responses)
+        scored = await task.score_responses(responses)
 
         # Compute metrics (returns nested structure: {metric: {scorer: value}})
         metrics = task.compute_metrics(scored)

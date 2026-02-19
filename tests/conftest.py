@@ -2,6 +2,15 @@
 
 import pytest
 
+# Register anyio plugin for async tests
+pytest_plugins = ["anyio"]
+
+
+@pytest.fixture
+def anyio_backend():
+    """Use only asyncio backend for async tests (trio not installed)."""
+    return "asyncio"
+
 
 def pytest_addoption(parser):
     """Add custom command line options."""

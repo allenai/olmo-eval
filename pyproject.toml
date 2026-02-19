@@ -3,7 +3,7 @@ name = "olmo-eval-internal"
 version = "0.1.0"
 description = "Evaluation toolkit for OLMo models"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [
     { name = "Allen Institute for AI" },
@@ -41,7 +41,7 @@ hf = [
 ]
 vllm = [
     "vllm[runai]==0.13.0",  # runai extras enable S3 model loading
-    "opencv-python-headless==4.12.0.88",  # Required to avoid libxcb import error
+    "opencv-python-headless==4.13.0.92",  # Required to avoid libxcb import error
     "torch-c-dlpack-ext",  # Required for TVM tensor allocation in vLLM
 ]
 litellm = [
@@ -50,6 +50,12 @@ litellm = [
 agents = [
     "openai-agents~=0.7.0",
     "httpx~=0.28.1",
+]
+openhands = [
+    "openhands-ai~=1.4.0",
+]
+sandbox = [
+    "swe-rex[modal] @ git+https://github.com/jdahm/SWE-ReX.git@johannd/ai2",
 ]
 beaker = [
     "beaker-py>=2.5.4,<3",
@@ -76,6 +82,17 @@ olmo-eval = "olmo_eval.cli:main"
 
 [tool.uv]
 package = true
+# These extras have incompatible transitive dependencies and cannot be installed together
+conflicts = [
+    [
+        { extra = "agents" },
+        { extra = "openhands" },
+    ],
+    [
+        { extra = "vllm" },
+        { extra = "openhands" },
+    ],
+]
 
 [dependency-groups]
 dev = [
@@ -94,6 +111,24 @@ include = ["src/olmo_eval/inference/**"]
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"
 
+# ty overrides for sandbox module (uses optional swe-rex dependency)
+[[tool.ty.overrides]]
+include = ["src/olmo_eval/harness/sandbox/**"]
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
+# ty overrides for backends module (uses optional openhands/agents dependencies)
+[[tool.ty.overrides]]
+include = ["src/olmo_eval/harness/backends/**"]
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
+# ty overrides for adapters module (uses optional openhands/swe-rex dependencies)
+[[tool.ty.overrides]]
+include = ["src/olmo_eval/harness/adapters/**"]
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"
@@ -108,6 +143,12 @@ select = [
     "B",
     "SIM",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# Long strings in test fixtures
+"tests/**/fixtures.py" = ["E501"]
+# Long URLs in model configs
+"src/olmo_eval/common/constants/models.py" = ["E501"]
 
 [tool.ruff.format]
 docstring-code-format = true

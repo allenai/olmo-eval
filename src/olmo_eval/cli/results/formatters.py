@@ -70,7 +70,7 @@ def experiments_to_dict(
             instance_groups[key].append(
                 InstanceOutput(
                     native_id=inst.get("native_id", ""),
-                    instance_metrics=inst.get("instance_metrics", {}),
+                    metrics=inst.get("instance_metrics", {}),
                 )
             )
 
@@ -212,7 +212,7 @@ def task_comparison_to_dict(
             instance_groups[key].append(
                 InstanceOutput(
                     native_id=inst.get("native_id", ""),
-                    instance_metrics=inst.get("instance_metrics", {}),
+                    metrics=inst.get("instance_metrics", {}),
                 )
             )
 
