@@ -28,6 +28,7 @@ from olmo_eval.common.types import (
     RequestType,
     Response,
     SamplingParams,
+    Split,
 )
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -522,6 +523,7 @@ SQA_METRIC_LABELS = [
 class AstaBenchSQA(Task):
     """AstaBench ScholArQA-CS2 scientific question answering task."""
 
+    split = Split.TRAIN  # HF JSON files load as a single "train" split
     data_source = DataSource(
         path=ASTA_BENCH_REPO,
         data_files="tasks/sqa/rubrics_v1_recomputed.json",
