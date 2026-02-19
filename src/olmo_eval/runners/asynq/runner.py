@@ -13,7 +13,7 @@ from typing import Any
 from olmo_eval.cli.utils import console
 from olmo_eval.common.configs import expand_tasks
 from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR
-from olmo_eval.common.logging import get_logger, get_worker_id
+from olmo_eval.common.logging import configure_worker_logging, get_logger, get_worker_id
 from olmo_eval.harness.config import HarnessConfig, ProviderConfig
 from olmo_eval.runners.asynq.monitoring import (
     terminate_workers,
@@ -26,7 +26,7 @@ from olmo_eval.runners.asynq.preparation import (
     prepare_task_items,
 )
 from olmo_eval.runners.asynq.results import aggregate_results, process_results
-from olmo_eval.runners.asynq.types import DEFAULT_SCORING_CONCURRENCY, QueueItem, TaskTracker
+from olmo_eval.runners.asynq.types import QueueItem, TaskTracker
 from olmo_eval.runners.asynq.workers import inference_worker, scoring_worker
 from olmo_eval.runners.common.base import BaseEvalRunner
 from olmo_eval.runners.common.mixins import RunnerResultsMixin
@@ -35,6 +35,7 @@ from olmo_eval.runners.processing.utils import compute_task_hash, generate_exper
 from olmo_eval.storage import StorageBackend
 
 logger = get_logger(__name__)
+runner_logger = configure_worker_logging("runner")
 
 
 @dataclass
@@ -141,7 +142,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         # Prepare tasks
         expanded_tasks, trackers, items = self._prepare_tasks()
         total_instances = len(items)
-        logger.info(f"Total instances: {total_instances}")
+        runner_logger.info(f"Total instances: {total_instances}")
 
         # Setup multiprocessing
         ctx = mp.get_context("spawn")
@@ -179,15 +180,30 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             scorer_ready = ctx.Event()
 
             workers = self._start_workers(
-                ctx, num_workers, total_gpus, item_queue, result_queue, init_times
+                ctx, num_workers, total_gpus, item_queue, result_queue, init_times, total_instances
             )
 
-            scoring_concurrency = (
-                self.harness_config.scoring_concurrency or DEFAULT_SCORING_CONCURRENCY
-            )
+            # Determine scoring concurrency
+            if self.harness_config.scoring_concurrency:
+                scoring_concurrency = self.harness_config.scoring_concurrency
+            elif sandbox_configs_list is not None:
+                # Match sandbox pool size (sum of instances across all configs)
+                sandbox_pool_size = sum(cfg.get("instances", 1) for cfg in sandbox_configs_list)
+                scoring_concurrency = max(1, sandbox_pool_size)
+            else:
+                # CPU-bound scoring - use available cores
+                import os
+
+                cpu_count = os.cpu_count() or 4
+                scoring_concurrency = max(1, int(cpu_count * 0.75))
+
+            runner_logger.info(f"Scoring concurrency: {scoring_concurrency}")
+
+            scorer_id = "scorer-0"  # TODO: support multiple scorers
             scorer_proc = ctx.Process(
                 target=scoring_worker,
                 args=(
+                    scorer_id,
                     scoring_queue,
                     scored_queue,
                     total_instances,
@@ -199,15 +215,15 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             scorer_proc.start()
 
             # Wait for workers to initialize
-            logger.info("Waiting for inference workers to initialize...")
+            runner_logger.info("Waiting for inference workers to initialize...")
             wait_for_workers_ready(workers, result_queue, startup_timeout=60.0)
-            logger.info("Inference workers ready")
+            runner_logger.info("Inference workers ready")
 
             # Now wait for scoring worker (runs in parallel with inference worker init)
             if sandbox_configs_list is not None:
-                logger.info("Waiting for scoring worker to initialize...")
+                runner_logger.info("Waiting for scoring worker to initialize...")
                 wait_for_scorer_ready(scorer_proc, scorer_ready, scored_queue, timeout=180.0)
-                logger.info("Scoring worker ready")
+                runner_logger.info("Scoring worker ready")
 
             # Wait for workers to report their init times (also checks for crashes)
             provider_init_seconds = wait_for_init_times(
@@ -401,6 +417,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         item_queue: mp.Queue,
         result_queue: mp.Queue,
         init_times: Any,
+        total_instances: int,
     ) -> list[mp.process.BaseProcess]:
         """Start worker processes."""
         workers: list[mp.process.BaseProcess] = []
@@ -420,6 +437,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                     item_queue,
                     result_queue,
                     harness_config_dict,
+                    total_instances,
                     init_times,
                     self.output_dir,
                 ),

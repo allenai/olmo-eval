@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import multiprocessing as mp
 import os
 import queue
 import time
 from multiprocessing.synchronize import Event as MPEvent
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from olmo_eval.harness import Harness
 
 from olmo_eval.common.logging import get_logger
 from olmo_eval.runners.asynq.types import (
+    DEFAULT_CHUNK_SIZE,
+    DEFAULT_CHUNK_TIMEOUT,
     DEFAULT_SCORING_CONCURRENCY,
     SCORER_FATAL,
     WORKER_FATAL,
@@ -23,19 +29,86 @@ from olmo_eval.runners.asynq.types import (
 logger = get_logger(__name__)
 
 
+async def process_items_streaming(
+    item_queue: mp.Queue[QueueItem | None],
+    harness: Harness,
+    result_queue: mp.Queue[ResultItem],
+    max_concurrency: int | None,
+    worker_logger: logging.Logger,
+    total_instances: int,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+    chunk_timeout: float = DEFAULT_CHUNK_TIMEOUT,
+) -> None:
+    """Process items in chunks for balanced latency and throughput.
+
+    Collects items until chunk_size is reached or chunk_timeout expires,
+    then processes the chunk while continuing to accept new items.
+    This allows processing to start before all items are enqueued.
+
+    Args:
+        item_queue: Queue of QueueItems (None signals shutdown).
+        harness: Harness instance for execution.
+        result_queue: Queue to put ResultItems.
+        max_concurrency: Maximum concurrent requests.
+        worker_logger: Logger with worker identification.
+        total_instances: Total number of instances to process.
+        chunk_size: Maximum items per chunk (default 256, matches vLLM max_num_seqs).
+        chunk_timeout: Seconds to wait for chunk to fill before processing partial.
+    """
+    import math
+    import time
+
+    from olmo_eval.runners.asynq.processing import process_items
+
+    total_batches = math.ceil(total_instances / chunk_size)
+    batch_num = 0
+
+    while True:
+        items: list[QueueItem] = []
+        deadline = time.time() + chunk_timeout
+
+        # Collect items until chunk is full or timeout
+        while len(items) < chunk_size:
+            remaining = max(0.01, deadline - time.time())
+            try:
+                item = item_queue.get(timeout=remaining)
+                if item is None:
+                    # Poison pill - process remaining items and exit
+                    if items:
+                        batch_num += 1
+                        worker_logger.info(
+                            f"Processing batch {batch_num}/{total_batches} ({len(items)} items)"
+                        )
+                        await process_items(
+                            items, harness, result_queue, max_concurrency, worker_logger
+                        )
+                    return
+                items.append(item)
+            except queue.Empty:
+                # Timeout - process what we have
+                break
+
+        if items:
+            batch_num += 1
+            worker_logger.info(f"Processing batch {batch_num}/{total_batches} ({len(items)} items)")
+            await process_items(items, harness, result_queue, max_concurrency, worker_logger)
+
+
 def inference_worker(
     worker_id: str,
     gpu_ids: list[int],
     item_queue: mp.Queue,
     result_queue: mp.Queue,
     harness_config_dict: dict[str, Any],
+    total_instances: int,
     init_times: dict[str, float] | None = None,
     output_dir: str | None = None,
 ) -> None:
     """Worker process that initializes a harness and processes items.
 
-    Collects all items from the queue, then processes them with batching
-    for COMPLETION/LOGLIKELIHOOD and async concurrency for CHAT requests.
+    Processes items in streaming chunks for balanced latency and throughput.
+    COMPLETION/LOGLIKELIHOOD requests are batched, CHAT requests use async
+    concurrency.
 
     Args:
         worker_id: Unique worker identifier.
@@ -43,6 +116,7 @@ def inference_worker(
         item_queue: Queue of QueueItems (None signals shutdown).
         result_queue: Queue to put ResultItems.
         harness_config_dict: Serialized HarnessConfig.
+        total_instances: Total number of instances to process.
         init_times: Optional shared dict for tracking initialization times.
         output_dir: Output directory for persisting logs (e.g., vLLM server logs).
     """
@@ -133,17 +207,17 @@ def inference_worker(
             if harness_config.backend:
                 asyncio.run(harness.backend.initialize(harness_config))
 
-            items: list[QueueItem] = []
-            while True:
-                item = item_queue.get()
-                if item is None:
-                    break
-                items.append(item)
-
-            if items:
-                from olmo_eval.runners.asynq.processing import process_items
-
-                asyncio.run(process_items(items, harness, result_queue, max_concurrency))
+            worker_logger.info("Inference worker ready")
+            asyncio.run(
+                process_items_streaming(
+                    item_queue,
+                    harness,
+                    result_queue,
+                    max_concurrency,
+                    worker_logger,
+                    total_instances,
+                )
+            )
 
             worker_logger.info("Processing complete")
         finally:
@@ -174,6 +248,7 @@ def inference_worker(
 
 
 def scoring_worker(
+    worker_id: str,
     scoring_queue: mp.Queue,
     scored_queue: mp.Queue,
     total_instances: int,
@@ -190,6 +265,7 @@ def scoring_worker(
     similar to how inference_worker manages provider lifecycle.
 
     Args:
+        worker_id: Unique worker identifier (e.g., "scorer-0").
         scoring_queue: Queue of ScoringItems (None signals shutdown).
         scored_queue: Queue to put ScoredResponses.
         total_instances: Total number of instances to score (for progress).
@@ -199,9 +275,10 @@ def scoring_worker(
     """
     import sys
 
-    from olmo_eval.common.logging import configure_logging
+    from olmo_eval.common.logging import configure_logging, configure_worker_logging
 
     configure_logging()
+    worker_logger = configure_worker_logging(worker_id)
 
     from olmo_eval.common.execution import ScoringContext
     from olmo_eval.common.progress import ProgressLogger
@@ -224,7 +301,7 @@ def scoring_worker(
                     scored=scored,
                 )
             except Exception as e:
-                logger.warning(f"Failed to score {item.spec}[{item.instance_idx}]: {e}")
+                worker_logger.warning(f"Failed to score {item.spec}[{item.instance_idx}]: {e}")
                 return ScoredResponse(
                     spec=item.spec,
                     instance_idx=item.instance_idx,
@@ -263,7 +340,7 @@ def scoring_worker(
                             progress = ProgressLogger(
                                 total=total_instances,
                                 desc="Scored",
-                                logger=logger,
+                                logger=worker_logger,
                                 color="blue",
                             )
                         await process_batch(batch, scoring_context, progress)
@@ -277,7 +354,7 @@ def scoring_worker(
                             progress = ProgressLogger(
                                 total=total_instances,
                                 desc="Scored",
-                                logger=logger,
+                                logger=worker_logger,
                                 color="blue",
                             )
                         await process_batch(batch, scoring_context, progress)
@@ -285,8 +362,9 @@ def scoring_worker(
 
                 # Create progress logger on first item
                 if progress is None:
+                    worker_logger.info("Starting scoring")
                     progress = ProgressLogger(
-                        total=total_instances, desc="Scored", logger=logger, color="blue"
+                        total=total_instances, desc="Scored", logger=worker_logger, color="blue"
                     )
 
                 batch.append(item)
@@ -305,14 +383,16 @@ def scoring_worker(
             from olmo_eval.harness.sandbox import SandboxConfig, SandboxManager
 
             sandbox_configs = [SandboxConfig.from_dict(d) for d in sandbox_configs_list]
-            logger.info(f"Initializing sandbox manager with {len(sandbox_configs)} config(s)...")
+            worker_logger.info(
+                f"Initializing sandbox manager with {len(sandbox_configs)} config(s)..."
+            )
             sandbox_manager = SandboxManager(sandbox_configs, owner="scorer")
 
             # Start sandbox synchronously using asyncio
             try:
                 asyncio.run(sandbox_manager.start())
             except Exception as e:
-                logger.error(f"Failed to start sandbox: {e}")
+                worker_logger.error(f"Failed to start sandbox: {e}")
                 scored_queue.put(
                     ScoredResponse(
                         spec=SCORER_FATAL,
@@ -326,6 +406,7 @@ def scoring_worker(
             scoring_context = ScoringContext(execution_env=sandbox_manager)
 
         # Signal that worker is ready
+        worker_logger.info("Scorer ready")
         if ready_event is not None:
             ready_event.set()
 
@@ -333,7 +414,7 @@ def scoring_worker(
         asyncio.run(run_scoring_loop())
 
     except Exception as e:
-        logger.error(f"Scoring worker failed: {e}")
+        worker_logger.error(f"Scoring worker failed: {e}")
         # Signal fatal error via the scored queue
         scored_queue.put(
             ScoredResponse(
@@ -350,10 +431,11 @@ def scoring_worker(
             try:
                 asyncio.run(sandbox_manager.stop())
             except Exception as e:
-                logger.warning(f"Failed to stop sandbox: {e}")
+                worker_logger.warning(f"Failed to stop sandbox: {e}")
 
 
 __all__ = [
     "inference_worker",
+    "process_items_streaming",
     "scoring_worker",
 ]

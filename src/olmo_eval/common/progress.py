@@ -75,7 +75,8 @@ class ProgressLogger:
         self.count += n
         now = time.time()
 
-        if now - self.last_log_time >= self.log_interval:
+        # Log at intervals, but skip if at 100% since close() will log final summary
+        if now - self.last_log_time >= self.log_interval and self.count < self.total:
             self._log_progress(now)
             self.last_log_time = now
 
