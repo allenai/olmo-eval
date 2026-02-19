@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import multiprocessing as mp
 from typing import TYPE_CHECKING
 
@@ -209,6 +210,7 @@ async def process_items(
     harness: Harness,
     result_queue: mp.Queue,
     max_concurrency: int | None = None,
+    worker_logger: logging.Logger | None = None,
 ) -> None:
     """Process queue items, batching where possible.
 
@@ -221,8 +223,11 @@ async def process_items(
         harness: Harness instance for execution.
         result_queue: Queue to put results.
         max_concurrency: Maximum concurrent CHAT requests.
+        worker_logger: Logger with worker identification.
     """
     from olmo_eval.common.types import RequestType, SamplingParams
+
+    log = worker_logger or logger
 
     chat_items: list[QueueItem] = []
     batchable_items: list[QueueItem] = []
@@ -244,7 +249,7 @@ async def process_items(
             batches[key].append(item)
 
         progress = ProgressLogger(
-            total=len(batchable_items), desc="Processed", logger=logger, color="green"
+            total=len(batchable_items), desc="Processed", logger=log, color="green"
         )
         for batch in batches.values():
             await process_batch(batch, harness, result_queue)
@@ -256,7 +261,7 @@ async def process_items(
 
         semaphore = asyncio.Semaphore(max_concurrency or len(chat_items))
         progress = ProgressLogger(
-            total=len(chat_items), desc="Processed", logger=logger, color="green"
+            total=len(chat_items), desc="Processed", logger=log, color="green"
         )
 
         async def process(item: QueueItem) -> None:

@@ -185,9 +185,11 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             scoring_concurrency = (
                 self.harness_config.scoring_concurrency or DEFAULT_SCORING_CONCURRENCY
             )
+            scorer_id = "scorer-0"  # TODO: support multiple scorers
             scorer_proc = ctx.Process(
                 target=scoring_worker,
                 args=(
+                    scorer_id,
                     scoring_queue,
                     scored_queue,
                     total_instances,
