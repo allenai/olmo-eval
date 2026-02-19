@@ -169,7 +169,7 @@ _MMLU_FORMATTER = MultipleChoiceLogprobFormatter(
     template="{question}",
     label_prefix=" ",
     include_choices_in_prompt=False,
-    answer_suffix="\n\nAnswer: ",
+    answer_suffix="\n\nAnswer:",
 )
 
 # Register one task per subject (mmlu_abstract_algebra, mmlu_anatomy, ...)

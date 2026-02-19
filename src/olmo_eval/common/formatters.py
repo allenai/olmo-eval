@@ -161,29 +161,40 @@ class MultipleChoiceLogprobFormatter(Formatter):
     template: str = "{question}"
     label_prefix: str = " "  # Space before letter for standard tokenization
     include_choices_in_prompt: bool = True
-    answer_suffix: str = ""  # e.g. "\n\nAnswer: " so prompt ends before the answer letter
+    answer_suffix: str = ""  # e.g. "\n\nAnswer:" so prompt ends before the answer letter
+    fewshot_separator: str = "\n\n"
 
     @property
     def request_type(self) -> RequestType:
         return RequestType.LOGLIKELIHOOD
 
-    def format(
-        self,
-        instance: Instance,
-        fewshot: list[Instance] | None = None,
-    ) -> LMRequest:
+    def _format_single(self, instance: Instance, include_answer: bool = False) -> str:
+        """Format a single instance into a prompt string."""
         prompt = self.template.format(question=instance.question)
-        continuations: tuple[str, ...] = ()
         if instance.choices:
             if self.include_choices_in_prompt:
                 choices_text = "\n".join(
                     f"{chr(ord('A') + i)}. {c}" for i, c in enumerate(instance.choices)
                 )
                 prompt = f"{prompt}\n\n{choices_text}"
-            if self.answer_suffix:
-                prompt = prompt + self.answer_suffix
-            # Continuations are the answer letters (A, B, C, D) with optional prefix for
-            # tokenization
+            prompt = prompt + self.answer_suffix
+            if include_answer and instance.gold_answer:
+                prompt = prompt + self.label_prefix + instance.gold_answer
+        return prompt
+
+    def format(
+        self,
+        instance: Instance,
+        fewshot: list[Instance] | None = None,
+    ) -> LMRequest:
+        parts: list[str] = []
+        for ex in fewshot or []:
+            parts.append(self._format_single(ex, include_answer=True))
+        parts.append(self._format_single(instance, include_answer=False))
+        prompt = self.fewshot_separator.join(parts)
+
+        continuations: tuple[str, ...] = ()
+        if instance.choices:
             letters = tuple(chr(ord("A") + i) for i in range(len(instance.choices)))
             continuations = tuple(self.label_prefix + letter for letter in letters)
         return LMRequest(
