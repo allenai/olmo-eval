@@ -130,6 +130,10 @@ class VLLMProvider(InferenceProvider):
         try:
             from vllm import LLM
         except ImportError as e:
+            import traceback
+
+            logger.error(f"Failed to import vllm: {e}")
+            logger.error(traceback.format_exc())
             raise ImportError("vllm is required for VLLMProvider") from e
 
         super().__init__(model_name)

@@ -160,7 +160,7 @@ class TestMultipleChoiceFormatter:
 
         request = formatter.format(instance)
 
-        assert request.request_type == RequestType.COMPLETION
+        assert request.request_type == RequestType.LOGLIKELIHOOD
         # Default behavior includes labeled choices in prompt
         assert "What color is the sky?" in request.prompt
         assert "A. Red" in request.prompt
@@ -179,7 +179,7 @@ class TestMultipleChoiceFormatter:
 
         request = formatter.format(instance)
 
-        assert request.request_type == RequestType.COMPLETION
+        assert request.request_type == RequestType.LOGLIKELIHOOD
         assert request.prompt == "What color is the sky?"
         assert request.continuations == ("Red", "Blue", "Green")
 

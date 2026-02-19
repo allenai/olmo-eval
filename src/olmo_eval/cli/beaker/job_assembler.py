@@ -352,22 +352,37 @@ class JobConfigAssembler:
         # Determine backend and sandbox requirements from harness preset
         backend_name: str | None = None
         sandbox_enabled = False
+        harness_provider_package: str | None = None
+        harness_provider_deps: list[str] = []
         if self.config.harness:
             from olmo_eval.harness import get_harness_preset
 
             preset = get_harness_preset(self.config.harness)
+            if self.config.harness_overrides:
+                from olmo_eval.cli.beaker.launch import _apply_harness_overrides
+
+                preset = _apply_harness_overrides(preset, self.config.harness_overrides)
             backend_name = preset.backend
             sandbox_enabled = bool(preset.sandboxes)
+            harness_provider_package = preset.provider.package
+            harness_provider_deps = list(preset.provider.dependencies)
 
         # Determine provider kind and whether to use separate venv for vLLM
         provider_kind = get_provider_kind(exp.model_spec)
         vllm_separate_venv = provider_kind == "vllm_server"
 
+        # If provider.package is set, it overrides the default provider extra (e.g., vllm)
+        # In that case, skip provider extras and install the package separately
+        if harness_provider_package:
+            provider_extras: list[str] = []
+        else:
+            provider_extras = get_provider_extras(exp.model_spec)
+
         install_extras = collect_install_extras(
             store=self.config.store,
             sandbox=sandbox_enabled,
             backend_name=backend_name,
-            provider_extras=get_provider_extras(exp.model_spec),
+            provider_extras=provider_extras,
         )
 
         # Collect env vars that have explicit overrides
@@ -435,7 +450,17 @@ class JobConfigAssembler:
 
         # Collect task dependencies and provider dependencies separately
         task_packages = self._extract_task_dependencies(exp.tasks, exp.task_overrides) or None
-        provider_packages = get_provider_dependencies(exp.model_spec) or None
+
+        # Build provider packages list:
+        # 1. provider.package (overrides default extra like vllm)
+        # 2. model's provider dependencies
+        # 3. provider.dependencies (additional deps)
+        provider_packages: list[str] = []
+        if harness_provider_package:
+            provider_packages.append(harness_provider_package)
+        provider_packages.extend(get_provider_dependencies(exp.model_spec))
+        provider_packages.extend(harness_provider_deps)
+        provider_packages = provider_packages or None  # type: ignore[assignment]
 
         return BeakerJobConfig(
             name=exp.name,

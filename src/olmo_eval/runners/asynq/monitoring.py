@@ -143,6 +143,8 @@ def wait_for_workers_ready(
 def wait_for_init_times(
     init_times: Any,
     num_workers: int,
+    workers: list[mp.process.BaseProcess] | None = None,
+    result_queue: mp.Queue | None = None,
     timeout: float = 300.0,
     check_interval: float = 1.0,
 ) -> dict[str, float]:
@@ -151,17 +153,27 @@ def wait_for_init_times(
     Args:
         init_times: Shared manager dict that workers write their init times to.
         num_workers: Expected number of workers.
+        workers: Optional list of worker processes to check for crashes.
+        result_queue: Optional queue to check for fatal error markers.
         timeout: Maximum time to wait for all init times.
         check_interval: How often to check for new entries.
 
     Returns:
         Dictionary mapping worker_id to init time in seconds.
+
+    Raises:
+        RuntimeError: If a worker crashes during initialization.
     """
     start_time = time.time()
 
     while time.time() - start_time < timeout:
         if len(init_times) >= num_workers:
             return dict(init_times)
+
+        # Check for worker crashes if workers and queue are provided
+        if workers is not None and result_queue is not None:
+            check_workers_alive(workers, result_queue)
+
         time.sleep(check_interval)
 
     # Return what we have even if incomplete

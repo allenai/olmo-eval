@@ -209,8 +209,10 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 wait_for_scorer_ready(scorer_proc, scorer_ready, scored_queue, timeout=180.0)
                 logger.info("Scoring worker ready")
 
-            # Wait for workers to report their init times
-            provider_init_seconds = wait_for_init_times(init_times, num_workers)
+            # Wait for workers to report their init times (also checks for crashes)
+            provider_init_seconds = wait_for_init_times(
+                init_times, num_workers, workers=workers, result_queue=result_queue
+            )
 
             # Reset tracker start times now that workers are ready
             # This ensures task duration only measures actual processing time

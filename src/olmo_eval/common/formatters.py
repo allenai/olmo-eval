@@ -95,6 +95,7 @@ class CompletionFormatter(Formatter):
     template: str = "{question}"
     fewshot_separator: str = "\n\n"
     answer_prefix: str = ""
+    fewshot_answer_key: str | None = None
 
     @property
     def request_type(self) -> RequestType:
@@ -108,8 +109,13 @@ class CompletionFormatter(Formatter):
         parts: list[str] = []
         for ex in fewshot or []:
             example = self.template.format(question=ex.question)
-            if ex.gold_answer:
-                example += self.answer_prefix + ex.gold_answer
+            # Use fewshot_answer_key from metadata if specified, otherwise use gold_answer
+            if self.fewshot_answer_key and self.fewshot_answer_key in ex.metadata:
+                answer = ex.metadata[self.fewshot_answer_key]
+            else:
+                answer = ex.gold_answer
+            if answer:
+                example += self.answer_prefix + str(answer)
             parts.append(example)
         parts.append(self.template.format(question=instance.question) + self.answer_prefix)
         prompt = self.fewshot_separator.join(parts)
@@ -126,7 +132,7 @@ class MultipleChoiceFormatter(Formatter):
 
     @property
     def request_type(self) -> RequestType:
-        return RequestType.COMPLETION
+        return RequestType.LOGLIKELIHOOD
 
     def format(
         self,

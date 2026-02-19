@@ -225,3 +225,131 @@ class LogprobScorer(Scorer):
             return float("-inf")
 
         return sum(logprobs)
+
+
+@dataclass(frozen=True, slots=True)
+class ExactMatchFlexScorer(Scorer):
+    """Flexible exact match that checks ANY extracted answer against ANY gold answer.
+
+    This scorer is useful for math tasks where multiple equivalent representations
+    of the answer might exist. It checks if any of the extracted answers matches
+    any of the gold answers.
+
+    Expects:
+        - instance.metadata["all_gold_answers"]: list of acceptable gold answers
+        - output.metadata["all_extracted_answers"]: list of extracted answers from model output
+
+    Falls back to standard exact match if these metadata fields are not present.
+    """
+
+    name: str = "exact_match_flex"
+    case_sensitive: bool = False
+    remove_whitespace: bool = True
+
+    def _normalize(self, text: str) -> str:
+        """Normalize text for comparison."""
+        if not self.case_sensitive:
+            text = text.lower()
+        if self.remove_whitespace:
+            text = "".join(text.split())
+        return text
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        # Get all gold answers
+        all_gold = instance.metadata.get("all_gold_answers", [])
+        if not all_gold and instance.gold_answer is not None:
+            all_gold = [instance.gold_answer]
+
+        # Get all extracted answers
+        all_extracted = (output.metadata or {}).get("all_extracted_answers", [])
+        if not all_extracted and output.extracted_answer is not None:
+            all_extracted = [output.extracted_answer]
+
+        if not all_gold or not all_extracted:
+            return 0.0
+
+        # Check if any extracted answer matches any gold answer
+        normalized_gold = {self._normalize(str(g)) for g in all_gold}
+        for extracted in all_extracted:
+            if self._normalize(str(extracted)) in normalized_gold:
+                return 1.0
+
+        return 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class MinervaMathScorer(Scorer):
+    """Flexible math equivalence: any extracted answer vs any gold, using sympy + Hendrycks.
+
+    Matches oe-eval Minerva MATH behavior: try sympy (minerva_is_equiv) then
+    Hendrycks string normalization. Expects instance.metadata["all_gold_answers"]
+    and output.metadata["all_extracted_answers"]; falls back to single gold/extracted.
+    """
+
+    name: str = "minerva_math_flex"
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        from olmo_eval.evals.extract.math import is_equiv
+
+        all_gold = instance.metadata.get("all_gold_answers", [])
+        if not all_gold and instance.gold_answer is not None:
+            all_gold = [instance.gold_answer]
+
+        all_extracted = (output.metadata or {}).get("all_extracted_answers", [])
+        if not all_extracted and output.extracted_answer is not None:
+            all_extracted = [output.extracted_answer]
+
+        if not all_gold or not all_extracted:
+            return 0.0
+
+        for extracted in all_extracted:
+            for gold in all_gold:
+                if is_equiv(str(extracted).strip(), str(gold).strip()):
+                    return 1.0
+        return 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class MathVerifyScorer(Scorer):
+    """Score math answers using symbolic verification via math_verify library.
+
+    This scorer uses the math_verify package to check if the extracted answer
+    is mathematically equivalent to the gold answer, handling various
+    representations of mathematical expressions.
+
+    Falls back to exact string matching if math_verify is not available.
+    """
+
+    name: str = "math_verify"
+    timeout: float = 5.0
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        if instance.gold_answer is None or output.extracted_answer is None:
+            return 0.0
+
+        gold = str(instance.gold_answer)
+        pred = str(output.extracted_answer)
+
+        # Try using math_verify first (optional dependency)
+        try:
+            from math_verify import verify  # type: ignore[import-not-found]
+
+            result = verify(gold, pred)
+            return 1.0 if result else 0.0
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
+        # Fall back to our internal equivalence check
+        try:
+            from olmo_eval.evals.extract.math import is_equiv
+
+            return 1.0 if is_equiv(pred, gold) else 0.0
+        except ImportError:
+            pass
+
+        # Last resort: exact string match (normalized)
+        gold_norm = "".join(gold.lower().split())
+        pred_norm = "".join(pred.lower().split())
+        return 1.0 if gold_norm == pred_norm else 0.0

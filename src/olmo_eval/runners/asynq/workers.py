@@ -155,7 +155,10 @@ def inference_worker(
                 close_fn()
 
     except Exception as e:
+        import traceback
+
         worker_logger.error(f"Worker process failed: {e}")
+        worker_logger.error(traceback.format_exc())
         result_queue.put(
             ResultItem(
                 model_name=model_name,

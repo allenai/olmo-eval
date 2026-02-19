@@ -782,10 +782,13 @@ def _build_experiment_summary(
     harness_overrides: list[str] | None = None,
 ) -> ExperimentSummary:
     """Build experiment summary for display."""
+    from olmo_eval.common.configs import expand_tasks
     from olmo_eval.runners import AsyncEvalRunner
 
+    # Expand task specs to match keys in task_configs_by_spec
+    expanded_tasks = expand_tasks(exp.tasks)
     exp_task_configs = []
-    for task_spec in exp.tasks:
+    for task_spec in expanded_tasks:
         base_spec = task_spec.rsplit("@", 1)[0] if "@" in task_spec else task_spec
         if base_spec in task_configs_by_spec:
             exp_task_configs.append(task_configs_by_spec[base_spec])

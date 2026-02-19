@@ -702,8 +702,8 @@ class BeakerLauncher:
             # Set VLLM_PYTHON so VLLMServerProcess uses the separate venv
             steps.append(f"export VLLM_PYTHON={vllm_venv}/bin/python")
 
-        # Install main package (without vllm extra since it's in separate venv)
-        main_extras = [e for e in extras if e != "vllm"]
+        # Install main package (without vllm extra only when using separate venv)
+        main_extras = [e for e in extras if e != "vllm"] if use_separate_vllm_venv else list(extras)
         if main_extras:
             extras_str = ",".join(main_extras)
             install_cmd = f"uv pip install -e '.[{extras_str}]' -c {constraints}"
