@@ -179,6 +179,16 @@ def inference_worker(
             log_dir=log_dir,
         )
 
+        # Update metrics config with runtime values (output_dir, provider_kind, model_name)
+        if harness_config.metrics is not None and harness_config.metrics.enabled:
+            updated_metrics = harness_config.metrics.with_output_dir(
+                output_dir or ""
+            ).with_metadata(
+                provider_kind=provider_kind,
+                model_name=model_name,
+            )
+            harness_config = harness_config.with_metrics(updated_metrics)
+
         harness = Harness(harness_config)
 
         # Force provider creation to catch import errors early

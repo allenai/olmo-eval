@@ -44,10 +44,19 @@ class Harness:
         """Get or create the inference provider.
 
         The provider is lazily created from config.provider on first access.
+        If metrics configuration is present and enabled, the provider is wrapped
+        with instrumentation for metrics collection.
         """
         if self._provider is None:
-            self._provider = self.config.provider.create_provider()
-        return self._provider
+            provider = self.config.provider.create_provider()
+            if self.config.metrics is not None and self.config.metrics.enabled:
+                from olmo_eval.inference.metrics import InstrumentedProvider
+
+                # InstrumentedProvider wraps provider and implements the same interface
+                self._provider = InstrumentedProvider(provider)  # type: ignore[assignment]
+            else:
+                self._provider = provider
+        return self._provider  # type: ignore[return-value]
 
     @property
     def backend(self) -> Backend:

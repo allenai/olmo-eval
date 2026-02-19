@@ -12,6 +12,7 @@ from typing import Any
 from olmo_eval.common.constants import BEAKER_RESULT_DIR, LOCAL_RESULT_DIR
 from olmo_eval.common.types import ProviderKind
 from olmo_eval.harness.sandbox import Capability
+from olmo_eval.inference.metrics import MetricsConfig
 
 from .config import HarnessConfig, ProviderConfig
 from .constants import (
@@ -62,7 +63,10 @@ def lazy(fn: Callable[[str], HarnessConfig]) -> _Lazy:
 class HarnessPresets:
     """Harness presets. Access as HarnessPresets.name or get_harness_preset("name")."""
 
-    default = HarnessConfig(name="default")
+    default = HarnessConfig(
+        name="default",
+        metrics=MetricsConfig(),  # Defaults to jsonl reporter
+    )
 
     @lazy
     def dr_tulu(name: str) -> HarnessConfig:

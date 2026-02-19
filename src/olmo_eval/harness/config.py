@@ -9,6 +9,7 @@ from olmo_eval.inference.providers.config import ProviderConfig
 
 if TYPE_CHECKING:
     from olmo_eval.common.types import ToolSchema
+    from olmo_eval.inference.metrics import MetricsConfig
 
     from .sandbox import SandboxConfig
     from .tools import Tool
@@ -39,6 +40,7 @@ class HarnessConfig:
     scoring_concurrency: int | None = None
     sandboxes: tuple[SandboxConfig, ...] = ()
     backend_kwargs: dict[str, Any] = field(default_factory=dict)
+    metrics: MetricsConfig | None = None
 
     # Cache for resolved tools
     _resolved_tools_cache: tuple[Tool, ...] | None = field(
@@ -132,6 +134,8 @@ class HarnessConfig:
             d["sandboxes"] = [s.to_dict() for s in self.sandboxes]
         if self.backend_kwargs:
             d["backend_kwargs"] = self.backend_kwargs
+        if self.metrics is not None:
+            d["metrics"] = self.metrics.to_dict()
         return d
 
     @classmethod
@@ -144,11 +148,16 @@ class HarnessConfig:
         Returns:
             A new HarnessConfig instance.
         """
+        from olmo_eval.inference.metrics import MetricsConfig
+
         from .sandbox import SandboxConfig
 
         provider_data = data.get("provider", {})
         sandboxes_data = data.get("sandboxes", [])
         sandboxes = tuple(SandboxConfig.from_dict(s) for s in sandboxes_data)
+
+        metrics_data = data.get("metrics")
+        metrics = MetricsConfig.from_dict(metrics_data) if metrics_data else None
 
         return cls(
             name=data.get("name", "default"),
@@ -163,6 +172,7 @@ class HarnessConfig:
             scoring_concurrency=data.get("scoring_concurrency"),
             sandboxes=sandboxes,
             backend_kwargs=data.get("backend_kwargs", {}),
+            metrics=metrics,
         )
 
     def with_tools(self, *new_tools: Tool | str) -> HarnessConfig:
@@ -187,6 +197,7 @@ class HarnessConfig:
             scoring_concurrency=self.scoring_concurrency,
             sandboxes=self.sandboxes,
             backend_kwargs=self.backend_kwargs,
+            metrics=self.metrics,
         )
 
     def with_system_prompt(self, system_prompt: str) -> HarnessConfig:
@@ -211,6 +222,7 @@ class HarnessConfig:
             scoring_concurrency=self.scoring_concurrency,
             sandboxes=self.sandboxes,
             backend_kwargs=self.backend_kwargs,
+            metrics=self.metrics,
         )
 
     def with_provider(self, provider: ProviderConfig) -> HarnessConfig:
@@ -232,6 +244,7 @@ class HarnessConfig:
             required_secrets=self.required_secrets,
             max_turns=self.max_turns,
             max_concurrency=self.max_concurrency,
+            metrics=self.metrics,
             scoring_concurrency=self.scoring_concurrency,
             sandboxes=self.sandboxes,
             backend_kwargs=self.backend_kwargs,
@@ -287,6 +300,31 @@ class HarnessConfig:
         """
         return self.with_provider(self.provider.with_overrides(**overrides))
 
+    def with_metrics(self, metrics: MetricsConfig) -> HarnessConfig:
+        """Create a new config with updated metrics configuration.
+
+        Args:
+            metrics: The new metrics configuration.
+
+        Returns:
+            New HarnessConfig with updated metrics.
+        """
+        return HarnessConfig(
+            name=self.name,
+            provider=self.provider,
+            tools=self.tools,
+            system_prompt=self.system_prompt,
+            tool_choice=self.tool_choice,
+            backend=self.backend,
+            required_secrets=self.required_secrets,
+            max_turns=self.max_turns,
+            max_concurrency=self.max_concurrency,
+            scoring_concurrency=self.scoring_concurrency,
+            sandboxes=self.sandboxes,
+            backend_kwargs=self.backend_kwargs,
+            metrics=metrics,
+        )
+
 
 def harness_config(
     name: str,
@@ -301,6 +339,7 @@ def harness_config(
     scoring_concurrency: int | None = None,
     sandboxes: Sequence[SandboxConfig] = (),
     backend_kwargs: dict[str, Any] | None = None,
+    metrics: MetricsConfig | None = None,
 ) -> HarnessConfig:
     """Create a HarnessConfig.
 
@@ -317,6 +356,7 @@ def harness_config(
         scoring_concurrency: Maximum concurrent scoring operations (default 8).
         sandboxes: Sandbox configurations for isolated tool execution.
         backend_kwargs: Backend-specific kwargs (e.g., enable_compaction for openai_agents).
+        metrics: Metrics collection configuration (None = no metrics).
 
     Returns:
         A new HarnessConfig instance.
@@ -334,4 +374,5 @@ def harness_config(
         scoring_concurrency=scoring_concurrency,
         sandboxes=tuple(sandboxes),
         backend_kwargs=backend_kwargs or {},
+        metrics=metrics,
     )

@@ -13,15 +13,13 @@ PACKAGE_LOGGER_NAME = "olmo_eval"
 
 # ANSI color codes for terminal output
 _COLORS = (
-    # Standard colors
+    # Standard colors (no red - reserved for errors)
     "\033[36m",  # Cyan
     "\033[33m",  # Yellow
     "\033[35m",  # Magenta
     "\033[32m",  # Green
     "\033[34m",  # Blue
-    "\033[31m",  # Red
-    # Bright colors
-    "\033[91m",  # Light Red
+    # Bright colors (no light red - reserved for errors)
     "\033[96m",  # Light Cyan
     "\033[93m",  # Light Yellow
     "\033[95m",  # Light Magenta
