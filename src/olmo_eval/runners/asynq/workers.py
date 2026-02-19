@@ -35,6 +35,7 @@ async def process_items_streaming(
     result_queue: mp.Queue[ResultItem],
     max_concurrency: int | None,
     worker_logger: logging.Logger,
+    total_instances: int,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     chunk_timeout: float = DEFAULT_CHUNK_TIMEOUT,
 ) -> None:
@@ -50,14 +51,18 @@ async def process_items_streaming(
         result_queue: Queue to put ResultItems.
         max_concurrency: Maximum concurrent requests.
         worker_logger: Logger with worker identification.
+        total_instances: Total number of instances to process.
         chunk_size: Maximum items per chunk (default 256, matches vLLM max_num_seqs).
         chunk_timeout: Seconds to wait for chunk to fill before processing partial.
     """
+    import math
     import time
 
     from olmo_eval.runners.asynq.processing import process_items
 
+    total_batches = math.ceil(total_instances / chunk_size)
     batch_num = 0
+
     while True:
         items: list[QueueItem] = []
         deadline = time.time() + chunk_timeout
@@ -72,7 +77,7 @@ async def process_items_streaming(
                     if items:
                         batch_num += 1
                         worker_logger.info(
-                            f"Processing final batch {batch_num} ({len(items)} items)"
+                            f"Processing batch {batch_num}/{total_batches} ({len(items)} items)"
                         )
                         await process_items(
                             items, harness, result_queue, max_concurrency, worker_logger
@@ -85,7 +90,7 @@ async def process_items_streaming(
 
         if items:
             batch_num += 1
-            worker_logger.info(f"Processing batch {batch_num} ({len(items)} items)")
+            worker_logger.info(f"Processing batch {batch_num}/{total_batches} ({len(items)} items)")
             await process_items(items, harness, result_queue, max_concurrency, worker_logger)
 
 
@@ -95,6 +100,7 @@ def inference_worker(
     item_queue: mp.Queue,
     result_queue: mp.Queue,
     harness_config_dict: dict[str, Any],
+    total_instances: int,
     init_times: dict[str, float] | None = None,
     output_dir: str | None = None,
 ) -> None:
@@ -110,6 +116,7 @@ def inference_worker(
         item_queue: Queue of QueueItems (None signals shutdown).
         result_queue: Queue to put ResultItems.
         harness_config_dict: Serialized HarnessConfig.
+        total_instances: Total number of instances to process.
         init_times: Optional shared dict for tracking initialization times.
         output_dir: Output directory for persisting logs (e.g., vLLM server logs).
     """
@@ -200,10 +207,15 @@ def inference_worker(
             if harness_config.backend:
                 asyncio.run(harness.backend.initialize(harness_config))
 
-            worker_logger.info("Processing worker ready")
+            worker_logger.info("Inference worker ready")
             asyncio.run(
                 process_items_streaming(
-                    item_queue, harness, result_queue, max_concurrency, worker_logger
+                    item_queue,
+                    harness,
+                    result_queue,
+                    max_concurrency,
+                    worker_logger,
+                    total_instances,
                 )
             )
 
