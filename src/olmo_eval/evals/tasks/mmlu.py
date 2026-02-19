@@ -180,7 +180,7 @@ for _subject in MMLU_SUBJECTS:
             "formatter": _MMLU_FORMATTER,
             "metrics": (MultipleChoiceLogprobMetric(),),
             "primary_metric": MultipleChoiceLogprobMetric(),
-            "num_fewshot": 0,
+            "num_fewshot": 5,
             "split": Split.TEST,
             "sampling_params": SamplingParams(max_tokens=1, temperature=0.0),
             "__module__": __name__,
