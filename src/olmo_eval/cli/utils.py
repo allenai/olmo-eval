@@ -339,37 +339,91 @@ class ExternalEvalSummary:
     beaker: "BeakerJobConfig"
 
 
-def print_runtime_environment() -> None:
-    """Print runtime environment summary for debugging."""
-    import sys
+def _get_vllm_version() -> str | None:
+    """Get vLLM version from isolated venv or current environment."""
+    import os
+    import subprocess
 
-    console.print("\n" + "=" * 60)
-    console.print("RUNTIME ENVIRONMENT SUMMARY")
-    console.print("=" * 60)
-    console.print(f"Python:          {sys.version.split()[0]}")
-    try:
-        import torch  # type: ignore[import-not-found]
-
-        console.print(f"PyTorch:         {torch.__version__}")
-        console.print(f"CUDA available:  {torch.cuda.is_available()}")
-        if torch.cuda.is_available():
-            console.print(f"CUDA version:    {torch.version.cuda}")
-            console.print(f"cuDNN version:   {torch.backends.cudnn.version()}")
-            console.print(f"GPU count:       {torch.cuda.device_count()}")
-            for i in range(torch.cuda.device_count()):
-                console.print(f"  GPU {i}:         {torch.cuda.get_device_name(i)}")
-    except ImportError:
-        console.print("PyTorch:         NOT INSTALLED")
-    try:
-        import transformers
-
-        console.print(f"Transformers:    {transformers.__version__}")
-    except ImportError:
-        console.print("Transformers:    NOT INSTALLED")
+    # First check current environment
     try:
         import vllm  # type: ignore[import-not-found]
 
-        console.print(f"vLLM:            {vllm.__version__}")
+        return vllm.__version__
     except ImportError:
-        console.print("vLLM:            NOT INSTALLED")
-    console.print("=" * 60 + "\n")
+        pass
+
+    # Check isolated venv via VLLM_PYTHON or default path
+    vllm_python = os.environ.get("VLLM_PYTHON")
+    if not vllm_python:
+        # Check default isolated venv location
+        default_vllm_venv = "/opt/vllm-venv/bin/python"
+        if os.path.exists(default_vllm_venv):
+            vllm_python = default_vllm_venv
+
+    if vllm_python and os.path.exists(vllm_python):
+        try:
+            result = subprocess.run(
+                [vllm_python, "-c", "import vllm; print(vllm.__version__)"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                version = result.stdout.strip()
+                # Indicate it's from isolated venv
+                return f"{version} (isolated)"
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+
+    return None
+
+
+def print_runtime_environment() -> None:
+    """Print runtime environment summary for debugging."""
+    import os
+    import sys
+
+    from rich.panel import Panel
+    from rich.table import Table
+
+    table = Table(show_header=False, box=None, padding=(0, 1))
+    table.add_column("Key", style="bold", width=16)
+    table.add_column("Value")
+
+    table.add_row("Python", sys.version.split()[0])
+
+    try:
+        import torch  # type: ignore[import-not-found]
+
+        table.add_row("PyTorch", torch.__version__)
+        table.add_row("CUDA available", str(torch.cuda.is_available()))
+        if torch.cuda.is_available():
+            table.add_row("CUDA version", str(torch.version.cuda))
+            table.add_row("cuDNN version", str(torch.backends.cudnn.version()))
+            table.add_row("GPU count", str(torch.cuda.device_count()))
+            for i in range(torch.cuda.device_count()):
+                table.add_row(f"  GPU {i}", torch.cuda.get_device_name(i))
+    except ImportError:
+        table.add_row("PyTorch", "[dim]NOT INSTALLED[/dim]")
+
+    try:
+        import transformers
+
+        table.add_row("Transformers", transformers.__version__)
+    except ImportError:
+        table.add_row("Transformers", "[dim]NOT INSTALLED[/dim]")
+
+    vllm_version = _get_vllm_version()
+    if vllm_version:
+        table.add_row("vLLM", vllm_version)
+    else:
+        table.add_row("vLLM", "[dim]NOT INSTALLED[/dim]")
+
+    # Show VLLM_PYTHON if set
+    vllm_python = os.environ.get("VLLM_PYTHON")
+    if vllm_python:
+        table.add_row("VLLM_PYTHON", vllm_python)
+
+    console.print()
+    console.print(Panel(table, title="Runtime Environment", border_style="blue"))
+    console.print()

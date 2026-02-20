@@ -26,7 +26,6 @@ class DbReporter:
     - OLMO_EVAL_DB_PORT: Database port (default: 5432)
     - OLMO_EVAL_DB_USER: Database user (default: postgres)
     - OLMO_EVAL_DB_PASSWORD: Database password
-    - OLMO_EVAL_DB_SECRET_ARN: AWS Secrets Manager ARN for password
 
     The database name defaults to 'olmo_eval_metrics' (separate from results DB).
     """

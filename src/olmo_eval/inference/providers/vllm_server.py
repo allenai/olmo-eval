@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from olmo_eval.common.logging import get_logger
-from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
+from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
 from olmo_eval.common.types.tools import ToolCall
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
@@ -201,6 +201,70 @@ class VLLMServerProvider(InferenceProvider):
         """Generate completions for a single request."""
         client = self._get_or_create_client()
 
+        # Route to completions endpoint for COMPLETION requests without messages
+        use_completions = (
+            request.request_type == RequestType.COMPLETION
+            and not request.messages
+            and request.prompt
+        )
+
+        if use_completions:
+            return await self._generate_completion(client, request, params)
+        else:
+            return await self._generate_chat(client, request, params)
+
+    async def _generate_completion(
+        self, client: AsyncOpenAI, request: LMRequest, params: SamplingParams
+    ) -> list[LMOutput]:
+        """Generate using the /v1/completions endpoint."""
+        kwargs: dict[str, Any] = {
+            "model": self.model_name,
+            "prompt": request.prompt,
+            "n": params.num_samples,
+            "max_tokens": params.max_tokens,
+            "logprobs": 1,  # Request logprobs for metrics
+        }
+
+        if params.temperature > 0:
+            kwargs["temperature"] = params.temperature
+        if params.stop_sequences:
+            kwargs["stop"] = list(params.stop_sequences)[:4]
+
+        response = await client.completions.create(**kwargs)
+
+        outputs = []
+        for choice in response.choices:
+            text = choice.text or ""
+
+            # Convert logprobs to standard format
+            logprob_entries: list[LogProbEntry] | None = None
+            metadata: dict[str, Any] = {}
+            logprobs_data = getattr(choice, "logprobs", None)
+            if logprobs_data and hasattr(logprobs_data, "token_logprobs"):
+                tokens = logprobs_data.tokens or []
+                token_logprobs = logprobs_data.token_logprobs or []
+                logprob_entries = []
+                for token, logprob in zip(tokens, token_logprobs, strict=False):
+                    if logprob is not None:
+                        logprob_entries.append({"token": token, "logprob": logprob})
+
+                if logprob_entries:
+                    sum_logits = sum(entry["logprob"] for entry in logprob_entries)
+                    num_tokens = len(logprob_entries)
+                    metadata = {
+                        "sum_logits": sum_logits,
+                        "num_tokens": num_tokens,
+                        "num_tokens_all": num_tokens,
+                    }
+
+            outputs.append(LMOutput(text=text, logprobs=logprob_entries, metadata=metadata))
+
+        return outputs
+
+    async def _generate_chat(
+        self, client: AsyncOpenAI, request: LMRequest, params: SamplingParams
+    ) -> list[LMOutput]:
+        """Generate using the /v1/chat/completions endpoint."""
         # Build messages
         if request.messages:
             messages: list[dict[str, Any]] = [dict(m) for m in request.messages]
