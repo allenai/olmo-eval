@@ -6,6 +6,7 @@ and other dataclasses using Rich panels and tables.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import fields, is_dataclass
 from typing import TYPE_CHECKING, Any
@@ -444,67 +445,124 @@ def _get_isolated_venv_python() -> str | None:
     return None
 
 
-class SubprocessTokenizer:
-    """Tokenizer that runs in an isolated venv via subprocess.
+_TOKENIZER_SERVER_SCRIPT = """
+import json
+import sys
+import os
 
-    Used when transformers is not available in the main environment but is
-    available in an isolated venv (e.g., vLLM's isolated environment).
+# Silence HuggingFace downloads and warnings
+os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
+
+from transformers import AutoTokenizer
+
+tokenizer_name = sys.argv[1]
+tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True)
+
+# Signal ready
+print(json.dumps({"status": "ready", "special_ids": list(tokenizer.all_special_ids)}), flush=True)
+
+# Process requests
+for line in sys.stdin:
+    try:
+        req = json.loads(line.strip())
+        cmd = req.get("cmd")
+
+        if cmd == "encode":
+            add_special = req.get("add_special_tokens", True)
+            tokens = tokenizer.encode(req["text"], add_special_tokens=add_special)
+            print(json.dumps({"tokens": tokens}), flush=True)
+
+        elif cmd == "decode":
+            skip_special = req.get("skip_special_tokens", False)
+            text = tokenizer.decode(req["token_ids"], skip_special_tokens=skip_special)
+            print(json.dumps({"text": text}), flush=True)
+
+        elif cmd == "apply_chat_template":
+            result = tokenizer.apply_chat_template(
+                req["messages"],
+                tokenize=req.get("tokenize", False),
+                add_generation_prompt=req.get("add_generation_prompt", True),
+            )
+            if isinstance(result, list):
+                print(json.dumps({"tokens": result}), flush=True)
+            else:
+                print(json.dumps({"text": result}), flush=True)
+
+        elif cmd == "quit":
+            break
+
+        else:
+            print(json.dumps({"error": f"Unknown command: {cmd}"}), flush=True)
+
+    except Exception as e:
+        print(json.dumps({"error": str(e)}), flush=True)
+"""
+
+
+class SubprocessTokenizer:
+    """Tokenizer that runs in an isolated venv via a persistent subprocess.
+
+    Uses a long-running subprocess that loads the tokenizer once and handles
+    requests via JSON-line protocol over stdin/stdout.
     """
 
     def __init__(self, tokenizer_name: str, python_path: str) -> None:
-        self._tokenizer_name = tokenizer_name
-        self._python_path = python_path
-        self._special_ids: set[int] | None = None
-
-    def _run_tokenizer_script(self, script: str) -> str:
-        """Run a Python script in the isolated venv and return stdout."""
         import subprocess
 
-        result = subprocess.run(
-            [self._python_path, "-c", script],
-            capture_output=True,
+        self._tokenizer_name = tokenizer_name
+        self._python_path = python_path
+        self._special_ids: set[int] = set()
+
+        # Start persistent subprocess
+        self._proc = subprocess.Popen(
+            [python_path, "-c", _TOKENIZER_SERVER_SCRIPT, tokenizer_name],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=30,
+            bufsize=1,  # Line buffered
         )
-        if result.returncode != 0:
-            raise RuntimeError(f"Tokenizer subprocess failed: {result.stderr}")
-        return result.stdout.strip()
+
+        # Wait for ready signal
+        ready_line = self._proc.stdout.readline()  # type: ignore[union-attr]
+        if not ready_line:
+            stderr = self._proc.stderr.read() if self._proc.stderr else ""  # type: ignore[union-attr]
+            raise RuntimeError(f"Tokenizer subprocess failed to start: {stderr}")
+
+        ready = json.loads(ready_line)
+        if ready.get("status") != "ready":
+            raise RuntimeError(f"Tokenizer subprocess error: {ready.get('error', 'unknown')}")
+
+        self._special_ids = set(ready.get("special_ids", []))
+
+    def _request(self, req: dict[str, Any]) -> dict[str, Any]:
+        """Send a request to the subprocess and get response."""
+        if self._proc.poll() is not None:
+            raise RuntimeError("Tokenizer subprocess has terminated")
+
+        self._proc.stdin.write(json.dumps(req) + "\n")  # type: ignore[union-attr]
+        self._proc.stdin.flush()  # type: ignore[union-attr]
+
+        response_line = self._proc.stdout.readline()  # type: ignore[union-attr]
+        if not response_line:
+            raise RuntimeError("Tokenizer subprocess returned empty response")
+
+        response = json.loads(response_line)
+        if "error" in response:
+            raise RuntimeError(f"Tokenizer error: {response['error']}")
+
+        return response
 
     def encode(self, text: str, add_special_tokens: bool = True) -> list[int]:
-        """Encode text to token IDs using subprocess."""
-        import base64
-        import json
-
-        # Encode text as base64 to avoid shell escaping issues
-        text_b64 = base64.b64encode(text.encode()).decode()
-
-        script = f"""
-import base64
-import json
-from transformers import AutoTokenizer
-tokenizer = AutoTokenizer.from_pretrained("{self._tokenizer_name}", trust_remote_code=True)
-text = base64.b64decode("{text_b64}").decode()
-tokens = tokenizer.encode(text, add_special_tokens={add_special_tokens})
-print(json.dumps(tokens))
-"""
-        output = self._run_tokenizer_script(script)
-        return json.loads(output)
+        """Encode text to token IDs."""
+        req = {"cmd": "encode", "text": text, "add_special_tokens": add_special_tokens}
+        return self._request(req)["tokens"]
 
     def decode(self, token_ids: list[int], skip_special_tokens: bool = False) -> str:
-        """Decode token IDs to text using subprocess."""
-        import json
-
-        token_ids_json = json.dumps(token_ids)
-
-        script = f"""
-import json
-from transformers import AutoTokenizer
-tokenizer = AutoTokenizer.from_pretrained("{self._tokenizer_name}", trust_remote_code=True)
-token_ids = {token_ids_json}
-text = tokenizer.decode(token_ids, skip_special_tokens={skip_special_tokens})
-print(text, end='')
-"""
-        return self._run_tokenizer_script(script)
+        """Decode token IDs to text."""
+        req = {"cmd": "decode", "token_ids": token_ids, "skip_special_tokens": skip_special_tokens}
+        return self._request(req)["text"]
 
     def apply_chat_template(
         self,
@@ -512,48 +570,31 @@ print(text, end='')
         tokenize: bool = False,
         add_generation_prompt: bool = True,
     ) -> str | list[int]:
-        """Apply chat template using subprocess."""
-        import json
-
-        messages_json = json.dumps(messages)
-
-        script = f"""
-import json
-from transformers import AutoTokenizer
-tokenizer = AutoTokenizer.from_pretrained("{self._tokenizer_name}", trust_remote_code=True)
-messages = {messages_json}
-result = tokenizer.apply_chat_template(
-    messages,
-    tokenize={tokenize},
-    add_generation_prompt={add_generation_prompt},
-)
-if isinstance(result, list):
-    print(json.dumps(result))
-else:
-    print(result, end='')
-"""
-        output = self._run_tokenizer_script(script)
-        if tokenize:
-            import json
-
-            return json.loads(output)
-        return output
+        """Apply chat template."""
+        resp = self._request(
+            {
+                "cmd": "apply_chat_template",
+                "messages": messages,
+                "tokenize": tokenize,
+                "add_generation_prompt": add_generation_prompt,
+            }
+        )
+        return resp.get("tokens") or resp.get("text", "")
 
     @property
     def all_special_ids(self) -> set[int]:
         """Get all special token IDs."""
-        if self._special_ids is None:
-            import json
-
-            script = f"""
-import json
-from transformers import AutoTokenizer
-tokenizer = AutoTokenizer.from_pretrained("{self._tokenizer_name}", trust_remote_code=True)
-print(json.dumps(list(tokenizer.all_special_ids)))
-"""
-            output = self._run_tokenizer_script(script)
-            self._special_ids = set(json.loads(output))
         return self._special_ids
+
+    def __del__(self) -> None:
+        """Clean up subprocess."""
+        if hasattr(self, "_proc") and self._proc.poll() is None:
+            try:
+                self._proc.stdin.write('{"cmd": "quit"}\n')  # type: ignore[union-attr]
+                self._proc.stdin.flush()  # type: ignore[union-attr]
+                self._proc.wait(timeout=2)
+            except Exception:
+                self._proc.kill()
 
 
 def _load_tokenizer_from_isolated_venv(tokenizer_name: str, logger: Any) -> Any | None:
