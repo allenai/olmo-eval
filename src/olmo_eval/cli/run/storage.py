@@ -81,10 +81,6 @@ class StorageSetup:
                 password=self.db_password,
             )
             storage.initialize()
-            console.print(
-                f"[green]Connected to postgres storage:[/green] "
-                f"{self.db_host}:{self.db_port}/{self.db_name}"
-            )
             return storage
         except ImportError as e:
             console.print(f"[red]Storage backend error:[/red] {e}")
