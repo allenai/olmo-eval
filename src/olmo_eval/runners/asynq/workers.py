@@ -231,6 +231,8 @@ def inference_worker(
 
             worker_logger.info("Processing complete")
         finally:
+            # Flush metrics before cleanup
+            harness.flush_metrics()
             # Clean up harness resources (including sandbox manager)
             asyncio.run(harness.cleanup())
             # Clean up provider

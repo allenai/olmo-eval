@@ -175,6 +175,82 @@ class Harness:
         if self._backend is not None:
             await self._backend.cleanup()
 
+    def flush_metrics(self, clear: bool = True) -> None:
+        """Flush collected metrics to configured reporters.
+
+        Call this after each batch to write metrics incrementally.
+        Only has effect if metrics is enabled and the provider is instrumented.
+
+        Args:
+            clear: If True, clear collected metrics after reporting.
+        """
+        if self.config.metrics is None or not self.config.metrics.enabled:
+            return
+
+        # Check if provider is instrumented
+        if self._provider is None:
+            return
+
+        from olmo_eval.inference.metrics import InstrumentedProvider
+
+        if not isinstance(self._provider, InstrumentedProvider):
+            return
+
+        metrics = self._provider.get_metrics()
+        if not metrics:
+            return
+
+        # Initialize reporters and report
+        from olmo_eval.inference.metrics.core.registry import reporter_registry
+        from olmo_eval.inference.metrics.core.stats import compute_batch_metrics
+
+        batch = compute_batch_metrics(metrics, wall_clock_s=0.0, config=self.config.metrics)
+
+        for reporter_config in self.config.metrics.reporters:
+            try:
+                resolved = self._resolve_reporter_config(reporter_config)
+                if resolved is None:
+                    continue
+                reporter = reporter_registry.create(resolved)
+                reporter.report_batch(batch)
+                reporter.flush()
+                reporter.shutdown()
+            except Exception as e:
+                import logging
+
+                logging.getLogger(__name__).warning(f"Failed to report metrics: {e}")
+
+        # Clear metrics after reporting to avoid double-counting
+        if clear:
+            self._provider.clear_metrics()
+
+    def _resolve_reporter_config(
+        self, reporter_config: str | dict[str, Any]
+    ) -> str | dict[str, Any] | None:
+        """Resolve reporter config, adding path for jsonl if needed."""
+        if isinstance(reporter_config, str):
+            name = reporter_config
+            config_dict: dict[str, Any] = {}
+        else:
+            name = reporter_config.get("name", "console")
+            config_dict = dict(reporter_config)
+
+        # For jsonl reporter, resolve path from metrics config if not set
+        if name == "jsonl" and "path" not in config_dict:
+            path = self.config.metrics.get_metrics_path() if self.config.metrics else None
+            if path is None:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "JSONL reporter requires output_dir in MetricsConfig. Skipping."
+                )
+                return None
+            config_dict["name"] = "jsonl"
+            config_dict["path"] = path
+            return config_dict
+
+        return reporter_config
+
     # ─────────────────────────────────────────────────────────
     # Config application (used by backends)
     # ─────────────────────────────────────────────────────────

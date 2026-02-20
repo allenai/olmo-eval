@@ -185,6 +185,9 @@ async def process_batch(
                 )
             )
 
+        # Flush metrics after each batch
+        harness.flush_metrics()
+
     except Exception as e:
         # Batch failed - report error for all items
         error_detail = _format_error_detail(e)
@@ -271,6 +274,9 @@ async def process_items(
 
         await asyncio.gather(*[process(item) for item in chat_items])
         progress.close()
+
+        # Flush metrics after chat requests
+        harness.flush_metrics()
 
 
 __all__ = [
