@@ -8,12 +8,18 @@ import multiprocessing as mp
 from typing import TYPE_CHECKING
 
 from olmo_eval.common.logging import get_logger
+from olmo_eval.inference.metrics.core.stats import compute_batch_hash
 from olmo_eval.runners.asynq.types import QueueItem, ResultItem
 
 if TYPE_CHECKING:
     from olmo_eval.harness import Harness
 
 logger = get_logger(__name__)
+
+
+def _get_native_ids(items: list[QueueItem]) -> list[str]:
+    """Extract native IDs from queue items for batch hashing."""
+    return [item.instance.metadata.get("id", f"doc_{item.instance_idx}") for item in items]
 
 
 def _format_cause(cause: BaseException) -> str:
@@ -185,8 +191,9 @@ async def process_batch(
                 )
             )
 
-        # Flush metrics after each batch
-        harness.flush_metrics()
+        # Flush metrics after each batch with stable batch hash
+        batch_hash = compute_batch_hash(_get_native_ids(items))
+        harness.flush_metrics(batch_hash)
 
     except Exception as e:
         # Batch failed - report error for all items
@@ -275,8 +282,9 @@ async def process_items(
         await asyncio.gather(*[process(item) for item in chat_items])
         progress.close()
 
-        # Flush metrics after chat requests
-        harness.flush_metrics()
+        # Flush metrics after chat requests with stable batch hash
+        batch_hash = compute_batch_hash(_get_native_ids(chat_items))
+        harness.flush_metrics(batch_hash)
 
 
 __all__ = [

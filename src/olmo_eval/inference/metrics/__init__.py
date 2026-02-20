@@ -4,27 +4,16 @@ This module provides tools for collecting performance metrics during inference:
 - Latency, throughput, token counts
 - Time to first token (TTFT) when available
 - GPU utilization (optional, requires pynvml)
-
-Usage:
-    from olmo_eval.inference import create_provider
-    from olmo_eval.inference.metrics import collect_metrics
-
-    provider = create_provider("vllm", model_name="llama-3.1-8b")
-
-    with collect_metrics(provider, reporters=["console"]) as ctx:
-        outputs = ctx.generate(requests, sampling_params)
 """
 
 from .core.collector import InstrumentedHarness, InstrumentedProvider
 from .core.config import MetricsConfig, ReporterType
-from .core.context import MetricsContext, collect_metrics
 from .core.gpu import GPUMonitor, collect_gpu_snapshots, is_gpu_available
 from .core.registry import reporter_registry
 from .core.schema import BatchMetrics, GPUSnapshot, RequestMetrics
+from .core.stats import compute_batch_hash
 
 __all__ = [
-    "collect_metrics",
-    "MetricsContext",
     "MetricsConfig",
     "ReporterType",
     "RequestMetrics",
@@ -36,4 +25,5 @@ __all__ = [
     "InstrumentedProvider",
     "InstrumentedHarness",
     "reporter_registry",
+    "compute_batch_hash",
 ]

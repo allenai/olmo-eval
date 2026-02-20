@@ -71,7 +71,7 @@ class HarnessPresets:
         return HarnessConfig(
             name=name,
             metrics=MetricsConfig(),
-            batching=BatchConfig.pipelined(max_in_flight=4, chunk_size=64),
+            batching=BatchConfig.pipelined(max_in_flight=1, chunk_size=64),
         )
 
     @lazy

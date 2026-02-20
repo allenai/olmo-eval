@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import TYPE_CHECKING
 
 from .schema import BatchMetrics, GPUSnapshot, RequestMetrics
@@ -10,9 +11,22 @@ if TYPE_CHECKING:
     from .config import MetricsConfig
 
 
+def compute_batch_hash(native_ids: list[str]) -> str:
+    """Compute a hash of the batch based on native instance IDs.
+
+    Same batch composition with same order produces same hash.
+    Deterministic across runs when using stable native_ids.
+    """
+    if not native_ids:
+        return "empty"
+    id_string = "|".join(native_ids)
+    return hashlib.sha256(id_string.encode()).hexdigest()[:12]
+
+
 def compute_batch_metrics(
     requests: list[RequestMetrics],
     wall_clock_s: float,
+    batch_hash: str,
     config: MetricsConfig | None = None,
     gpu_snapshots: tuple[GPUSnapshot, ...] = (),
 ) -> BatchMetrics:
@@ -21,6 +35,7 @@ def compute_batch_metrics(
     Args:
         requests: List of RequestMetrics from individual requests.
         wall_clock_s: Total wall clock time for the batch.
+        batch_hash: Batch hash computed from native instance IDs.
         config: Optional MetricsConfig to extract metadata from.
         gpu_snapshots: Optional GPU utilization snapshots.
 
@@ -49,6 +64,7 @@ def compute_batch_metrics(
             wall_clock_time_s=wall_clock_s,
             output_tokens_per_second=0.0,
             mean_latency_s=0.0,
+            batch_hash=batch_hash,
             experiment_id=experiment_id,
             experiment_name=experiment_name,
             experiment_group=experiment_group,
@@ -87,6 +103,7 @@ def compute_batch_metrics(
         wall_clock_time_s=effective_wall_clock,
         output_tokens_per_second=output_tps,
         mean_latency_s=mean_latency,
+        batch_hash=batch_hash,
         experiment_id=experiment_id,
         experiment_name=experiment_name,
         experiment_group=experiment_group,

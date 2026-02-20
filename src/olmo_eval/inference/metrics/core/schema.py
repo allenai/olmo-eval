@@ -58,6 +58,9 @@ class BatchMetrics:
     output_tokens_per_second: float
     mean_latency_s: float
 
+    # Batch identification
+    batch_hash: str | None = None  # Hash of request IDs for reproducibility
+
     # Core metadata (mirrors evaluation schema)
     experiment_id: str | None = None
     experiment_name: str | None = None
@@ -99,6 +102,8 @@ class BatchMetrics:
         if self.gpu_snapshots:
             d["gpu_devices"] = self._group_gpu_snapshots()
         # Include non-None metadata
+        if self.batch_hash is not None:
+            d["batch_hash"] = self.batch_hash
         if self.experiment_id is not None:
             d["experiment_id"] = self.experiment_id
         if self.experiment_name is not None:

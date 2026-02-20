@@ -179,13 +179,14 @@ class Harness:
         if self._backend is not None:
             await self._backend.cleanup()
 
-    def flush_metrics(self, clear: bool = True) -> None:
+    def flush_metrics(self, batch_hash: str, clear: bool = True) -> None:
         """Flush collected metrics to configured reporters.
 
         Call this after each batch to write metrics incrementally.
         Only has effect if metrics is enabled and the provider is instrumented.
 
         Args:
+            batch_hash: Batch hash computed from native instance IDs.
             clear: If True, clear collected metrics after reporting.
         """
         if self.config.metrics is None or not self.config.metrics.enabled:
@@ -212,7 +213,11 @@ class Harness:
         gpu_snapshots = self._provider.get_gpu_snapshots()
 
         batch = compute_batch_metrics(
-            metrics, wall_clock_s=0.0, config=self.config.metrics, gpu_snapshots=gpu_snapshots
+            metrics,
+            wall_clock_s=0.0,
+            batch_hash=batch_hash,
+            config=self.config.metrics,
+            gpu_snapshots=gpu_snapshots,
         )
 
         import contextlib

@@ -1,19 +1,22 @@
-"""Console reporter for pretty-printing metrics."""
+"""Console reporter for pretty-printing metrics using rich."""
 
 from __future__ import annotations
 
-import sys
-from typing import TYPE_CHECKING, Any, TextIO
+from typing import TYPE_CHECKING, Any
+
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
 
 if TYPE_CHECKING:
     from ..core.schema import BatchMetrics, RequestMetrics
 
 
 class ConsoleReporter:
-    """Pretty-print metrics to stdout."""
+    """Pretty-print metrics to console using rich."""
 
-    def __init__(self, output: TextIO | None = None) -> None:
-        self._output = output or sys.stdout
+    def __init__(self) -> None:
+        self._console = Console()
         self._verbose = False
 
     @property
@@ -33,67 +36,72 @@ class ConsoleReporter:
         if not self._verbose:
             return
 
-        self._output.write(
+        self._console.print(
             f"  Request {metrics.request_id[:8]}... "
             f"prompt={metrics.prompt_tokens} tokens, "
             f"completion={metrics.completion_tokens} tokens, "
             f"latency={metrics.end_to_end_latency_s:.3f}s, "
-            f"tps={metrics.tokens_per_second:.1f}\n"
+            f"tps={metrics.tokens_per_second:.1f}"
         )
 
     def report_batch(self, metrics: BatchMetrics) -> None:
-        """Report batch metrics."""
-        self._output.write("\n")
-        self._output.write("=" * 60 + "\n")
-        self._output.write("Inference Metrics Summary\n")
-        self._output.write("=" * 60 + "\n")
+        """Report batch metrics using rich table."""
+        table = Table(show_header=False, box=None, padding=(0, 2))
+        table.add_column("Label", style="bold")
+        table.add_column("Value", justify="right")
 
-        # Print metadata if available
-        metadata_lines = []
-        if metrics.experiment_name:
-            metadata_lines.append(f"Experiment: {metrics.experiment_name}")
-        if metrics.experiment_group:
-            metadata_lines.append(f"Group: {metrics.experiment_group}")
+        # Metadata section
         if metrics.model_name:
-            metadata_lines.append(f"Model: {metrics.model_name}")
-        if metrics.task_name:
-            metadata_lines.append(f"Task: {metrics.task_name}")
-        if metadata_lines:
-            for line in metadata_lines:
-                self._output.write(f"{line}\n")
+            table.add_row("Model", metrics.model_name)
+        if metrics.batch_hash:
+            table.add_row("Batch", f"[dim]{metrics.batch_hash}[/dim]")
+        if metrics.experiment_name:
+            table.add_row("Experiment", metrics.experiment_name)
 
-        if metrics.tags:
-            tag_str = ", ".join(f"{k}={v}" for k, v in metrics.tags.items())
-            self._output.write(f"Tags: {tag_str}\n")
+        # Requests section
+        table.add_row("", "")  # Spacer
+        table.add_row("Requests", "")
+        table.add_row("  Total", str(metrics.total_requests))
+        table.add_row("  Successful", f"[green]{metrics.successful_requests}[/green]")
+        if metrics.failed_requests > 0:
+            table.add_row("  Failed", f"[red]{metrics.failed_requests}[/red]")
+        else:
+            table.add_row("  Failed", str(metrics.failed_requests))
 
-        self._output.write("\nRequests:\n")
-        self._output.write(f"  Total:      {metrics.total_requests}\n")
-        self._output.write(f"  Successful: {metrics.successful_requests}\n")
-        self._output.write(f"  Failed:     {metrics.failed_requests}\n")
+        # Tokens section
+        table.add_row("", "")
+        table.add_row("Tokens", "")
+        table.add_row("  Prompt", f"{metrics.total_prompt_tokens:,}")
+        table.add_row("  Completion", f"{metrics.total_completion_tokens:,}")
 
-        self._output.write("\nTokens:\n")
-        self._output.write(f"  Prompt:     {metrics.total_prompt_tokens:,}\n")
-        self._output.write(f"  Completion: {metrics.total_completion_tokens:,}\n")
+        # Performance section
+        table.add_row("", "")
+        table.add_row("Performance", "")
+        table.add_row("  Wall clock", f"{metrics.wall_clock_time_s:.2f}s")
+        table.add_row("  Throughput", f"[cyan]{metrics.output_tokens_per_second:,.1f}[/cyan] tok/s")
+        table.add_row("  Latency (mean)", f"{metrics.mean_latency_s:.3f}s")
 
-        self._output.write("\nPerformance:\n")
-        self._output.write(f"  Wall clock:      {metrics.wall_clock_time_s:.2f}s\n")
-        self._output.write(f"  Output tok/s:    {metrics.output_tokens_per_second:.1f}\n")
+        # Create panel
+        panel = Panel(
+            table,
+            title="[bold]Inference Metrics[/bold]",
+            border_style="blue",
+            padding=(0, 1),
+        )
 
-        self._output.write("\nLatency:\n")
-        self._output.write(f"  Mean:  {metrics.mean_latency_s:.3f}s\n")
-
-        self._output.write("=" * 60 + "\n\n")
+        self._console.print()
+        self._console.print(panel)
 
         # Print per-request metrics if verbose
         if self._verbose and metrics.requests:
-            self._output.write("Per-request metrics:\n")
+            self._console.print("\n[bold]Per-request metrics:[/bold]")
             for req in metrics.requests:
                 self.report_request(req)
-            self._output.write("\n")
+            self._console.print()
 
     def flush(self) -> None:
         """Flush output."""
-        self._output.flush()
+        pass
 
     def shutdown(self) -> None:
         """No cleanup needed."""
