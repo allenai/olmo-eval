@@ -11,15 +11,12 @@ class BatchStrategy(StrEnum):
     """Available batching strategies."""
 
     SEQUENTIAL = "sequential"  # One batch at a time, wait for completion
-    PIPELINED = "pipelined"  # Multiple batches in flight concurrently
     CONTINUOUS = "continuous"  # No batching, stream directly to provider
 
 
 # Default values
 DEFAULT_CHUNK_SIZE = 256
 DEFAULT_CHUNK_TIMEOUT = 5.0
-DEFAULT_MAX_IN_FLIGHT = 2
-DEFAULT_STAGGER_DELAY = 10.0  # seconds between batch starts during initial ramp
 
 
 @dataclass(frozen=True)
@@ -30,8 +27,6 @@ class BatchConfig:
         strategy: Batching strategy to use.
         chunk_size: Maximum items per batch.
         chunk_timeout: Seconds to wait for batch to fill before processing partial.
-        max_in_flight: Maximum concurrent batches (pipelined strategy only).
-        stagger_delay: Seconds between batch starts during initial ramp (pipelined only).
     """
 
     # Providers that only support sequential (LLM() is not thread-safe)
@@ -40,8 +35,6 @@ class BatchConfig:
     strategy: BatchStrategy = BatchStrategy.SEQUENTIAL
     chunk_size: int = DEFAULT_CHUNK_SIZE
     chunk_timeout: float = DEFAULT_CHUNK_TIMEOUT
-    max_in_flight: int = DEFAULT_MAX_IN_FLIGHT
-    stagger_delay: float = DEFAULT_STAGGER_DELAY
 
     def validate_for_provider(self, provider_kind: str) -> None:
         """Validate that this batching config is compatible with the provider.
@@ -64,8 +57,6 @@ class BatchConfig:
             "strategy": str(self.strategy),
             "chunk_size": self.chunk_size,
             "chunk_timeout": self.chunk_timeout,
-            "max_in_flight": self.max_in_flight,
-            "stagger_delay": self.stagger_delay,
         }
 
     @classmethod
@@ -78,29 +69,12 @@ class BatchConfig:
             strategy=strategy,
             chunk_size=data.get("chunk_size", DEFAULT_CHUNK_SIZE),
             chunk_timeout=data.get("chunk_timeout", DEFAULT_CHUNK_TIMEOUT),
-            max_in_flight=data.get("max_in_flight", DEFAULT_MAX_IN_FLIGHT),
-            stagger_delay=data.get("stagger_delay", DEFAULT_STAGGER_DELAY),
         )
 
     @classmethod
     def sequential(cls, chunk_size: int = DEFAULT_CHUNK_SIZE) -> BatchConfig:
         """Create sequential config."""
         return cls(strategy=BatchStrategy.SEQUENTIAL, chunk_size=chunk_size)
-
-    @classmethod
-    def pipelined(
-        cls,
-        chunk_size: int = DEFAULT_CHUNK_SIZE,
-        max_in_flight: int = DEFAULT_MAX_IN_FLIGHT,
-        stagger_delay: float = DEFAULT_STAGGER_DELAY,
-    ) -> BatchConfig:
-        """Create pipelined config for maximum GPU utilization."""
-        return cls(
-            strategy=BatchStrategy.PIPELINED,
-            chunk_size=chunk_size,
-            max_in_flight=max_in_flight,
-            stagger_delay=stagger_delay,
-        )
 
     @classmethod
     def continuous(cls) -> BatchConfig:

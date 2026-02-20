@@ -492,14 +492,21 @@ class VLLMServerProvider(InferenceProvider):
         Returns:
             List of output lists, one per request.
         """
+        from olmo_eval.inference.dispatch import dispatch_concurrent
+
         params = self._default_sampling_params(sampling_params)
-        semaphore = asyncio.Semaphore(self.max_concurrency)
 
         async def process(req: LMRequest) -> list[LMOutput]:
-            async with semaphore:
-                return await self._generate_single_async(req, params)
+            return await self._generate_single_async(req, params)
 
-        return await asyncio.gather(*[process(r) for r in requests])
+        results = await dispatch_concurrent(
+            requests,
+            process,
+            max_in_flight=self.max_concurrency,
+            max_retries=self.max_retries,
+        )
+        # Replace None with empty list for failed requests
+        return [r if r is not None else [] for r in results]
 
     def generate(
         self,
@@ -608,13 +615,16 @@ class VLLMServerProvider(InferenceProvider):
         Returns:
             List of output lists with logprobs populated.
         """
-        semaphore = asyncio.Semaphore(self.max_concurrency)
+        from olmo_eval.inference.dispatch import dispatch_concurrent
 
-        async def process(req: LMRequest) -> list[LMOutput]:
-            async with semaphore:
-                return await self._logprobs_single_async(req)
-
-        return await asyncio.gather(*[process(r) for r in requests])
+        results = await dispatch_concurrent(
+            requests,
+            self._logprobs_single_async,
+            max_in_flight=self.max_concurrency,
+            max_retries=self.max_retries,
+        )
+        # Replace None with empty list for failed requests
+        return [r if r is not None else [] for r in results]
 
     def logprobs(self, requests: list[LMRequest]) -> list[list[LMOutput]]:
         """Compute logprobs for continuations.

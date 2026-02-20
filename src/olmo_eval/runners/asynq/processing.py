@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import multiprocessing as mp
 from typing import TYPE_CHECKING
@@ -268,18 +267,24 @@ async def process_items(
 
     if chat_items:
         from olmo_eval.common.progress import ProgressLogger
+        from olmo_eval.inference.dispatch import dispatch_concurrent
 
-        semaphore = asyncio.Semaphore(max_concurrency or len(chat_items))
         progress = ProgressLogger(
             total=len(chat_items), desc="Processed", logger=log, color="green"
         )
 
         async def process(item: QueueItem) -> None:
-            async with semaphore:
-                await process_chat_request(item, harness, result_queue)
-                progress.update(1)
+            await process_chat_request(item, harness, result_queue)
 
-        await asyncio.gather(*[process(item) for item in chat_items])
+        def on_progress(done: int, total: int) -> None:
+            progress.update(1)
+
+        await dispatch_concurrent(
+            chat_items,
+            process,
+            max_in_flight=max_concurrency or len(chat_items),
+            on_progress=on_progress,
+        )
         progress.close()
 
         # Flush metrics after chat requests with stable batch hash
