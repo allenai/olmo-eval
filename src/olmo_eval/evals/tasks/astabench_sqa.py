@@ -328,7 +328,10 @@ def _citation_intersection(supporting: list[str], half_credit_ids: list[str]) ->
 def _filter_citation(citation: dict[str, Any], sec_text: str) -> bool:
     """Check if citation snippets are present and usable."""
     sec_text_alpha = re.sub(r"[^a-zA-Z]", "", sec_text).lower()
-    snippets_alpha = [re.sub(r"[^a-zA-Z]", "", s).lower() for s in citation.get("snippets", [])]
+    raw_snippets = citation.get("snippets", [])
+    if isinstance(raw_snippets, str):
+        raw_snippets = [raw_snippets]
+    snippets_alpha = [re.sub(r"[^a-zA-Z]", "", s).lower() for s in raw_snippets]
     return bool(
         citation.get("snippets")
         and not any(s in sec_text_alpha for s in snippets_alpha)
@@ -726,12 +729,15 @@ class AstaBenchSQA(Task):
                         citations.append({"id": cit_id, "snippets": snippet_text})
                     else:
                         title = c.get("title", "")
-                        citations.append(
-                            {
-                                "id": cit_id,
-                                "snippets": f"{JUST_HAS_A_TITLE}{title}",
-                            }
-                        )
+                        if title:
+                            citations.append(
+                                {
+                                    "id": cit_id,
+                                    "snippets": f"{JUST_HAS_A_TITLE}{title}",
+                                }
+                            )
+                        else:
+                            citations.append({"id": cit_id, "snippets": ""})
 
                 clean_text = clean_sentence(sec_text)
                 result = score_citation_group(judge_fn, clean_text, citations)
