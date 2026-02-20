@@ -213,6 +213,10 @@ def inspect_instance(
 
     renderables: list[Any] = []
 
+    # Use provided limit or default (first 100 + last 100 chars)
+    half = max_string_length // 2 if max_string_length > 0 else DEFAULT_STRING_HALF
+    limit = max_string_length if max_string_length > 0 else half * 2
+
     def add_field(name: str, value: Any) -> None:
         """Add a field with its label and value."""
         if renderables:
@@ -225,8 +229,7 @@ def inspect_instance(
             json_str = json.dumps(value, indent=2, ensure_ascii=False)
             renderables.append(Syntax(json_str, "json", theme="ansi_dark", word_wrap=True))
         elif isinstance(value, str):
-            if max_string_length > 0 and len(value) > max_string_length:
-                half = max_string_length // 2
+            if len(value) > limit:
                 truncated, was_truncated = truncate_string(value, half=half)
                 if was_truncated:
                     renderables.append(Text(f"{truncated}\n({len(value)} chars total)"))
@@ -319,7 +322,9 @@ def inspect_request(
 
     add_field("request_type", request.request_type.name)
 
+    # Use provided limit or default (first 100 + last 100 chars)
     half = max_string_length // 2 if max_string_length > 0 else DEFAULT_STRING_HALF
+    limit = max_string_length if max_string_length > 0 else half * 2
 
     if request.messages:
         # Format messages nicely
@@ -327,27 +332,24 @@ def inspect_request(
         for msg in request.messages:
             role = msg.get("role", "unknown")
             content = msg.get("content", "")
-            if (
-                isinstance(content, str)
-                and max_string_length > 0
-                and len(content) > max_string_length
-            ):
+            if isinstance(content, str) and len(content) > limit:
                 content, _ = truncate_string(content, half=half)
             msg_strs.append(f"[{role}]: {content}")
         add_field("messages", "\n".join(msg_strs))
 
     if request.prompt:
         prompt_val = request.prompt
-        if max_string_length > 0 and len(prompt_val) > max_string_length:
+        if len(prompt_val) > limit:
+            original_len = len(prompt_val)
             prompt_val, _ = truncate_string(prompt_val, half=half)
-            prompt_val = f"{prompt_val}\n({len(request.prompt)} chars total)"
+            prompt_val = f"{prompt_val}\n({original_len} chars total)"
         add_field("prompt", prompt_val)
 
     if request.continuations:
         # Show each continuation on its own line
         cont_strs = []
         for c in request.continuations:
-            if max_string_length > 0 and len(c) > max_string_length:
+            if len(c) > limit:
                 truncated, _ = truncate_string(c, half=half)
                 cont_strs.append(truncated)
             else:
@@ -357,9 +359,10 @@ def inspect_request(
     # Agent-specific fields
     if request.system_prompt:
         prompt_val = request.system_prompt
-        if max_string_length > 0 and len(prompt_val) > max_string_length:
+        if len(prompt_val) > limit:
+            original_len = len(prompt_val)
             prompt_val, _ = truncate_string(prompt_val, half=half)
-            prompt_val = f"{prompt_val}\n({len(request.system_prompt)} chars total)"
+            prompt_val = f"{prompt_val}\n({original_len} chars total)"
         add_field("system_prompt", prompt_val)
 
     if request.tools:
@@ -422,6 +425,176 @@ def instance_to_dict(instance: Instance) -> dict[str, Any]:
         result["expected_final_state"] = instance.expected_final_state
 
     return result
+
+
+def _get_isolated_venv_python() -> str | None:
+    """Get the Python executable for the isolated vLLM venv if available."""
+    import os
+
+    # Check VLLM_PYTHON env var first
+    vllm_python = os.environ.get("VLLM_PYTHON")
+    if vllm_python and os.path.isfile(vllm_python):
+        return vllm_python
+
+    # Check standard location
+    standard_path = "/opt/vllm-venv/bin/python"
+    if os.path.isfile(standard_path):
+        return standard_path
+
+    return None
+
+
+class SubprocessTokenizer:
+    """Tokenizer that runs in an isolated venv via subprocess.
+
+    Used when transformers is not available in the main environment but is
+    available in an isolated venv (e.g., vLLM's isolated environment).
+    """
+
+    def __init__(self, tokenizer_name: str, python_path: str) -> None:
+        self._tokenizer_name = tokenizer_name
+        self._python_path = python_path
+        self._special_ids: set[int] | None = None
+
+    def _run_tokenizer_script(self, script: str) -> str:
+        """Run a Python script in the isolated venv and return stdout."""
+        import subprocess
+
+        result = subprocess.run(
+            [self._python_path, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Tokenizer subprocess failed: {result.stderr}")
+        return result.stdout.strip()
+
+    def encode(self, text: str, add_special_tokens: bool = True) -> list[int]:
+        """Encode text to token IDs using subprocess."""
+        import base64
+        import json
+
+        # Encode text as base64 to avoid shell escaping issues
+        text_b64 = base64.b64encode(text.encode()).decode()
+
+        script = f"""
+import base64
+import json
+from transformers import AutoTokenizer
+tokenizer = AutoTokenizer.from_pretrained("{self._tokenizer_name}", trust_remote_code=True)
+text = base64.b64decode("{text_b64}").decode()
+tokens = tokenizer.encode(text, add_special_tokens={add_special_tokens})
+print(json.dumps(tokens))
+"""
+        output = self._run_tokenizer_script(script)
+        return json.loads(output)
+
+    def decode(self, token_ids: list[int], skip_special_tokens: bool = False) -> str:
+        """Decode token IDs to text using subprocess."""
+        import json
+
+        token_ids_json = json.dumps(token_ids)
+
+        script = f"""
+import json
+from transformers import AutoTokenizer
+tokenizer = AutoTokenizer.from_pretrained("{self._tokenizer_name}", trust_remote_code=True)
+token_ids = {token_ids_json}
+text = tokenizer.decode(token_ids, skip_special_tokens={skip_special_tokens})
+print(text, end='')
+"""
+        return self._run_tokenizer_script(script)
+
+    def apply_chat_template(
+        self,
+        messages: list[dict[str, str]],
+        tokenize: bool = False,
+        add_generation_prompt: bool = True,
+    ) -> str | list[int]:
+        """Apply chat template using subprocess."""
+        import json
+
+        messages_json = json.dumps(messages)
+
+        script = f"""
+import json
+from transformers import AutoTokenizer
+tokenizer = AutoTokenizer.from_pretrained("{self._tokenizer_name}", trust_remote_code=True)
+messages = {messages_json}
+result = tokenizer.apply_chat_template(
+    messages,
+    tokenize={tokenize},
+    add_generation_prompt={add_generation_prompt},
+)
+if isinstance(result, list):
+    print(json.dumps(result))
+else:
+    print(result, end='')
+"""
+        output = self._run_tokenizer_script(script)
+        if tokenize:
+            import json
+
+            return json.loads(output)
+        return output
+
+    @property
+    def all_special_ids(self) -> set[int]:
+        """Get all special token IDs."""
+        if self._special_ids is None:
+            import json
+
+            script = f"""
+import json
+from transformers import AutoTokenizer
+tokenizer = AutoTokenizer.from_pretrained("{self._tokenizer_name}", trust_remote_code=True)
+print(json.dumps(list(tokenizer.all_special_ids)))
+"""
+            output = self._run_tokenizer_script(script)
+            self._special_ids = set(json.loads(output))
+        return self._special_ids
+
+
+def _load_tokenizer_from_isolated_venv(tokenizer_name: str, logger: Any) -> Any | None:
+    """Try to load a tokenizer using the isolated vLLM venv.
+
+    Args:
+        tokenizer_name: HuggingFace tokenizer name or path.
+        logger: Logger for warnings/errors.
+
+    Returns:
+        A SubprocessTokenizer if isolated venv is available, None otherwise.
+    """
+    python_path = _get_isolated_venv_python()
+    if python_path is None:
+        logger.warning(
+            "transformers not available and no isolated venv found. "
+            "Token inspection will be skipped."
+        )
+        return None
+
+    try:
+        # Verify the isolated venv has transformers
+        import subprocess
+
+        result = subprocess.run(
+            [python_path, "-c", "import transformers"],
+            capture_output=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                f"Isolated venv at {python_path} does not have transformers installed. "
+                "Token inspection will be skipped."
+            )
+            return None
+
+        logger.info(f"Using isolated venv tokenizer via {python_path}")
+        return SubprocessTokenizer(tokenizer_name, python_path)
+    except Exception as e:
+        logger.warning(f"Failed to initialize isolated venv tokenizer: {e}")
+        return None
 
 
 def load_tokenizer(tokenizer_name: str, trust_remote_code: bool = True) -> Any:
@@ -792,6 +965,10 @@ def inspect_response(
 
     renderables: list[Any] = []
 
+    # Use provided limit or default (first 100 + last 100 chars)
+    half = max_string_length // 2 if max_string_length > 0 else DEFAULT_STRING_HALF
+    limit = max_string_length if max_string_length > 0 else half * 2
+
     def add_field(name: str, value: Any) -> None:
         """Add a field with its label and value."""
         if renderables:
@@ -804,8 +981,7 @@ def inspect_response(
             json_str = json.dumps(value, indent=2, ensure_ascii=False)
             renderables.append(Syntax(json_str, "json", theme="ansi_dark", word_wrap=True))
         elif isinstance(value, str):
-            if max_string_length > 0 and len(value) > max_string_length:
-                half = max_string_length // 2
+            if len(value) > limit:
                 truncated, was_truncated = truncate_string(value, half=half)
                 if was_truncated:
                     renderables.append(Text(f"{truncated}\n({len(value)} chars total)"))
@@ -894,6 +1070,9 @@ def inspect_task_instances(
         tokenizer_name = provider_config.tokenizer or provider_config.model
         try:
             tokenizer = load_tokenizer(tokenizer_name)
+        except ImportError:
+            # transformers not available - try isolated venv
+            tokenizer = _load_tokenizer_from_isolated_venv(tokenizer_name, logger)
         except Exception as e:
             logger.warning(f"Could not load tokenizer: {e}")
 
