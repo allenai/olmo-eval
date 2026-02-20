@@ -527,7 +527,7 @@ class SubprocessTokenizer:
         # Wait for ready signal
         ready_line = self._proc.stdout.readline()  # type: ignore[union-attr]
         if not ready_line:
-            stderr = self._proc.stderr.read() if self._proc.stderr else ""  # type: ignore[union-attr]
+            stderr = self._proc.stderr.read() if self._proc.stderr else ""
             raise RuntimeError(f"Tokenizer subprocess failed to start: {stderr}")
 
         ready = json.loads(ready_line)
