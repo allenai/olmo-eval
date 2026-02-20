@@ -81,6 +81,7 @@ def collect_install_extras(
     *,
     store: bool = False,
     sandbox: bool = False,
+    metrics: bool = False,
     backend_name: str | None = None,
     provider_extras: list[str] | None = None,
 ) -> list[str]:
@@ -89,6 +90,7 @@ def collect_install_extras(
     Args:
         store: Whether storage is enabled.
         sandbox: Whether sandbox is enabled.
+        metrics: Whether metrics collection is enabled.
         backend_name: Harness backend name (e.g., "openai_agents").
         provider_extras: Provider-specific extras.
 
@@ -101,6 +103,8 @@ def collect_install_extras(
         extras.append("storage")
     if sandbox:
         extras.append("sandbox")
+    if metrics:
+        extras.append("postgres")
 
     if backend_name:
         from olmo_eval.harness import get_backend_extras
@@ -352,6 +356,7 @@ class JobConfigAssembler:
         # Determine backend and sandbox requirements from harness preset
         backend_name: str | None = None
         sandbox_enabled = False
+        metrics_enabled = False
         harness_provider_package: str | None = None
         harness_provider_deps: list[str] = []
         if self.config.harness:
@@ -364,6 +369,7 @@ class JobConfigAssembler:
                 preset = _apply_harness_overrides(preset, self.config.harness_overrides)
             backend_name = preset.backend
             sandbox_enabled = bool(preset.sandboxes)
+            metrics_enabled = preset.metrics is not None and preset.metrics.enabled
             harness_provider_package = preset.provider.package
             harness_provider_deps = list(preset.provider.dependencies)
 
@@ -381,6 +387,7 @@ class JobConfigAssembler:
         install_extras = collect_install_extras(
             store=self.config.store,
             sandbox=sandbox_enabled,
+            metrics=metrics_enabled,
             backend_name=backend_name,
             provider_extras=provider_extras,
         )
