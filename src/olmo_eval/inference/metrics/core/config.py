@@ -14,7 +14,7 @@ METRICS_SUBDIR = "metrics"
 METRICS_FILENAME_SUFFIX = "-inference.jsonl"
 
 
-class ReporterName(StrEnum):
+class ReporterType(StrEnum):
     """Available metrics reporters."""
 
     CONSOLE = "console"
@@ -39,7 +39,7 @@ class MetricsConfig:
     """
 
     enabled: bool = True
-    reporters: tuple[str | dict[str, Any], ...] = (ReporterName.JSONL,)
+    reporters: tuple[str | dict[str, Any], ...] = (ReporterType.JSONL, ReporterType.CONSOLE)
     collect_gpu: bool = False
 
     # Output directory (set at runtime, used by file-based reporters)
@@ -62,7 +62,7 @@ class MetricsConfig:
     # User-defined tags (for special filtering beyond core metadata)
     tags: dict[str, str] = field(default_factory=dict)
 
-    def has_reporter(self, name: ReporterName | str) -> bool:
+    def has_reporter(self, name: ReporterType | str) -> bool:
         """Check if a specific reporter is configured.
 
         Args:
@@ -139,7 +139,7 @@ class MetricsConfig:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> MetricsConfig:
         """Create from dictionary."""
-        reporters = data.get("reporters", [ReporterName.JSONL])
+        reporters = data.get("reporters", [ReporterType.JSONL])
         return cls(
             enabled=data.get("enabled", True),
             reporters=tuple(reporters),

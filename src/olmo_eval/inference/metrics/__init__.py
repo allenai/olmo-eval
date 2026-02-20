@@ -16,27 +16,23 @@ Usage:
 """
 
 from .core.collector import InstrumentedHarness, InstrumentedProvider
-from .core.config import MetricsConfig, ReporterName
+from .core.config import MetricsConfig, ReporterType
 from .core.context import MetricsContext, collect_metrics
 from .core.gpu import GPUMonitor, collect_gpu_snapshots, is_gpu_available
 from .core.registry import reporter_registry
 from .core.schema import BatchMetrics, GPUSnapshot, RequestMetrics
 
 __all__ = [
-    # Main API
     "collect_metrics",
     "MetricsContext",
     "MetricsConfig",
-    "ReporterName",
-    # Schema
+    "ReporterType",
     "RequestMetrics",
     "BatchMetrics",
     "GPUSnapshot",
-    # GPU
     "GPUMonitor",
     "collect_gpu_snapshots",
     "is_gpu_available",
-    # Advanced
     "InstrumentedProvider",
     "InstrumentedHarness",
     "reporter_registry",

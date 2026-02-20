@@ -369,12 +369,12 @@ class JobConfigAssembler:
                 preset = _apply_harness_overrides(preset, self.config.harness_overrides)
             backend_name = preset.backend
             sandbox_enabled = bool(preset.sandboxes)
-            from olmo_eval.inference.metrics import ReporterName
+            from olmo_eval.inference.metrics import ReporterType
 
             metrics_enabled = (
                 preset.metrics is not None
                 and preset.metrics.enabled
-                and preset.metrics.has_reporter(ReporterName.POSTGRES)
+                and preset.metrics.has_reporter(ReporterType.POSTGRES)
             )
             harness_provider_package = preset.provider.package
             harness_provider_deps = list(preset.provider.dependencies)

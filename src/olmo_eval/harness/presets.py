@@ -65,7 +65,7 @@ class HarnessPresets:
 
     default = HarnessConfig(
         name="default",
-        metrics=MetricsConfig(),  # Defaults to jsonl reporter
+        metrics=MetricsConfig(),
     )
 
     @lazy
