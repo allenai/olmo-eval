@@ -278,6 +278,7 @@ def scoring_worker(
         progress: ProgressLogger | None = None
         batch: list[ScoringItem] = []
         batch_size = max_concurrency * 2  # Buffer 2x concurrency for efficiency
+        min_batch_for_flush = min(max_concurrency, total_instances)
 
         try:
             while True:
@@ -285,8 +286,8 @@ def scoring_worker(
                 try:
                     item: ScoringItem | None = scoring_queue.get(timeout=0.1)
                 except queue.Empty:
-                    # Timeout - flush any pending batch
-                    if batch:
+                    # Timeout - flush batch only if we have enough items to utilize concurrency
+                    if len(batch) >= min_batch_for_flush:
                         if progress is None:
                             progress = ProgressLogger(
                                 total=total_instances,

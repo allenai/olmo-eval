@@ -72,6 +72,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
     save_predictions: bool = True
     save_requests: bool = True
 
+    # Shuffle seed for deterministic instance ordering (enables future checkpointing)
+    shuffle_seed: int = 42
+
     # Instance inspection options
     inspect_instance: bool = False
     inspect_formatted: bool = False
@@ -157,8 +160,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         manager = ctx.Manager()
         init_times = manager.dict()
 
-        # Shuffle and enqueue items
-        random.shuffle(items)
+        # Shuffle with seed for deterministic ordering (enables future checkpointing)
+        rng = random.Random(self.shuffle_seed)
+        rng.shuffle(items)
         for item in items:
             item_queue.put(item)
 

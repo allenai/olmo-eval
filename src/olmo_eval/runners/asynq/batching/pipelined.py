@@ -72,8 +72,10 @@ class PipelinedStrategy(BatchingStrategy):
                 if saw_shutdown:
                     pending_shutdown = True
 
-            # Check if any in-flight batch completed
-            completed_any = bool(done & in_flight)
+            # Check if any in-flight batch completed and remove them
+            completed_tasks = done & in_flight
+            completed_any = bool(completed_tasks)
+            in_flight -= completed_tasks
 
             # After initial ramp, completions trigger new batch starts
             # This maintains the stagger established during ramp
@@ -109,13 +111,11 @@ class PipelinedStrategy(BatchingStrategy):
                     )
                 )
                 in_flight.add(task)
-                task.add_done_callback(in_flight.discard)
                 pending_batch = None
 
                 # Check if initial ramp is complete (reached max capacity)
                 if not initial_ramp_complete and len(in_flight) >= self.config.max_in_flight:
                     initial_ramp_complete = True
-                    worker_logger.info("Initial ramp complete, switching to completion-driven mode")
 
                 # Start collecting next batch immediately (if not shutdown)
                 if not pending_shutdown and collect_task is None:
