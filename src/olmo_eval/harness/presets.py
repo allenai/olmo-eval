@@ -72,7 +72,7 @@ class HarnessPresets:
             name=name,
             provider=ProviderConfig(kind=ProviderKind.VLLM_SERVER),
             metrics=MetricsConfig(),
-            batching=BatchConfig.pipelined(max_in_flight=1, chunk_size=64),
+            batching=BatchConfig.pipelined(max_in_flight=2, chunk_size=64),
         )
 
     @lazy

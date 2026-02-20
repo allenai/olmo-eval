@@ -17,7 +17,7 @@ class BatchStrategy(StrEnum):
 
 # Default values
 DEFAULT_CHUNK_SIZE = 256
-DEFAULT_CHUNK_TIMEOUT = 30.0
+DEFAULT_CHUNK_TIMEOUT = 5.0
 DEFAULT_MAX_IN_FLIGHT = 2
 
 
