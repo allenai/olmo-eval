@@ -53,7 +53,11 @@ class Harness:
                 from olmo_eval.inference.metrics import InstrumentedProvider
 
                 # InstrumentedProvider wraps provider and implements the same interface
-                self._provider = InstrumentedProvider(provider)  # type: ignore[assignment]
+                instrumented = InstrumentedProvider(provider)
+                # Enable GPU monitoring if configured
+                if self.config.metrics.collect_gpu:
+                    instrumented.enable_gpu_monitoring(interval_s=1.0)
+                self._provider = instrumented  # type: ignore[assignment]
             else:
                 self._provider = provider
         return self._provider  # type: ignore[return-value]
@@ -204,12 +208,8 @@ class Harness:
         from olmo_eval.inference.metrics.core.registry import reporter_registry
         from olmo_eval.inference.metrics.core.stats import compute_batch_metrics
 
-        # Collect GPU snapshots if enabled
-        gpu_snapshots: tuple = ()
-        if self.config.metrics.collect_gpu:
-            from olmo_eval.inference.metrics.core.gpu import collect_gpu_snapshots
-
-            gpu_snapshots = collect_gpu_snapshots()
+        # Get GPU snapshots collected during inference
+        gpu_snapshots = self._provider.get_gpu_snapshots()
 
         batch = compute_batch_metrics(
             metrics, wall_clock_s=0.0, config=self.config.metrics, gpu_snapshots=gpu_snapshots

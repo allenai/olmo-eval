@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import threading
 from datetime import UTC, datetime
 
 from .schema import GPUSnapshot
@@ -46,6 +47,65 @@ def _ensure_nvml() -> bool:
         _nvml_available = False
 
     return _nvml_available
+
+
+class GPUMonitor:
+    """Background thread that samples GPU metrics at regular intervals.
+
+    Usage:
+        monitor = GPUMonitor(interval_s=1.0)
+        monitor.start()
+        # ... do inference work ...
+        snapshots = monitor.stop()  # Returns all collected snapshots
+    """
+
+    def __init__(self, interval_s: float = 1.0) -> None:
+        """Initialize the GPU monitor.
+
+        Args:
+            interval_s: Sampling interval in seconds.
+        """
+        self._interval_s = interval_s
+        self._snapshots: list[GPUSnapshot] = []
+        self._lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        """Start background sampling thread."""
+        if not _ensure_nvml():
+            return
+
+        self._stop_event.clear()
+        self._snapshots.clear()
+        self._thread = threading.Thread(target=self._sample_loop, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> tuple[GPUSnapshot, ...]:
+        """Stop sampling and return collected snapshots.
+
+        Returns:
+            Tuple of all GPU snapshots collected during monitoring.
+        """
+        if self._thread is None:
+            return ()
+
+        self._stop_event.set()
+        self._thread.join(timeout=2.0)
+        self._thread = None
+
+        with self._lock:
+            return tuple(self._snapshots)
+
+    def _sample_loop(self) -> None:
+        """Background sampling loop."""
+        while not self._stop_event.is_set():
+            snapshots = collect_gpu_snapshots()
+            if snapshots:
+                with self._lock:
+                    self._snapshots.extend(snapshots)
+            # Wait for next sample, but check stop_event frequently
+            self._stop_event.wait(timeout=self._interval_s)
 
 
 def collect_gpu_snapshots() -> tuple[GPUSnapshot, ...]:

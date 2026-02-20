@@ -18,7 +18,7 @@ Usage:
 from .core.collector import InstrumentedHarness, InstrumentedProvider
 from .core.config import MetricsConfig, ReporterName
 from .core.context import MetricsContext, collect_metrics
-from .core.gpu import collect_gpu_snapshots, is_gpu_available
+from .core.gpu import GPUMonitor, collect_gpu_snapshots, is_gpu_available
 from .core.registry import reporter_registry
 from .core.schema import BatchMetrics, GPUSnapshot, RequestMetrics
 
@@ -33,6 +33,7 @@ __all__ = [
     "BatchMetrics",
     "GPUSnapshot",
     # GPU
+    "GPUMonitor",
     "collect_gpu_snapshots",
     "is_gpu_available",
     # Advanced

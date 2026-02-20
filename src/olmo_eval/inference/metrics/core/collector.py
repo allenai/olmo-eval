@@ -5,7 +5,8 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from .schema import RequestMetrics
+from .gpu import GPUMonitor
+from .schema import GPUSnapshot, RequestMetrics
 from .timer import Timer
 
 if TYPE_CHECKING:
@@ -20,15 +21,36 @@ class InstrumentedProvider:
     This wrapper intercepts generate/agenerate calls to measure latency
     and collect token counts. All other attributes are forwarded to the
     underlying provider.
+
+    GPU monitoring can be enabled via enable_gpu_monitoring(). When enabled,
+    the monitor samples GPU metrics in a background thread during inference.
     """
 
     def __init__(self, provider: InferenceProvider) -> None:
         self._provider = provider
         self._request_metrics: list[RequestMetrics] = []
+        self._gpu_monitor: GPUMonitor | None = None
+        self._gpu_monitoring_enabled = False
 
     def __getattr__(self, name: str) -> Any:
         """Forward unknown attributes to the underlying provider."""
         return getattr(self._provider, name)
+
+    def enable_gpu_monitoring(self, interval_s: float = 1.0) -> None:
+        """Enable GPU metrics collection during inference.
+
+        Args:
+            interval_s: Sampling interval in seconds.
+        """
+        self._gpu_monitoring_enabled = True
+        self._gpu_monitor = GPUMonitor(interval_s=interval_s)
+
+    def disable_gpu_monitoring(self) -> None:
+        """Disable GPU metrics collection."""
+        self._gpu_monitoring_enabled = False
+        if self._gpu_monitor is not None:
+            self._gpu_monitor.stop()
+            self._gpu_monitor = None
 
     def generate(
         self,
@@ -36,6 +58,8 @@ class InstrumentedProvider:
         sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
         """Generate with timing instrumentation."""
+        self._start_gpu_monitor_if_needed()
+
         with Timer() as t:
             outputs = self._provider.generate(requests, sampling_params)
 
@@ -48,6 +72,8 @@ class InstrumentedProvider:
         sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
         """Async generate with timing instrumentation."""
+        self._start_gpu_monitor_if_needed()
+
         with Timer() as t:
             outputs = await self._provider.agenerate(requests, sampling_params)
 
@@ -55,12 +81,36 @@ class InstrumentedProvider:
         return outputs
 
     def get_metrics(self) -> list[RequestMetrics]:
-        """Get collected metrics."""
+        """Get collected request metrics."""
         return list(self._request_metrics)
 
+    def get_gpu_snapshots(self) -> tuple[GPUSnapshot, ...]:
+        """Stop GPU monitor and return collected snapshots.
+
+        Returns:
+            Tuple of GPU snapshots collected since monitoring started.
+        """
+        if self._gpu_monitor is None:
+            return ()
+        return self._gpu_monitor.stop()
+
     def clear_metrics(self) -> None:
-        """Clear collected metrics."""
+        """Clear collected metrics and restart GPU monitor if enabled."""
         self._request_metrics.clear()
+        # Stop current monitor to clear its snapshots
+        if self._gpu_monitor is not None:
+            self._gpu_monitor.stop()
+            # Create fresh monitor for next batch
+            self._gpu_monitor = GPUMonitor(interval_s=self._gpu_monitor._interval_s)
+
+    def _start_gpu_monitor_if_needed(self) -> None:
+        """Start GPU monitor if enabled and not already running."""
+        if (
+            self._gpu_monitoring_enabled
+            and self._gpu_monitor is not None
+            and self._gpu_monitor._thread is None
+        ):
+            self._gpu_monitor.start()
 
     def _collect_metrics(
         self,
