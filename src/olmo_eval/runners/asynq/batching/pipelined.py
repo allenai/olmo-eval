@@ -35,46 +35,94 @@ class PipelinedStrategy(BatchingStrategy):
     ) -> None:
         """Execute pipelined batching with overlapping batches."""
         from olmo_eval.runners.asynq.processing import process_items
+        from olmo_eval.runners.asynq.types import QueueItem as QueueItemType
 
         total_batches = math.ceil(total_instances / self.config.chunk_size)
         batch_num = 0
         in_flight: set[asyncio.Task] = set()
-        saw_shutdown = False
+
+        # Prefetch: always have the next batch ready
+        pending_batch: list[QueueItemType] | None = None
+        pending_shutdown = False
+        collect_task: asyncio.Task | None = asyncio.create_task(self.collect_batch(item_queue))
+
+        # For staggering: track when initial ramp is complete
+        # During initial ramp, we stagger batch starts to avoid synchronized completions
+        initial_ramp_complete = False
 
         while True:
-            # Collect next batch
-            batch, saw_shutdown = await self.collect_batch(item_queue)
+            # Wait for either: batch collection completes OR an in-flight task completes
+            wait_tasks: set[asyncio.Task] = set()
+            if collect_task is not None:
+                wait_tasks.add(collect_task)
+            wait_tasks.update(in_flight)
 
-            if not batch and saw_shutdown:
-                # Empty batch with shutdown - wait for in-flight and exit
+            if not wait_tasks:
                 break
 
-            if batch:
+            done, _ = await asyncio.wait(wait_tasks, return_when=asyncio.FIRST_COMPLETED)
+
+            # Check if batch collection completed
+            if collect_task in done:
+                batch, saw_shutdown = collect_task.result()
+                collect_task = None
+
+                if batch:
+                    pending_batch = batch
+                if saw_shutdown:
+                    pending_shutdown = True
+
+            # Check if any in-flight batch completed
+            completed_any = bool(done & in_flight)
+
+            # After initial ramp, completions trigger new batch starts
+            # This maintains the stagger established during ramp
+            if initial_ramp_complete:
+                can_start = (
+                    pending_batch is not None
+                    and len(in_flight) < self.config.max_in_flight
+                    and completed_any
+                )
+            else:
+                # During initial ramp: fill slots but with stagger delay
+                can_start = pending_batch is not None and len(in_flight) < self.config.max_in_flight
+
+            if can_start:
                 batch_num += 1
 
-                # Stagger batch starts to avoid synchronized completion times.
-                # Before starting batch N+1, let batch N make some progress.
-                if in_flight:
-                    await asyncio.sleep(1.0)
+                # During initial ramp, stagger batch starts to avoid synchronized completions
+                # After the first batch, wait for earlier batches to make progress
+                if not initial_ramp_complete and len(in_flight) > 0:
+                    # Stagger by waiting - this spaces out the initial batches
+                    # so they complete at different times
+                    stagger_seconds = self.config.stagger_delay
+                    worker_logger.info(f"Staggering batch start by {stagger_seconds}s")
+                    await asyncio.sleep(stagger_seconds)
 
                 worker_logger.info(
-                    f"Starting batch {batch_num}/{total_batches} ({len(batch)} items)"
+                    f"Starting batch {batch_num}/{total_batches} ({len(pending_batch)} items)"
                 )
 
-                # Start processing without waiting
                 task = asyncio.create_task(
-                    process_items(batch, harness, result_queue, max_concurrency, worker_logger)
+                    process_items(
+                        pending_batch, harness, result_queue, max_concurrency, worker_logger
+                    )
                 )
                 in_flight.add(task)
                 task.add_done_callback(in_flight.discard)
+                pending_batch = None
 
-                # If at capacity, wait for any one to complete
-                if len(in_flight) >= self.config.max_in_flight:
-                    _done, _pending = await asyncio.wait(
-                        in_flight, return_when=asyncio.FIRST_COMPLETED
-                    )
+                # Check if initial ramp is complete (reached max capacity)
+                if not initial_ramp_complete and len(in_flight) >= self.config.max_in_flight:
+                    initial_ramp_complete = True
+                    worker_logger.info("Initial ramp complete, switching to completion-driven mode")
 
-            if saw_shutdown:
+                # Start collecting next batch immediately (if not shutdown)
+                if not pending_shutdown and collect_task is None:
+                    collect_task = asyncio.create_task(self.collect_batch(item_queue))
+
+            # Exit conditions
+            if pending_shutdown and not in_flight and pending_batch is None:
                 break
 
         # Drain remaining in-flight batches
