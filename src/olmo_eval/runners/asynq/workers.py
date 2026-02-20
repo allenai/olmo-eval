@@ -157,7 +157,7 @@ def inference_worker(
 
             worker_logger.info(
                 f"Inference worker ready (strategy={batch_config.strategy}, "
-                f"chunk_size={batch_config.chunk_size})"
+                f"chunk_size={batch_config.chunk_size}, max_in_flight={max_concurrency})"
             )
             asyncio.run(
                 strategy.run(

@@ -10,12 +10,12 @@ from typing import Any, ClassVar
 class BatchStrategy(StrEnum):
     """Available batching strategies."""
 
-    SEQUENTIAL = "sequential"  # One batch at a time, wait for completion
-    CONTINUOUS = "continuous"  # No batching, stream directly to provider
+    BATCHED = "batched"  # Process in chunks with continuous dispatch
+    STREAMING = "streaming"  # Stream items directly to provider
 
 
 # Default values
-DEFAULT_CHUNK_SIZE = 256
+DEFAULT_CHUNK_SIZE = 64
 DEFAULT_CHUNK_TIMEOUT = 5.0
 
 
@@ -32,7 +32,7 @@ class BatchConfig:
     # Providers that only support sequential (LLM() is not thread-safe)
     _SEQUENTIAL_ONLY: ClassVar[frozenset[str]] = frozenset({"vllm", "hf"})
 
-    strategy: BatchStrategy = BatchStrategy.SEQUENTIAL
+    strategy: BatchStrategy = BatchStrategy.BATCHED
     chunk_size: int = DEFAULT_CHUNK_SIZE
     chunk_timeout: float = DEFAULT_CHUNK_TIMEOUT
 
@@ -45,10 +45,10 @@ class BatchConfig:
         Raises:
             ValueError: If the batching strategy is not supported by the provider.
         """
-        if provider_kind in self._SEQUENTIAL_ONLY and self.strategy != BatchStrategy.SEQUENTIAL:
+        if provider_kind in self._SEQUENTIAL_ONLY and self.strategy != BatchStrategy.BATCHED:
             raise ValueError(
-                f"Provider '{provider_kind}' only supports sequential batching. "
-                f"Use vllm_server for {self.strategy} batching."
+                f"Provider '{provider_kind}' only supports batched processing. "
+                f"Use vllm_server for streaming."
             )
 
     def to_dict(self) -> dict[str, Any]:
@@ -62,7 +62,7 @@ class BatchConfig:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BatchConfig:
         """Create from dictionary."""
-        strategy = data.get("strategy", BatchStrategy.SEQUENTIAL)
+        strategy = data.get("strategy", BatchStrategy.BATCHED)
         if isinstance(strategy, str):
             strategy = BatchStrategy(strategy)
         return cls(
@@ -72,11 +72,11 @@ class BatchConfig:
         )
 
     @classmethod
-    def sequential(cls, chunk_size: int = DEFAULT_CHUNK_SIZE) -> BatchConfig:
-        """Create sequential config."""
-        return cls(strategy=BatchStrategy.SEQUENTIAL, chunk_size=chunk_size)
+    def batched(cls, chunk_size: int = DEFAULT_CHUNK_SIZE) -> BatchConfig:
+        """Create batched config with continuous dispatch within each chunk."""
+        return cls(strategy=BatchStrategy.BATCHED, chunk_size=chunk_size)
 
     @classmethod
-    def continuous(cls) -> BatchConfig:
-        """Create continuous config (no batching)."""
-        return cls(strategy=BatchStrategy.CONTINUOUS)
+    def streaming(cls) -> BatchConfig:
+        """Create streaming config (items sent directly to provider)."""
+        return cls(strategy=BatchStrategy.STREAMING)

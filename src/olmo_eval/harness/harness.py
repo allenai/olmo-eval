@@ -257,8 +257,9 @@ class Harness:
                     if resolved is not None:
                         reporter = reporter_registry.create(resolved)
                         # Initialize reporters that support eager connection
-                        if hasattr(reporter, "initialize"):
-                            reporter.initialize()
+                        init_fn = getattr(reporter, "initialize", None)
+                        if callable(init_fn):
+                            init_fn()
                         self._reporters.append(reporter)
         return self._reporters
 

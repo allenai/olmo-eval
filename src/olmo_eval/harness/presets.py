@@ -65,14 +65,14 @@ class HarnessPresets:
 
     @lazy
     def default(name: str) -> HarnessConfig:
-        """Default preset with vllm_server and sequential batching."""
+        """Default preset with vllm_server and batched processing."""
         from olmo_eval.runners.asynq.batching import BatchConfig
 
         return HarnessConfig(
             name=name,
             provider=ProviderConfig(kind=ProviderKind.VLLM_SERVER),
             metrics=MetricsConfig(),
-            batching=BatchConfig.sequential(),
+            batching=BatchConfig.batched(),
         )
 
     @lazy
