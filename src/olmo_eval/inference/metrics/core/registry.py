@@ -29,8 +29,14 @@ class ReporterRegistry:
 
             return JSONLReporter()
 
+        def postgres_factory() -> MetricsReporter:
+            from ..reporters.postgres import PostgresReporter
+
+            return PostgresReporter()
+
         self._factories["console"] = console_factory
         self._factories["jsonl"] = jsonl_factory
+        self._factories["postgres"] = postgres_factory
 
     def register(self, name: str, factory: Callable[[], MetricsReporter]) -> None:
         """Register a reporter factory.
