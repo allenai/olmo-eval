@@ -176,6 +176,7 @@ class Harness:
 
     async def cleanup(self) -> None:
         """Clean up resources held by the harness and its backend."""
+        self.shutdown_reporters()
         if self._backend is not None:
             await self._backend.cleanup()
 
@@ -206,7 +207,6 @@ class Harness:
             return
 
         # Initialize reporters and report
-        from olmo_eval.inference.metrics.core.registry import reporter_registry
         from olmo_eval.inference.metrics.core.stats import compute_batch_metrics
 
         # Get GPU snapshots collected during inference
@@ -220,29 +220,44 @@ class Harness:
             gpu_snapshots=gpu_snapshots,
         )
 
-        import contextlib
+        # Get or create cached reporters (reuse connections across batches)
+        reporters = self._get_reporters()
 
-        for reporter_config in self.config.metrics.reporters:
-            reporter = None
+        for reporter in reporters:
             try:
-                resolved = self._resolve_reporter_config(reporter_config)
-                if resolved is None:
-                    continue
-                reporter = reporter_registry.create(resolved)
                 reporter.report_batch(batch)
                 reporter.flush()
             except Exception as e:
                 import logging
 
                 logging.getLogger(__name__).warning(f"Failed to report metrics: {e}")
-            finally:
-                if reporter is not None:
-                    with contextlib.suppress(Exception):
-                        reporter.shutdown()
 
         # Clear metrics after reporting to avoid double-counting
         if clear:
             self._provider.clear_metrics()
+
+    def _get_reporters(self) -> list[Any]:
+        """Get or create cached metrics reporters."""
+        if not hasattr(self, "_reporters"):
+            from olmo_eval.inference.metrics.core.registry import reporter_registry
+
+            self._reporters: list[Any] = []
+            if self.config.metrics is not None:
+                for reporter_config in self.config.metrics.reporters:
+                    resolved = self._resolve_reporter_config(reporter_config)
+                    if resolved is not None:
+                        self._reporters.append(reporter_registry.create(resolved))
+        return self._reporters
+
+    def shutdown_reporters(self) -> None:
+        """Shutdown cached metrics reporters."""
+        import contextlib
+
+        if hasattr(self, "_reporters"):
+            for reporter in self._reporters:
+                with contextlib.suppress(Exception):
+                    reporter.shutdown()
+            self._reporters = []
 
     def _resolve_reporter_config(
         self, reporter_config: str | dict[str, Any]
