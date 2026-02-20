@@ -11,6 +11,7 @@ from olmo_eval.inference.providers.config import ProviderConfig
 if TYPE_CHECKING:
     from olmo_eval.common.types import ToolSchema
     from olmo_eval.inference.metrics import MetricsConfig
+    from olmo_eval.runners.asynq.batching import BatchConfig
 
     from .sandbox import SandboxConfig
     from .tools import Tool
@@ -43,6 +44,7 @@ class HarnessConfig:
     sandboxes: tuple[SandboxConfig, ...] = ()
     backend_kwargs: dict[str, Any] = field(default_factory=dict)
     metrics: MetricsConfig | None = None
+    batching: BatchConfig | None = None
 
     # Cache for resolved tools
     _resolved_tools_cache: tuple[Tool, ...] | None = field(
@@ -138,6 +140,8 @@ class HarnessConfig:
             d["backend_kwargs"] = self.backend_kwargs
         if self.metrics is not None:
             d["metrics"] = self.metrics.to_dict()
+        if self.batching is not None:
+            d["batching"] = self.batching.to_dict()
         return d
 
     @classmethod
@@ -151,6 +155,7 @@ class HarnessConfig:
             A new HarnessConfig instance.
         """
         from olmo_eval.inference.metrics import MetricsConfig
+        from olmo_eval.runners.asynq.batching import BatchConfig
 
         from .sandbox import SandboxConfig
 
@@ -160,6 +165,9 @@ class HarnessConfig:
 
         metrics_data = data.get("metrics")
         metrics = MetricsConfig.from_dict(metrics_data) if metrics_data else None
+
+        batching_data = data.get("batching")
+        batching = BatchConfig.from_dict(batching_data) if batching_data else None
 
         return cls(
             name=data.get("name", "default"),
@@ -175,6 +183,7 @@ class HarnessConfig:
             sandboxes=sandboxes,
             backend_kwargs=data.get("backend_kwargs", {}),
             metrics=metrics,
+            batching=batching,
         )
 
     def with_tools(self, *new_tools: Tool | str) -> HarnessConfig:
@@ -200,6 +209,7 @@ class HarnessConfig:
             sandboxes=self.sandboxes,
             backend_kwargs=self.backend_kwargs,
             metrics=self.metrics,
+            batching=self.batching,
         )
 
     def with_system_prompt(self, system_prompt: str) -> HarnessConfig:
@@ -225,6 +235,7 @@ class HarnessConfig:
             sandboxes=self.sandboxes,
             backend_kwargs=self.backend_kwargs,
             metrics=self.metrics,
+            batching=self.batching,
         )
 
     def with_provider(self, provider: ProviderConfig) -> HarnessConfig:
@@ -246,10 +257,11 @@ class HarnessConfig:
             required_secrets=self.required_secrets,
             max_turns=self.max_turns,
             max_concurrency=self.max_concurrency,
-            metrics=self.metrics,
             scoring_concurrency=self.scoring_concurrency,
             sandboxes=self.sandboxes,
             backend_kwargs=self.backend_kwargs,
+            metrics=self.metrics,
+            batching=self.batching,
         )
 
     def merge_provider(self, provider: ProviderConfig) -> HarnessConfig:
@@ -325,6 +337,33 @@ class HarnessConfig:
             sandboxes=self.sandboxes,
             backend_kwargs=self.backend_kwargs,
             metrics=metrics,
+            batching=self.batching,
+        )
+
+    def with_batching(self, batching: BatchConfig) -> HarnessConfig:
+        """Create a new config with updated batching configuration.
+
+        Args:
+            batching: The new batching configuration.
+
+        Returns:
+            New HarnessConfig with updated batching.
+        """
+        return HarnessConfig(
+            name=self.name,
+            provider=self.provider,
+            tools=self.tools,
+            system_prompt=self.system_prompt,
+            tool_choice=self.tool_choice,
+            backend=self.backend,
+            required_secrets=self.required_secrets,
+            max_turns=self.max_turns,
+            max_concurrency=self.max_concurrency,
+            scoring_concurrency=self.scoring_concurrency,
+            sandboxes=self.sandboxes,
+            backend_kwargs=self.backend_kwargs,
+            metrics=self.metrics,
+            batching=batching,
         )
 
 
@@ -342,6 +381,7 @@ def harness_config(
     sandboxes: Sequence[SandboxConfig] = (),
     backend_kwargs: dict[str, Any] | None = None,
     metrics: MetricsConfig | None = None,
+    batching: BatchConfig | None = None,
 ) -> HarnessConfig:
     """Create a HarnessConfig.
 
@@ -359,6 +399,7 @@ def harness_config(
         sandboxes: Sandbox configurations for isolated tool execution.
         backend_kwargs: Backend-specific kwargs (e.g., enable_compaction for openai_agents).
         metrics: Metrics collection configuration (None = no metrics).
+        batching: Batching strategy configuration (None = sequential).
 
     Returns:
         A new HarnessConfig instance.
@@ -377,4 +418,5 @@ def harness_config(
         sandboxes=tuple(sandboxes),
         backend_kwargs=backend_kwargs or {},
         metrics=metrics,
+        batching=batching,
     )

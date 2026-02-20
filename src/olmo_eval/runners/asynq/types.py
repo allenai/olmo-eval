@@ -18,12 +18,6 @@ SCORER_FATAL = "__SCORER_FATAL__"
 # Default concurrency for scoring worker
 DEFAULT_SCORING_CONCURRENCY = 8
 
-# Default chunk size for streaming processing (matches typical vLLM max_num_seqs)
-DEFAULT_CHUNK_SIZE = 256
-
-# Timeout for collecting items before processing partial chunk
-DEFAULT_CHUNK_TIMEOUT = 2.0
-
 
 @dataclass
 class QueueItem:
@@ -118,8 +112,6 @@ class ScoredResponse:
 
 
 __all__ = [
-    "DEFAULT_CHUNK_SIZE",
-    "DEFAULT_CHUNK_TIMEOUT",
     "DEFAULT_SCORING_CONCURRENCY",
     "WORKER_FATAL",
     "SCORER_FATAL",

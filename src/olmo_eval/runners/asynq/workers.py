@@ -3,123 +3,23 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import multiprocessing as mp
 import os
 import queue
 import time
 from multiprocessing.synchronize import Event as MPEvent
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from olmo_eval.harness import Harness
+from typing import Any
 
 from olmo_eval.common.logging import get_logger
 from olmo_eval.runners.asynq.types import (
-    DEFAULT_CHUNK_SIZE,
-    DEFAULT_CHUNK_TIMEOUT,
     DEFAULT_SCORING_CONCURRENCY,
     SCORER_FATAL,
     WORKER_FATAL,
-    QueueItem,
     ResultItem,
     ScoredResponse,
 )
 
 logger = get_logger(__name__)
-
-
-async def process_items_streaming(
-    item_queue: mp.Queue[QueueItem | None],
-    harness: Harness,
-    result_queue: mp.Queue[ResultItem],
-    max_concurrency: int | None,
-    worker_logger: logging.Logger,
-    total_instances: int,
-    chunk_size: int = DEFAULT_CHUNK_SIZE,
-    chunk_timeout: float = DEFAULT_CHUNK_TIMEOUT,
-) -> None:
-    """Process items in chunks with prefetching to maximize GPU utilization.
-
-    Uses double-buffered prefetching: while GPU processes batch N, the next
-    batch N+1 is collected in the background. This overlaps CPU work (queue
-    collection) with GPU compute to minimize idle time between batches.
-
-    Args:
-        item_queue: Queue of QueueItems (None signals shutdown).
-        harness: Harness instance for execution.
-        result_queue: Queue to put ResultItems.
-        max_concurrency: Maximum concurrent requests.
-        worker_logger: Logger with worker identification.
-        total_instances: Total number of instances to process.
-        chunk_size: Maximum items per chunk (default 256, matches vLLM max_num_seqs).
-        chunk_timeout: Seconds to wait for chunk to fill before processing partial.
-    """
-    import math
-
-    from olmo_eval.runners.asynq.processing import process_items
-
-    total_batches = math.ceil(total_instances / chunk_size)
-    batch_num = 0
-    saw_poison_pill = False
-
-    async def collect_batch() -> tuple[list[QueueItem], bool]:
-        """Collect items for next batch.
-
-        Returns:
-            Tuple of (items, saw_poison_pill). If saw_poison_pill is True,
-            the returned items are the final batch before shutdown.
-        """
-        items: list[QueueItem] = []
-        deadline = time.time() + chunk_timeout
-
-        def get_items_sync() -> tuple[list[QueueItem], bool]:
-            """Synchronous collection for use with run_in_executor."""
-            nonlocal deadline
-            while len(items) < chunk_size:
-                remaining = max(0.01, deadline - time.time())
-                try:
-                    item = item_queue.get(timeout=remaining)
-                    if item is None:
-                        return items, True
-                    items.append(item)
-                except queue.Empty:
-                    break
-            return items, False
-
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, get_items_sync)
-
-    # Collect first batch synchronously
-    current_batch, saw_poison_pill = await collect_batch()
-    if not current_batch:
-        return
-
-    while True:
-        # Start prefetching next batch BEFORE processing current (unless shutting down)
-        prefetch_task = None
-        if not saw_poison_pill:
-            prefetch_task = asyncio.create_task(collect_batch())
-
-        # Process current batch (GPU inference)
-        batch_num += 1
-        worker_logger.info(
-            f"Processing batch {batch_num}/{total_batches} ({len(current_batch)} items)"
-        )
-        await process_items(current_batch, harness, result_queue, max_concurrency, worker_logger)
-
-        # If we already saw shutdown signal, we're done
-        if saw_poison_pill:
-            return
-
-        # Get prefetched batch (should be ready or nearly ready)
-        next_batch, saw_poison_pill = await prefetch_task  # type: ignore[union-attr]
-
-        if not next_batch:
-            # No more items and no pending work
-            return
-
-        current_batch = next_batch
 
 
 def inference_worker(
@@ -245,9 +145,18 @@ def inference_worker(
             if harness_config.backend:
                 asyncio.run(harness.backend.initialize(harness_config))
 
-            worker_logger.info("Inference worker ready")
+            # Get batching strategy from config
+            from olmo_eval.runners.asynq.batching import BatchConfig, get_strategy
+
+            batch_config = harness_config.batching or BatchConfig()
+            strategy = get_strategy(batch_config)
+
+            worker_logger.info(
+                f"Inference worker ready (strategy={batch_config.strategy}, "
+                f"chunk_size={batch_config.chunk_size})"
+            )
             asyncio.run(
-                process_items_streaming(
+                strategy.run(
                     item_queue,
                     harness,
                     result_queue,
@@ -476,6 +385,5 @@ def scoring_worker(
 
 __all__ = [
     "inference_worker",
-    "process_items_streaming",
     "scoring_worker",
 ]

@@ -63,10 +63,16 @@ def lazy(fn: Callable[[str], HarnessConfig]) -> _Lazy:
 class HarnessPresets:
     """Harness presets. Access as HarnessPresets.name or get_harness_preset("name")."""
 
-    default = HarnessConfig(
-        name="default",
-        metrics=MetricsConfig(),
-    )
+    @lazy
+    def default(name: str) -> HarnessConfig:
+        """Default preset with pipelined batching for GPU utilization."""
+        from olmo_eval.runners.asynq.batching import BatchConfig
+
+        return HarnessConfig(
+            name=name,
+            metrics=MetricsConfig(),
+            batching=BatchConfig.pipelined(max_in_flight=4, chunk_size=64),
+        )
 
     @lazy
     def dr_tulu(name: str) -> HarnessConfig:
