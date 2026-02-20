@@ -51,19 +51,22 @@ class ReporterRegistry:
         """Create a reporter instance.
 
         Args:
-            name_or_config: Reporter name or dict with 'name' and config options.
+            name_or_config: Reporter name or dict with 'name' key and config options.
 
         Returns:
             Configured reporter instance.
 
         Raises:
+            ValueError: If config dict is missing 'name' key.
             KeyError: If reporter name is not registered.
         """
         if isinstance(name_or_config, str):
             name = name_or_config
             config: dict[str, Any] = {}
         else:
-            name = name_or_config.get("name", "console")
+            if "name" not in name_or_config:
+                raise ValueError(f"Reporter config dict must have 'name' key: {name_or_config}")
+            name = name_or_config["name"]
             config = {k: v for k, v in name_or_config.items() if k != "name"}
 
         if name not in self._factories:
@@ -77,6 +80,32 @@ class ReporterRegistry:
     def available(self) -> list[str]:
         """List available reporter names."""
         return list(self._factories.keys())
+
+    def validate(self, reporters: tuple[str | dict[str, Any], ...]) -> None:
+        """Validate that all reporter names are registered.
+
+        Args:
+            reporters: Tuple of reporter names or configs to validate.
+
+        Raises:
+            ValueError: If any reporter name is not registered.
+        """
+        for reporter in reporters:
+            if isinstance(reporter, str):
+                name = reporter
+            elif isinstance(reporter, dict):
+                if "name" not in reporter:
+                    raise ValueError(f"Reporter config dict must have 'name' key: {reporter}")
+                name = reporter["name"]
+            else:
+                raise ValueError(
+                    f"Reporter must be a string or dict, got: {type(reporter).__name__}"
+                )
+
+            if name not in self._factories:
+                raise ValueError(
+                    f"Unknown metrics reporter: '{name}'. Available reporters: {self.available()}"
+                )
 
 
 # Global registry instance

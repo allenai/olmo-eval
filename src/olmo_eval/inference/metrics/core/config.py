@@ -136,11 +136,24 @@ class MetricsConfig:
             d["tags"] = dict(self.tags)
         return d
 
+    def validate(self) -> None:
+        """Validate the metrics configuration.
+
+        Raises:
+            ValueError: If any reporter name is invalid.
+        """
+        if not self.enabled:
+            return
+
+        from .registry import reporter_registry
+
+        reporter_registry.validate(self.reporters)
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> MetricsConfig:
         """Create from dictionary."""
         reporters = data.get("reporters", [ReporterType.FILE])
-        return cls(
+        config = cls(
             enabled=data.get("enabled", True),
             reporters=tuple(reporters),
             collect_gpu=data.get("collect_gpu", False),
@@ -157,6 +170,8 @@ class MetricsConfig:
             author=data.get("author"),
             tags=data.get("tags", {}),
         )
+        config.validate()
+        return config
 
     def with_output_dir(self, output_dir: str) -> MetricsConfig:
         """Create a new config with output_dir set."""
