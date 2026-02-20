@@ -52,11 +52,15 @@ def get_provider_extras(model_spec: str, default_kind: str | None = None) -> lis
 
     provider_kind = get_provider_kind(model_spec, default_kind)
 
+    extras: list[str] = []
     if provider_kind:
         provider_extra = BACKEND_OPTIONAL_GROUPS.get(provider_kind)
         if provider_extra:
-            return [provider_extra]
-    return []
+            extras.append(provider_extra)
+        # vllm_server uses OpenAI client to communicate with vLLM's OpenAI-compatible API
+        if provider_kind == "vllm_server":
+            extras.append("clients")
+    return extras
 
 
 def get_provider_dependencies(model_spec: str) -> list[str]:
