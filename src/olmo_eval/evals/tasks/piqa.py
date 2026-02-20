@@ -132,17 +132,18 @@ def _format_rc(goal: str, answer: str | None = None) -> str:
         prompt += f" {answer}"
     return prompt
 
+
+register_variant("piqa", "rc")
+
 register_variant(
     "piqa",
-    "mc_olmo3base",
+    "mc",
     formatter=MultipleChoiceFormatter(),
-    num_fewshot=5,
-    fewshot_source="olmes_piqa_fixed",
 )
 
 register_variant(
     "piqa",
-    "rc_olmo3base",
+    "olmo3base",
     num_fewshot=5,
     fewshot_source="olmes_piqa_fixed",
 )
