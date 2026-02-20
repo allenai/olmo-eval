@@ -890,13 +890,11 @@ def inspect_tokens(
     lines.append(f"[bold]{len(tokens)} tokens[/bold]")
     lines.append("─" * 60)
 
-    truncated = False
     if max_tokens > 0 and len(tokens) > max_tokens:
         # Show first half and last half of max_tokens
         half = max_tokens // 2
         first_tokens = tokens[:half]
         last_tokens = tokens[-half:]
-        truncated = True
 
         # Add first tokens
         for token_id in first_tokens:
@@ -913,10 +911,6 @@ def inspect_tokens(
         # Show all tokens
         for token_id in tokens:
             lines.append(format_token(token_id))
-
-    if truncated:
-        half = max_tokens // 2
-        lines.append(f"\n[dim](showing first {half} and last {half} of {len(tokens)} tokens)[/dim]")
 
     # Build panel title
     if task_name and native_id is not None:

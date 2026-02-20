@@ -51,6 +51,12 @@ class PipelinedStrategy(BatchingStrategy):
 
             if batch:
                 batch_num += 1
+
+                # Stagger batch starts to avoid synchronized completion times.
+                # Before starting batch N+1, let batch N make some progress.
+                if in_flight:
+                    await asyncio.sleep(1.0)
+
                 worker_logger.info(
                     f"Starting batch {batch_num}/{total_batches} ({len(batch)} items)"
                 )
