@@ -215,7 +215,10 @@ class Harness:
             metrics, wall_clock_s=0.0, config=self.config.metrics, gpu_snapshots=gpu_snapshots
         )
 
+        import contextlib
+
         for reporter_config in self.config.metrics.reporters:
+            reporter = None
             try:
                 resolved = self._resolve_reporter_config(reporter_config)
                 if resolved is None:
@@ -223,11 +226,14 @@ class Harness:
                 reporter = reporter_registry.create(resolved)
                 reporter.report_batch(batch)
                 reporter.flush()
-                reporter.shutdown()
             except Exception as e:
                 import logging
 
                 logging.getLogger(__name__).warning(f"Failed to report metrics: {e}")
+            finally:
+                if reporter is not None:
+                    with contextlib.suppress(Exception):
+                        reporter.shutdown()
 
         # Clear metrics after reporting to avoid double-counting
         if clear:
@@ -244,17 +250,17 @@ class Harness:
             name = reporter_config.get("name", "console")
             config_dict = dict(reporter_config)
 
-        # For jsonl reporter, resolve path from metrics config if not set
-        if name == "jsonl" and "path" not in config_dict:
+        # For file reporter, resolve path from metrics config if not set
+        if name == "file" and "path" not in config_dict:
             path = self.config.metrics.get_metrics_path() if self.config.metrics else None
             if path is None:
                 import logging
 
                 logging.getLogger(__name__).warning(
-                    "JSONL reporter requires output_dir in MetricsConfig. Skipping."
+                    "File reporter requires output_dir in MetricsConfig. Skipping."
                 )
                 return None
-            config_dict["name"] = "jsonl"
+            config_dict["name"] = "file"
             config_dict["path"] = path
             return config_dict
 

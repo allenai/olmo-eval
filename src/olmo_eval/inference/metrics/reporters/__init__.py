@@ -1,7 +1,7 @@
 """Metrics reporters."""
 
 from .console import ConsoleReporter
-from .jsonl import JSONLReporter
-from .postgres import PostgresReporter
+from .db import DbReporter
+from .file import FileReporter
 
-__all__ = ["ConsoleReporter", "JSONLReporter", "PostgresReporter"]
+__all__ = ["ConsoleReporter", "DbReporter", "FileReporter"]

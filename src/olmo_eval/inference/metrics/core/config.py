@@ -18,8 +18,8 @@ class ReporterType(StrEnum):
     """Available metrics reporters."""
 
     CONSOLE = "console"
-    JSONL = "jsonl"
-    POSTGRES = "postgres"
+    FILE = "file"
+    DB = "db"
 
 
 @hide_unset()
@@ -39,7 +39,7 @@ class MetricsConfig:
     """
 
     enabled: bool = True
-    reporters: tuple[str | dict[str, Any], ...] = (ReporterType.JSONL, ReporterType.CONSOLE)
+    reporters: tuple[str | dict[str, Any], ...] = (ReporterType.FILE, ReporterType.CONSOLE)
     collect_gpu: bool = False
 
     # Output directory (set at runtime, used by file-based reporters)
@@ -139,7 +139,7 @@ class MetricsConfig:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> MetricsConfig:
         """Create from dictionary."""
-        reporters = data.get("reporters", [ReporterType.JSONL])
+        reporters = data.get("reporters", [ReporterType.FILE])
         return cls(
             enabled=data.get("enabled", True),
             reporters=tuple(reporters),

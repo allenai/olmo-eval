@@ -374,7 +374,7 @@ class JobConfigAssembler:
             metrics_enabled = (
                 preset.metrics is not None
                 and preset.metrics.enabled
-                and preset.metrics.has_reporter(ReporterType.POSTGRES)
+                and preset.metrics.has_reporter(ReporterType.DB)
             )
             harness_provider_package = preset.provider.package
             harness_provider_deps = list(preset.provider.dependencies)

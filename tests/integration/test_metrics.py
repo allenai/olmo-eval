@@ -9,8 +9,8 @@ import pytest
 
 from olmo_eval.inference.metrics.core.schema import BatchMetrics, GPUSnapshot, RequestMetrics
 from olmo_eval.inference.metrics.reporters.console import ConsoleReporter
-from olmo_eval.inference.metrics.reporters.jsonl import JSONLReporter
-from olmo_eval.inference.metrics.reporters.postgres import PostgresReporter
+from olmo_eval.inference.metrics.reporters.db import DbReporter
+from olmo_eval.inference.metrics.reporters.file import FileReporter
 from olmo_eval.storage.backends.postgres.metrics_models import (
     InferenceRequestMetric,
     InferenceRun,
@@ -111,13 +111,13 @@ def sample_batch_metrics() -> BatchMetrics:
     )
 
 
-class TestPostgresReporter:
-    """Integration tests for PostgresReporter."""
+class TestDbReporter:
+    """Integration tests for DbReporter."""
 
     @pytest.mark.integration
     def test_report_batch_without_requests(self, metrics_db, sample_batch_metrics):
         """Test storing batch metrics without per-request details."""
-        reporter = PostgresReporter(
+        reporter = DbReporter(
             host="localhost",
             port=5433,
             database="olmo_eval_test",
@@ -164,7 +164,7 @@ class TestPostgresReporter:
     @pytest.mark.integration
     def test_report_batch_with_requests(self, metrics_db, sample_batch_metrics):
         """Test storing batch metrics with per-request details."""
-        reporter = PostgresReporter(
+        reporter = DbReporter(
             host="localhost",
             port=5433,
             database="olmo_eval_test",
@@ -210,7 +210,7 @@ class TestPostgresReporter:
     @pytest.mark.integration
     def test_multiple_batches(self, metrics_db, sample_batch_metrics):
         """Test storing multiple batches."""
-        reporter = PostgresReporter(
+        reporter = DbReporter(
             host="localhost",
             port=5433,
             database="olmo_eval_test",
@@ -293,7 +293,7 @@ class TestPostgresReporter:
             timestamp=datetime.now(UTC),
         )
 
-        reporter = PostgresReporter(
+        reporter = DbReporter(
             host="localhost",
             port=5433,
             database="olmo_eval_test",
@@ -326,7 +326,7 @@ class TestMetricsQueryPatterns:
     @pytest.mark.integration
     def test_query_by_experiment_id(self, metrics_db, sample_batch_metrics):
         """Test querying metrics by experiment_id."""
-        reporter = PostgresReporter(
+        reporter = DbReporter(
             host="localhost",
             port=5433,
             database="olmo_eval_test",
@@ -353,7 +353,7 @@ class TestMetricsQueryPatterns:
     @pytest.mark.integration
     def test_query_by_model_name(self, metrics_db):
         """Test querying metrics by model name."""
-        reporter = PostgresReporter(
+        reporter = DbReporter(
             host="localhost",
             port=5433,
             database="olmo_eval_test",
@@ -402,7 +402,7 @@ class TestMetricsQueryPatterns:
         """Test querying metrics by timestamp range."""
         from datetime import timedelta
 
-        reporter = PostgresReporter(
+        reporter = DbReporter(
             host="localhost",
             port=5433,
             database="olmo_eval_test",
@@ -446,7 +446,7 @@ class TestMetricsQueryPatterns:
     @pytest.mark.integration
     def test_cascade_delete(self, metrics_db, sample_batch_metrics):
         """Test that deleting an InferenceRun cascades to request metrics."""
-        reporter = PostgresReporter(
+        reporter = DbReporter(
             host="localhost",
             port=5433,
             database="olmo_eval_test",
@@ -489,16 +489,16 @@ class TestMetricsQueryPatterns:
 
 
 class TestRegistryIntegration:
-    """Test that postgres reporter works through the registry."""
+    """Test that db reporter works through the registry."""
 
     @pytest.mark.integration
     def test_create_via_registry(self, metrics_db, sample_batch_metrics):
-        """Test creating postgres reporter via registry."""
+        """Test creating db reporter via registry."""
         from olmo_eval.inference.metrics.core.registry import reporter_registry
 
         reporter = reporter_registry.create(
             {
-                "name": "postgres",
+                "name": "db",
                 "host": "localhost",
                 "port": 5433,
                 "database": "olmo_eval_test",
@@ -585,19 +585,19 @@ class TestConsoleReporter:
 
 
 # =============================================================================
-# JSONL Reporter Tests
+# File Reporter Tests
 # =============================================================================
 
 
-class TestJSONLReporter:
-    """Tests for JSONLReporter."""
+class TestFileReporter:
+    """Tests for FileReporter."""
 
     def test_report_batch_creates_file(self, sample_batch_metrics):
-        """Test that JSONL reporter creates file and writes batch."""
+        """Test that file reporter creates file and writes batch."""
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "metrics" / "test-metrics.jsonl"
 
-            reporter = JSONLReporter(path=path)
+            reporter = FileReporter(path=path)
             reporter.report_batch(sample_batch_metrics)
             reporter.flush()
             reporter.shutdown()
@@ -619,11 +619,11 @@ class TestJSONLReporter:
             assert data["data"]["experiment_id"] == "test-exp-001"
 
     def test_report_batch_without_requests(self, sample_batch_metrics):
-        """Test that JSONL reporter excludes requests by default."""
+        """Test that file reporter excludes requests by default."""
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "metrics.jsonl"
 
-            reporter = JSONLReporter(path=path)
+            reporter = FileReporter(path=path)
             reporter.report_batch(sample_batch_metrics)
             reporter.flush()
             reporter.shutdown()
@@ -635,11 +635,11 @@ class TestJSONLReporter:
             assert "requests" not in data["data"]
 
     def test_report_batch_with_requests(self, sample_batch_metrics):
-        """Test that JSONL reporter includes requests when configured."""
+        """Test that file reporter includes requests when configured."""
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "metrics.jsonl"
 
-            reporter = JSONLReporter(path=path)
+            reporter = FileReporter(path=path)
             reporter.configure(include_requests=True)
             reporter.report_batch(sample_batch_metrics)
             reporter.flush()
@@ -654,11 +654,11 @@ class TestJSONLReporter:
             assert request_ids == {"req-001", "req-002", "req-003"}
 
     def test_report_request(self):
-        """Test that JSONL reporter writes individual requests."""
+        """Test that file reporter writes individual requests."""
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "metrics.jsonl"
 
-            reporter = JSONLReporter(path=path)
+            reporter = FileReporter(path=path)
 
             request = RequestMetrics(
                 request_id="test-req-001",
@@ -686,7 +686,7 @@ class TestJSONLReporter:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "metrics.jsonl"
 
-            reporter = JSONLReporter(path=path)
+            reporter = FileReporter(path=path)
 
             # Write first batch
             reporter.report_batch(sample_batch_metrics)
@@ -720,11 +720,11 @@ class TestJSONLReporter:
             assert data2["data"]["experiment_id"] == "test-exp-002"
 
     def test_creates_parent_directories(self, sample_batch_metrics):
-        """Test that JSONL reporter creates parent directories."""
+        """Test that file reporter creates parent directories."""
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "nested" / "deep" / "metrics.jsonl"
 
-            reporter = JSONLReporter(path=path)
+            reporter = FileReporter(path=path)
             reporter.report_batch(sample_batch_metrics)
             reporter.flush()
             reporter.shutdown()
@@ -733,13 +733,13 @@ class TestJSONLReporter:
             assert path.parent.exists()
 
     def test_create_via_registry(self, sample_batch_metrics):
-        """Test creating JSONL reporter via registry."""
+        """Test creating file reporter via registry."""
         from olmo_eval.inference.metrics.core.registry import reporter_registry
 
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "metrics.jsonl"
 
-            reporter = reporter_registry.create({"name": "jsonl", "path": str(path)})
+            reporter = reporter_registry.create({"name": "file", "path": str(path)})
             reporter.report_batch(sample_batch_metrics)
             reporter.flush()
             reporter.shutdown()
@@ -777,7 +777,7 @@ class TestJSONLReporter:
                 timestamp=datetime.now(UTC),
             )
 
-            reporter = JSONLReporter(path=path)
+            reporter = FileReporter(path=path)
             reporter.report_batch(batch)
             reporter.flush()
             reporter.shutdown()

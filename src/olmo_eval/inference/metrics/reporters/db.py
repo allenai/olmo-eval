@@ -1,8 +1,9 @@
-"""PostgreSQL reporter for metrics storage."""
+"""Database reporter for metrics storage."""
 
 from __future__ import annotations
 
 import logging
+import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -14,28 +15,38 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class PostgresReporter:
+class DbReporter:
     """Store metrics in PostgreSQL database.
 
     Writes batch metrics to inference_runs table and optionally writes
     per-request metrics to inference_request_metrics table.
+
+    Connection parameters are read from environment variables by default:
+    - OLMO_EVAL_DB_HOST: Database host (required)
+    - OLMO_EVAL_DB_PORT: Database port (default: 5432)
+    - OLMO_EVAL_DB_USER: Database user (default: postgres)
+    - OLMO_EVAL_DB_PASSWORD: Database password
+    - OLMO_EVAL_DB_SECRET_ARN: AWS Secrets Manager ARN for password
+
+    The database name defaults to 'olmo_eval_metrics' (separate from results DB).
     """
 
     def __init__(
         self,
-        host: str = "localhost",
-        port: int = 5432,
+        host: str | None = None,
+        port: int | None = None,
         database: str = "olmo_eval_metrics",
-        user: str = "postgres",
-        password: str = "",
+        user: str | None = None,
+        password: str | None = None,
         password_env: str | None = None,
         sslmode: str = "require",
     ) -> None:
-        self._host = host
-        self._port = port
+        # Read from environment variables if not provided
+        self._host = host or os.environ.get("OLMO_EVAL_DB_HOST")
+        self._port = port or int(os.environ.get("OLMO_EVAL_DB_PORT", "5432"))
         self._database = database
-        self._user = user
-        self._password = password
+        self._user = user or os.environ.get("OLMO_EVAL_DB_USER", "postgres")
+        self._password = password or os.environ.get("OLMO_EVAL_DB_PASSWORD", "")
         self._password_env = password_env
         self._sslmode = sslmode
         self._include_requests = False
@@ -44,7 +55,7 @@ class PostgresReporter:
 
     @property
     def reporter_name(self) -> str:
-        return "postgres"
+        return "db"
 
     def configure(
         self,
@@ -89,6 +100,12 @@ class PostgresReporter:
     def _ensure_connection(self) -> Session:
         """Ensure database connection is established."""
         if self._session is None:
+            if not self._host:
+                raise ValueError(
+                    "Database host not configured. Set OLMO_EVAL_DB_HOST environment variable "
+                    "or pass host parameter to DbReporter."
+                )
+
             from olmo_eval.storage.backends.postgres import DatabaseSession
 
             self._db_session = DatabaseSession(

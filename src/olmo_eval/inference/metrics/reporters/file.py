@@ -1,4 +1,4 @@
-"""JSONL reporter for append-only file output."""
+"""File reporter for append-only JSONL output."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from ..core.schema import BatchMetrics, RequestMetrics
 
 
-class JSONLReporter:
+class FileReporter:
     """Append metrics as JSON lines to a file."""
 
     def __init__(self, path: str | Path | None = None) -> None:
@@ -20,7 +20,7 @@ class JSONLReporter:
 
     @property
     def reporter_name(self) -> str:
-        return "jsonl"
+        return "file"
 
     def configure(
         self,
@@ -42,7 +42,7 @@ class JSONLReporter:
         """Ensure file is open for writing."""
         if self._file is None:
             if self._path is None:
-                raise ValueError("No path configured for JSONL reporter")
+                raise ValueError("No path configured for file reporter")
             self._path.parent.mkdir(parents=True, exist_ok=True)
             self._file = open(self._path, "a", encoding="utf-8")  # noqa: SIM115
         return self._file

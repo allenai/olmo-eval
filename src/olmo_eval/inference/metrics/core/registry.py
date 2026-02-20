@@ -24,25 +24,25 @@ class ReporterRegistry:
 
             return ConsoleReporter()
 
-        def jsonl_factory() -> MetricsReporter:
-            from ..reporters.jsonl import JSONLReporter
+        def file_factory() -> MetricsReporter:
+            from ..reporters.file import FileReporter
 
-            return JSONLReporter()
+            return FileReporter()
 
-        def postgres_factory() -> MetricsReporter:
-            from ..reporters.postgres import PostgresReporter
+        def db_factory() -> MetricsReporter:
+            from ..reporters.db import DbReporter
 
-            return PostgresReporter()
+            return DbReporter()
 
         self._factories["console"] = console_factory
-        self._factories["jsonl"] = jsonl_factory
-        self._factories["postgres"] = postgres_factory
+        self._factories["file"] = file_factory
+        self._factories["db"] = db_factory
 
     def register(self, name: str, factory: Callable[[], MetricsReporter]) -> None:
         """Register a reporter factory.
 
         Args:
-            name: Reporter name (e.g., "console", "postgres").
+            name: Reporter name (e.g., "console", "db").
             factory: Callable that creates a reporter instance.
         """
         self._factories[name] = factory

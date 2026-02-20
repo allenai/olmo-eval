@@ -83,16 +83,16 @@ class MetricsContext:
             name = reporter_config.get("name", "console")
             config_dict = dict(reporter_config)
 
-        # For jsonl reporter, resolve path from metrics config if not set
-        if name == "jsonl" and "path" not in config_dict:
+        # For file reporter, resolve path from metrics config if not set
+        if name == "file" and "path" not in config_dict:
             path = self._config.get_metrics_path()
             if path is None:
                 logger.warning(
-                    "JSONL reporter requires output_dir to be set in MetricsConfig. "
-                    "Skipping jsonl reporter."
+                    "File reporter requires output_dir to be set in MetricsConfig. "
+                    "Skipping file reporter."
                 )
                 return None
-            config_dict["name"] = "jsonl"
+            config_dict["name"] = "file"
             config_dict["path"] = path
             return config_dict
 
@@ -135,8 +135,8 @@ def collect_metrics(
         target: InferenceProvider or Harness to instrument.
         config: Full MetricsConfig (preferred). If provided, other kwargs are ignored.
         reporters: List of reporter names or configs (default: ["console"]).
-            Supported reporters: "console", "jsonl".
-            Dict format: {"name": "jsonl", "path": "/path/to/file.jsonl"}
+            Supported reporters: "console", "file", "db".
+            Dict format: {"name": "file", "path": "/path/to/file.jsonl"}
         tags: User-defined tags to attach to metrics.
 
     Returns:
