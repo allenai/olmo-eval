@@ -21,6 +21,93 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+
+class RemoteTokenizer:
+    """Tokenizer that uses vLLM server's /tokenize and /detokenize endpoints.
+
+    Provides a tokenizer-like interface without requiring transformers locally.
+    This is useful when the vLLM server runs in an isolated environment.
+    """
+
+    def __init__(self, base_url: str, model_name: str) -> None:
+        """Initialize the remote tokenizer.
+
+        Args:
+            base_url: Base URL of the vLLM server (e.g., "http://localhost:8000/v1").
+            model_name: Model name for tokenization requests.
+        """
+        # Strip /v1 suffix if present for tokenize endpoints
+        self._base_url = base_url.rstrip("/").removesuffix("/v1")
+        self._model_name = model_name
+        self._client: httpx.Client | None = None
+        self._all_special_ids: set[int] | None = None
+        # BOS/EOS token IDs - not available via API, set to None
+        # For logprobs computation, empty context handling uses fallbacks
+        self.bos_token_id: int | None = None
+        self.eos_token_id: int | None = None
+
+    def _get_client(self) -> httpx.Client:
+        if self._client is None:
+            self._client = httpx.Client(timeout=30.0)
+        return self._client
+
+    def encode(self, text: str, add_special_tokens: bool = True) -> list[int]:
+        """Encode text to token IDs using the remote server."""
+        client = self._get_client()
+        response = client.post(
+            f"{self._base_url}/tokenize",
+            json={
+                "model": self._model_name,
+                "prompt": text,
+                "add_special_tokens": add_special_tokens,
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data.get("tokens", [])
+
+    def decode(self, token_ids: list[int], skip_special_tokens: bool = False) -> str:
+        """Decode token IDs to text using the remote server."""
+        client = self._get_client()
+        response = client.post(
+            f"{self._base_url}/detokenize",
+            json={
+                "model": self._model_name,
+                "tokens": token_ids,
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data.get("prompt", "")
+
+    @property
+    def all_special_ids(self) -> set[int]:
+        """Get special token IDs (cached after first call)."""
+        if self._all_special_ids is None:
+            # vLLM doesn't expose special tokens via API, return empty set
+            # Token inspection will still work, just without special token highlighting
+            self._all_special_ids = set()
+        return self._all_special_ids
+
+    def __call__(
+        self, text: str, return_tensors: str | None = None, **kwargs: Any
+    ) -> dict[str, Any]:
+        """Tokenize text (for compatibility with HuggingFace tokenizer interface)."""
+        tokens = self.encode(text)
+        result: dict[str, Any] = {"input_ids": tokens}
+        if return_tensors == "pt":
+            import torch
+
+            result["input_ids"] = torch.tensor([tokens])
+        return result
+
+    def close(self) -> None:
+        """Close the HTTP client."""
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+
+
 # Enable with VLLM_DEBUG_REQUESTS=1
 _DEBUG_REQUESTS = os.environ.get("VLLM_DEBUG_REQUESTS", "").lower() in ("1", "true", "yes")
 
@@ -187,13 +274,33 @@ class VLLMServerProvider(InferenceProvider):
         """Get the AsyncOpenAI client for this provider."""
         return self._get_or_create_client()
 
-    def _get_tokenizer(self) -> Any:
-        """Get or create the tokenizer for logprobs computation."""
-        if self._tokenizer is None:
-            from transformers import AutoTokenizer
+    def _get_tokenizer(self, *, require_local: bool = False) -> Any:
+        """Get or create the tokenizer.
 
-            self._tokenizer = AutoTokenizer.from_pretrained(self._tokenizer_path)
+        Args:
+            require_local: If True, loads HuggingFace tokenizer locally (slower but
+                has BOS/EOS token IDs for logprobs computation). If False, uses
+                the remote vLLM tokenization API (faster, no transformers needed).
+
+        Returns:
+            Tokenizer instance (RemoteTokenizer or HuggingFace AutoTokenizer).
+        """
+        if require_local:
+            # Load HuggingFace tokenizer for full functionality (BOS/EOS handling)
+            if self._tokenizer is None or isinstance(self._tokenizer, RemoteTokenizer):
+                from transformers import AutoTokenizer
+
+                self._tokenizer = AutoTokenizer.from_pretrained(self._tokenizer_path)
+            return self._tokenizer
+
+        # Use remote tokenizer by default (no transformers dependency)
+        if self._tokenizer is None:
+            self._tokenizer = RemoteTokenizer(self.base_url, self.model_name)
         return self._tokenizer
+
+    def get_tokenizer(self) -> Any:
+        """Get the tokenizer for this provider (for external use like inspection)."""
+        return self._get_tokenizer(require_local=False)
 
     async def _generate_single_impl(
         self, request: LMRequest, params: SamplingParams
@@ -401,7 +508,8 @@ class VLLMServerProvider(InferenceProvider):
         logprob of each continuation token given the context.
         """
         client = self._get_or_create_client()
-        tokenizer = self._get_tokenizer()
+        # Use local tokenizer for logprobs (needs BOS/EOS token IDs)
+        tokenizer = self._get_tokenizer(require_local=True)
 
         # Get the context/prompt text
         context = request.prompt

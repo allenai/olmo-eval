@@ -19,6 +19,29 @@ from rich.text import Text
 if TYPE_CHECKING:
     from olmo_eval.common.types import Instance, LMRequest, Response
 
+# Default truncation limits
+DEFAULT_STRING_HALF = 100  # Show first 100 and last 100 chars for strings
+DEFAULT_TOKEN_HALF = 50  # Show first 50 and last 50 tokens
+
+
+def truncate_string(value: str, half: int = DEFAULT_STRING_HALF) -> tuple[str, bool]:
+    """Truncate a long string showing first N and last N characters.
+
+    Args:
+        value: The string to potentially truncate.
+        half: Number of characters to show from each end.
+
+    Returns:
+        Tuple of (truncated_string, was_truncated).
+    """
+    max_len = half * 2
+    if len(value) <= max_len:
+        return value, False
+
+    first = value[:half]
+    last = value[-half:]
+    return f"{first}\n\n... ({len(value) - max_len} chars omitted) ...\n\n{last}", True
+
 
 def format_value(
     value: Any,
@@ -30,6 +53,7 @@ def format_value(
     Args:
         value: The value to format.
         max_string_length: Maximum length for string values before truncation.
+            When truncating, shows first half and last half of the limit.
         max_list_items: Maximum number of items to show for lists/tuples.
 
     Returns:
@@ -40,7 +64,9 @@ def format_value(
 
     if isinstance(value, str):
         if max_string_length > 0 and len(value) > max_string_length:
-            return f'"{value[:max_string_length]}..." [dim]({len(value)} chars)[/dim]'
+            half = max_string_length // 2
+            truncated, _ = truncate_string(value, half=half)
+            return f'"{truncated}" [dim]({len(value)} chars)[/dim]'
         return f'"{value}"'
 
     if isinstance(value, bool):
@@ -90,12 +116,15 @@ def _format_simple_value(value: Any, max_length: int = 0) -> str:
     Args:
         value: The value to format.
         max_length: Maximum length for string values (0 for no limit).
+            When truncating, shows first half and last half.
     """
     if value is None:
         return "None"
     if isinstance(value, str):
         if max_length > 0 and len(value) > max_length:
-            return f'"{value[:max_length]}..."'
+            half = max_length // 2
+            truncated, _ = truncate_string(value, half=half)
+            return f'"{truncated}"'
         return f'"{value}"'
     if isinstance(value, (bool, int, float)):
         return str(value)
@@ -107,7 +136,9 @@ def _format_simple_value(value: Any, max_length: int = 0) -> str:
         return "[...]" if isinstance(value, list) else "(...)"
     repr_str = repr(value)
     if max_length > 0 and len(repr_str) > max_length:
-        return repr_str[:max_length] + "..."
+        half = max_length // 2
+        truncated, _ = truncate_string(repr_str, half=half)
+        return truncated
     return repr_str
 
 
@@ -194,8 +225,13 @@ def inspect_instance(
             json_str = json.dumps(value, indent=2, ensure_ascii=False)
             renderables.append(Syntax(json_str, "json", theme="ansi_dark", word_wrap=True))
         elif isinstance(value, str):
-            if len(value) > max_string_length and max_string_length > 0:
-                renderables.append(Text(value[:max_string_length] + f"... ({len(value)} chars)"))
+            if max_string_length > 0 and len(value) > max_string_length:
+                half = max_string_length // 2
+                truncated, was_truncated = truncate_string(value, half=half)
+                if was_truncated:
+                    renderables.append(Text(f"{truncated}\n({len(value)} chars total)"))
+                else:
+                    renderables.append(Text(value))
             else:
                 renderables.append(Text(value))
         elif isinstance(value, (list, tuple)):
@@ -283,6 +319,8 @@ def inspect_request(
 
     add_field("request_type", request.request_type.name)
 
+    half = max_string_length // 2 if max_string_length > 0 else DEFAULT_STRING_HALF
+
     if request.messages:
         # Format messages nicely
         msg_strs = []
@@ -294,14 +332,15 @@ def inspect_request(
                 and max_string_length > 0
                 and len(content) > max_string_length
             ):
-                content = content[:max_string_length] + "..."
+                content, _ = truncate_string(content, half=half)
             msg_strs.append(f"[{role}]: {content}")
         add_field("messages", "\n".join(msg_strs))
 
     if request.prompt:
         prompt_val = request.prompt
         if max_string_length > 0 and len(prompt_val) > max_string_length:
-            prompt_val = prompt_val[:max_string_length] + f"... ({len(request.prompt)} chars)"
+            prompt_val, _ = truncate_string(prompt_val, half=half)
+            prompt_val = f"{prompt_val}\n({len(request.prompt)} chars total)"
         add_field("prompt", prompt_val)
 
     if request.continuations:
@@ -309,7 +348,8 @@ def inspect_request(
         cont_strs = []
         for c in request.continuations:
             if max_string_length > 0 and len(c) > max_string_length:
-                cont_strs.append(c[:max_string_length] + "...")
+                truncated, _ = truncate_string(c, half=half)
+                cont_strs.append(truncated)
             else:
                 cont_strs.append(c)
         add_field("continuations", "\n".join(cont_strs))
@@ -318,9 +358,8 @@ def inspect_request(
     if request.system_prompt:
         prompt_val = request.system_prompt
         if max_string_length > 0 and len(prompt_val) > max_string_length:
-            prompt_val = (
-                prompt_val[:max_string_length] + f"... ({len(request.system_prompt)} chars)"
-            )
+            prompt_val, _ = truncate_string(prompt_val, half=half)
+            prompt_val = f"{prompt_val}\n({len(request.system_prompt)} chars total)"
         add_field("system_prompt", prompt_val)
 
     if request.tools:
@@ -519,45 +558,49 @@ def inspect_formatted_request(
         task_name: Optional task name for the panel title.
         native_id: Optional native_id for the panel title.
         max_chars: Max characters to display (0 for no limit, default 2000).
+            When truncating, shows first half and last half.
     """
     if console is None:
         from olmo_eval.cli.utils import console as shared_console
 
         console = shared_console
 
-    # Build styled text with special token highlighting
-    text = Text()
-
     # Pattern to match common special tokens
     special_token_pattern = re.compile(
         r"(<\|[^|>]+\|>|<s>|</s>|<unk>|<pad>|<mask>|\[CLS\]|\[SEP\]|\[PAD\]|\[MASK\])"
     )
 
-    display_text = formatted_prompt
-    truncated = False
+    def style_special_tokens(s: str) -> Text:
+        """Apply styling to special tokens in a string."""
+        result = Text()
+        last_end = 0
+        for match in special_token_pattern.finditer(s):
+            if match.start() > last_end:
+                result.append(s[last_end : match.start()])
+            result.append(match.group(), style="bold cyan")
+            last_end = match.end()
+        if last_end < len(s):
+            result.append(s[last_end:])
+        return result
+
+    # Build styled text with special token highlighting
+    text = Text()
+
     if max_chars > 0 and len(formatted_prompt) > max_chars:
-        display_text = formatted_prompt[:max_chars]
-        truncated = True
+        # Show first half and last half
+        half = max_chars // 2
+        first_part = formatted_prompt[:half]
+        last_part = formatted_prompt[-half:]
+        omitted = len(formatted_prompt) - max_chars
 
-    # Split by special tokens and style them
-    last_end = 0
-    for match in special_token_pattern.finditer(display_text):
-        # Add text before the token
-        if match.start() > last_end:
-            text.append(display_text[last_end : match.start()])
-        # Add the special token with styling
-        text.append(match.group(), style="bold cyan")
-        last_end = match.end()
-
-    # Add remaining text
-    if last_end < len(display_text):
-        text.append(display_text[last_end:])
-
-    # Add truncation indicator
-    if truncated:
-        text.append(f"\n\n... ({len(formatted_prompt)} characters total)", style="dim")
+        text.append_text(style_special_tokens(first_part))
+        text.append(f"\n\n... ({omitted} chars omitted) ...\n\n", style="dim")
+        text.append_text(style_special_tokens(last_part))
     else:
-        text.append(f"\n\n({len(formatted_prompt)} characters)", style="dim")
+        text.append_text(style_special_tokens(formatted_prompt))
+
+    # Add character count
+    text.append(f"\n\n({len(formatted_prompt)} characters total)", style="dim")
 
     # Build panel title
     if task_name and native_id is not None:
@@ -579,7 +622,7 @@ def inspect_tokens(
     console: Console | None = None,
     task_name: str | None = None,
     native_id: str | None = None,
-    max_tokens: int = 100,
+    max_tokens: int = DEFAULT_TOKEN_HALF * 2,
     show_decoded: bool = True,
 ) -> None:
     """Pretty-print token IDs with decoded values, highlighting special tokens.
@@ -591,7 +634,7 @@ def inspect_tokens(
         task_name: Optional task name for the panel title.
         native_id: Optional native_id for the panel title.
         max_tokens: Max tokens to display (0 for no limit, default 100).
-            When truncating, shows first 50 and last 50 tokens.
+            When truncating, shows first half and last half.
         show_decoded: Whether to show decoded token values.
     """
     if console is None:
@@ -761,8 +804,13 @@ def inspect_response(
             json_str = json.dumps(value, indent=2, ensure_ascii=False)
             renderables.append(Syntax(json_str, "json", theme="ansi_dark", word_wrap=True))
         elif isinstance(value, str):
-            if len(value) > max_string_length and max_string_length > 0:
-                renderables.append(Text(value[:max_string_length] + f"... ({len(value)} chars)"))
+            if max_string_length > 0 and len(value) > max_string_length:
+                half = max_string_length // 2
+                truncated, was_truncated = truncate_string(value, half=half)
+                if was_truncated:
+                    renderables.append(Text(f"{truncated}\n({len(value)} chars total)"))
+                else:
+                    renderables.append(Text(value))
             else:
                 renderables.append(Text(value))
         elif isinstance(value, (list, tuple)):
@@ -898,6 +946,7 @@ def inspect_task_instances(
 
 
 __all__ = [
+    "truncate_string",
     "format_value",
     "inspect_object",
     "inspect_instance",
