@@ -99,7 +99,15 @@ from olmo_eval.cli.utils import console
     "show_all",
     is_flag=True,
     default=False,
-    help="Show all historical results instead of just the most recent per model.",
+    help="Show all historical results instead of just the best per model.",
+)
+@click.option(
+    "--recent",
+    "-r",
+    "show_recent",
+    is_flag=True,
+    default=False,
+    help="Show most recent result per model instead of the best.",
 )
 @db_options
 def query(
@@ -114,6 +122,7 @@ def query(
     after_id: int | None,
     output_format: str,
     show_all: bool,
+    show_recent: bool,
     db_host: str,
     db_port: int,
     db_name: str,
@@ -217,6 +226,7 @@ def query(
                 instances,
                 limit,
                 show_all,
+                show_recent,
             )
     finally:
         db.dispose()
@@ -308,6 +318,7 @@ def _output_results(
     include_instances: bool,
     limit: int,
     show_all: bool = False,
+    show_recent: bool = False,
 ) -> None:
     """Output query results in the requested format."""
     instances_for_output = instance_data if include_instances else None
@@ -329,7 +340,9 @@ def _output_results(
     # CSV output
     if output_format == "csv":
         if is_comparison:
-            task_comparison_to_csv(experiments, task_filter, show_all=show_all)
+            task_comparison_to_csv(
+                experiments, task_filter, show_all=show_all, show_recent=show_recent
+            )
         else:
             experiments_to_csv(experiments)
         if include_instances and instance_data:
@@ -339,7 +352,9 @@ def _output_results(
 
     # Table output
     if is_comparison:
-        print_task_comparison_matrix(experiments, task_filter, show_all=show_all)
+        print_task_comparison_matrix(
+            experiments, task_filter, show_all=show_all, show_recent=show_recent
+        )
     else:
         print_experiments_table(experiments, task_filter)
 
