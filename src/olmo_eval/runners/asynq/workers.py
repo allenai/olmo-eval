@@ -149,6 +149,7 @@ def inference_worker(
             from olmo_eval.runners.asynq.batching import BatchConfig, get_strategy
 
             batch_config = harness_config.batching or BatchConfig()
+            batch_config.validate_for_provider(provider_kind)
             strategy = get_strategy(batch_config)
 
             worker_logger.info(

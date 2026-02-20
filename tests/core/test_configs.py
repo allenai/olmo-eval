@@ -75,7 +75,7 @@ class TestGetProviderConfig:
         config = get_provider_config("some-org/custom-model")
 
         assert config.model == "some-org/custom-model"
-        assert config.get_provider_name() == "vllm"  # Default
+        assert config.get_provider_name() == "vllm_server"  # Default
 
     def test_get_model_with_override(self):
         """Test getting model with field override."""

@@ -19,7 +19,7 @@ logger = get_logger(__name__)
 
 def _get_native_ids(items: list[QueueItem]) -> list[str]:
     """Extract native IDs from queue items for batch hashing."""
-    return [item.instance.metadata.get("id", f"doc_{item.instance_idx}") for item in items]
+    return [f"{item.task_id}:{item.instance_idx}" for item in items]
 
 
 def _format_cause(cause: BaseException) -> str:

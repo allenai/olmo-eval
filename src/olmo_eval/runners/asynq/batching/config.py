@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import Any, ClassVar
 
 
 class BatchStrategy(StrEnum):
@@ -32,10 +32,28 @@ class BatchConfig:
         max_in_flight: Maximum concurrent batches (pipelined strategy only).
     """
 
+    # Providers that only support sequential (LLM() is not thread-safe)
+    _SEQUENTIAL_ONLY: ClassVar[frozenset[str]] = frozenset({"vllm", "hf"})
+
     strategy: BatchStrategy = BatchStrategy.SEQUENTIAL
     chunk_size: int = DEFAULT_CHUNK_SIZE
     chunk_timeout: float = DEFAULT_CHUNK_TIMEOUT
     max_in_flight: int = DEFAULT_MAX_IN_FLIGHT
+
+    def validate_for_provider(self, provider_kind: str) -> None:
+        """Validate that this batching config is compatible with the provider.
+
+        Args:
+            provider_kind: The provider type (e.g., "vllm", "vllm_server").
+
+        Raises:
+            ValueError: If the batching strategy is not supported by the provider.
+        """
+        if provider_kind in self._SEQUENTIAL_ONLY and self.strategy != BatchStrategy.SEQUENTIAL:
+            raise ValueError(
+                f"Provider '{provider_kind}' only supports sequential batching. "
+                f"Use vllm_server for {self.strategy} batching."
+            )
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""

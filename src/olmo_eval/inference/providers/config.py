@@ -39,7 +39,7 @@ class ProviderConfig:
         kwargs: Additional arguments passed to the provider constructor.
     """
 
-    kind: str = ProviderKind.VLLM
+    kind: str = ProviderKind.VLLM_SERVER
     model: str = ""
     alias: str | None = None
     base_url: str | None = None
