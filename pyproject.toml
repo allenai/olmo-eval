@@ -98,6 +98,10 @@ conflicts = [
         { extra = "vllm" },
         { extra = "openhands" },
     ],
+    [
+        { extra = "clients" },
+        { extra = "openhands" },
+    ],
 ]
 
 [dependency-groups]
