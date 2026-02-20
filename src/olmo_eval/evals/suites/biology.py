@@ -32,3 +32,13 @@ LAB_BENCH_BPB = make_suite(
     tuple(f"{t}:bpb" for t in _LAB_BENCH_TASKS),
     description="LAB-Bench with bits-per-byte evaluation",
 )
+
+make_suite(
+    "medmcqa",
+    ("medmcqa:mc",),
+)
+
+make_suite(
+    "medmcqa:mc",
+    ("medmcqa:mc",),
+)

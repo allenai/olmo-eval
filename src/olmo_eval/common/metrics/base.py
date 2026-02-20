@@ -244,6 +244,34 @@ class PassPowKMetric(Metric):
 
 
 @dataclass(frozen=True, slots=True)
+class LogprobMCAccuracyMetric(Metric):
+    """Multiple-choice accuracy via logprob argmax.
+
+    Picks the continuation with the highest total logprob and checks whether
+    its index matches ``instance.metadata["gold_idx"]``.
+    """
+
+    name: str = "accuracy"
+    scorer: type[Scorer] = LogprobScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        if not responses:
+            return 0.0
+        correct = 0
+        for response in responses:
+            gold_idx = response.instance.metadata.get("gold_idx")
+            if gold_idx is None or not response.outputs:
+                continue
+            logprob_sums = [
+                sum(lp["logprob"] for lp in (o.logprobs or []))
+                for o in response.outputs
+            ]
+            if logprob_sums.index(max(logprob_sums)) == gold_idx:
+                correct += 1
+        return correct / len(responses)
+
+
+@dataclass(frozen=True, slots=True)
 class ToolAccuracyMetric(Metric):
     """Mean tool call accuracy across all responses."""
 

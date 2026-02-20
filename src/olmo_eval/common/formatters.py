@@ -129,6 +129,7 @@ class MultipleChoiceFormatter(Formatter):
     template: str = "{question}"
     choice_template: str = "{choice}"
     include_choices_in_prompt: bool = True
+    prompt_suffix: str = ""
 
     @property
     def request_type(self) -> RequestType:
@@ -149,6 +150,8 @@ class MultipleChoiceFormatter(Formatter):
                 )
                 prompt = f"{prompt}\n\n{choices_text}"
             continuations = tuple(self.choice_template.format(choice=c) for c in instance.choices)
+        if self.prompt_suffix:
+            prompt = f"{prompt}{self.prompt_suffix}"
         return LMRequest(
             request_type=self.request_type,
             prompt=prompt,
