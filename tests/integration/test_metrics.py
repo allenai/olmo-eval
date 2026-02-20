@@ -308,15 +308,16 @@ class TestPostgresReporter:
         finally:
             reporter.shutdown()
 
-        # Verify GPU snapshots are in metadata
+        # Verify GPU devices are in metadata (grouped by device)
         with metrics_db.session() as session:
             run = session.query(InferenceRun).filter_by(experiment_id="gpu-test").first()
             assert run is not None
             assert run.metadata_ is not None
-            assert "gpu_snapshots" in run.metadata_
-            assert len(run.metadata_["gpu_snapshots"]) == 2
-            assert run.metadata_["gpu_snapshots"][0]["name"] == "NVIDIA A100"
-            assert run.metadata_["gpu_snapshots"][0]["utilization_pct"] == 85.0
+            assert "gpu_devices" in run.metadata_
+            # Two devices, each with one sample
+            assert len(run.metadata_["gpu_devices"]) == 2
+            assert run.metadata_["gpu_devices"][0]["name"] == "NVIDIA A100"
+            assert run.metadata_["gpu_devices"][0]["samples"][0]["utilization_pct"] == 85.0
 
 
 class TestMetricsQueryPatterns:
@@ -784,6 +785,6 @@ class TestJSONLReporter:
             with open(path) as f:
                 data = json.loads(f.readline())
 
-            assert len(data["data"]["gpu_snapshots"]) == 1
-            assert data["data"]["gpu_snapshots"][0]["name"] == "NVIDIA A100"
-            assert data["data"]["gpu_snapshots"][0]["utilization_pct"] == 85.0
+            assert len(data["data"]["gpu_devices"]) == 1
+            assert data["data"]["gpu_devices"][0]["name"] == "NVIDIA A100"
+            assert data["data"]["gpu_devices"][0]["samples"][0]["utilization_pct"] == 85.0

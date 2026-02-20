@@ -129,7 +129,7 @@ class PostgresReporter:
         # Build metadata dict for flexible storage
         metadata: dict[str, Any] = {}
         if metrics.gpu_snapshots:
-            metadata["gpu_snapshots"] = [s.to_dict() for s in metrics.gpu_snapshots]
+            metadata["gpu_devices"] = metrics._group_gpu_snapshots()
 
         # Create InferenceRun record
         inference_run = InferenceRun(

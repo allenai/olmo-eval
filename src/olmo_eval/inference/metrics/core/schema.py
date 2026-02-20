@@ -97,7 +97,7 @@ class BatchMetrics:
         if include_requests:
             d["requests"] = [r.to_dict() for r in self.requests]
         if self.gpu_snapshots:
-            d["gpu_snapshots"] = [g.to_dict() for g in self.gpu_snapshots]
+            d["gpu_devices"] = self._group_gpu_snapshots()
         # Include non-None metadata
         if self.experiment_id is not None:
             d["experiment_id"] = self.experiment_id
@@ -120,6 +120,38 @@ class BatchMetrics:
         if self.tags:
             d["tags"] = dict(self.tags)
         return d
+
+    def _group_gpu_snapshots(self) -> list[dict[str, Any]]:
+        """Group GPU snapshots by device, separating static and dynamic fields."""
+        from collections import defaultdict
+
+        # Group snapshots by device_id
+        by_device: dict[int, list[GPUSnapshot]] = defaultdict(list)
+        for snapshot in self.gpu_snapshots:
+            by_device[snapshot.device_id].append(snapshot)
+
+        result = []
+        for device_id in sorted(by_device.keys()):
+            snapshots = by_device[device_id]
+            # Use first snapshot for static fields
+            first = snapshots[0]
+            device_data: dict[str, Any] = {
+                "device_id": device_id,
+                "name": first.name,
+                "memory_total_mb": first.memory_total_mb,
+                "samples": [
+                    {
+                        "utilization_pct": s.utilization_pct,
+                        "memory_used_mb": s.memory_used_mb,
+                        "temperature_c": s.temperature_c,
+                        "power_watts": s.power_watts,
+                        "timestamp": s.timestamp.isoformat(),
+                    }
+                    for s in snapshots
+                ],
+            }
+            result.append(device_data)
+        return result
 
 
 @dataclass(frozen=True)
