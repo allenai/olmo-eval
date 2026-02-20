@@ -103,13 +103,16 @@ class TaskDisplayInfo:
 
 
 def _build_model_task_scores(
-    experiments: list[Any], task_filter: set[str] | None = None
+    experiments: list[Any],
+    task_filter: set[str] | None = None,
+    show_all: bool = False,
 ) -> tuple[list[TaskDisplayInfo], dict[str, dict[tuple[str, str], float | None]]]:
     """Build model-task score mapping from experiments.
 
     Args:
         experiments: List of experiment results.
         task_filter: Optional set of task names to include.
+        show_all: If True, include timestamp in model key to show all historical results.
 
     Returns:
         Tuple of (task_infos, model_scores) where:
@@ -124,6 +127,8 @@ def _build_model_task_scores(
         model_key = exp.model_name
         if exp.model_hash:
             model_key += f" [dim]({exp.model_hash[:4]})[/dim]"
+        if show_all and exp.timestamp:
+            model_key += f" [dim]{format_timestamp(exp.timestamp)}[/dim]"
 
         if model_key not in model_scores:
             model_scores[model_key] = {}
@@ -164,15 +169,18 @@ def _build_model_task_scores(
 
 
 def print_task_comparison_matrix(
-    experiments: list[Any], task_filter: set[str] | None = None
+    experiments: list[Any],
+    task_filter: set[str] | None = None,
+    show_all: bool = False,
 ) -> None:
     """Print a comparison matrix with models as rows and tasks as columns.
 
     Args:
         experiments: List of experiment results.
         task_filter: Optional set of task names to include.
+        show_all: If True, show all historical results instead of just the most recent.
     """
-    task_infos, model_scores = _build_model_task_scores(experiments, task_filter)
+    task_infos, model_scores = _build_model_task_scores(experiments, task_filter, show_all)
 
     if not task_infos:
         console.print("[dim]No matching tasks found.[/dim]")

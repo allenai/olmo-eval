@@ -278,14 +278,10 @@ def save_results(
             logger.info(f"Saving to {backend_name}...")
             try:
                 storage.save(eval_result, instances_by_task if instances_by_task else None)
+                instance_count = sum(len(preds) for preds in instances_by_task.values())
                 logger.info(
                     f"Saved to {backend_name}: model={model_name}, "
-                    f"experiment_id={exp_id}, tasks={task_count}"
-                )
-                instance_count = sum(len(preds) for preds in instances_by_task.values())
-                console.print(
-                    f"[green]Saved to {backend_name}:[/green] {model_name} "
-                    f"({task_count} tasks, {instance_count} instances, id={exp_id})"
+                    f"experiment_id={exp_id}, tasks={task_count}, instances={instance_count}"
                 )
             except Exception as e:
                 logger.error(f"Failed to save to {backend_name}: {e}")

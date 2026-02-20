@@ -93,6 +93,14 @@ from olmo_eval.cli.utils import console
     default="table",
     help="Output format.",
 )
+@click.option(
+    "--all",
+    "-a",
+    "show_all",
+    is_flag=True,
+    default=False,
+    help="Show all historical results instead of just the most recent per model.",
+)
 @db_options
 def query(
     experiment_ids: tuple[str, ...],
@@ -105,6 +113,7 @@ def query(
     limit: int,
     after_id: int | None,
     output_format: str,
+    show_all: bool,
     db_host: str,
     db_port: int,
     db_name: str,
@@ -207,6 +216,7 @@ def query(
                 output_format,
                 instances,
                 limit,
+                show_all,
             )
     finally:
         db.dispose()
@@ -297,6 +307,7 @@ def _output_results(
     output_format: str,
     include_instances: bool,
     limit: int,
+    show_all: bool = False,
 ) -> None:
     """Output query results in the requested format."""
     instances_for_output = instance_data if include_instances else None
@@ -318,7 +329,7 @@ def _output_results(
     # CSV output
     if output_format == "csv":
         if is_comparison:
-            task_comparison_to_csv(experiments, task_filter)
+            task_comparison_to_csv(experiments, task_filter, show_all=show_all)
         else:
             experiments_to_csv(experiments)
         if include_instances and instance_data:
@@ -328,7 +339,7 @@ def _output_results(
 
     # Table output
     if is_comparison:
-        print_task_comparison_matrix(experiments, task_filter)
+        print_task_comparison_matrix(experiments, task_filter, show_all=show_all)
     else:
         print_experiments_table(experiments, task_filter)
 
