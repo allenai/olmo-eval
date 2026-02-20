@@ -128,6 +128,9 @@ def inference_worker(
 
             validate_backend(harness_config.backend)
 
+        # Initialize metrics reporters early to establish database connections
+        harness.initialize_reporters()
+
         init_time = time.time() - init_start
         worker_logger.info(f"Provider ready ({init_time:.1f}s)")
 

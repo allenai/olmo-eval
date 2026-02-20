@@ -339,9 +339,23 @@ class ExternalEvalSummary:
     beaker: "BeakerJobConfig"
 
 
+def _get_isolated_vllm_python() -> str | None:
+    """Get the path to the isolated vLLM Python interpreter if available."""
+    import os
+
+    vllm_python = os.environ.get("VLLM_PYTHON")
+    if not vllm_python:
+        default_vllm_venv = "/opt/vllm-venv/bin/python"
+        if os.path.exists(default_vllm_venv):
+            vllm_python = default_vllm_venv
+
+    if vllm_python and os.path.exists(vllm_python):
+        return vllm_python
+    return None
+
+
 def _get_vllm_version() -> str | None:
     """Get vLLM version from isolated venv or current environment."""
-    import os
     import subprocess
 
     # First check current environment
@@ -352,15 +366,9 @@ def _get_vllm_version() -> str | None:
     except ImportError:
         pass
 
-    # Check isolated venv via VLLM_PYTHON or default path
-    vllm_python = os.environ.get("VLLM_PYTHON")
-    if not vllm_python:
-        # Check default isolated venv location
-        default_vllm_venv = "/opt/vllm-venv/bin/python"
-        if os.path.exists(default_vllm_venv):
-            vllm_python = default_vllm_venv
-
-    if vllm_python and os.path.exists(vllm_python):
+    # Check isolated venv
+    vllm_python = _get_isolated_vllm_python()
+    if vllm_python:
         try:
             result = subprocess.run(
                 [vllm_python, "-c", "import vllm; print(vllm.__version__)"],
@@ -370,7 +378,37 @@ def _get_vllm_version() -> str | None:
             )
             if result.returncode == 0:
                 version = result.stdout.strip()
-                # Indicate it's from isolated venv
+                return f"{version} (isolated)"
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+
+    return None
+
+
+def _get_transformers_version() -> str | None:
+    """Get transformers version from current environment or isolated venv."""
+    import subprocess
+
+    # First check current environment
+    try:
+        import transformers
+
+        return transformers.__version__
+    except ImportError:
+        pass
+
+    # Check isolated venv as fallback
+    vllm_python = _get_isolated_vllm_python()
+    if vllm_python:
+        try:
+            result = subprocess.run(
+                [vllm_python, "-c", "import transformers; print(transformers.__version__)"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                version = result.stdout.strip()
                 return f"{version} (isolated)"
         except (subprocess.TimeoutExpired, OSError):
             pass
@@ -406,11 +444,10 @@ def print_runtime_environment() -> None:
     except ImportError:
         table.add_row("PyTorch", "[dim]NOT INSTALLED[/dim]")
 
-    try:
-        import transformers
-
-        table.add_row("Transformers", transformers.__version__)
-    except ImportError:
+    transformers_version = _get_transformers_version()
+    if transformers_version:
+        table.add_row("Transformers", transformers_version)
+    else:
         table.add_row("Transformers", "[dim]NOT INSTALLED[/dim]")
 
     vllm_version = _get_vllm_version()

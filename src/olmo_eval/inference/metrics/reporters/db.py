@@ -97,6 +97,14 @@ class DbReporter:
             self._sslmode = sslmode
         self._include_requests = include_requests
 
+    def initialize(self) -> None:
+        """Initialize the database connection eagerly.
+
+        Call this at job start to establish the connection early rather than
+        waiting until the first batch is processed.
+        """
+        self._ensure_connection()
+
     def _ensure_connection(self) -> Session:
         """Ensure database connection is established."""
         if self._session is None:

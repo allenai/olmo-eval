@@ -236,6 +236,15 @@ class Harness:
         if clear:
             self._provider.clear_metrics()
 
+    def initialize_reporters(self) -> None:
+        """Initialize metrics reporters eagerly.
+
+        Call this at job start to establish database connections early rather than
+        waiting until the first batch is processed. This is optional - reporters
+        will be lazily initialized on first use if not called.
+        """
+        self._get_reporters()
+
     def _get_reporters(self) -> list[Any]:
         """Get or create cached metrics reporters."""
         if not hasattr(self, "_reporters"):
@@ -246,7 +255,11 @@ class Harness:
                 for reporter_config in self.config.metrics.reporters:
                     resolved = self._resolve_reporter_config(reporter_config)
                     if resolved is not None:
-                        self._reporters.append(reporter_registry.create(resolved))
+                        reporter = reporter_registry.create(resolved)
+                        # Initialize reporters that support eager connection
+                        if hasattr(reporter, "initialize"):
+                            reporter.initialize()
+                        self._reporters.append(reporter)
         return self._reporters
 
     def shutdown_reporters(self) -> None:
