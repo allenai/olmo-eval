@@ -36,6 +36,7 @@ from olmo_eval.common.constants.infrastructure import (
     BEAKER_KNOWN_CLUSTERS,
     NEW_CLUSTER_ALIASES,
 )
+from olmo_eval.common.repr import hide_unset
 
 if TYPE_CHECKING:
     from beaker import Beaker, BeakerExperiment, BeakerGroup
@@ -312,6 +313,7 @@ class BeakerWekaBucket:
             self.mount = f"/weka/{self.bucket}"
 
 
+@hide_unset()
 @dataclass
 class BeakerJobConfig:
     """Configuration for a Beaker evaluation job.

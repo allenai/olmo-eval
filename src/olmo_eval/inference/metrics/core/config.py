@@ -6,11 +6,14 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
+from olmo_eval.common.repr import hide_unset
+
 # Default subdirectory for metrics files within output_dir
 METRICS_SUBDIR = "metrics"
 METRICS_FILENAME_SUFFIX = "-inference.jsonl"
 
 
+@hide_unset()
 @dataclass(frozen=True)
 class MetricsConfig:
     """Configuration for metrics collection.

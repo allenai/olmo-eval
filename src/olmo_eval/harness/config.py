@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
+from olmo_eval.common.repr import hide_unset
 from olmo_eval.inference.providers.config import ProviderConfig
 
 if TYPE_CHECKING:
@@ -15,6 +16,7 @@ if TYPE_CHECKING:
     from .tools import Tool
 
 
+@hide_unset(skip=frozenset({"_resolved_tools_cache"}))
 @dataclass(frozen=True)
 class HarnessConfig:
     """Immutable configuration for a Harness.

@@ -7,12 +7,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from olmo_eval.common.repr import hide_unset
 from olmo_eval.common.types import ProviderKind
 
 if TYPE_CHECKING:
     from olmo_eval.inference.base import InferenceProvider
 
 
+@hide_unset()
 @dataclass(frozen=True)
 class ProviderConfig:
     """Immutable configuration for creating an InferenceProvider.
