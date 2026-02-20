@@ -21,11 +21,12 @@ class DbReporter:
     Writes batch metrics to inference_runs table and optionally writes
     per-request metrics to inference_request_metrics table.
 
-    Connection parameters are read from environment variables by default:
-    - OLMO_EVAL_DB_HOST: Database host (required)
-    - OLMO_EVAL_DB_PORT: Database port (default: 5432)
-    - OLMO_EVAL_DB_USER: Database user (default: postgres)
-    - OLMO_EVAL_DB_PASSWORD: Database password
+    Connection parameters are read from standard PostgreSQL environment
+    variables (same as harness):
+    - PGHOST: Database host (required)
+    - PGPORT: Database port (default: 5432)
+    - PGUSER: Database user (default: postgres)
+    - PGPASSWORD: Database password
 
     The database name defaults to 'olmo_eval_metrics' (separate from results DB).
     """
@@ -40,12 +41,12 @@ class DbReporter:
         password_env: str | None = None,
         sslmode: str = "require",
     ) -> None:
-        # Read from environment variables if not provided
-        self._host = host or os.environ.get("OLMO_EVAL_DB_HOST")
-        self._port = port or int(os.environ.get("OLMO_EVAL_DB_PORT", "5432"))
+        # Read from standard PostgreSQL environment variables (same as harness)
+        self._host = host or os.environ.get("PGHOST")
+        self._port = port or int(os.environ.get("PGPORT", "5432"))
         self._database = database
-        self._user = user or os.environ.get("OLMO_EVAL_DB_USER", "postgres")
-        self._password = password or os.environ.get("OLMO_EVAL_DB_PASSWORD", "")
+        self._user = user or os.environ.get("PGUSER", "postgres")
+        self._password = password or os.environ.get("PGPASSWORD", "")
         self._password_env = password_env
         self._sslmode = sslmode
         self._include_requests = False
@@ -101,7 +102,7 @@ class DbReporter:
         if self._session is None:
             if not self._host:
                 raise ValueError(
-                    "Database host not configured. Set OLMO_EVAL_DB_HOST environment variable "
+                    "Database host not configured. Set PGHOST environment variable "
                     "or pass host parameter to DbReporter."
                 )
 

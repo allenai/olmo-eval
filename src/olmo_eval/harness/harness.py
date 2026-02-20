@@ -247,7 +247,7 @@ class Harness:
     def _resolve_reporter_config(
         self, reporter_config: str | dict[str, Any]
     ) -> str | dict[str, Any] | None:
-        """Resolve reporter config, adding path for jsonl if needed."""
+        """Resolve reporter config, adding path for file reporter if needed."""
         if isinstance(reporter_config, str):
             name = reporter_config
             config_dict: dict[str, Any] = {}

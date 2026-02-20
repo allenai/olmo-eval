@@ -278,9 +278,9 @@ def assemble_external_eval_job(
             if eval_instance.backend and eval_instance.backend not in backend_names:
                 backend_names.append(eval_instance.backend)
 
-    # External evals always run vLLM as a server subprocess, so use separate venv
+    # External evals always run vLLM as a server subprocess, so use isolated venv
     # to avoid dependency conflicts with other packages (e.g., openhands)
-    vllm_separate_venv = True
+    vllm_isolated_venv = True
 
     # Collect extras from all backends
     extras: list[str] = collect_install_extras(
@@ -318,7 +318,7 @@ def assemble_external_eval_job(
         setup_store_secrets=store,
         extras=extras,
         provider_packages=provider_packages,
-        vllm_separate_venv=vllm_separate_venv,
+        vllm_isolated_venv=vllm_isolated_venv,
     )
 
 
@@ -383,9 +383,9 @@ class JobConfigAssembler:
             harness_provider_package = preset.provider.package
             harness_provider_deps = list(preset.provider.dependencies)
 
-        # Determine provider kind and whether to use separate venv for vLLM
+        # Determine provider kind and whether to use isolated venv for vLLM
         provider_kind = get_provider_kind(exp.model_spec)
-        vllm_separate_venv = provider_kind == "vllm_server"
+        vllm_isolated_venv = provider_kind == "vllm_server"
 
         # If provider.package is set, it overrides the default provider extra (e.g., vllm)
         # In that case, skip provider extras and install the package separately
@@ -503,7 +503,7 @@ class JobConfigAssembler:
             enable_sandbox=self.enable_sandbox,
             setup_registry_mirror=setup_registry_mirror,
             setup_store_secrets=self.config.store,
-            vllm_separate_venv=vllm_separate_venv,
+            vllm_isolated_venv=vllm_isolated_venv,
         )
 
     def _extract_task_dependencies(

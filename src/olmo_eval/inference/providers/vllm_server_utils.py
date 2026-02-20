@@ -155,7 +155,7 @@ def _infer_tool_call_parser(model_name: str) -> str:
 def _get_vllm_python() -> str:
     """Get the Python interpreter to use for vLLM server.
 
-    Checks VLLM_PYTHON env var first (for separate venv setups),
+    Checks VLLM_PYTHON env var first (for isolated venv setups),
     falls back to current interpreter.
 
     Returns:
@@ -200,7 +200,7 @@ def _build_server_command(
     """
     import json
 
-    # Use VLLM_PYTHON env var if set (for separate venv setups)
+    # Use VLLM_PYTHON env var if set (for isolated venv setups)
     python_executable = _get_vllm_python()
 
     cmd = [
