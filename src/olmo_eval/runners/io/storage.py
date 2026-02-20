@@ -75,14 +75,15 @@ def upload_to_s3(
         experiment_id=experiment_id,
     )
 
-    retry_config = Config(
+    boto_config = Config(
         retries={
             "max_attempts": 5,
             "mode": "adaptive",
-        }
+        },
+        max_pool_connections=50,
     )
 
-    client_kwargs: dict[str, Any] = {"region_name": s3_config.region, "config": retry_config}
+    client_kwargs: dict[str, Any] = {"region_name": s3_config.region, "config": boto_config}
     if s3_config.endpoint_url:
         client_kwargs["endpoint_url"] = s3_config.endpoint_url
     s3 = boto3.client("s3", **client_kwargs)
