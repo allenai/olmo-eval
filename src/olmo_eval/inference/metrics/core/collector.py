@@ -137,11 +137,23 @@ class InstrumentedProvider:
         latency_s: float,
     ) -> RequestMetrics:
         """Build RequestMetrics from a single request/output pair."""
-        # Count prompt tokens
-        prompt_tokens = self._count_prompt_tokens(request)
+        # Try to get accurate token counts from output metadata (set by provider)
+        prompt_tokens = 0
+        completion_tokens = 0
 
-        # Count completion tokens across all outputs
-        completion_tokens = sum(self._count_output_tokens(out) for out in outputs)
+        for out in outputs:
+            if out.metadata:
+                # Use server-provided counts if available (most accurate)
+                if "prompt_tokens" in out.metadata:
+                    prompt_tokens = out.metadata["prompt_tokens"]
+                if "completion_tokens" in out.metadata:
+                    completion_tokens += out.metadata["completion_tokens"]
+
+        # Fall back to estimation if metadata not available
+        if prompt_tokens == 0:
+            prompt_tokens = self._count_prompt_tokens(request)
+        if completion_tokens == 0:
+            completion_tokens = sum(self._count_output_tokens(out) for out in outputs)
 
         # Compute tokens per second
         tps = completion_tokens / latency_s if latency_s > 0 else 0.0

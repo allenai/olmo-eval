@@ -339,6 +339,9 @@ class VLLMServerProvider(InferenceProvider):
 
         response = await client.completions.create(**kwargs)
 
+        # Capture usage for accurate metrics
+        usage = getattr(response, "usage", None)
+
         outputs = []
         for choice in response.choices:
             text = choice.text or ""
@@ -346,6 +349,12 @@ class VLLMServerProvider(InferenceProvider):
             # Convert logprobs to standard format
             logprob_entries: list[LogProbEntry] | None = None
             metadata: dict[str, Any] = {}
+
+            # Store token counts from server for accurate metrics
+            if usage:
+                metadata["prompt_tokens"] = usage.prompt_tokens
+                metadata["completion_tokens"] = usage.completion_tokens
+
             logprobs_data = getattr(choice, "logprobs", None)
             if logprobs_data and hasattr(logprobs_data, "token_logprobs"):
                 tokens = logprobs_data.tokens or []
@@ -407,6 +416,9 @@ class VLLMServerProvider(InferenceProvider):
 
         response = await client.chat.completions.create(**kwargs)
 
+        # Capture usage for accurate metrics
+        usage = getattr(response, "usage", None)
+
         outputs = []
         for choice in response.choices:
             text = choice.message.content or ""
@@ -424,6 +436,12 @@ class VLLMServerProvider(InferenceProvider):
             # Convert logprobs to standard format
             logprob_entries: list[LogProbEntry] | None = None
             metadata: dict[str, Any] = {}
+
+            # Store token counts from server for accurate metrics
+            if usage:
+                metadata["prompt_tokens"] = usage.prompt_tokens
+                metadata["completion_tokens"] = usage.completion_tokens
+
             logprobs_data = getattr(choice, "logprobs", None)
             if logprobs_data and hasattr(logprobs_data, "content") and logprobs_data.content:
                 logprob_entries = []
