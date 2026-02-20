@@ -229,7 +229,10 @@ def _make_ruler_task_class(task_name: str, task_cfg: dict) -> type:
 
 # Dynamically register all RULER tasks
 for _task_name, _task_config in RULER_TASKS.items():
-    register(f"ruler_{_task_name}")(_make_ruler_task_class(_task_name, _task_config))
+    _cls = _make_ruler_task_class(_task_name, _task_config)
+    # Inject into module globals so pickle can find the class by name
+    globals()[_cls.__name__] = _cls
+    register(f"ruler_{_task_name}")(_cls)
 
 # Register BPB variant for all RULER tasks
 # This allows perplexity-based evaluation as an alternative to generation-based
