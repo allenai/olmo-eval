@@ -4,46 +4,17 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .schema import BatchMetrics, RequestMetrics
+from .schema import BatchMetrics, GPUSnapshot, RequestMetrics
 
 if TYPE_CHECKING:
     from .config import MetricsConfig
-
-
-def percentile(values: list[float], p: float) -> float:
-    """Compute percentile of a list of values.
-
-    Args:
-        values: List of numeric values (must be non-empty).
-        p: Percentile to compute (0-100).
-
-    Returns:
-        The p-th percentile value.
-    """
-    if not values:
-        return 0.0
-
-    sorted_values = sorted(values)
-    n = len(sorted_values)
-
-    if n == 1:
-        return sorted_values[0]
-
-    # Linear interpolation method
-    k = (n - 1) * (p / 100.0)
-    f = int(k)
-    c = f + 1
-
-    if c >= n:
-        return sorted_values[-1]
-
-    return sorted_values[f] + (k - f) * (sorted_values[c] - sorted_values[f])
 
 
 def compute_batch_metrics(
     requests: list[RequestMetrics],
     wall_clock_s: float,
     config: MetricsConfig | None = None,
+    gpu_snapshots: tuple[GPUSnapshot, ...] = (),
 ) -> BatchMetrics:
     """Compute aggregate metrics from a list of request metrics.
 
@@ -51,6 +22,7 @@ def compute_batch_metrics(
         requests: List of RequestMetrics from individual requests.
         wall_clock_s: Total wall clock time for the batch.
         config: Optional MetricsConfig to extract metadata from.
+        gpu_snapshots: Optional GPU utilization snapshots.
 
     Returns:
         BatchMetrics with aggregated statistics.
@@ -77,9 +49,6 @@ def compute_batch_metrics(
             wall_clock_time_s=wall_clock_s,
             output_tokens_per_second=0.0,
             mean_latency_s=0.0,
-            p50_latency_s=0.0,
-            p95_latency_s=0.0,
-            p99_latency_s=0.0,
             experiment_id=experiment_id,
             experiment_name=experiment_name,
             experiment_group=experiment_group,
@@ -90,7 +59,7 @@ def compute_batch_metrics(
             workspace=workspace,
             author=author,
             tags=tags,
-            requests=tuple(requests),
+            gpu_snapshots=gpu_snapshots,
         )
 
     total_requests = len(requests)
@@ -105,7 +74,9 @@ def compute_batch_metrics(
     latencies = [r.end_to_end_latency_s for r in requests]
     mean_latency = sum(latencies) / len(latencies) if latencies else 0.0
 
-    output_tps = total_completion_tokens / wall_clock_s if wall_clock_s > 0 else 0.0
+    # If wall_clock_s not provided, use sum of latencies as approximation
+    effective_wall_clock = wall_clock_s if wall_clock_s > 0 else sum(latencies)
+    output_tps = total_completion_tokens / effective_wall_clock if effective_wall_clock > 0 else 0.0
 
     return BatchMetrics(
         total_requests=total_requests,
@@ -113,12 +84,9 @@ def compute_batch_metrics(
         failed_requests=failed_requests,
         total_prompt_tokens=total_prompt_tokens,
         total_completion_tokens=total_completion_tokens,
-        wall_clock_time_s=wall_clock_s,
+        wall_clock_time_s=effective_wall_clock,
         output_tokens_per_second=output_tps,
         mean_latency_s=mean_latency,
-        p50_latency_s=percentile(latencies, 50),
-        p95_latency_s=percentile(latencies, 95),
-        p99_latency_s=percentile(latencies, 99),
         experiment_id=experiment_id,
         experiment_name=experiment_name,
         experiment_group=experiment_group,
@@ -129,5 +97,5 @@ def compute_batch_metrics(
         workspace=workspace,
         author=author,
         tags=tags,
-        requests=tuple(requests),
+        gpu_snapshots=gpu_snapshots,
     )

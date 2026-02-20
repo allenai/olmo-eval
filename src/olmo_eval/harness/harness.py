@@ -204,7 +204,16 @@ class Harness:
         from olmo_eval.inference.metrics.core.registry import reporter_registry
         from olmo_eval.inference.metrics.core.stats import compute_batch_metrics
 
-        batch = compute_batch_metrics(metrics, wall_clock_s=0.0, config=self.config.metrics)
+        # Collect GPU snapshots if enabled
+        gpu_snapshots: tuple = ()
+        if self.config.metrics.collect_gpu:
+            from olmo_eval.inference.metrics.core.gpu import collect_gpu_snapshots
+
+            gpu_snapshots = collect_gpu_snapshots()
+
+        batch = compute_batch_metrics(
+            metrics, wall_clock_s=0.0, config=self.config.metrics, gpu_snapshots=gpu_snapshots
+        )
 
         for reporter_config in self.config.metrics.reporters:
             try:

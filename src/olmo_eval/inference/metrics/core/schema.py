@@ -57,9 +57,6 @@ class BatchMetrics:
     wall_clock_time_s: float
     output_tokens_per_second: float
     mean_latency_s: float
-    p50_latency_s: float
-    p95_latency_s: float
-    p99_latency_s: float
 
     # Core metadata (mirrors evaluation schema)
     experiment_id: str | None = None
@@ -80,8 +77,12 @@ class BatchMetrics:
     gpu_snapshots: tuple[GPUSnapshot, ...] = ()
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for serialization."""
+    def to_dict(self, include_requests: bool = False) -> dict[str, Any]:
+        """Convert to dictionary for serialization.
+
+        Args:
+            include_requests: If True, include per-request metrics (can be large).
+        """
         d: dict[str, Any] = {
             "total_requests": self.total_requests,
             "successful_requests": self.successful_requests,
@@ -91,13 +92,12 @@ class BatchMetrics:
             "wall_clock_time_s": self.wall_clock_time_s,
             "output_tokens_per_second": self.output_tokens_per_second,
             "mean_latency_s": self.mean_latency_s,
-            "p50_latency_s": self.p50_latency_s,
-            "p95_latency_s": self.p95_latency_s,
-            "p99_latency_s": self.p99_latency_s,
             "timestamp": self.timestamp.isoformat(),
-            "requests": [r.to_dict() for r in self.requests],
-            "gpu_snapshots": [g.to_dict() for g in self.gpu_snapshots],
         }
+        if include_requests:
+            d["requests"] = [r.to_dict() for r in self.requests]
+        if self.gpu_snapshots:
+            d["gpu_snapshots"] = [g.to_dict() for g in self.gpu_snapshots]
         # Include non-None metadata
         if self.experiment_id is not None:
             d["experiment_id"] = self.experiment_id

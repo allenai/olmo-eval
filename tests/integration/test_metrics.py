@@ -96,9 +96,6 @@ def sample_batch_metrics() -> BatchMetrics:
         wall_clock_time_s=1.6,
         output_tokens_per_second=187.5,
         mean_latency_s=0.533,
-        p50_latency_s=0.5,
-        p95_latency_s=0.78,
-        p99_latency_s=0.796,
         experiment_id="test-exp-001",
         experiment_name="metrics-integration-test",
         experiment_group="integration-tests",
@@ -236,9 +233,6 @@ class TestPostgresReporter:
                 wall_clock_time_s=2.5,
                 output_tokens_per_second=160.0,
                 mean_latency_s=0.5,
-                p50_latency_s=0.45,
-                p95_latency_s=0.9,
-                p99_latency_s=0.95,
                 experiment_id="test-exp-002",
                 experiment_name="second-test",
                 model_name="llama-3.1-70b",
@@ -275,9 +269,6 @@ class TestPostgresReporter:
             wall_clock_time_s=0.5,
             output_tokens_per_second=40.0,
             mean_latency_s=0.5,
-            p50_latency_s=0.5,
-            p95_latency_s=0.5,
-            p99_latency_s=0.5,
             experiment_id="gpu-test",
             gpu_snapshots=(
                 GPUSnapshot(
@@ -380,9 +371,6 @@ class TestMetricsQueryPatterns:
                 wall_clock_time_s=1.0,
                 output_tokens_per_second=200.0,
                 mean_latency_s=0.1,
-                p50_latency_s=0.1,
-                p95_latency_s=0.15,
-                p99_latency_s=0.18,
                 experiment_id=f"exp-{i}",
                 model_name=model,
                 timestamp=datetime.now(UTC),
@@ -440,9 +428,6 @@ class TestMetricsQueryPatterns:
                     wall_clock_time_s=0.1,
                     output_tokens_per_second=200.0,
                     mean_latency_s=0.1,
-                    p50_latency_s=0.1,
-                    p95_latency_s=0.1,
-                    p99_latency_s=0.1,
                     experiment_id=f"time-exp-{i}",
                     timestamp=ts,
                 )
@@ -645,8 +630,8 @@ class TestJSONLReporter:
             with open(path) as f:
                 data = json.loads(f.readline())
 
-            # Requests should be empty by default
-            assert data["data"]["requests"] == []
+            # Requests should not be included by default
+            assert "requests" not in data["data"]
 
     def test_report_batch_with_requests(self, sample_batch_metrics):
         """Test that JSONL reporter includes requests when configured."""
@@ -715,9 +700,6 @@ class TestJSONLReporter:
                 wall_clock_time_s=2.0,
                 output_tokens_per_second=200.0,
                 mean_latency_s=0.4,
-                p50_latency_s=0.4,
-                p95_latency_s=0.5,
-                p99_latency_s=0.55,
                 experiment_id="test-exp-002",
                 timestamp=datetime.now(UTC),
             )
@@ -782,9 +764,6 @@ class TestJSONLReporter:
                 wall_clock_time_s=0.5,
                 output_tokens_per_second=40.0,
                 mean_latency_s=0.5,
-                p50_latency_s=0.5,
-                p95_latency_s=0.5,
-                p99_latency_s=0.5,
                 gpu_snapshots=(
                     GPUSnapshot(
                         device_id=0,

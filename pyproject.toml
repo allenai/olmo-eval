@@ -69,6 +69,9 @@ postgres = [
     "sqlalchemy>=2.0.46",
     "alembic>=1.18.1",
 ]
+gpu = [
+    "pynvml>=12.0.0",
+]
 storage = [
     "olmo-eval-internal[s3,postgres]",
 ]

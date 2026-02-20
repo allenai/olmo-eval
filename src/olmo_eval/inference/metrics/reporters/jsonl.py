@@ -59,11 +59,7 @@ class JSONLReporter:
     def report_batch(self, metrics: BatchMetrics) -> None:
         """Write batch metrics as JSON line."""
         f = self._ensure_file()
-        data = metrics.to_dict()
-
-        # Optionally exclude per-request details to reduce file size
-        if not self._include_requests:
-            data["requests"] = []
+        data = metrics.to_dict(include_requests=self._include_requests)
 
         output = {
             "type": "batch",

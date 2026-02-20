@@ -152,9 +152,6 @@ class PostgresReporter:
             wall_clock_time_s=metrics.wall_clock_time_s,
             output_tokens_per_second=metrics.output_tokens_per_second,
             mean_latency_s=metrics.mean_latency_s,
-            p50_latency_s=metrics.p50_latency_s,
-            p95_latency_s=metrics.p95_latency_s,
-            p99_latency_s=metrics.p99_latency_s,
             tags=tags_list,
             metadata_=metadata if metadata else None,
         )

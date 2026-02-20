@@ -81,9 +81,6 @@ class ConsoleReporter:
 
         self._output.write("\nLatency:\n")
         self._output.write(f"  Mean:  {metrics.mean_latency_s:.3f}s\n")
-        self._output.write(f"  P50:   {metrics.p50_latency_s:.3f}s\n")
-        self._output.write(f"  P95:   {metrics.p95_latency_s:.3f}s\n")
-        self._output.write(f"  P99:   {metrics.p99_latency_s:.3f}s\n")
 
         self._output.write("=" * 60 + "\n\n")
 

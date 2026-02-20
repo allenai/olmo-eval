@@ -69,9 +69,6 @@ class InferenceRun(MetricsBase):
 
     # Latency statistics
     mean_latency_s: Mapped[float] = mapped_column(DOUBLE_PRECISION, nullable=False)
-    p50_latency_s: Mapped[float] = mapped_column(DOUBLE_PRECISION, nullable=False)
-    p95_latency_s: Mapped[float] = mapped_column(DOUBLE_PRECISION, nullable=False)
-    p99_latency_s: Mapped[float] = mapped_column(DOUBLE_PRECISION, nullable=False)
 
     # User-defined tags (for special filtering beyond core metadata)
     tags: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
