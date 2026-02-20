@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any
 
 from olmo_eval.common.repr import hide_unset
@@ -11,6 +12,14 @@ from olmo_eval.common.repr import hide_unset
 # Default subdirectory for metrics files within output_dir
 METRICS_SUBDIR = "metrics"
 METRICS_FILENAME_SUFFIX = "-inference.jsonl"
+
+
+class ReporterName(StrEnum):
+    """Available metrics reporters."""
+
+    CONSOLE = "console"
+    JSONL = "jsonl"
+    POSTGRES = "postgres"
 
 
 @hide_unset()
@@ -30,7 +39,7 @@ class MetricsConfig:
     """
 
     enabled: bool = True
-    reporters: tuple[str | dict[str, Any], ...] = ("jsonl",)
+    reporters: tuple[str | dict[str, Any], ...] = (ReporterName.JSONL,)
     collect_gpu: bool = False
 
     # Output directory (set at runtime, used by file-based reporters)
@@ -52,6 +61,24 @@ class MetricsConfig:
 
     # User-defined tags (for special filtering beyond core metadata)
     tags: dict[str, str] = field(default_factory=dict)
+
+    def has_reporter(self, name: ReporterName | str) -> bool:
+        """Check if a specific reporter is configured.
+
+        Args:
+            name: Reporter name to check for.
+
+        Returns:
+            True if the reporter is in the reporters list.
+        """
+        name_str = str(name)
+        for r in self.reporters:
+            if isinstance(r, str):
+                if r == name_str:
+                    return True
+            elif isinstance(r, dict) and r.get("name") == name_str:
+                return True
+        return False
 
     def get_metrics_path(self) -> str | None:
         """Get the resolved path for metrics file.
@@ -112,7 +139,7 @@ class MetricsConfig:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> MetricsConfig:
         """Create from dictionary."""
-        reporters = data.get("reporters", ["jsonl"])
+        reporters = data.get("reporters", [ReporterName.JSONL])
         return cls(
             enabled=data.get("enabled", True),
             reporters=tuple(reporters),

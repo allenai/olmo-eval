@@ -18,7 +18,7 @@ class InstrumentedProvider:
     """Wraps InferenceProvider to collect timing metrics.
 
     This wrapper intercepts generate/agenerate calls to measure latency
-    and collect token counts. It exposes the same interface as the
+    and collect token counts. All other attributes are forwarded to the
     underlying provider.
     """
 
@@ -26,14 +26,9 @@ class InstrumentedProvider:
         self._provider = provider
         self._request_metrics: list[RequestMetrics] = []
 
-    @property
-    def model_name(self) -> str:
-        """Model name from the underlying provider."""
-        return self._provider.model_name
-
-    def get_tokenizer(self) -> Any:
-        """Get tokenizer from the underlying provider."""
-        return self._provider.get_tokenizer()
+    def __getattr__(self, name: str) -> Any:
+        """Forward unknown attributes to the underlying provider."""
+        return getattr(self._provider, name)
 
     def generate(
         self,
@@ -58,14 +53,6 @@ class InstrumentedProvider:
 
         self._collect_metrics(requests, outputs, t.elapsed_s)
         return outputs
-
-    def logprobs(self, requests: list[LMRequest]) -> list[list[LMOutput]]:
-        """Pass through to provider (no timing for logprobs)."""
-        return self._provider.logprobs(requests)
-
-    async def alogprobs(self, requests: list[LMRequest]) -> list[list[LMOutput]]:
-        """Pass through to provider (no timing for logprobs)."""
-        return await self._provider.alogprobs(requests)
 
     def get_metrics(self) -> list[RequestMetrics]:
         """Get collected metrics."""
@@ -177,22 +164,17 @@ class InstrumentedHarness:
     """Wraps Harness to collect metrics on provider calls.
 
     This wrapper intercepts the harness's generate/agenerate calls
-    and instruments the underlying provider.
+    and instruments the underlying provider. All other attributes
+    are forwarded to the underlying harness.
     """
 
     def __init__(self, harness: Harness) -> None:
         self._harness = harness
         self._instrumented_provider: InstrumentedProvider | None = None
 
-    @property
-    def config(self):
-        """Expose harness config."""
-        return self._harness.config
-
-    @property
-    def model_name(self) -> str:
-        """Model name from the harness."""
-        return self._harness.model_name
+    def __getattr__(self, name: str) -> Any:
+        """Forward unknown attributes to the underlying harness."""
+        return getattr(self._harness, name)
 
     @property
     def _provider(self) -> InstrumentedProvider:
@@ -218,14 +200,6 @@ class InstrumentedHarness:
         """Async generate with timing instrumentation."""
         transformed = [self._harness._apply_config(r) for r in requests]
         return await self._provider.agenerate(transformed, sampling_params)
-
-    def logprobs(self, requests: list[LMRequest]) -> list[list[LMOutput]]:
-        """Pass through to harness."""
-        return self._harness.logprobs(requests)
-
-    async def alogprobs(self, requests: list[LMRequest]) -> list[list[LMOutput]]:
-        """Pass through to harness."""
-        return await self._harness.alogprobs(requests)
 
     def get_metrics(self) -> list[RequestMetrics]:
         """Get collected metrics."""

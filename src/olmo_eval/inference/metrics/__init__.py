@@ -16,7 +16,7 @@ Usage:
 """
 
 from .core.collector import InstrumentedHarness, InstrumentedProvider
-from .core.config import MetricsConfig
+from .core.config import MetricsConfig, ReporterName
 from .core.context import MetricsContext, collect_metrics
 from .core.registry import reporter_registry
 from .core.schema import BatchMetrics, GPUSnapshot, RequestMetrics
@@ -26,6 +26,7 @@ __all__ = [
     "collect_metrics",
     "MetricsContext",
     "MetricsConfig",
+    "ReporterName",
     # Schema
     "RequestMetrics",
     "BatchMetrics",
