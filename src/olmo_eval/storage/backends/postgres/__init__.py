@@ -8,8 +8,7 @@ from olmo_eval.storage.backends.postgres.db_url import (
     build_results_db_url,
 )
 from olmo_eval.storage.backends.postgres.metrics_models import (
-    InferenceRequestMetric,
-    InferenceRun,
+    InferenceSample,
     MetricsBase,
 )
 from olmo_eval.storage.backends.postgres.models import (
@@ -37,8 +36,7 @@ __all__ = [
     "Experiment",
     "TaskResult",
     "InstancePrediction",
-    "InferenceRun",
-    "InferenceRequestMetric",
+    "InferenceSample",
     "DatabaseSession",
     "create_postgres_engine",
     "create_session_factory",

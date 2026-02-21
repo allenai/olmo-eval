@@ -80,6 +80,26 @@ class InstrumentedProvider:
         self._collect_metrics(requests, outputs, t.elapsed_s)
         return outputs
 
+    def logprobs(self, requests: list[LMRequest]) -> list[list[LMOutput]]:
+        """Log probability computation with timing instrumentation."""
+        self._start_gpu_monitor_if_needed()
+
+        with Timer() as t:
+            outputs = self._provider.logprobs(requests)
+
+        self._collect_metrics(requests, outputs, t.elapsed_s)
+        return outputs
+
+    async def alogprobs(self, requests: list[LMRequest]) -> list[list[LMOutput]]:
+        """Async log probability computation with timing instrumentation."""
+        self._start_gpu_monitor_if_needed()
+
+        with Timer() as t:
+            outputs = await self._provider.alogprobs(requests)
+
+        self._collect_metrics(requests, outputs, t.elapsed_s)
+        return outputs
+
     def get_metrics(self) -> list[RequestMetrics]:
         """Get collected request metrics."""
         return list(self._request_metrics)

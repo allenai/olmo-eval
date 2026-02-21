@@ -18,8 +18,7 @@ logger = logging.getLogger(__name__)
 class DbReporter:
     """Store metrics in PostgreSQL database.
 
-    Writes batch metrics to inference_runs table and optionally writes
-    per-request metrics to inference_request_metrics table.
+    Writes batch metrics to inference_samples table.
 
     Connection parameters are read from standard PostgreSQL environment
     variables (same as harness):
@@ -49,7 +48,6 @@ class DbReporter:
         self._password = password or os.environ.get("PGPASSWORD", "")
         self._password_env = password_env
         self._sslmode = sslmode
-        self._include_requests = False
         self._session: Session | None = None
         self._db_session: Any = None  # DatabaseSession instance
 
@@ -66,7 +64,6 @@ class DbReporter:
         password: str | None = None,
         password_env: str | None = None,
         sslmode: str | None = None,
-        include_requests: bool = False,
         **kwargs: Any,
     ) -> None:
         """Configure the reporter.
@@ -79,7 +76,6 @@ class DbReporter:
             password: Database password.
             password_env: Environment variable containing password.
             sslmode: SSL mode for connection.
-            include_requests: If True, also store per-request metrics.
         """
         if host is not None:
             self._host = host
@@ -95,7 +91,6 @@ class DbReporter:
             self._password_env = password_env
         if sslmode is not None:
             self._sslmode = sslmode
-        self._include_requests = include_requests
 
     def initialize(self) -> None:
         """Initialize the database connection eagerly.
@@ -141,10 +136,7 @@ class DbReporter:
 
     def report_batch(self, metrics: BatchMetrics) -> None:
         """Store batch metrics in the database."""
-        from olmo_eval.storage.backends.postgres.metrics_models import (
-            InferenceRequestMetric,
-            InferenceRun,
-        )
+        from olmo_eval.storage.backends.postgres.metrics_models import InferenceSample
 
         session = self._ensure_connection()
 
@@ -156,8 +148,8 @@ class DbReporter:
         if metrics.gpu_snapshots:
             metadata["gpu_devices"] = metrics._group_gpu_snapshots()
 
-        # Create InferenceRun record
-        inference_run = InferenceRun(
+        # Create InferenceSample record
+        sample = InferenceSample(
             experiment_id=metrics.experiment_id,
             experiment_name=metrics.experiment_name,
             experiment_group=metrics.experiment_group,
@@ -167,7 +159,7 @@ class DbReporter:
             task_hash=metrics.task_hash,
             workspace=metrics.workspace,
             author=metrics.author,
-            provider_kind=None,  # Set from config if available
+            provider_kind=metrics.provider_kind,
             timestamp=metrics.timestamp or datetime.now(UTC),
             total_requests=metrics.total_requests,
             successful_requests=metrics.successful_requests,
@@ -181,26 +173,7 @@ class DbReporter:
             metadata_=metadata if metadata else None,
         )
 
-        session.add(inference_run)
-        session.flush()  # Get the ID for foreign key
-
-        # Optionally store per-request metrics
-        if self._include_requests and metrics.requests:
-            for req in metrics.requests:
-                request_metric = InferenceRequestMetric(
-                    inference_run_id=inference_run.id,
-                    request_id=req.request_id,
-                    prompt_tokens=req.prompt_tokens,
-                    completion_tokens=req.completion_tokens,
-                    end_to_end_latency_s=req.end_to_end_latency_s,
-                    tokens_per_second=req.tokens_per_second,
-                    time_to_first_token_s=req.time_to_first_token_s,
-                    time_per_output_token_s=req.time_per_output_token_s,
-                    finish_reason=req.finish_reason,
-                    model=req.model,
-                    timestamp=req.timestamp,
-                )
-                session.add(request_metric)
+        session.add(sample)
 
     def flush(self) -> None:
         """Commit pending transactions."""

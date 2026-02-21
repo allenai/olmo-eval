@@ -289,6 +289,7 @@ def scoring_worker(
                     # Timeout - flush batch only if we have enough items to utilize concurrency
                     if len(batch) >= min_batch_for_flush:
                         if progress is None:
+                            worker_logger.info("Starting scoring")
                             progress = ProgressLogger(
                                 total=total_instances,
                                 desc="Scored",
@@ -312,17 +313,18 @@ def scoring_worker(
                         await process_batch(batch, scoring_context, progress)
                     break
 
-                # Create progress logger on first item
-                if progress is None:
-                    worker_logger.info("Starting scoring")
-                    progress = ProgressLogger(
-                        total=total_instances, desc="Scored", logger=worker_logger, color="blue"
-                    )
-
                 batch.append(item)
 
                 # Process batch when full
                 if len(batch) >= batch_size:
+                    if progress is None:
+                        worker_logger.info("Starting scoring")
+                        progress = ProgressLogger(
+                            total=total_instances,
+                            desc="Scored",
+                            logger=worker_logger,
+                            color="blue",
+                        )
                     await process_batch(batch, scoring_context, progress)
                     batch = []
 

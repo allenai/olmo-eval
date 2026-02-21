@@ -71,6 +71,7 @@ class BatchMetrics:
     task_hash: str | None = None
     workspace: str | None = None
     author: str | None = None
+    provider_kind: str | None = None
 
     # User-defined tags
     tags: dict[str, str] = field(default_factory=dict)
@@ -122,6 +123,8 @@ class BatchMetrics:
             d["workspace"] = self.workspace
         if self.author is not None:
             d["author"] = self.author
+        if self.provider_kind is not None:
+            d["provider_kind"] = self.provider_kind
         if self.tags:
             d["tags"] = dict(self.tags)
         return d

@@ -11,10 +11,7 @@ from olmo_eval.inference.metrics.core.schema import BatchMetrics, GPUSnapshot, R
 from olmo_eval.inference.metrics.reporters.console import ConsoleReporter
 from olmo_eval.inference.metrics.reporters.db import DbReporter
 from olmo_eval.inference.metrics.reporters.file import FileReporter
-from olmo_eval.storage.backends.postgres.metrics_models import (
-    InferenceRequestMetric,
-    InferenceRun,
-)
+from olmo_eval.storage.backends.postgres.metrics_models import InferenceSample
 
 
 @pytest.fixture
@@ -105,6 +102,7 @@ def sample_batch_metrics() -> BatchMetrics:
         task_hash="mmlu-v1-hash",
         workspace="ai2/olmo-test",
         author="test-runner",
+        provider_kind="vllm_server",
         tags={"environment": "test", "version": "1.0"},
         requests=requests,
         timestamp=datetime.now(UTC),
@@ -115,8 +113,8 @@ class TestDbReporter:
     """Integration tests for DbReporter."""
 
     @pytest.mark.integration
-    def test_report_batch_without_requests(self, metrics_db, sample_batch_metrics):
-        """Test storing batch metrics without per-request details."""
+    def test_report_batch(self, metrics_db, sample_batch_metrics):
+        """Test storing batch metrics."""
         reporter = DbReporter(
             host="localhost",
             port=5433,
@@ -134,78 +132,29 @@ class TestDbReporter:
 
         # Verify the data was stored
         with metrics_db.session() as session:
-            runs = session.query(InferenceRun).all()
-            assert len(runs) == 1
+            samples = session.query(InferenceSample).all()
+            assert len(samples) == 1
 
-            run = runs[0]
-            assert run.experiment_id == "test-exp-001"
-            assert run.experiment_name == "metrics-integration-test"
-            assert run.experiment_group == "integration-tests"
-            assert run.model_name == "llama-3.1-8b"
-            assert run.model_hash == "abc123def456"
-            assert run.task_name == "mmlu"
-            assert run.task_hash == "mmlu-v1-hash"
-            assert run.workspace == "ai2/olmo-test"
-            assert run.author == "test-runner"
-            assert run.total_requests == 3
-            assert run.successful_requests == 3
-            assert run.failed_requests == 0
-            assert run.total_prompt_tokens == 155
-            assert run.total_completion_tokens == 300
-            assert abs(run.wall_clock_time_s - 1.6) < 0.01
-            assert abs(run.mean_latency_s - 0.533) < 0.01
-            assert run.tags is not None
-            assert "environment:test" in run.tags
-
-            # No request metrics should be stored
-            request_metrics = session.query(InferenceRequestMetric).all()
-            assert len(request_metrics) == 0
-
-    @pytest.mark.integration
-    def test_report_batch_with_requests(self, metrics_db, sample_batch_metrics):
-        """Test storing batch metrics with per-request details."""
-        reporter = DbReporter(
-            host="localhost",
-            port=5433,
-            database="olmo_eval_test",
-            user="test",
-            password="test",
-            sslmode="disable",
-        )
-        reporter.configure(include_requests=True)
-
-        try:
-            reporter.report_batch(sample_batch_metrics)
-            reporter.flush()
-        finally:
-            reporter.shutdown()
-
-        # Verify batch and request data was stored
-        with metrics_db.session() as session:
-            runs = session.query(InferenceRun).all()
-            assert len(runs) == 1
-
-            run = runs[0]
-            assert run.total_requests == 3
-
-            # Check request metrics
-            request_metrics = (
-                session.query(InferenceRequestMetric)
-                .filter(InferenceRequestMetric.inference_run_id == run.id)
-                .all()
-            )
-            assert len(request_metrics) == 3
-
-            request_ids = {rm.request_id for rm in request_metrics}
-            assert request_ids == {"req-001", "req-002", "req-003"}
-
-            # Check specific request
-            req1 = next(rm for rm in request_metrics if rm.request_id == "req-001")
-            assert req1.prompt_tokens == 50
-            assert req1.completion_tokens == 100
-            assert abs(req1.end_to_end_latency_s - 0.5) < 0.01
-            assert req1.finish_reason == "stop"
-            assert req1.model == "llama-3.1-8b"
+            sample = samples[0]
+            assert sample.experiment_id == "test-exp-001"
+            assert sample.experiment_name == "metrics-integration-test"
+            assert sample.experiment_group == "integration-tests"
+            assert sample.model_name == "llama-3.1-8b"
+            assert sample.model_hash == "abc123def456"
+            assert sample.task_name == "mmlu"
+            assert sample.task_hash == "mmlu-v1-hash"
+            assert sample.workspace == "ai2/olmo-test"
+            assert sample.author == "test-runner"
+            assert sample.provider_kind == "vllm_server"
+            assert sample.total_requests == 3
+            assert sample.successful_requests == 3
+            assert sample.failed_requests == 0
+            assert sample.total_prompt_tokens == 155
+            assert sample.total_completion_tokens == 300
+            assert abs(sample.wall_clock_time_s - 1.6) < 0.01
+            assert abs(sample.mean_latency_s - 0.533) < 0.01
+            assert sample.tags is not None
+            assert "environment:test" in sample.tags
 
     @pytest.mark.integration
     def test_multiple_batches(self, metrics_db, sample_batch_metrics):
@@ -236,6 +185,7 @@ class TestDbReporter:
                 experiment_id="test-exp-002",
                 experiment_name="second-test",
                 model_name="llama-3.1-70b",
+                provider_kind="litellm",
                 timestamp=datetime.now(UTC),
             )
             reporter.report_batch(batch2)
@@ -245,17 +195,19 @@ class TestDbReporter:
 
         # Verify both batches were stored
         with metrics_db.session() as session:
-            runs = session.query(InferenceRun).order_by(InferenceRun.id).all()
-            assert len(runs) == 2
+            samples = session.query(InferenceSample).order_by(InferenceSample.id).all()
+            assert len(samples) == 2
 
-            assert runs[0].experiment_id == "test-exp-001"
-            assert runs[0].model_name == "llama-3.1-8b"
-            assert runs[0].total_requests == 3
+            assert samples[0].experiment_id == "test-exp-001"
+            assert samples[0].model_name == "llama-3.1-8b"
+            assert samples[0].total_requests == 3
+            assert samples[0].provider_kind == "vllm_server"
 
-            assert runs[1].experiment_id == "test-exp-002"
-            assert runs[1].model_name == "llama-3.1-70b"
-            assert runs[1].total_requests == 5
-            assert runs[1].failed_requests == 1
+            assert samples[1].experiment_id == "test-exp-002"
+            assert samples[1].model_name == "llama-3.1-70b"
+            assert samples[1].total_requests == 5
+            assert samples[1].failed_requests == 1
+            assert samples[1].provider_kind == "litellm"
 
     @pytest.mark.integration
     def test_gpu_snapshots_stored_in_metadata(self, metrics_db):
@@ -310,14 +262,14 @@ class TestDbReporter:
 
         # Verify GPU devices are in metadata (grouped by device)
         with metrics_db.session() as session:
-            run = session.query(InferenceRun).filter_by(experiment_id="gpu-test").first()
-            assert run is not None
-            assert run.metadata_ is not None
-            assert "gpu_devices" in run.metadata_
+            sample = session.query(InferenceSample).filter_by(experiment_id="gpu-test").first()
+            assert sample is not None
+            assert sample.metadata_ is not None
+            assert "gpu_devices" in sample.metadata_
             # Two devices, each with one sample
-            assert len(run.metadata_["gpu_devices"]) == 2
-            assert run.metadata_["gpu_devices"][0]["name"] == "NVIDIA A100"
-            assert run.metadata_["gpu_devices"][0]["samples"][0]["utilization_pct"] == 85.0
+            assert len(sample.metadata_["gpu_devices"]) == 2
+            assert sample.metadata_["gpu_devices"][0]["name"] == "NVIDIA A100"
+            assert sample.metadata_["gpu_devices"][0]["samples"][0]["utilization_pct"] == 85.0
 
 
 class TestMetricsQueryPatterns:
@@ -342,13 +294,13 @@ class TestMetricsQueryPatterns:
             reporter.shutdown()
 
         with metrics_db.session() as session:
-            runs = (
-                session.query(InferenceRun)
-                .filter(InferenceRun.experiment_id == "test-exp-001")
+            samples = (
+                session.query(InferenceSample)
+                .filter(InferenceSample.experiment_id == "test-exp-001")
                 .all()
             )
-            assert len(runs) == 1
-            assert runs[0].model_name == "llama-3.1-8b"
+            assert len(samples) == 1
+            assert samples[0].model_name == "llama-3.1-8b"
 
     @pytest.mark.integration
     def test_query_by_model_name(self, metrics_db):
@@ -387,15 +339,19 @@ class TestMetricsQueryPatterns:
             reporter.shutdown()
 
         with metrics_db.session() as session:
-            llama_8b_runs = (
-                session.query(InferenceRun).filter(InferenceRun.model_name == "llama-3.1-8b").all()
+            llama_8b = (
+                session.query(InferenceSample)
+                .filter(InferenceSample.model_name == "llama-3.1-8b")
+                .all()
             )
-            assert len(llama_8b_runs) == 2
+            assert len(llama_8b) == 2
 
-            llama_70b_runs = (
-                session.query(InferenceRun).filter(InferenceRun.model_name == "llama-3.1-70b").all()
+            llama_70b = (
+                session.query(InferenceSample)
+                .filter(InferenceSample.model_name == "llama-3.1-70b")
+                .all()
             )
-            assert len(llama_70b_runs) == 1
+            assert len(llama_70b) == 1
 
     @pytest.mark.integration
     def test_query_by_time_range(self, metrics_db):
@@ -440,52 +396,10 @@ class TestMetricsQueryPatterns:
         with metrics_db.session() as session:
             # Query last 90 minutes
             cutoff = now - timedelta(minutes=90)
-            recent_runs = session.query(InferenceRun).filter(InferenceRun.timestamp >= cutoff).all()
-            assert len(recent_runs) == 2  # Last two batches
-
-    @pytest.mark.integration
-    def test_cascade_delete(self, metrics_db, sample_batch_metrics):
-        """Test that deleting an InferenceRun cascades to request metrics."""
-        reporter = DbReporter(
-            host="localhost",
-            port=5433,
-            database="olmo_eval_test",
-            user="test",
-            password="test",
-            sslmode="disable",
-        )
-        reporter.configure(include_requests=True)
-
-        try:
-            reporter.report_batch(sample_batch_metrics)
-            reporter.flush()
-        finally:
-            reporter.shutdown()
-
-        with metrics_db.session() as session:
-            # Verify data exists
-            run = session.query(InferenceRun).first()
-            assert run is not None
-            run_id = run.id
-
-            request_count = (
-                session.query(InferenceRequestMetric)
-                .filter(InferenceRequestMetric.inference_run_id == run_id)
-                .count()
+            recent = (
+                session.query(InferenceSample).filter(InferenceSample.timestamp >= cutoff).all()
             )
-            assert request_count == 3
-
-            # Delete the run
-            session.delete(run)
-            session.commit()
-
-        with metrics_db.session() as session:
-            # Verify cascade delete
-            remaining_runs = session.query(InferenceRun).count()
-            assert remaining_runs == 0
-
-            remaining_requests = session.query(InferenceRequestMetric).count()
-            assert remaining_requests == 0
+            assert len(recent) == 2  # Last two batches
 
 
 class TestRegistryIntegration:
@@ -515,9 +429,9 @@ class TestRegistryIntegration:
             reporter.shutdown()
 
         with metrics_db.session() as session:
-            runs = session.query(InferenceRun).all()
-            assert len(runs) == 1
-            assert runs[0].experiment_id == "test-exp-001"
+            samples = session.query(InferenceSample).all()
+            assert len(samples) == 1
+            assert samples[0].experiment_id == "test-exp-001"
 
 
 # =============================================================================

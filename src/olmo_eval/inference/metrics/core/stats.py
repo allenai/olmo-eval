@@ -52,6 +52,7 @@ def compute_batch_metrics(
     task_hash = config.task_hash if config else None
     workspace = config.workspace if config else None
     author = config.author if config else None
+    provider_kind = config.provider_kind if config else None
     tags = config.tags if config else {}
 
     if not requests:
@@ -74,6 +75,7 @@ def compute_batch_metrics(
             task_hash=task_hash,
             workspace=workspace,
             author=author,
+            provider_kind=provider_kind,
             tags=tags,
             gpu_snapshots=gpu_snapshots,
         )
@@ -113,6 +115,7 @@ def compute_batch_metrics(
         task_hash=task_hash,
         workspace=workspace,
         author=author,
+        provider_kind=provider_kind,
         tags=tags,
         gpu_snapshots=gpu_snapshots,
     )
