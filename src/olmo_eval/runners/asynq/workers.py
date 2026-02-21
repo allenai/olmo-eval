@@ -155,9 +155,10 @@ def inference_worker(
             batch_config.validate_for_provider(provider_kind)
             strategy = get_strategy(batch_config)
 
+            concurrency_str = max_concurrency or "unlimited"
             worker_logger.info(
                 f"Inference worker ready (strategy={batch_config.strategy}, "
-                f"chunk_size={batch_config.chunk_size}, max_in_flight={max_concurrency})"
+                f"chunk_size={batch_config.chunk_size}, max_in_flight={concurrency_str})"
             )
             asyncio.run(
                 strategy.run(
