@@ -78,10 +78,6 @@ clients = [
 storage = [
     "olmo-eval-internal[s3,postgres]",
 ]
-# Runtime without Beaker (most common for container execution)
-runtime = [
-    "olmo-eval-internal[storage]",
-]
 
 [project.scripts]
 olmo-eval = "olmo_eval.cli:main"

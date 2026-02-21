@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 # Flag to track if pynvml is available and initialized
 _nvml_initialized = False
 _nvml_available = False
+_nvml_error: str | None = None
 
 
 def _ensure_nvml() -> bool:
@@ -26,7 +27,7 @@ def _ensure_nvml() -> bool:
     Returns:
         True if NVML is available and initialized.
     """
-    global _nvml_initialized, _nvml_available
+    global _nvml_initialized, _nvml_available, _nvml_error
 
     if _nvml_initialized:
         return _nvml_available
@@ -38,12 +39,15 @@ def _ensure_nvml() -> bool:
 
         pynvml.nvmlInit()
         _nvml_available = True
+        _nvml_error = None
         logger.debug("NVML initialized successfully")
     except ImportError:
-        logger.debug("pynvml not installed, GPU metrics disabled")
+        _nvml_error = "pynvml not installed"
+        logger.warning(f"GPU metrics disabled: {_nvml_error}")
         _nvml_available = False
     except Exception as e:
-        logger.debug(f"Failed to initialize NVML: {e}")
+        _nvml_error = str(e)
+        logger.warning(f"GPU metrics disabled: NVML init failed: {_nvml_error}")
         _nvml_available = False
 
     return _nvml_available
@@ -74,7 +78,7 @@ class GPUMonitor:
     def start(self) -> None:
         """Start background sampling thread."""
         if not _ensure_nvml():
-            logger.warning("GPU monitoring: NVML not available, skipping")
+            # Error already logged by _ensure_nvml at WARNING level
             return
 
         self._stop_event.clear()

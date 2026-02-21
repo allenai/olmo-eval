@@ -86,6 +86,7 @@ def collect_install_extras(
     store: bool = False,
     sandbox: bool = False,
     metrics: bool = False,
+    collect_gpu: bool = False,
     backend_name: str | None = None,
     provider_extras: list[str] | None = None,
 ) -> list[str]:
@@ -95,6 +96,7 @@ def collect_install_extras(
         store: Whether storage is enabled.
         sandbox: Whether sandbox is enabled.
         metrics: Whether metrics collection is enabled.
+        collect_gpu: Whether GPU metrics collection is enabled.
         backend_name: Harness backend name (e.g., "openai_agents").
         provider_extras: Provider-specific extras.
 
@@ -109,6 +111,8 @@ def collect_install_extras(
         extras.append("sandbox")
     if metrics:
         extras.append("postgres")
+    if collect_gpu:
+        extras.append("gpu")
 
     if backend_name:
         from olmo_eval.harness import get_backend_extras
@@ -361,6 +365,7 @@ class JobConfigAssembler:
         backend_name: str | None = None
         sandbox_enabled = False
         metrics_enabled = False
+        collect_gpu_enabled = False
         harness_provider_package: str | None = None
         harness_provider_deps: list[str] = []
         if self.config.harness:
@@ -380,6 +385,9 @@ class JobConfigAssembler:
                 and preset.metrics.enabled
                 and preset.metrics.has_reporter(ReporterType.DB)
             )
+            collect_gpu_enabled = (
+                preset.metrics is not None and preset.metrics.enabled and preset.metrics.collect_gpu
+            )
             harness_provider_package = preset.provider.package
             harness_provider_deps = list(preset.provider.dependencies)
 
@@ -398,6 +406,7 @@ class JobConfigAssembler:
             store=self.config.store,
             sandbox=sandbox_enabled,
             metrics=metrics_enabled,
+            collect_gpu=collect_gpu_enabled,
             backend_name=backend_name,
             provider_extras=provider_extras,
         )
