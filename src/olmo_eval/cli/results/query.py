@@ -164,7 +164,8 @@ def query(
             "--experiment, --model, --model-hash, --task, --task-hash, or --experiment-group"
         )
 
-    db = get_database_session(db_host, db_port, db_name, db_user, db_password)
+    with console.status("[bold blue]Connecting to database..."):
+        db = get_database_session(db_host, db_port, db_name, db_user, db_password)
 
     try:
         from olmo_eval.storage.backends.postgres.queries import QueryHelper
@@ -176,21 +177,23 @@ def query(
 
             # Experiment group with instances uses streaming (early return)
             if experiment_groups and instances:
-                _stream_experiment_group_instances(
-                    session, experiment_groups, model_hashes, task_hashes, output_format
-                )
+                with console.status("[bold blue]Streaming instances..."):
+                    _stream_experiment_group_instances(
+                        session, experiment_groups, model_hashes, task_hashes, output_format
+                    )
                 return
 
             # Fetch experiments based on filters (all combined with AND)
-            all_experiments = _query_experiments(
-                repo,
-                experiment_ids,
-                model_names,
-                model_hashes,
-                task_names,
-                task_hashes,
-                experiment_groups,
-            )
+            with console.status("[bold blue]Fetching results..."):
+                all_experiments = _query_experiments(
+                    repo,
+                    experiment_ids,
+                    model_names,
+                    model_hashes,
+                    task_names,
+                    task_hashes,
+                    experiment_groups,
+                )
             if not all_experiments:
                 console.print("[dim]No results found.[/dim]")
                 return
@@ -201,20 +204,20 @@ def query(
             task_filter = set(task_names) if task_names else None
 
             # Fetch instances if requested
-            instance_data = (
-                _query_instances(
-                    helper,
-                    experiment_ids,
-                    model_names,
-                    model_hashes,
-                    task_names,
-                    task_hashes,
-                    limit,
-                    after_id,
-                )
-                if instances
-                else []
-            )
+            if instances:
+                with console.status("[bold blue]Fetching instances..."):
+                    instance_data = _query_instances(
+                        helper,
+                        experiment_ids,
+                        model_names,
+                        model_hashes,
+                        task_names,
+                        task_hashes,
+                        limit,
+                        after_id,
+                    )
+            else:
+                instance_data = []
 
             # Output results
             _output_results(
