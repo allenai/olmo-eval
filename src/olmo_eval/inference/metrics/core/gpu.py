@@ -74,12 +74,14 @@ class GPUMonitor:
     def start(self) -> None:
         """Start background sampling thread."""
         if not _ensure_nvml():
+            logger.warning("GPU monitoring: NVML not available, skipping")
             return
 
         self._stop_event.clear()
         self._snapshots.clear()
         self._thread = threading.Thread(target=self._sample_loop, daemon=True)
         self._thread.start()
+        logger.info("GPU monitoring: background thread started")
 
     def stop(self) -> tuple[GPUSnapshot, ...]:
         """Stop sampling and return collected snapshots.

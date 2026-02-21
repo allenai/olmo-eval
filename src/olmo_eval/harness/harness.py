@@ -48,6 +48,9 @@ class Harness:
         with instrumentation for metrics collection.
         """
         if self._provider is None:
+            import logging
+
+            logger = logging.getLogger(__name__)
             provider = self.config.provider.create_provider()
             if self.config.metrics is not None and self.config.metrics.enabled:
                 from olmo_eval.inference.metrics import InstrumentedProvider
@@ -56,9 +59,13 @@ class Harness:
                 instrumented = InstrumentedProvider(provider)
                 # Enable GPU monitoring if configured
                 if self.config.metrics.collect_gpu:
+                    logger.info("Enabling GPU monitoring for metrics collection")
                     instrumented.enable_gpu_monitoring(interval_s=1.0)
+                else:
+                    logger.debug("GPU monitoring disabled (collect_gpu=False)")
                 self._provider = instrumented  # type: ignore[assignment]
             else:
+                logger.debug("Metrics disabled, skipping instrumentation")
                 self._provider = provider
         return self._provider  # type: ignore[return-value]
 
