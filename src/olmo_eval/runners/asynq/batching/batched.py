@@ -36,7 +36,12 @@ class BatchedStrategy(BatchingStrategy):
         total_instances: int,
     ) -> None:
         """Execute batched processing."""
+        import math
+
         from olmo_eval.runners.asynq.processing import process_items
+
+        total_batches = math.ceil(total_instances / self.config.chunk_size)
+        current_batch = 0
 
         while True:
             # Collect batch
@@ -47,6 +52,7 @@ class BatchedStrategy(BatchingStrategy):
                 return
 
             if batch:
+                current_batch += 1
                 batch_hash = _compute_batch_hash(batch)
                 batch_size = len(batch)
                 start_time = time.perf_counter()
@@ -56,7 +62,7 @@ class BatchedStrategy(BatchingStrategy):
                 elapsed = time.perf_counter() - start_time
                 rate = batch_size / elapsed if elapsed > 0 else 0
                 worker_logger.info(
-                    f"Processed batch {batch_hash} {batch_size}/{batch_size} "
+                    f"Processed batch {current_batch}/{total_batches} ({batch_hash}) "
                     f"in {elapsed:.1f}s ({rate:.1f} items/sec)"
                 )
 
