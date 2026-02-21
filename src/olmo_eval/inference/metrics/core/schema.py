@@ -101,6 +101,7 @@ class BatchMetrics:
         if include_requests:
             d["requests"] = [r.to_dict() for r in self.requests]
         if self.gpu_snapshots:
+            d["gpu_summary"] = self._compute_gpu_summary()
             d["gpu_devices"] = self._group_gpu_snapshots()
         # Include non-None metadata
         if self.batch_hash is not None:
@@ -128,6 +129,26 @@ class BatchMetrics:
         if self.tags:
             d["tags"] = dict(self.tags)
         return d
+
+    def _compute_gpu_summary(self) -> dict[str, Any] | None:
+        """Compute aggregate GPU statistics across all snapshots."""
+        if not self.gpu_snapshots:
+            return None
+
+        device_ids = set(s.device_id for s in self.gpu_snapshots)
+        utilizations = [s.utilization_pct for s in self.gpu_snapshots]
+        memory_used = [s.memory_used_mb for s in self.gpu_snapshots]
+        power_values = [s.power_watts for s in self.gpu_snapshots if s.power_watts is not None]
+
+        return {
+            "device_count": len(device_ids),
+            "sample_count": len(self.gpu_snapshots),
+            "avg_utilization_pct": sum(utilizations) / len(utilizations),
+            "max_utilization_pct": max(utilizations),
+            "avg_memory_used_mb": sum(memory_used) / len(memory_used),
+            "max_memory_used_mb": max(memory_used),
+            "avg_power_watts": sum(power_values) / len(power_values) if power_values else None,
+        }
 
     def _group_gpu_snapshots(self) -> list[dict[str, Any]]:
         """Group GPU snapshots by device, separating static and dynamic fields."""

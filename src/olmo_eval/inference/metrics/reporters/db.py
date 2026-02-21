@@ -146,6 +146,7 @@ class DbReporter:
         # Build metadata dict for flexible storage
         metadata: dict[str, Any] = {}
         if metrics.gpu_snapshots:
+            metadata["gpu_summary"] = metrics._compute_gpu_summary()
             metadata["gpu_devices"] = metrics._group_gpu_snapshots()
 
         # Create InferenceSample record

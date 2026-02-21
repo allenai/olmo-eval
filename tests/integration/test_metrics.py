@@ -271,6 +271,17 @@ class TestDbReporter:
             assert sample.metadata_["gpu_devices"][0]["name"] == "NVIDIA A100"
             assert sample.metadata_["gpu_devices"][0]["samples"][0]["utilization_pct"] == 85.0
 
+            # Verify GPU summary is computed and stored
+            assert "gpu_summary" in sample.metadata_
+            summary = sample.metadata_["gpu_summary"]
+            assert summary["device_count"] == 2
+            assert summary["sample_count"] == 2
+            assert summary["avg_utilization_pct"] == (85.0 + 78.0) / 2
+            assert summary["max_utilization_pct"] == 85.0
+            assert summary["avg_memory_used_mb"] == (40000 + 35000) / 2
+            assert summary["max_memory_used_mb"] == 40000
+            assert summary["avg_power_watts"] == (250.0 + 230.0) / 2
+
 
 class TestMetricsQueryPatterns:
     """Integration tests for querying stored metrics."""
@@ -702,3 +713,8 @@ class TestFileReporter:
             assert len(data["data"]["gpu_devices"]) == 1
             assert data["data"]["gpu_devices"][0]["name"] == "NVIDIA A100"
             assert data["data"]["gpu_devices"][0]["samples"][0]["utilization_pct"] == 85.0
+
+            # Verify GPU summary is included
+            assert "gpu_summary" in data["data"]
+            assert data["data"]["gpu_summary"]["device_count"] == 1
+            assert data["data"]["gpu_summary"]["avg_utilization_pct"] == 85.0
