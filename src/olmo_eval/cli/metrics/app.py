@@ -99,7 +99,7 @@ def run_plot_app(
         return
 
     n_plots = len(metrics_to_plot)
-    sort_options = list(METRICS.keys()) + ["run"]
+    sort_options = list(METRICS.keys()) + ["run", "time"]
 
     class MetricsApp(App[None]):
         """Textual app for displaying metrics plots."""
@@ -135,6 +135,7 @@ def run_plot_app(
             ("r", "reset_scales", "Reset"),
             ("s", "cycle_sort", "Sort"),
             ("S", "toggle_sort_direction", "Asc/Desc"),
+            ("space", "toggle_solo", "Solo"),
         ]
 
         def __init__(self) -> None:
@@ -150,6 +151,7 @@ def run_plot_app(
             self._spinner_timer: Any = None
             self._spinner_min_end: float = 0
             self._hidden_series: set[int] = set()
+            self._solo_mode = False
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=False, icon="")
@@ -290,7 +292,7 @@ def run_plot_app(
             sort_by = sort_options[self._sort_index]
             arrow = "▼" if self._sort_descending else "▲"
             table.add_column(f"Run {arrow}" if sort_by == "run" else "Run  ", key="run")
-            table.add_column("Time", key="time")
+            table.add_column(f"Time {arrow}" if sort_by == "time" else "Time  ", key="time")
             for m in metrics:
                 suffix = f" {arrow}" if sort_by == m.key else "  "
                 table.add_column(f"Avg {m.table_name}{suffix}", key=f"avg_{m.key}")
@@ -313,19 +315,24 @@ def run_plot_app(
                     if m.key in P95_METRICS and vals:
                         metric_values[f"{m.key}_p95"] = compute_p95(vals)
 
-                rows.append((label, metric_values, idx, timestamp))
+                rows.append((label, metric_values, idx, ts, timestamp))
 
-            # Sort
+            # Sort (rows without values always at bottom)
             if sort_by == "run":
-                rows.sort(key=lambda r: r[0], reverse=self._sort_descending)
+                rows.sort(key=lambda r: r[0].lower(), reverse=self._sort_descending)
+            elif sort_by == "time":
+                with_val = [r for r in rows if r[3] is not None]
+                without_val = [r for r in rows if r[3] is None]
+                with_val.sort(key=lambda r: r[3], reverse=self._sort_descending)
+                rows = with_val + without_val
             elif sort_by in METRICS:
-                rows.sort(
-                    key=lambda r: (r[1].get(sort_by) is None, r[1].get(sort_by) or 0),
-                    reverse=self._sort_descending,
-                )
+                with_val = [r for r in rows if r[1].get(sort_by) is not None]
+                without_val = [r for r in rows if r[1].get(sort_by) is None]
+                with_val.sort(key=lambda r: r[1].get(sort_by), reverse=self._sort_descending)
+                rows = with_val + without_val
 
             # Add rows
-            for label, metric_values, idx, timestamp in rows:
+            for label, metric_values, idx, _ts, timestamp in rows:
                 color = SERIES_COLORS[idx % len(SERIES_COLORS)]
                 indicator = f"[{color}]□[/]" if idx in self._hidden_series else f"[{color}]■[/]"
                 row_data = [f"{indicator} {label}", timestamp]
@@ -364,5 +371,29 @@ def run_plot_app(
         def action_toggle_sort_direction(self) -> None:
             self._sort_descending = not self._sort_descending
             self._update_stats_table()
+
+        def action_toggle_solo(self) -> None:
+            table = self.query_one("#stats-table", DataTable)
+            if table.row_count == 0:
+                return
+
+            cell_key = table.coordinate_to_cell_key(Coordinate(table.cursor_row, 0))
+            if cell_key.row_key.value is None:
+                return
+
+            current_idx = int(cell_key.row_key.value)
+            all_indices = set(range(len(self._samples_by_exp)))
+
+            if self._solo_mode:
+                # Exit solo mode: show all series
+                self._hidden_series.clear()
+                self._solo_mode = False
+            else:
+                # Enter solo mode: hide all except current
+                self._hidden_series = all_indices - {current_idx}
+                self._solo_mode = True
+
+            self._update_stats_table()
+            self._update_plots()
 
     MetricsApp().run()
