@@ -16,8 +16,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import PPLFormatter
-from olmo_eval.common.metrics import AccuracyMetric, BPBMetric, F1Metric, RecallMetric
-from olmo_eval.common.scorers import ExactMatchScorer, F1Scorer
+from olmo_eval.common.metrics import BPBMetric, RecallMetric
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.data.ruler_loader import download_ruler_data, load_ruler_dataset
 from olmo_eval.data.ruler_tasks import RULER_TASKS
@@ -126,16 +125,22 @@ class RulerTask(Task):
         # Get answer (handle both "answer" and "outputs" fields)
         answer = doc.get("answer") or doc.get("outputs")
 
+        # QA tasks have list gold answers. Keep the list for SubstringRecallScorer
+        # (which handles lists natively) and store it in metadata for other scorers.
+        metadata: dict = {
+            "id": doc.get("index", index),
+            "task_type": self.task_type,
+            "context_size": self.context_size,
+            "prepend_text": prepend_text,
+            "tag": self.ruler_config["tag"],
+        }
+        if isinstance(answer, list):
+            metadata["all_gold_answers"] = answer
+
         return Instance(
             question=question,
             gold_answer=answer,
-            metadata={
-                "id": doc.get("index", index),
-                "task_type": self.task_type,
-                "context_size": self.context_size,
-                "prepend_text": prepend_text,
-                "tag": self.ruler_config["tag"],
-            },
+            metadata=metadata,
         )
 
     @property
@@ -166,11 +171,16 @@ class RulerTask(Task):
                 )
             return self.config.formatter.format(instance, self.get_fewshot())
 
-        # Default formatting: just return the prompt
-        # (sampling_params are already configured in TaskConfig)
+        # Build prompt: append system template as completion prefix for non-chat format.
+        # For base models, the prefix anchors the expected output format.
+        prompt = instance.question
+        prepend_text = (instance.metadata or {}).get("prepend_text", "")
+        if prepend_text:
+            prompt = prompt + "\n" + prepend_text
+
         return LMRequest(
             request_type=self.request_type,
-            prompt=instance.question,
+            prompt=prompt,
         )
 
     def extract_answer(self, output: LMOutput) -> Any:
@@ -190,16 +200,11 @@ class RulerTask(Task):
 
 def _make_ruler_task_class(task_name: str, task_cfg: dict) -> type:
     """Create and register a task class for a RULER task variant."""
-    # Determine metrics based on task type
-    if task_cfg["tag"] == "qa":
-        task_metrics: tuple = (
-            AccuracyMetric(scorer=ExactMatchScorer),
-            F1Metric(scorer=F1Scorer),
-        )
-        task_primary_metric = "exact_match"
-    else:
-        task_metrics = (RecallMetric(),)
-        task_primary_metric = "recall"
+    # Determine metrics based on task type.
+    # QA tasks use RecallMetric (SubstringRecallScorer) which matches RULER's
+    # primary "substring_exact_match" metric and handles list gold answers.
+    task_metrics = (RecallMetric(),)
+    task_primary_metric = "recall"
 
     # Build sampling params
     stop_sequences = []
