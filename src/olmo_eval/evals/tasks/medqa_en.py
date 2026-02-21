@@ -25,14 +25,13 @@ def _format_rc(question: str, answer: str | None = None) -> str:
     return prompt
 
 
-@register("medmcqa")
-class MedMCQA(Task):
-    data_source = DataSource(path="openlifescienceai/medmcqa", split="validation")
-    split = Split.VALIDATION
+@register("medqa_en")
+class MedQAEn(Task):
+    data_source = DataSource(path="davidheineman/medqa-en", split="test")
+    split = Split.TEST
     metrics = (LogprobMCAccuracyMetric(),)
-    num_fewshot = 0
-    fewshot_split = "train"
     sampling_params = SamplingParams(temperature=0.0)
+    fewshot_split = "train"
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -43,32 +42,28 @@ class MedMCQA(Task):
         if not question:
             return None
 
-        choices = [
-            doc.get("opa", ""),
-            doc.get("opb", ""),
-            doc.get("opc", ""),
-            doc.get("opd", ""),
-        ]
-        choices = [c for c in choices if c.strip()]
+        choices = doc.get("choices", [])
         if not choices:
             return None
 
-        gold_idx = int(doc.get("cop", 0))
-        if not (0 <= gold_idx < len(choices)):
+        answer_idx = doc.get("answer_idx", 0)
+        if not (0 <= answer_idx < len(choices)):
             return None
 
-        gold_text = choices[gold_idx]
+        gold_text = choices[answer_idx]
+        gold_letter = chr(ord("A") + answer_idx)
 
         return Instance(
             question=question,
             choices=tuple(choices),
-            gold_answer=chr(ord("A") + gold_idx),
+            gold_answer=gold_letter,
             metadata={
-                "id": doc.get("id", f"medmcqa_{index}"),
+                "id": f"medqa_en_{index}",
                 "index": index,
-                "dataset": "medmcqa",
-                "gold_idx": gold_idx,
+                "dataset": "medqa_en",
+                "gold_idx": answer_idx,
                 "gold_text": gold_text,
+                "mc_answer": gold_letter,
             },
         )
 
@@ -79,10 +74,10 @@ class MedMCQA(Task):
         parts: list[str] = []
         for ex in fewshot:
             if is_mc:
-                answer = ex.gold_answer or ""
+                answer = ex.metadata.get("mc_answer", "")
                 parts.append(_format_mc(ex.question, ex.choices or (), answer))
             else:
-                answer = ex.metadata.get("gold_text", ex.gold_answer or "")
+                answer = ex.metadata.get("gold_text", "")
                 parts.append(_format_rc(ex.question, answer))
 
         if is_mc:
@@ -102,6 +97,6 @@ class MedMCQA(Task):
         )
 
 
-register_variant("medmcqa", "rc")
-register_variant("medmcqa", "mc", formatter=MultipleChoiceFormatter())
-register_variant("medmcqa", "olmo3base", num_fewshot=5)
+register_variant("medqa_en", "rc")
+register_variant("medqa_en", "mc", formatter=MultipleChoiceFormatter())
+register_variant("medqa_en", "olmo3base", num_fewshot=5)
