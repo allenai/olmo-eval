@@ -1,0 +1,368 @@
+"""Textual application for metrics visualization."""
+
+from __future__ import annotations
+
+import statistics
+from typing import Any
+
+from olmo_eval.cli.metrics.config import (
+    METRICS,
+    METRICS_DB_NAME,
+    P95_METRICS,
+    SERIES_COLORS,
+    DbConfig,
+    QueryFilters,
+)
+from olmo_eval.cli.metrics.data import (
+    extract_series_data,
+    find_metrics_with_data,
+    get_run_label,
+    query_samples,
+)
+from olmo_eval.cli.metrics.utils import compute_p95, extract_metric_value, format_value
+from olmo_eval.cli.results.options import get_database_session
+from olmo_eval.cli.utils import console
+
+
+def print_stats_table(samples_by_exp: dict[str, list[Any]]) -> None:
+    """Print a statistics summary table to the console."""
+    from rich.table import Table
+
+    metrics = find_metrics_with_data(samples_by_exp)
+    if not metrics:
+        console.print("[dim]No metric data found.[/dim]")
+        return
+
+    # Print summary
+    console.print()
+    for exp_id, samples in samples_by_exp.items():
+        if samples:
+            label = get_run_label(samples, exp_id)
+            console.print(f"[bold cyan]{label}[/bold cyan]: {len(samples)} samples")
+    console.print()
+
+    # Build table
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Run", style="cyan", no_wrap=True)
+    for m in metrics:
+        table.add_column(f"Avg {m.table_name}", justify="right")
+
+    for exp_id, samples in samples_by_exp.items():
+        if not samples:
+            continue
+        row = [get_run_label(samples, exp_id)]
+        for m in metrics:
+            values = [v for s in samples if (v := extract_metric_value(s, m.path)) is not None]
+            row.append(format_value(statistics.mean(values)) if values else "-")
+        table.add_row(*row)
+
+    console.print(table)
+    console.print()
+
+
+def run_plot_app(
+    series_data: dict[str, dict[str, list[float]]],
+    samples_by_exp: dict[str, list[Any]],
+    metric: str | None,
+    refresh_interval: int | None,
+    filters: QueryFilters,
+    db_config: DbConfig,
+) -> None:
+    """Run the Textual plotting app."""
+    from olmo_eval.cli.metrics.utils import interpolate_series
+    from olmo_eval.cli.metrics.widgets import CleanPlotWidget
+
+    try:
+        from textual.app import App, ComposeResult
+        from textual.containers import Vertical
+        from textual.coordinate import Coordinate
+        from textual.widgets import DataTable, Footer, Header, Static
+        from textual.worker import Worker, WorkerState
+        from textual_plot import HiResMode, PlotWidget
+    except ImportError:
+        console.print(
+            "[red]Error:[/red] Plotting requires textual-plot. "
+            "Install with: pip install textual-plot"
+        )
+        raise SystemExit(1) from None
+
+    # Determine which metrics to plot
+    if metric:
+        metrics_to_plot = {metric: METRICS[metric]}
+    else:
+        metrics_to_plot = {
+            k: v for k, v in METRICS.items() if any(k in m for m in series_data.values())
+        }
+
+    if not metrics_to_plot:
+        console.print("[yellow]No metric data to plot.[/yellow]")
+        return
+
+    n_plots = len(metrics_to_plot)
+    sort_options = list(METRICS.keys()) + ["run"]
+
+    class MetricsApp(App[None]):
+        """Textual app for displaying metrics plots."""
+
+        CSS = """
+        Screen { layout: vertical; padding: 0; }
+        #plots-area {
+            layout: grid;
+            grid-size: 2;
+            grid-gutter: 0 2;
+            height: 1fr;
+            width: 100%;
+            margin-top: 1;
+        }
+        .plot-container { height: 1fr; min-height: 8; padding: 0; margin: 0; }
+        .single-plot { column-span: 2; }
+        .plot-title { text-align: center; color: $text-muted; height: 1; padding: 0; margin: 0; }
+        PlotWidget {
+            height: 1fr;
+            & > .plot--axis { color: $text-disabled; }
+            & > .plot--tick { color: $text-disabled; text-style: none; }
+            & > .plot--label { color: $text-muted; text-style: none; }
+        }
+        #stats-table {
+            height: auto; min-height: 5; max-height: 15;
+            padding: 0 1; scrollbar-gutter: stable;
+        }
+        Footer { dock: bottom; }
+        """
+
+        BINDINGS = [
+            ("q", "quit", "Quit"),
+            ("r", "reset_scales", "Reset"),
+            ("s", "cycle_sort", "Sort"),
+            ("S", "toggle_sort_direction", "Asc/Desc"),
+        ]
+
+        def __init__(self) -> None:
+            super().__init__()
+            self._sort_index = 0
+            self._sort_descending = True
+            self._series_data = series_data
+            self._samples_by_exp = samples_by_exp
+            self._is_fetching = False
+            self._last_updated: str | None = None
+            self._spinner_frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+            self._spinner_index = 0
+            self._spinner_timer: Any = None
+            self._spinner_min_end: float = 0
+            self._hidden_series: set[int] = set()
+
+        def compose(self) -> ComposeResult:
+            yield Header(show_clock=False, icon="")
+            with Vertical(id="plots-area"):
+                for key, (_, plot_name, _) in metrics_to_plot.items():
+                    classes = "plot-container single-plot" if n_plots == 1 else "plot-container"
+                    with Vertical(classes=classes):
+                        yield Static(plot_name, classes="plot-title")
+                        yield CleanPlotWidget(id=f"plot-{key}")
+            yield DataTable(id="stats-table", cursor_type="row")
+            yield Footer()
+
+        def on_mount(self) -> None:
+            from datetime import datetime
+
+            self.theme = "atom-one-dark"
+            self._last_updated = datetime.now().strftime("%H:%M:%S")
+            self._update_title()
+            self._update_stats_table()
+            self._update_plots()
+            self.query_one("#stats-table", DataTable).focus()
+
+            if refresh_interval and refresh_interval > 0:
+                self.set_interval(refresh_interval, self._trigger_refresh)
+
+        def _update_plots(self) -> None:
+            for key in metrics_to_plot:
+                plot = self.query_one(f"#plot-{key}", PlotWidget)
+                plot.clear()
+
+                visible_series = [
+                    (i, metrics[key])
+                    for i, (_, metrics) in enumerate(self._series_data.items())
+                    if key in metrics and i not in self._hidden_series
+                ]
+
+                all_values = [v for _, vals in visible_series for v in vals]
+                if not all_values:
+                    continue
+
+                y_min, y_max = min(all_values), max(all_values)
+                y_range = max(y_max - y_min, abs(y_max) * 0.1, 1)
+                offset_step = y_range * 0.02
+
+                for i, values in visible_series:
+                    offset = i * offset_step
+                    x_vals = list(range(len(values)))
+                    y_vals = [v + offset for v in values]
+                    x_interp, y_interp = interpolate_series(x_vals, y_vals)
+                    plot.plot(
+                        x=x_interp,
+                        y=y_interp,
+                        line_style=SERIES_COLORS[i % len(SERIES_COLORS)],
+                        hires_mode=HiResMode.BRAILLE,
+                    )
+
+                padding = y_range * 0.1
+                max_offset = (len(visible_series) - 1) * offset_step
+                plot.set_ylimits(y_min - padding, y_max + max_offset + padding)
+
+        def _update_title(self) -> None:
+            import time
+
+            ts = f" · {self._last_updated}" if self._last_updated else ""
+            # Check if we should still show spinner (fetching or minimum duration not met)
+            show_spinner = self._is_fetching or time.time() < self._spinner_min_end
+            if show_spinner:
+                spinner = self._spinner_frames[self._spinner_index]
+                self.title = f"Inference Metrics{ts} {spinner}"
+            else:
+                # Reserve space to prevent text bouncing
+                self.title = f"Inference Metrics{ts}  "
+
+        def _animate_spinner(self) -> None:
+            import time
+
+            self._spinner_index = (self._spinner_index + 1) % len(self._spinner_frames)
+            self._update_title()
+            # Stop timer if fetch is done AND minimum display time has passed
+            if not self._is_fetching and time.time() >= self._spinner_min_end:
+                self._stop_spinner()
+                self._update_title()
+
+        def _start_spinner(self) -> None:
+            if self._spinner_timer is None:
+                self._spinner_timer = self.set_interval(0.1, self._animate_spinner)
+
+        def _stop_spinner(self) -> None:
+            if self._spinner_timer is not None:
+                self._spinner_timer.stop()
+                self._spinner_timer = None
+
+        def _trigger_refresh(self) -> None:
+            import time
+
+            if not self._is_fetching:
+                self._is_fetching = True
+                self._spinner_min_end = time.time() + 1.0  # Show spinner for at least 1 second
+                self._update_title()
+                self._start_spinner()
+                self.run_worker(self._fetch_data, exclusive=True, thread=True)
+
+        def _fetch_data(self) -> tuple[dict[str, dict[str, list[float]]], dict[str, list[Any]]]:
+            db = get_database_session(
+                db_config.host, db_config.port, METRICS_DB_NAME, db_config.user, db_config.password
+            )
+            try:
+                with db.session() as session:
+                    new_samples = query_samples(session, filters)
+            finally:
+                db.dispose()
+            return extract_series_data(new_samples), new_samples
+
+        def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+            from datetime import datetime
+
+            if event.state == WorkerState.SUCCESS and event.worker.result:
+                new_series, new_samples = event.worker.result
+                if new_series != self._series_data:
+                    self._series_data = new_series
+                    self._samples_by_exp = new_samples
+                    self._update_plots()
+                self._update_stats_table()
+                self._last_updated = datetime.now().strftime("%H:%M:%S")
+            # Set fetching to false; spinner will stop after minimum duration
+            self._is_fetching = False
+
+        def _update_stats_table(self) -> None:
+            table = self.query_one("#stats-table", DataTable)
+            cursor_row = table.cursor_row if table.row_count > 0 else 0
+            table.clear(columns=True)
+
+            metrics = find_metrics_with_data(self._samples_by_exp)
+            if not metrics:
+                return
+
+            # Build columns
+            sort_by = sort_options[self._sort_index]
+            arrow = "▼" if self._sort_descending else "▲"
+            table.add_column(f"Run {arrow}" if sort_by == "run" else "Run  ", key="run")
+            table.add_column("Time", key="time")
+            for m in metrics:
+                suffix = f" {arrow}" if sort_by == m.key else "  "
+                table.add_column(f"Avg {m.table_name}{suffix}", key=f"avg_{m.key}")
+                if m.key in P95_METRICS:
+                    table.add_column("p95", key=f"p95_{m.key}")
+
+            # Compute rows
+            rows = []
+            for idx, (exp_id, samples) in enumerate(self._samples_by_exp.items()):
+                if not samples:
+                    continue
+                label = get_run_label(samples, exp_id)
+                ts = samples[0].timestamp
+                timestamp = ts.strftime("%Y-%m-%d %H:%M:%S") if ts else ""
+
+                metric_values: dict[str, float | None] = {}
+                for m in metrics:
+                    vals = [v for s in samples if (v := extract_metric_value(s, m.path))]
+                    metric_values[m.key] = statistics.mean(vals) if vals else None
+                    if m.key in P95_METRICS and vals:
+                        metric_values[f"{m.key}_p95"] = compute_p95(vals)
+
+                rows.append((label, metric_values, idx, timestamp))
+
+            # Sort
+            if sort_by == "run":
+                rows.sort(key=lambda r: r[0], reverse=self._sort_descending)
+            elif sort_by in METRICS:
+                rows.sort(
+                    key=lambda r: (r[1].get(sort_by) is None, r[1].get(sort_by) or 0),
+                    reverse=self._sort_descending,
+                )
+
+            # Add rows
+            for label, metric_values, idx, timestamp in rows:
+                color = SERIES_COLORS[idx % len(SERIES_COLORS)]
+                indicator = f"[{color}]□[/]" if idx in self._hidden_series else f"[{color}]■[/]"
+                row_data = [f"{indicator} {label}", timestamp]
+                for m in metrics:
+                    row_data.append(format_value(metric_values.get(m.key)))
+                    if m.key in P95_METRICS:
+                        row_data.append(format_value(metric_values.get(f"{m.key}_p95")))
+                table.add_row(*row_data, key=str(idx))
+
+            if table.row_count > 0:
+                table.move_cursor(row=min(cursor_row, table.row_count - 1))
+
+        def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+            if event.row_key and event.row_key.value is not None:
+                idx = int(event.row_key.value)
+                self._hidden_series.symmetric_difference_update({idx})
+
+                table = self.query_one("#stats-table", DataTable)
+                row_idx = table.get_row_index(event.row_key)
+                cell = str(table.get_cell_at(Coordinate(row_idx, 0)))
+                label = cell.split("] ", 1)[1] if "] " in cell else cell
+
+                color = SERIES_COLORS[idx % len(SERIES_COLORS)]
+                indicator = f"[{color}]□[/]" if idx in self._hidden_series else f"[{color}]■[/]"
+                table.update_cell_at(Coordinate(row_idx, 0), f"{indicator} {label}")
+                self._update_plots()
+
+        def action_reset_scales(self) -> None:
+            for key in metrics_to_plot:
+                self.query_one(f"#plot-{key}", PlotWidget).action_reset_scales()
+
+        def action_cycle_sort(self) -> None:
+            self._sort_index = (self._sort_index + 1) % len(sort_options)
+            self._update_stats_table()
+
+        def action_toggle_sort_direction(self) -> None:
+            self._sort_descending = not self._sort_descending
+            self._update_stats_table()
+
+    MetricsApp().run()
