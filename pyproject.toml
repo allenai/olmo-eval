@@ -70,7 +70,7 @@ postgres = [
     "alembic>=1.18.1",
 ]
 gpu = [
-    "pynvml>=12.0.0",
+    "nvidia-ml-py>=12.560",
 ]
 clients = [
     "openai~=2.21.0",

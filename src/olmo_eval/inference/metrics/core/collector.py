@@ -42,10 +42,6 @@ class InstrumentedProvider:
         Args:
             interval_s: Sampling interval in seconds.
         """
-        import logging
-
-        logger = logging.getLogger(__name__)
-        logger.info(f"GPU monitoring enabled (interval={interval_s}s)")
         self._gpu_monitoring_enabled = True
         self._gpu_monitor = GPUMonitor(interval_s=interval_s)
 
@@ -114,21 +110,9 @@ class InstrumentedProvider:
         Returns:
             Tuple of GPU snapshots collected since monitoring started.
         """
-        import logging
-
-        logger = logging.getLogger(__name__)
         if self._gpu_monitor is None:
-            logger.debug("get_gpu_snapshots: no monitor configured")
             return ()
-        thread_was_running = self._gpu_monitor._thread is not None
-        snapshots = self._gpu_monitor.stop()
-        if snapshots:
-            logger.info(f"GPU monitoring: collected {len(snapshots)} snapshots")
-        elif self._gpu_monitoring_enabled:
-            logger.warning(
-                f"GPU monitoring: no snapshots (thread_was_running={thread_was_running})"
-            )
-        return snapshots
+        return self._gpu_monitor.stop()
 
     def clear_metrics(self) -> None:
         """Clear collected metrics and restart GPU monitor if enabled."""
@@ -146,9 +130,6 @@ class InstrumentedProvider:
             and self._gpu_monitor is not None
             and self._gpu_monitor._thread is None
         ):
-            import logging
-
-            logging.getLogger(__name__).debug("Starting GPU monitor for batch")
             self._gpu_monitor.start()
 
     def _collect_metrics(
