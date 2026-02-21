@@ -385,8 +385,6 @@ def _run_plot_app(
             ("l", "toggle_legend", "Legend"),
         ]
 
-        theme = "atom-one-dark"
-
         def compose(self) -> ComposeResult:
             # Legend showing series colors for each experiment (grid layout)
             with Container(id="legend"):
@@ -410,6 +408,7 @@ def _run_plot_app(
             yield Footer()
 
         def on_mount(self) -> None:
+            self.theme = "atom-one-dark"
             self.title = "Inference Metrics"
 
             # Plot data for each metric with appropriate y-axis padding
