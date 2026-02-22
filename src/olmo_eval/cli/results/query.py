@@ -164,27 +164,24 @@ def query(
             "--experiment, --model, --model-hash, --task, --task-hash, or --experiment-group"
         )
 
-    with console.status("[bold blue]Connecting to database..."):
+    from olmo_eval.storage.backends.postgres.queries import QueryHelper
+    from olmo_eval.storage.backends.postgres.repository import ExperimentRepository
+
+    with console.status("[bold blue]Fetching results..."):
         db = get_database_session(db_host, db_port, db_name, db_user, db_password)
+        try:
+            with db.session() as session:
+                helper = QueryHelper(session)
+                repo = ExperimentRepository(session)
 
-    try:
-        from olmo_eval.storage.backends.postgres.queries import QueryHelper
-        from olmo_eval.storage.backends.postgres.repository import ExperimentRepository
-
-        with db.session() as session:
-            helper = QueryHelper(session)
-            repo = ExperimentRepository(session)
-
-            # Experiment group with instances uses streaming (early return)
-            if experiment_groups and instances:
-                with console.status("[bold blue]Streaming instances..."):
+                # Experiment group with instances uses streaming (early return)
+                if experiment_groups and instances:
                     _stream_experiment_group_instances(
                         session, experiment_groups, model_hashes, task_hashes, output_format
                     )
-                return
+                    return
 
-            # Fetch experiments based on filters (all combined with AND)
-            with console.status("[bold blue]Fetching results..."):
+                # Fetch experiments based on filters (all combined with AND)
                 all_experiments = _query_experiments(
                     repo,
                     experiment_ids,
@@ -194,18 +191,18 @@ def query(
                     task_hashes,
                     experiment_groups,
                 )
-            if not all_experiments:
-                console.print("[dim]No results found.[/dim]")
-                return
 
-            # Comparison mode: no experiment IDs specified
-            is_comparison = not experiment_ids
+                if not all_experiments:
+                    console.print("[dim]No results found.[/dim]")
+                    return
 
-            task_filter = set(task_names) if task_names else None
+                # Comparison mode: no experiment IDs specified
+                is_comparison = not experiment_ids
 
-            # Fetch instances if requested
-            if instances:
-                with console.status("[bold blue]Fetching instances..."):
+                task_filter = set(task_names) if task_names else None
+
+                # Fetch instances if requested
+                if instances:
                     instance_data = _query_instances(
                         helper,
                         experiment_ids,
@@ -216,23 +213,24 @@ def query(
                         limit,
                         after_id,
                     )
-            else:
-                instance_data = []
+                else:
+                    instance_data = []
 
-            # Output results
-            _output_results(
-                all_experiments,
-                instance_data,
-                is_comparison,
-                task_filter,
-                output_format,
-                instances,
-                limit,
-                show_all,
-                show_recent,
-            )
-    finally:
-        db.dispose()
+        finally:
+            db.dispose()
+
+    # Output results
+    _output_results(
+        all_experiments,
+        instance_data,
+        is_comparison,
+        task_filter,
+        output_format,
+        instances,
+        limit,
+        show_all,
+        show_recent,
+    )
 
 
 def _stream_experiment_group_instances(
