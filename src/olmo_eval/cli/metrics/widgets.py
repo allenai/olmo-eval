@@ -108,14 +108,11 @@ class CleanPlotWidget(PlotWidget):
 
         # If no datasets, show "No Data" message centered in plot
         if not self._datasets:
-            try:
-                canvas = self.query_one("#plot", Canvas)
-                if canvas._canvas_size is not None:
-                    cx = canvas._canvas_size.width // 2
-                    cy = canvas._canvas_size.height // 2
-                    canvas.write_text(cx, cy, "[bold dim]No Data[/]", TextAlign.CENTER)
-            except Exception:
-                pass
+            canvas = self.query_one("#plot", Canvas)
+            if canvas._canvas_size is not None:
+                cx = canvas._canvas_size.width // 2
+                cy = canvas._canvas_size.height // 2
+                canvas.write_text(cx, cy, "[bold dim]No Data[/]", TextAlign.CENTER)
 
     def _update_legend(self) -> None:
         """Update legend with custom braille marker for scatter plots."""

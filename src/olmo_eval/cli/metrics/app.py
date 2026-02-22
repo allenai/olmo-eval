@@ -441,11 +441,12 @@ def run_plot_app(
                 idx = int(event.row_key.value)
                 self._hidden_series.symmetric_difference_update({idx})
 
+                # Look up label from source data instead of parsing display text
+                exp_id, samples = list(self._samples_by_exp.items())[idx]
+                label = get_run_label(samples, exp_id)
+
                 table = self.query_one("#stats-table", DataTable)
                 row_idx = table.get_row_index(event.row_key)
-                cell = str(table.get_cell_at(Coordinate(row_idx, 0)))
-                label = cell.split("] ", 1)[1] if "] " in cell else cell
-
                 color = SERIES_COLORS[idx % len(SERIES_COLORS)]
                 indicator = f"[{color}]□[/]" if idx in self._hidden_series else f"[{color}]■[/]"
                 table.update_cell_at(Coordinate(row_idx, 0), f"{indicator} {label}")
