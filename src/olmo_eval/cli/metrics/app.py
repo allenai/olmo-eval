@@ -70,21 +70,26 @@ def run_plot_app(
 ) -> None:
     """Run the Textual plotting app."""
     from olmo_eval.cli.metrics.utils import interpolate_series
-    from olmo_eval.cli.metrics.widgets import CleanPlotWidget
+    from olmo_eval.cli.metrics.widgets import CleanPlotWidget, TimestampAxisFormatter
 
     try:
         from textual.app import App, ComposeResult
         from textual.containers import Vertical
         from textual.coordinate import Coordinate
-        from textual.widgets import DataTable, Footer, Header, Static
+        from textual.widgets import DataTable, Footer, Header, Static, TabbedContent, TabPane
         from textual.worker import Worker, WorkerState
-        from textual_plot import HiResMode, PlotWidget
+        from textual_plot import HiResMode, LegendLocation, PlotWidget
     except ImportError:
         console.print(
             "[red]Error:[/red] Plotting requires textual-plot. "
             "Install with: pip install textual-plot"
         )
         raise SystemExit(1) from None
+
+    # Apply braille OR patch so overlapping series combine dots instead of overwriting
+    from olmo_eval.cli.metrics.braille_patch import OVERLAP_STYLE, apply_braille_or_patch
+
+    apply_braille_or_patch()
 
     # Determine which metrics to plot
     if metric:
@@ -98,7 +103,13 @@ def run_plot_app(
         console.print("[yellow]No metric data to plot.[/yellow]")
         return
 
-    n_plots = len(metrics_to_plot)
+    # Group metrics into tabs
+    inference_metrics = {"throughput", "latency"}
+    gpu_metrics = {"gpu_util", "gpu_mem"}
+
+    inference_to_plot = {k: v for k, v in metrics_to_plot.items() if k in inference_metrics}
+    gpu_to_plot = {k: v for k, v in metrics_to_plot.items() if k in gpu_metrics}
+
     sort_options = list(METRICS.keys()) + ["run", "time"]
 
     class MetricsApp(App[None]):
@@ -106,29 +117,39 @@ def run_plot_app(
 
         CSS = """
         Screen { layout: vertical; padding: 0; }
-        #plots-area {
+        TabbedContent { height: 1fr; }
+        ContentSwitcher { height: 1fr; }
+        TabPane { height: 1fr; padding: 0; }
+        .plots-grid {
             layout: grid;
             grid-size: 2;
-            grid-gutter: 0 2;
+            grid-gutter: 0 1;
             height: 1fr;
             width: 100%;
-            margin-top: 1;
         }
         .plot-container { height: 1fr; min-height: 8; padding: 0; margin: 0; }
-        .single-plot { column-span: 2; }
-        .plot-title { text-align: center; color: $text-muted; height: 1; padding: 0; margin: 0; }
+        .plot-title {
+            text-align: center; color: $text-muted; text-style: dim;
+            height: 1; padding: 0; margin: 0;
+        }
         PlotWidget {
             height: 1fr;
             & > .plot--axis { color: $text-disabled; }
             & > .plot--tick { color: $text-disabled; text-style: none; }
-            & > .plot--label { color: $text-muted; text-style: none; }
+            #legend {
+                border: none;
+                background: transparent;
+                padding: 0 1;
+                offset: 2 1;
+                color: $text-muted;
+            }
         }
         PlotWidget:focus {
             & > .plot--axis { color: $accent; }
         }
         #stats-table {
-            height: auto; min-height: 5; max-height: 15;
-            padding: 0 1; scrollbar-gutter: stable;
+            height: auto; min-height: 3; max-height: 12;
+            padding: 0; margin-top: 1; scrollbar-gutter: stable;
         }
         Footer { dock: bottom; }
         """
@@ -136,9 +157,11 @@ def run_plot_app(
         BINDINGS = [
             ("q", "quit", "Quit"),
             ("r", "reset_scales", "Reset"),
+            ("R", "reset_all", "Reset All"),
             ("s", "cycle_sort", "Sort"),
             ("S", "toggle_sort_direction", "Asc/Desc"),
             ("space", "toggle_solo", "Solo"),
+            ("tab", "focus_next", "Focus"),
         ]
 
         def __init__(self) -> None:
@@ -158,12 +181,19 @@ def run_plot_app(
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=False, icon="")
-            with Vertical(id="plots-area"):
-                for key, (_, plot_name, _) in metrics_to_plot.items():
-                    classes = "plot-container single-plot" if n_plots == 1 else "plot-container"
-                    with Vertical(classes=classes):
-                        yield Static(plot_name, classes="plot-title")
-                        yield CleanPlotWidget(id=f"plot-{key}")
+            with TabbedContent():
+                if inference_to_plot:
+                    with TabPane("Inference", id="perf-tab"), Vertical(classes="plots-grid"):
+                        for key, (_, plot_name, _) in inference_to_plot.items():
+                            with Vertical(classes="plot-container"):
+                                yield Static(plot_name, classes="plot-title")
+                                yield CleanPlotWidget(id=f"plot-{key}")
+                if gpu_to_plot:
+                    with TabPane("GPU", id="gpu-tab"), Vertical(classes="plots-grid"):
+                        for key, (_, plot_name, _) in gpu_to_plot.items():
+                            with Vertical(classes="plot-container"):
+                                yield Static(plot_name, classes="plot-title")
+                                yield CleanPlotWidget(id=f"plot-{key}")
             yield DataTable(id="stats-table", cursor_type="row")
             yield Footer()
 
@@ -181,45 +211,95 @@ def run_plot_app(
                 self.set_interval(refresh_interval, self._trigger_refresh)
 
         def _update_plots(self) -> None:
+            from textual_plot.axis_formatter import NumericAxisFormatter
+
+            y_labels = {
+                "throughput": "tok/s",
+                "latency": "sec",
+                "gpu_util": "%",
+                "gpu_mem": "MB",
+            }
+
             for key in metrics_to_plot:
                 plot = self.query_one(f"#plot-{key}", PlotWidget)
                 plot.clear()
+                plot.set_xlabel("Sample")
+                plot.set_ylabel(y_labels.get(key, ""))
 
-                # Use samples_by_exp for consistent indexing with the table
-                visible_series = []
+                # Collect visible series with their sample indices
+                visible_series: list[tuple[int, list[float]]] = []
+                visible_samples: list[list[Any]] = []
                 for i, (exp_id, samples) in enumerate(self._samples_by_exp.items()):
                     if i in self._hidden_series or not samples:
                         continue
                     label = get_run_label(samples, exp_id)
                     if label in self._series_data and key in self._series_data[label]:
                         visible_series.append((i, self._series_data[label][key]))
+                        visible_samples.append(samples)
 
                 all_values = [v for _, vals in visible_series for v in vals]
                 if not all_values:
+                    plot.set_x_formatter(NumericAxisFormatter())
+                    # Reset to default limits so axes don't show stale values
+                    plot.set_xlimits(0, 1)
+                    plot.set_ylimits(0, 1)
+                    # Force refresh to trigger "No Data" message render
+                    plot.refresh()
                     continue
 
                 y_min, y_max = min(all_values), max(all_values)
                 y_range = max(y_max - y_min, abs(y_max) * 0.1, 1)
-                offset_step = y_range * 0.02
                 padding = y_range * 0.1
-                max_offset = (len(visible_series) - 1) * offset_step
 
                 # Set limits before plotting for proper rendering
                 max_x = max(len(vals) for _, vals in visible_series)
                 plot.set_xlimits(0, max_x - 1)
-                plot.set_ylimits(y_min - padding, y_max + max_offset + padding)
+                plot.set_ylimits(y_min - padding, y_max + padding)
 
-                for plot_idx, (color_idx, values) in enumerate(visible_series):
-                    offset = plot_idx * offset_step
+                # Use timestamp x-axis for single series, numeric for multiple
+                if len(visible_series) == 1:
+                    timestamps = [s.timestamp for s in visible_samples[0] if s.timestamp]
+                    if timestamps:
+                        plot.set_x_formatter(TimestampAxisFormatter(timestamps))
+                    else:
+                        plot.set_x_formatter(NumericAxisFormatter())
+                else:
+                    plot.set_x_formatter(NumericAxisFormatter())
+
+                for color_idx, values in visible_series:
                     x_vals = list(range(len(values)))
-                    y_vals = [v + offset for v in values]
-                    x_interp, y_interp = interpolate_series(x_vals, y_vals)
-                    plot.plot(
-                        x=x_interp,
-                        y=y_interp,
-                        line_style=SERIES_COLORS[color_idx % len(SERIES_COLORS)],
+                    color = SERIES_COLORS[color_idx % len(SERIES_COLORS)]
+
+                    # Draw sparse connecting lines first (background)
+                    if len(values) >= 2:
+                        x_interp, y_interp = interpolate_series(
+                            x_vals, values, points_per_segment=2
+                        )
+                        plot.plot(
+                            x=x_interp,
+                            y=y_interp,
+                            line_style=color,
+                            hires_mode=HiResMode.BRAILLE,
+                        )
+
+                    # Draw data points as scatter (visible on top)
+                    plot.scatter(
+                        x=x_vals,
+                        y=list(values),
+                        marker_style=color,
                         hires_mode=HiResMode.BRAILLE,
                     )
+
+                # Add legend entry for overlap indicator when multiple series visible
+                if len(visible_series) > 1:
+                    plot.scatter(
+                        x=[],
+                        y=[],
+                        marker_style=OVERLAP_STYLE,
+                        hires_mode=HiResMode.BRAILLE,
+                        label="Multiple series",
+                    )
+                    plot.show_legend(is_visible=True, location=LegendLocation.TOPLEFT)
 
         def _update_title(self) -> None:
             import time
@@ -319,7 +399,9 @@ def run_plot_app(
 
                 metric_values: dict[str, float | None] = {}
                 for m in metrics:
-                    vals = [v for s in samples if (v := extract_metric_value(s, m.path))]
+                    vals = [
+                        v for s in samples if (v := extract_metric_value(s, m.path)) is not None
+                    ]
                     metric_values[m.key] = statistics.mean(vals) if vals else None
                     if m.key in P95_METRICS and vals:
                         metric_values[f"{m.key}_p95"] = compute_p95(vals)
@@ -372,6 +454,17 @@ def run_plot_app(
         def action_reset_scales(self) -> None:
             for key in metrics_to_plot:
                 self.query_one(f"#plot-{key}", PlotWidget).action_reset_scales()
+
+        def action_reset_all(self) -> None:
+            """Reset all charts and settings to initial defaults."""
+            self._sort_index = 0
+            self._sort_descending = True
+            self._hidden_series.clear()
+            self._solo_mode = False
+            for key in metrics_to_plot:
+                self.query_one(f"#plot-{key}", PlotWidget).action_reset_scales()
+            self._update_stats_table()
+            self._update_plots()
 
         def action_cycle_sort(self) -> None:
             self._sort_index = (self._sort_index + 1) % len(sort_options)

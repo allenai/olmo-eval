@@ -6,8 +6,8 @@ from dataclasses import dataclass
 
 # Metrics configuration: key -> (db_path, plot_name, table_name)
 METRICS = {
-    "throughput": ("output_tokens_per_second", "Tokens/sec", "TPS"),
-    "latency": ("mean_latency_s", "Latency", "Latency"),
+    "throughput": ("output_tokens_per_second", "Tokens per Second", "TPS"),
+    "latency": ("mean_latency_s", "Request Latency", "Latency"),
     "gpu_util": ("metadata_.gpu_summary.avg_utilization_pct", "GPU %", "GPU %"),
     "gpu_mem": ("metadata_.gpu_summary.avg_memory_used_mb", "GPU MB", "GPU MB"),
 }

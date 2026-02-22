@@ -69,7 +69,7 @@ def plot(
     if not has_filter:
         raise click.UsageError("At least one filter is required: -e, -G, -m, -M, -t, or -T")
 
-    with console.status("[bold blue]Fetching metrics..."):
+    with console.status("[bold blue]Starting application..."):
         db = get_database_session(db_host, db_port, METRICS_DB_NAME, db_user, db_password)
         try:
             with db.session() as session:
