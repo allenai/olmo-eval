@@ -10,6 +10,7 @@ from textual_plot.axis_formatter import CategoricalAxisFormatter
 class CleanPlotWidget(PlotWidget):
     """PlotWidget with ticks only on bottom and left axes."""
 
+    can_focus = True
     margin_top = 0
     margin_left = 6
 

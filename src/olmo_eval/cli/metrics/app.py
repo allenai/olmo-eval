@@ -123,6 +123,9 @@ def run_plot_app(
             & > .plot--tick { color: $text-disabled; text-style: none; }
             & > .plot--label { color: $text-muted; text-style: none; }
         }
+        PlotWidget:focus {
+            & > .plot--axis { color: $accent; }
+        }
         #stats-table {
             height: auto; min-height: 5; max-height: 15;
             padding: 0 1; scrollbar-gutter: stable;
@@ -182,11 +185,14 @@ def run_plot_app(
                 plot = self.query_one(f"#plot-{key}", PlotWidget)
                 plot.clear()
 
-                visible_series = [
-                    (i, metrics[key])
-                    for i, (_, metrics) in enumerate(self._series_data.items())
-                    if key in metrics and i not in self._hidden_series
-                ]
+                # Use samples_by_exp for consistent indexing with the table
+                visible_series = []
+                for i, (exp_id, samples) in enumerate(self._samples_by_exp.items()):
+                    if i in self._hidden_series or not samples:
+                        continue
+                    label = get_run_label(samples, exp_id)
+                    if label in self._series_data and key in self._series_data[label]:
+                        visible_series.append((i, self._series_data[label][key]))
 
                 all_values = [v for _, vals in visible_series for v in vals]
                 if not all_values:
@@ -195,22 +201,25 @@ def run_plot_app(
                 y_min, y_max = min(all_values), max(all_values)
                 y_range = max(y_max - y_min, abs(y_max) * 0.1, 1)
                 offset_step = y_range * 0.02
+                padding = y_range * 0.1
+                max_offset = (len(visible_series) - 1) * offset_step
 
-                for i, values in visible_series:
-                    offset = i * offset_step
+                # Set limits before plotting for proper rendering
+                max_x = max(len(vals) for _, vals in visible_series)
+                plot.set_xlimits(0, max_x - 1)
+                plot.set_ylimits(y_min - padding, y_max + max_offset + padding)
+
+                for plot_idx, (color_idx, values) in enumerate(visible_series):
+                    offset = plot_idx * offset_step
                     x_vals = list(range(len(values)))
                     y_vals = [v + offset for v in values]
                     x_interp, y_interp = interpolate_series(x_vals, y_vals)
                     plot.plot(
                         x=x_interp,
                         y=y_interp,
-                        line_style=SERIES_COLORS[i % len(SERIES_COLORS)],
+                        line_style=SERIES_COLORS[color_idx % len(SERIES_COLORS)],
                         hires_mode=HiResMode.BRAILLE,
                     )
-
-                padding = y_range * 0.1
-                max_offset = (len(visible_series) - 1) * offset_step
-                plot.set_ylimits(y_min - padding, y_max + max_offset + padding)
 
         def _update_title(self) -> None:
             import time

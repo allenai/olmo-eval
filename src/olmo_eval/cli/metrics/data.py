@@ -8,6 +8,14 @@ from olmo_eval.cli.metrics.config import METRICS, MetricInfo, QueryFilters
 from olmo_eval.cli.metrics.utils import extract_metric_value
 
 
+def ellipsis_center(text: str, max_len: int = 20) -> str:
+    """Truncate text with ellipsis in the center, preserving prefix and suffix."""
+    if len(text) <= max_len:
+        return text
+    side_len = (max_len - 1) // 2
+    return f"{text[:side_len]}…{text[-side_len:]}"
+
+
 def get_run_label(samples: list[Any], exp_id: str) -> str:
     """Generate a label for a run from its samples and experiment ID."""
     prefix = exp_id[:6]
@@ -17,7 +25,7 @@ def get_run_label(samples: list[Any], exp_id: str) -> str:
     sample = samples[0]
     parts = []
     if sample.model_name:
-        parts.append(sample.model_name.split("/")[-1][:20])
+        parts.append(ellipsis_center(sample.model_name.split("/")[-1]))
     if sample.provider_kind:
         parts.append(sample.provider_kind)
 
