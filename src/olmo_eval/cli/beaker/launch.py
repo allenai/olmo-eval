@@ -715,6 +715,7 @@ def _ensure_secrets(
 ) -> tuple[list[tuple[str, str]], list[tuple[str, str]], list[tuple[str, str]]]:
     """Ensure required secrets exist."""
     from olmo_eval.launch.beaker.secrets import (
+        COMMON_SECRET_NAMES,
         ensure_common_secrets,
         ensure_task_secrets,
         get_local_hf_token,
@@ -724,18 +725,20 @@ def _ensure_secrets(
 
     beaker_username = launcher.beaker.user_name
 
+    task_required_secrets = all_required_secrets - COMMON_SECRET_NAMES
+
     if dry_run:
         common_secrets = []
         if get_local_hf_token():
             common_secrets.append(("HF_TOKEN", f"{beaker_username}_HF_TOKEN"))
         if get_local_wandb_api_key():
             common_secrets.append(("WANDB_API_KEY", f"{beaker_username}_WANDB_API_KEY"))
-        task_secrets = [(s, f"{beaker_username}_{s}") for s in sorted(all_required_secrets)]
+        task_secrets = [(s, f"{beaker_username}_{s}") for s in sorted(task_required_secrets)]
     else:
         common_secrets = ensure_common_secrets(workspace=launch_config.workspace)
         try:
             task_secrets = ensure_task_secrets(
-                workspace=launch_config.workspace, required_secrets=all_required_secrets
+                workspace=launch_config.workspace, required_secrets=task_required_secrets
             )
         except ValueError as e:
             console.print(f"[red]Error:[/red] {e}")
@@ -879,6 +882,7 @@ def _prepare_secrets(
         (env_var, secret_name) tuples.
     """
     from olmo_eval.launch.beaker.secrets import (
+        COMMON_SECRET_NAMES,
         ensure_common_secrets,
         ensure_task_secrets,
         get_local_hf_token,
@@ -886,19 +890,21 @@ def _prepare_secrets(
         get_store_secret_mappings,
     )
 
+    task_required_secrets = all_required_secrets - COMMON_SECRET_NAMES
+
     if dry_run:
         common_secrets: list[tuple[str, str]] = []
         if get_local_hf_token():
             common_secrets.append(("HF_TOKEN", f"{beaker_username}_HF_TOKEN"))
         if get_local_wandb_api_key():
             common_secrets.append(("WANDB_API_KEY", f"{beaker_username}_WANDB_API_KEY"))
-        task_secrets = [(s, f"{beaker_username}_{s}") for s in sorted(all_required_secrets)]
+        task_secrets = [(s, f"{beaker_username}_{s}") for s in sorted(task_required_secrets)]
     else:
         common_secrets = ensure_common_secrets(workspace=workspace)
         try:
             task_secrets = ensure_task_secrets(
                 workspace=workspace,
-                required_secrets=all_required_secrets,
+                required_secrets=task_required_secrets,
             )
         except ValueError as e:
             console.print(f"[red]Error:[/red] {e}")

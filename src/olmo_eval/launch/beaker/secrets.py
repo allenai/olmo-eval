@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 __all__ = [
+    "COMMON_SECRET_NAMES",
     "get_local_hf_token",
     "get_local_wandb_api_key",
     "ensure_common_secrets",
@@ -40,6 +41,8 @@ __all__ = [
     "get_store_env_defaults",
     "setup_pgpassword_from_arn",
 ]
+
+COMMON_SECRET_NAMES: frozenset[str] = frozenset({"HF_TOKEN"})
 
 
 def get_local_hf_token() -> str | None:
