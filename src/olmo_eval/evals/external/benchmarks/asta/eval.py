@@ -340,7 +340,7 @@ class AstaExternalEval(SandboxedExternalEval):
             args.extend(["--limit", str(asta_args.limit)])
 
         if asta_args.scorer_model:
-            args.extend(["--model-role", f"grader={asta_args.scorer_model}"])
+            args.extend(["-T", f"scorer_model={asta_args.scorer_model}"])
 
         if asta_args.temperature is not None:
             args.extend(["-T", f"temperature={asta_args.temperature}"])
