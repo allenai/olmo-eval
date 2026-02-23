@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import shlex
+import subprocess
 import time
 from typing import TYPE_CHECKING, Any
 
+from olmo_eval.common.config import get_infra_config
 from olmo_eval.evals.external.base import SandboxedExternalEval
 from olmo_eval.evals.external.benchmarks.asta.args import AstaArgs
 from olmo_eval.evals.external.benchmarks.asta.result_parser import (
@@ -22,7 +25,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# ASTA-bench task categories
+ASTA_IMAGE_VERSION = "20260223.1"
+ASTA_BENCH_VERSION = "v0.3.1"
+ASTA_REGISTRY_IMAGE = "ghcr.io/allenai/olmo-eval-asta:latest"
+
 ASTA_TASKS = {
     "literature": [
         "paper_finder",
@@ -35,6 +41,96 @@ ASTA_TASKS = {
     "data_analysis": ["discoverybench"],
     "discovery": ["e2e_discovery", "e2e_discovery_hard"],
 }
+
+
+def _get_asta_image(container_runtime: str = "docker") -> str:
+    """Get or build the ASTA-bench container image.
+
+    Checks local cache first, then registry, then builds locally.
+    """
+    config = get_infra_config()
+    registry = config.swerex_registry
+
+    hash_input = f"asta-bench:{ASTA_BENCH_VERSION}:{ASTA_IMAGE_VERSION}"
+    tag_hash = hashlib.sha256(hash_input.encode()).hexdigest()[:12]
+
+    local_image = f"asta-bench-{tag_hash}:latest"
+
+    result = subprocess.run(
+        [container_runtime, "image", "inspect", local_image],
+        capture_output=True,
+    )
+    if result.returncode == 0:
+        logger.info(f"Using cached ASTA image: {local_image}")
+        return local_image
+
+    logger.debug(f"Local image {local_image} not found, checking registry...")
+
+    registry_images = [ASTA_REGISTRY_IMAGE]
+    if registry:
+        registry_images.append(f"{registry}/asta-bench-{tag_hash}:latest")
+
+    for registry_image in registry_images:
+        result = subprocess.run(
+            [container_runtime, "pull", registry_image],
+            capture_output=True,
+        )
+        if result.returncode == 0:
+            subprocess.run(
+                [container_runtime, "tag", registry_image, local_image],
+                capture_output=True,
+            )
+            logger.info(f"Pulled ASTA image from registry: {registry_image}")
+            return local_image
+        logger.debug(f"Registry pull failed for {registry_image}")
+
+    logger.info("Building ASTA image locally...")
+
+    dockerfile = f"""\
+FROM python:3.11-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \\
+    git curl ca-certificates build-essential && \\
+    rm -rf /var/lib/apt/lists/*
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+WORKDIR /workspace
+RUN git clone --recursive --branch {ASTA_BENCH_VERSION} \\
+    https://github.com/allenai/asta-bench.git
+WORKDIR /workspace/asta-bench
+RUN uv sync
+RUN uv pip install numpy pandas scipy scikit-learn matplotlib seaborn
+RUN mkdir -p /workspace/asta-bench/results
+ENV PATH="/workspace/asta-bench/.venv/bin:$PATH"
+ENV PYTHONUNBUFFERED=1
+ENV INSPECT_SANDBOX=local
+ENV INSPECT_EVAL_SANDBOX=local
+"""
+
+    result = subprocess.run(
+        [container_runtime, "build", "-t", local_image, "-"],
+        input=dockerfile.encode(),
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.decode() if result.stderr else ""
+        raise RuntimeError(f"Failed to build ASTA image: {stderr}")
+
+    logger.info(f"Built ASTA image: {local_image}")
+
+    if registry:
+        registry_image = f"{registry}/asta-bench-{tag_hash}:latest"
+        logger.info(f"Pushing ASTA image to registry: {registry_image}")
+        tag_cmd = [container_runtime, "tag", local_image, registry_image]
+        subprocess.run(tag_cmd, capture_output=True)
+        push_cmd = [container_runtime, "push", registry_image]
+        push_result = subprocess.run(push_cmd, capture_output=True)
+        if push_result.returncode == 0:
+            logger.info(f"Pushed ASTA image to registry: {registry_image}")
+        else:
+            stderr = push_result.stderr.decode() if push_result.stderr else ""
+            logger.warning(f"Failed to push to registry (using local image): {stderr}")
+
+    return local_image
 
 
 class AstaExternalEval(SandboxedExternalEval):
@@ -186,28 +282,25 @@ class AstaExternalEval(SandboxedExternalEval):
             SandboxMode,
         )
 
-        # Build base environment from required secrets
         env_vars = self._build_env_vars()
 
-        # Add ASTA-specific environment variables
         if asta_args.sandbox_type == "local":
-            # Tell Inspect to run code locally (no nested containers)
             env_vars["INSPECT_SANDBOX"] = "local"
             env_vars["INSPECT_EVAL_SANDBOX"] = "local"
 
-        # Forward optional secrets if available
         for optional_secret in ("ANTHROPIC_API_KEY", "GOOGLE_API_KEY"):
             if value := os.environ.get(optional_secret):
                 env_vars[optional_secret] = value
 
-        # Set log_dir for sandbox container logs
         log_dir = None
         if output_dir:
             log_dir = os.path.join(output_dir, "logs")
 
         runtime = cast(ContainerRuntime, container_runtime)
+        image = _get_asta_image(container_runtime)
+
         return SandboxConfig(
-            image=self.sandbox_image,
+            image=image,
             mode=SandboxMode.DOCKER,
             container_runtime=runtime,
             command_timeout=self.timeout_seconds,
