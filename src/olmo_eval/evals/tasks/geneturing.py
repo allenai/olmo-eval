@@ -248,7 +248,8 @@ def _extract_first_line_answer(text: str) -> str | None:
         # Strip trailing punctuation and parenthetical notes
         line = re.sub(r"\s*\(.*?\)\s*$", "", line)
         line = line.rstrip(".")
-        cleaned = line.strip()
+        # Take first sentence only ("GENE. This gene encodes..." → "GENE")
+        cleaned = line.split(". ")[0].strip()
         if cleaned:
             return cleaned
     return None
