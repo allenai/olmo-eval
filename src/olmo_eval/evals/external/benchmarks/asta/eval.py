@@ -226,16 +226,16 @@ class AstaExternalEval(SandboxedExternalEval):
                 if err := await self._run_setup(executor, all_output, start_time):
                     return err
 
-                sandbox_url = self._get_provider_url_for_sandbox(provider_url)
+                if is_local:
+                    provider_url = self._get_provider_url_for_sandbox(provider_url)
+                    if not await self._check_provider_health(executor, provider_url):
+                        return self._error_result(
+                            f"Provider not reachable at {provider_url}",
+                            start_time,
+                            "\n".join(all_output),
+                        )
 
-                if not await self._check_provider_health(executor, sandbox_url):
-                    return self._error_result(
-                        f"Provider not reachable at {sandbox_url}",
-                        start_time,
-                        "\n".join(all_output),
-                    )
-
-                run_cmd = self._build_run_command(model_name, sandbox_url, is_local, asta_args)
+                run_cmd = self._build_run_command(model_name, provider_url, is_local, asta_args)
                 logger.info(f"[{self.name}] Running: {run_cmd}")
 
                 run_result = await executor.execute_command(
