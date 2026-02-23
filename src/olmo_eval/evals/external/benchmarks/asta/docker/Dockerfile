@@ -27,14 +27,8 @@ WORKDIR /workspace/asta-bench
 # Install dependencies with uv
 RUN uv sync
 
-# Pre-install common scientific packages for agent sandbox use
-RUN uv pip install \
-    numpy \
-    pandas \
-    scipy \
-    scikit-learn \
-    matplotlib \
-    seaborn
+# Install swe-rex for sandbox communication
+RUN uv pip install swe-rex
 
 # Create results directory
 RUN mkdir -p /workspace/asta-bench/results

@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-ASTA_IMAGE_VERSION = "20260223.1"
+ASTA_IMAGE_VERSION = "20260223.2"
 ASTA_BENCH_VERSION = "v0.3.1"
 ASTA_REGISTRY_IMAGE = "ghcr.io/allenai/olmo-eval-asta:latest"
 
@@ -98,7 +98,7 @@ RUN git clone --recursive --branch {ASTA_BENCH_VERSION} \\
     https://github.com/allenai/asta-bench.git
 WORKDIR /workspace/asta-bench
 RUN uv sync
-RUN uv pip install numpy pandas scipy scikit-learn matplotlib seaborn
+RUN uv pip install swe-rex
 RUN mkdir -p /workspace/asta-bench/results
 ENV PATH="/workspace/asta-bench/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
