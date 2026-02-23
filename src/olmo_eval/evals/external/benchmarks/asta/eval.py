@@ -27,7 +27,6 @@ logger = logging.getLogger(__name__)
 
 ASTA_IMAGE_VERSION = "20260223.2"
 ASTA_BENCH_VERSION = "v0.3.1"
-ASTA_REGISTRY_IMAGE = "ghcr.io/allenai/olmo-eval-asta:latest"
 
 ASTA_TASKS = {
     "literature": [
@@ -66,11 +65,8 @@ def _get_asta_image(container_runtime: str = "docker") -> str:
 
     logger.debug(f"Local image {local_image} not found, checking registry...")
 
-    registry_images = [ASTA_REGISTRY_IMAGE]
     if registry:
-        registry_images.append(f"{registry}/asta-bench-{tag_hash}:latest")
-
-    for registry_image in registry_images:
+        registry_image = f"{registry}/asta-bench-{tag_hash}:latest"
         result = subprocess.run(
             [container_runtime, "pull", registry_image],
             capture_output=True,
@@ -149,7 +145,7 @@ class AstaExternalEval(SandboxedExternalEval):
 
     @property
     def sandbox_image(self) -> str:
-        return "ghcr.io/allenai/olmo-eval-asta:latest"
+        return "(built locally)"
 
     @property
     def working_dir(self) -> str:
