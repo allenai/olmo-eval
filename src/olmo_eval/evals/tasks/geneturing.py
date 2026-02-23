@@ -144,10 +144,16 @@ class MeanScoreMetric(Metric):
 # Answer Extraction Helpers
 # =============================================================================
 
+_THINK_PATTERN = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 _CHR_PATTERN = re.compile(r"chr(?:omosome\s*)?(\d+|[XYxy])", re.IGNORECASE)
 _AMINO_ACID_PATTERN = re.compile(r"[ACDEFGHIKLMNPQRSTVWY]{5,}", re.IGNORECASE)
 _DNA_PATTERN = re.compile(r"[ACGTacgt]{10,}")
 _KNOWN_SPECIES = frozenset({"human", "mouse", "rat", "zebrafish", "worm", "yeast", "fruit fly"})
+
+
+def _strip_thinking(text: str) -> str:
+    """Remove ``<think>...</think>`` blocks from model output."""
+    return _THINK_PATTERN.sub("", text).strip()
 
 
 def _normalize_chromosome(text: str) -> str | None:
@@ -167,12 +173,12 @@ def _normalize_chromosome(text: str) -> str | None:
 
 def _extract_chromosome(text: str) -> str | None:
     """Extract chromosome from model output."""
-    return _normalize_chromosome(text)
+    return _normalize_chromosome(_strip_thinking(text))
 
 
 def _extract_boolean(text: str) -> str | None:
     """Map yes/no/true/false to TRUE/NA (protein-coding convention)."""
-    lower = text.strip().lower()
+    lower = _strip_thinking(text).strip().lower()
     # Check for explicit TRUE/NA first
     if "true" in lower and "na" not in lower:
         return "TRUE"
@@ -189,7 +195,7 @@ def _extract_boolean(text: str) -> str | None:
 
 def _extract_activation(text: str) -> str | None:
     """Extract Activation or Repression from model output."""
-    lower = text.lower()
+    lower = _strip_thinking(text).lower()
     has_activation = "activat" in lower
     has_repression = "repress" in lower
     if has_activation and not has_repression:
@@ -209,7 +215,7 @@ def _extract_activation(text: str) -> str | None:
 
 def _extract_sequence(text: str, pattern: re.Pattern[str]) -> str | None:
     """Extract the longest contiguous sequence matching the pattern."""
-    matches: list[str] = pattern.findall(text)
+    matches: list[str] = pattern.findall(_strip_thinking(text))
     if not matches:
         return None
     best = matches[0]
@@ -220,16 +226,21 @@ def _extract_sequence(text: str, pattern: re.Pattern[str]) -> str | None:
 
 
 def _extract_first_line_answer(text: str) -> str | None:
-    """Extract the first meaningful line, stripping common boilerplate."""
+    """Extract the first meaningful line, stripping thinking traces and boilerplate."""
+    text = _strip_thinking(text)
     lines = text.strip().split("\n")
     for line in lines:
         line = line.strip()
-        # Skip empty lines and common prefixes
+        # Strip markdown bold/italic
+        line = re.sub(r"\*{1,2}([^*]+)\*{1,2}", r"\1", line)
+        # Strip common verbose prefixes (e.g. "The official gene symbol is ...")
         line = re.sub(
-            r"^(the\s+(official\s+)?(gene\s+)?(symbol|name|answer)\s+(is|for)\s+[^:]*:\s*"
+            r"^(the\s+(official\s+)?(gene\s+)?(symbol|name|answer)\s+"
+            r"(is|for|of|corresponding to)\s+[^:]*?(is\s+|:\s*)"
             r"|based on[^,]*,\s*"
             r"|according to[^,]*,\s*"
-            r"|the\s+gene\s+symbol\s+for\s+.*?\s+is\s+)",
+            r"|the\s+gene\s+symbol\s+for\s+.*?\s+is\s+"
+            r"|the\s+official\s+gene\s+symbol\s+.*?\s+is\s+)",
             "",
             line,
             flags=re.IGNORECASE,
@@ -245,7 +256,7 @@ def _extract_first_line_answer(text: str) -> str | None:
 
 def _extract_species(text: str) -> str | None:
     """Extract a species name from model output."""
-    lower = text.lower()
+    lower = _strip_thinking(text).lower()
     for species in _KNOWN_SPECIES:
         if species in lower:
             return species
@@ -266,7 +277,7 @@ def _parse_name_set(text: str) -> set[str]:
 
 def _extract_gene_names(text: str) -> str | None:
     """Extract gene/protein names from model output for gene_name_extraction."""
-    lower = text.strip().lower()
+    lower = _strip_thinking(text).strip().lower()
     if "no gene" in lower or "no protein" in lower or lower.startswith("none"):
         return "No gene"
     return _extract_first_line_answer(text)
