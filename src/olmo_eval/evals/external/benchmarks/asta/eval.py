@@ -318,80 +318,66 @@ class AstaExternalEval(SandboxedExternalEval):
         asta_args: AstaArgs,
     ) -> str:
         """Build the astabench run command."""
-        # For local providers, use openai-compatible model spec
-        if is_local:
-            model_spec = f"openai/{model_name}"
-            # Set base URL via environment in the command
-            env_prefix = f"OPENAI_BASE_URL={shlex.quote(provider_url)}"
-        else:
-            model_spec = model_name
-            env_prefix = ""
+        model_spec = f"openai/{model_name}" if is_local else model_name
 
-        parts = [f"cd {self.working_dir} &&"]
-        if env_prefix:
-            parts.append(env_prefix)
+        args = [
+            "uv",
+            "run",
+            "astabench",
+            "eval",
+            "--model",
+            model_spec,
+            "--solver",
+            asta_args.solver,
+            "--max-samples",
+            str(asta_args.max_samples),
+            "--max-sandboxes",
+            str(asta_args.max_sandboxes),
+            "--max-connections",
+            str(asta_args.max_connections),
+            "--display",
+            "plain",
+            "--log-dir",
+            self.results_dir,
+            "--split",
+            asta_args.split,
+        ]
 
-        parts.extend(
-            [
-                "uv run astabench eval",
-                f"--model {shlex.quote(model_spec)}",
-                f"--solver {shlex.quote(asta_args.solver)}",
-                f"--max-samples {asta_args.max_samples}",
-                f"--max-sandboxes {asta_args.max_sandboxes}",
-                f"--max-connections {asta_args.max_connections}",
-                "--display=plain",
-                f"--log-dir {self.results_dir}",
-            ]
-        )
-
-        # Add sandbox mode
         if asta_args.sandbox_type == "local":
-            parts.append("--sandbox local")
+            args.extend(["--sandbox", "local"])
 
-        # Add tool flags as solver args
-        tool_args = []
-        if asta_args.with_asta_tools:
-            tool_args.append("with_asta_tools=1")
-        if asta_args.with_stateful_python:
-            tool_args.append("with_stateful_python=1")
-        if asta_args.with_report_editor:
-            tool_args.append("with_report_editor=1")
-        if asta_args.with_table_editor:
-            tool_args.append("with_table_editor=1")
-        if asta_args.with_thinking_tool:
-            tool_args.append("with_thinking_tool=1")
-
-        for arg in tool_args:
-            parts.append(f"-S {arg}")
-
-        # Model overrides
-        if asta_args.temperature is not None:
-            parts.append(f"-T temperature={asta_args.temperature}")
-        if asta_args.max_tokens is not None:
-            parts.append(f"-T max_tokens={asta_args.max_tokens}")
-
-        # Scorer model (for tasks that need separate scoring model)
-        if asta_args.scorer_model:
-            parts.append(f"--scorer-model {shlex.quote(asta_args.scorer_model)}")
-
-        # Limit number of problems
         if asta_args.limit is not None:
-            parts.append(f"--limit {asta_args.limit}")
+            args.extend(["--limit", str(asta_args.limit)])
 
-        # Extra args
-        for extra_arg in asta_args.extra_args:
-            parts.append(shlex.quote(extra_arg))
+        if asta_args.scorer_model:
+            args.extend(["--scorer-model", asta_args.scorer_model])
 
-        # Add task specifications
-        if asta_args.tasks:
-            for task in asta_args.tasks:
-                task_spec = f"astabench/{task}_{asta_args.split}"
-                parts.append(shlex.quote(task_spec))
-        else:
-            # Run all tasks for the split
-            parts.append(f"astabench/{asta_args.split}")
+        if asta_args.temperature is not None:
+            args.extend(["-T", f"temperature={asta_args.temperature}"])
 
-        return " ".join(parts)
+        if asta_args.max_tokens is not None:
+            args.extend(["-T", f"max_tokens={asta_args.max_tokens}"])
+
+        # Solver args for tool flags
+        for flag, enabled in [
+            ("with_asta_tools", asta_args.with_asta_tools),
+            ("with_stateful_python", asta_args.with_stateful_python),
+            ("with_report_editor", asta_args.with_report_editor),
+            ("with_table_editor", asta_args.with_table_editor),
+            ("with_thinking_tool", asta_args.with_thinking_tool),
+        ]:
+            if enabled:
+                args.extend(["-S", f"{flag}=1"])
+
+        args.extend(asta_args.extra_args)
+
+        # Task specifications
+        for task in asta_args.tasks or []:
+            args.append(f"astabench/{task}")
+
+        # Build command with cd and optional env prefix
+        env_prefix = f"OPENAI_BASE_URL={shlex.quote(provider_url)} " if is_local else ""
+        return f"cd {self.working_dir} && {env_prefix}{shlex.join(args)}"
 
     async def _extract_results(
         self,
