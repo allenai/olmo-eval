@@ -15,17 +15,6 @@ def _parse_optional(data: dict, key: str, type_fn: type) -> Any:
     return type_fn(value) if value is not None else None
 
 
-def _parse_bool(value: Any, default: bool = False) -> bool:
-    """Parse a boolean value from string or bool."""
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.lower() in ("true", "1", "yes")
-    return bool(value)
-
-
 @dataclass
 class AstaArgs:
     """Arguments for asta_bench evaluation."""
@@ -46,13 +35,6 @@ class AstaArgs:
     # Sandbox mode
     sandbox_type: AstaSandboxType = "local"
 
-    # Tool flags
-    with_asta_tools: bool = True
-    with_stateful_python: bool = True
-    with_report_editor: bool = False
-    with_table_editor: bool = False
-    with_thinking_tool: bool = False
-
     # Model overrides
     temperature: float | None = None
     max_tokens: int | None = None
@@ -61,6 +43,7 @@ class AstaArgs:
     scorer_model: str | None = None
 
     # Extra inspect args (passed through to inspect eval)
+    # Use for task-specific flags like -T with_search_tools=1
     extra_args: list[str] = field(default_factory=list)
 
     @classmethod
@@ -84,11 +67,6 @@ class AstaArgs:
             max_sandboxes=int(data.get("max_sandboxes", 1)),
             max_connections=int(data.get("max_connections", 8)),
             sandbox_type=data.get("sandbox_type", "local"),
-            with_asta_tools=_parse_bool(data.get("with_asta_tools"), default=True),
-            with_stateful_python=_parse_bool(data.get("with_stateful_python"), default=True),
-            with_report_editor=_parse_bool(data.get("with_report_editor"), default=False),
-            with_table_editor=_parse_bool(data.get("with_table_editor"), default=False),
-            with_thinking_tool=_parse_bool(data.get("with_thinking_tool"), default=False),
             temperature=_parse_optional(data, "temperature", float),
             max_tokens=_parse_optional(data, "max_tokens", int),
             scorer_model=data.get("scorer_model"),

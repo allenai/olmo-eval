@@ -181,18 +181,12 @@ class AstaExternalEval(SandboxedExternalEval):
             "max_connections": ("Max model API connections", 8),
             # Sandbox mode
             "sandbox_type": ("Sandbox type: 'local' (Beaker) or 'docker'", "local"),
-            # Tool flags
-            "with_asta_tools": ("Enable literature search tools", True),
-            "with_stateful_python": ("Enable persistent code execution", True),
-            "with_report_editor": ("Enable SQA report editor", False),
-            "with_table_editor": ("Enable ArxivDigestables editor", False),
-            "with_thinking_tool": ("Enable extended reasoning tool", False),
             # Model overrides
             "temperature": ("Temperature for agent responses", None),
             "max_tokens": ("Max tokens for agent responses", None),
             # Scoring
             "scorer_model": ("Model for scoring (requires API key)", None),
-            # Extra args
+            # Extra args (use for task-specific flags like -T with_search_tools=1)
             "extra_args": ("Extra args to pass to inspect eval", None),
         }
 
@@ -354,17 +348,7 @@ class AstaExternalEval(SandboxedExternalEval):
         if asta_args.max_tokens is not None:
             args.extend(["-T", f"max_tokens={asta_args.max_tokens}"])
 
-        # Solver args for tool flags
-        for flag, enabled in [
-            ("with_asta_tools", asta_args.with_asta_tools),
-            ("with_stateful_python", asta_args.with_stateful_python),
-            ("with_report_editor", asta_args.with_report_editor),
-            ("with_table_editor", asta_args.with_table_editor),
-            ("with_thinking_tool", asta_args.with_thinking_tool),
-        ]:
-            if enabled:
-                args.extend(["-S", f"{flag}=1"])
-
+        # Extra args (for task-specific flags like -T with_search_tools=1)
         args.extend(asta_args.extra_args)
 
         # Task specifications
