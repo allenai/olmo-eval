@@ -3,22 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import click
 
 from olmo_eval.cli.utils import ConfiguredExternalEval, console, parse_key_value_args
 from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR
 
-if TYPE_CHECKING:
-    from olmo_eval.inference.providers.config import ProviderConfig
-
 
 @dataclass
 class ExternalRunConfig:
     """Configuration for an external evaluation run."""
 
-    provider: ProviderConfig
     evals: list[ConfiguredExternalEval]
     output_dir: str
     container_runtime: str
@@ -266,7 +262,6 @@ def run_external(
     ]
 
     run_config = ExternalRunConfig(
-        provider=provider_config,
         evals=configured_evals,
         output_dir=output_dir,
         container_runtime=runtime,
