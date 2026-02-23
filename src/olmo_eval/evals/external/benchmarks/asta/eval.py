@@ -164,7 +164,14 @@ class AstaExternalEval(SandboxedExternalEval):
 
     @property
     def required_secrets(self) -> tuple[str, ...]:
-        return ("OPENAI_API_KEY", "ASTA_TOOL_KEY", "HF_TOKEN")
+        # GOOGLE_API_KEY is required because asta-bench scorers hardcode Google models
+        return (
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "GOOGLE_API_KEY",
+            "ASTA_TOOL_KEY",
+            "HF_TOKEN",
+        )
 
     @property
     def arguments(self) -> dict[str, tuple[str, Any | None]]:
@@ -184,8 +191,6 @@ class AstaExternalEval(SandboxedExternalEval):
             # Model overrides
             "temperature": ("Temperature for agent responses", None),
             "max_tokens": ("Max tokens for agent responses", None),
-            # Scoring
-            "scorer_model": ("Model for scoring", "openai/gpt-4o-mini"),
             # Extra args (use for task-specific flags like -T with_search_tools=1)
             "extra_args": ("Extra args to pass to inspect eval", None),
         }
@@ -278,10 +283,6 @@ class AstaExternalEval(SandboxedExternalEval):
             env_vars["INSPECT_SANDBOX"] = "local"
             env_vars["INSPECT_EVAL_SANDBOX"] = "local"
 
-        for optional_secret in ("ANTHROPIC_API_KEY", "GOOGLE_API_KEY"):
-            if value := os.environ.get(optional_secret):
-                env_vars[optional_secret] = value
-
         log_dir = None
         if output_dir:
             log_dir = os.path.join(output_dir, "logs")
@@ -338,9 +339,6 @@ class AstaExternalEval(SandboxedExternalEval):
 
         if asta_args.limit is not None:
             args.extend(["--limit", str(asta_args.limit)])
-
-        if asta_args.scorer_model:
-            args.extend(["-T", f"scorer_model={asta_args.scorer_model}"])
 
         if asta_args.temperature is not None:
             args.extend(["-T", f"temperature={asta_args.temperature}"])

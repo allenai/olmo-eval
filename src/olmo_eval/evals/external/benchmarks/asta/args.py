@@ -39,9 +39,6 @@ class AstaArgs:
     temperature: float | None = None
     max_tokens: int | None = None
 
-    # Scoring configuration
-    scorer_model: str = "openai/gpt-4o-mini"
-
     # Extra inspect args (passed through to inspect eval)
     # Use for task-specific flags like -T with_search_tools=1
     extra_args: list[str] = field(default_factory=list)
@@ -69,6 +66,5 @@ class AstaArgs:
             sandbox_type=data.get("sandbox_type", "local"),
             temperature=_parse_optional(data, "temperature", float),
             max_tokens=_parse_optional(data, "max_tokens", int),
-            scorer_model=data.get("scorer_model", "openai/gpt-4o-mini"),
             extra_args=extra_args,
         )

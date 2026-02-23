@@ -593,6 +593,7 @@ def launch(
                 Pretty(exp_summary, expand_all=True),
                 title=f"[bold]{exp_summary.name}[/bold]",
                 border_style="cyan",
+                expand=True,
             )
         )
         console.print()
@@ -1189,6 +1190,7 @@ def _launch_external_evals(
                 Pretty(summary, expand_all=True),
                 title=f"[bold]{summary.name}[/bold]",
                 border_style="cyan",
+                expand=True,
             )
         )
         console.print()
