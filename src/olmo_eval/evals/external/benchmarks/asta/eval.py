@@ -185,7 +185,7 @@ class AstaExternalEval(SandboxedExternalEval):
             "temperature": ("Temperature for agent responses", None),
             "max_tokens": ("Max tokens for agent responses", None),
             # Scoring
-            "scorer_model": ("Model for scoring (requires API key)", None),
+            "scorer_model": ("Model for scoring", "openai/gpt-4o-mini"),
             # Extra args (use for task-specific flags like -T with_search_tools=1)
             "extra_args": ("Extra args to pass to inspect eval", None),
         }
