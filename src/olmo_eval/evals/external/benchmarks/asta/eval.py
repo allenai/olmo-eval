@@ -312,11 +312,8 @@ class AstaExternalEval(SandboxedExternalEval):
         runtime = cast(ContainerRuntime, container_runtime)
         image = _get_asta_image(container_runtime)
 
-        # Get network args and add Podman-specific options
+        # Get network args
         docker_args_list = list(get_docker_network_args(runtime=container_runtime))
-        if container_runtime == "podman":
-            # Avoid UID remapping issues with Weka mounts
-            docker_args_list.append("--userns=keep-id")
 
         return SandboxConfig(
             image=image,
