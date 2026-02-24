@@ -2,11 +2,25 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+logger = logging.getLogger(__name__)
+
 AstaSandboxType = Literal["local", "docker"]
 AstaSolver = Literal["react", "basic"]
+
+# Known ASTA-bench tasks by category
+ASTA_TASKS = {
+    "literature": ["paper_finder", "sqa", "litqa2", "paper_finder_litqa2", "arxivdigestables"],
+    "code": ["core_bench", "ds1000", "super"],
+    "data_analysis": ["discoverybench"],
+    "discovery": ["e2e_discovery", "e2e_discovery_hard"],
+}
+
+# Flat set for validation
+KNOWN_TASKS = {task for tasks in ASTA_TASKS.values() for task in tasks}
 
 
 def _parse_optional(data: dict, key: str, type_fn: type) -> Any:
@@ -49,6 +63,15 @@ class AstaArgs:
         tasks = data.get("tasks")
         if isinstance(tasks, str):
             tasks = [t.strip() for t in tasks.split(",") if t.strip()]
+
+        # Validate tasks and warn about unknown ones
+        if tasks:
+            unknown = [t for t in tasks if t not in KNOWN_TASKS]
+            if unknown:
+                known_list = ", ".join(sorted(KNOWN_TASKS))
+                logger.warning(
+                    f"Unknown ASTA task(s): {', '.join(unknown)}. Known tasks: {known_list}"
+                )
 
         # Handle extra_args which can be comma-separated string or list
         extra_args = data.get("extra_args", [])

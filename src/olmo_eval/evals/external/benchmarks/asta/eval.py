@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.config import get_infra_config
 from olmo_eval.evals.external.base import SandboxedExternalEval
-from olmo_eval.evals.external.benchmarks.asta.args import AstaArgs
+from olmo_eval.evals.external.benchmarks.asta.args import ASTA_TASKS, AstaArgs
 from olmo_eval.evals.external.benchmarks.asta.result_parser import (
     aggregate_metrics,
     parse_agenteval_json,
@@ -28,19 +28,6 @@ logger = logging.getLogger(__name__)
 
 ASTA_IMAGE_VERSION = "20260223.2"
 ASTA_BENCH_VERSION = "v0.3.1"
-
-ASTA_TASKS = {
-    "literature": [
-        "paper_finder",
-        "sqa",
-        "litqa2",
-        "paper_finder_litqa2",
-        "arxivdigestables",
-    ],
-    "code": ["core_bench", "ds1000", "super"],
-    "data_analysis": ["discoverybench"],
-    "discovery": ["e2e_discovery", "e2e_discovery_hard"],
-}
 
 
 def _get_asta_image(container_runtime: str = "docker") -> str:
@@ -176,9 +163,17 @@ class AstaExternalEval(SandboxedExternalEval):
 
     @property
     def arguments(self) -> dict[str, tuple[str, Any | None]]:
+        # Build task list description from ASTA_TASKS
+        task_descriptions = []
+        for category, tasks in ASTA_TASKS.items():
+            task_descriptions.append(f"{category}: {', '.join(tasks)}")
+        tasks_help = (
+            "Comma-separated task names to run (default: all). "
+            f"Available: {'; '.join(task_descriptions)}"
+        )
         return {
             "split": ("Dataset split: 'validation' or 'test'", "validation"),
-            "tasks": ("Comma-separated task names to run (default: all)", None),
+            "tasks": (tasks_help, None),
             "limit": ("Maximum problems per task", None),
             "solver": ("Agent solver type: 'react' or 'basic'", "react"),
             "max_samples": ("Max concurrent problems", 1),
@@ -240,6 +235,20 @@ class AstaExternalEval(SandboxedExternalEval):
                 logger.info(f"[{self.name}] Run exit code: {run_result.exit_code}")
 
                 # Run scoring to compile aggregate results
+                # First check if eval_config.json exists (may not for single-task runs)
+                config_check = await executor.execute_command(
+                    f"test -f {self.results_dir}/eval_config.json && echo exists",
+                    timeout=30.0,
+                )
+                if "exists" not in config_check.output:
+                    # Generate config for single-task scoring
+                    config_cmd = self._build_config_only_command(asta_args)
+                    logger.info(f"[{self.name}] Generating eval config: {config_cmd}")
+                    config_result = await executor.execute_command(
+                        config_cmd, timeout=120.0, stream=True, log_prefix=f"{self.name}-config"
+                    )
+                    all_output.append(f"$ {config_cmd}\n{config_result.output}")
+
                 score_cmd = self._build_score_command()
                 logger.info(f"[{self.name}] Running scoring: {score_cmd}")
 
@@ -366,6 +375,25 @@ class AstaExternalEval(SandboxedExternalEval):
     def _build_score_command(self) -> str:
         """Build the astabench score command."""
         return f"cd {self.working_dir} && uv run astabench score {self.results_dir}"
+
+    def _build_config_only_command(self, asta_args: AstaArgs) -> str:
+        """Build command to generate eval_config.json for single-task runs."""
+        args = [
+            "uv",
+            "run",
+            "astabench",
+            "eval",
+            "--config-only",
+            "--log-dir",
+            self.results_dir,
+            "--split",
+            asta_args.split,
+        ]
+        # Task specifications
+        for task in asta_args.tasks or []:
+            args.append(f"astabench/{task}")
+
+        return f"cd {self.working_dir} && {shlex.join(args)}"
 
     async def _extract_results(
         self,
