@@ -300,9 +300,16 @@ class AstaExternalEval(SandboxedExternalEval):
         volumes: list[tuple[str, str]] = []
         inspect_cache_dir = config.inspect_cache_dir or os.environ.get("INSPECT_CACHE_DIR")
         if inspect_cache_dir:
+            # Create directory structure on host with open permissions
+            # so the container (running as root) can read/write
+            host_cache = os.path.join(inspect_cache_dir, "inspect_evals")
+            core_bench_data = os.path.join(host_cache, "CORE-Bench", "data")
+            os.makedirs(core_bench_data, exist_ok=True)
+            # Ensure all directories in the path are writable
+            for path in [host_cache, os.path.dirname(core_bench_data), core_bench_data]:
+                os.chmod(path, 0o777)
             # Mount directly to where inspect_evals expects its cache
             container_cache = "/root/.cache/inspect_evals"
-            host_cache = f"{inspect_cache_dir}/inspect_evals"
             volumes.append((host_cache, container_cache))
             logger.info(f"[{self.name}] Mounting {host_cache} -> {container_cache}")
         else:
