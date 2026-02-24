@@ -377,7 +377,12 @@ class AstaExternalEval(SandboxedExternalEval):
 
     def _build_score_command(self) -> str:
         """Build the astabench score command."""
-        return f"cd {self.working_dir} && uv run astabench score {self.results_dir}"
+        # LITELLM_LOCAL_MODEL_COST_MAP=True allows litellm to calculate costs
+        # for models not in their standard pricing (like local/custom models)
+        return (
+            f"cd {self.working_dir} && "
+            f"LITELLM_LOCAL_MODEL_COST_MAP=True uv run astabench score {self.results_dir}"
+        )
 
     def _build_config_only_command(self, asta_args: AstaArgs) -> str:
         """Build command to generate eval_config.json for single-task runs."""
@@ -477,9 +482,9 @@ class AstaExternalEval(SandboxedExternalEval):
                 if not log_file:
                     continue
 
-                # .eval files may be gzipped - try zcat first, then cat
+                # .eval files are gzipped - use gzip -dc which handles multiple streams
                 cat_result = await executor.execute_command(
-                    f"zcat {shlex.quote(log_file)} 2>/dev/null || cat {shlex.quote(log_file)}",
+                    f"gzip -dc {shlex.quote(log_file)} 2>/dev/null",
                     timeout=60.0,
                 )
 
@@ -488,7 +493,11 @@ class AstaExternalEval(SandboxedExternalEval):
                     continue
 
                 try:
-                    log_content = json.loads(cat_result.output)
+                    # .eval files may contain multiple JSON objects (streaming format)
+                    # Try to parse the first complete JSON object
+                    content = cat_result.output.strip()
+                    decoder = json.JSONDecoder()
+                    log_content, _ = decoder.raw_decode(content)
                     parsed = parse_inspect_log(log_content)
                     parsed_logs.append(parsed)
                     all_predictions.extend(parsed.get("predictions", []))
