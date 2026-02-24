@@ -244,6 +244,7 @@ def assemble_external_eval_job(
             {
                 "HF_HOME": "/weka/oe-eval-default/oyvindt/hf-cache",
                 "HF_HUB_CACHE": "/weka/oe-eval-default/oyvindt/hf-cache",
+                "INSPECT_CACHE_DIR": "/weka/oe-training-default/olmo-eval/inspect-cache",
                 "UV_LINK_MODE": "copy",
             }
         )
@@ -456,6 +457,7 @@ class JobConfigAssembler:
                 {
                     "HF_HOME": "/weka/oe-eval-default/oyvindt/hf-cache",
                     "HF_HUB_CACHE": "/weka/oe-eval-default/oyvindt/hf-cache",
+                    "INSPECT_CACHE_DIR": "/weka/oe-training-default/olmo-eval/inspect-cache",
                     "UV_LINK_MODE": "copy",
                 }
             )
