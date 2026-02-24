@@ -197,3 +197,90 @@ def aggregate_metrics(parsed_logs: list[dict[str, Any]]) -> dict[str, float]:
     aggregated["total_samples"] = float(total_samples)
 
     return aggregated
+
+
+def parse_agenteval_json(content: dict[str, Any]) -> dict[str, Any]:
+    """Parse agenteval.json produced by `astabench score`.
+
+    Args:
+        content: Parsed JSON from agenteval.json.
+
+    Returns:
+        Dictionary with:
+            - metrics: Aggregated scores from the scoring run
+            - costs: Token usage costs per model
+            - metadata: Evaluation metadata
+    """
+    metrics: dict[str, float] = {}
+    costs: dict[str, Any] = {}
+    metadata: dict[str, Any] = {}
+
+    # Extract task-level scores
+    tasks = content.get("tasks", {})
+    for task_name, task_data in tasks.items():
+        if isinstance(task_data, dict):
+            # Extract primary metric score
+            score = task_data.get("score")
+            if score is not None:
+                metrics[f"{task_name}_score"] = float(score)
+
+            # Extract stderr if available
+            stderr = task_data.get("stderr")
+            if stderr is not None:
+                metrics[f"{task_name}_stderr"] = float(stderr)
+
+            # Extract cost if available
+            cost = task_data.get("cost")
+            if cost is not None:
+                metrics[f"{task_name}_cost"] = float(cost)
+
+    # Extract tag-level aggregates (category scores)
+    tags = content.get("tags", {})
+    for tag_name, tag_data in tags.items():
+        if isinstance(tag_data, dict):
+            score = tag_data.get("score")
+            if score is not None:
+                metrics[f"tag_{tag_name}_score"] = float(score)
+
+            stderr = tag_data.get("stderr")
+            if stderr is not None:
+                metrics[f"tag_{tag_name}_stderr"] = float(stderr)
+
+            cost = tag_data.get("cost")
+            if cost is not None:
+                metrics[f"tag_{tag_name}_cost"] = float(cost)
+
+    # Extract overall score if available
+    overall = content.get("overall", {})
+    if isinstance(overall, dict):
+        if "score" in overall:
+            metrics["overall_score"] = float(overall["score"])
+        if "cost" in overall:
+            metrics["overall_cost"] = float(overall["cost"])
+    elif isinstance(overall, (int, float)):
+        metrics["overall_score"] = float(overall)
+
+    # Extract cost breakdown by model
+    model_costs = content.get("costs", {})
+    if isinstance(model_costs, dict):
+        costs = model_costs
+        # Also add total cost as a metric
+        total_cost = sum(
+            c.get("total", 0) if isinstance(c, dict) else 0 for c in model_costs.values()
+        )
+        if total_cost > 0:
+            metrics["total_model_cost"] = float(total_cost)
+
+    # Extract metadata
+    metadata = {
+        "eval_config": content.get("eval_config", {}),
+        "split": content.get("split", ""),
+        "model": content.get("model", ""),
+        "created": content.get("created", ""),
+    }
+
+    return {
+        "metrics": metrics,
+        "costs": costs,
+        "metadata": metadata,
+    }

@@ -15,6 +15,7 @@ from olmo_eval.evals.external.base import SandboxedExternalEval
 from olmo_eval.evals.external.benchmarks.asta.args import AstaArgs
 from olmo_eval.evals.external.benchmarks.asta.result_parser import (
     aggregate_metrics,
+    parse_agenteval_json,
     parse_inspect_log,
 )
 from olmo_eval.evals.external.result import ExternalEvalResult
@@ -238,6 +239,16 @@ class AstaExternalEval(SandboxedExternalEval):
                 all_output.append(f"$ {run_cmd}\n{run_result.output}")
                 logger.info(f"[{self.name}] Run exit code: {run_result.exit_code}")
 
+                # Run scoring to compile aggregate results
+                score_cmd = self._build_score_command()
+                logger.info(f"[{self.name}] Running scoring: {score_cmd}")
+
+                score_result = await executor.execute_command(
+                    score_cmd, timeout=300.0, stream=True, log_prefix=f"{self.name}-score"
+                )
+                all_output.append(f"$ {score_cmd}\n{score_result.output}")
+                logger.info(f"[{self.name}] Score exit code: {score_result.exit_code}")
+
                 result = await self._extract_results(
                     executor,
                     "\n".join(all_output),
@@ -352,6 +363,10 @@ class AstaExternalEval(SandboxedExternalEval):
         env_prefix = f"OPENAI_BASE_URL={shlex.quote(provider_url)} " if is_local else ""
         return f"cd {self.working_dir} && {env_prefix}{shlex.join(args)}"
 
+    def _build_score_command(self) -> str:
+        """Build the astabench score command."""
+        return f"cd {self.working_dir} && uv run astabench score {self.results_dir}"
+
     async def _extract_results(
         self,
         executor: SandboxExecutor,
@@ -359,79 +374,106 @@ class AstaExternalEval(SandboxedExternalEval):
         exit_code: int,
         output_dir: str | None = None,
     ) -> ExternalEvalResult:
-        """Extract metrics from Inspect AI log files."""
-        # List log files in results directory
-        ls_result = await executor.execute_command(
-            f"ls {self.results_dir}/*.json 2>/dev/null || ls {self.results_dir}/*.eval 2>/dev/null",
-            timeout=30.0,
-        )
-
-        if not ls_result.success or not ls_result.output.strip():
-            return ExternalEvalResult(
-                name=self.name,
-                success=False,
-                error="No Inspect log files found",
-                raw_output=raw_output,
-            )
-
+        """Extract metrics from agenteval.json and Inspect AI log files."""
         all_predictions: list[dict[str, Any]] = []
         parsed_logs: list[dict[str, Any]] = []
         metadata: dict[str, Any] = {"log_files": []}
+        agenteval_metrics: dict[str, float] = {}
 
-        for log_file in ls_result.output.strip().split("\n"):
-            log_file = log_file.strip()
-            if not log_file:
-                continue
+        # First, try to read agenteval.json (produced by astabench score)
+        agenteval_path = f"{self.results_dir}/agenteval.json"
+        agenteval_result = await executor.execute_command(
+            f"cat {shlex.quote(agenteval_path)}", timeout=60.0
+        )
 
-            # Read log file content
-            if log_file.endswith(".eval"):
+        if agenteval_result.success and agenteval_result.output.strip():
+            try:
+                agenteval_content = json.loads(agenteval_result.output)
+                parsed_agenteval = parse_agenteval_json(agenteval_content)
+                agenteval_metrics = parsed_agenteval.get("metrics", {})
+                metadata["agenteval"] = parsed_agenteval.get("metadata", {})
+                metadata["costs"] = parsed_agenteval.get("costs", {})
+                logger.info(
+                    f"[{self.name}] Parsed agenteval.json with {len(agenteval_metrics)} metrics"
+                )
+
+                # Save agenteval.json to output directory
+                if output_dir:
+                    from pathlib import Path
+
+                    local_path = Path(output_dir) / "agenteval.json"
+                    local_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(local_path, "w") as f:
+                        json.dump(agenteval_content, f, indent=2)
+
+            except json.JSONDecodeError as e:
+                logger.warning(f"[{self.name}] Failed to parse agenteval.json: {e}")
+
+        # Also parse individual .eval files for per-sample predictions
+        ls_result = await executor.execute_command(
+            f"ls {self.results_dir}/*.eval 2>/dev/null",
+            timeout=30.0,
+        )
+
+        if ls_result.success and ls_result.output.strip():
+            for log_file in ls_result.output.strip().split("\n"):
+                log_file = log_file.strip()
+                if not log_file:
+                    continue
+
                 # .eval files are gzipped - use zcat
                 cat_result = await executor.execute_command(
                     f"zcat {shlex.quote(log_file)}", timeout=60.0
                 )
-            else:
-                cat_result = await executor.execute_command(
-                    f"cat {shlex.quote(log_file)}", timeout=60.0
+
+                if not cat_result.success:
+                    logger.warning(f"[{self.name}] Failed to read {log_file}")
+                    continue
+
+                try:
+                    log_content = json.loads(cat_result.output)
+                    parsed = parse_inspect_log(log_content)
+                    parsed_logs.append(parsed)
+                    all_predictions.extend(parsed.get("predictions", []))
+                    metadata["log_files"].append(log_file)
+
+                    # Copy log file to output directory
+                    if output_dir:
+                        from pathlib import Path
+
+                        log_basename = Path(log_file).name
+                        local_path = Path(output_dir) / "inspect_logs" / log_basename
+                        local_path.parent.mkdir(parents=True, exist_ok=True)
+
+                        # Save the parsed content
+                        with open(local_path.with_suffix(".json"), "w") as f:
+                            json.dump(log_content, f, indent=2)
+
+                except json.JSONDecodeError as e:
+                    logger.warning(f"[{self.name}] Failed to parse {log_file}: {e}")
+
+        # Build final metrics: prefer agenteval.json scores, supplement with parsed logs
+        if agenteval_metrics:
+            all_metrics = agenteval_metrics
+            # Add sample counts from parsed logs
+            if parsed_logs:
+                all_metrics["num_tasks"] = float(len(parsed_logs))
+                total_samples = sum(
+                    log.get("metadata", {}).get("total_samples", 0) for log in parsed_logs
                 )
-
-            if not cat_result.success:
-                logger.warning(f"[{self.name}] Failed to read {log_file}")
-                continue
-
-            try:
-                log_content = json.loads(cat_result.output)
-                parsed = parse_inspect_log(log_content)
-                parsed_logs.append(parsed)
-                all_predictions.extend(parsed.get("predictions", []))
-                metadata["log_files"].append(log_file)
-
-                # Copy log file to output directory
-                if output_dir:
-                    from pathlib import Path
-
-                    log_basename = Path(log_file).name
-                    local_path = Path(output_dir) / "inspect_logs" / log_basename
-                    local_path.parent.mkdir(parents=True, exist_ok=True)
-
-                    # Save the parsed content
-                    with open(local_path.with_suffix(".json"), "w") as f:
-                        json.dump(log_content, f, indent=2)
-
-            except json.JSONDecodeError as e:
-                logger.warning(f"[{self.name}] Failed to parse {log_file}: {e}")
-
-        if not parsed_logs:
+                all_metrics["total_samples"] = float(total_samples)
+        elif parsed_logs:
+            # Fall back to aggregating from individual logs
+            all_metrics = aggregate_metrics(parsed_logs)
+        else:
             return ExternalEvalResult(
                 name=self.name,
                 success=False,
-                error="Failed to parse any Inspect log files",
+                error="No agenteval.json or Inspect log files found",
                 raw_output=raw_output,
             )
 
-        # Aggregate metrics across all logs
-        all_metrics = aggregate_metrics(parsed_logs)
-
-        # Merge per-task metadata
+        # Merge per-task metadata from parsed logs
         for log_data in parsed_logs:
             task_name = log_data.get("metadata", {}).get("task", "")
             if task_name:
