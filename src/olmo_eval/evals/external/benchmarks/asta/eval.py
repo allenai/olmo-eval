@@ -15,7 +15,6 @@ from olmo_eval.evals.external.base import SandboxedExternalEval
 from olmo_eval.evals.external.benchmarks.asta.args import ASTA_TASKS, AstaArgs
 from olmo_eval.evals.external.benchmarks.asta.result_parser import (
     aggregate_metrics,
-    parse_agenteval_json,
     parse_inspect_log,
 )
 from olmo_eval.evals.external.result import ExternalEvalResult
@@ -378,10 +377,7 @@ class AstaExternalEval(SandboxedExternalEval):
 
     def _build_score_command(self) -> str:
         """Build the astabench score command."""
-        return (
-            f"cd {self.working_dir} && "
-            f"LITELLM_LOCAL_MODEL_COST_MAP=True uv run astabench score {self.results_dir}"
-        )
+        return f"cd {self.working_dir} && uv run astabench score {self.results_dir}"
 
     def _build_config_only_command(self, asta_args: AstaArgs) -> str:
         """Build command to generate eval_config.json for single-task runs."""
@@ -409,40 +405,65 @@ class AstaExternalEval(SandboxedExternalEval):
         exit_code: int,
         output_dir: str | None = None,
     ) -> ExternalEvalResult:
-        """Extract metrics from agenteval.json and Inspect AI log files."""
+        """Extract metrics from scores.json and Inspect AI log files."""
         all_predictions: list[dict[str, Any]] = []
         parsed_logs: list[dict[str, Any]] = []
         metadata: dict[str, Any] = {"log_files": []}
-        agenteval_metrics: dict[str, float] = {}
+        score_metrics: dict[str, float] = {}
 
-        # First, try to read agenteval.json (produced by astabench score)
-        agenteval_path = f"{self.results_dir}/agenteval.json"
-        agenteval_result = await executor.execute_command(
-            f"cat {shlex.quote(agenteval_path)}", timeout=60.0
+        # Try to read scores.json (produced by astabench score)
+        scores_path = f"{self.results_dir}/scores.json"
+        scores_result = await executor.execute_command(
+            f"cat {shlex.quote(scores_path)}", timeout=60.0
         )
 
-        if agenteval_result.success and agenteval_result.output.strip():
+        if scores_result.success and scores_result.output.strip():
             try:
-                agenteval_content = json.loads(agenteval_result.output)
-                parsed_agenteval = parse_agenteval_json(agenteval_content)
-                agenteval_metrics = parsed_agenteval.get("metrics", {})
-                metadata["agenteval"] = parsed_agenteval.get("metadata", {})
-                metadata["costs"] = parsed_agenteval.get("costs", {})
-                logger.info(
-                    f"[{self.name}] Parsed agenteval.json with {len(agenteval_metrics)} metrics"
-                )
+                scores_content = json.loads(scores_result.output)
+                # scores.json contains task-level scores directly
+                for task_name, task_data in scores_content.items():
+                    if isinstance(task_data, dict):
+                        for metric_name, value in task_data.items():
+                            if isinstance(value, (int, float)):
+                                score_metrics[f"{task_name}_{metric_name}"] = float(value)
+                    elif isinstance(task_data, (int, float)):
+                        score_metrics[task_name] = float(task_data)
+                logger.info(f"[{self.name}] Parsed scores.json with {len(score_metrics)} metrics")
 
-                # Save agenteval.json to output directory
+                # Save scores.json to output directory
                 if output_dir:
                     from pathlib import Path
 
-                    local_path = Path(output_dir) / "agenteval.json"
+                    local_path = Path(output_dir) / "scores.json"
                     local_path.parent.mkdir(parents=True, exist_ok=True)
                     with open(local_path, "w") as f:
-                        json.dump(agenteval_content, f, indent=2)
+                        json.dump(scores_content, f, indent=2)
 
             except json.JSONDecodeError as e:
-                logger.warning(f"[{self.name}] Failed to parse agenteval.json: {e}")
+                logger.warning(f"[{self.name}] Failed to parse scores.json: {e}")
+
+        # Also try summary_stats.json for aggregate metrics
+        summary_path = f"{self.results_dir}/summary_stats.json"
+        summary_result = await executor.execute_command(
+            f"cat {shlex.quote(summary_path)}", timeout=60.0
+        )
+
+        if summary_result.success and summary_result.output.strip():
+            try:
+                summary_content = json.loads(summary_result.output)
+                metadata["summary_stats"] = summary_content
+
+                # Save summary_stats.json to output directory
+                if output_dir:
+                    from pathlib import Path
+
+                    local_path = Path(output_dir) / "summary_stats.json"
+                    local_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(local_path, "w") as f:
+                        json.dump(summary_content, f, indent=2)
+
+            except json.JSONDecodeError as e:
+                logger.warning(f"[{self.name}] Failed to parse summary_stats.json: {e}")
 
         # Also parse individual .eval files for per-sample predictions
         ls_result = await executor.execute_command(
@@ -456,12 +477,13 @@ class AstaExternalEval(SandboxedExternalEval):
                 if not log_file:
                     continue
 
-                # .eval files are gzipped - use zcat
+                # .eval files may be gzipped - try zcat first, then cat
                 cat_result = await executor.execute_command(
-                    f"zcat {shlex.quote(log_file)}", timeout=60.0
+                    f"zcat {shlex.quote(log_file)} 2>/dev/null || cat {shlex.quote(log_file)}",
+                    timeout=60.0,
                 )
 
-                if not cat_result.success:
+                if not cat_result.success or not cat_result.output.strip():
                     logger.warning(f"[{self.name}] Failed to read {log_file}")
                     continue
 
@@ -487,9 +509,9 @@ class AstaExternalEval(SandboxedExternalEval):
                 except json.JSONDecodeError as e:
                     logger.warning(f"[{self.name}] Failed to parse {log_file}: {e}")
 
-        # Build final metrics: prefer agenteval.json scores, supplement with parsed logs
-        if agenteval_metrics:
-            all_metrics = agenteval_metrics
+        # Build final metrics: prefer scores.json, supplement with parsed logs
+        if score_metrics:
+            all_metrics = score_metrics
             # Add sample counts from parsed logs
             if parsed_logs:
                 all_metrics["num_tasks"] = float(len(parsed_logs))
@@ -504,7 +526,7 @@ class AstaExternalEval(SandboxedExternalEval):
             return ExternalEvalResult(
                 name=self.name,
                 success=False,
-                error="No agenteval.json or Inspect log files found",
+                error="No scores.json or Inspect log files found",
                 raw_output=raw_output,
             )
 
