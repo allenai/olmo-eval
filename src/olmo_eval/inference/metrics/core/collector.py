@@ -10,9 +10,96 @@ from .schema import GPUSnapshot, RequestMetrics
 from .timer import Timer
 
 if TYPE_CHECKING:
+    from openai import AsyncOpenAI
+
     from olmo_eval.common.types import LMOutput, LMRequest, SamplingParams
     from olmo_eval.harness import Harness
     from olmo_eval.inference.base import InferenceProvider
+
+
+class InstrumentedChatCompletions:
+    """Wraps AsyncOpenAI chat.completions to collect metrics."""
+
+    def __init__(
+        self,
+        completions: Any,
+        metrics_collector: InstrumentedProvider,
+    ) -> None:
+        self._completions = completions
+        self._collector = metrics_collector
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._completions, name)
+
+    async def create(self, **kwargs: Any) -> Any:
+        """Wrap create() to collect timing metrics."""
+        self._collector._start_gpu_monitor_if_needed()
+
+        with Timer() as t:
+            response = await self._completions.create(**kwargs)
+
+        # Extract metrics from response
+        usage = getattr(response, "usage", None)
+        prompt_tokens = getattr(usage, "prompt_tokens", 0) if usage else 0
+        completion_tokens = getattr(usage, "completion_tokens", 0) if usage else 0
+
+        # Get finish reason from first choice
+        choices = getattr(response, "choices", [])
+        finish_reason = None
+        if choices:
+            finish_reason = getattr(choices[0], "finish_reason", None)
+
+        # Compute tokens per second
+        tps = completion_tokens / t.elapsed_s if t.elapsed_s > 0 else 0.0
+
+        metrics = RequestMetrics(
+            request_id=str(uuid.uuid4()),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            end_to_end_latency_s=t.elapsed_s,
+            tokens_per_second=tps,
+            model=kwargs.get("model", self._collector.model_name),
+            finish_reason=finish_reason,
+        )
+        self._collector._request_metrics.append(metrics)
+
+        return response
+
+
+class InstrumentedChat:
+    """Wraps AsyncOpenAI chat to provide instrumented completions."""
+
+    def __init__(self, chat: Any, metrics_collector: InstrumentedProvider) -> None:
+        self._chat = chat
+        self._collector = metrics_collector
+        self._completions: InstrumentedChatCompletions | None = None
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._chat, name)
+
+    @property
+    def completions(self) -> InstrumentedChatCompletions:
+        if self._completions is None:
+            self._completions = InstrumentedChatCompletions(self._chat.completions, self._collector)
+        return self._completions
+
+
+class InstrumentedAsyncOpenAI:
+    """Wraps AsyncOpenAI client to collect metrics on chat completions."""
+
+    def __init__(self, client: AsyncOpenAI, metrics_collector: InstrumentedProvider) -> None:
+        self._client = client
+        self._collector = metrics_collector
+        self._chat: InstrumentedChat | None = None
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._client, name)
+
+    @property
+    def chat(self) -> InstrumentedChat:
+        if self._chat is None:
+            self._chat = InstrumentedChat(self._client.chat, self._collector)
+        return self._chat
 
 
 class InstrumentedProvider:
@@ -51,6 +138,16 @@ class InstrumentedProvider:
         if self._gpu_monitor is not None:
             self._gpu_monitor.stop()
             self._gpu_monitor = None
+
+    def get_openai_client(self) -> InstrumentedAsyncOpenAI:
+        """Get an instrumented AsyncOpenAI client.
+
+        Returns an instrumented wrapper that collects metrics on chat completions.
+        This allows backends using the OpenAI client directly to still have their
+        API calls instrumented.
+        """
+        client = self._provider.get_openai_client()
+        return InstrumentedAsyncOpenAI(client, self)
 
     def generate(
         self,

@@ -176,22 +176,16 @@ class AstaExternalEval(SandboxedExternalEval):
     @property
     def arguments(self) -> dict[str, tuple[str, Any | None]]:
         return {
-            # Dataset selection
             "split": ("Dataset split: 'validation' or 'test'", "validation"),
             "tasks": ("Comma-separated task names to run (default: all)", None),
             "limit": ("Maximum problems per task", None),
-            # Agent configuration
             "solver": ("Agent solver type: 'react' or 'basic'", "react"),
-            # Parallelism
             "max_samples": ("Max concurrent problems", 1),
             "max_sandboxes": ("Max parallel sandboxes", 1),
             "max_connections": ("Max model API connections", 8),
-            # Sandbox mode
             "sandbox_type": ("Sandbox type: 'local' (Beaker) or 'docker'", "local"),
-            # Model overrides
             "temperature": ("Temperature for agent responses", None),
             "max_tokens": ("Max tokens for agent responses", None),
-            # Extra args (use for task-specific flags like -T with_search_tools=1)
             "extra_args": ("Extra args to pass to inspect eval", None),
         }
 

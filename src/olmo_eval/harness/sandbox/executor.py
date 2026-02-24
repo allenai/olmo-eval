@@ -85,6 +85,10 @@ class SandboxExecutor:
         self._runtime: Any = None
         self._session_created: bool = False
         self._session_lock: asyncio.Lock = asyncio.Lock()
+        # External monitor processes (run on host, not in container)
+        self._events_proc: Any = None
+        self._stats_proc: Any = None
+        self._events_file: Any = None
 
     def _log(self, level: int, msg: str) -> None:
         """Log a message with optional name prefix."""
@@ -92,6 +96,97 @@ class SandboxExecutor:
             logger.log(level, f"[{self.name}] {msg}")
         else:
             logger.log(level, msg)
+
+    def _start_external_monitor(self) -> None:
+        """Start background processes to monitor container from outside."""
+        import subprocess
+
+        container_name = getattr(self._deployment, "container_name", None)
+        if not container_name or not self.name or not self.config.log_dir:
+            return
+
+        # Use same container-specific subdirectory as the volume mount
+        monitor_log_dir = os.path.join(self.config.log_dir, "sandboxes", self.name)
+        os.makedirs(monitor_log_dir, exist_ok=True)
+        runtime = self.config.container_runtime or "podman"
+
+        # Stream container events (OOM, die, kill, etc.) to log file
+        events_log = os.path.join(monitor_log_dir, "events.log")
+        try:
+            events_file = open(events_log, "w")  # noqa: SIM115
+            self._events_proc = subprocess.Popen(
+                [
+                    runtime,
+                    "events",
+                    "--filter",
+                    f"container={container_name}",
+                    "--format",
+                    "{{.Time}} {{.Status}}",
+                ],
+                stdout=events_file,
+                stderr=subprocess.STDOUT,
+            )
+            # Store file handle for cleanup
+            self._events_file = events_file
+        except Exception as e:
+            self._log(logging.WARNING, f"Failed to start events monitor: {e}")
+
+        # Periodic stats to log file (every 2 seconds)
+        stats_log = os.path.join(monitor_log_dir, "stats.log")
+        # Build format strings separately to avoid long lines
+        stats_fmt = "CPU: {{.CPUPerc}} MEM: {{.MemUsage}} ({{.MemPerc}})"
+        io_fmt = "IO: {{.BlockIO}}"
+        exit_fmt = "Exit: {{.State.ExitCode}} OOM: {{.State.OOMKilled}} Error: {{.State.Error}}"
+        stats_script = f"""
+while {runtime} inspect {container_name} >/dev/null 2>&1; do
+    echo "=== $(date -Iseconds) ===" >> {stats_log}
+    {runtime} stats --no-stream --format "{stats_fmt}" {container_name} >> {stats_log} 2>&1
+    df -h / /tmp 2>/dev/null | tail -n +2 >> {stats_log}
+    {runtime} stats --no-stream --format "{io_fmt}" {container_name} >> {stats_log} 2>&1
+    sleep 2
+done
+echo "=== Container exited at $(date -Iseconds) ===" >> {stats_log}
+{runtime} inspect {container_name} --format "{exit_fmt}" >> {stats_log} 2>&1
+"""
+        try:
+            self._stats_proc = subprocess.Popen(["bash", "-c", stats_script])
+        except Exception as e:
+            self._log(logging.WARNING, f"Failed to start stats monitor: {e}")
+
+        self._log(logging.INFO, f"Started external monitors: {events_log}, {stats_log}")
+
+    async def _start_internal_syslog(self) -> None:
+        """Start capturing system logs inside the container to mounted volume."""
+        if self._runtime is None or not self.name:
+            return
+
+        from swerex.runtime.abstract import Command
+
+        # Capture system logs to mounted volume (runs inside container)
+        # Files go to /sandbox_logs/ which maps to {log_dir}/sandboxes/{name}/
+        syslog_cmd = """
+# Try journalctl first (systemd), fall back to syslog files
+if command -v journalctl >/dev/null 2>&1; then
+    journalctl -f >> /sandbox_logs/syslog.log 2>&1 &
+elif [ -f /var/log/syslog ]; then
+    tail -f /var/log/syslog >> /sandbox_logs/syslog.log 2>&1 &
+elif [ -f /var/log/messages ]; then
+    tail -f /var/log/messages >> /sandbox_logs/syslog.log 2>&1 &
+fi
+# Also capture dmesg if we have permission
+dmesg -w >> /sandbox_logs/dmesg.log 2>&1 &
+true
+"""
+        try:
+            await self._runtime.execute(
+                Command(
+                    command=["bash", "-c", syslog_cmd],
+                    timeout=5.0,
+                )
+            )
+            self._log(logging.DEBUG, "Started internal syslog capture")
+        except Exception as e:
+            self._log(logging.DEBUG, f"Internal syslog capture failed (expected in some envs): {e}")
 
     async def _get_container_diagnostics(self) -> str:
         """Gather diagnostic info when sandbox becomes unresponsive."""
@@ -178,10 +273,8 @@ class SandboxExecutor:
             ImportError: If swe-rex is not installed.
             RuntimeError: If container runtime is not available.
         """
-        self._log(logging.INFO, "Creating sandbox deployment...")
-        deployment = self.get_deployment()
-
         self._log(logging.INFO, "Starting sandbox deployment...")
+        deployment = self.get_deployment()
         prefix = f"[{self.name}] " if self.name else ""
         await _run_with_progress(
             deployment.start(),
@@ -192,6 +285,11 @@ class SandboxExecutor:
         self._deployment = deployment
         self._runtime = deployment.runtime
         self._log(logging.INFO, "Sandbox deployment ready!")
+
+        # Start external monitoring (runs on host, not inside container)
+        if self.config.log_dir and self.config.mode == SandboxMode.DOCKER:
+            self._start_external_monitor()
+            await self._start_internal_syslog()
 
     def get_deployment(self) -> Any:
         """Create the appropriate deployment based on configuration.
@@ -216,6 +314,12 @@ class SandboxExecutor:
                 docker_args = list(self.config.docker_args) if self.config.docker_args else []
                 if self.config.log_dir and self.name:
                     docker_args.extend(_get_log_docker_args(self.config.log_dir, self.name))
+                    # Create container-specific subdirectory for system logs
+                    # Mount only this container's subdirectory, not parent
+                    # Use :Z for SELinux relabeling (safe for single-container access)
+                    container_log_dir = os.path.join(self.config.log_dir, "sandboxes", self.name)
+                    os.makedirs(container_log_dir, exist_ok=True)
+                    docker_args.extend(["-v", f"{container_log_dir}:/sandbox_logs:Z"])
 
                 # Add environment variables as docker args
                 for key, value in self.config.environment:
@@ -266,6 +370,28 @@ class SandboxExecutor:
 
     async def stop(self) -> None:
         """Stop the sandbox deployment and clean up resources."""
+        import subprocess
+
+        # Terminate external monitors
+        for proc in [self._events_proc, self._stats_proc]:
+            if proc:
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                except Exception:
+                    pass
+        self._events_proc = None
+        self._stats_proc = None
+        # Close events log file handle
+        if self._events_file:
+            import contextlib
+
+            with contextlib.suppress(Exception):
+                self._events_file.close()
+            self._events_file = None
+
         # Close session before stopping deployment
         if self._session_created and self._runtime is not None:
             try:
