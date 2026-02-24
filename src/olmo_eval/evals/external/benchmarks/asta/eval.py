@@ -369,12 +369,19 @@ class AstaExternalEval(SandboxedExternalEval):
             args.append(f"astabench/{task}")
 
         # Build command with cd and optional env prefix
-        env_prefix = f"VLLM_BASE_URL={shlex.quote(provider_url)} " if is_local else ""
+        # For local vLLM providers, set VLLM_BASE_URL and VLLM_API_KEY
+        # This avoids polluting OPENAI_BASE_URL which would affect scorer models
+        env_prefix = (
+            f"VLLM_BASE_URL={shlex.quote(provider_url)} VLLM_API_KEY=local " if is_local else ""
+        )
         return f"cd {self.working_dir} && {env_prefix}{shlex.join(args)}"
 
     def _build_score_command(self) -> str:
         """Build the astabench score command."""
-        return f"cd {self.working_dir} && uv run astabench score {self.results_dir}"
+        return (
+            f"cd {self.working_dir} && "
+            f"LITELLM_LOCAL_MODEL_COST_MAP=True uv run astabench score {self.results_dir}"
+        )
 
     def _build_config_only_command(self, asta_args: AstaArgs) -> str:
         """Build command to generate eval_config.json for single-task runs."""

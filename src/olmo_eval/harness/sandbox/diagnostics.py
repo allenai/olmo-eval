@@ -48,7 +48,7 @@ cat > /tmp/_monitor.sh << 'MONITOR_EOF'
 {monitor_script}
 MONITOR_EOF
 chmod +x /tmp/_monitor.sh
-/tmp/_monitor.sh &
+/tmp/_monitor.sh </dev/null >/dev/null 2>&1 &
 pid=$!
 sleep 0.5
 if kill -0 $pid 2>/dev/null; then
