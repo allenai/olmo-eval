@@ -383,7 +383,9 @@ class AstaExternalEval(SandboxedExternalEval):
     def _build_score_command(self) -> str:
         """Build the astabench score command."""
         return (
-            f"cd {self.working_dir} && LITELLM_LOG=ERROR uv run astabench score {self.results_dir}"
+            f"cd {self.working_dir} && "
+            f"LITELLM_LOCAL_MODEL_COST_MAP=True LITELLM_LOG=ERROR "
+            f"uv run astabench score {self.results_dir}"
         )
 
     def _build_config_only_command(self, asta_args: AstaArgs) -> str:
