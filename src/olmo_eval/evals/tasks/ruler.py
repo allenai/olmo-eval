@@ -12,16 +12,61 @@ Original implementation: https://github.com/hsiehjackson/RULER
 """
 
 import os
+import re
+import string
 from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Any
 
 from olmo_eval.common.formatters import PPLFormatter
 from olmo_eval.common.metrics import BPBMetric, RecallMetric
+from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.data.ruler_loader import download_ruler_data, load_ruler_dataset
 from olmo_eval.data.ruler_tasks import RULER_TASKS
 from olmo_eval.evals.tasks.common.base import Task, TaskConfig
 from olmo_eval.evals.tasks.common.registry import register, register_variant
+
+
+def _normalize_answer(s: str) -> str:
+    """Normalize answer text for QA scoring (matches HELMET/old framework)."""
+    s = s.lower()
+    s = "".join(ch for ch in s if ch not in string.punctuation)
+    s = re.sub(r"\b(a|an|the)\b", " ", s)
+    return " ".join(s.split())
+
+
+@dataclass(frozen=True, slots=True)
+class RulerQAScorer(Scorer):
+    """Substring scorer for RULER QA tasks with HELMET-style normalization.
+
+    Matches old framework behavior: normalizes both gold and prediction
+    (lowercase, remove punctuation, remove articles) then checks if any
+    normalized gold answer is a substring of the normalized prediction.
+    Takes max over all gold answers.
+    """
+
+    name: str = "substring_recall"
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        if instance.gold_answer is None or output.text is None:
+            return 0.0
+
+        gold_answers = (
+            instance.gold_answer
+            if isinstance(instance.gold_answer, list)
+            else [str(instance.gold_answer)]
+        )
+        if not gold_answers:
+            return 0.0
+
+        pred_norm = _normalize_answer(output.text)
+
+        # max over ground truths (1.0 if any gold answer is found)
+        for answer in gold_answers:
+            if _normalize_answer(str(answer)) in pred_norm:
+                return 1.0
+        return 0.0
 
 
 class RulerTask(Task):
@@ -200,10 +245,13 @@ class RulerTask(Task):
 
 def _make_ruler_task_class(task_name: str, task_cfg: dict) -> type:
     """Create and register a task class for a RULER task variant."""
-    # Determine metrics based on task type.
-    # QA tasks use RecallMetric (SubstringRecallScorer) which matches RULER's
-    # primary "substring_exact_match" metric and handles list gold answers.
-    task_metrics = (RecallMetric(),)
+    # QA tasks use RulerQAScorer which applies HELMET-style normalization
+    # (removes articles/punctuation, normalizes whitespace) matching the old framework.
+    # All other tasks use the standard SubstringRecallScorer via RecallMetric.
+    if task_cfg["tag"] == "qa":
+        task_metrics = (RecallMetric(scorer=RulerQAScorer),)
+    else:
+        task_metrics = (RecallMetric(),)
     task_primary_metric = "recall"
 
     # Build sampling params
