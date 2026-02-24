@@ -387,6 +387,7 @@ class BeakerJobConfig:
         default_factory=lambda: {
             "HF_HOME": "/weka/oe-eval-default/oyvindt/hf-cache",
             "HF_HUB_CACHE": "/weka/oe-eval-default/oyvindt/hf-cache",
+            "INSPECT_CACHE_DIR": "/weka/oe-training-default/olmo-eval/inspect-cache",
         }
     )
     env_secrets: list[BeakerEnvSecret] = field(default_factory=list)

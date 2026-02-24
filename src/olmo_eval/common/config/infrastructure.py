@@ -32,6 +32,7 @@ class InfrastructureConfig:
     # Storage paths (None = use tool defaults)
     hf_cache_dir: str | None
     uv_cache_dir: str | None
+    inspect_cache_dir: str | None
     result_dir: str
 
     # S3 settings (empty = disabled)
@@ -56,6 +57,7 @@ class InfrastructureConfig:
             ),
             hf_cache_dir=os.environ.get("HF_HOME"),
             uv_cache_dir=os.environ.get("UV_CACHE_DIR"),
+            inspect_cache_dir=os.environ.get("INSPECT_CACHE_DIR"),
             result_dir=os.environ.get("OLMO_RESULT_DIR", "/tmp/results"),
             s3_bucket=os.environ.get("OLMO_S3_BUCKET", ""),
             s3_prefix=os.environ.get("OLMO_S3_PREFIX", ""),
