@@ -171,6 +171,20 @@ class SandboxExecutor:
                 for key, value in self.config.environment:
                     docker_args.extend(["-e", f"{key}={value}"])
 
+                # Add volume mounts from config
+                for host_path, container_path in self.config.volumes:
+                    if self.config.container_runtime == "podman":
+                        # Use --mount with bind-propagation=rslave for nested mounts
+                        # This ensures mount propagation flows inward for DinD scenarios
+                        docker_args.extend(
+                            [
+                                "--mount",
+                                f"type=bind,src={host_path},dst={container_path},bind-propagation=rslave",
+                            ]
+                        )
+                    else:
+                        docker_args.extend(["-v", f"{host_path}:{container_path}"])
+
                 # Build kwargs, omitting None values (swerex doesn't accept None for some fields)
                 deployment_kwargs: dict[str, Any] = {
                     "image": self.config.image,

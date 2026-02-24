@@ -297,9 +297,13 @@ class AstaExternalEval(SandboxedExternalEval):
 
         # Add INSPECT_CACHE_DIR to environment and mount volume if configured
         volumes: list[tuple[str, str]] = []
-        if config.inspect_cache_dir:
-            env_vars["INSPECT_CACHE_DIR"] = config.inspect_cache_dir
-            volumes.append((config.inspect_cache_dir, config.inspect_cache_dir))
+        inspect_cache_dir = config.inspect_cache_dir or os.environ.get("INSPECT_CACHE_DIR")
+        if inspect_cache_dir:
+            env_vars["INSPECT_CACHE_DIR"] = inspect_cache_dir
+            volumes.append((inspect_cache_dir, inspect_cache_dir))
+            logger.info(f"[{self.name}] INSPECT_CACHE_DIR={inspect_cache_dir}")
+        else:
+            logger.warning(f"[{self.name}] INSPECT_CACHE_DIR not configured")
 
         log_dir = None
         if output_dir:
@@ -307,6 +311,12 @@ class AstaExternalEval(SandboxedExternalEval):
 
         runtime = cast(ContainerRuntime, container_runtime)
         image = _get_asta_image(container_runtime)
+
+        # Get network args and add Podman-specific options
+        docker_args_list = list(get_docker_network_args(runtime=container_runtime))
+        if container_runtime == "podman":
+            # Avoid UID remapping issues with Weka mounts
+            docker_args_list.append("--userns=keep-id")
 
         return SandboxConfig(
             image=image,
@@ -316,7 +326,7 @@ class AstaExternalEval(SandboxedExternalEval):
             working_dir=self.working_dir,
             environment=tuple(env_vars.items()),
             volumes=tuple(volumes),
-            docker_args=tuple(get_docker_network_args(runtime=container_runtime)),
+            docker_args=tuple(docker_args_list),
             log_dir=log_dir,
         )
 
@@ -435,6 +445,11 @@ class AstaExternalEval(SandboxedExternalEval):
 
         try:
             agenteval_content = json.loads(agenteval_result.output)
+
+            # Debug: log top-level keys to understand the structure
+            top_keys = list(agenteval_content.keys())
+            logger.info(f"[{self.name}] scores.json top-level keys: {top_keys}")
+
             parsed = parse_agenteval_json(agenteval_content)
 
             all_metrics = parsed["metrics"]
@@ -477,6 +492,10 @@ class AstaExternalEval(SandboxedExternalEval):
             except json.JSONDecodeError:
                 pass  # Non-critical
 
+        # Copy all files from the results directory for debugging
+        if output_dir:
+            await self._copy_results_directory(executor, output_dir)
+
         return ExternalEvalResult(
             name=self.name,
             success=exit_code == 0 and bool(all_metrics),
@@ -484,3 +503,50 @@ class AstaExternalEval(SandboxedExternalEval):
             metadata=metadata,
             raw_output=raw_output,
         )
+
+    async def _copy_results_directory(
+        self,
+        executor: SandboxExecutor,
+        output_dir: str,
+    ) -> None:
+        """Copy all files from the sandbox results directory to the output directory."""
+        import base64
+        from pathlib import Path
+
+        # List all files in the results directory
+        list_result = await executor.execute_command(
+            f"find {self.results_dir} -type f \\( -name '*.json' -o -name '*.eval' \\) 2>/dev/null",
+            timeout=60.0,
+        )
+
+        if not list_result.success or not list_result.output.strip():
+            logger.warning(f"[{self.name}] No result files found in {self.results_dir}")
+            return
+
+        files = [f.strip() for f in list_result.output.strip().split("\n") if f.strip()]
+        logger.info(f"[{self.name}] Copying {len(files)} result files from sandbox")
+
+        results_subdir = Path(output_dir) / "asta_results"
+        results_subdir.mkdir(parents=True, exist_ok=True)
+
+        for remote_path in files:
+            # Get relative path from results_dir
+            rel_path = remote_path.replace(self.results_dir + "/", "")
+            local_path = results_subdir / rel_path
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Read file content (use base64 for binary-safe transfer)
+            read_result = await executor.execute_command(
+                f"base64 {shlex.quote(remote_path)}", timeout=120.0
+            )
+
+            if read_result.success and read_result.output.strip():
+                try:
+                    content = base64.b64decode(read_result.output.strip())
+                    with open(local_path, "wb") as f:
+                        f.write(content)
+                    logger.debug(f"[{self.name}] Copied {rel_path}")
+                except Exception as e:
+                    logger.warning(f"[{self.name}] Failed to copy {rel_path}: {e}")
+            else:
+                logger.warning(f"[{self.name}] Failed to read {remote_path}")
