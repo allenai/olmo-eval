@@ -154,6 +154,8 @@ def assemble_external_eval_job(
     beaker_username: str | None = None,
     preemptible: bool = True,
     retries: int | None = None,
+    provider_kind: str | None = None,
+    base_url: str | None = None,
 ) -> Any:
     """Assemble a BeakerJobConfig for running external evaluations.
 
@@ -189,6 +191,12 @@ def assemble_external_eval_job(
     for eval_name in external_evals:
         command.extend(["-e", eval_name])
     command.extend(["-O", BEAKER_RESULT_DIR])
+
+    # Pass provider kind and base_url if specified
+    if provider_kind:
+        command.extend(["--provider", provider_kind])
+    if base_url:
+        command.extend(["--base-url", base_url])
 
     if tensor_parallel_size > 1:
         command.extend(["--tp", str(tensor_parallel_size)])

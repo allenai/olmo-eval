@@ -1162,6 +1162,8 @@ def _launch_external_evals(
             beaker_username=beaker_username,
             preemptible=effective_preemptible,
             retries=retries,
+            provider_kind=str(provider_config.kind),
+            base_url=provider_config.base_url,
         )
         job_configs.append(job_config)
 

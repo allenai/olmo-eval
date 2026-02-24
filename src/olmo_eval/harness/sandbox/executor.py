@@ -131,19 +131,18 @@ class SandboxExecutor:
         except Exception as e:
             self._log(logging.WARNING, f"Failed to start events monitor: {e}")
 
-        # Periodic stats to log file (every 2 seconds)
+        # Periodic stats to log file (every 5 seconds)
+        # Note: podman stats requires cgroups which may not be available in nested containers
+        # We use podman exec to get resource info from inside the container
         stats_log = os.path.join(monitor_log_dir, "stats.log")
-        # Build format strings separately to avoid long lines
-        stats_fmt = "CPU: {{.CPUPerc}} MEM: {{.MemUsage}} ({{.MemPerc}})"
-        io_fmt = "IO: {{.BlockIO}}"
         exit_fmt = "Exit: {{.State.ExitCode}} OOM: {{.State.OOMKilled}} Error: {{.State.Error}}"
+        # Command to run inside container to get disk/memory stats
+        inner_cmd = "df -h / /tmp 2>/dev/null; free -h 2>/dev/null || cat /proc/meminfo | head -5"
         stats_script = f"""
 while {runtime} inspect {container_name} >/dev/null 2>&1; do
     echo "=== $(date -Iseconds) ===" >> {stats_log}
-    {runtime} stats --no-stream --format "{stats_fmt}" {container_name} >> {stats_log} 2>&1
-    df -h / /tmp 2>/dev/null | tail -n +2 >> {stats_log}
-    {runtime} stats --no-stream --format "{io_fmt}" {container_name} >> {stats_log} 2>&1
-    sleep 2
+    {runtime} exec {container_name} sh -c '{inner_cmd}' >> {stats_log} 2>&1
+    sleep 5
 done
 echo "=== Container exited at $(date -Iseconds) ===" >> {stats_log}
 {runtime} inspect {container_name} --format "{exit_fmt}" >> {stats_log} 2>&1
