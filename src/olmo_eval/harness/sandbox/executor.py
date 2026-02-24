@@ -162,7 +162,9 @@ class SandboxExecutor:
                     # Mount only this container's subdirectory, not parent
                     # Use :Z for SELinux relabeling (safe for single-container access)
                     container_log_dir = os.path.join(self.config.log_dir, "sandboxes", self.name)
-                    os.makedirs(container_log_dir, exist_ok=True)
+                    os.makedirs(container_log_dir, exist_ok=True, mode=0o777)
+                    # Ensure writable even if directory already existed
+                    os.chmod(container_log_dir, 0o777)
                     docker_args.extend(["-v", f"{container_log_dir}:/sandbox_logs:Z"])
 
                 # Add environment variables as docker args

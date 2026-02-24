@@ -40,7 +40,10 @@ async def start_internal_monitor(
     monitor_script = get_script("monitor")
 
     # Write script, start it, verify it's running
+    # Try to fix permissions in case host-side chmod didn't work (user namespace mapping)
     start_cmd = f"""
+# Try to make /sandbox_logs writable (may fail if not root, that's OK)
+chmod 777 /sandbox_logs 2>/dev/null || true
 cat > /tmp/_monitor.sh << 'MONITOR_EOF'
 {monitor_script}
 MONITOR_EOF
@@ -54,6 +57,7 @@ else
     echo "FAIL"
     # Show why it failed
     ls -la /sandbox_logs/ 2>&1 || echo "/sandbox_logs/ missing"
+    id 2>&1 || true
 fi
 """
     try:
