@@ -414,13 +414,13 @@ class AstaExternalEval(SandboxedExternalEval):
         exit_code: int,
         output_dir: str | None = None,
     ) -> ExternalEvalResult:
-        """Extract metrics from agenteval.json produced by astabench score."""
+        """Extract metrics from scores.json produced by astabench score."""
         from pathlib import Path
 
         metadata: dict[str, Any] = {}
 
-        # Read agenteval.json (primary output from astabench score)
-        agenteval_path = f"{self.results_dir}/agenteval.json"
+        # Read scores.json (primary output from astabench score)
+        agenteval_path = f"{self.results_dir}/scores.json"
         agenteval_result = await executor.execute_command(
             f"cat {shlex.quote(agenteval_path)}", timeout=60.0
         )
@@ -441,20 +441,20 @@ class AstaExternalEval(SandboxedExternalEval):
             metadata["costs"] = parsed.get("costs", {})
             metadata.update(parsed.get("metadata", {}))
 
-            # Save agenteval.json to output directory
+            # Save scores.json to output directory
             if output_dir:
-                local_path = Path(output_dir) / "agenteval.json"
+                local_path = Path(output_dir) / "scores.json"
                 local_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(local_path, "w") as f:
                     json.dump(agenteval_content, f, indent=2)
 
-            logger.info(f"[{self.name}] Parsed agenteval.json with {len(all_metrics)} metrics")
+            logger.info(f"[{self.name}] Parsed scores.json with {len(all_metrics)} metrics")
 
         except json.JSONDecodeError as e:
             return ExternalEvalResult(
                 name=self.name,
                 success=False,
-                error=f"Failed to parse agenteval.json: {e}",
+                error=f"Failed to parse scores.json: {e}",
                 raw_output=raw_output,
             )
 

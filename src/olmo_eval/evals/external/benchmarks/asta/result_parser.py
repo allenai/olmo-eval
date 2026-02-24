@@ -200,10 +200,10 @@ def aggregate_metrics(parsed_logs: list[dict[str, Any]]) -> dict[str, float]:
 
 
 def parse_agenteval_json(content: dict[str, Any]) -> dict[str, Any]:
-    """Parse agenteval.json produced by `astabench score`.
+    """Parse scores.json produced by `astabench score`.
 
     Args:
-        content: Parsed JSON from agenteval.json.
+        content: Parsed JSON from scores.json.
 
     Returns:
         Dictionary with:
