@@ -324,7 +324,7 @@ class AstaExternalEval(SandboxedExternalEval):
         asta_args: AstaArgs,
     ) -> str:
         """Build the astabench run command."""
-        model_spec = f"openai/{model_name}" if is_local else model_name
+        model_spec = f"openai-api/vllm/{model_name}" if is_local else model_name
 
         args = [
             "uv",
@@ -369,7 +369,7 @@ class AstaExternalEval(SandboxedExternalEval):
             args.append(f"astabench/{task}")
 
         # Build command with cd and optional env prefix
-        env_prefix = f"OPENAI_BASE_URL={shlex.quote(provider_url)} " if is_local else ""
+        env_prefix = f"VLLM_BASE_URL={shlex.quote(provider_url)} " if is_local else ""
         return f"cd {self.working_dir} && {env_prefix}{shlex.join(args)}"
 
     def _build_score_command(self) -> str:
