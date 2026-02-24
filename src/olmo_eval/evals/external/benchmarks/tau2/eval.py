@@ -175,9 +175,10 @@ class Tau2ExternalEval(SandboxedExternalEval):
         all_output: list[str] = []
 
         # Extract URL and model name from provider for sandbox use
-        provider_url = getattr(provider, "base_url", "http://localhost:8000/v1")
+        provider_url = getattr(provider, "base_url", None) or "http://localhost:8000/v1"
         model_name = provider.model_name
-        is_local = hasattr(provider, "_server") or "localhost" in provider_url
+        # Detect if this is a locally-deployed server (vLLM) vs external API
+        is_local = self._is_local_provider(provider, provider_url)
 
         try:
             from olmo_eval.harness.sandbox.executor import SandboxExecutor

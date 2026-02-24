@@ -135,6 +135,38 @@ class ExternalEval(ABC):
 
         return env_vars
 
+    def _is_local_provider(self, provider: Any, provider_url: str) -> bool:
+        """Check if the provider is a locally-deployed server.
+
+        Returns True for vLLM servers or other local providers.
+        Returns False for external API providers (OpenAI, Anthropic, etc.).
+
+        Args:
+            provider: The inference provider instance.
+            provider_url: The provider's base URL.
+
+        Returns:
+            True if this is a local provider requiring health checks.
+        """
+        from urllib.parse import urlparse
+
+        # Check if provider is managing its own server process
+        # (VLLMServerProvider sets _server when starting a local server)
+        server = getattr(provider, "_server", None)
+        if server is not None:
+            return True
+
+        # Check if URL points to a local address
+        parsed = urlparse(provider_url)
+        hostname = parsed.hostname or ""
+
+        # Local hostnames
+        if hostname in ("localhost", "127.0.0.1", "::1"):
+            return True
+
+        # Private IP ranges (common in container networking)
+        return hostname.startswith(("10.", "172.", "192.168."))
+
     def _get_provider_url_for_sandbox(self, provider_url: str) -> str:
         """Get the provider URL that's accessible from within the sandbox.
 
