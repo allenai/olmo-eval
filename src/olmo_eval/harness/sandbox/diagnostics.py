@@ -36,22 +36,36 @@ async def start_internal_monitor(
 
     from .scripts import get_script
 
+    prefix = f"[{name}] " if name else ""
     monitor_script = get_script("monitor")
+
+    # Write script, start it, verify it's running
     start_cmd = f"""
 cat > /tmp/_monitor.sh << 'MONITOR_EOF'
 {monitor_script}
 MONITOR_EOF
 chmod +x /tmp/_monitor.sh
-nohup /tmp/_monitor.sh > /dev/null 2>&1 &
-echo "Monitor PID: $!"
+/tmp/_monitor.sh &
+pid=$!
+sleep 0.5
+if kill -0 $pid 2>/dev/null; then
+    echo "OK:$pid"
+else
+    echo "FAIL"
+    # Show why it failed
+    ls -la /sandbox_logs/ 2>&1 || echo "/sandbox_logs/ missing"
+fi
 """
-
-    prefix = f"[{name}] " if name else ""
     try:
         resp = await runtime.execute(Command(command=["sh", "-c", start_cmd], timeout=10.0))
-        output = resp.stdout.strip() if resp.stdout else "OK"
-        logger.info(f"{prefix}Started internal monitor: {output}")
-        return True
+        output = resp.stdout.strip() if resp.stdout else ""
+        if output.startswith("OK:"):
+            pid = output.split(":")[1]
+            logger.info(f"{prefix}Started internal monitor (PID {pid})")
+            return True
+        else:
+            logger.error(f"{prefix}Monitor failed to start: {output}")
+            return False
     except Exception as e:
         logger.warning(f"{prefix}Failed to start internal monitor: {e}")
         return False

@@ -11,7 +11,10 @@ JSONFILE="/sandbox_logs/metrics.json"
 INTERVAL=5
 
 # Ensure we can write
-touch "$LOGFILE" 2>/dev/null || exit 1
+if ! touch "$LOGFILE"; then
+    echo "Cannot write to $LOGFILE" >&2
+    exit 1
+fi
 
 while true; do
     {
