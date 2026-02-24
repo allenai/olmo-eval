@@ -3,11 +3,9 @@
 # Writes to /sandbox_logs/ which is volume-mounted from host
 #
 # Output files:
-#   stats.log    - Human-readable metrics history (appended)
-#   metrics.json - JSON snapshot of latest metrics (overwritten)
+#   stats.log - Human-readable metrics history (appended)
 
 LOGFILE="/sandbox_logs/stats.log"
-JSONFILE="/sandbox_logs/metrics.json"
 INTERVAL=5
 
 # Ensure we can write
@@ -89,47 +87,6 @@ while true; do
 
         echo ""
     } >> "$LOGFILE" 2>&1
-
-    # Write JSON snapshot for programmatic consumption
-    {
-        echo "{"
-        echo "  \"timestamp\": \"$(date -Iseconds 2>/dev/null || date)\","
-
-        # Memory
-        if [ -f /sys/fs/cgroup/memory.current ]; then
-            curr=$(cat /sys/fs/cgroup/memory.current 2>/dev/null || echo 0)
-            max=$(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo "max")
-            oom=$(grep "^oom " /sys/fs/cgroup/memory.events 2>/dev/null | awk '{print $2}')
-            oom_kill=$(grep "^oom_kill " /sys/fs/cgroup/memory.events 2>/dev/null | awk '{print $2}')
-            echo "  \"memory\": {\"current_bytes\": $curr, \"max_bytes\": \"$max\", \"oom_events\": ${oom:-0}, \"oom_kills\": ${oom_kill:-0}},"
-        elif [ -f /sys/fs/cgroup/memory/memory.usage_in_bytes ]; then
-            curr=$(cat /sys/fs/cgroup/memory/memory.usage_in_bytes 2>/dev/null || echo 0)
-            max=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || echo 0)
-            failcnt=$(cat /sys/fs/cgroup/memory/memory.failcnt 2>/dev/null || echo 0)
-            echo "  \"memory\": {\"current_bytes\": $curr, \"max_bytes\": $max, \"failcnt\": $failcnt},"
-        fi
-
-        # CPU
-        if [ -f /sys/fs/cgroup/cpu.stat ]; then
-            throttled=$(grep "^nr_throttled " /sys/fs/cgroup/cpu.stat 2>/dev/null | awk '{print $2}')
-            echo "  \"cpu\": {\"throttled_count\": ${throttled:-0}},"
-        fi
-
-        # Disk
-        root_use=$(df / 2>/dev/null | tail -1 | awk '{print $5}' | tr -d '%')
-        tmp_use=$(df /tmp 2>/dev/null | tail -1 | awk '{print $5}' | tr -d '%')
-        root_avail=$(df / 2>/dev/null | tail -1 | awk '{print $4}')
-        tmp_avail=$(df /tmp 2>/dev/null | tail -1 | awk '{print $4}')
-        echo "  \"disk\": {\"root_percent\": ${root_use:-0}, \"tmp_percent\": ${tmp_use:-0}, \"root_avail\": \"${root_avail:-0}\", \"tmp_avail\": \"${tmp_avail:-0}\"},"
-
-        # Processes
-        total=$(ps -e --no-headers 2>/dev/null | wc -l)
-        zombies=$(ps -eo stat 2>/dev/null | grep -c "^Z" || echo 0)
-        dstate=$(ps -eo stat 2>/dev/null | grep -c "^D" || echo 0)
-        echo "  \"processes\": {\"total\": $total, \"zombies\": $zombies, \"d_state\": $dstate}"
-
-        echo "}"
-    } > "$JSONFILE" 2>/dev/null
 
     # Keep log file from growing unbounded (keep last 1000 lines)
     if [ $(wc -l < "$LOGFILE" 2>/dev/null || echo 0) -gt 2000 ]; then

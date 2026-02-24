@@ -14,11 +14,10 @@ async def start_internal_monitor(
 ) -> bool:
     """Start background monitoring process inside the container.
 
-    The monitor writes to /sandbox_logs/ every 5 seconds:
-      - stats.log:    Human-readable metrics history (appended)
-      - metrics.json: JSON snapshot of latest metrics (overwritten)
+    The monitor writes to /sandbox_logs/stats.log every 5 seconds with
+    human-readable metrics history.
 
-    These paths are volume-mounted to {log_dir}/sandboxes/{name}/ on the host.
+    This path is volume-mounted to {log_dir}/sandboxes/{name}/ on the host.
     When the container becomes unresponsive, read the files directly from
     the host filesystem - no exec needed.
 
