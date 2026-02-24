@@ -308,6 +308,9 @@ def assemble_external_eval_job(
 
     provider_packages = get_provider_dependencies(model) or None
 
+    # Enable Artifact Registry auth when GCS credentials are available
+    setup_artifact_registry = inject_gcs_credentials
+
     return BeakerJobConfig(
         name=name,
         command=command,
@@ -328,6 +331,7 @@ def assemble_external_eval_job(
         env_secrets=beaker_env_secrets,
         enable_sandbox=True,
         setup_registry_mirror=setup_registry_mirror,
+        setup_artifact_registry=setup_artifact_registry,
         setup_store_secrets=store,
         extras=extras,
         provider_packages=provider_packages,
@@ -498,6 +502,9 @@ class JobConfigAssembler:
         provider_packages.extend(harness_provider_deps)
         provider_packages = provider_packages or None  # type: ignore[assignment]
 
+        # Enable Artifact Registry auth when GCS credentials are available
+        setup_artifact_registry = self.inject_gcs_credentials
+
         return BeakerJobConfig(
             name=exp.name,
             command=command,
@@ -521,6 +528,7 @@ class JobConfigAssembler:
             task_packages=task_packages,
             enable_sandbox=self.enable_sandbox,
             setup_registry_mirror=setup_registry_mirror,
+            setup_artifact_registry=setup_artifact_registry,
             setup_store_secrets=self.config.store,
             vllm_isolated_venv=vllm_isolated_venv,
         )
