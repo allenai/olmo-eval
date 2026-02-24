@@ -185,6 +185,9 @@ class ExternalEval(ABC):
     ) -> bool:
         """Check if the provider is reachable from within the sandbox.
 
+        This should only be called for locally-deployed providers (e.g., vLLM server).
+        External API providers (OpenAI, Anthropic, etc.) don't expose /health endpoints.
+
         Args:
             executor: Sandbox executor instance.
             provider_url: URL of the provider to check.
