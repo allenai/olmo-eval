@@ -295,14 +295,16 @@ class AstaExternalEval(SandboxedExternalEval):
             env_vars["INSPECT_SANDBOX"] = "local"
             env_vars["INSPECT_EVAL_SANDBOX"] = "local"
 
-        # Add cache directory for inspect_evals data (CORE-Bench capsules, etc.)
-        # XDG_CACHE_HOME controls inspect_evals data cache (via platformdirs)
+        # Mount shared cache for inspect_evals data (CORE-Bench capsules, etc.)
+        # inspect_evals uses ~/.cache/inspect_evals via platformdirs
         volumes: list[tuple[str, str]] = []
         inspect_cache_dir = config.inspect_cache_dir or os.environ.get("INSPECT_CACHE_DIR")
         if inspect_cache_dir:
-            env_vars["XDG_CACHE_HOME"] = inspect_cache_dir
-            volumes.append((inspect_cache_dir, inspect_cache_dir))
-            logger.info(f"[{self.name}] XDG_CACHE_HOME={inspect_cache_dir}")
+            # Mount directly to where inspect_evals expects its cache
+            container_cache = "/root/.cache/inspect_evals"
+            host_cache = f"{inspect_cache_dir}/inspect_evals"
+            volumes.append((host_cache, container_cache))
+            logger.info(f"[{self.name}] Mounting {host_cache} -> {container_cache}")
         else:
             logger.warning(f"[{self.name}] INSPECT_CACHE_DIR not configured")
 
