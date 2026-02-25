@@ -430,9 +430,6 @@ class BeakerJobConfig:
     # Use this for external evals that run vLLM as a server subprocess.
     vllm_isolated_venv: bool = False
 
-    # Setup Artifact Registry auth for pushing/pulling sandbox images
-    setup_artifact_registry: bool = False
-
 
 def resolve_clusters(cluster: str | list[str]) -> list[str]:
     """Resolve cluster aliases to full cluster names.
@@ -636,7 +633,6 @@ class BeakerLauncher:
         enable_sandbox: bool = False,
         setup_store_secrets: bool = False,
         vllm_isolated_venv: bool = False,
-        setup_artifact_registry: bool = False,
     ) -> str:
         """Build installation command for gantry's install_cmd parameter.
 
@@ -654,10 +650,9 @@ class BeakerLauncher:
             provider_packages: Optional list of provider-specific dependencies.
             task_packages: Optional list of task-specific packages to install.
             setup_registry_mirror: If True, run setup_dockerio_mirror script with MIRROR_HOSTS.
-            enable_sandbox: If True, set up /dev/net/tun for pasta networking.
+            enable_sandbox: If True, set up /dev/net/tun and Artifact Registry auth.
             setup_store_secrets: If True, run setup_store_secrets to configure database access.
             vllm_isolated_venv: If True, install vLLM in isolated venv for server mode.
-            setup_artifact_registry: If True, configure GCP Artifact Registry auth.
 
         Returns:
             Shell command string for installation.
@@ -683,7 +678,8 @@ class BeakerLauncher:
             steps.append(f'if [ -n "$MIRROR_HOSTS" ]; then {script} "$MIRROR_HOSTS"; fi')
 
         # Set up Artifact Registry auth for sandbox image caching
-        if setup_artifact_registry:
+        # Checks for GOOGLE_APPLICATION_CREDENTIALS and exits gracefully if not set
+        if enable_sandbox:
             script = "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/setup_artifact_registry"
             steps.append(f"source {script}")
 
@@ -769,7 +765,6 @@ class BeakerLauncher:
             config.enable_sandbox,
             config.setup_store_secrets,
             config.vllm_isolated_venv,
-            config.setup_artifact_registry,
         )
 
         # Build weka mounts as tuples: (bucket, mount_path)
