@@ -26,6 +26,7 @@ dependencies = [
     "datasets>=3.2.0",
     "numpy>=1.20.0",
     "omegaconf~=2.3.0",
+    "prometheus_client>=0.21.0",
     "rich~=14.3.1",
     "sympy>=1.12",
     "textual-plot>=0.10.1",
@@ -44,7 +45,6 @@ vllm = [
     "vllm[runai]==0.13.0",  # runai extras enable S3 model loading
     "opencv-python-headless==4.13.0.92",  # Required to avoid libxcb import error
     "torch-c-dlpack-ext",  # Required for TVM tensor allocation in vLLM
-    "prometheus_client>=0.21.0",  # For parsing vLLM /metrics endpoint
 ]
 litellm = [
     "litellm~=1.80.11",

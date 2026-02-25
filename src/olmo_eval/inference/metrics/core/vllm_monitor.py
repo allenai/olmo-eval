@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from prometheus_client.parser import text_string_to_metric_families
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +46,6 @@ def parse_prometheus_metrics(text: str) -> dict[str, dict[str, Any]]:
     Returns:
         Dictionary mapping metric names to {labels: {...}, value: float}.
     """
-    from prometheus_client.parser import text_string_to_metric_families
-
     metrics: dict[str, dict[str, Any]] = {}
 
     for family in text_string_to_metric_families(text):
