@@ -202,6 +202,13 @@ def aggregate_metrics(parsed_logs: list[dict[str, Any]]) -> dict[str, float]:
 def parse_agenteval_json(content: dict[str, Any]) -> dict[str, Any]:
     """Parse scores.json produced by `astabench score`.
 
+    The scores.json format has a `results` array where each entry has:
+        - task_name: Name of the task
+        - eval_spec: Evaluation configuration
+        - metrics: Array of {name, value} objects
+        - model_usages: Token usage per sample
+        - model_costs: Cost data (often null)
+
     Args:
         content: Parsed JSON from scores.json.
 
@@ -215,72 +222,114 @@ def parse_agenteval_json(content: dict[str, Any]) -> dict[str, Any]:
     costs: dict[str, Any] = {}
     metadata: dict[str, Any] = {}
 
-    # Extract task-level scores
-    tasks = content.get("tasks", {})
-    for task_name, task_data in tasks.items():
-        if isinstance(task_data, dict):
-            # Extract primary metric score
-            score = task_data.get("score")
-            if score is not None:
-                metrics[f"{task_name}_score"] = float(score)
+    results = content.get("results", [])
 
-            # Extract stderr if available
-            stderr = task_data.get("stderr")
-            if stderr is not None:
-                metrics[f"{task_name}_stderr"] = float(stderr)
+    for task_result in results:
+        task_name = task_result.get("task_name", "unknown")
 
-            # Extract cost if available
-            cost = task_data.get("cost")
-            if cost is not None:
-                metrics[f"{task_name}_cost"] = float(cost)
+        # Parse metrics array: [{"name": "metric/scorer", "value": 0.5}, ...]
+        task_metrics = task_result.get("metrics", [])
+        for metric_entry in task_metrics:
+            metric_name = metric_entry.get("name", "")
+            metric_value = metric_entry.get("value")
+            if metric_name and metric_value is not None:
+                # Store as task_name/metric_name for uniqueness
+                full_name = f"{task_name}/{metric_name}"
+                metrics[full_name] = float(metric_value)
 
-    # Extract tag-level aggregates (category scores)
-    tags = content.get("tags", {})
-    for tag_name, tag_data in tags.items():
-        if isinstance(tag_data, dict):
-            score = tag_data.get("score")
-            if score is not None:
-                metrics[f"tag_{tag_name}_score"] = float(score)
+        # Extract eval_spec metadata
+        eval_spec = task_result.get("eval_spec", {})
+        if eval_spec and not metadata.get("model"):
+            metadata["model"] = eval_spec.get("model", "")
+            metadata["solver"] = eval_spec.get("solver", "")
+            metadata["revision"] = eval_spec.get("revision", {})
 
-            stderr = tag_data.get("stderr")
-            if stderr is not None:
-                metrics[f"tag_{tag_name}_stderr"] = float(stderr)
+        # Aggregate token usage across all samples for this task
+        model_usages = task_result.get("model_usages", [])
+        for sample_usages in model_usages:
+            for usage_entry in sample_usages:
+                model_name = usage_entry.get("model", "unknown")
+                usage = usage_entry.get("usage", {})
+                if model_name not in costs:
+                    costs[model_name] = {
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "total_tokens": 0,
+                    }
+                costs[model_name]["input_tokens"] += usage.get("input_tokens", 0) or 0
+                costs[model_name]["output_tokens"] += usage.get("output_tokens", 0) or 0
+                costs[model_name]["total_tokens"] += usage.get("total_tokens", 0) or 0
 
-            cost = tag_data.get("cost")
-            if cost is not None:
-                metrics[f"tag_{tag_name}_cost"] = float(cost)
-
-    # Extract overall score if available
-    overall = content.get("overall", {})
-    if isinstance(overall, dict):
-        if "score" in overall:
-            metrics["overall_score"] = float(overall["score"])
-        if "cost" in overall:
-            metrics["overall_cost"] = float(overall["cost"])
-    elif isinstance(overall, (int, float)):
-        metrics["overall_score"] = float(overall)
-
-    # Extract cost breakdown by model
-    model_costs = content.get("costs", {})
-    if isinstance(model_costs, dict):
-        costs = model_costs
-        # Also add total cost as a metric
-        total_cost = sum(
-            c.get("total", 0) if isinstance(c, dict) else 0 for c in model_costs.values()
-        )
-        if total_cost > 0:
-            metrics["total_model_cost"] = float(total_cost)
-
-    # Extract metadata
-    metadata = {
-        "eval_config": content.get("eval_config", {}),
-        "split": content.get("split", ""),
-        "model": content.get("model", ""),
-        "created": content.get("created", ""),
-    }
+    metadata["num_tasks"] = len(results)
 
     return {
         "metrics": metrics,
         "costs": costs,
         "metadata": metadata,
+    }
+
+
+def parse_summary_stats_json(content: dict[str, Any]) -> dict[str, Any]:
+    """Parse summary_stats.json produced by `astabench score`.
+
+    The summary_stats.json format has a `stats` object with:
+        - overall: {score, score_stderr, cost, cost_stderr}
+        - tag/NAME: Tag-level aggregates
+        - task/NAME: Task-level scores
+
+    Args:
+        content: Parsed JSON from summary_stats.json.
+
+    Returns:
+        Dictionary with:
+            - metrics: All scores as flat metrics dict
+            - overall_score: The primary overall score
+            - tag_scores: Dict of tag name -> score
+            - task_scores: Dict of task name -> score
+    """
+    metrics: dict[str, float] = {}
+    tag_scores: dict[str, float] = {}
+    task_scores: dict[str, float] = {}
+    overall_score: float | None = None
+
+    stats = content.get("stats", {})
+
+    for key, data in stats.items():
+        if not isinstance(data, dict):
+            continue
+
+        score = data.get("score")
+        stderr = data.get("score_stderr")
+        cost = data.get("cost")
+
+        if key == "overall":
+            if score is not None:
+                overall_score = float(score)
+                metrics["overall_score"] = overall_score
+            if stderr is not None:
+                metrics["overall_stderr"] = float(stderr)
+            if cost is not None:
+                metrics["overall_cost"] = float(cost)
+
+        elif key.startswith("tag/"):
+            tag_name = key[4:]  # Remove "tag/" prefix
+            if score is not None:
+                tag_scores[tag_name] = float(score)
+                metrics[f"tag_{tag_name}_score"] = float(score)
+            if stderr is not None:
+                metrics[f"tag_{tag_name}_stderr"] = float(stderr)
+
+        elif key.startswith("task/"):
+            task_name = key[5:]  # Remove "task/" prefix
+            if score is not None:
+                task_scores[task_name] = float(score)
+                metrics[f"{task_name}_score"] = float(score)
+            if stderr is not None:
+                metrics[f"{task_name}_stderr"] = float(stderr)
+
+    return {
+        "metrics": metrics,
+        "overall_score": overall_score,
+        "tag_scores": tag_scores,
+        "task_scores": task_scores,
     }

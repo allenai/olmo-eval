@@ -13,7 +13,10 @@ from typing import TYPE_CHECKING, Any
 from olmo_eval.common.config import get_infra_config
 from olmo_eval.evals.external.base import SandboxedExternalEval
 from olmo_eval.evals.external.benchmarks.asta.args import ASTA_TASKS, AstaArgs
-from olmo_eval.evals.external.benchmarks.asta.result_parser import parse_agenteval_json
+from olmo_eval.evals.external.benchmarks.asta.result_parser import (
+    parse_agenteval_json,
+    parse_summary_stats_json,
+)
 from olmo_eval.evals.external.result import ExternalEvalResult
 
 if TYPE_CHECKING:
@@ -431,56 +434,18 @@ class AstaExternalEval(SandboxedExternalEval):
         exit_code: int,
         output_dir: str | None = None,
     ) -> ExternalEvalResult:
-        """Extract metrics from scores.json produced by astabench score."""
+        """Extract metrics from astabench score output files.
+
+        Uses summary_stats.json as the primary source for aggregated metrics
+        (overall, tag-level, task-level scores) and scores.json for detailed
+        per-task metrics and token usage data.
+        """
         from pathlib import Path
 
         metadata: dict[str, Any] = {}
+        all_metrics: dict[str, float] = {}
 
-        # Read scores.json (primary output from astabench score)
-        agenteval_path = f"{self.results_dir}/scores.json"
-        agenteval_result = await executor.execute_command(
-            f"cat {shlex.quote(agenteval_path)}", timeout=60.0
-        )
-
-        if not agenteval_result.success or not agenteval_result.output.strip():
-            return ExternalEvalResult(
-                name=self.name,
-                success=False,
-                error=f"Failed to read {agenteval_path}",
-                raw_output=raw_output,
-            )
-
-        try:
-            agenteval_content = json.loads(agenteval_result.output)
-
-            # Debug: log top-level keys to understand the structure
-            top_keys = list(agenteval_content.keys())
-            logger.info(f"[{self.name}] scores.json top-level keys: {top_keys}")
-
-            parsed = parse_agenteval_json(agenteval_content)
-
-            all_metrics = parsed["metrics"]
-            metadata["costs"] = parsed.get("costs", {})
-            metadata.update(parsed.get("metadata", {}))
-
-            # Save scores.json to output directory
-            if output_dir:
-                local_path = Path(output_dir) / "scores.json"
-                local_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(local_path, "w") as f:
-                    json.dump(agenteval_content, f, indent=2)
-
-            logger.info(f"[{self.name}] Parsed scores.json with {len(all_metrics)} metrics")
-
-        except json.JSONDecodeError as e:
-            return ExternalEvalResult(
-                name=self.name,
-                success=False,
-                error=f"Failed to parse scores.json: {e}",
-                raw_output=raw_output,
-            )
-
-        # Also read summary_stats.json for additional metadata
+        # Read summary_stats.json first (primary source for aggregated scores)
         summary_path = f"{self.results_dir}/summary_stats.json"
         summary_result = await executor.execute_command(
             f"cat {shlex.quote(summary_path)}", timeout=60.0
@@ -489,15 +454,73 @@ class AstaExternalEval(SandboxedExternalEval):
         if summary_result.success and summary_result.output.strip():
             try:
                 summary_content = json.loads(summary_result.output)
-                metadata["summary_stats"] = summary_content
+                parsed_summary = parse_summary_stats_json(summary_content)
+
+                # Use summary metrics as primary metrics
+                all_metrics.update(parsed_summary["metrics"])
+                metadata["overall_score"] = parsed_summary.get("overall_score")
+                metadata["tag_scores"] = parsed_summary.get("tag_scores", {})
+                metadata["task_scores"] = parsed_summary.get("task_scores", {})
 
                 if output_dir:
                     local_path = Path(output_dir) / "summary_stats.json"
+                    local_path.parent.mkdir(parents=True, exist_ok=True)
                     with open(local_path, "w") as f:
                         json.dump(summary_content, f, indent=2)
 
-            except json.JSONDecodeError:
-                pass  # Non-critical
+                logger.info(
+                    f"[{self.name}] Parsed summary_stats.json: "
+                    f"overall={parsed_summary.get('overall_score')}, "
+                    f"{len(parsed_summary.get('task_scores', {}))} tasks"
+                )
+
+            except json.JSONDecodeError as e:
+                logger.warning(f"[{self.name}] Failed to parse summary_stats.json: {e}")
+
+        # Read scores.json for detailed per-task metrics and token usage
+        scores_path = f"{self.results_dir}/scores.json"
+        scores_result = await executor.execute_command(
+            f"cat {shlex.quote(scores_path)}", timeout=60.0
+        )
+
+        if scores_result.success and scores_result.output.strip():
+            try:
+                scores_content = json.loads(scores_result.output)
+                parsed_scores = parse_agenteval_json(scores_content)
+
+                # Add detailed per-task metrics (task_name/metric_name format)
+                for metric_name, value in parsed_scores["metrics"].items():
+                    # Prefix with "detail/" to distinguish from summary metrics
+                    all_metrics[f"detail/{metric_name}"] = value
+
+                # Add token usage to metadata
+                metadata["costs"] = parsed_scores.get("costs", {})
+                metadata["num_tasks"] = parsed_scores.get("metadata", {}).get("num_tasks", 0)
+                metadata["model"] = parsed_scores.get("metadata", {}).get("model", "")
+                metadata["solver"] = parsed_scores.get("metadata", {}).get("solver", "")
+
+                if output_dir:
+                    local_path = Path(output_dir) / "scores.json"
+                    local_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(local_path, "w") as f:
+                        json.dump(scores_content, f, indent=2)
+
+                logger.info(
+                    f"[{self.name}] Parsed scores.json: "
+                    f"{len(parsed_scores['metrics'])} detailed metrics"
+                )
+
+            except json.JSONDecodeError as e:
+                logger.warning(f"[{self.name}] Failed to parse scores.json: {e}")
+
+        # Check if we got any metrics
+        if not all_metrics:
+            return ExternalEvalResult(
+                name=self.name,
+                success=False,
+                error="No metrics extracted from summary_stats.json or scores.json",
+                raw_output=raw_output,
+            )
 
         # Copy all files from the results directory for debugging
         if output_dir:
