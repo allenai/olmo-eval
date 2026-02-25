@@ -12,11 +12,9 @@ fi
 echo "Setting up Artifact Registry credentials..."
 
 # Authenticate with gcloud
-echo "Activating service account from $GOOGLE_APPLICATION_CREDENTIALS"
 gcloud auth activate-service-account --key-file="$GOOGLE_APPLICATION_CREDENTIALS" --quiet
 
 # Configure docker/podman credential helper for Artifact Registry
-echo "Configuring Docker credential helper for us-east1-docker.pkg.dev"
 gcloud auth configure-docker us-east1-docker.pkg.dev --quiet
 
-echo "Artifact Registry authentication configured successfully"
+echo "Artifact Registry authentication configured"
