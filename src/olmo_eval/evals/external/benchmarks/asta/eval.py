@@ -269,9 +269,6 @@ class AstaExternalEval(SandboxedExternalEval):
             return self._error_result(str(e), start_time, "\n".join(all_output))
 
         result.duration_seconds = time.time() - start_time
-        if output_dir:
-            self._save_results(result, output_dir)
-
         return result
 
     def _create_sandbox_config_with_env(
@@ -404,7 +401,7 @@ class AstaExternalEval(SandboxedExternalEval):
         """Build the astabench score command."""
         return (
             f"cd {self.working_dir} && "
-            f"LITELLM_LOCAL_MODEL_COST_MAP=True LITELLM_LOG=ERROR "
+            f"LITELLM_LOCAL_MODEL_COST_MAP=True "
             f"uv run astabench score {self.results_dir}"
         )
 

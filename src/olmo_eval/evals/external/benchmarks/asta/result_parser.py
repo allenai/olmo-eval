@@ -191,11 +191,6 @@ def aggregate_metrics(parsed_logs: list[dict[str, Any]]) -> dict[str, float]:
     for metric_name, values in metric_values.items():
         aggregated[metric_name] = sum(values) / len(values) if values else 0.0
 
-    # Add count metrics
-    aggregated["num_tasks"] = float(len(parsed_logs))
-    total_samples = sum(log.get("metadata", {}).get("total_samples", 0) for log in parsed_logs)
-    aggregated["total_samples"] = float(total_samples)
-
     return aggregated
 
 
