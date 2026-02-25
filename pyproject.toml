@@ -44,6 +44,7 @@ vllm = [
     "vllm[runai]==0.13.0",  # runai extras enable S3 model loading
     "opencv-python-headless==4.13.0.92",  # Required to avoid libxcb import error
     "torch-c-dlpack-ext",  # Required for TVM tensor allocation in vLLM
+    "prometheus_client>=0.21.0",  # For parsing vLLM /metrics endpoint
 ]
 litellm = [
     "litellm~=1.80.11",

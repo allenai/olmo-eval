@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 import logging
 import math
-import re
 import threading
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -23,7 +23,7 @@ class VLLMMetricsSnapshot:
 
     timestamp: str  # ISO format
     fetch_latency_ms: float  # How long the /metrics call took
-    parsed_metrics: dict[str, float] = field(default_factory=dict)
+    parsed_metrics: dict[str, dict[str, Any]] = field(default_factory=dict)
     error: str | None = None
 
     def to_dict(self) -> dict:
@@ -36,44 +36,29 @@ class VLLMMetricsSnapshot:
         }
 
 
-def parse_prometheus_metrics(text: str) -> dict[str, float]:
-    """Parse Prometheus text format into dict of metric_name -> value.
-
-    Handles gauges and counters. For histograms, extracts _sum and _count.
-    Preserves labels in the key name for disambiguation.
+def parse_prometheus_metrics(text: str) -> dict[str, dict[str, Any]]:
+    """Parse Prometheus text format using prometheus_client library.
 
     Args:
         text: Raw Prometheus metrics text.
 
     Returns:
-        Dictionary mapping metric names (with labels) to float values.
+        Dictionary mapping metric names to {labels: {...}, value: float}.
     """
-    metrics: dict[str, float] = {}
+    from prometheus_client.parser import text_string_to_metric_families
 
-    for line in text.strip().split("\n"):
-        # Skip comments and empty lines
-        if not line or line.startswith("#"):
-            continue
+    metrics: dict[str, dict[str, Any]] = {}
 
-        # Parse metric line: metric_name{labels} value [timestamp]
-        # or: metric_name value [timestamp]
-        # Handle numeric values including Inf/NaN
-        match = re.match(
-            r"^([a-zA-Z_:][a-zA-Z0-9_:]*(?:\{[^}]*\})?)"
-            r"(?:\s+)"
-            r"([+-]?(?:\d+\.?\d*(?:[eE][+-]?\d+)?|Inf|NaN))",
-            line,
-            re.IGNORECASE,
-        )
-        if match:
-            name = match.group(1)
-            try:
-                value = float(match.group(2))
-                # Skip Inf/NaN as they're not JSON-serializable
-                if not (math.isinf(value) or math.isnan(value)):
-                    metrics[name] = value
-            except ValueError:
+    for family in text_string_to_metric_families(text):
+        for sample in family.samples:
+            # Skip Inf/NaN as they're not JSON-serializable
+            if math.isinf(sample.value) or math.isnan(sample.value):
                 continue
+
+            metrics[sample.name] = {
+                "labels": dict(sample.labels),
+                "value": sample.value,
+            }
 
     return metrics
 
