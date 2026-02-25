@@ -1,6 +1,4 @@
 #!/bin/sh
-# Exhaustive container diagnostics
-# Called when we detect unresponsiveness - may or may not succeed depending on container state
 
 echo "########## CONTAINER DIAGNOSTICS ##########"
 echo "Collected at: $(date -Iseconds 2>/dev/null || date)"

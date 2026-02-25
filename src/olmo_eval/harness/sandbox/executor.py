@@ -10,6 +10,8 @@ import time
 import uuid
 from typing import Any
 
+import aiohttp
+
 from olmo_eval.common.execution.environment import ExecutionResult
 
 from .config import SandboxConfig, SandboxMode
@@ -371,6 +373,9 @@ class SandboxExecutor:
         timed_out = False
         consecutive_failures = 0
         max_consecutive_failures = 3
+        output_truncated = False
+        max_output_size = 5 * 1024 * 1024  # 5MB
+        keep_after_truncate = 1 * 1024 * 1024  # Keep last 1MB after truncation
 
         async def kill_process_group() -> None:
             """Kill the background process group."""
@@ -407,22 +412,45 @@ class SandboxExecutor:
                 break
 
             # Stream new output and check for completion in one pass
+            # Also check if output file is too large and truncate if needed
+            poll_start = time.time()
             try:
-                resp = await self._runtime.execute(
-                    Command(
-                        command=[
-                            "bash",
-                            "-c",
-                            f"tail -c +{last_pos + 1} {output_file} 2>/dev/null; "
-                            f"echo '---EXIT_CODE---'; "
-                            f"cat {exit_code_file} 2>/dev/null",
-                        ],
-                        timeout=10.0,
-                    )
+                poll_cmd = (
+                    f"size=$(stat -c%s {output_file} 2>/dev/null || echo 0); "
+                    f'if [ "$size" -gt {max_output_size} ]; then '
+                    f"  tail -c {keep_after_truncate} {output_file} > {output_file}.tmp && "
+                    f"  mv {output_file}.tmp {output_file}; "
+                    f"  echo '---TRUNCATED---'; "
+                    f"fi; "
+                    f"tail -c +{last_pos + 1} {output_file} 2>/dev/null; "
+                    f"echo '---EXIT_CODE---'; "
+                    f"cat {exit_code_file} 2>/dev/null"
                 )
+                resp = await self._runtime.execute(
+                    Command(command=["bash", "-c", poll_cmd], timeout=10.0)
+                )
+                poll_duration = time.time() - poll_start
                 consecutive_failures = 0  # Reset on success
 
-                parts = (resp.stdout or "").split("---EXIT_CODE---")
+                if poll_duration > 5.0:
+                    self._log(logging.WARNING, f"Poll slow ({poll_duration:.1f}s)")
+
+                stdout = resp.stdout or ""
+
+                # Check if output was truncated
+                if "---TRUNCATED---" in stdout:
+                    if not output_truncated:
+                        self._log(
+                            logging.WARNING,
+                            f"Output exceeded {max_output_size // (1024 * 1024)}MB, "
+                            f"truncating to last {keep_after_truncate // 1024}KB",
+                        )
+                        output_truncated = True
+                    # Reset position since file was truncated
+                    last_pos = 0
+                    stdout = stdout.replace("---TRUNCATED---\n", "").replace("---TRUNCATED---", "")
+
+                parts = stdout.split("---EXIT_CODE---")
                 new_output = parts[0] if parts else ""
                 exit_marker = parts[1].strip() if len(parts) > 1 else ""
 
@@ -435,25 +463,56 @@ class SandboxExecutor:
                 if exit_marker:
                     break
 
-            except Exception as e:
+            except TimeoutError:
+                poll_duration = time.time() - poll_start
                 consecutive_failures += 1
                 self._log(
                     logging.WARNING,
-                    f"Poll failed ({consecutive_failures}/{max_consecutive_failures}): {e}",
+                    f"Poll timed out after {poll_duration:.1f}s "
+                    f"({consecutive_failures}/{max_consecutive_failures}) "
+                    "- sandbox may be under resource pressure",
                 )
-                if consecutive_failures >= max_consecutive_failures:
-                    self._log(logging.ERROR, "Sandbox unresponsive, aborting")
-                    await kill_process_group()
-                    await cleanup_temp_files()
-                    diagnostics_path = None
-                    if self.config.log_dir and self.name:
-                        diagnostics_path = os.path.join(
-                            self.config.log_dir, "sandboxes", self.name, "stats.log"
-                        )
-                    msg = f"Sandbox unresponsive after {consecutive_failures} polls"
-                    if diagnostics_path:
-                        msg += f"\nDiagnostics available at: {diagnostics_path}"
-                    return ExecutionResult(False, msg, -1)
+            except aiohttp.ClientConnectionError as e:
+                poll_duration = time.time() - poll_start
+                consecutive_failures += 1
+                self._log(
+                    logging.WARNING,
+                    f"Poll connection failed after {poll_duration:.1f}s "
+                    f"({consecutive_failures}/{max_consecutive_failures}): {e} "
+                    "- swerex server may be down",
+                )
+            except aiohttp.ClientError as e:
+                poll_duration = time.time() - poll_start
+                consecutive_failures += 1
+                self._log(
+                    logging.WARNING,
+                    f"Poll network error after {poll_duration:.1f}s "
+                    f"({consecutive_failures}/{max_consecutive_failures}): {e}",
+                )
+            except Exception as e:
+                poll_duration = time.time() - poll_start
+                consecutive_failures += 1
+                self._log(
+                    logging.WARNING,
+                    f"Poll failed after {poll_duration:.1f}s "
+                    f"({consecutive_failures}/{max_consecutive_failures}): "
+                    f"{type(e).__name__}: {e}",
+                )
+
+            # Check if we've exceeded max consecutive failures (after any exception)
+            if consecutive_failures >= max_consecutive_failures:
+                self._log(logging.ERROR, "Sandbox unresponsive, aborting")
+                await kill_process_group()
+                await cleanup_temp_files()
+                diagnostics_path = None
+                if self.config.log_dir and self.name:
+                    diagnostics_path = os.path.join(
+                        self.config.log_dir, "sandboxes", self.name, "stats.log"
+                    )
+                msg = f"Sandbox unresponsive after {consecutive_failures} polls"
+                if diagnostics_path:
+                    msg += f"\nDiagnostics available at: {diagnostics_path}"
+                return ExecutionResult(False, msg, -1)
 
         # Read final output and exit code
         full_output = ""
@@ -488,6 +547,13 @@ class SandboxExecutor:
 
         # Clean up temp files
         await cleanup_temp_files()
+
+        if output_truncated:
+            truncate_msg = (
+                f"[Output truncated: exceeded {max_output_size // (1024 * 1024)}MB, "
+                f"showing last {keep_after_truncate // (1024 * 1024)}MB]"
+            )
+            full_output = truncate_msg + "\n" + full_output if full_output else truncate_msg
 
         if timed_out:
             full_output = (full_output + "\n[Command timed out]") if full_output else "[Timed out]"
