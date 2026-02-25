@@ -11,6 +11,13 @@ fi
 
 echo "Setting up Artifact Registry credentials..."
 
+# Install gcloud if not available
+if ! command -v gcloud &> /dev/null; then
+    echo "Installing Google Cloud SDK..."
+    curl -sSL https://sdk.cloud.google.com | bash -s -- --disable-prompts --install-dir=/opt > /dev/null 2>&1
+    export PATH="/opt/google-cloud-sdk/bin:$PATH"
+fi
+
 # Authenticate with gcloud
 gcloud auth activate-service-account --key-file="$GOOGLE_APPLICATION_CREDENTIALS" --quiet
 
