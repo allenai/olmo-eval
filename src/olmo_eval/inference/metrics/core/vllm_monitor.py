@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import threading
 import time
@@ -56,17 +57,21 @@ def parse_prometheus_metrics(text: str) -> dict[str, float]:
 
         # Parse metric line: metric_name{labels} value [timestamp]
         # or: metric_name value [timestamp]
+        # Handle numeric values including Inf/NaN
         match = re.match(
             r"^([a-zA-Z_:][a-zA-Z0-9_:]*(?:\{[^}]*\})?)"
             r"(?:\s+)"
-            r"([+-]?\d+\.?\d*(?:[eE][+-]?\d+)?)",
+            r"([+-]?(?:\d+\.?\d*(?:[eE][+-]?\d+)?|Inf|NaN))",
             line,
+            re.IGNORECASE,
         )
         if match:
             name = match.group(1)
             try:
                 value = float(match.group(2))
-                metrics[name] = value
+                # Skip Inf/NaN as they're not JSON-serializable
+                if not (math.isinf(value) or math.isnan(value)):
+                    metrics[name] = value
             except ValueError:
                 continue
 
@@ -135,11 +140,6 @@ class VLLMMetricsMonitor:
         # Ensure output directory exists
         if self._output_path:
             self._output_path.parent.mkdir(parents=True, exist_ok=True)
-            # Write header comment
-            with open(self._output_path, "w") as f:
-                f.write(f"# vLLM metrics from {self._metrics_url}\n")
-                f.write(f"# Started: {datetime.now(UTC).isoformat()}\n")
-                f.write(f"# Interval: {self._interval_s}s\n")
 
         self._thread = threading.Thread(
             target=self._monitor_loop,

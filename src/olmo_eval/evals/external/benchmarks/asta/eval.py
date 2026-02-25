@@ -130,9 +130,9 @@ class AstaExternalEval(SandboxedExternalEval):
             "code execution, data analysis, and end-to-end discovery. Uses Inspect AI harness."
         )
 
-    @property
-    def sandbox_image(self) -> str:
-        return "(built locally)"
+    def build_sandbox_image(self, container_runtime: str) -> str:
+        """Build or fetch the ASTA-bench container image."""
+        return _get_asta_image(container_runtime)
 
     @property
     def working_dir(self) -> str:

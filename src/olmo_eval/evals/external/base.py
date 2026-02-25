@@ -306,10 +306,44 @@ class SandboxedExternalEval(ExternalEval):
     """
 
     @property
-    @abstractmethod
-    def sandbox_image(self) -> str:
-        """Docker image to use for the sandbox container."""
-        ...
+    def sandbox_image(self) -> str | None:
+        """Docker image to use for the sandbox container.
+
+        Return None if the image should be built dynamically via build_sandbox_image().
+        """
+        return None
+
+    def build_sandbox_image(self, container_runtime: str) -> str:
+        """Build or fetch the sandbox image dynamically.
+
+        Override this method to implement custom image building logic.
+        Called when sandbox_image returns None.
+
+        Args:
+            container_runtime: Container runtime to use (docker or podman).
+
+        Returns:
+            The image name to use.
+
+        Raises:
+            NotImplementedError: If sandbox_image is None and this method is not overridden.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must set sandbox_image or override build_sandbox_image()"
+        )
+
+    def get_sandbox_image(self, container_runtime: str) -> str:
+        """Get the sandbox image, building if necessary.
+
+        Args:
+            container_runtime: Container runtime to use (docker or podman).
+
+        Returns:
+            The image name to use.
+        """
+        if self.sandbox_image is not None:
+            return self.sandbox_image
+        return self.build_sandbox_image(container_runtime)
 
     @property
     @abstractmethod
@@ -347,8 +381,9 @@ class SandboxedExternalEval(ExternalEval):
             log_dir = os.path.join(output_dir, "logs")
 
         runtime = cast(ContainerRuntime, container_runtime)
+        image = self.get_sandbox_image(container_runtime)
         return SandboxConfig(
-            image=self.sandbox_image,
+            image=image,
             mode=SandboxMode.DOCKER,
             container_runtime=runtime,
             command_timeout=self.timeout_seconds,
