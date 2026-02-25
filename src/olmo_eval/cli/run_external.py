@@ -120,6 +120,30 @@ class ExternalRunConfig:
 # Experiment metadata
 @click.option("--experiment-name", help="Human-readable experiment name")
 @click.option("--experiment-group", help="Experiment group for grouping related experiments")
+# Provider metrics options
+@click.option(
+    "--metrics/--no-metrics",
+    "enable_metrics",
+    default=True,
+    help="Enable provider metrics collection (default: enabled)",
+)
+@click.option(
+    "--collect-gpu/--no-collect-gpu",
+    default=False,
+    help="Collect GPU metrics (default: disabled)",
+)
+@click.option(
+    "--vllm-metrics/--no-vllm-metrics",
+    "collect_vllm_server",
+    default=True,
+    help="Collect vLLM server metrics via /metrics endpoint (default: enabled)",
+)
+@click.option(
+    "--vllm-poll-interval",
+    type=float,
+    default=10.0,
+    help="vLLM metrics polling interval in seconds (default: 10.0)",
+)
 def run_external(
     model: str,
     evals: tuple[str, ...],
@@ -145,6 +169,10 @@ def run_external(
     db_password: str,
     experiment_name: str | None,
     experiment_group: str | None,
+    enable_metrics: bool,
+    collect_gpu: bool,
+    collect_vllm_server: bool,
+    vllm_poll_interval: float,
 ) -> None:
     """Run external black-box evaluations.
 
@@ -226,6 +254,21 @@ def run_external(
     )
     storages, s3_config = storage_setup.setup()
 
+    # Build metrics config (matches default harness preset)
+    from olmo_eval.inference.metrics import MetricsConfig
+
+    metrics_config: MetricsConfig | None = None
+    if enable_metrics:
+        metrics_config = MetricsConfig(
+            enabled=True,
+            collect_gpu=collect_gpu,
+            collect_vllm_server=collect_vllm_server,
+            vllm_poll_interval_s=vllm_poll_interval,
+            output_dir=output_dir,
+            provider_kind=provider,
+            model_name=provider_config.alias or provider_config.model,
+        )
+
     # Create runner
     from olmo_eval.runners.external import ExternalEvalRunner
 
@@ -240,6 +283,7 @@ def run_external(
         storages=storages,
         experiment_name=experiment_name,
         experiment_group=experiment_group,
+        metrics=metrics_config,
     )
 
     # Validate

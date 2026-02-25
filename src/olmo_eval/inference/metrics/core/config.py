@@ -42,6 +42,10 @@ class MetricsConfig:
     reporters: tuple[str | dict[str, Any], ...] = (ReporterType.FILE, ReporterType.CONSOLE)
     collect_gpu: bool = False
 
+    # vLLM server metrics monitoring
+    collect_vllm_server: bool = True  # Poll /metrics endpoint from vLLM server
+    vllm_poll_interval_s: float = 10.0  # Polling interval in seconds
+
     # Output directory (set at runtime, used by file-based reporters)
     output_dir: str | None = None
 
@@ -108,6 +112,8 @@ class MetricsConfig:
             "enabled": self.enabled,
             "reporters": list(self.reporters),
             "collect_gpu": self.collect_gpu,
+            "collect_vllm_server": self.collect_vllm_server,
+            "vllm_poll_interval_s": self.vllm_poll_interval_s,
         }
         # Only include non-None fields
         if self.output_dir is not None:
@@ -157,6 +163,8 @@ class MetricsConfig:
             enabled=data.get("enabled", True),
             reporters=tuple(reporters),
             collect_gpu=data.get("collect_gpu", False),
+            collect_vllm_server=data.get("collect_vllm_server", True),
+            vllm_poll_interval_s=data.get("vllm_poll_interval_s", 10.0),
             output_dir=data.get("output_dir"),
             provider_kind=data.get("provider_kind"),
             experiment_id=data.get("experiment_id"),
@@ -179,6 +187,8 @@ class MetricsConfig:
             enabled=self.enabled,
             reporters=self.reporters,
             collect_gpu=self.collect_gpu,
+            collect_vllm_server=self.collect_vllm_server,
+            vllm_poll_interval_s=self.vllm_poll_interval_s,
             output_dir=output_dir,
             provider_kind=self.provider_kind,
             experiment_id=self.experiment_id,
@@ -214,6 +224,8 @@ class MetricsConfig:
             enabled=self.enabled,
             reporters=self.reporters,
             collect_gpu=self.collect_gpu,
+            collect_vllm_server=self.collect_vllm_server,
+            vllm_poll_interval_s=self.vllm_poll_interval_s,
             output_dir=self.output_dir,
             provider_kind=provider_kind or self.provider_kind,
             experiment_id=experiment_id or self.experiment_id,
@@ -235,6 +247,8 @@ class MetricsConfig:
             enabled=self.enabled,
             reporters=self.reporters,
             collect_gpu=self.collect_gpu,
+            collect_vllm_server=self.collect_vllm_server,
+            vllm_poll_interval_s=self.vllm_poll_interval_s,
             output_dir=self.output_dir,
             provider_kind=self.provider_kind,
             experiment_id=self.experiment_id,

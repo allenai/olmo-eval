@@ -19,7 +19,11 @@ from olmo_eval.evals.external import (
     get_external_eval,
     list_external_evals,
 )
-from olmo_eval.inference.metrics import InstrumentedProvider, MetricsConfig
+from olmo_eval.inference.metrics import (
+    InstrumentedProvider,
+    MetricsConfig,
+    VLLMMetricsMonitor,
+)
 from olmo_eval.inference.providers.config import ProviderConfig
 from olmo_eval.runners.common.models import S3Config
 from olmo_eval.runners.processing.utils import generate_experiment_id
@@ -131,6 +135,26 @@ class ExternalEvalRunner:
                 instrumented.enable_gpu_monitoring(interval_s=1.0)
             provider = instrumented
 
+        # Start vLLM server metrics monitoring if enabled and we have a vLLM server
+        vllm_monitor: VLLMMetricsMonitor | None = None
+        is_vllm_provider = self.provider_config.kind in ("vllm", "vllm_server")
+        if (
+            self.metrics is not None
+            and self.metrics.enabled
+            and self.metrics.collect_vllm_server
+            and is_vllm_provider
+            and base_url
+        ):
+            vllm_metrics_path = os.path.join(
+                self.output_dir, "metrics", "vllm_server_metrics.jsonl"
+            )
+            vllm_monitor = VLLMMetricsMonitor(
+                base_url=base_url,
+                output_path=vllm_metrics_path,
+                interval_s=self.metrics.vllm_poll_interval_s,
+            )
+            vllm_monitor.start()
+
         try:
             for eval_name in self.external_eval_names:
                 logger.info(f"Running external evaluation: {eval_name}")
@@ -157,6 +181,12 @@ class ExternalEvalRunner:
                     results[eval_name] = ExternalEvalResult.from_error(eval_name, str(e))
 
         finally:
+            # Stop vLLM server metrics monitoring
+            if vllm_monitor is not None:
+                vllm_snapshots = vllm_monitor.stop()
+                if vllm_snapshots:
+                    logger.info(f"Collected {len(vllm_snapshots)} vLLM server metrics snapshots")
+
             # Disable GPU monitoring if enabled
             if isinstance(provider, InstrumentedProvider):
                 provider.disable_gpu_monitoring()
