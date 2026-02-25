@@ -76,17 +76,11 @@ class RulerTask(Task):
     with specific configuration from RULER_TASKS.
     """
 
-    def __init__(self, config: TaskConfig, task_name: str, ruler_config: dict[str, Any]) -> None:
-        """Initialize RULER task.
-
-        Args:
-            config: Task configuration
-            task_name: Full RULER task name (e.g., "niah_s_1__4096")
-            ruler_config: RULER-specific configuration dict
-        """
+    def __init__(self, config: TaskConfig) -> None:
         super().__init__(config)
+        task_name = config.name.removeprefix("ruler_")
         self.task_name = task_name
-        self.ruler_config = ruler_config
+        self.ruler_config = RULER_TASKS[task_name]
 
         # Extract context size from task name
         task_type, context_size_str = task_name.rsplit("__", 1)
@@ -98,7 +92,14 @@ class RulerTask(Task):
         self._templates = None
 
     def _load_data(self) -> None:
-        """Load RULER dataset if not already loaded."""
+        """Load RULER dataset if not already loaded.
+
+        RULER uses a custom data loader rather than the standard HuggingFace pipeline
+        because its data is pre-generated offline at specific context lengths (e.g. 4096,
+        8192 tokens) and stored as task-specific JSONL files.
+        Each file pairs synthetic context (needle-in-haystack padding, variable tracking
+        chains, etc.) with gold answers and formatting templates that vary by task type.
+        """
         if self._dataset is not None:
             return
 
@@ -244,40 +245,32 @@ class RulerTask(Task):
 
 
 def _make_ruler_task_class(task_name: str, task_cfg: dict) -> type:
-    """Create and register a task class for a RULER task variant."""
+    """Create a task subclass for a RULER task variant.
+
+    Subclasses carry only class-level attributes (metrics, sampling_params, limit);
+    all runtime state is derived from config.name inside RulerTask.__init__.
+    """
     # QA tasks use RulerQAScorer which applies HELMET-style normalization
     # (removes articles/punctuation, normalizes whitespace) matching the old framework.
     # All other tasks use the standard SubstringRecallScorer via RecallMetric.
-    if task_cfg["tag"] == "qa":
-        task_metrics = (RecallMetric(scorer=RulerQAScorer),)
-    else:
-        task_metrics = (RecallMetric(),)
-    task_primary_metric = "recall"
-
-    # Build sampling params
-    stop_sequences = []
-    if task_cfg.get("stop_new_line", False):
-        stop_sequences = ["\n", "Ċ", "ĊĊ", "<0x0A>"]
-
-    task_sampling_params = SamplingParams(
-        temperature=0.0,
-        top_p=1.0,
-        max_tokens=task_cfg.get("max_gen_toks", 50),
-        stop_sequences=stop_sequences if stop_sequences else None,
+    stop_sequences = ["\n", "Ċ", "ĊĊ", "<0x0A>"] if task_cfg.get("stop_new_line", False) else None
+    return type(
+        f"Ruler_{task_name}",
+        (RulerTask,),
+        {
+            "metrics": (RecallMetric(scorer=RulerQAScorer),)
+            if task_cfg["tag"] == "qa"
+            else (RecallMetric(),),
+            "primary_metric": "recall",
+            "sampling_params": SamplingParams(
+                temperature=0.0,
+                top_p=1.0,
+                max_tokens=task_cfg.get("max_gen_toks", 50),
+                stop_sequences=stop_sequences,
+            ),
+            "limit": 100,
+        },
     )
-
-    class _RulerTask(RulerTask):
-        metrics = task_metrics
-        primary_metric = task_primary_metric
-        sampling_params = task_sampling_params
-        limit = 100
-
-        def __init__(self, config: TaskConfig) -> None:
-            super().__init__(config, task_name, task_cfg)
-
-    _RulerTask.__name__ = f"Ruler_{task_name}"
-    _RulerTask.__qualname__ = f"Ruler_{task_name}"
-    return _RulerTask
 
 
 # Dynamically register all RULER tasks
@@ -293,7 +286,7 @@ for _task_name in RULER_TASKS:
     register_variant(
         f"ruler_{_task_name}",
         "bpb",
-        formatter=PPLFormatter(leading_space=False, answer_prefix=""),
+        formatter=PPLFormatter(leading_space=False),
         metrics=(BPBMetric(),),
         primary_metric=BPBMetric(),
     )
