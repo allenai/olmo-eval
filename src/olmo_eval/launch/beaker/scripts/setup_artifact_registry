@@ -1,6 +1,6 @@
 #!/bin/bash
 # Setup Google Artifact Registry authentication for Podman
-# Requires: GOOGLE_APPLICATION_CREDENTIALS env var pointing to service account JSON file
+# Requires: GOOGLE_APPLICATION_CREDENTIALS env var containing service account JSON
 
 set -e
 
@@ -18,10 +18,17 @@ if ! command -v gcloud &> /dev/null; then
     export PATH="/opt/google-cloud-sdk/bin:$PATH"
 fi
 
+# Write credentials to temp file (gcloud needs a file path, not inline JSON)
+CREDS_FILE=$(mktemp)
+echo "$GOOGLE_APPLICATION_CREDENTIALS" > "$CREDS_FILE"
+
 # Authenticate with gcloud
-gcloud auth activate-service-account --key-file="$GOOGLE_APPLICATION_CREDENTIALS" --quiet
+gcloud auth activate-service-account --key-file="$CREDS_FILE" --quiet
 
 # Configure docker/podman credential helper for Artifact Registry
 gcloud auth configure-docker us-east1-docker.pkg.dev --quiet
+
+# Clean up
+rm -f "$CREDS_FILE"
 
 echo "Artifact Registry authentication configured"
