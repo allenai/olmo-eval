@@ -29,7 +29,6 @@ dependencies = [
     "rich~=14.3.1",
     "sympy>=1.12",
     "textual-plot>=0.10.1",
-    "unicode-segmentation-rs>=0.2.1",
 ]
 
 [project.urls]
