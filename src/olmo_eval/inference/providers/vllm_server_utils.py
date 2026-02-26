@@ -166,6 +166,16 @@ def _get_vllm_python() -> str:
     return os.environ.get("VLLM_PYTHON", sys.executable)
 
 
+def _get_olmo3_tool_template_path() -> str:
+    """Get path to bundled OLMo3 tool chat template."""
+    import importlib.resources
+
+    return str(
+        importlib.resources.files("olmo_eval.inference.templates")
+        / "tool_chat_template_olmo3.jinja"
+    )
+
+
 def _build_server_command(
     model_name: str,
     port: int,
@@ -235,6 +245,10 @@ def _build_server_command(
         # Auto-detect parser if not specified
         parser = tool_call_parser or _infer_tool_call_parser(model_name)
         cmd.extend(["--tool-call-parser", parser])
+
+        # OLMo3 requires custom chat template for tool calling
+        if parser == "olmo3":
+            cmd.extend(["--chat-template", _get_olmo3_tool_template_path()])
 
     # Prefix caching (enabled by default for faster inference)
     if enable_prefix_caching:
