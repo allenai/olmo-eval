@@ -86,7 +86,7 @@ class HarnessPresets:
             ),
             metrics=MetricsConfig(),
             backend="openai_agents",
-            required_secrets=("OPENAI_API_KEY",),
+            max_concurrency=4,
         )
 
     @lazy
