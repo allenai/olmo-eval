@@ -729,6 +729,13 @@ class BeakerLauncher:
             for pkg in task_packages:
                 steps.append(build_install_command(pkg, constraints))
 
+        # Patch vLLM's olmo3 tool parser to handle bracket-wrapped function calls
+        # See: https://github.com/vllm-project/vllm/issues/32534
+        if use_isolated_vllm_venv:
+            steps.append(
+                "python -m olmo_eval.inference.patches.olmo3_tool_parser_patch /opt/vllm-venv"
+            )
+
         # Set up database credentials for --store
         if setup_store_secrets:
             script = "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/setup_store_secrets"
