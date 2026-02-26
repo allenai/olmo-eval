@@ -42,7 +42,9 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     type=click.Path(exists=True),
     help="YAML config file (CLI args override config values)",
 )
-@click.option("--name", "-n", help="Experiment name")
+@click.option(
+    "--name", "-n", help="Experiment name (auto-generated from model/tasks if not provided)"
+)
 @click.option(
     "--model",
     "-m",
@@ -1145,7 +1147,16 @@ def _launch_external_evals(
 
         # Generate experiment name using shared utility
         short_name = get_model_short_name(model_spec, model_alias)
-        exp_name = name or f"external-{short_name}-{'-'.join(external_evals)}"
+        if name:
+            exp_name = name
+        elif len(external_evals) <= 2:
+            # Short list: include all eval names
+            exp_name = f"{short_name}-{'-'.join(external_evals)}-external"
+        else:
+            # Many evals: show first eval + count to keep name reasonable
+            exp_name = (
+                f"{short_name}-{external_evals[0]}-and-{len(external_evals) - 1}-more-external"
+            )
 
         job_config = assemble_external_eval_job(
             name=exp_name,
