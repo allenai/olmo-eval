@@ -244,7 +244,7 @@ class RulerTask(Task):
         return output.text
 
 
-def _make_ruler_task_class(task_name: str, task_cfg: dict) -> type:
+def _make_ruler_task_class(task_name: str, task_cfg: dict) -> type[RulerTask]:
     """Create a task subclass for a RULER task variant.
 
     Subclasses carry only class-level attributes (metrics, sampling_params, limit);
@@ -253,7 +253,9 @@ def _make_ruler_task_class(task_name: str, task_cfg: dict) -> type:
     # QA tasks use RulerQAScorer which applies HELMET-style normalization
     # (removes articles/punctuation, normalizes whitespace) matching the old framework.
     # All other tasks use the standard SubstringRecallScorer via RecallMetric.
-    stop_sequences = ["\n", "Ċ", "ĊĊ", "<0x0A>"] if task_cfg.get("stop_new_line", False) else None
+    stop_sequences: tuple[str, ...] | None = (
+        ("\n", "Ċ", "ĊĊ", "<0x0A>") if task_cfg.get("stop_new_line", False) else None
+    )
     return type(
         f"Ruler_{task_name}",
         (RulerTask,),

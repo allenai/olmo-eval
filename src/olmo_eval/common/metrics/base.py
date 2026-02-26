@@ -85,7 +85,7 @@ class RecallMetric(Metric):
     """
 
     name: str = "recall"
-    scorer: type[SubstringRecallScorer] = SubstringRecallScorer
+    scorer: type[Scorer] = SubstringRecallScorer
 
     def compute(self, responses: Sequence[Response]) -> float:
         """Compute average recall across all responses.

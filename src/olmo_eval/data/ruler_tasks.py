@@ -120,7 +120,7 @@ def _generate_ruler_tasks() -> dict:
 
             # Build task configuration
             tasks[task_name] = {
-                "data": base_config["data_template"].format(size=size),
+                "data": str(base_config["data_template"]).format(size=size),
                 "examples": None,
                 "num_shots": 0,
                 "max_gen_toks": max_gen_toks,
