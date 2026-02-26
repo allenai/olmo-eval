@@ -258,6 +258,7 @@ def _make_ruler_task_class(task_name: str, task_cfg: dict) -> type:
         f"Ruler_{task_name}",
         (RulerTask,),
         {
+            "__module__": __name__,
             "metrics": (RecallMetric(scorer=RulerQAScorer),)
             if task_cfg["tag"] == "qa"
             else (RecallMetric(),),
