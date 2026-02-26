@@ -151,7 +151,14 @@ class VLLMProvider(InferenceProvider):
         # Disable tqdm loading bar by default, enable with --debug-provider
         engine_kwargs.setdefault("use_tqdm_on_load", is_debug_provider())
 
+        # Extract add_bos_token before passing to LLM (not a valid vLLM EngineArgs parameter)
+        add_bos_token = engine_kwargs.pop("add_bos_token", None)
+
         self.llm: LLM = LLM(model=model_name, **engine_kwargs)
+
+        # Patch tokenizer add_bos_token if explicitly set (overrides tokenizer_config.json default)
+        if add_bos_token is not None:
+            self.llm.get_tokenizer().add_bos_token = add_bos_token
 
     @property
     def max_length(self) -> int:
