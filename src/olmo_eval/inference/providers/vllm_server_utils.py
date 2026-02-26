@@ -147,8 +147,10 @@ def _infer_tool_call_parser(model_name: str) -> str:
         return "llama3_json"
     elif "mistral" in model_lower:
         return "mistral"
+    elif "olmo" in model_lower:
+        return "olmo3"
     else:
-        # Default for Qwen, OLMo, and other models
+        # Default for Qwen and other models
         return "hermes"
 
 

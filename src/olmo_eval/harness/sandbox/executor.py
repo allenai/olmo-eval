@@ -30,8 +30,9 @@ def _get_log_docker_args(log_dir: str, name: str) -> tuple[str, ...]:
     Returns:
         Docker args tuple for json-file logging.
     """
-    os.makedirs(log_dir, exist_ok=True)
-    log_path = os.path.join(log_dir, f"{name}.log")
+    sandbox_log_dir = os.path.join(log_dir, "sandboxes", name)
+    os.makedirs(sandbox_log_dir, exist_ok=True)
+    log_path = os.path.join(sandbox_log_dir, "container.log")
     return ("--log-driver=json-file", "--log-opt", f"path={log_path}")
 
 
