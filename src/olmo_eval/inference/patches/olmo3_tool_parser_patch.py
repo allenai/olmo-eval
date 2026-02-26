@@ -1,11 +1,14 @@
-"""Patch for vLLM's olmo3 tool parser to handle bracket-wrapped function calls.
+"""Patch for vLLM's olmo3 tool parser to handle JSON content in string arguments.
 
-The OLMo3 model sometimes outputs tool calls wrapped in square brackets like:
-    [submit(answer='...')]
-instead of:
-    submit(answer='...')
+The OLMo3 model outputs tool calls in Python-like syntax:
+    [submit(answer='{"key": "value"}')]
 
-This patch modifies the parser to strip brackets before parsing with ast.parse().
+The vLLM parser uses ast.parse() which fails when the JSON string contains:
+- Newlines (pretty-printed JSON)
+- Single quotes in text (e.g., "Model's approach")
+- Unescaped backslashes (e.g., "C:\\path")
+
+This patch adds preprocessing to escape these characters before ast.parse().
 
 Related issues:
 - https://github.com/vllm-project/vllm/issues/32534 (OLMo-3 tool calling issue)
@@ -16,8 +19,6 @@ Usage:
 
     venv_path: Optional path to the venv containing vLLM (e.g., /opt/vllm-venv)
                If not provided, searches current Python's site-packages.
-
-This script should be run after vLLM is installed.
 """
 
 from __future__ import annotations
@@ -28,16 +29,37 @@ import site
 import sys
 from pathlib import Path
 
+# The code to insert before ast.parse() to sanitize string content
+# This replaces problematic characters that break Python string parsing
+SANITIZE_CODE = r'''
+            # PATCHED: Sanitize string arguments before ast.parse
+            # See: https://github.com/vllm-project/vllm/issues/32534
+            # JSON content in single-quoted strings can break Python parsing due to:
+            # - Newlines (pretty-printed JSON)
+            # - Single quotes in text (e.g., "Model's approach")
+            # - Unescaped backslashes
+            import re as _re
+            def _sanitize_python_strings(text: str) -> str:
+                """Escape problematic characters inside single-quoted strings."""
+                # Find all single-quoted strings and escape control characters
+                def _escape_string_content(match):
+                    content = match.group(1)
+                    # Escape literal control characters
+                    content = content.replace('\n', '\\n')
+                    content = content.replace('\r', '\\r')
+                    content = content.replace('\t', '\\t')
+                    return "'" + content + "'"
+                # Match single-quoted strings (non-greedy, handling escaped quotes)
+                # This pattern matches 'content' where content can include \'
+                return _re.sub(r"'((?:[^'\\]|\\.)*)'", _escape_string_content, text)
+
+            model_output = _sanitize_python_strings(model_output)
+'''
+
 
 def find_olmo3_parser(venv_path: str | None = None) -> Path | None:
-    """Find the olmo3_tool_parser.py file in site-packages.
-
-    Args:
-        venv_path: Optional path to a venv to search. If None, searches
-                   the current Python's site-packages.
-    """
+    """Find the olmo3_tool_parser.py file in site-packages."""
     if venv_path:
-        # Search in the specified venv
         venv = Path(venv_path)
         for lib_dir in venv.glob("lib/python*/site-packages"):
             parser_path = lib_dir / "vllm" / "tool_parsers" / "olmo3_tool_parser.py"
@@ -45,7 +67,6 @@ def find_olmo3_parser(venv_path: str | None = None) -> Path | None:
                 return parser_path
         return None
 
-    # Search in current Python's site-packages
     for site_dir in site.getsitepackages() + [site.getusersitepackages()]:
         parser_path = Path(site_dir) / "vllm" / "tool_parsers" / "olmo3_tool_parser.py"
         if parser_path.exists():
@@ -54,36 +75,30 @@ def find_olmo3_parser(venv_path: str | None = None) -> Path | None:
 
 
 def patch_parser(parser_path: Path) -> bool:
-    """Patch the olmo3 parser to strip brackets before ast.parse().
+    """Patch the olmo3 parser to sanitize strings before ast.parse().
 
     Returns True if patch was applied, False if already patched or not needed.
     """
     content = parser_path.read_text()
 
     # Check if already patched
-    if "# PATCHED: Strip brackets" in content:
+    if "# PATCHED: Sanitize string arguments" in content:
         print(f"Parser already patched: {parser_path}")
         return False
 
-    # Find the ast.parse call and add bracket stripping before it
-    # The original code is typically:
-    #     module = ast.parse(model_output)
-    # We want to add bracket stripping before it
-
-    # Pattern to find the ast.parse line in extract_tool_calls
-    pattern = r"(\s+)module = ast\.parse\(model_output\)"
+    # Find the ast.parse call in extract_tool_calls and add sanitization before it
+    # Pattern matches the line with ast.parse(model_output) capturing the indentation
+    pattern = r"(\n)(\s+)(module = ast\.parse\(model_output\))"
 
     def replacement(match: re.Match) -> str:
-        indent = match.group(1)
-        return f"""{indent}# PATCHED: Strip brackets from model output if present
-{indent}# See: https://github.com/vllm-project/vllm/issues/32534
-{indent}# OLMo3 sometimes outputs tool calls wrapped in brackets like [func(...)]
-{indent}_model_output = model_output.strip()
-{indent}if _model_output.startswith('[') and _model_output.endswith(']'):
-{indent}    _model_output = _model_output[1:-1].strip()
-{indent}module = ast.parse(_model_output)"""
+        newline = match.group(1)
+        indent = match.group(2)
+        ast_parse_line = match.group(3)
+        # Insert sanitization code before ast.parse, adjusting indentation
+        sanitize = SANITIZE_CODE.replace("\n            ", f"\n{indent}")
+        return f"{newline}{sanitize}\n{indent}{ast_parse_line}"
 
-    new_content, count = re.subn(pattern, replacement, content)
+    new_content, count = re.subn(pattern, replacement, content, count=1)
 
     if count == 0:
         print(f"Could not find ast.parse pattern in {parser_path}")
@@ -99,7 +114,7 @@ def patch_parser(parser_path: Path) -> bool:
 def main() -> int:
     """Main entry point for the patch script."""
     arg_parser = argparse.ArgumentParser(
-        description="Patch vLLM's olmo3 tool parser to handle bracket-wrapped calls"
+        description="Patch vLLM's olmo3 tool parser to handle JSON in string arguments"
     )
     arg_parser.add_argument(
         "venv_path",

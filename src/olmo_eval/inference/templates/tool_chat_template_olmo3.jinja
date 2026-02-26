@@ -56,19 +56,10 @@
 {%- else %}
 {%- set args = tool_call.arguments %}
 {%- endif %}
+{#- Use tojson for all values to properly escape strings (matches official OLMo3 template) #}
+{#- See: https://github.com/vllm-project/vllm/issues/32534 #}
 {%- for key, value in args.items() %}
-{{- key + "=" }}
-{%- if value is string %}
-{{- "'" + value + "'" }}
-{%- elif value is none %}
-{{- "null" }}
-{%- elif value is sameas true %}
-{{- "true" }}
-{%- elif value is sameas false %}
-{{- "false" }}
-{%- else %}
-{{- value | tojson }}
-{%- endif %}
+{{- key + "=" + (value | tojson) }}
 {%- if not loop.last %}
 {{- ", " }}
 {%- endif %}

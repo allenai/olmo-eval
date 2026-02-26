@@ -729,7 +729,7 @@ class BeakerLauncher:
             for pkg in task_packages:
                 steps.append(build_install_command(pkg, constraints))
 
-        # Patch vLLM's olmo3 tool parser to handle bracket-wrapped function calls
+        # Patch vLLM's olmo3 tool parser to handle JSON content in string arguments
         # See: https://github.com/vllm-project/vllm/issues/32534
         if use_isolated_vllm_venv:
             steps.append(
