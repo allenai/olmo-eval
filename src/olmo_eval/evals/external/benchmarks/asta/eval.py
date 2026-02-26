@@ -463,8 +463,8 @@ class AstaExternalEval(SandboxedExternalEval):
         """
         from pathlib import Path
 
-        # Create trajectories output directory
-        trajectories_dir = Path(output_dir) / "trajectories"
+        # Create trajectories output directory (under asta_results with other task files)
+        trajectories_dir = Path(output_dir) / "asta_results" / "trajectories"
         container_trajectories_dir = f"{self.results_dir}/trajectories_json"
 
         # Find all .eval files in the results directory
