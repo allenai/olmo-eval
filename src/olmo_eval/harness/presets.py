@@ -13,6 +13,7 @@ from olmo_eval.common.constants import BEAKER_RESULT_DIR, LOCAL_RESULT_DIR
 from olmo_eval.common.types import ProviderKind
 from olmo_eval.harness.sandbox import Capability
 from olmo_eval.inference.metrics import MetricsConfig
+from olmo_eval.runners.asynq.batching import BatchConfig
 
 from .config import HarnessConfig, ProviderConfig
 from .constants import (
@@ -87,6 +88,7 @@ class HarnessPresets:
             metrics=MetricsConfig(),
             backend="openai_agents",
             max_concurrency=4,
+            batching=BatchConfig.streaming(),
         )
 
     @lazy
