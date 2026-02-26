@@ -659,9 +659,9 @@ class AstaExternalEval(SandboxedExternalEval):
         import base64
         from pathlib import Path
 
-        # List all files in the results directory
+        # List all files in the results directory (skip .eval files since we dump JSON trajectories)
         list_result = await executor.execute_command(
-            f"find {self.results_dir} -type f \\( -name '*.json' -o -name '*.eval' \\) 2>/dev/null",
+            f"find {self.results_dir} -type f -name '*.json' 2>/dev/null",
             timeout=60.0,
         )
 
