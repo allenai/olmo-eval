@@ -76,6 +76,20 @@ class HarnessPresets:
         )
 
     @lazy
+    def simple_agent(name: str) -> HarnessConfig:
+        """Experiment"""
+        return HarnessConfig(
+            name=name,
+            provider=ProviderConfig(
+                kind=ProviderKind.VLLM_SERVER,
+                kwargs={"timeout": 60},
+            ),
+            metrics=MetricsConfig(),
+            backend="openai_agents",
+            required_secrets=("OPENAI_API_KEY",),
+        )
+
+    @lazy
     def dr_tulu(name: str) -> HarnessConfig:
         """Dr. Tulu preset with web and academic search tools."""
         from .tools.search import semantic_scholar_search, serper_fetch_page, serper_web_search
