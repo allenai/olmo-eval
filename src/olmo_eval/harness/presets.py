@@ -87,7 +87,7 @@ class HarnessPresets:
             ),
             metrics=MetricsConfig(),
             backend="openai_agents",
-            max_concurrency=4,
+            max_concurrency=1,
             batching=BatchConfig.streaming(),
         )
 
