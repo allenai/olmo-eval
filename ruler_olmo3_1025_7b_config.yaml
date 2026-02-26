@@ -1,0 +1,11 @@
+name: test-ruler-olmo-3-1025-7b
+models:
+  - olmo-3-1025-7b
+
+tasks:
+  - ruler_all__4096
+
+cluster: h100
+workspace: ai2/olmo-3-evals
+budget: ai2/oe-base
+timeout: 24h
