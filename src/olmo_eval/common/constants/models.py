@@ -69,6 +69,15 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             kind=ProviderKind.VLLM,
             model="mistralai/Mistral-7B-v0.3",
         ),
+        "marin-8b-base": ProviderConfig(
+            kind=ProviderKind.VLLM,
+            model="marin-community/marin-8b-base",
+        ),
+        "nemotron-nano-9b-v2-base": ProviderConfig(
+            kind=ProviderKind.VLLM,
+            model="nvidia/NVIDIA-Nemotron-Nano-9B-v2-Base",
+            trust_remote_code=True,
+        ),
         "gpt-4o": ProviderConfig(
             kind=ProviderKind.LITELLM,
             model="gpt-4o",

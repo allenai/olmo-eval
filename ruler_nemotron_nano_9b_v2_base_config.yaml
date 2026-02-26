@@ -1,0 +1,11 @@
+name: test-ruler-nemotron-nano-9b-v2-base
+models:
+  - nemotron-nano-9b-v2-base
+
+tasks:
+  - ruler_all__16384
+
+cluster: h100
+workspace: ai2/olmo-3-evals
+budget: ai2/oe-base
+timeout: 24h
