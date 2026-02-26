@@ -57,6 +57,9 @@ class AstaArgs:
     # Use for task-specific flags like -T with_search_tools=1
     extra_args: list[str] = field(default_factory=list)
 
+    # Trajectory logging
+    dump_trajectories: bool = True
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AstaArgs:
         # Handle tasks which can be comma-separated string or list
@@ -90,4 +93,5 @@ class AstaArgs:
             temperature=_parse_optional(data, "temperature", float),
             max_tokens=_parse_optional(data, "max_tokens", int),
             extra_args=extra_args,
+            dump_trajectories=data.get("dump_trajectories", True),
         )

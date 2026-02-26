@@ -182,6 +182,7 @@ class AstaExternalEval(SandboxedExternalEval):
             "temperature": ("Temperature for agent responses", None),
             "max_tokens": ("Max tokens for agent responses", None),
             "extra_args": ("Extra args to pass to inspect eval", None),
+            "dump_trajectories": ("Dump agent trajectories to JSON files", True),
         }
 
     async def execute(
@@ -210,20 +211,27 @@ class AstaExternalEval(SandboxedExternalEval):
             container_runtime, output_dir, asta_args
         )
 
+        result: ExternalEvalResult | None = None
+        executor: SandboxExecutor | None = None
+
         try:
-            async with SandboxExecutor(sandbox_config, name=self.name) as executor:
-                if err := await self._run_setup(executor, all_output, start_time):
-                    return err
+            from olmo_eval.harness.sandbox.executor import SandboxExecutor
 
-                if is_local:
-                    provider_url = self._get_provider_url_for_sandbox(provider_url)
-                    if not await self._check_provider_health(executor, provider_url):
-                        return self._error_result(
-                            f"Provider not reachable at {provider_url}",
-                            start_time,
-                            "\n".join(all_output),
-                        )
+            executor = SandboxExecutor(sandbox_config, name=self.name)
+            await executor.__aenter__()
 
+            if err := await self._run_setup(executor, all_output, start_time):
+                result = err
+            elif is_local:
+                provider_url = self._get_provider_url_for_sandbox(provider_url)
+                if not await self._check_provider_health(executor, provider_url):
+                    result = self._error_result(
+                        f"Provider not reachable at {provider_url}",
+                        start_time,
+                        "\n".join(all_output),
+                    )
+
+            if result is None:
                 run_cmd = self._build_run_command(model_name, provider_url, is_local, asta_args)
                 logger.info(f"[{self.name}] Running: {run_cmd}")
 
@@ -266,7 +274,25 @@ class AstaExternalEval(SandboxedExternalEval):
 
         except Exception as e:
             logger.exception(f"[{self.name}] Execution failed")
-            return self._error_result(str(e), start_time, "\n".join(all_output))
+            result = self._error_result(str(e), start_time, "\n".join(all_output))
+
+        finally:
+            # Always attempt to dump trajectories, even on failure
+            if executor is not None and asta_args.dump_trajectories and output_dir:
+                try:
+                    await self._dump_trajectories_to_json(executor, output_dir, all_output)
+                except Exception as e:
+                    logger.warning(f"[{self.name}] Failed to dump trajectories: {e}")
+
+            # Clean up executor
+            if executor is not None:
+                try:
+                    await executor.__aexit__(None, None, None)
+                except Exception as e:
+                    logger.warning(f"[{self.name}] Error closing executor: {e}")
+
+        if result is None:
+            result = self._error_result("No result produced", start_time, "\n".join(all_output))
 
         result.duration_seconds = time.time() - start_time
         return result
@@ -423,6 +449,99 @@ class AstaExternalEval(SandboxedExternalEval):
             args.append(f"astabench/{task}")
 
         return f"cd {self.working_dir} && {shlex.join(args)}"
+
+    async def _dump_trajectories_to_json(
+        self,
+        executor: SandboxExecutor,
+        output_dir: str,
+        all_output: list[str],
+    ) -> None:
+        """Convert .eval log files to JSON for trajectory analysis.
+
+        This runs even on evaluation failure to preserve agent trajectories
+        for debugging purposes.
+        """
+        from pathlib import Path
+
+        # Create trajectories output directory
+        trajectories_dir = Path(output_dir) / "trajectories"
+        container_trajectories_dir = f"{self.results_dir}/trajectories_json"
+
+        # Find all .eval files in the results directory
+        find_cmd = f"find {self.results_dir} -name '*.eval' -type f 2>/dev/null"
+        find_result = await executor.execute_command(find_cmd, timeout=60.0)
+
+        if not find_result.success or not find_result.output.strip():
+            logger.info(f"[{self.name}] No .eval files found to convert to JSON")
+            return
+
+        eval_files = [f.strip() for f in find_result.output.strip().split("\n") if f.strip()]
+        logger.info(f"[{self.name}] Found {len(eval_files)} .eval files to convert")
+
+        # Create output directory in container
+        mkdir_cmd = f"mkdir -p {container_trajectories_dir}"
+        await executor.execute_command(mkdir_cmd, timeout=30.0)
+
+        # Convert each .eval file to JSON using inspect log convert
+        converted_count = 0
+        for eval_file in eval_files:
+            # Use inspect log convert to produce JSON
+            convert_cmd = (
+                f"cd {self.working_dir} && "
+                f"uv run inspect log convert {shlex.quote(eval_file)} "
+                f"--to json --output-dir {container_trajectories_dir}"
+            )
+            logger.debug(f"[{self.name}] Converting: {convert_cmd}")
+
+            convert_result = await executor.execute_command(
+                convert_cmd, timeout=120.0, stream=False
+            )
+
+            if convert_result.success:
+                converted_count += 1
+            else:
+                logger.warning(
+                    f"[{self.name}] Failed to convert {eval_file}: {convert_result.output}"
+                )
+                all_output.append(f"$ {convert_cmd}\n{convert_result.output}")
+
+        logger.info(f"[{self.name}] Converted {converted_count}/{len(eval_files)} .eval files")
+
+        # Copy converted JSON files to output directory
+        list_json_cmd = f"find {container_trajectories_dir} -name '*.json' -type f 2>/dev/null"
+        list_result = await executor.execute_command(list_json_cmd, timeout=60.0)
+
+        if not list_result.success or not list_result.output.strip():
+            logger.warning(f"[{self.name}] No JSON trajectory files found after conversion")
+            return
+
+        json_files = [f.strip() for f in list_result.output.strip().split("\n") if f.strip()]
+        trajectories_dir.mkdir(parents=True, exist_ok=True)
+
+        import base64
+
+        for remote_path in json_files:
+            # Get filename for local path
+            filename = remote_path.split("/")[-1]
+            local_path = trajectories_dir / filename
+
+            # Read file content (use base64 for safe transfer)
+            read_result = await executor.execute_command(
+                f"base64 {shlex.quote(remote_path)}", timeout=120.0
+            )
+
+            if read_result.success and read_result.output.strip():
+                try:
+                    content = base64.b64decode(read_result.output.strip())
+                    with open(local_path, "wb") as f:
+                        f.write(content)
+                    logger.debug(f"[{self.name}] Saved trajectory: {filename}")
+                except Exception as e:
+                    logger.warning(f"[{self.name}] Failed to save {filename}: {e}")
+            else:
+                logger.warning(f"[{self.name}] Failed to read {remote_path}")
+
+        logger.info(f"[{self.name}] Saved {len(json_files)} trajectory files to {trajectories_dir}")
 
     async def _extract_results(
         self,
