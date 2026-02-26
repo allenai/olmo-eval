@@ -10,9 +10,99 @@ from .schema import GPUSnapshot, RequestMetrics
 from .timer import Timer
 
 if TYPE_CHECKING:
+    from openai import AsyncOpenAI
+
     from olmo_eval.common.types import LMOutput, LMRequest, SamplingParams
     from olmo_eval.harness import Harness
     from olmo_eval.inference.base import InferenceProvider
+
+
+class _InstrumentedCompletions:
+    """Wraps chat.completions to intercept create() calls for metrics."""
+
+    def __init__(self, completions: Any, collector: InstrumentedProvider, model_name: str) -> None:
+        self._completions = completions
+        self._collector = collector
+        self._model_name = model_name
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._completions, name)
+
+    async def create(self, **kwargs: Any) -> Any:
+        """Intercept chat completion create to collect metrics."""
+        with Timer() as t:
+            response = await self._completions.create(**kwargs)
+
+        # Extract token counts from response usage
+        prompt_tokens = 0
+        completion_tokens = 0
+        finish_reason = None
+
+        if hasattr(response, "usage") and response.usage:
+            prompt_tokens = response.usage.prompt_tokens or 0
+            completion_tokens = response.usage.completion_tokens or 0
+
+        # Get finish reason from first choice if available
+        if hasattr(response, "choices") and response.choices:
+            finish_reason = response.choices[0].finish_reason
+
+        # Compute tokens per second
+        tps = completion_tokens / t.elapsed_s if t.elapsed_s > 0 else 0.0
+
+        metrics = RequestMetrics(
+            request_id=str(uuid.uuid4()),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            end_to_end_latency_s=t.elapsed_s,
+            tokens_per_second=tps,
+            model=self._model_name,
+            finish_reason=finish_reason,
+        )
+        self._collector._request_metrics.append(metrics)
+
+        return response
+
+
+class _InstrumentedChat:
+    """Wraps client.chat to return instrumented completions."""
+
+    def __init__(self, chat: Any, collector: InstrumentedProvider, model_name: str) -> None:
+        self._chat = chat
+        self._collector = collector
+        self._model_name = model_name
+        self._completions: _InstrumentedCompletions | None = None
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._chat, name)
+
+    @property
+    def completions(self) -> _InstrumentedCompletions:
+        if self._completions is None:
+            self._completions = _InstrumentedCompletions(
+                self._chat.completions, self._collector, self._model_name
+            )
+        return self._completions
+
+
+class _InstrumentedAsyncOpenAI:
+    """Wraps AsyncOpenAI client to intercept chat.completions.create() for metrics."""
+
+    def __init__(
+        self, client: AsyncOpenAI, collector: InstrumentedProvider, model_name: str
+    ) -> None:
+        self._client = client
+        self._collector = collector
+        self._model_name = model_name
+        self._chat: _InstrumentedChat | None = None
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._client, name)
+
+    @property
+    def chat(self) -> _InstrumentedChat:
+        if self._chat is None:
+            self._chat = _InstrumentedChat(self._client.chat, self._collector, self._model_name)
+        return self._chat
 
 
 class InstrumentedProvider:
@@ -35,6 +125,15 @@ class InstrumentedProvider:
     def __getattr__(self, name: str) -> Any:
         """Forward unknown attributes to the underlying provider."""
         return getattr(self._provider, name)
+
+    def get_openai_client(self) -> _InstrumentedAsyncOpenAI:
+        """Return an instrumented OpenAI client for metrics collection.
+
+        This wraps the provider's OpenAI client to intercept chat.completions.create()
+        calls and collect request metrics. Used by the openai_agents backend.
+        """
+        base_client = self._provider.get_openai_client()
+        return _InstrumentedAsyncOpenAI(base_client, self, self._provider.model_name)
 
     def enable_gpu_monitoring(self, interval_s: float = 1.0) -> None:
         """Enable GPU metrics collection during inference.
