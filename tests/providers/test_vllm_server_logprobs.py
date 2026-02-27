@@ -94,7 +94,7 @@ class TestVLLMServerProviderLogprobs:
                 assert len(output.logprobs) == 1
                 assert output.logprobs[0]["token"] == "Paris"
                 assert output.logprobs[0]["logprob"] == -0.1
-                assert output.metadata["total_logprob"] == -0.1
+                assert output.metadata["sum_logits"] == -0.1
                 assert output.metadata["num_tokens"] == 1
 
     @pytest.mark.anyio
@@ -159,7 +159,7 @@ class TestVLLMServerProviderLogprobs:
 
             assert len(outputs) == 3
             # Paris should have highest logprob (least negative)
-            logprobs = [o.metadata["total_logprob"] for o in outputs]
+            logprobs = [o.metadata["sum_logits"] for o in outputs]
             assert logprobs[0] > logprobs[1] > logprobs[2]
 
     @pytest.mark.anyio

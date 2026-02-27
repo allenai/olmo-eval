@@ -644,7 +644,11 @@ class VLLMServerProvider(InferenceProvider):
                 LMOutput(
                     text=continuation,
                     logprobs=logprob_entries if logprob_entries else None,
-                    metadata={"total_logprob": total, "num_tokens": len(logprob_entries)},
+                    metadata={
+                        "sum_logits": total,
+                        "num_tokens": len(logprob_entries),
+                        "num_tokens_all": len(logprob_entries),
+                    },
                 )
             )
 
