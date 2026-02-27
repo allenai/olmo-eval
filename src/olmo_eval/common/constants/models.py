@@ -42,7 +42,6 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             trust_remote_code=True,
             max_model_len=4096,
             revision="stage2-step47684",
-            package="vllm==0.11.0",
             kwargs={"gpu_memory_utilization": 0.7, "add_bos_token": False},
         ),
         "olmo-2-7b": ProviderConfig(
