@@ -111,6 +111,9 @@ class RemoteTokenizer:
 # Enable with VLLM_DEBUG_REQUESTS=1
 _DEBUG_REQUESTS = os.environ.get("VLLM_DEBUG_REQUESTS", "").lower() in ("1", "true", "yes")
 
+# Disable retries for debugging with VLLM_DEBUG_NO_RETRY=1
+_DEBUG_NO_RETRY = os.environ.get("VLLM_DEBUG_NO_RETRY", "").lower() in ("1", "true", "yes")
+
 
 def _log_request(request: httpx.Request) -> None:
     """Log outgoing HTTP request."""
@@ -119,6 +122,32 @@ def _log_request(request: httpx.Request) -> None:
     if len(body) > 2000:
         body = body[:2000] + "... [truncated]"
     logger.info(f"vLLM request: {request.method} {request.url}\n  body: {body}")
+
+
+async def _log_response(response: httpx.Response) -> None:
+    """Log HTTP response, especially errors."""
+    if response.status_code >= 400:
+        # Read body for error details
+        await response.aread()
+        body = response.text[:1000] if response.text else "(empty)"
+        logger.error(f"vLLM response error: {response.status_code} {response.url}\n  body: {body}")
+
+
+class _DebugTransport(httpx.AsyncHTTPTransport):
+    """Transport wrapper that logs all HTTP errors with full tracebacks."""
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        try:
+            return await super().handle_async_request(request)
+        except Exception as e:
+            import traceback
+
+            logger.error(
+                f"vLLM transport error: {type(e).__name__}: {e}\n"
+                f"  URL: {request.url}\n"
+                f"  Traceback:\n{traceback.format_exc()}"
+            )
+            raise
 
 
 class VLLMServerProvider(InferenceProvider):
@@ -244,19 +273,29 @@ class VLLMServerProvider(InferenceProvider):
                 logger.info("vLLM debug request logging enabled (VLLM_DEBUG_REQUESTS=1)")
                 event_hooks = {
                     "request": [_log_request],
+                    "response": [_log_response],
                 }
 
+            # Use debug transport when enabled to catch connection errors
+            transport = _DebugTransport() if _DEBUG_REQUESTS else None
+
             self._http_client = httpx.AsyncClient(
+                transport=transport,
                 limits=limits,
                 timeout=self.timeout,
                 event_hooks=event_hooks or {},
             )
 
+            # Use 0 retries when debugging to see errors immediately
+            effective_retries = 0 if _DEBUG_NO_RETRY else self.max_retries
+            if _DEBUG_NO_RETRY:
+                logger.info("vLLM debug: retries disabled (VLLM_DEBUG_NO_RETRY=1)")
+
             self._client = AsyncOpenAI(
                 base_url=self.base_url,
                 api_key="EMPTY",
                 timeout=self.timeout,
-                max_retries=self.max_retries,
+                max_retries=effective_retries,
                 http_client=self._http_client,
             )
         return self._client
