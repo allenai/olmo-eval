@@ -180,6 +180,31 @@ def _get_olmo3_tool_template_path() -> str:
 _NON_VLLM_KWARGS = frozenset({"patch_olmo3_tool_parser"})
 
 
+def _apply_olmo3_tool_parser_patch() -> None:
+    """Apply OLMo3 tool parser patch at runtime.
+
+    This patches vLLM's olmo3_tool_parser.py to handle JSON content in string
+    arguments. The patch is idempotent (checks if already applied).
+
+    See: https://github.com/vllm-project/vllm/issues/32534
+    """
+    import os
+    from pathlib import Path
+
+    from olmo_eval.inference.patches.olmo3_tool_parser_patch import (
+        find_olmo3_parser,
+        patch_parser,
+    )
+
+    # Determine which venv to patch based on VLLM_PYTHON env var
+    vllm_python = os.environ.get("VLLM_PYTHON")
+    venv_path = str(Path(vllm_python).parent.parent) if vllm_python else None
+
+    parser_path = find_olmo3_parser(venv_path)
+    if parser_path:
+        patch_parser(parser_path)
+
+
 def _build_server_command(
     model_name: str,
     port: int,
@@ -219,6 +244,11 @@ def _build_server_command(
 
     # Extract deployment kwargs before filtering
     patch_olmo3_tool_parser = kwargs.get("patch_olmo3_tool_parser", False)
+
+    # Apply OLMo3 tool parser patch at runtime if requested
+    # This patches vLLM to handle JSON content in string arguments
+    if patch_olmo3_tool_parser:
+        _apply_olmo3_tool_parser_patch()
 
     # Use VLLM_PYTHON env var if set (for isolated venv setups)
     python_executable = _get_vllm_python()
