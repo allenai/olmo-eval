@@ -124,8 +124,13 @@ def validate_task_metrics(tasks: list[str]) -> tuple[list[str], list[str]]:
                 with_metrics.append(spec)
             else:
                 without_metrics.append(spec)
-        except Exception:
-            # If we can't instantiate the task, skip it (should be caught elsewhere)
+        except Exception as e:
+            # Log the error so config problems aren't silently swallowed
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Failed to load task %r for metrics validation: %s", task_spec, e
+            )
             without_metrics.append(spec)
 
     return with_metrics, without_metrics
