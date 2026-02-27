@@ -533,8 +533,8 @@ class VLLMServerProvider(InferenceProvider):
         logprob of each continuation token given the context.
         """
         client = self._get_or_create_client()
-        # Use local tokenizer for logprobs (needs BOS/EOS token IDs)
-        tokenizer = self._get_tokenizer(require_local=True)
+        # Use remote tokenizer (no transformers dependency needed)
+        tokenizer = self._get_tokenizer(require_local=False)
 
         # Get the context/prompt text
         context = request.prompt
@@ -547,6 +547,13 @@ class VLLMServerProvider(InferenceProvider):
             context_enc, continuation_enc = encode_context_and_continuation(
                 tokenizer, context, continuation
             )
+
+            # RemoteTokenizer doesn't have BOS/EOS token IDs, so for empty contexts
+            # encode_context_and_continuation returns empty context_enc.
+            # In this case, encode with add_special_tokens=True to get BOS from server.
+            if not context_enc and context == "":
+                context_enc = tokenizer.encode("", add_special_tokens=True)
+
             context_len = len(context_enc)
 
             # Build full token sequence and convert back to text for API
@@ -557,7 +564,7 @@ class VLLMServerProvider(InferenceProvider):
             response = await client.completions.create(
                 model=self.model_name,
                 prompt=full_prompt,
-                max_tokens=0,  # Don't generate, just get prompt logprobs
+                max_tokens=1,  # Minimum required; we only use prompt_logprobs
                 temperature=0.0,
                 extra_body={"prompt_logprobs": 5},
             )
@@ -623,6 +630,18 @@ class VLLMServerProvider(InferenceProvider):
             max_in_flight=self.max_concurrency,
             max_retries=self.max_retries,
         )
+
+        # Log if any requests failed (result is None)
+        failed_count = sum(1 for r in results if r is None)
+        if failed_count > 0:
+            # Try to get the actual error by running one request directly
+            try:
+                await self._logprobs_single_async(requests[0])
+            except Exception as e:
+                logger.error(
+                    f"alogprobs: {failed_count}/{len(requests)} requests failed. First error: {e!r}"
+                )
+
         # Replace None with empty list for failed requests
         return [r if r is not None else [] for r in results]
 

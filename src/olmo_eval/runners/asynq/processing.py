@@ -74,6 +74,7 @@ async def process_chat_request(
     item: QueueItem,
     harness: Harness,
     result_queue: mp.Queue,
+    worker_logger: logging.Logger | None = None,
 ) -> None:
     """Process a single CHAT request via harness.run().
 
@@ -84,7 +85,9 @@ async def process_chat_request(
         item: Queue item to process (must be CHAT type).
         harness: Harness instance for execution.
         result_queue: Queue to put results.
+        worker_logger: Logger with worker identification.
     """
+    log = worker_logger or logger
     from dataclasses import replace as dataclass_replace
 
     # Build trace metadata for observability
@@ -129,7 +132,7 @@ async def process_chat_request(
 
     except Exception as e:
         error_detail = _format_error_detail(e)
-        logger.warning(f"Error on CHAT instance {item.instance_idx}: {error_detail}")
+        log.error(f"Error on CHAT instance {item.instance_idx}: {error_detail}")
 
         result_queue.put(
             ResultItem(
@@ -149,6 +152,7 @@ async def process_batch(
     items: list[QueueItem],
     harness: Harness,
     result_queue: mp.Queue,
+    worker_logger: logging.Logger | None = None,
 ) -> None:
     """Process a batch of COMPLETION or LOGLIKELIHOOD requests.
 
@@ -159,8 +163,11 @@ async def process_batch(
         items: List of queue items to process (same type and sampling_params).
         harness: Harness instance for execution.
         result_queue: Queue to put results.
+        worker_logger: Logger with worker identification.
     """
     from olmo_eval.common.types import RequestType
+
+    log = worker_logger or logger
 
     if not items:
         return
@@ -197,7 +204,7 @@ async def process_batch(
     except Exception as e:
         # Batch failed - report error for all items
         error_detail = _format_error_detail(e)
-        logger.warning(f"Batch error ({len(items)} items): {error_detail}")
+        log.error(f"Batch error ({len(items)} items): {error_detail}")
 
         for item in items:
             result_queue.put(
@@ -256,7 +263,7 @@ async def process_items(
             batches[key].append(item)
 
         for batch in batches.values():
-            await process_batch(batch, harness, result_queue)
+            await process_batch(batch, harness, result_queue, log)
 
     if chat_items:
         from olmo_eval.common.progress import ProgressLogger
@@ -267,7 +274,7 @@ async def process_items(
         )
 
         async def process(item: QueueItem) -> None:
-            await process_chat_request(item, harness, result_queue)
+            await process_chat_request(item, harness, result_queue, log)
 
         def on_progress(done: int, total: int) -> None:
             progress.update(1)
