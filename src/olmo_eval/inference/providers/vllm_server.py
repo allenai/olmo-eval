@@ -449,7 +449,9 @@ class VLLMServerProvider(InferenceProvider):
         if tools:
             kwargs["tools"] = tools
         # Always request logprobs for metrics computation
+        # Both logprobs=True and top_logprobs are required for chat completions API
         kwargs["logprobs"] = True
+        kwargs["top_logprobs"] = 1
 
         # Pass chat_template_kwargs via extra_body for vLLM
         if self.chat_template_kwargs:
