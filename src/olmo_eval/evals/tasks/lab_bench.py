@@ -261,11 +261,14 @@ class CloningScenarios(LabBenchTask, subset="CloningScenarios"): ...
 
 
 class ProtocolQA(LabBenchTask, subset="ProtocolQA"):
-    """Prepends the protocol text to the question."""
+    """Prepends the protocol text to the question (chat/MC modes only)."""
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
-        protocol = doc.get("protocol", "")
-        if protocol:
-            question = doc.get("question", "")
-            doc = {**doc, "question": f"Protocol:\n{protocol}\n\nQuestion: {question}"}
+        # Only prepend protocol for chat/MC evaluation; RC mode (formatter=None)
+        # matches the old oe-eval-internal behaviour which uses the bare question.
+        if self.config.formatter is not None:
+            protocol = doc.get("protocol", "")
+            if protocol:
+                question = doc.get("question", "")
+                doc = {**doc, "question": f"Protocol:\n{protocol}\n\nQuestion: {question}"}
         return super().process_doc(doc, index)
