@@ -213,9 +213,11 @@ def get_worker_id(model_name: str, worker_index: int) -> str:
     Examples:
         "allenai/OLMo-2-7B", 0 -> "OLMo-2-7B-w0"
         "meta-llama/Llama-3.1-8B", 1 -> "Llama-3.1-8B-w1"
+        "s3://bucket/checkpoints/owner/model/step1000-hf/", 0 -> "step1000-hf-w0"
     """
-    # Extract last component of path
-    short_name = model_name.split("/")[-1] if "/" in model_name else model_name
+    # Strip trailing slashes and extract last component of path
+    name = model_name.rstrip("/")
+    short_name = name.split("/")[-1] if "/" in name else name
     # Truncate if too long
     if len(short_name) > 20:
         short_name = short_name[:17] + "..."
