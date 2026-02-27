@@ -373,7 +373,6 @@ class DatabaseSession:
             logger.warning("Database already initialized")
             return
 
-        logger.info(f"Connecting to PostgreSQL: {self.host}:{self.port}/{self.database}")
         self._engine = create_postgres_engine(
             host=self.host,
             port=self.port,

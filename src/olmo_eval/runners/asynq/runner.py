@@ -72,6 +72,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
     save_predictions: bool = True
     save_requests: bool = True
 
+    # Shuffle seed for deterministic instance ordering (enables future checkpointing)
+    shuffle_seed: int = 42
+
     # Instance inspection options
     inspect_instance: bool = False
     inspect_formatted: bool = False
@@ -139,10 +142,16 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         # Track experiment start time
         experiment_start = time.time()
 
+        # Generate experiment ID early so metrics can include it
+        experiment_id = generate_experiment_id()
+
         # Prepare tasks
         expanded_tasks, trackers, items = self._prepare_tasks()
         total_instances = len(items)
         runner_logger.info(f"Total instances: {total_instances}")
+
+        # Update harness metrics config with experiment metadata before starting workers
+        self._update_metrics_config(experiment_id)
 
         # Setup multiprocessing
         ctx = mp.get_context("spawn")
@@ -157,8 +166,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         manager = ctx.Manager()
         init_times = manager.dict()
 
-        # Shuffle and enqueue items
-        random.shuffle(items)
+        # Shuffle with seed for deterministic ordering (enables future checkpointing)
+        rng = random.Random(self.shuffle_seed)
+        rng.shuffle(items)
         for item in items:
             item_queue.put(item)
 
@@ -217,7 +227,6 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             # Wait for workers to initialize
             runner_logger.info("Waiting for inference workers to initialize...")
             wait_for_workers_ready(workers, result_queue, startup_timeout=60.0)
-            runner_logger.info("Inference workers ready")
 
             # Now wait for scoring worker (runs in parallel with inference worker init)
             if sandbox_configs_list is not None:
@@ -283,6 +292,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             results_dict = self._aggregate_results(results, expanded_tasks)
             return self._finalize_and_save(
                 results_dict,
+                experiment_id=experiment_id,
                 experiment_duration_seconds=experiment_duration_seconds,
                 provider_init_seconds=provider_init_seconds,
             )
@@ -464,6 +474,32 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         """
         return 1
 
+    def _update_metrics_config(self, experiment_id: str) -> None:
+        """Update harness metrics config with experiment metadata.
+
+        This must be called before starting workers so the serialized config
+        includes all metadata for metrics reporting.
+        """
+        from olmo_eval.common.types import compute_model_hash
+
+        if self.harness_config.metrics is None or not self.harness_config.metrics.enabled:
+            return
+
+        # Compute model hash from provider config
+        model_hash = compute_model_hash(self.harness_config.provider.to_dict())
+
+        # Update metrics config with all available metadata
+        updated_metrics = self.harness_config.metrics.with_metadata(
+            experiment_id=experiment_id,
+            experiment_name=self.experiment_name,
+            experiment_group=self.experiment_group,
+            model_name=self.model_name,
+            model_hash=model_hash,
+        )
+
+        # Replace harness config with updated metrics
+        self.harness_config = self.harness_config.with_metrics(updated_metrics)
+
     async def _process_results(
         self,
         trackers: dict[str, TaskTracker],
@@ -506,6 +542,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
     def _finalize_and_save(
         self,
         results_dict: dict[str, Any],
+        experiment_id: str,
         experiment_duration_seconds: float | None = None,
         provider_init_seconds: dict[str, float] | None = None,
     ) -> dict[str, Any]:
@@ -514,7 +551,6 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
         self._log_summary(results_dict)
 
-        experiment_id = generate_experiment_id()
         model_hash = compute_model_hash(results_dict.get("model_config", {}))
         results_dict["_model_hash"] = model_hash
 

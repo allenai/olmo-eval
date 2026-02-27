@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from olmo_eval.common.logging import get_logger
-from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
+from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
 from olmo_eval.common.types.tools import ToolCall
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
@@ -21,17 +21,133 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+
+class RemoteTokenizer:
+    """Tokenizer that uses vLLM server's /tokenize and /detokenize endpoints.
+
+    Provides a tokenizer-like interface without requiring transformers locally.
+    This is useful when the vLLM server runs in an isolated environment.
+    """
+
+    def __init__(self, base_url: str, model_name: str) -> None:
+        """Initialize the remote tokenizer.
+
+        Args:
+            base_url: Base URL of the vLLM server (e.g., "http://localhost:8000/v1").
+            model_name: Model name for tokenization requests.
+        """
+        # Strip /v1 suffix if present for tokenize endpoints
+        self._base_url = base_url.rstrip("/").removesuffix("/v1")
+        self._model_name = model_name
+        self._client: httpx.Client | None = None
+        self._all_special_ids: set[int] | None = None
+        # BOS/EOS token IDs - not available via API, set to None
+        # For logprobs computation, empty context handling uses fallbacks
+        self.bos_token_id: int | None = None
+        self.eos_token_id: int | None = None
+
+    def _get_client(self) -> httpx.Client:
+        if self._client is None:
+            self._client = httpx.Client(timeout=30.0)
+        return self._client
+
+    def encode(self, text: str, add_special_tokens: bool = True) -> list[int]:
+        """Encode text to token IDs using the remote server."""
+        client = self._get_client()
+        response = client.post(
+            f"{self._base_url}/tokenize",
+            json={
+                "model": self._model_name,
+                "prompt": text,
+                "add_special_tokens": add_special_tokens,
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data.get("tokens", [])
+
+    def decode(self, token_ids: list[int], skip_special_tokens: bool = False) -> str:
+        """Decode token IDs to text using the remote server."""
+        client = self._get_client()
+        response = client.post(
+            f"{self._base_url}/detokenize",
+            json={
+                "model": self._model_name,
+                "tokens": token_ids,
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data.get("prompt", "")
+
+    @property
+    def all_special_ids(self) -> set[int]:
+        """Get special token IDs (cached after first call)."""
+        if self._all_special_ids is None:
+            # vLLM doesn't expose special tokens via API, return empty set
+            # Token inspection will still work, just without special token highlighting
+            self._all_special_ids = set()
+        return self._all_special_ids
+
+    def __call__(
+        self, text: str, return_tensors: str | None = None, **kwargs: Any
+    ) -> dict[str, Any]:
+        """Tokenize text (for compatibility with HuggingFace tokenizer interface)."""
+        tokens = self.encode(text)
+        result: dict[str, Any] = {"input_ids": tokens}
+        if return_tensors == "pt":
+            import torch
+
+            result["input_ids"] = torch.tensor([tokens])
+        return result
+
+    def close(self) -> None:
+        """Close the HTTP client."""
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+
+
 # Enable with VLLM_DEBUG_REQUESTS=1
 _DEBUG_REQUESTS = os.environ.get("VLLM_DEBUG_REQUESTS", "").lower() in ("1", "true", "yes")
 
+# Disable retries for debugging with VLLM_DEBUG_NO_RETRY=1
+_DEBUG_NO_RETRY = os.environ.get("VLLM_DEBUG_NO_RETRY", "").lower() in ("1", "true", "yes")
 
-def _log_request(request: httpx.Request) -> None:
+
+async def _log_request(request: httpx.Request) -> None:
     """Log outgoing HTTP request."""
     body = request.content.decode("utf-8", errors="replace") if request.content else ""
     # Truncate very long bodies
     if len(body) > 2000:
         body = body[:2000] + "... [truncated]"
     logger.info(f"vLLM request: {request.method} {request.url}\n  body: {body}")
+
+
+async def _log_response(response: httpx.Response) -> None:
+    """Log HTTP response, especially errors."""
+    if response.status_code >= 400:
+        # Read body for error details
+        await response.aread()
+        body = response.text[:1000] if response.text else "(empty)"
+        logger.error(f"vLLM response error: {response.status_code} {response.url}\n  body: {body}")
+
+
+class _DebugTransport(httpx.AsyncHTTPTransport):
+    """Transport wrapper that logs all HTTP errors with full tracebacks."""
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        try:
+            return await super().handle_async_request(request)
+        except Exception as e:
+            import traceback
+
+            logger.error(
+                f"vLLM transport error: {type(e).__name__}: {e}\n"
+                f"  URL: {request.url}\n"
+                f"  Traceback:\n{traceback.format_exc()}"
+            )
+            raise
 
 
 class VLLMServerProvider(InferenceProvider):
@@ -157,19 +273,29 @@ class VLLMServerProvider(InferenceProvider):
                 logger.info("vLLM debug request logging enabled (VLLM_DEBUG_REQUESTS=1)")
                 event_hooks = {
                     "request": [_log_request],
+                    "response": [_log_response],
                 }
 
+            # Use debug transport when enabled to catch connection errors
+            transport = _DebugTransport() if _DEBUG_REQUESTS else None
+
             self._http_client = httpx.AsyncClient(
+                transport=transport,
                 limits=limits,
                 timeout=self.timeout,
                 event_hooks=event_hooks or {},
             )
 
+            # Use 0 retries when debugging to see errors immediately
+            effective_retries = 0 if _DEBUG_NO_RETRY else self.max_retries
+            if _DEBUG_NO_RETRY:
+                logger.info("vLLM debug: retries disabled (VLLM_DEBUG_NO_RETRY=1)")
+
             self._client = AsyncOpenAI(
                 base_url=self.base_url,
                 api_key="EMPTY",
                 timeout=self.timeout,
-                max_retries=self.max_retries,
+                max_retries=effective_retries,
                 http_client=self._http_client,
             )
         return self._client
@@ -185,15 +311,37 @@ class VLLMServerProvider(InferenceProvider):
 
     def get_openai_client(self) -> AsyncOpenAI:
         """Get the AsyncOpenAI client for this provider."""
-        return self._get_or_create_client()
+        client = self._get_or_create_client()
+        assert client is not None, "AsyncOpenAI client creation failed"
+        return client
 
-    def _get_tokenizer(self) -> Any:
-        """Get or create the tokenizer for logprobs computation."""
+    def _get_tokenizer(self, *, require_local: bool = False) -> Any:
+        """Get or create the tokenizer.
+
+        Args:
+            require_local: If True, loads HuggingFace tokenizer locally (slower but
+                has BOS/EOS token IDs for logprobs computation). If False, uses
+                the remote vLLM tokenization API (faster, no transformers needed).
+
+        Returns:
+            Tokenizer instance (RemoteTokenizer or HuggingFace AutoTokenizer).
+        """
+        if require_local:
+            # Load HuggingFace tokenizer for full functionality (BOS/EOS handling)
+            if self._tokenizer is None or isinstance(self._tokenizer, RemoteTokenizer):
+                from transformers import AutoTokenizer
+
+                self._tokenizer = AutoTokenizer.from_pretrained(self._tokenizer_path)
+            return self._tokenizer
+
+        # Use remote tokenizer by default (no transformers dependency)
         if self._tokenizer is None:
-            from transformers import AutoTokenizer
-
-            self._tokenizer = AutoTokenizer.from_pretrained(self._tokenizer_path)
+            self._tokenizer = RemoteTokenizer(self.base_url, self.model_name)
         return self._tokenizer
+
+    def get_tokenizer(self) -> Any:
+        """Get the tokenizer for this provider (for external use like inspection)."""
+        return self._get_tokenizer(require_local=False)
 
     async def _generate_single_impl(
         self, request: LMRequest, params: SamplingParams
@@ -201,6 +349,79 @@ class VLLMServerProvider(InferenceProvider):
         """Generate completions for a single request."""
         client = self._get_or_create_client()
 
+        # Route to completions endpoint for COMPLETION requests without messages
+        use_completions = (
+            request.request_type == RequestType.COMPLETION
+            and not request.messages
+            and request.prompt
+        )
+
+        if use_completions:
+            return await self._generate_completion(client, request, params)
+        else:
+            return await self._generate_chat(client, request, params)
+
+    async def _generate_completion(
+        self, client: AsyncOpenAI, request: LMRequest, params: SamplingParams
+    ) -> list[LMOutput]:
+        """Generate using the /v1/completions endpoint."""
+        kwargs: dict[str, Any] = {
+            "model": self.model_name,
+            "prompt": request.prompt,
+            "n": params.num_samples,
+            "max_tokens": params.max_tokens,
+            "logprobs": 1,  # Request logprobs for metrics
+        }
+
+        if params.temperature > 0:
+            kwargs["temperature"] = params.temperature
+        if params.stop_sequences:
+            kwargs["stop"] = list(params.stop_sequences)[:4]
+
+        response = await client.completions.create(**kwargs)
+
+        # Capture usage for accurate metrics
+        usage = getattr(response, "usage", None)
+
+        outputs = []
+        for choice in response.choices:
+            text = choice.text or ""
+
+            # Convert logprobs to standard format
+            logprob_entries: list[LogProbEntry] | None = None
+            metadata: dict[str, Any] = {}
+
+            # Store token counts from server for accurate metrics
+            if usage:
+                metadata["prompt_tokens"] = usage.prompt_tokens
+                metadata["completion_tokens"] = usage.completion_tokens
+
+            logprobs_data = getattr(choice, "logprobs", None)
+            if logprobs_data and hasattr(logprobs_data, "token_logprobs"):
+                tokens = logprobs_data.tokens or []
+                token_logprobs = logprobs_data.token_logprobs or []
+                logprob_entries = []
+                for token, logprob in zip(tokens, token_logprobs, strict=False):
+                    if logprob is not None:
+                        logprob_entries.append({"token": token, "logprob": logprob})
+
+                if logprob_entries:
+                    sum_logits = sum(entry["logprob"] for entry in logprob_entries)
+                    num_tokens = len(logprob_entries)
+                    metadata = {
+                        "sum_logits": sum_logits,
+                        "num_tokens": num_tokens,
+                        "num_tokens_all": num_tokens,
+                    }
+
+            outputs.append(LMOutput(text=text, logprobs=logprob_entries, metadata=metadata))
+
+        return outputs
+
+    async def _generate_chat(
+        self, client: AsyncOpenAI, request: LMRequest, params: SamplingParams
+    ) -> list[LMOutput]:
+        """Generate using the /v1/chat/completions endpoint."""
         # Build messages
         if request.messages:
             messages: list[dict[str, Any]] = [dict(m) for m in request.messages]
@@ -236,6 +457,9 @@ class VLLMServerProvider(InferenceProvider):
 
         response = await client.chat.completions.create(**kwargs)
 
+        # Capture usage for accurate metrics
+        usage = getattr(response, "usage", None)
+
         outputs = []
         for choice in response.choices:
             text = choice.message.content or ""
@@ -253,6 +477,12 @@ class VLLMServerProvider(InferenceProvider):
             # Convert logprobs to standard format
             logprob_entries: list[LogProbEntry] | None = None
             metadata: dict[str, Any] = {}
+
+            # Store token counts from server for accurate metrics
+            if usage:
+                metadata["prompt_tokens"] = usage.prompt_tokens
+                metadata["completion_tokens"] = usage.completion_tokens
+
             logprobs_data = getattr(choice, "logprobs", None)
             if logprobs_data and hasattr(logprobs_data, "content") and logprobs_data.content:
                 logprob_entries = []
@@ -303,14 +533,21 @@ class VLLMServerProvider(InferenceProvider):
         Returns:
             List of output lists, one per request.
         """
+        from olmo_eval.inference.dispatch import dispatch_concurrent
+
         params = self._default_sampling_params(sampling_params)
-        semaphore = asyncio.Semaphore(self.max_concurrency)
 
         async def process(req: LMRequest) -> list[LMOutput]:
-            async with semaphore:
-                return await self._generate_single_async(req, params)
+            return await self._generate_single_async(req, params)
 
-        return await asyncio.gather(*[process(r) for r in requests])
+        results = await dispatch_concurrent(
+            requests,
+            process,
+            max_in_flight=self.max_concurrency,
+            max_retries=self.max_retries,
+        )
+        # Replace None with empty list for failed requests
+        return [r if r is not None else [] for r in results]
 
     def generate(
         self,
@@ -337,7 +574,8 @@ class VLLMServerProvider(InferenceProvider):
         logprob of each continuation token given the context.
         """
         client = self._get_or_create_client()
-        tokenizer = self._get_tokenizer()
+        # Use remote tokenizer (no transformers dependency needed)
+        tokenizer = self._get_tokenizer(require_local=False)
 
         # Get the context/prompt text
         context = request.prompt
@@ -350,6 +588,13 @@ class VLLMServerProvider(InferenceProvider):
             context_enc, continuation_enc = encode_context_and_continuation(
                 tokenizer, context, continuation
             )
+
+            # RemoteTokenizer doesn't have BOS/EOS token IDs, so for empty contexts
+            # encode_context_and_continuation returns empty context_enc.
+            # In this case, encode with add_special_tokens=True to get BOS from server.
+            if not context_enc and context == "":
+                context_enc = tokenizer.encode("", add_special_tokens=True)
+
             context_len = len(context_enc)
 
             # Build full token sequence and convert back to text for API
@@ -360,7 +605,7 @@ class VLLMServerProvider(InferenceProvider):
             response = await client.completions.create(
                 model=self.model_name,
                 prompt=full_prompt,
-                max_tokens=0,  # Don't generate, just get prompt logprobs
+                max_tokens=1,  # Minimum required; we only use prompt_logprobs
                 temperature=0.0,
                 extra_body={"prompt_logprobs": 5},
             )
@@ -418,13 +663,28 @@ class VLLMServerProvider(InferenceProvider):
         Returns:
             List of output lists with logprobs populated.
         """
-        semaphore = asyncio.Semaphore(self.max_concurrency)
+        from olmo_eval.inference.dispatch import dispatch_concurrent
 
-        async def process(req: LMRequest) -> list[LMOutput]:
-            async with semaphore:
-                return await self._logprobs_single_async(req)
+        results = await dispatch_concurrent(
+            requests,
+            self._logprobs_single_async,
+            max_in_flight=self.max_concurrency,
+            max_retries=self.max_retries,
+        )
 
-        return await asyncio.gather(*[process(r) for r in requests])
+        # Log if any requests failed (result is None)
+        failed_count = sum(1 for r in results if r is None)
+        if failed_count > 0:
+            # Try to get the actual error by running one request directly
+            try:
+                await self._logprobs_single_async(requests[0])
+            except Exception as e:
+                logger.error(
+                    f"alogprobs: {failed_count}/{len(requests)} requests failed. First error: {e!r}"
+                )
+
+        # Replace None with empty list for failed requests
+        return [r if r is not None else [] for r in results]
 
     def logprobs(self, requests: list[LMRequest]) -> list[list[LMOutput]]:
         """Compute logprobs for continuations.

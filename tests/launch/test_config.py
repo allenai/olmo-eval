@@ -21,19 +21,24 @@ class TestGetModelShortName:
         assert get_model_short_name("meta-llama/Llama-3.1-8B") == "llama-3.1-8b"
 
     def test_local_path(self):
-        """Test local path returns last component."""
-        assert get_model_short_name("/weka/checkpoints/model/step1000-hf") == "step1000-hf"
+        """Test local checkpoint path returns everything after checkpoints/."""
+        path = "/weka/checkpoints/lucas/model/step1000-hf"
+        assert get_model_short_name(path) == "lucas/model/step1000-hf"
 
     def test_local_path_with_trailing_slash(self):
-        """Test local path with trailing slash returns last non-empty component."""
-        assert get_model_short_name("/weka/checkpoints/model/step1000-hf/") == "step1000-hf"
+        """Test local checkpoint path with trailing slash."""
+        path = "/weka/checkpoints/lucas/model/step1000-hf/"
+        assert get_model_short_name(path) == "lucas/model/step1000-hf"
 
     def test_alias_overrides_name(self):
         """Test alias is used when provided."""
-        assert (
-            get_model_short_name("/weka/checkpoints/model/step1000-hf/", alias="my-model-1k")
-            == "my-model-1k"
-        )
+        path = "/weka/checkpoints/lucas/model/step1000-hf/"
+        assert get_model_short_name(path, alias="my-model-1k") == "my-model-1k"
+
+    def test_s3_checkpoint_path(self):
+        """Test S3 checkpoint path returns everything after checkpoints/."""
+        path = "s3://ai2-llm/checkpoints/lucas/olmo3_1b_v2/step61007-hf/"
+        assert get_model_short_name(path) == "lucas/olmo3_1b_v2/step61007-hf"
 
     def test_alias_is_lowercased(self):
         """Test alias is lowercased."""
@@ -42,13 +47,13 @@ class TestGetModelShortName:
     def test_long_path_uses_last_16_chars(self):
         """Test very long last component uses last 16 chars of full path."""
         long_component = "a" * 40
-        result = get_model_short_name(f"/weka/checkpoints/{long_component}")
+        result = get_model_short_name(f"/weka/models/{long_component}")
         assert len(result) == 16
         assert result == "a" * 16
 
-    def test_empty_last_component_uses_last_16_chars(self):
-        """Test path ending with just slashes uses last 16 chars."""
-        assert get_model_short_name("/weka/checkpoints/my-model-name") == "my-model-name"
+    def test_non_checkpoint_path(self):
+        """Test non-checkpoint path returns last component."""
+        assert get_model_short_name("/weka/models/my-model-name") == "my-model-name"
 
 
 class TestGetTasksShortName:

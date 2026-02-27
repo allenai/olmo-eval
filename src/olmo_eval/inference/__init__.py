@@ -25,6 +25,8 @@ __all__ = [
     "get_bos_token_ids",
     "get_context_token_ids",
     "has_bos_token",
+    # Metrics (lazy import via __getattr__)
+    "metrics",
 ]
 
 
@@ -92,4 +94,8 @@ def __getattr__(name: str):
         from .providers.litellm import LiteLLMProvider
 
         return LiteLLMProvider
+    if name == "metrics":
+        from . import metrics
+
+        return metrics
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

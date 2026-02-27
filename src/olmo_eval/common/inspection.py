@@ -6,6 +6,7 @@ and other dataclasses using Rich panels and tables.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import fields, is_dataclass
 from typing import TYPE_CHECKING, Any
@@ -19,6 +20,29 @@ from rich.text import Text
 if TYPE_CHECKING:
     from olmo_eval.common.types import Instance, LMRequest, Response
 
+# Default truncation limits
+DEFAULT_STRING_HALF = 100  # Show first 100 and last 100 chars for strings
+DEFAULT_TOKEN_HALF = 50  # Show first 50 and last 50 tokens
+
+
+def truncate_string(value: str, half: int = DEFAULT_STRING_HALF) -> tuple[str, bool]:
+    """Truncate a long string showing first N and last N characters.
+
+    Args:
+        value: The string to potentially truncate.
+        half: Number of characters to show from each end.
+
+    Returns:
+        Tuple of (truncated_string, was_truncated).
+    """
+    max_len = half * 2
+    if len(value) <= max_len:
+        return value, False
+
+    first = value[:half]
+    last = value[-half:]
+    return f"{first}\n\n... ({len(value) - max_len} chars omitted) ...\n\n{last}", True
+
 
 def format_value(
     value: Any,
@@ -30,6 +54,7 @@ def format_value(
     Args:
         value: The value to format.
         max_string_length: Maximum length for string values before truncation.
+            When truncating, shows first half and last half of the limit.
         max_list_items: Maximum number of items to show for lists/tuples.
 
     Returns:
@@ -40,7 +65,9 @@ def format_value(
 
     if isinstance(value, str):
         if max_string_length > 0 and len(value) > max_string_length:
-            return f'"{value[:max_string_length]}..." [dim]({len(value)} chars)[/dim]'
+            half = max_string_length // 2
+            truncated, _ = truncate_string(value, half=half)
+            return f'"{truncated}" [dim]({len(value)} chars)[/dim]'
         return f'"{value}"'
 
     if isinstance(value, bool):
@@ -90,12 +117,15 @@ def _format_simple_value(value: Any, max_length: int = 0) -> str:
     Args:
         value: The value to format.
         max_length: Maximum length for string values (0 for no limit).
+            When truncating, shows first half and last half.
     """
     if value is None:
         return "None"
     if isinstance(value, str):
         if max_length > 0 and len(value) > max_length:
-            return f'"{value[:max_length]}..."'
+            half = max_length // 2
+            truncated, _ = truncate_string(value, half=half)
+            return f'"{truncated}"'
         return f'"{value}"'
     if isinstance(value, (bool, int, float)):
         return str(value)
@@ -107,7 +137,9 @@ def _format_simple_value(value: Any, max_length: int = 0) -> str:
         return "[...]" if isinstance(value, list) else "(...)"
     repr_str = repr(value)
     if max_length > 0 and len(repr_str) > max_length:
-        return repr_str[:max_length] + "..."
+        half = max_length // 2
+        truncated, _ = truncate_string(repr_str, half=half)
+        return truncated
     return repr_str
 
 
@@ -182,6 +214,10 @@ def inspect_instance(
 
     renderables: list[Any] = []
 
+    # Use provided limit or default (first 100 + last 100 chars)
+    half = max_string_length // 2 if max_string_length > 0 else DEFAULT_STRING_HALF
+    limit = max_string_length if max_string_length > 0 else half * 2
+
     def add_field(name: str, value: Any) -> None:
         """Add a field with its label and value."""
         if renderables:
@@ -194,8 +230,12 @@ def inspect_instance(
             json_str = json.dumps(value, indent=2, ensure_ascii=False)
             renderables.append(Syntax(json_str, "json", theme="ansi_dark", word_wrap=True))
         elif isinstance(value, str):
-            if len(value) > max_string_length and max_string_length > 0:
-                renderables.append(Text(value[:max_string_length] + f"... ({len(value)} chars)"))
+            if len(value) > limit:
+                truncated, was_truncated = truncate_string(value, half=half)
+                if was_truncated:
+                    renderables.append(Text(f"{truncated}\n({len(value)} chars total)"))
+                else:
+                    renderables.append(Text(value))
             else:
                 renderables.append(Text(value))
         elif isinstance(value, (list, tuple)):
@@ -283,33 +323,36 @@ def inspect_request(
 
     add_field("request_type", request.request_type.name)
 
+    # Use provided limit or default (first 100 + last 100 chars)
+    half = max_string_length // 2 if max_string_length > 0 else DEFAULT_STRING_HALF
+    limit = max_string_length if max_string_length > 0 else half * 2
+
     if request.messages:
         # Format messages nicely
         msg_strs = []
         for msg in request.messages:
             role = msg.get("role", "unknown")
             content = msg.get("content", "")
-            if (
-                isinstance(content, str)
-                and max_string_length > 0
-                and len(content) > max_string_length
-            ):
-                content = content[:max_string_length] + "..."
+            if isinstance(content, str) and len(content) > limit:
+                content, _ = truncate_string(content, half=half)
             msg_strs.append(f"[{role}]: {content}")
         add_field("messages", "\n".join(msg_strs))
 
     if request.prompt:
         prompt_val = request.prompt
-        if max_string_length > 0 and len(prompt_val) > max_string_length:
-            prompt_val = prompt_val[:max_string_length] + f"... ({len(request.prompt)} chars)"
+        if len(prompt_val) > limit:
+            original_len = len(prompt_val)
+            prompt_val, _ = truncate_string(prompt_val, half=half)
+            prompt_val = f"{prompt_val}\n({original_len} chars total)"
         add_field("prompt", prompt_val)
 
     if request.continuations:
         # Show each continuation on its own line
         cont_strs = []
         for c in request.continuations:
-            if max_string_length > 0 and len(c) > max_string_length:
-                cont_strs.append(c[:max_string_length] + "...")
+            if len(c) > limit:
+                truncated, _ = truncate_string(c, half=half)
+                cont_strs.append(truncated)
             else:
                 cont_strs.append(c)
         add_field("continuations", "\n".join(cont_strs))
@@ -317,10 +360,10 @@ def inspect_request(
     # Agent-specific fields
     if request.system_prompt:
         prompt_val = request.system_prompt
-        if max_string_length > 0 and len(prompt_val) > max_string_length:
-            prompt_val = (
-                prompt_val[:max_string_length] + f"... ({len(request.system_prompt)} chars)"
-            )
+        if len(prompt_val) > limit:
+            original_len = len(prompt_val)
+            prompt_val, _ = truncate_string(prompt_val, half=half)
+            prompt_val = f"{prompt_val}\n({original_len} chars total)"
         add_field("system_prompt", prompt_val)
 
     if request.tools:
@@ -383,6 +426,216 @@ def instance_to_dict(instance: Instance) -> dict[str, Any]:
         result["expected_final_state"] = instance.expected_final_state
 
     return result
+
+
+def _get_isolated_venv_python() -> str | None:
+    """Get the Python executable for the isolated vLLM venv if available."""
+    import os
+
+    # Check VLLM_PYTHON env var first
+    vllm_python = os.environ.get("VLLM_PYTHON")
+    if vllm_python and os.path.isfile(vllm_python):
+        return vllm_python
+
+    # Check standard location
+    standard_path = "/opt/vllm-venv/bin/python"
+    if os.path.isfile(standard_path):
+        return standard_path
+
+    return None
+
+
+_TOKENIZER_SERVER_SCRIPT = """
+import json
+import sys
+import os
+
+# Silence HuggingFace downloads and warnings
+os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
+
+from transformers import AutoTokenizer
+
+tokenizer_name = sys.argv[1]
+tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True)
+
+# Signal ready
+print(json.dumps({"status": "ready", "special_ids": list(tokenizer.all_special_ids)}), flush=True)
+
+# Process requests
+for line in sys.stdin:
+    try:
+        req = json.loads(line.strip())
+        cmd = req.get("cmd")
+
+        if cmd == "encode":
+            add_special = req.get("add_special_tokens", True)
+            tokens = tokenizer.encode(req["text"], add_special_tokens=add_special)
+            print(json.dumps({"tokens": tokens}), flush=True)
+
+        elif cmd == "decode":
+            skip_special = req.get("skip_special_tokens", False)
+            text = tokenizer.decode(req["token_ids"], skip_special_tokens=skip_special)
+            print(json.dumps({"text": text}), flush=True)
+
+        elif cmd == "apply_chat_template":
+            result = tokenizer.apply_chat_template(
+                req["messages"],
+                tokenize=req.get("tokenize", False),
+                add_generation_prompt=req.get("add_generation_prompt", True),
+            )
+            if isinstance(result, list):
+                print(json.dumps({"tokens": result}), flush=True)
+            else:
+                print(json.dumps({"text": result}), flush=True)
+
+        elif cmd == "quit":
+            break
+
+        else:
+            print(json.dumps({"error": f"Unknown command: {cmd}"}), flush=True)
+
+    except Exception as e:
+        print(json.dumps({"error": str(e)}), flush=True)
+"""
+
+
+class SubprocessTokenizer:
+    """Tokenizer that runs in an isolated venv via a persistent subprocess.
+
+    Uses a long-running subprocess that loads the tokenizer once and handles
+    requests via JSON-line protocol over stdin/stdout.
+    """
+
+    def __init__(self, tokenizer_name: str, python_path: str) -> None:
+        import subprocess
+
+        self._tokenizer_name = tokenizer_name
+        self._python_path = python_path
+        self._special_ids: set[int] = set()
+
+        # Start persistent subprocess
+        self._proc = subprocess.Popen(
+            [python_path, "-c", _TOKENIZER_SERVER_SCRIPT, tokenizer_name],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,  # Line buffered
+        )
+
+        # Wait for ready signal
+        ready_line = self._proc.stdout.readline()  # type: ignore[union-attr]
+        if not ready_line:
+            stderr = self._proc.stderr.read() if self._proc.stderr else ""
+            raise RuntimeError(f"Tokenizer subprocess failed to start: {stderr}")
+
+        ready = json.loads(ready_line)
+        if ready.get("status") != "ready":
+            raise RuntimeError(f"Tokenizer subprocess error: {ready.get('error', 'unknown')}")
+
+        self._special_ids = set(ready.get("special_ids", []))
+
+    def _request(self, req: dict[str, Any]) -> dict[str, Any]:
+        """Send a request to the subprocess and get response."""
+        if self._proc.poll() is not None:
+            raise RuntimeError("Tokenizer subprocess has terminated")
+
+        self._proc.stdin.write(json.dumps(req) + "\n")  # type: ignore[union-attr]
+        self._proc.stdin.flush()  # type: ignore[union-attr]
+
+        response_line = self._proc.stdout.readline()  # type: ignore[union-attr]
+        if not response_line:
+            raise RuntimeError("Tokenizer subprocess returned empty response")
+
+        response = json.loads(response_line)
+        if "error" in response:
+            raise RuntimeError(f"Tokenizer error: {response['error']}")
+
+        return response
+
+    def encode(self, text: str, add_special_tokens: bool = True) -> list[int]:
+        """Encode text to token IDs."""
+        req = {"cmd": "encode", "text": text, "add_special_tokens": add_special_tokens}
+        return self._request(req)["tokens"]
+
+    def decode(self, token_ids: list[int], skip_special_tokens: bool = False) -> str:
+        """Decode token IDs to text."""
+        req = {"cmd": "decode", "token_ids": token_ids, "skip_special_tokens": skip_special_tokens}
+        return self._request(req)["text"]
+
+    def apply_chat_template(
+        self,
+        messages: list[dict[str, str]],
+        tokenize: bool = False,
+        add_generation_prompt: bool = True,
+    ) -> str | list[int]:
+        """Apply chat template."""
+        resp = self._request(
+            {
+                "cmd": "apply_chat_template",
+                "messages": messages,
+                "tokenize": tokenize,
+                "add_generation_prompt": add_generation_prompt,
+            }
+        )
+        return resp.get("tokens") or resp.get("text", "")
+
+    @property
+    def all_special_ids(self) -> set[int]:
+        """Get all special token IDs."""
+        return self._special_ids
+
+    def __del__(self) -> None:
+        """Clean up subprocess."""
+        if hasattr(self, "_proc") and self._proc.poll() is None:
+            try:
+                self._proc.stdin.write('{"cmd": "quit"}\n')  # type: ignore[union-attr]
+                self._proc.stdin.flush()  # type: ignore[union-attr]
+                self._proc.wait(timeout=2)
+            except Exception:
+                self._proc.kill()
+
+
+def _load_tokenizer_from_isolated_venv(tokenizer_name: str, logger: Any) -> Any | None:
+    """Try to load a tokenizer using the isolated vLLM venv.
+
+    Args:
+        tokenizer_name: HuggingFace tokenizer name or path.
+        logger: Logger for warnings/errors.
+
+    Returns:
+        A SubprocessTokenizer if isolated venv is available, None otherwise.
+    """
+    python_path = _get_isolated_venv_python()
+    if python_path is None:
+        logger.warning(
+            "transformers not available and no isolated venv found. "
+            "Token inspection will be skipped."
+        )
+        return None
+
+    try:
+        # Verify the isolated venv has transformers
+        import subprocess
+
+        result = subprocess.run(
+            [python_path, "-c", "import transformers"],
+            capture_output=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                f"Isolated venv at {python_path} does not have transformers installed. "
+                "Token inspection will be skipped."
+            )
+            return None
+
+        logger.info(f"Using isolated venv tokenizer via {python_path}")
+        return SubprocessTokenizer(tokenizer_name, python_path)
+    except Exception as e:
+        logger.warning(f"Failed to initialize isolated venv tokenizer: {e}")
+        return None
 
 
 def load_tokenizer(tokenizer_name: str, trust_remote_code: bool = True) -> Any:
@@ -519,45 +772,49 @@ def inspect_formatted_request(
         task_name: Optional task name for the panel title.
         native_id: Optional native_id for the panel title.
         max_chars: Max characters to display (0 for no limit, default 2000).
+            When truncating, shows first half and last half.
     """
     if console is None:
         from olmo_eval.cli.utils import console as shared_console
 
         console = shared_console
 
-    # Build styled text with special token highlighting
-    text = Text()
-
     # Pattern to match common special tokens
     special_token_pattern = re.compile(
         r"(<\|[^|>]+\|>|<s>|</s>|<unk>|<pad>|<mask>|\[CLS\]|\[SEP\]|\[PAD\]|\[MASK\])"
     )
 
-    display_text = formatted_prompt
-    truncated = False
+    def style_special_tokens(s: str) -> Text:
+        """Apply styling to special tokens in a string."""
+        result = Text()
+        last_end = 0
+        for match in special_token_pattern.finditer(s):
+            if match.start() > last_end:
+                result.append(s[last_end : match.start()])
+            result.append(match.group(), style="bold cyan")
+            last_end = match.end()
+        if last_end < len(s):
+            result.append(s[last_end:])
+        return result
+
+    # Build styled text with special token highlighting
+    text = Text()
+
     if max_chars > 0 and len(formatted_prompt) > max_chars:
-        display_text = formatted_prompt[:max_chars]
-        truncated = True
+        # Show first half and last half
+        half = max_chars // 2
+        first_part = formatted_prompt[:half]
+        last_part = formatted_prompt[-half:]
+        omitted = len(formatted_prompt) - max_chars
 
-    # Split by special tokens and style them
-    last_end = 0
-    for match in special_token_pattern.finditer(display_text):
-        # Add text before the token
-        if match.start() > last_end:
-            text.append(display_text[last_end : match.start()])
-        # Add the special token with styling
-        text.append(match.group(), style="bold cyan")
-        last_end = match.end()
-
-    # Add remaining text
-    if last_end < len(display_text):
-        text.append(display_text[last_end:])
-
-    # Add truncation indicator
-    if truncated:
-        text.append(f"\n\n... ({len(formatted_prompt)} characters total)", style="dim")
+        text.append_text(style_special_tokens(first_part))
+        text.append(f"\n\n... ({omitted} chars omitted) ...\n\n", style="dim")
+        text.append_text(style_special_tokens(last_part))
     else:
-        text.append(f"\n\n({len(formatted_prompt)} characters)", style="dim")
+        text.append_text(style_special_tokens(formatted_prompt))
+
+    # Add character count
+    text.append(f"\n\n({len(formatted_prompt)} characters total)", style="dim")
 
     # Build panel title
     if task_name and native_id is not None:
@@ -579,7 +836,7 @@ def inspect_tokens(
     console: Console | None = None,
     task_name: str | None = None,
     native_id: str | None = None,
-    max_tokens: int = 100,
+    max_tokens: int = DEFAULT_TOKEN_HALF * 2,
     show_decoded: bool = True,
 ) -> None:
     """Pretty-print token IDs with decoded values, highlighting special tokens.
@@ -591,7 +848,7 @@ def inspect_tokens(
         task_name: Optional task name for the panel title.
         native_id: Optional native_id for the panel title.
         max_tokens: Max tokens to display (0 for no limit, default 100).
-            When truncating, shows first 50 and last 50 tokens.
+            When truncating, shows first half and last half.
         show_decoded: Whether to show decoded token values.
     """
     if console is None:
@@ -633,13 +890,11 @@ def inspect_tokens(
     lines.append(f"[bold]{len(tokens)} tokens[/bold]")
     lines.append("─" * 60)
 
-    truncated = False
     if max_tokens > 0 and len(tokens) > max_tokens:
         # Show first half and last half of max_tokens
         half = max_tokens // 2
         first_tokens = tokens[:half]
         last_tokens = tokens[-half:]
-        truncated = True
 
         # Add first tokens
         for token_id in first_tokens:
@@ -656,10 +911,6 @@ def inspect_tokens(
         # Show all tokens
         for token_id in tokens:
             lines.append(format_token(token_id))
-
-    if truncated:
-        half = max_tokens // 2
-        lines.append(f"\n[dim](showing first {half} and last {half} of {len(tokens)} tokens)[/dim]")
 
     # Build panel title
     if task_name and native_id is not None:
@@ -749,6 +1000,10 @@ def inspect_response(
 
     renderables: list[Any] = []
 
+    # Use provided limit or default (first 100 + last 100 chars)
+    half = max_string_length // 2 if max_string_length > 0 else DEFAULT_STRING_HALF
+    limit = max_string_length if max_string_length > 0 else half * 2
+
     def add_field(name: str, value: Any) -> None:
         """Add a field with its label and value."""
         if renderables:
@@ -761,8 +1016,12 @@ def inspect_response(
             json_str = json.dumps(value, indent=2, ensure_ascii=False)
             renderables.append(Syntax(json_str, "json", theme="ansi_dark", word_wrap=True))
         elif isinstance(value, str):
-            if len(value) > max_string_length and max_string_length > 0:
-                renderables.append(Text(value[:max_string_length] + f"... ({len(value)} chars)"))
+            if len(value) > limit:
+                truncated, was_truncated = truncate_string(value, half=half)
+                if was_truncated:
+                    renderables.append(Text(f"{truncated}\n({len(value)} chars total)"))
+                else:
+                    renderables.append(Text(value))
             else:
                 renderables.append(Text(value))
         elif isinstance(value, (list, tuple)):
@@ -846,6 +1105,9 @@ def inspect_task_instances(
         tokenizer_name = provider_config.tokenizer or provider_config.model
         try:
             tokenizer = load_tokenizer(tokenizer_name)
+        except ImportError:
+            # transformers not available - try isolated venv
+            tokenizer = _load_tokenizer_from_isolated_venv(tokenizer_name, logger)
         except Exception as e:
             logger.warning(f"Could not load tokenizer: {e}")
 
@@ -898,6 +1160,7 @@ def inspect_task_instances(
 
 
 __all__ = [
+    "truncate_string",
     "format_value",
     "inspect_object",
     "inspect_instance",

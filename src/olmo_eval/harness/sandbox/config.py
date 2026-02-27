@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Literal
 
+from olmo_eval.common.repr import hide_unset
+
 ContainerRuntime = Literal["docker", "podman"]
 
 
@@ -31,6 +33,7 @@ class Capability:
     DEFAULT: frozenset[str] = BASH
 
 
+@hide_unset()
 @dataclass(frozen=True)
 class SandboxConfig:
     """Configuration for sandboxed tool execution via SWE-ReX.

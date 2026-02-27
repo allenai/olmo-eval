@@ -36,6 +36,7 @@ from olmo_eval.common.constants.infrastructure import (
     BEAKER_KNOWN_CLUSTERS,
     NEW_CLUSTER_ALIASES,
 )
+from olmo_eval.common.repr import hide_unset
 
 if TYPE_CHECKING:
     from beaker import Beaker, BeakerExperiment, BeakerGroup
@@ -312,6 +313,7 @@ class BeakerWekaBucket:
             self.mount = f"/weka/{self.bucket}"
 
 
+@hide_unset()
 @dataclass
 class BeakerJobConfig:
     """Configuration for a Beaker evaluation job.
@@ -422,10 +424,10 @@ class BeakerJobConfig:
     # Run setup_store_secrets during install to configure database access
     setup_store_secrets: bool = False
 
-    # Install vLLM in separate venv (for server mode to avoid dependency conflicts)
+    # Install vLLM in isolated venv (for server mode to avoid dependency conflicts)
     # When True, vLLM is installed in /opt/vllm-venv and VLLM_PYTHON points to it.
     # Use this for external evals that run vLLM as a server subprocess.
-    vllm_separate_venv: bool = False
+    vllm_isolated_venv: bool = False
 
 
 def resolve_clusters(cluster: str | list[str]) -> list[str]:
@@ -629,7 +631,7 @@ class BeakerLauncher:
         setup_registry_mirror: bool = False,
         enable_sandbox: bool = False,
         setup_store_secrets: bool = False,
-        vllm_separate_venv: bool = False,
+        vllm_isolated_venv: bool = False,
     ) -> str:
         """Build installation command for gantry's install_cmd parameter.
 
@@ -637,10 +639,9 @@ class BeakerLauncher:
         1. Install olmo-eval from the cloned source with optional extras
         2. Optionally install provider-specific and task-specific dependencies
 
-        When vllm_separate_venv is True, vLLM is installed in a separate venv
+        When vllm_isolated_venv is True, vLLM is installed in a isolated venv
         (/opt/vllm-venv) to avoid dependency conflicts. The vLLM server runs as
         a subprocess using VLLM_PYTHON env var, while the main app uses /opt/venv.
-        Use this for server mode (external evals), not for batch mode (regular evals).
 
         Args:
             extras: Optional dependency group names from pyproject.toml.
@@ -650,13 +651,13 @@ class BeakerLauncher:
             setup_registry_mirror: If True, run setup_dockerio_mirror script with MIRROR_HOSTS.
             enable_sandbox: If True, set up /dev/net/tun for pasta networking.
             setup_store_secrets: If True, run setup_store_secrets to configure database access.
-            vllm_separate_venv: If True, install vLLM in separate venv for server mode.
+            vllm_isolated_venv: If True, install vLLM in isolated venv for server mode.
 
         Returns:
             Shell command string for installation.
         """
         has_vllm = "vllm" in extras
-        use_separate_vllm_venv = has_vllm and vllm_separate_venv
+        use_isolated_vllm_venv = has_vllm and vllm_isolated_venv
 
         # Build the install steps
         # Export UV_PROJECT_ENVIRONMENT so all uv commands use Docker's /opt/venv
@@ -684,8 +685,8 @@ class BeakerLauncher:
         constraints = "/tmp/cuda-constraints.txt"
         steps.append(f"uv pip freeze -q | grep -E '^(torch|nvidia-)' > {constraints}")
 
-        # Install vLLM in separate venv when requested (for server mode)
-        if use_separate_vllm_venv:
+        # Install vLLM in isolated venv when requested (for server mode)
+        if use_isolated_vllm_venv:
             vllm_venv = "/opt/vllm-venv"
             steps.append(f"uv venv {vllm_venv}")
             # Symlink torch and nvidia packages from main venv (already installed)
@@ -699,11 +700,11 @@ class BeakerLauncher:
                 f"VIRTUAL_ENV={vllm_venv} uv pip install "
                 f"--cache-dir \"$UV_CACHE_DIR\" 'vllm[runai]==0.13.0'"
             )
-            # Set VLLM_PYTHON so VLLMServerProcess uses the separate venv
+            # Set VLLM_PYTHON so VLLMServerProcess uses the isolated venv
             steps.append(f"export VLLM_PYTHON={vllm_venv}/bin/python")
 
-        # Install main package (without vllm extra only when using separate venv)
-        main_extras = [e for e in extras if e != "vllm"] if use_separate_vllm_venv else list(extras)
+        # Install main package (without vllm extra only when using isolated venv)
+        main_extras = [e for e in extras if e != "vllm"] if use_isolated_vllm_venv else list(extras)
         if main_extras:
             extras_str = ",".join(main_extras)
             install_cmd = f"uv pip install -e '.[{extras_str}]' -c {constraints}"
@@ -756,7 +757,7 @@ class BeakerLauncher:
             config.setup_registry_mirror,
             config.enable_sandbox,
             config.setup_store_secrets,
-            config.vllm_separate_venv,
+            config.vllm_isolated_venv,
         )
 
         # Build weka mounts as tuples: (bucket, mount_path)

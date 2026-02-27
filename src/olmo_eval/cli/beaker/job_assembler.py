@@ -52,11 +52,15 @@ def get_provider_extras(model_spec: str, default_kind: str | None = None) -> lis
 
     provider_kind = get_provider_kind(model_spec, default_kind)
 
+    extras: list[str] = []
     if provider_kind:
         provider_extra = BACKEND_OPTIONAL_GROUPS.get(provider_kind)
         if provider_extra:
-            return [provider_extra]
-    return []
+            extras.append(provider_extra)
+        # vllm_server uses OpenAI client to communicate with vLLM's OpenAI-compatible API
+        if provider_kind == "vllm_server":
+            extras.append("clients")
+    return extras
 
 
 def get_provider_dependencies(model_spec: str) -> list[str]:
@@ -81,6 +85,8 @@ def collect_install_extras(
     *,
     store: bool = False,
     sandbox: bool = False,
+    metrics: bool = False,
+    collect_gpu: bool = False,
     backend_name: str | None = None,
     provider_extras: list[str] | None = None,
 ) -> list[str]:
@@ -89,6 +95,8 @@ def collect_install_extras(
     Args:
         store: Whether storage is enabled.
         sandbox: Whether sandbox is enabled.
+        metrics: Whether metrics collection is enabled.
+        collect_gpu: Whether GPU metrics collection is enabled.
         backend_name: Harness backend name (e.g., "openai_agents").
         provider_extras: Provider-specific extras.
 
@@ -101,6 +109,10 @@ def collect_install_extras(
         extras.append("storage")
     if sandbox:
         extras.append("sandbox")
+    if metrics:
+        extras.append("postgres")
+    if collect_gpu:
+        extras.append("gpu")
 
     if backend_name:
         from olmo_eval.harness import get_backend_extras
@@ -270,9 +282,9 @@ def assemble_external_eval_job(
             if eval_instance.backend and eval_instance.backend not in backend_names:
                 backend_names.append(eval_instance.backend)
 
-    # External evals always run vLLM as a server subprocess, so use separate venv
+    # External evals always run vLLM as a server subprocess, so use isolated venv
     # to avoid dependency conflicts with other packages (e.g., openhands)
-    vllm_separate_venv = True
+    vllm_isolated_venv = True
 
     # Collect extras from all backends
     extras: list[str] = collect_install_extras(
@@ -310,7 +322,7 @@ def assemble_external_eval_job(
         setup_store_secrets=store,
         extras=extras,
         provider_packages=provider_packages,
-        vllm_separate_venv=vllm_separate_venv,
+        vllm_isolated_venv=vllm_isolated_venv,
     )
 
 
@@ -352,6 +364,8 @@ class JobConfigAssembler:
         # Determine backend and sandbox requirements from harness preset
         backend_name: str | None = None
         sandbox_enabled = False
+        metrics_enabled = False
+        collect_gpu_enabled = False
         harness_provider_package: str | None = None
         harness_provider_deps: list[str] = []
         if self.config.harness:
@@ -364,12 +378,26 @@ class JobConfigAssembler:
                 preset = _apply_harness_overrides(preset, self.config.harness_overrides)
             backend_name = preset.backend
             sandbox_enabled = bool(preset.sandboxes)
+            from olmo_eval.inference.metrics import ReporterType
+
+            metrics_enabled = (
+                preset.metrics is not None
+                and preset.metrics.enabled
+                and preset.metrics.has_reporter(ReporterType.DB)
+            )
+            collect_gpu_enabled = (
+                preset.metrics is not None and preset.metrics.enabled and preset.metrics.collect_gpu
+            )
             harness_provider_package = preset.provider.package
             harness_provider_deps = list(preset.provider.dependencies)
+            # Use provider kind from preset (includes harness_overrides like -o provider.kind=vllm)
+            harness_provider_kind = str(preset.provider.kind) if preset.provider.kind else None
+        else:
+            harness_provider_kind = None
 
-        # Determine provider kind and whether to use separate venv for vLLM
-        provider_kind = get_provider_kind(exp.model_spec)
-        vllm_separate_venv = provider_kind == "vllm_server"
+        # Determine provider kind - prefer harness preset (with overrides) over model spec default
+        provider_kind = harness_provider_kind or get_provider_kind(exp.model_spec)
+        vllm_isolated_venv = provider_kind == "vllm_server"
 
         # If provider.package is set, it overrides the default provider extra (e.g., vllm)
         # In that case, skip provider extras and install the package separately
@@ -381,6 +409,8 @@ class JobConfigAssembler:
         install_extras = collect_install_extras(
             store=self.config.store,
             sandbox=sandbox_enabled,
+            metrics=metrics_enabled,
+            collect_gpu=collect_gpu_enabled,
             backend_name=backend_name,
             provider_extras=provider_extras,
         )
@@ -486,7 +516,7 @@ class JobConfigAssembler:
             enable_sandbox=self.enable_sandbox,
             setup_registry_mirror=setup_registry_mirror,
             setup_store_secrets=self.config.store,
-            vllm_separate_venv=vllm_separate_venv,
+            vllm_isolated_venv=vllm_isolated_venv,
         )
 
     def _extract_task_dependencies(

@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from enum import Enum
 from urllib.parse import parse_qs, urlparse
 
+from olmo_eval.common.repr import hide_unset
+
 
 class SourceType(Enum):
     """Supported data source types."""
@@ -16,6 +18,7 @@ class SourceType(Enum):
     GCS = "gcs"
 
 
+@hide_unset()
 @dataclass(frozen=True)
 class DataSource:
     """Identifies a dataset location.

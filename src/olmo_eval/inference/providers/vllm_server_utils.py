@@ -155,7 +155,7 @@ def _infer_tool_call_parser(model_name: str) -> str:
 def _get_vllm_python() -> str:
     """Get the Python interpreter to use for vLLM server.
 
-    Checks VLLM_PYTHON env var first (for separate venv setups),
+    Checks VLLM_PYTHON env var first (for isolated venv setups),
     falls back to current interpreter.
 
     Returns:
@@ -200,7 +200,7 @@ def _build_server_command(
     """
     import json
 
-    # Use VLLM_PYTHON env var if set (for separate venv setups)
+    # Use VLLM_PYTHON env var if set (for isolated venv setups)
     python_executable = _get_vllm_python()
 
     cmd = [
@@ -299,7 +299,7 @@ class VLLMServerProcess:
     @property
     def base_url(self) -> str:
         """Get the base URL for the OpenAI-compatible API."""
-        return f"http://localhost:{self.port}/v1"
+        return f"http://127.0.0.1:{self.port}/v1"
 
     def start(self, progress_callback: ProgressCallback | None = None) -> str:
         """Start the vLLM server.

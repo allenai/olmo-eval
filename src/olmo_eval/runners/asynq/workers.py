@@ -3,95 +3,23 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import multiprocessing as mp
 import os
 import queue
 import time
 from multiprocessing.synchronize import Event as MPEvent
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from olmo_eval.harness import Harness
+from typing import Any
 
 from olmo_eval.common.logging import get_logger
 from olmo_eval.runners.asynq.types import (
-    DEFAULT_CHUNK_SIZE,
-    DEFAULT_CHUNK_TIMEOUT,
     DEFAULT_SCORING_CONCURRENCY,
     SCORER_FATAL,
     WORKER_FATAL,
-    QueueItem,
     ResultItem,
     ScoredResponse,
 )
 
 logger = get_logger(__name__)
-
-
-async def process_items_streaming(
-    item_queue: mp.Queue[QueueItem | None],
-    harness: Harness,
-    result_queue: mp.Queue[ResultItem],
-    max_concurrency: int | None,
-    worker_logger: logging.Logger,
-    total_instances: int,
-    chunk_size: int = DEFAULT_CHUNK_SIZE,
-    chunk_timeout: float = DEFAULT_CHUNK_TIMEOUT,
-) -> None:
-    """Process items in chunks for balanced latency and throughput.
-
-    Collects items until chunk_size is reached or chunk_timeout expires,
-    then processes the chunk while continuing to accept new items.
-    This allows processing to start before all items are enqueued.
-
-    Args:
-        item_queue: Queue of QueueItems (None signals shutdown).
-        harness: Harness instance for execution.
-        result_queue: Queue to put ResultItems.
-        max_concurrency: Maximum concurrent requests.
-        worker_logger: Logger with worker identification.
-        total_instances: Total number of instances to process.
-        chunk_size: Maximum items per chunk (default 256, matches vLLM max_num_seqs).
-        chunk_timeout: Seconds to wait for chunk to fill before processing partial.
-    """
-    import math
-    import time
-
-    from olmo_eval.runners.asynq.processing import process_items
-
-    total_batches = math.ceil(total_instances / chunk_size)
-    batch_num = 0
-
-    while True:
-        items: list[QueueItem] = []
-        deadline = time.time() + chunk_timeout
-
-        # Collect items until chunk is full or timeout
-        while len(items) < chunk_size:
-            remaining = max(0.01, deadline - time.time())
-            try:
-                item = item_queue.get(timeout=remaining)
-                if item is None:
-                    # Poison pill - process remaining items and exit
-                    if items:
-                        batch_num += 1
-                        worker_logger.info(
-                            f"Processing batch {batch_num}/{total_batches} ({len(items)} items)"
-                        )
-                        await process_items(
-                            items, harness, result_queue, max_concurrency, worker_logger
-                        )
-                    return
-                items.append(item)
-            except queue.Empty:
-                # Timeout - process what we have
-                break
-
-        if items:
-            batch_num += 1
-            worker_logger.info(f"Processing batch {batch_num}/{total_batches} ({len(items)} items)")
-            await process_items(items, harness, result_queue, max_concurrency, worker_logger)
 
 
 def inference_worker(
@@ -148,8 +76,11 @@ def inference_worker(
         load_format = provider_kwargs.get("load_format")
         extra_loader_config = provider_kwargs.get("model_loader_extra_config")
 
+        from olmo_eval.launch.config import get_model_short_name
+
+        short_name = get_model_short_name(model_name)
         worker_logger.info(f"Initializing provider: {provider_kind}")
-        worker_logger.info(f"  Model: {model_name}")
+        worker_logger.info(f"  Model: {short_name}")
         if tokenizer:
             worker_logger.info(f"  Tokenizer: {tokenizer}")
         if gpu_ids:
@@ -179,6 +110,16 @@ def inference_worker(
             log_dir=log_dir,
         )
 
+        # Update metrics config with runtime values (output_dir, provider_kind, model_name)
+        if harness_config.metrics is not None and harness_config.metrics.enabled:
+            updated_metrics = harness_config.metrics.with_output_dir(
+                output_dir or ""
+            ).with_metadata(
+                provider_kind=provider_kind,
+                model_name=model_name,
+            )
+            harness_config = harness_config.with_metrics(updated_metrics)
+
         harness = Harness(harness_config)
 
         # Force provider creation to catch import errors early
@@ -189,6 +130,9 @@ def inference_worker(
             from olmo_eval.harness.backends import validate_backend
 
             validate_backend(harness_config.backend)
+
+        # Initialize metrics reporters early to establish database connections
+        harness.initialize_reporters()
 
         init_time = time.time() - init_start
         worker_logger.info(f"Provider ready ({init_time:.1f}s)")
@@ -207,9 +151,20 @@ def inference_worker(
             if harness_config.backend:
                 asyncio.run(harness.backend.initialize(harness_config))
 
-            worker_logger.info("Inference worker ready")
+            # Get batching strategy from config
+            from olmo_eval.runners.asynq.batching import BatchConfig, get_strategy
+
+            batch_config = harness_config.batching or BatchConfig()
+            batch_config.validate_for_provider(provider_kind)
+            strategy = get_strategy(batch_config)
+
+            concurrency_str = max_concurrency or "unlimited"
+            worker_logger.info(
+                f"Inference worker ready (strategy={batch_config.strategy}, "
+                f"chunk_size={batch_config.chunk_size}, max_in_flight={concurrency_str})"
+            )
             asyncio.run(
-                process_items_streaming(
+                strategy.run(
                     item_queue,
                     harness,
                     result_queue,
@@ -334,9 +289,10 @@ def scoring_worker(
                 try:
                     item: ScoringItem | None = scoring_queue.get(timeout=0.1)
                 except queue.Empty:
-                    # Timeout - flush any pending batch
+                    # Timeout - flush any pending batch to avoid deadlock
                     if batch:
                         if progress is None:
+                            worker_logger.info("Starting scoring")
                             progress = ProgressLogger(
                                 total=total_instances,
                                 desc="Scored",
@@ -360,17 +316,18 @@ def scoring_worker(
                         await process_batch(batch, scoring_context, progress)
                     break
 
-                # Create progress logger on first item
-                if progress is None:
-                    worker_logger.info("Starting scoring")
-                    progress = ProgressLogger(
-                        total=total_instances, desc="Scored", logger=worker_logger, color="blue"
-                    )
-
                 batch.append(item)
 
                 # Process batch when full
                 if len(batch) >= batch_size:
+                    if progress is None:
+                        worker_logger.info("Starting scoring")
+                        progress = ProgressLogger(
+                            total=total_instances,
+                            desc="Scored",
+                            logger=worker_logger,
+                            color="blue",
+                        )
                     await process_batch(batch, scoring_context, progress)
                     batch = []
 
@@ -436,6 +393,5 @@ def scoring_worker(
 
 __all__ = [
     "inference_worker",
-    "process_items_streaming",
     "scoring_worker",
 ]

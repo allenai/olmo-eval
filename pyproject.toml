@@ -28,6 +28,7 @@ dependencies = [
     "omegaconf~=2.3.0",
     "rich~=14.3.1",
     "sympy>=1.12",
+    "textual-plot>=0.10.1",
 ]
 
 [project.urls]
@@ -69,12 +70,14 @@ postgres = [
     "sqlalchemy>=2.0.46",
     "alembic>=1.18.1",
 ]
+gpu = [
+    "nvidia-ml-py>=12.560",
+]
+clients = [
+    "openai~=2.21.0",
+]
 storage = [
     "olmo-eval-internal[s3,postgres]",
-]
-# Runtime without Beaker (most common for container execution)
-runtime = [
-    "olmo-eval-internal[storage]",
 ]
 
 [project.scripts]
@@ -90,6 +93,10 @@ conflicts = [
     ],
     [
         { extra = "vllm" },
+        { extra = "openhands" },
+    ],
+    [
+        { extra = "clients" },
         { extra = "openhands" },
     ],
 ]

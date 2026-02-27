@@ -9,6 +9,8 @@ from datetime import datetime
 from enum import Enum, StrEnum, auto
 from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
 
+from olmo_eval.common.repr import hide_unset
+
 if TYPE_CHECKING:
     from .tools import ToolCall, ToolSchema
     from .trajectory import AgentTrajectory
@@ -139,6 +141,7 @@ class LMRequest:
     system_prompt: str | None = None
 
 
+@hide_unset()
 @dataclass(frozen=True, slots=True)
 class SamplingParams:
     """Parameters for language model sampling."""
