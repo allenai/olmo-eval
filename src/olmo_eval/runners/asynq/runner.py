@@ -311,6 +311,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         """Prepare all tasks and return tracking data structures."""
         expanded_tasks = expand_tasks(self.task_specs)
 
+        if not expanded_tasks:
+            raise ValueError("No tasks to run after expansion. Check task_specs configuration.")
+
         trackers: dict[str, TaskTracker] = {}
         items: list[QueueItem] = []
 
