@@ -617,8 +617,8 @@ class VLLMServerProvider(InferenceProvider):
             total = 0.0
 
             if response.choices:
-                choice = response.choices[0]
-                prompt_logprobs = getattr(choice, "prompt_logprobs", None) or []
+                # vLLM returns prompt_logprobs on response, not on choice
+                prompt_logprobs = getattr(response, "prompt_logprobs", None) or []
 
                 # Skip context tokens, get continuation logprobs
                 cont_logprobs = prompt_logprobs[context_len:]

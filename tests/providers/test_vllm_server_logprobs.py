@@ -29,9 +29,10 @@ class TestVLLMServerProviderLogprobs:
 
         def make_response(prompt_logprobs):
             choice = MagicMock()
-            choice.prompt_logprobs = prompt_logprobs
             response = MagicMock()
             response.choices = [choice]
+            # vLLM returns prompt_logprobs on response, not on choice
+            response.prompt_logprobs = prompt_logprobs
             return response
 
         return make_response
