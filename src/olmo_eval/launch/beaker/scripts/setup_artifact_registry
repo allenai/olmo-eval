@@ -6,7 +6,7 @@ set -e
 
 if [ -z "$GOOGLE_APPLICATION_CREDENTIALS" ]; then
     echo "GOOGLE_APPLICATION_CREDENTIALS not set, skipping Artifact Registry setup"
-    exit 0
+    return 0 2>/dev/null || true  # return when sourced, no-op when executed directly
 fi
 
 echo "Setting up Artifact Registry credentials..."
