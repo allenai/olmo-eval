@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 from typing import TYPE_CHECKING, Any
 
@@ -11,6 +10,7 @@ from olmo_eval.common.logging import get_logger
 from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.retry import retry_with_backoff
+from olmo_eval.inference.utils import run_async
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -235,7 +235,7 @@ class LiteLLMProvider(InferenceProvider):
         Returns:
             List of output lists, one per request.
         """
-        return asyncio.run(self.agenerate(requests, sampling_params))
+        return run_async(self.agenerate(requests, sampling_params))
 
     async def _logprobs_single_impl(self, request: LMRequest) -> list[LMOutput]:
         """Compute logprobs for a single request."""
@@ -349,4 +349,4 @@ class LiteLLMProvider(InferenceProvider):
         Returns:
             List of output lists with logprobs populated.
         """
-        return asyncio.run(self.alogprobs(requests))
+        return run_async(self.alogprobs(requests))

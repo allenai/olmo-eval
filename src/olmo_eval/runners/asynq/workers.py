@@ -159,10 +159,16 @@ def inference_worker(
             strategy = get_strategy(batch_config)
 
             concurrency_str = max_concurrency or "unlimited"
-            worker_logger.info(
-                f"Inference worker ready (strategy={batch_config.strategy}, "
-                f"chunk_size={batch_config.chunk_size}, max_in_flight={concurrency_str})"
-            )
+            if batch_config.strategy == "streaming":
+                worker_logger.info(
+                    f"Inference worker ready (strategy={batch_config.strategy}, "
+                    f"max_in_flight={concurrency_str})"
+                )
+            else:
+                worker_logger.info(
+                    f"Inference worker ready (strategy={batch_config.strategy}, "
+                    f"chunk_size={batch_config.chunk_size})"
+                )
             asyncio.run(
                 strategy.run(
                     item_queue,

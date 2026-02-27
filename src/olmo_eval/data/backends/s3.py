@@ -114,6 +114,8 @@ class S3Backend:
 
     def _prefix_has_objects(self, prefix: str) -> bool:
         """Check if an S3 prefix contains any objects."""
+        from botocore.exceptions import ClientError
+
         bucket, key = self._parse_s3_uri(prefix)
         try:
             response = self.s3_client.list_objects_v2(
@@ -122,8 +124,14 @@ class S3Backend:
                 MaxKeys=1,
             )
             return response.get("KeyCount", 0) > 0
-        except Exception:
-            return False
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "")
+            # Only treat "not found" errors as prefix not existing
+            if error_code in ("NoSuchBucket", "NoSuchKey", "404"):
+                return False
+            # Log and re-raise permission/transient errors
+            logger.error(f"S3 error checking prefix {prefix}: {error_code} - {e}")
+            raise
 
     def _parse_s3_uri(self, uri: str) -> tuple[str, str]:
         """Parse an S3 URI into bucket and key."""
@@ -173,16 +181,16 @@ class S3Backend:
         if not prefix.endswith("/"):
             prefix = prefix + "/"
 
-        # List all objects under the prefix
-        objects = list(self._list_objects(prefix))
+        # Collect supported files lazily (only materializes supported files, not all objects)
+        supported_files = []
+        has_any_objects = False
+        for obj in self._list_objects(prefix):
+            has_any_objects = True
+            if any(obj.endswith(ext) for ext in self.SUPPORTED_EXTENSIONS):
+                supported_files.append(obj)
 
-        if not objects:
+        if not has_any_objects:
             raise ValueError(f"No objects found under S3 prefix: {prefix}")
-
-        # Filter for supported file types
-        supported_files = [
-            obj for obj in objects if any(obj.endswith(ext) for ext in self.SUPPORTED_EXTENSIONS)
-        ]
 
         if not supported_files:
             raise ValueError(
@@ -266,26 +274,22 @@ class S3Backend:
 
         smart_open, transport_params = self._get_smart_open()
 
-        # Read parquet file from S3
+        # Stream parquet file in batches to avoid loading entire table into memory
         with smart_open(path, "rb", transport_params=transport_params) as f:
-            table = pq.read_table(f)
-
-        # Yield rows in batches for memory efficiency
-        for batch in table.to_batches():
-            yield from batch.to_pylist()
+            parquet_file = pq.ParquetFile(f)
+            for batch in parquet_file.iter_batches():
+                yield from batch.to_pylist()
 
     def _load_csv(self, path: str) -> Iterator[dict[str, Any]]:
         """Load a CSV file from S3."""
         import csv
-        import io
 
         smart_open, transport_params = self._get_smart_open()
 
+        # Stream CSV directly from the file handle
         with smart_open(path, "r", encoding="utf-8", transport_params=transport_params) as f:
-            content = f.read()
-
-        reader = csv.DictReader(io.StringIO(content))
-        yield from reader
+            reader = csv.DictReader(f)
+            yield from reader
 
     def exists(self, path: str) -> bool:
         """Check if an S3 path exists.
@@ -296,14 +300,21 @@ class S3Backend:
         Returns:
             True if the path exists (as file or prefix with objects).
         """
+        from botocore.exceptions import ClientError
+
         bucket, key = self._parse_s3_uri(path)
 
         # Check if it's a direct object
         try:
             self.s3_client.head_object(Bucket=bucket, Key=key)
             return True
-        except Exception:
-            pass
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "")
+            # Only treat "not found" errors as object not existing
+            if error_code not in ("NoSuchBucket", "NoSuchKey", "404", "NotFound"):
+                # Log and re-raise permission/transient errors
+                logger.error(f"S3 error checking path {path}: {error_code} - {e}")
+                raise
 
         # Check if it's a prefix with objects
         return self._prefix_has_objects(path if path.endswith("/") else path + "/")

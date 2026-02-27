@@ -1,5 +1,35 @@
 """Inference provider utilities."""
 
+from __future__ import annotations
+
+import asyncio
+import concurrent.futures
+from collections.abc import Coroutine
+from typing import Any, cast
+
+
+def run_async[T](coro: Coroutine[Any, Any, T]) -> T:
+    """Run async code from a sync context, handling nested event loops.
+
+    Unlike asyncio.run(), this helper detects when there's already a running
+    event loop (e.g., in Jupyter notebooks or async applications) and runs
+    the coroutine in a dedicated thread to avoid RuntimeError.
+
+    Args:
+        coro: The coroutine to run.
+
+    Returns:
+        The result of the coroutine.
+    """
+    try:
+        asyncio.get_running_loop()
+        # Already in an async context - run in a thread
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            return cast(T, executor.submit(asyncio.run, coro).result())
+    except RuntimeError:
+        # No running loop - use asyncio.run directly
+        return asyncio.run(coro)
+
 
 def patch_openai_agents_for_vllm() -> None:
     """Patch openai-agents SDK to omit 'strict' field for vLLM compatibility.

@@ -119,7 +119,7 @@ class HarnessPresets:
             name=name,
             sandboxes=(
                 SandboxConfig(
-                    instances=3,
+                    instances=1,
                     image="ghcr.io/astral-sh/uv:python3.12-bookworm-slim",
                     mode=SandboxMode.DOCKER,
                     startup_timeout=60.0,

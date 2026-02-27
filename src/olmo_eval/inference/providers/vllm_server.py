@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 from typing import TYPE_CHECKING, Any
 
@@ -13,6 +12,7 @@ from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestTyp
 from olmo_eval.common.types.tools import ToolCall
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
+from olmo_eval.inference.utils import run_async
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -449,7 +449,9 @@ class VLLMServerProvider(InferenceProvider):
         if tools:
             kwargs["tools"] = tools
         # Always request logprobs for metrics computation
+        # Both logprobs=True and top_logprobs are required for chat completions API
         kwargs["logprobs"] = True
+        kwargs["top_logprobs"] = 1
 
         # Pass chat_template_kwargs via extra_body for vLLM
         if self.chat_template_kwargs:
@@ -565,12 +567,12 @@ class VLLMServerProvider(InferenceProvider):
         Returns:
             List of output lists, one per request.
         """
-        return asyncio.run(self.agenerate(requests, sampling_params))
+        return run_async(self.agenerate(requests, sampling_params))
 
     async def _logprobs_single_impl(self, request: LMRequest) -> list[LMOutput]:
         """Compute logprobs for continuations.
 
-        Uses the completions endpoint with prompt_logprobs to get the actual
+        Uses the completions endpoint with echo=True to get the actual
         logprob of each continuation token given the context.
         """
         client = self._get_or_create_client()
@@ -601,13 +603,14 @@ class VLLMServerProvider(InferenceProvider):
             full_tokens = context_enc + continuation_enc
             full_prompt = tokenizer.decode(full_tokens)
 
-            # Use completions endpoint with prompt_logprobs
+            # Use completions endpoint with echo=True to get logprobs for prompt tokens
             response = await client.completions.create(
                 model=self.model_name,
                 prompt=full_prompt,
-                max_tokens=1,  # Minimum required; we only use prompt_logprobs
+                max_tokens=1,
                 temperature=0.0,
-                extra_body={"prompt_logprobs": 5},
+                logprobs=5,
+                echo=True,
             )
 
             # Extract logprobs for continuation tokens only
@@ -616,35 +619,30 @@ class VLLMServerProvider(InferenceProvider):
 
             if response.choices:
                 choice = response.choices[0]
-                prompt_logprobs = getattr(choice, "prompt_logprobs", None) or []
+                logprobs_data = getattr(choice, "logprobs", None)
 
-                # Skip context tokens, get continuation logprobs
-                cont_logprobs = prompt_logprobs[context_len:]
+                if logprobs_data and hasattr(logprobs_data, "token_logprobs"):
+                    tokens = logprobs_data.tokens or []
+                    token_logprobs = logprobs_data.token_logprobs or []
 
-                for token_id, token_probs in zip(continuation_enc, cont_logprobs, strict=False):
-                    if not token_probs:
-                        continue
+                    # Skip context tokens, get continuation logprobs
+                    cont_tokens = tokens[context_len:]
+                    cont_token_logprobs = token_logprobs[context_len:]
 
-                    # Look up logprob for the actual continuation token
-                    lp_info = token_probs.get(token_id)
-                    if lp_info is None:
-                        continue
-
-                    if isinstance(lp_info, dict):
-                        token_str = lp_info.get("token", tokenizer.decode([token_id]))
-                        logprob = lp_info.get("logprob", 0.0)
-                    else:
-                        token_str = getattr(lp_info, "token", tokenizer.decode([token_id]))
-                        logprob = getattr(lp_info, "logprob", 0.0)
-
-                    logprob_entries.append({"token": token_str, "logprob": logprob})
-                    total += logprob
+                    for token_str, logprob in zip(cont_tokens, cont_token_logprobs, strict=False):
+                        if logprob is not None:
+                            logprob_entries.append({"token": token_str, "logprob": logprob})
+                            total += logprob
 
             outputs.append(
                 LMOutput(
                     text=continuation,
                     logprobs=logprob_entries if logprob_entries else None,
-                    metadata={"total_logprob": total, "num_tokens": len(logprob_entries)},
+                    metadata={
+                        "sum_logits": total,
+                        "num_tokens": len(logprob_entries),
+                        "num_tokens_all": len(logprob_entries),
+                    },
                 )
             )
 
@@ -695,4 +693,4 @@ class VLLMServerProvider(InferenceProvider):
         Returns:
             List of output lists with logprobs populated.
         """
-        return asyncio.run(self.alogprobs(requests))
+        return run_async(self.alogprobs(requests))

@@ -107,13 +107,21 @@ class GCSBackend:
 
     def _prefix_has_objects(self, prefix: str) -> bool:
         """Check if a GCS prefix contains any objects."""
+        from google.api_core import exceptions as gcs_exceptions  # type: ignore[import-not-found]
+
         bucket_name, blob_prefix = self._parse_gcs_uri(prefix)
         try:
             bucket = self.gcs_client.bucket(bucket_name)
             blobs = bucket.list_blobs(prefix=blob_prefix, max_results=1)
             return any(True for _ in blobs)
-        except Exception:
+        except gcs_exceptions.NotFound:
             return False
+        except (gcs_exceptions.Forbidden, gcs_exceptions.Unauthorized) as e:
+            logger.error(f"GCS permission error checking prefix {prefix}: {e}")
+            raise
+        except gcs_exceptions.GoogleAPICallError as e:
+            logger.error(f"GCS error checking prefix {prefix}: {e}")
+            raise
 
     def _parse_gcs_uri(self, uri: str) -> tuple[str, str]:
         """Parse a GCS URI into bucket and blob prefix."""
@@ -159,16 +167,16 @@ class GCSBackend:
         if not prefix.endswith("/"):
             prefix = prefix + "/"
 
-        # List all objects under the prefix
-        objects = list(self._list_objects(prefix))
+        # Collect supported files lazily (only materializes supported files, not all objects)
+        supported_files = []
+        has_any_objects = False
+        for obj in self._list_objects(prefix):
+            has_any_objects = True
+            if any(obj.endswith(ext) for ext in self.SUPPORTED_EXTENSIONS):
+                supported_files.append(obj)
 
-        if not objects:
+        if not has_any_objects:
             raise ValueError(f"No objects found under GCS prefix: {prefix}")
-
-        # Filter for supported file types
-        supported_files = [
-            obj for obj in objects if any(obj.endswith(ext) for ext in self.SUPPORTED_EXTENSIONS)
-        ]
 
         if not supported_files:
             raise ValueError(
@@ -252,25 +260,22 @@ class GCSBackend:
 
         smart_open, transport_params = self._get_smart_open()
 
+        # Stream parquet file in batches to avoid loading entire table into memory
         with smart_open(path, "rb", transport_params=transport_params) as f:
-            table = pq.read_table(f)
-
-        # Yield rows in batches for memory efficiency
-        for batch in table.to_batches():
-            yield from batch.to_pylist()
+            parquet_file = pq.ParquetFile(f)
+            for batch in parquet_file.iter_batches():
+                yield from batch.to_pylist()
 
     def _load_csv(self, path: str) -> Iterator[dict[str, Any]]:
         """Load a CSV file from GCS."""
         import csv
-        import io
 
         smart_open, transport_params = self._get_smart_open()
 
+        # Stream CSV directly from the file handle
         with smart_open(path, "r", encoding="utf-8", transport_params=transport_params) as f:
-            content = f.read()
-
-        reader = csv.DictReader(io.StringIO(content))
-        yield from reader
+            reader = csv.DictReader(f)
+            yield from reader
 
     def exists(self, path: str) -> bool:
         """Check if a GCS path exists.
@@ -281,13 +286,24 @@ class GCSBackend:
         Returns:
             True if the path exists (as file or prefix with objects).
         """
+        from google.api_core import exceptions as gcs_exceptions  # type: ignore[import-not-found]
+
         bucket_name, blob_name = self._parse_gcs_uri(path)
         bucket = self.gcs_client.bucket(bucket_name)
 
         # Check if it's a direct blob
-        blob = bucket.blob(blob_name)
-        if blob.exists():
-            return True
+        try:
+            blob = bucket.blob(blob_name)
+            if blob.exists():
+                return True
+        except gcs_exceptions.NotFound:
+            pass  # Continue to prefix check
+        except (gcs_exceptions.Forbidden, gcs_exceptions.Unauthorized) as e:
+            logger.error(f"GCS permission error checking path {path}: {e}")
+            raise
+        except gcs_exceptions.GoogleAPICallError as e:
+            logger.error(f"GCS error checking path {path}: {e}")
+            raise
 
         # Check if it's a prefix with objects
         return self._prefix_has_objects(path if path.endswith("/") else path + "/")

@@ -505,6 +505,13 @@ class SubprocessTokenizer:
 
     Uses a long-running subprocess that loads the tokenizer once and handles
     requests via JSON-line protocol over stdin/stdout.
+
+    This class supports context manager protocol for proper resource cleanup:
+
+        with SubprocessTokenizer(name, path) as tokenizer:
+            tokens = tokenizer.encode("hello")
+
+    Or call close() explicitly when done.
     """
 
     def __init__(self, tokenizer_name: str, python_path: str) -> None:
@@ -513,31 +520,53 @@ class SubprocessTokenizer:
         self._tokenizer_name = tokenizer_name
         self._python_path = python_path
         self._special_ids: set[int] = set()
+        self._closed = False
 
-        # Start persistent subprocess
+        # Start persistent subprocess.
+        # Redirect stderr to DEVNULL to prevent pipe buffer filling up and blocking.
+        # Errors are communicated via JSON over stdout.
         self._proc = subprocess.Popen(
             [python_path, "-c", _TOKENIZER_SERVER_SCRIPT, tokenizer_name],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             text=True,
             bufsize=1,  # Line buffered
         )
 
-        # Wait for ready signal
+        # Wait for ready signal with timeout to prevent hanging on startup failures
+        import select
+        import sys
+
+        timeout_seconds = 60
+        if sys.platform != "win32" and hasattr(select, "select"):
+            # Use select for timeout on Unix
+            ready, _, _ = select.select([self._proc.stdout], [], [], timeout_seconds)
+            if not ready:
+                self._proc.kill()
+                self._proc.wait()
+                raise RuntimeError(
+                    f"Tokenizer subprocess timed out after {timeout_seconds}s "
+                    "waiting for ready signal"
+                )
+
         ready_line = self._proc.stdout.readline()  # type: ignore[union-attr]
         if not ready_line:
-            stderr = self._proc.stderr.read() if self._proc.stderr else ""
-            raise RuntimeError(f"Tokenizer subprocess failed to start: {stderr}")
+            self._proc.kill()
+            self._proc.wait()
+            raise RuntimeError("Tokenizer subprocess failed to start (no output)")
 
         ready = json.loads(ready_line)
         if ready.get("status") != "ready":
+            self.close()
             raise RuntimeError(f"Tokenizer subprocess error: {ready.get('error', 'unknown')}")
 
         self._special_ids = set(ready.get("special_ids", []))
 
     def _request(self, req: dict[str, Any]) -> dict[str, Any]:
         """Send a request to the subprocess and get response."""
+        if self._closed:
+            raise RuntimeError("Tokenizer has been closed")
         if self._proc.poll() is not None:
             raise RuntimeError("Tokenizer subprocess has terminated")
 
@@ -586,15 +615,43 @@ class SubprocessTokenizer:
         """Get all special token IDs."""
         return self._special_ids
 
-    def __del__(self) -> None:
-        """Clean up subprocess."""
-        if hasattr(self, "_proc") and self._proc.poll() is None:
+    def close(self) -> None:
+        """Close the subprocess and release resources."""
+        if self._closed:
+            return
+        self._closed = True
+
+        if not hasattr(self, "_proc"):
+            return
+
+        if self._proc.poll() is None:
             try:
+                # Send quit command for graceful shutdown
                 self._proc.stdin.write('{"cmd": "quit"}\n')  # type: ignore[union-attr]
                 self._proc.stdin.flush()  # type: ignore[union-attr]
                 self._proc.wait(timeout=2)
             except Exception:
-                self._proc.kill()
+                # Force kill if graceful shutdown fails
+                try:
+                    self._proc.kill()
+                    self._proc.wait(timeout=1)
+                except Exception:
+                    pass
+
+    def __enter__(self) -> SubprocessTokenizer:
+        """Enter context manager."""
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Exit context manager and close subprocess."""
+        self.close()
+
+    def __del__(self) -> None:
+        """Clean up subprocess (fallback if close() not called)."""
+        import contextlib
+
+        with contextlib.suppress(Exception):
+            self.close()
 
 
 def _load_tokenizer_from_isolated_venv(tokenizer_name: str, logger: Any) -> Any | None:

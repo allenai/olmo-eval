@@ -148,12 +148,15 @@ def assemble_external_eval_job(
     env_secrets: list[tuple[str, str]] | None = None,
     inject_aws_credentials: bool = False,
     inject_gcs_credentials: bool = False,
+    inject_gcp_secret: bool = False,
     eval_args: dict[str, str] | None = None,
     provider_kwargs: dict[str, str] | None = None,
     uv_cache_dir: str | None = None,
     beaker_username: str | None = None,
     preemptible: bool = True,
     retries: int | None = None,
+    provider_kind: str | None = None,
+    base_url: str | None = None,
 ) -> Any:
     """Assemble a BeakerJobConfig for running external evaluations.
 
@@ -189,6 +192,12 @@ def assemble_external_eval_job(
     for eval_name in external_evals:
         command.extend(["-e", eval_name])
     command.extend(["-O", BEAKER_RESULT_DIR])
+
+    # Pass provider kind and base_url if specified
+    if provider_kind:
+        command.extend(["--provider", provider_kind])
+    if base_url:
+        command.extend(["--base-url", base_url])
 
     if tensor_parallel_size > 1:
         command.extend(["--tp", str(tensor_parallel_size)])
@@ -236,6 +245,7 @@ def assemble_external_eval_job(
             {
                 "HF_HOME": "/weka/oe-eval-default/oyvindt/hf-cache",
                 "HF_HUB_CACHE": "/weka/oe-eval-default/oyvindt/hf-cache",
+                "INSPECT_CACHE_DIR": "/weka/oe-training-default/olmo-eval/inspect-cache",
                 "UV_LINK_MODE": "copy",
             }
         )
@@ -258,6 +268,13 @@ def assemble_external_eval_job(
         beaker_env_secrets = [
             BeakerEnvSecret(env_var, secret_name) for env_var, secret_name in env_secrets
         ]
+
+    # Add GCP secret as GOOGLE_APPLICATION_CREDENTIALS env var
+    if inject_gcp_secret and beaker_username:
+        gcp_secret_name = f"{beaker_username}_GOOGLE_APPLICATION_CREDENTIALS"
+        beaker_env_secrets.append(
+            BeakerEnvSecret("GOOGLE_APPLICATION_CREDENTIALS", gcp_secret_name)
+        )
 
     # Add store defaults if enabled
     if store:
@@ -342,6 +359,7 @@ class JobConfigAssembler:
         inject_gcs_credentials: bool,
         enable_sandbox: bool = False,
         secret_env_overrides: dict[str, str] | None = None,
+        inject_gcp_secret: bool = False,
     ):
         self.config = config
         self.effective_image = effective_image
@@ -354,6 +372,7 @@ class JobConfigAssembler:
         self.inject_gcs_credentials = inject_gcs_credentials
         self.enable_sandbox = enable_sandbox
         self.secret_env_overrides = secret_env_overrides or {}
+        self.inject_gcp_secret = inject_gcp_secret
 
     def assemble(self, exp: ExperimentPlan) -> BeakerJobConfig:
         """Assemble a BeakerJobConfig for an experiment."""
@@ -440,6 +459,11 @@ class JobConfigAssembler:
             for beaker_secret, env_var in self.secret_env_overrides.items()
         )
 
+        # Add GCP secret as GOOGLE_APPLICATION_CREDENTIALS env var
+        if self.inject_gcp_secret:
+            gcp_secret_name = f"{self.beaker_username}_GOOGLE_APPLICATION_CREDENTIALS"
+            env_secrets.append(BeakerEnvSecret("GOOGLE_APPLICATION_CREDENTIALS", gcp_secret_name))
+
         job_env_vars: dict[str, str] = {
             "BEAKER_AUTHOR": self.beaker_username,
             "BEAKER_WORKSPACE": self.config.workspace,
@@ -452,6 +476,7 @@ class JobConfigAssembler:
                 {
                     "HF_HOME": "/weka/oe-eval-default/oyvindt/hf-cache",
                     "HF_HUB_CACHE": "/weka/oe-eval-default/oyvindt/hf-cache",
+                    "INSPECT_CACHE_DIR": "/weka/oe-training-default/olmo-eval/inspect-cache",
                     "UV_LINK_MODE": "copy",
                 }
             )

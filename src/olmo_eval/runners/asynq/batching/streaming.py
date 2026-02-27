@@ -81,7 +81,6 @@ class StreamingStrategy(BatchingStrategy):
             task.add_done_callback(in_flight.discard)
 
         if in_flight:
-            worker_logger.info(f"Waiting for {len(in_flight)} in-flight items")
             await asyncio.gather(*in_flight)
 
         progress.close()

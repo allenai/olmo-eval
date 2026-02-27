@@ -34,6 +34,7 @@ from olmo_eval.launch.config import (
     EvalConfig,
     get_model_short_name,
     get_tasks_short_name,
+    sanitize_beaker_name,
 )
 
 __all__ = [
@@ -47,6 +48,7 @@ __all__ = [
     "get_model_short_name",
     "get_tasks_short_name",
     "parse_task_with_priority",
+    "sanitize_beaker_name",
     "print_experiment_config",
     "resolve_clusters",
     "validate_priority_configuration",

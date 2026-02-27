@@ -135,6 +135,38 @@ class ExternalEval(ABC):
 
         return env_vars
 
+    def _is_local_provider(self, provider: Any, provider_url: str) -> bool:
+        """Check if the provider is a locally-deployed server.
+
+        Returns True for vLLM servers or other local providers.
+        Returns False for external API providers (OpenAI, Anthropic, etc.).
+
+        Args:
+            provider: The inference provider instance.
+            provider_url: The provider's base URL.
+
+        Returns:
+            True if this is a local provider requiring health checks.
+        """
+        from urllib.parse import urlparse
+
+        # Check if provider is managing its own server process
+        # (VLLMServerProvider sets _server when starting a local server)
+        server = getattr(provider, "_server", None)
+        if server is not None:
+            return True
+
+        # Check if URL points to a local address
+        parsed = urlparse(provider_url)
+        hostname = parsed.hostname or ""
+
+        # Local hostnames
+        if hostname in ("localhost", "127.0.0.1", "::1"):
+            return True
+
+        # Private IP ranges (common in container networking)
+        return hostname.startswith(("10.", "172.", "192.168."))
+
     def _get_provider_url_for_sandbox(self, provider_url: str) -> str:
         """Get the provider URL that's accessible from within the sandbox.
 
@@ -184,6 +216,9 @@ class ExternalEval(ABC):
         retry_delay: float = 2.0,
     ) -> bool:
         """Check if the provider is reachable from within the sandbox.
+
+        This should only be called for locally-deployed providers (e.g., vLLM server).
+        External API providers (OpenAI, Anthropic, etc.) don't expose /health endpoints.
 
         Args:
             executor: Sandbox executor instance.
@@ -271,10 +306,44 @@ class SandboxedExternalEval(ExternalEval):
     """
 
     @property
-    @abstractmethod
-    def sandbox_image(self) -> str:
-        """Docker image to use for the sandbox container."""
-        ...
+    def sandbox_image(self) -> str | None:
+        """Docker image to use for the sandbox container.
+
+        Return None if the image should be built dynamically via build_sandbox_image().
+        """
+        return None
+
+    def build_sandbox_image(self, container_runtime: str) -> str:
+        """Build or fetch the sandbox image dynamically.
+
+        Override this method to implement custom image building logic.
+        Called when sandbox_image returns None.
+
+        Args:
+            container_runtime: Container runtime to use (docker or podman).
+
+        Returns:
+            The image name to use.
+
+        Raises:
+            NotImplementedError: If sandbox_image is None and this method is not overridden.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must set sandbox_image or override build_sandbox_image()"
+        )
+
+    def get_sandbox_image(self, container_runtime: str) -> str:
+        """Get the sandbox image, building if necessary.
+
+        Args:
+            container_runtime: Container runtime to use (docker or podman).
+
+        Returns:
+            The image name to use.
+        """
+        if self.sandbox_image is not None:
+            return self.sandbox_image
+        return self.build_sandbox_image(container_runtime)
 
     @property
     @abstractmethod
@@ -312,8 +381,9 @@ class SandboxedExternalEval(ExternalEval):
             log_dir = os.path.join(output_dir, "logs")
 
         runtime = cast(ContainerRuntime, container_runtime)
+        image = self.get_sandbox_image(container_runtime)
         return SandboxConfig(
-            image=self.sandbox_image,
+            image=image,
             mode=SandboxMode.DOCKER,
             container_runtime=runtime,
             command_timeout=self.timeout_seconds,

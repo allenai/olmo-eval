@@ -72,7 +72,12 @@ class CredentialManager:
 
         console.print()
         console.print(
-            Panel(gcs_table, title="[bold]GCS Access Configuration[/bold]", border_style="magenta")
+            Panel(
+                gcs_table,
+                title="[bold]GCS Access Configuration[/bold]",
+                border_style="magenta",
+                expand=True,
+            )
         )
         console.print()
 
@@ -139,6 +144,7 @@ class CredentialManager:
                 "\n".join(storage_lines),
                 title="[bold]Storage Configuration[/bold]",
                 border_style="green",
+                expand=True,
             )
         )
         console.print()

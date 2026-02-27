@@ -252,6 +252,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 scoring_queue,
                 scored_queue,
                 workers,
+                scorer_proc,
                 len(expanded_tasks),
                 total_instances,
             )
@@ -310,6 +311,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
     ) -> tuple[list[str], dict[str, TaskTracker], list[QueueItem]]:
         """Prepare all tasks and return tracking data structures."""
         expanded_tasks = expand_tasks(self.task_specs)
+
+        if not expanded_tasks:
+            raise ValueError("No tasks to run after expansion. Check task_specs configuration.")
 
         trackers: dict[str, TaskTracker] = {}
         items: list[QueueItem] = []
@@ -507,6 +511,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         scoring_queue: mp.Queue,
         scored_queue: mp.Queue,
         workers: list[mp.process.BaseProcess],
+        scorer_proc: mp.process.BaseProcess,
         total_tasks: int,
         total_instances: int,
     ) -> dict[str, Any]:
@@ -517,6 +522,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             scoring_queue=scoring_queue,
             scored_queue=scored_queue,
             workers=workers,
+            scorer_proc=scorer_proc,
             total_tasks=total_tasks,
             total_instances=total_instances,
             model_name=self.model_name,
