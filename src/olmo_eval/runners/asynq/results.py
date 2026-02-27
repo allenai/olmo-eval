@@ -72,6 +72,15 @@ async def process_results(
     instances_sent: dict[str, int] = {spec: 0 for spec in trackers}
     instances_scored: dict[str, int] = {spec: 0 for spec in trackers}
 
+    # Determine which tasks need the scoring worker (async scorers like sandboxed
+    # code execution). All other tasks are scored inline to avoid mp.Queue overhead.
+    tasks_needing_async_scoring: set[str] = set()
+    for spec, tracker in trackers.items():
+        if tracker.task is not None and tracker.task._has_async_scorers():
+            tasks_needing_async_scoring.add(spec)
+    if tasks_needing_async_scoring:
+        logger.info(f"Tasks using async scoring worker: {tasks_needing_async_scoring}")
+
     def check_task_completion(spec: str) -> None:
         """Check if task is complete and finalize if so."""
         nonlocal tasks_complete
@@ -191,17 +200,23 @@ async def process_results(
             trajectory=trajectory,
         )
 
-        # Send to scoring worker immediately
         assert tracker.task is not None
-        scoring_queue.put(
-            ScoringItem(
-                spec=result_item.task_id,
-                instance_idx=result_item.instance_idx,
-                response=response,
-                task=tracker.task,
+        if result_item.task_id in tasks_needing_async_scoring:
+            scoring_queue.put(
+                ScoringItem(
+                    spec=result_item.task_id,
+                    instance_idx=result_item.instance_idx,
+                    response=response,
+                    task=tracker.task,
+                )
             )
-        )
-        instances_sent[result_item.task_id] += 1
+            instances_sent[result_item.task_id] += 1
+        else:
+            scored_list = await tracker.task.score_responses([response])
+            scored = scored_list[0] if scored_list else response
+            scored_responses[result_item.task_id][result_item.instance_idx] = scored
+            instances_scored[result_item.task_id] += 1
+            check_task_completion(result_item.task_id)
 
     # Wait for remaining scoring to complete
     while tasks_complete < total_tasks:
