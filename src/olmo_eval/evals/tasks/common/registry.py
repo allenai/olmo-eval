@@ -428,12 +428,17 @@ def register_subtasks(
         attrs: dict[str, Any] = {
             subtask_attr: subtask,
             "data_source": DataSource(path=data_source, subset=subtask),
+            "__module__": base_class.__module__,
         }
         if class_attrs:
             attrs.update(class_attrs)
 
         # Create and register the subclass
         cls = type(class_name, (base_class,), attrs)
+        # Make the class accessible for pickling by adding it to the base class's module
+        import sys
+
+        setattr(sys.modules[base_class.__module__], class_name, cls)
         register(task_name)(cls)
 
         # Register variants
