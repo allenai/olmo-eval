@@ -625,8 +625,11 @@ class VLLMServerProvider(InferenceProvider):
                     if not token_probs:
                         continue
 
-                    # Look up logprob for the actual continuation token
+                    # Look up logprob for the actual continuation token.
+                    # JSON keys are always strings, so try both int and str keys.
                     lp_info = token_probs.get(token_id)
+                    if lp_info is None:
+                        lp_info = token_probs.get(str(token_id))
                     if lp_info is None:
                         continue
 
