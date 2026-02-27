@@ -299,7 +299,7 @@ class VLLMServerProcess:
     @property
     def base_url(self) -> str:
         """Get the base URL for the OpenAI-compatible API."""
-        return f"http://localhost:{self.port}/v1"
+        return f"http://127.0.0.1:{self.port}/v1"
 
     def start(self, progress_callback: ProgressCallback | None = None) -> str:
         """Start the vLLM server.

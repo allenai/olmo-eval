@@ -3,19 +3,18 @@
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.metrics import CorpusPerplexityMetric
+from olmo_eval.common.formatters import PPLFormatter
+from olmo_eval.common.metrics import BPBMetric, CorpusPerplexityMetric
 from olmo_eval.common.types import (
     Instance,
     LMRequest,
     RequestType,
+    SamplingParams,
     Split,
 )
 from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.common.types import Instance, LMRequest, SamplingParams
 from olmo_eval.evals.suites.registry import AggregationStrategy, make_suite
 from olmo_eval.evals.tasks.common import Task, register_subtasks
-from olmo_eval.common.formatters import PPLFormatter
-from olmo_eval.common.metrics import BPBMetric
 
 MAX_LENGTH = 4096
 
@@ -137,11 +136,11 @@ SHARED_ATTRS: dict = {
 VARIANTS: dict = {
     "bpb": {
         "formatter": PPLFormatter(leading_space=False, always_prepend_separator=True),
-        "metrics": (BPBMetric(),)
+        "metrics": (BPBMetric(),),
     },
     "ppl": {
         "formatter": PPLFormatter(leading_space=False, always_prepend_separator=True),
-        "metrics": (CorpusPerplexityMetric(),)
+        "metrics": (CorpusPerplexityMetric(),),
     },
 }
 
