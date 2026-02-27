@@ -115,7 +115,7 @@ _DEBUG_REQUESTS = os.environ.get("VLLM_DEBUG_REQUESTS", "").lower() in ("1", "tr
 _DEBUG_NO_RETRY = os.environ.get("VLLM_DEBUG_NO_RETRY", "").lower() in ("1", "true", "yes")
 
 
-def _log_request(request: httpx.Request) -> None:
+async def _log_request(request: httpx.Request) -> None:
     """Log outgoing HTTP request."""
     body = request.content.decode("utf-8", errors="replace") if request.content else ""
     # Truncate very long bodies
