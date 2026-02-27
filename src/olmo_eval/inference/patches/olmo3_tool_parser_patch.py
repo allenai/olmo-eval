@@ -110,7 +110,6 @@ def patch_parser(parser_path: Path) -> bool:
 
     # Write the patched content
     parser_path.write_text(new_content)
-    print(f"Successfully patched: {parser_path}")
     return True
 
 
@@ -127,6 +126,9 @@ def main() -> int:
     )
     args = arg_parser.parse_args()
 
+    print("[OLMo3 Tool Parser Patch] Applying patch for JSON content handling...")
+    print("  See: https://github.com/vllm-project/vllm/issues/32534")
+
     parser_path = find_olmo3_parser(args.venv_path)
 
     if parser_path is None:
@@ -140,7 +142,7 @@ def main() -> int:
 
     try:
         if patch_parser(parser_path):
-            print("Patch applied successfully!")
+            print(f"Patch applied successfully: {parser_path}")
         return 0
     except Exception as e:
         print(f"Error applying patch: {e}")

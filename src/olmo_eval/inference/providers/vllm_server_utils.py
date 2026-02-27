@@ -176,6 +176,10 @@ def _get_olmo3_tool_template_path() -> str:
     )
 
 
+# Kwargs that are used for deployment/setup, not vLLM server CLI arguments
+_NON_VLLM_KWARGS = frozenset({"patch_olmo3_tool_parser"})
+
+
 def _build_server_command(
     model_name: str,
     port: int,
@@ -205,12 +209,16 @@ def _build_server_command(
             when enable_auto_tool_choice is True)
         enable_prefix_caching: Enable prefix caching for faster inference (default: True)
         chat_template_kwargs: Extra kwargs for chat template (e.g., {"enable_thinking": false})
-        **kwargs: Additional vLLM server arguments
+        **kwargs: Additional vLLM server arguments. May include patch_olmo3_tool_parser
+            which controls whether to use the custom OLMo3 chat template.
 
     Returns:
         Command list for subprocess
     """
     import json
+
+    # Extract deployment kwargs before filtering
+    patch_olmo3_tool_parser = kwargs.get("patch_olmo3_tool_parser", False)
 
     # Use VLLM_PYTHON env var if set (for isolated venv setups)
     python_executable = _get_vllm_python()
@@ -246,8 +254,8 @@ def _build_server_command(
         parser = tool_call_parser or _infer_tool_call_parser(model_name)
         cmd.extend(["--tool-call-parser", parser])
 
-        # OLMo3 requires custom chat template for tool calling
-        if parser == "olmo3":
+        # OLMo3 requires custom chat template for tool calling (only when patch is applied)
+        if parser == "olmo3" and patch_olmo3_tool_parser:
             cmd.extend(["--chat-template", _get_olmo3_tool_template_path()])
 
     # Prefix caching (enabled by default for faster inference)
@@ -264,8 +272,10 @@ def _build_server_command(
     else:
         cmd.append("--no-use-tqdm-on-load")
 
-    # Add any extra kwargs as CLI args
+    # Add any extra kwargs as CLI args (filter out non-vLLM kwargs)
     for key, value in kwargs.items():
+        if key in _NON_VLLM_KWARGS:
+            continue
         if value is not None:
             arg_name = f"--{key.replace('_', '-')}"
             if isinstance(value, bool):

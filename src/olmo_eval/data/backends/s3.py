@@ -114,6 +114,8 @@ class S3Backend:
 
     def _prefix_has_objects(self, prefix: str) -> bool:
         """Check if an S3 prefix contains any objects."""
+        from botocore.exceptions import ClientError
+
         bucket, key = self._parse_s3_uri(prefix)
         try:
             response = self.s3_client.list_objects_v2(
@@ -122,8 +124,14 @@ class S3Backend:
                 MaxKeys=1,
             )
             return response.get("KeyCount", 0) > 0
-        except Exception:
-            return False
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "")
+            # Only treat "not found" errors as prefix not existing
+            if error_code in ("NoSuchBucket", "NoSuchKey", "404"):
+                return False
+            # Log and re-raise permission/transient errors
+            logger.error(f"S3 error checking prefix {prefix}: {error_code} - {e}")
+            raise
 
     def _parse_s3_uri(self, uri: str) -> tuple[str, str]:
         """Parse an S3 URI into bucket and key."""
@@ -292,14 +300,21 @@ class S3Backend:
         Returns:
             True if the path exists (as file or prefix with objects).
         """
+        from botocore.exceptions import ClientError
+
         bucket, key = self._parse_s3_uri(path)
 
         # Check if it's a direct object
         try:
             self.s3_client.head_object(Bucket=bucket, Key=key)
             return True
-        except Exception:
-            pass
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "")
+            # Only treat "not found" errors as object not existing
+            if error_code not in ("NoSuchBucket", "NoSuchKey", "404", "NotFound"):
+                # Log and re-raise permission/transient errors
+                logger.error(f"S3 error checking path {path}: {error_code} - {e}")
+                raise
 
         # Check if it's a prefix with objects
         return self._prefix_has_objects(path if path.endswith("/") else path + "/")

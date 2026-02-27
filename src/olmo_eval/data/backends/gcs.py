@@ -107,13 +107,21 @@ class GCSBackend:
 
     def _prefix_has_objects(self, prefix: str) -> bool:
         """Check if a GCS prefix contains any objects."""
+        from google.api_core import exceptions as gcs_exceptions  # type: ignore[import-not-found]
+
         bucket_name, blob_prefix = self._parse_gcs_uri(prefix)
         try:
             bucket = self.gcs_client.bucket(bucket_name)
             blobs = bucket.list_blobs(prefix=blob_prefix, max_results=1)
             return any(True for _ in blobs)
-        except Exception:
+        except gcs_exceptions.NotFound:
             return False
+        except (gcs_exceptions.Forbidden, gcs_exceptions.Unauthorized) as e:
+            logger.error(f"GCS permission error checking prefix {prefix}: {e}")
+            raise
+        except gcs_exceptions.GoogleAPICallError as e:
+            logger.error(f"GCS error checking prefix {prefix}: {e}")
+            raise
 
     def _parse_gcs_uri(self, uri: str) -> tuple[str, str]:
         """Parse a GCS URI into bucket and blob prefix."""
@@ -278,13 +286,24 @@ class GCSBackend:
         Returns:
             True if the path exists (as file or prefix with objects).
         """
+        from google.api_core import exceptions as gcs_exceptions  # type: ignore[import-not-found]
+
         bucket_name, blob_name = self._parse_gcs_uri(path)
         bucket = self.gcs_client.bucket(bucket_name)
 
         # Check if it's a direct blob
-        blob = bucket.blob(blob_name)
-        if blob.exists():
-            return True
+        try:
+            blob = bucket.blob(blob_name)
+            if blob.exists():
+                return True
+        except gcs_exceptions.NotFound:
+            pass  # Continue to prefix check
+        except (gcs_exceptions.Forbidden, gcs_exceptions.Unauthorized) as e:
+            logger.error(f"GCS permission error checking path {path}: {e}")
+            raise
+        except gcs_exceptions.GoogleAPICallError as e:
+            logger.error(f"GCS error checking path {path}: {e}")
+            raise
 
         # Check if it's a prefix with objects
         return self._prefix_has_objects(path if path.endswith("/") else path + "/")

@@ -111,6 +111,7 @@ dev = [
     "pre-commit>=4.0.0",
     "olmo-eval-internal[storage]",
     "jinja2>=3.1.6",
+    "google-api-core>=2.0.0",
 ]
 
 # ty file-based overrides for optional dependencies (inference providers use vllm/litellm)
