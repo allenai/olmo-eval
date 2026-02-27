@@ -55,6 +55,11 @@ make_suite(
 )
 
 make_suite(
+    "medmcqa:olmo3base",
+    ("medmcqa:rc:olmo3base", "medmcqa:mc:olmo3base"),
+)
+
+make_suite(
     "medqa_en",
     ("medqa_en:rc", "medqa_en:mc"),
 )

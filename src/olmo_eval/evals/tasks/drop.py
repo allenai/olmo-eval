@@ -1,0 +1,406 @@
+from __future__ import annotations
+
+import re
+import string
+from collections.abc import Iterator
+from dataclasses import dataclass
+from itertools import permutations
+from typing import Any, ClassVar
+
+from olmo_eval.common.metrics import AccuracyMetric, F1Metric
+from olmo_eval.common.scorers import Scorer
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams, Split
+from olmo_eval.data import DataSource
+from olmo_eval.evals.tasks.common import Task, register, register_variant
+
+_ARTICLES_RE = re.compile(r"\b(a|an|the)\b", re.UNICODE)
+
+
+def _is_number(text: str) -> bool:
+    try:
+        float(text)
+        return True
+    except ValueError:
+        return False
+
+
+def _remove_articles(text: str) -> str:
+    return _ARTICLES_RE.sub(" ", text)
+
+
+def _white_space_fix(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _remove_punc(text: str) -> str:
+    exclude = set(string.punctuation)
+    if not _is_number(text):
+        return "".join(ch for ch in text if ch not in exclude)
+    return text
+
+
+def _fix_number(text: str) -> str:
+    return str(float(text)) if _is_number(text) else text
+
+
+def _tokenize(text: str) -> list[str]:
+    return re.split(r" |-", text)
+
+
+def _normalize(answer: str) -> str:
+    tokens = [
+        _white_space_fix(_remove_articles(_fix_number(_remove_punc(token.lower()))))
+        for token in _tokenize(answer)
+    ]
+    tokens = [token for token in tokens if token.strip()]
+    return " ".join(tokens).strip()
+
+
+def _answer_to_bags(
+    answer: str | list[str] | tuple[str, ...],
+) -> tuple[list[str], list[set[str]]]:
+    if isinstance(answer, (list, tuple)):
+        raw_spans = list(answer)
+    else:
+        raw_spans = [answer]
+    normalized_spans: list[str] = []
+    token_bags: list[set[str]] = []
+    for raw_span in raw_spans:
+        normalized_span = _normalize(raw_span)
+        normalized_spans.append(normalized_span)
+        token_bags.append(set(normalized_span.split()))
+    return normalized_spans, token_bags
+
+
+def _compute_f1(predicted_bag: set[str], gold_bag: set[str]) -> float:
+    intersection = len(gold_bag.intersection(predicted_bag))
+    if not predicted_bag:
+        precision = 1.0
+    else:
+        precision = intersection / float(len(predicted_bag))
+    if not gold_bag:
+        recall = 1.0
+    else:
+        recall = intersection / float(len(gold_bag))
+    if precision == 0.0 and recall == 0.0:
+        return 0.0
+    return (2 * precision * recall) / (precision + recall)
+
+
+def _match_numbers_if_present(gold_bag: set[str], predicted_bag: set[str]) -> bool:
+    gold_numbers = {w for w in gold_bag if _is_number(w)}
+    predicted_numbers = {w for w in predicted_bag if _is_number(w)}
+    if (not gold_numbers) or gold_numbers.intersection(predicted_numbers):
+        return True
+    return False
+
+
+def _align_bags(predicted_bags: list[set[str]], gold_bags: list[set[str]]) -> list[float]:
+    n_gold = len(gold_bags)
+    n_pred = len(predicted_bags)
+    max_dim = max(n_gold, n_pred)
+
+    if n_gold == 0 or n_pred == 0:
+        return [0.0] * max_dim
+
+    score_mat = [[0.0] * n_pred for _ in range(n_gold)]
+    for gi, g in enumerate(gold_bags):
+        for pi, p in enumerate(predicted_bags):
+            if _match_numbers_if_present(g, p):
+                score_mat[gi][pi] = _compute_f1(p, g)
+
+    min_dim = min(n_gold, n_pred)
+    best_scores = [0.0] * max_dim
+    best_total = -1.0
+
+    for perm in permutations(range(n_pred), min_dim):
+        total = sum(score_mat[gi][pi] for gi, pi in enumerate(perm))
+        if total > best_total:
+            best_total = total
+            best_scores = [0.0] * max_dim
+            for gi, pi in enumerate(perm):
+                best_scores[gi] = score_mat[gi][pi]
+
+    return best_scores
+
+
+def _get_drop_metrics(
+    predicted: str | list[str] | tuple[str, ...],
+    gold: str | list[str] | tuple[str, ...],
+) -> tuple[float, float]:
+    predicted_bags = _answer_to_bags(predicted)
+    gold_bags = _answer_to_bags(gold)
+
+    if set(predicted_bags[0]) == set(gold_bags[0]) and len(predicted_bags[0]) == len(gold_bags[0]):
+        exact_match = 1.0
+    else:
+        exact_match = 0.0
+
+    f1_per_bag = _align_bags(predicted_bags[1], gold_bags[1])
+    f1 = sum(f1_per_bag) / len(f1_per_bag) if f1_per_bag else 0.0
+    f1 = round(f1, 2)
+    return exact_match, f1
+
+
+def _score_drop(predicted_text: str, answers: list[tuple[str, ...]]) -> tuple[float, float]:
+    max_em = 0.0
+    max_f1 = 0.0
+    for gold_answer in answers:
+        if gold_answer[0].strip():
+            em, f1 = _get_drop_metrics(predicted_text, gold_answer)
+            max_em = max(max_em, em)
+            max_f1 = max(max_f1, f1)
+    return max_em, max_f1
+
+
+@dataclass(frozen=True, slots=True)
+class DROPF1Scorer(Scorer):
+    name: str = "drop_f1"
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        if output.extracted_answer is None:
+            return 0.0
+        answers = instance.metadata.get("answers", [])
+        if not answers:
+            return 0.0
+        _, f1 = _score_drop(str(output.extracted_answer).strip(), answers)
+        return f1
+
+
+@dataclass(frozen=True, slots=True)
+class DROPExactMatchScorer(Scorer):
+    name: str = "drop_exact_match"
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        if output.extracted_answer is None:
+            return 0.0
+        answers = instance.metadata.get("answers", [])
+        if not answers:
+            return 0.0
+        em, _ = _score_drop(str(output.extracted_answer).strip(), answers)
+        return em
+
+
+# fmt: off
+DROP_FIXED_FEWSHOT = [
+    {
+        "section_id": "nfl_2201",
+        "passage": "To start the season, the Lions traveled south to Tampa, Florida to take on the Tampa Bay Buccaneers. The Lions scored first in the first quarter with a 23-yard field goal by Jason Hanson. The Buccaneers tied it up with a 38-yard field goal by Connor Barth, then took the lead when Aqib Talib intercepted a pass from Matthew Stafford and ran it in 28 yards. The Lions responded with a 28-yard field goal. In the second quarter, Detroit took the lead with a 36-yard touchdown catch by Calvin Johnson, and later added more points when Tony Scheffler caught an 11-yard TD pass. Tampa Bay responded with a 31-yard field goal just before halftime. The second half was relatively quiet, with each team only scoring one touchdown. First, Detroit's Calvin Johnson caught a 1-yard pass in the third quarter. The game's final points came when Mike Williams of Tampa Bay caught a 5-yard pass.  The Lions won their regular season opener for the first time since 2007",
+        "question": "How many field goals did the Lions score?",
+        "query_id": "c9582e03-b01b-42ed-83e0-b90a5334aefa",
+        "answer": {"number": "2", "date": {"day": "", "month": "", "year": ""}, "spans": [], "worker_id": "", "hit_id": ""},
+        "validated_answers": {"number": [""], "date": [{"day": "", "month": "", "year": ""}], "spans": [[]], "worker_id": [""], "hit_id": [""]},
+    },
+    {
+        "section_id": "nfl_1491",
+        "passage": "Coming off their road win over the Redskins, the Chiefs went home, donned their Dallas Texans throwbacks, and played a Week 7 AFL Legacy game with the San Diego Chargers. Kansas City would find themselves trailing in the first quarter as Chargers quarterback Philip Rivers completed a 3-yard touchdown pass to wide receiver Malcom Floyd, followed by a 10-yard touchdown pass to wide receiver Vincent Jackson. San Diego would add onto their lead in the second quarter with a 20-yard and a 39-yard field goal from kicker Nate Kaeding. The Chiefs would get onto the board in the third quarter with quarterback Matt Cassel completing a 7-yard touchdown pass to wide receiver Dwayne Bowe, but the Chargers kept their momentum going with Rivers finding running back Darren Sproles on a 58-yard touchdown pass. In the fourth quarter, San Diego sealed the win with Kaeding's 19-yard field goal and fullback Jacob Hester recovering a blocked punt in the end zone for a touchdown. With the loss, Kansas City went into their bye week at 1-6. Larry Johnson was suspended for two weeks after he made offensive comments about Todd Haley and made offensive comments about homosexuals on Twitter and in public.",
+        "question": "which player scored the longest field goal?",
+        "query_id": "a849cb71-b6da-4c1a-9791-b962c9ff2d65",
+        "answer": {"number": "", "date": {"day": "", "month": "", "year": ""}, "spans": ["Nate Kaeding"], "worker_id": "", "hit_id": ""},
+        "validated_answers": {"number": [""], "date": [{"day": "", "month": "", "year": ""}], "spans": [[]], "worker_id": [""], "hit_id": [""]},
+    },
+    {
+        "section_id": "history_269",
+        "passage": "In 1344, Momchil, the independent Bulgarian ruler of the Rhodope and Aegean regions, whose army grew to 2,000 men, took an important role in the Byzantine civil war. While at first he supported John Kantakouzenos, from the spring of 1344 Momchil reneged, provoked by the aggression of the Ottoman allies. In June he defeated the Ottoman fleet near the Portogalos bay. According to sources, at night the Bulgarian ruler sent boats to burn the anchored Ottoman ships and soon after he defeated the army of Kantakouzenos at Mosynopolis. Probably the first local ruler to become aware of the impending Ottoman threat, Momchil unsuccessfully pleaded with the emperors of Bulgaria and Byzantium for help. Even though his troops continued the resistance in the Eastern Rhodopes, in May 1345 the Turks led by Umur Beg marched from Asia Minor and devastated Bulgarian territories driving away people and livestock. Soon after, on 7 July 1345, Ottoman forces under Umur Beg defeated Momchil's army in the battle of Peritor near his capital Xanthi. Sources attest that the independent ruler perished in the battle without leaving asuccessor, and with little political will or leadership left to counter the Ottoman invasion.",
+        "question": "When did Momchil defeat the Ottoman fleet near the Portogalos bay?",
+        "query_id": "3637ce9d-203d-49e0-a454-b8a49e376148",
+        "answer": {"number": "", "date": {"day": "", "month": "June", "year": "1344"}, "spans": [], "worker_id": "", "hit_id": ""},
+        "validated_answers": {"number": [""], "date": [{"day": "", "month": "", "year": ""}], "spans": [[]], "worker_id": [""], "hit_id": [""]},
+    },
+    {
+        "section_id": "history_690",
+        "passage": "The French king, John II, had been held captive in England. The Treaty of Br\u00e9tigny set his ransom at 3\xa0million\xa0crowns and allowed for hostages to be held in lieu of John. The hostages included two of his sons, several princes and nobles, four inhabitants of Paris, and two citizens from each of the nineteen principal towns of France. While these hostages were held, John returned to France to try and raise funds to pay the ransom. In 1362 John's son Louis of Anjou, a hostage in English-held Calais, escaped captivity. So, with his stand-in hostage gone, John felt honor-bound to return to captivity in England. The French crown had been at odds with Navarre  since 1354, and in 1363 the Navarrese used the captivity of John II in London and the political weakness of the Dauphin to try to seize power. Although there was no formal treaty, Edward III supported the Navarrese moves, particularly as there was a prospect that he might gain control over the northern and western provinces as a consequence. With this in mind, Edward deliberately slowed the peace negotiations. In 1364, John II died in London, while still in honourable captivity. Charles V succeeded him as king of France. On 7 May 1364, one month after the dauphin's accession and three days before his coronation as Charles V, the Navarrese suffered a crushing defeat at the Battle of Cocherel.",
+        "question": "What did one of John II's replacements do in captivity?",
+        "query_id": "c420c10d-1384-47f1-9850-ec9269570ca8",
+        "answer": {"number": "", "date": {"day": "", "month": "", "year": ""}, "spans": ["escaped captivity"], "worker_id": "", "hit_id": ""},
+        "validated_answers": {"number": [""], "date": [{"day": "", "month": "", "year": ""}], "spans": [[]], "worker_id": [""], "hit_id": [""]},
+    },
+    {
+        "section_id": "history_2184",
+        "passage": "As of the census of 2000, there were 218,590 people, 79,667 households, and 60,387 families residing in the county.  The population density was 496 people per square mile (192/km\u00b2). There were 83,146 housing units at an average density of 189 per square mile (73/km\u00b2). The racial makeup of the county was 86.77% Race (United States Census), 9.27% Race (United States Census), 0.23% Race (United States Census), 1.52% Race (United States Census), 0.06% Race (United States Census), 0.69% from Race (United States Census), and 1.47% from two or more races.  1.91% of the population were Race (United States Census) or Race (United States Census) of any race. 22.5% were of German people, 13.1% Irish people, 9.8% Italian people, 9.2% English, 8.1% \"American\" and 6.0% Polish ancestry.",
+        "question": "How many more people were there than families?",
+        "query_id": "c312a5d0-5318-4bbb-806e-22333f00e990",
+        "answer": {"number": "158203", "date": {"day": "", "month": "", "year": ""}, "spans": [], "worker_id": "", "hit_id": ""},
+        "validated_answers": {"number": [""], "date": [{"day": "", "month": "", "year": ""}], "spans": [[]], "worker_id": [""], "hit_id": [""]},
+    },
+    {
+        "section_id": "history_1328",
+        "passage": "From 1231, Goryeo was intermittently invaded by the Mongol Empire. During this time, Goryeo was controlled by a military regime led by the Choe family. In 1232 the government under the nominal king fled to Ganghwa Island, which Mongol horse riders were unable to land on, and resisted the Mongol invasion. Unfortunately because of its fragile foundation, Goryeo faced frequent rebellions. The 1258 rebellion resulted in the establishment of Ssangseong  and Dongnyeong Prefectures  by the Mongols. Unlike these rebels, the Sambyeolcho  were an organ of the military government. They were organized by the Choe family to maintain security. However, unlike the Choe private guards unit , the Sambyeolcho assumed public functions performed by police and combat forces, effectively replacing the Six Divisions of the military. In 1258, Choe Ui, the fourth of the Choe family, was overthrown by Kim Jun  using the Sambyeolcho. Kim Jun took a pro-Mongol policy and sent Crown Prince Wang Jeon to the Mongol Empire. At the same time, King Gojong and the crown prince approached the Mongols to restore power from Kim Jun. In 1268, however, Kim Jun was annihilated by the Sambyeolcho under the order of Im Yeon. The next year, Im Yeon's attempt to replace King Wonjong was reversed by the crown prince  with the help from the Mongol force. In 1270, Im Yeon's successor Im Yumu was killed by the pro-Mongol faction using the Sambyeolcho. It marked the end of the military regime.",
+        "question": "What happened second: intermittent invasion of Goryeo or fleeing of king to Ganghwa Island?",
+        "query_id": "9175d921-c6a9-44f1-8406-5d5ec894866f",
+        "answer": {"number": "", "date": {"day": "", "month": "", "year": ""}, "spans": ["fleeing of king to Ganghwa Island"], "worker_id": "", "hit_id": ""},
+        "validated_answers": {"number": [""], "date": [{"day": "", "month": "", "year": ""}], "spans": [[]], "worker_id": [""], "hit_id": [""]},
+    },
+    {
+        "section_id": "nfl_1162",
+        "passage": "Hoping to rebound from their tough overtime road loss to the Raiders, the Jets went home for a Week 8 duel with the Kansas City Chiefs.  In the first quarter, New York took flight as QB Brett Favre completed an 18-yard TD pass to RB Leon Washington.  In the second quarter, the Chiefs tied the game as QB Tyler Thigpen completed a 19-yard TD pass to TE Tony Gonzalez.  The Jets would answer with Washington getting a 60-yard TD run.  Kansas City closed out the half as Thigpen completed an 11-yard TD pass to WR Mark Bradley. In the third quarter, the Chiefs took the lead as kicker Connor Barth nailed a 30-yard field goal, yet New York replied with RB Thomas Jones getting a 1-yard TD run.  In the fourth quarter, Kansas City got the lead again as CB Brandon Flowers returned an interception 91 yards for a touchdown.  Fortunately, the Jets pulled out the win with Favre completing the game-winning 15-yard TD pass to WR Laveranues Coles. During halftime, the Jets celebrated the 40th anniversary of their Super Bowl III championship team.",
+        "question": "How many yards was the first TD pass?",
+        "query_id": "f693675a-ae04-4a19-8b91-eba22d87b56a",
+        "answer": {"number": "18", "date": {"day": "", "month": "", "year": ""}, "spans": [], "worker_id": "", "hit_id": ""},
+        "validated_answers": {"number": [""], "date": [{"day": "", "month": "", "year": ""}], "spans": [[]], "worker_id": [""], "hit_id": [""]},
+    },
+    {
+        "section_id": "history_1396",
+        "passage": "In South America , the Portuguese conquered from Spain most of the Rio Negro valley, and repelled a Spanish attack on Mato Grosso . Between September 1762 and April 1763, Spanish forces led by don Pedro Antonio de Cevallos, Governor of Buenos Aires  undertook a campaign against the Portuguese in Uruguay and South Brazil. The Spaniards conquered the Portuguese territories of Colonia do Sacramento and Rio Grande de S\u00e3o Pedro and forced the Portuguese to surrender and retreat. Under the Treaty of Paris , Spain had to return to Portugal the colony of Sacramento, while the vast and rich territory of the so-called \"Continent of S. Peter\"  would be retaken from the Spanish army during the undeclared Hispano-Portuguese war of 1763-1777. As consequence of the war the Valdivian Fort System, a Spanish defensive complex in southern Chile, was updated and reinforced from 1764 onwards. Other vulnerable localities of colonial Chile such as Chilo\u00e9 Archipelago, Concepci\u00f3n, Juan Fern\u00e1ndez Islands and Valpara\u00edso were also made ready for an eventual English attack.",
+        "question": "What was the latter month that Spanish forces led a campaign against the Portuguese in Uruguay and South Brazil?",
+        "query_id": "da856d24-2607-4038-94fd-63fbc154f58a",
+        "answer": {"number": "", "date": {"day": "", "month": "April", "year": ""}, "spans": [], "worker_id": "", "hit_id": ""},
+        "validated_answers": {"number": [""], "date": [{"day": "", "month": "", "year": ""}], "spans": [[]], "worker_id": [""], "hit_id": [""]},
+    },
+    {
+        "section_id": "nfl_478",
+        "passage": "Trying to snap a two-game skid, the Bills flew to Gillette Stadium for a Week 3 divisional fight with the New England Patriots.  In the first quarter, QB J. P. Losman was immediately injured on the first offensive play of the game.  He would finish the series, but ended up on the bench for the rest of the game.  After New England took the lead with kicker Stephen Gostkowski's 24-yard field goal, rookie QB Trent Edwards played the rest of the game for Buffalo.  The Bills would get their only score of the game as RB Marshawn Lynch got an 8-yard TD run, and a Rian Lindell extra point put the Bills ahead surprisingly 7-3.  However, in the second quarter, the Patriots were able to open up their running game when Bills rookie standout Paul Posluszny was lost due to a broken arm. This left passing lanes open, and for the rest of the game, the Patriots dominated. QB Tom Brady's 8-yard TD pass to TE Benjamin Watson and a 3-yard TD pass to WR Randy Moss made it 17-7 at the half.  In the third quarter, New England continued its conquest with Brady's 4-yard TD pass to WR Jabar Gaffney and RB Sammy Morris' 4-yard TD run.  In the fourth quarter, the Patriots ended the day with Brady and Moss hooking up with each other again on a 45-yard TD pass.",
+        "question": "Which team scored first?",
+        "query_id": "81e9d225-4234-4391-ab00-2488b066d7f8",
+        "answer": {"number": "", "date": {"day": "", "month": "", "year": ""}, "spans": ["New England"], "worker_id": "", "hit_id": ""},
+        "validated_answers": {"number": [""], "date": [{"day": "", "month": "", "year": ""}], "spans": [[]], "worker_id": [""], "hit_id": [""]},
+    },
+    {
+        "section_id": "history_610",
+        "passage": "The French conquest of Morocco took place in 1911 in the aftermath of the Agadir Crisis, when Moroccan forces besieged the French-occupied city of Fez. On 30 March 1912, Sultan Abdelhafid signed the Treaty of Fez, formally ceding Moroccan sovereignty to France, transforming Morocco into a protectorate of France. However, many regions remained in revolt until 1934, when Morocco was declared to be pacified, but in several regions French authority was maintained by cooperation with local chiefs and not military strength. On 17 April 1912, Moroccan infantrymen mutinied in the French garrison in Fez. The Moroccans were unable to take the city and were defeated by a French relief force. In late May 1912, Moroccan forces unsuccessfully attacked the enhanced French garrison at Fez. The last aftermath of the conquest of Morocco occurred in 1933-34, the pacification of Morocco took over 22 years.",
+        "question": "In what year did the last aftermath of the conquest of Morocco occur?",
+        "query_id": "8bd20b5b-6d6f-4801-9cb8-e96abb81e565",
+        "answer": {"number": "", "date": {"day": "", "month": "", "year": "1934"}, "spans": [], "worker_id": "", "hit_id": ""},
+        "validated_answers": {"number": [""], "date": [{"day": "", "month": "", "year": ""}], "spans": [[]], "worker_id": [""], "hit_id": [""]},
+    },
+]
+# fmt: on
+
+_DESCRIPTION = (
+    "The following are reading comprehension questions, where the answer to each "
+    "question is either a segment of text from the corresponding passage, a number, "
+    "or a date (containing any of the date, month, and/or year components). Some "
+    "questions may require you to pull together information pieces from the passage "
+    "and reason over them.\n\n"
+)
+
+
+def _parse_answer(answer: dict[str, Any]) -> tuple[str, ...]:
+    if answer["number"] != "":
+        return (str(answer["number"]),)
+    if answer["spans"] != []:
+        return tuple(answer["spans"])
+    return (
+        " ".join(
+            [answer["date"]["day"], answer["date"]["month"], answer["date"]["year"]]
+        ).strip(),
+    )
+
+
+def _get_answers(doc: dict[str, Any]) -> list[tuple[str, ...]]:
+    def _flatten_validated_answers(validated_answers: dict[str, Any]) -> list[dict[str, Any]]:
+        valid_answers = []
+        for i in range(len(validated_answers["number"])):
+            valid_answers.append(
+                {
+                    "number": validated_answers["number"][i],
+                    "date": validated_answers["date"][i],
+                    "spans": validated_answers["spans"][i],
+                }
+            )
+        return valid_answers
+
+    answers: list[tuple[str, ...]] = []
+    answers_set: set[tuple[str, ...]] = set()
+    candidates = [doc["answer"]] + _flatten_validated_answers(doc["validated_answers"])
+    for candidate in candidates:
+        answer = _parse_answer(candidate)
+        if answer in answers_set:
+            continue
+        answers_set.add(answer)
+        answers.append(answer)
+    return answers
+
+
+@register("drop")
+class Drop(Task):
+    data_source = DataSource(path="EleutherAI/drop", split="validation")
+    split = Split.VALIDATION
+    metrics = (
+        F1Metric(scorer=DROPF1Scorer),
+        AccuracyMetric(scorer=DROPExactMatchScorer),
+    )
+    primary_metric = F1Metric(scorer=DROPF1Scorer)
+    sampling_params = SamplingParams(
+        max_tokens=100,
+        temperature=0,
+        stop_sequences=("Passage:", "Question:", "\n\n"),
+    )
+    num_fewshot = 0
+
+    @property
+    def instances(self) -> Iterator[Instance]:
+        yield from self._load_instances_cached(split="validation")
+
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
+        passage = doc["passage"]
+        question = doc["question"]
+        answers = _get_answers(doc)
+        gold_answer = " " + ", ".join(answers[0])
+
+        formatted_question = f"Passage: {passage}\nQuestion: {question}\nAnswer:"
+
+        return Instance(
+            question=formatted_question,
+            gold_answer=gold_answer,
+            metadata={
+                "id": doc.get("query_id", f"drop_{index}"),
+                "answers": answers,
+                "index": index,
+            },
+        )
+
+    def _build_fewshot(self) -> list[Instance]:
+        if self.config.fewshot_source == "olmes_drop_fixed":
+            return self._build_fixed_fewshot()
+        return super()._build_fewshot()
+
+    def _build_fixed_fewshot(self) -> list[Instance]:
+        import random
+
+        instances = []
+        for doc in DROP_FIXED_FEWSHOT:
+            answers = _get_answers(doc)
+            gold_answer = " " + ", ".join(answers[0])
+            formatted_question = (
+                f"Passage: {doc['passage']}\nQuestion: {doc['question']}\nAnswer:"
+            )
+            instances.append(
+                Instance(
+                    question=formatted_question,
+                    gold_answer=gold_answer,
+                    metadata={"answers": answers},
+                )
+            )
+
+        num = self.config.num_fewshot
+        if num and num < len(instances):
+            rng = random.Random(self.config.fewshot_seed)
+            instances = rng.sample(instances, num)
+        return instances
+
+    def format_request(self, instance: Instance) -> LMRequest:
+        fewshot = self.get_fewshot()
+
+        parts: list[str] = []
+        for ex in fewshot:
+            parts.append(ex.question + (ex.gold_answer or ""))
+        parts.append(instance.question)
+        prompt = "\n\n".join(parts)
+
+        if fewshot:
+            prompt = _DESCRIPTION + prompt
+
+        return LMRequest(request_type=RequestType.COMPLETION, prompt=prompt)
+
+    def extract_answer(self, output: LMOutput) -> str:
+        return output.text.strip()
+
+
+register_variant("drop", "gen")
+register_variant(
+    "drop",
+    "olmo3base",
+    num_fewshot=5,
+    fewshot_source="olmes_drop_fixed",
+)

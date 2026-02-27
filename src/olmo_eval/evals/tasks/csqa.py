@@ -69,7 +69,8 @@ class CommonsenseQA(Task):
 
     @property
     def instances(self) -> Iterator[Instance]:
-        yield from self._load_instances_cached()
+        split = self.config.data_source.split if isinstance(self.config.data_source, DataSource) else None
+        yield from self._load_instances_cached(split=split)
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         question = doc.get("question", "")
@@ -177,3 +178,13 @@ def _format_rc(question: str, answer: str | None = None) -> str:
 register_variant("csqa", "rc")
 register_variant("csqa", "mc", formatter=MultipleChoiceFormatter())
 register_variant("csqa", "olmo3base", num_fewshot=5, fewshot_source="olmes_csqa_fixed")
+register_variant(
+    "csqa",
+    "xlarge",
+    data_source=DataSource(path="commonsense_qa", split="train+validation"),
+    num_fewshot=5,
+    limit=10000,
+    fewshot_source="olmes_csqa_fixed",
+)
+register_variant("csqa", "olmes", num_fewshot=5, fewshot_source="olmes_csqa_fixed")
+register_variant("csqa", "full")
