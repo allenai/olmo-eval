@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 from typing import TYPE_CHECKING, Any
 
@@ -13,6 +12,7 @@ from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestTyp
 from olmo_eval.common.types.tools import ToolCall
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
+from olmo_eval.inference.utils import run_async
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -524,7 +524,7 @@ class VLLMServerProvider(InferenceProvider):
         Returns:
             List of output lists, one per request.
         """
-        return asyncio.run(self.agenerate(requests, sampling_params))
+        return run_async(self.agenerate(requests, sampling_params))
 
     async def _logprobs_single_impl(self, request: LMRequest) -> list[LMOutput]:
         """Compute logprobs for continuations.
@@ -635,4 +635,4 @@ class VLLMServerProvider(InferenceProvider):
         Returns:
             List of output lists with logprobs populated.
         """
-        return asyncio.run(self.alogprobs(requests))
+        return run_async(self.alogprobs(requests))
