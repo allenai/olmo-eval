@@ -533,8 +533,8 @@ class VLLMServerProvider(InferenceProvider):
         logprob of each continuation token given the context.
         """
         client = self._get_or_create_client()
-        # Use local tokenizer for logprobs (needs BOS/EOS token IDs)
-        tokenizer = self._get_tokenizer(require_local=True)
+        # Use remote tokenizer (no transformers dependency needed)
+        tokenizer = self._get_tokenizer(require_local=False)
 
         # Get the context/prompt text
         context = request.prompt
@@ -555,6 +555,13 @@ class VLLMServerProvider(InferenceProvider):
             context_enc, continuation_enc = encode_context_and_continuation(
                 tokenizer, context, continuation
             )
+
+            # RemoteTokenizer doesn't have BOS/EOS token IDs, so for empty contexts
+            # encode_context_and_continuation returns empty context_enc.
+            # In this case, encode with add_special_tokens=True to get BOS from server.
+            if not context_enc and context == "":
+                context_enc = tokenizer.encode("", add_special_tokens=True)
+
             context_len = len(context_enc)
 
             # Build full token sequence and convert back to text for API
