@@ -541,14 +541,6 @@ class VLLMServerProvider(InferenceProvider):
         if request.messages:
             context = request.messages[0].get("content", "") if request.messages else ""
 
-        # Debug: warn if no continuations
-        if not request.continuations:
-            logger.warning(
-                f"LOGLIKELIHOOD request has no continuations! "
-                f"request_type={request.request_type}, "
-                f"continuations={request.continuations!r}"
-            )
-
         outputs = []
         for continuation in request.continuations or ():
             # Use shared utility for proper tokenization (handles BOS, trailing spaces)
