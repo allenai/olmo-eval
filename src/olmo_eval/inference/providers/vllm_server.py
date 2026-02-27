@@ -572,7 +572,7 @@ class VLLMServerProvider(InferenceProvider):
             response = await client.completions.create(
                 model=self.model_name,
                 prompt=full_prompt,
-                max_tokens=0,  # Don't generate, just get prompt logprobs
+                max_tokens=1,  # Minimum required; we only use prompt_logprobs
                 temperature=0.0,
                 extra_body={"prompt_logprobs": 5},
             )
