@@ -354,9 +354,9 @@ def setup_pgpassword_from_arn() -> None:
         pgpass_file = Path(PGPASSWORD_FILE)
         pgpass_file.write_text(f"export PGPASSWORD='{password}'\n")
         pgpass_file.chmod(0o600)
-    except Exception:
+    except Exception as e:
         print(
-            f"Error: Failed to fetch password from {OLMO_EVAL_DB_ARN_SECRET_NAME}",
+            f"Error: Failed to fetch password from {OLMO_EVAL_DB_ARN_SECRET_NAME}: {e}",
             file=sys.stderr,
         )
         sys.exit(1)
