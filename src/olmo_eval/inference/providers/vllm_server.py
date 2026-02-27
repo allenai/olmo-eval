@@ -630,31 +630,25 @@ class VLLMServerProvider(InferenceProvider):
         Returns:
             List of output lists with logprobs populated.
         """
-        from olmo_eval.inference.dispatch import ContinuousBatchDispatcher
+        from olmo_eval.inference.dispatch import dispatch_concurrent
 
-        # Track errors to diagnose silent failures
-        errors: list[Exception] = []
-
-        def on_result(idx: int, result: list[LMOutput] | None, error: Exception | None) -> None:
-            if error is not None:
-                errors.append(error)
-
-        dispatcher: ContinuousBatchDispatcher[LMRequest, list[LMOutput]] = (
-            ContinuousBatchDispatcher(
-                process_fn=self._logprobs_single_async,
-                max_in_flight=self.max_concurrency,
-                max_retries=self.max_retries,
-                on_result=on_result,
-            )
+        results = await dispatch_concurrent(
+            requests,
+            self._logprobs_single_async,
+            max_in_flight=self.max_concurrency,
+            max_retries=self.max_retries,
         )
-        results = await dispatcher.run(requests)
 
-        # Log first error if any requests failed
-        if errors:
-            logger.error(
-                f"alogprobs: {len(errors)}/{len(requests)} requests failed. "
-                f"First error: {errors[0]!r}"
-            )
+        # Log if any requests failed (result is None)
+        failed_count = sum(1 for r in results if r is None)
+        if failed_count > 0:
+            # Try to get the actual error by running one request directly
+            try:
+                await self._logprobs_single_async(requests[0])
+            except Exception as e:
+                logger.error(
+                    f"alogprobs: {failed_count}/{len(requests)} requests failed. First error: {e!r}"
+                )
 
         # Replace None with empty list for failed requests
         return [r if r is not None else [] for r in results]
