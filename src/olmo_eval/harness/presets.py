@@ -77,7 +77,7 @@ class HarnessPresets:
 
     @lazy
     def simple_agent(name: str) -> HarnessConfig:
-        """Experiment"""
+        """Simple agent preset."""
         return HarnessConfig(
             name=name,
             provider=ProviderConfig(
@@ -87,6 +87,7 @@ class HarnessPresets:
             metrics=MetricsConfig(),
             backend="openai_agents",
             max_concurrency=4,
+            batching=BatchConfig.streaming(),
         )
 
     @lazy
@@ -106,6 +107,7 @@ class HarnessPresets:
             max_concurrency=4,
             backend="openai_agents",
             required_secrets=("S2_API_KEY", "SERPER_API_KEY", "OPENAI_API_KEY"),
+            batching=BatchConfig.streaming(),
         )
 
     @lazy
@@ -156,6 +158,7 @@ class HarnessPresets:
                     log_dir=_get_logs_dir(),
                 ),
             ),
+            batching=BatchConfig.streaming(),
         )
 
     @lazy
@@ -187,6 +190,7 @@ class HarnessPresets:
                     log_dir=_get_logs_dir(),
                 ),
             ),
+            batching=BatchConfig.streaming(),
         )
 
 

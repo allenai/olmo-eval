@@ -33,20 +33,24 @@ class StreamingStrategy(BatchingStrategy):
         total_instances: int,
     ) -> None:
         """Execute streaming to provider."""
+        from olmo_eval.common.progress import ProgressLogger
         from olmo_eval.runners.asynq.processing import process_items
 
         concurrency = max_concurrency or 64
         semaphore = asyncio.Semaphore(concurrency)
         in_flight: set[asyncio.Task] = set()
-        processed = 0
+
+        progress = ProgressLogger(
+            total=total_instances,
+            desc="Processed",
+            logger=worker_logger,
+            color="green",
+        )
 
         async def process_single(item: QueueItem) -> None:
-            nonlocal processed
             async with semaphore:
                 await process_items([item], harness, result_queue, 1, worker_logger)
-                processed += 1
-                if processed % 100 == 0:
-                    worker_logger.info(f"Processed {processed}/{total_instances} items")
+                progress.update(1)
 
         async def get_item() -> QueueItem | None:
             """Get next item from queue asynchronously."""
@@ -64,8 +68,6 @@ class StreamingStrategy(BatchingStrategy):
                             return None
                     await asyncio.sleep(0.01)
 
-        worker_logger.info("Starting streaming processing")
-
         while True:
             item = await get_item()
 
@@ -80,4 +82,4 @@ class StreamingStrategy(BatchingStrategy):
             worker_logger.info(f"Waiting for {len(in_flight)} in-flight items")
             await asyncio.gather(*in_flight)
 
-        worker_logger.info(f"Streaming complete: {processed} items")
+        progress.close()
