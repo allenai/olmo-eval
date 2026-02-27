@@ -1017,7 +1017,7 @@ def _launch_external_evals(
         BEAKER_SANDBOX_IMAGE,
     )
     from olmo_eval.evals.external import get_external_eval, is_external_eval_registered
-    from olmo_eval.launch import BeakerLauncher, get_model_short_name
+    from olmo_eval.launch import BeakerLauncher, get_model_short_name, sanitize_beaker_name
 
     secret_env_overrides = secret_env_overrides or {}
 
@@ -1151,10 +1151,10 @@ def _launch_external_evals(
             exp_name = name
         elif len(external_evals) <= 2:
             # Short list: include all eval names
-            exp_name = f"{short_name}-{'-'.join(external_evals)}-external"
+            exp_name = sanitize_beaker_name(f"{short_name}-{'-'.join(external_evals)}-external")
         else:
             # Many evals: show first eval + count to keep name reasonable
-            exp_name = (
+            exp_name = sanitize_beaker_name(
                 f"{short_name}-{external_evals[0]}-and-{len(external_evals) - 1}-more-external"
             )
 

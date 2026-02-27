@@ -242,7 +242,7 @@ class LaunchConfigLoader:
         - 1-2 tasks: {model}-{task1}-{task2}
         - 3+ tasks: {model}-{task1}-and-{N}-more
         """
-        from olmo_eval.launch import get_model_short_name
+        from olmo_eval.launch import get_model_short_name, sanitize_beaker_name
 
         # Use first model for the name (multi-model runs append model name later)
         model_name = get_model_short_name(model_specs[0]) if model_specs else "eval"
@@ -252,7 +252,7 @@ class LaunchConfigLoader:
         else:
             tasks_part = f"{task_specs[0]}-and-{len(task_specs) - 1}-more"
 
-        return f"{model_name}-{tasks_part}"
+        return sanitize_beaker_name(f"{model_name}-{tasks_part}")
 
     def _detect_gpu_requirement(self, model_spec: str) -> int:
         """Detect GPU requirement based on provider type.
