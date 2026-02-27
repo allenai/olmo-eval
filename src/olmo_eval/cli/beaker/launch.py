@@ -236,7 +236,7 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     "-G",
     type=int,
     default=None,
-    help="Number of GPUs for external eval jobs. tensor_parallel_size defaults to this value.",
+    help="Number of GPUs. Defaults to 1 for GPU providers, 0 otherwise.",
 )
 def launch(
     config: str | None,
@@ -352,6 +352,7 @@ def launch(
         "budget": budget,
         "image": image,
         "group": group,
+        "gpus": gpus,
         "s3_bucket": s3_bucket,
         "s3_prefix": s3_prefix,
         "s3_endpoint_url": s3_endpoint_url,

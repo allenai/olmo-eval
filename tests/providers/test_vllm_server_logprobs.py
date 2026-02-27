@@ -264,4 +264,4 @@ class TestVLLMServerProviderLogprobs:
             call_kwargs = mock_client.completions.create.call_args[1]
             assert "extra_body" in call_kwargs
             assert call_kwargs["extra_body"]["prompt_logprobs"] == 5
-            assert call_kwargs["max_tokens"] == 0  # Should not generate
+            assert call_kwargs["max_tokens"] == 1  # Minimum required by vLLM

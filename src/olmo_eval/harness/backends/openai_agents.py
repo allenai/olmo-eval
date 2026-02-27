@@ -163,6 +163,11 @@ class OpenAIAgentsBackend(Backend):
 
         # Create model using provider's OpenAI client
         client = provider.get_openai_client()
+        logger.debug(
+            f"Creating agent with client: {type(client).__name__}, "
+            f"base_url={getattr(client, 'base_url', 'unknown')}, "
+            f"model={provider.model_name}"
+        )
 
         model = OpenAIChatCompletionsModel(
             openai_client=client,
@@ -315,6 +320,11 @@ class OpenAIAgentsBackend(Backend):
                         max_turns_reached=True,
                         error=f"Max turns ({max_turns}) exceeded",
                     )
+
+                # Log full traceback for debugging connection issues
+                import traceback
+
+                logger.error(f"Agent run failed: {e}\n{traceback.format_exc()}")
                 raise
 
         # Convert result to HarnessResult

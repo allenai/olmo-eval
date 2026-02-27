@@ -39,7 +39,7 @@ class MetricsConfig:
     """
 
     enabled: bool = True
-    reporters: tuple[str | dict[str, Any], ...] = (ReporterType.FILE, ReporterType.CONSOLE)
+    reporters: tuple[str | dict[str, Any], ...] = (ReporterType.FILE,)
     collect_gpu: bool = False
 
     # vLLM server metrics monitoring

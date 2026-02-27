@@ -158,6 +158,8 @@ select = [
 "tests/**/fixtures.py" = ["E501"]
 # Long URLs in model configs
 "src/olmo_eval/common/constants/models.py" = ["E501"]
+# Verbatim prompt templates from asta-bench reference implementation
+"src/olmo_eval/evals/tasks/astabench_sqa.py" = ["E501"]
 
 [tool.ruff.format]
 docstring-code-format = true
