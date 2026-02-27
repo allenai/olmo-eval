@@ -178,7 +178,20 @@ async def process_batch(
 
     try:
         if request_type == RequestType.LOGLIKELIHOOD:
+            # Check if continuations are present
+            empty_cont_count = sum(1 for r in requests if not r.continuations)
+            if empty_cont_count > 0:
+                log.warning(
+                    f"LOGLIKELIHOOD batch: {empty_cont_count}/{len(requests)} requests "
+                    f"have empty continuations - no inference will be performed for these"
+                )
             all_outputs = await harness.alogprobs(requests)
+            # Debug: Check if outputs are empty
+            empty_outputs = sum(1 for o in all_outputs if not o)
+            if empty_outputs > 0:
+                log.warning(
+                    f"LOGLIKELIHOOD batch returned {empty_outputs}/{len(all_outputs)} empty outputs"
+                )
         else:
             all_outputs = await harness.agenerate(requests, sampling_params)
 
