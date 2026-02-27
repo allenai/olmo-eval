@@ -67,7 +67,6 @@ class HarnessPresets:
     @lazy
     def default(name: str) -> HarnessConfig:
         """Default preset with vllm_server and batched processing."""
-        from olmo_eval.runners.asynq.batching import BatchConfig
 
         return HarnessConfig(
             name=name,
@@ -87,8 +86,7 @@ class HarnessPresets:
             ),
             metrics=MetricsConfig(),
             backend="openai_agents",
-            max_concurrency=1,
-            batching=BatchConfig.streaming(),
+            max_concurrency=4,
         )
 
     @lazy
