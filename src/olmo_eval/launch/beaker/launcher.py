@@ -430,6 +430,10 @@ class BeakerJobConfig:
     # Use this for external evals that run vLLM as a server subprocess.
     vllm_isolated_venv: bool = False
 
+    # Whether to apply OLMo3 tool parser patch. Only used when vllm_isolated_venv=True.
+    # Set via ProviderConfig kwargs: {"patch_olmo3_tool_parser": True}
+    patch_olmo3_tool_parser: bool = False
+
 
 def resolve_clusters(cluster: str | list[str]) -> list[str]:
     """Resolve cluster aliases to full cluster names.
@@ -633,6 +637,7 @@ class BeakerLauncher:
         enable_sandbox: bool = False,
         setup_store_secrets: bool = False,
         vllm_isolated_venv: bool = False,
+        patch_olmo3_tool_parser: bool = False,
     ) -> str:
         """Build installation command for gantry's install_cmd parameter.
 
@@ -731,7 +736,7 @@ class BeakerLauncher:
 
         # Patch vLLM's olmo3 tool parser to handle JSON content in string arguments
         # See: https://github.com/vllm-project/vllm/issues/32534
-        if use_isolated_vllm_venv:
+        if use_isolated_vllm_venv and patch_olmo3_tool_parser:
             steps.append(
                 "python -m olmo_eval.inference.patches.olmo3_tool_parser_patch /opt/vllm-venv"
             )
@@ -772,6 +777,7 @@ class BeakerLauncher:
             config.enable_sandbox,
             config.setup_store_secrets,
             config.vllm_isolated_venv,
+            config.patch_olmo3_tool_parser,
         )
 
         # Build weka mounts as tuples: (bucket, mount_path)

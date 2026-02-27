@@ -212,84 +212,72 @@ class AstaExternalEval(SandboxedExternalEval):
         )
 
         result: ExternalEvalResult | None = None
-        executor: SandboxExecutor | None = None
 
-        try:
-            from olmo_eval.harness.sandbox.executor import SandboxExecutor
+        async with SandboxExecutor(sandbox_config, name=self.name) as executor:
+            try:
+                if err := await self._run_setup(executor, all_output, start_time):
+                    result = err
+                elif is_local:
+                    provider_url = self._get_provider_url_for_sandbox(provider_url)
+                    if not await self._check_provider_health(executor, provider_url):
+                        result = self._error_result(
+                            f"Provider not reachable at {provider_url}",
+                            start_time,
+                            "\n".join(all_output),
+                        )
 
-            executor = SandboxExecutor(sandbox_config, name=self.name)
-            await executor.__aenter__()
+                if result is None:
+                    run_cmd = self._build_run_command(model_name, provider_url, is_local, asta_args)
+                    logger.info(f"[{self.name}] Running: {run_cmd}")
 
-            if err := await self._run_setup(executor, all_output, start_time):
-                result = err
-            elif is_local:
-                provider_url = self._get_provider_url_for_sandbox(provider_url)
-                if not await self._check_provider_health(executor, provider_url):
-                    result = self._error_result(
-                        f"Provider not reachable at {provider_url}",
-                        start_time,
+                    run_result = await executor.execute_command(
+                        run_cmd, timeout=self.timeout_seconds, stream=True, log_prefix=self.name
+                    )
+                    all_output.append(f"$ {run_cmd}\n{run_result.output}")
+                    logger.info(f"[{self.name}] Run exit code: {run_result.exit_code}")
+
+                    # Run scoring to compile aggregate results
+                    # First check if eval_config.json exists (may not for single-task runs)
+                    config_check = await executor.execute_command(
+                        f"test -f {self.results_dir}/eval_config.json && echo exists",
+                        timeout=30.0,
+                    )
+                    if "exists" not in config_check.output:
+                        # Generate config for single-task scoring
+                        config_cmd = self._build_config_only_command(asta_args)
+                        logger.info(f"[{self.name}] Generating eval config: {config_cmd}")
+                        config_result = await executor.execute_command(
+                            config_cmd, timeout=120.0, stream=True, log_prefix=f"{self.name}-config"
+                        )
+                        all_output.append(f"$ {config_cmd}\n{config_result.output}")
+
+                    score_cmd = self._build_score_command()
+                    logger.info(f"[{self.name}] Running scoring: {score_cmd}")
+
+                    score_result = await executor.execute_command(
+                        score_cmd, timeout=300.0, stream=True, log_prefix=f"{self.name}-score"
+                    )
+                    all_output.append(f"$ {score_cmd}\n{score_result.output}")
+                    logger.info(f"[{self.name}] Score exit code: {score_result.exit_code}")
+
+                    result = await self._extract_results(
+                        executor,
                         "\n".join(all_output),
+                        run_result.exit_code,
+                        output_dir,
                     )
 
-            if result is None:
-                run_cmd = self._build_run_command(model_name, provider_url, is_local, asta_args)
-                logger.info(f"[{self.name}] Running: {run_cmd}")
+            except Exception as e:
+                logger.exception(f"[{self.name}] Execution failed")
+                result = self._error_result(str(e), start_time, "\n".join(all_output))
 
-                run_result = await executor.execute_command(
-                    run_cmd, timeout=self.timeout_seconds, stream=True, log_prefix=self.name
-                )
-                all_output.append(f"$ {run_cmd}\n{run_result.output}")
-                logger.info(f"[{self.name}] Run exit code: {run_result.exit_code}")
-
-                # Run scoring to compile aggregate results
-                # First check if eval_config.json exists (may not for single-task runs)
-                config_check = await executor.execute_command(
-                    f"test -f {self.results_dir}/eval_config.json && echo exists",
-                    timeout=30.0,
-                )
-                if "exists" not in config_check.output:
-                    # Generate config for single-task scoring
-                    config_cmd = self._build_config_only_command(asta_args)
-                    logger.info(f"[{self.name}] Generating eval config: {config_cmd}")
-                    config_result = await executor.execute_command(
-                        config_cmd, timeout=120.0, stream=True, log_prefix=f"{self.name}-config"
-                    )
-                    all_output.append(f"$ {config_cmd}\n{config_result.output}")
-
-                score_cmd = self._build_score_command()
-                logger.info(f"[{self.name}] Running scoring: {score_cmd}")
-
-                score_result = await executor.execute_command(
-                    score_cmd, timeout=300.0, stream=True, log_prefix=f"{self.name}-score"
-                )
-                all_output.append(f"$ {score_cmd}\n{score_result.output}")
-                logger.info(f"[{self.name}] Score exit code: {score_result.exit_code}")
-
-                result = await self._extract_results(
-                    executor,
-                    "\n".join(all_output),
-                    run_result.exit_code,
-                    output_dir,
-                )
-
-        except Exception as e:
-            logger.exception(f"[{self.name}] Execution failed")
-            result = self._error_result(str(e), start_time, "\n".join(all_output))
-
-        finally:
-            # Always attempt to dump trajectories, even on failure
-            if executor is not None and asta_args.dump_trajectories and output_dir:
-                try:
-                    await self._dump_trajectories_to_json(executor, output_dir, all_output)
-                except Exception as e:
-                    logger.warning(f"[{self.name}] Failed to dump trajectories: {e}")
-
-            # Clean up executor
-            if executor is not None:
-                try:
-                    await executor.__aexit__(None, None, None)
-                except Exception as e:
-                    logger.warning(f"[{self.name}] Error closing executor: {e}")
+            finally:
+                # Always attempt to dump trajectories, even on failure
+                if asta_args.dump_trajectories and output_dir:
+                    try:
+                        await self._dump_trajectories_to_json(executor, output_dir, all_output)
+                    except Exception as e:
+                        logger.warning(f"[{self.name}] Failed to dump trajectories: {e}")
 
         if result is None:
             result = self._error_result("No result produced", start_time, "\n".join(all_output))

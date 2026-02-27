@@ -81,6 +81,20 @@ def get_provider_dependencies(model_spec: str) -> list[str]:
         return []
 
 
+def get_patch_olmo3_tool_parser(model_spec: str) -> bool:
+    """Get patch_olmo3_tool_parser setting from provider config.
+
+    Returns False by default. Must be explicitly enabled in provider config.
+    """
+    from olmo_eval.common.configs import get_provider_config
+
+    try:
+        provider_config = get_provider_config(model_spec)
+        return provider_config.kwargs.get("patch_olmo3_tool_parser", False)
+    except Exception:
+        return False
+
+
 def collect_install_extras(
     *,
     store: bool = False,
@@ -302,6 +316,7 @@ def assemble_external_eval_job(
     # External evals always run vLLM as a server subprocess, so use isolated venv
     # to avoid dependency conflicts with other packages (e.g., openhands)
     vllm_isolated_venv = True
+    patch_olmo3_tool_parser = get_patch_olmo3_tool_parser(model)
 
     # Collect extras from all backends
     extras: list[str] = collect_install_extras(
@@ -340,6 +355,7 @@ def assemble_external_eval_job(
         extras=extras,
         provider_packages=provider_packages,
         vllm_isolated_venv=vllm_isolated_venv,
+        patch_olmo3_tool_parser=patch_olmo3_tool_parser,
     )
 
 
@@ -413,6 +429,7 @@ class JobConfigAssembler:
         # Determine provider kind and whether to use isolated venv for vLLM
         provider_kind = get_provider_kind(exp.model_spec)
         vllm_isolated_venv = provider_kind == "vllm_server"
+        patch_olmo3_tool_parser = get_patch_olmo3_tool_parser(exp.model_spec)
 
         # If provider.package is set, it overrides the default provider extra (e.g., vllm)
         # In that case, skip provider extras and install the package separately
@@ -538,6 +555,7 @@ class JobConfigAssembler:
             setup_registry_mirror=setup_registry_mirror,
             setup_store_secrets=self.config.store,
             vllm_isolated_venv=vllm_isolated_venv,
+            patch_olmo3_tool_parser=patch_olmo3_tool_parser,
         )
 
     def _extract_task_dependencies(
