@@ -49,7 +49,9 @@ class StreamingStrategy(BatchingStrategy):
 
         async def process_single(item: QueueItem) -> None:
             async with semaphore:
-                await process_items([item], harness, result_queue, 1, worker_logger)
+                await process_items(
+                    [item], harness, result_queue, 1, worker_logger, show_progress=False
+                )
                 progress.update(1)
 
         async def get_item() -> QueueItem | None:
