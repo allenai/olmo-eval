@@ -169,11 +169,25 @@ class LMOutput:
     extracted_answer: Any = None
     metadata: dict[str, Any] = field(default_factory=dict)
     tool_calls: list[ToolCall] | None = None
+    reasoning: str | None = None
+    reasoning_content: str | None = None
 
     @property
     def has_tool_calls(self) -> bool:
         """Check if this output contains tool calls."""
         return self.tool_calls is not None and len(self.tool_calls) > 0
+
+    @property
+    def has_reasoning(self) -> bool:
+        """Check if this output contains reasoning content.
+
+        Returns True if either 'reasoning' or 'reasoning_content' field is present.
+        """
+        has_reasoning_field = self.reasoning is not None and len(self.reasoning) > 0
+        has_reasoning_content_field = (
+            self.reasoning_content is not None and len(self.reasoning_content) > 0
+        )
+        return has_reasoning_field or has_reasoning_content_field
 
 
 @dataclass(slots=True)
