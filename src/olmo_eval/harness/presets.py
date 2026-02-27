@@ -13,6 +13,7 @@ from olmo_eval.common.constants import BEAKER_RESULT_DIR, LOCAL_RESULT_DIR
 from olmo_eval.common.types import ProviderKind
 from olmo_eval.harness.sandbox import Capability
 from olmo_eval.inference.metrics import MetricsConfig
+from olmo_eval.runners.asynq.batching import BatchConfig
 
 from .config import HarnessConfig, ProviderConfig
 from .constants import (
@@ -66,13 +67,27 @@ class HarnessPresets:
     @lazy
     def default(name: str) -> HarnessConfig:
         """Default preset with vllm_server and batched processing."""
-        from olmo_eval.runners.asynq.batching import BatchConfig
 
         return HarnessConfig(
             name=name,
             provider=ProviderConfig(kind=ProviderKind.VLLM_SERVER),
             metrics=MetricsConfig(),
             batching=BatchConfig.batched(),
+        )
+
+    @lazy
+    def simple_agent(name: str) -> HarnessConfig:
+        """Simple agent preset."""
+        return HarnessConfig(
+            name=name,
+            provider=ProviderConfig(
+                kind=ProviderKind.VLLM_SERVER,
+                kwargs={"timeout": 60},
+            ),
+            metrics=MetricsConfig(),
+            backend="openai_agents",
+            max_concurrency=4,
+            batching=BatchConfig.streaming(),
         )
 
     @lazy
@@ -92,6 +107,7 @@ class HarnessPresets:
             max_concurrency=4,
             backend="openai_agents",
             required_secrets=("S2_API_KEY", "SERPER_API_KEY", "OPENAI_API_KEY"),
+            batching=BatchConfig.streaming(),
         )
 
     @lazy
@@ -142,6 +158,7 @@ class HarnessPresets:
                     log_dir=_get_logs_dir(),
                 ),
             ),
+            batching=BatchConfig.streaming(),
         )
 
     @lazy
@@ -173,6 +190,7 @@ class HarnessPresets:
                     log_dir=_get_logs_dir(),
                 ),
             ),
+            batching=BatchConfig.streaming(),
         )
 
 

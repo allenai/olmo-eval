@@ -131,8 +131,11 @@ async def process_chat_request(
         )
 
     except Exception as e:
+        import traceback
+
         error_detail = _format_error_detail(e)
-        log.error(f"Error on CHAT instance {item.instance_idx}: {error_detail}")
+        full_tb = traceback.format_exc()
+        log.error(f"Error on CHAT instance {item.instance_idx}: {error_detail}\n{full_tb}")
 
         result_queue.put(
             ResultItem(
@@ -227,6 +230,7 @@ async def process_items(
     result_queue: mp.Queue,
     max_concurrency: int | None = None,
     worker_logger: logging.Logger | None = None,
+    show_progress: bool = True,
 ) -> None:
     """Process queue items, batching where possible.
 
@@ -240,6 +244,7 @@ async def process_items(
         result_queue: Queue to put results.
         max_concurrency: Maximum concurrent CHAT requests.
         worker_logger: Logger with worker identification.
+        show_progress: Whether to show progress logging (disable for streaming).
     """
     from olmo_eval.common.types import RequestType, SamplingParams
 
@@ -266,26 +271,34 @@ async def process_items(
             await process_batch(batch, harness, result_queue, log)
 
     if chat_items:
-        from olmo_eval.common.progress import ProgressLogger
         from olmo_eval.inference.dispatch import dispatch_concurrent
-
-        progress = ProgressLogger(
-            total=len(chat_items), desc="Processed", logger=log, color="green"
-        )
 
         async def process(item: QueueItem) -> None:
             await process_chat_request(item, harness, result_queue, log)
 
-        def on_progress(done: int, total: int) -> None:
-            progress.update(1)
+        if show_progress:
+            from olmo_eval.common.progress import ProgressLogger
 
-        await dispatch_concurrent(
-            chat_items,
-            process,
-            max_in_flight=max_concurrency or len(chat_items),
-            on_progress=on_progress,
-        )
-        progress.close()
+            progress = ProgressLogger(
+                total=len(chat_items), desc="Processed", logger=log, color="green"
+            )
+
+            def on_progress(done: int, total: int) -> None:
+                progress.update(1)
+
+            await dispatch_concurrent(
+                chat_items,
+                process,
+                max_in_flight=max_concurrency or len(chat_items),
+                on_progress=on_progress,
+            )
+            progress.close()
+        else:
+            await dispatch_concurrent(
+                chat_items,
+                process,
+                max_in_flight=max_concurrency or len(chat_items),
+            )
 
         # Flush metrics after chat requests with stable batch hash
         batch_hash = compute_batch_hash(_get_native_ids(chat_items))
