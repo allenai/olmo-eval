@@ -72,6 +72,25 @@ def prepare_task_items(
         for idx, inst in enumerate(instances)
     ]
 
+    # Validate LOGLIKELIHOOD requests have continuations
+    from olmo_eval.common.logging import get_logger
+    from olmo_eval.common.types import RequestType
+
+    _logger = get_logger(__name__)
+    if items:
+        first_req = items[0].request
+        if first_req.request_type == RequestType.LOGLIKELIHOOD:
+            empty_cont_count = sum(1 for item in items if not item.request.continuations)
+            if empty_cont_count > 0:
+                _logger.warning(
+                    f"Task {spec}: {empty_cont_count}/{len(items)} LOGLIKELIHOOD requests "
+                    f"have empty continuations - these will produce no inference outputs"
+                )
+            else:
+                _logger.debug(
+                    f"Task {spec}: All {len(items)} LOGLIKELIHOOD requests have continuations"
+                )
+
     return task, items
 
 

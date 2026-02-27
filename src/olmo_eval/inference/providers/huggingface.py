@@ -156,6 +156,19 @@ class HuggingFaceProvider(InferenceProvider):
     ) -> list[list[LMOutput]]:
         import torch
 
+        from olmo_eval.common.logging import get_logger
+
+        _logger = get_logger(__name__)
+
+        # Debug: Log first request's continuations
+        if requests:
+            first_req = requests[0]
+            _logger.debug(
+                f"HF logprobs: {len(requests)} requests, "
+                f"first has continuations={first_req.continuations is not None}, "
+                f"type={type(first_req.continuations)}"
+            )
+
         results = []
         for request in requests:
             request_outputs = []
