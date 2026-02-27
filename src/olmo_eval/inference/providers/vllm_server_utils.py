@@ -403,20 +403,12 @@ class VLLMServerProcess:
             progress_callback=progress_callback,
         )
         if not success:
-            # Try to capture any remaining output before stopping
-            if process_output is None and self._process and self._process.stdout:
-                with suppress(Exception):
-                    process_output = self._process.stdout.read().decode("utf-8", errors="replace")
+            # Stop the process first to avoid blocking on stdout.read()
+            self.stop()
 
             # If log_dir is set, output went to file - read it from there
             if process_output is None and self.log_dir:
                 with suppress(Exception):
-                    # Flush and close the log file first
-                    if self._log_file is not None:
-                        self._log_file.flush()
-                        self._log_file.close()
-                        self._log_file = None
-                    # Read the log file contents
                     import pathlib
 
                     log_path = pathlib.Path(self.log_dir) / "vllm_server.log"
@@ -426,8 +418,6 @@ class VLLMServerProcess:
             # Log the captured output for debugging
             if process_output:
                 logger.error(f"vLLM server output:\n{process_output}")
-
-            self.stop()
 
             # Build a detailed error message
             error_msg = (
