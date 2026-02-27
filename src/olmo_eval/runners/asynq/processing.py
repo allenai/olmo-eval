@@ -131,8 +131,11 @@ async def process_chat_request(
         )
 
     except Exception as e:
+        import traceback
+
         error_detail = _format_error_detail(e)
-        log.error(f"Error on CHAT instance {item.instance_idx}: {error_detail}")
+        full_tb = traceback.format_exc()
+        log.error(f"Error on CHAT instance {item.instance_idx}: {error_detail}\n{full_tb}")
 
         result_queue.put(
             ResultItem(

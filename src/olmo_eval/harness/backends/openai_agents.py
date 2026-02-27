@@ -315,6 +315,11 @@ class OpenAIAgentsBackend(Backend):
                         max_turns_reached=True,
                         error=f"Max turns ({max_turns}) exceeded",
                     )
+
+                # Log full traceback for debugging connection issues
+                import traceback
+
+                logger.error(f"Agent run failed: {e}\n{traceback.format_exc()}")
                 raise
 
         # Convert result to HarnessResult

@@ -272,7 +272,9 @@ class VLLMServerProvider(InferenceProvider):
 
     def get_openai_client(self) -> AsyncOpenAI:
         """Get the AsyncOpenAI client for this provider."""
-        return self._get_or_create_client()
+        client = self._get_or_create_client()
+        assert client is not None, "AsyncOpenAI client creation failed"
+        return client
 
     def _get_tokenizer(self, *, require_local: bool = False) -> Any:
         """Get or create the tokenizer.
