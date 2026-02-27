@@ -37,21 +37,22 @@ SANITIZE_CODE = r'''
             # JSON content in single-quoted strings can break Python parsing due to:
             # - Newlines (pretty-printed JSON)
             # - Single quotes in text (e.g., "Model's approach")
-            # - Unescaped backslashes
+            # - Unescaped backslashes (e.g., "C:\path")
             import re as _re
             def _sanitize_python_strings(text: str) -> str:
-                """Escape problematic characters inside single-quoted strings."""
-                # Find all single-quoted strings and escape control characters
-                def _escape_string_content(match):
-                    content = match.group(1)
-                    # Escape literal control characters
-                    content = content.replace('\n', '\\n')
-                    content = content.replace('\r', '\\r')
-                    content = content.replace('\t', '\\t')
-                    return "'" + content + "'"
-                # Match single-quoted strings (non-greedy, handling escaped quotes)
-                # This pattern matches 'content' where content can include \'
-                return _re.sub(r"'((?:[^'\\]|\\.)*)'", _escape_string_content, text)
+                """Escape problematic characters inside single-quoted string arguments."""
+                # Match arg='...' where content runs until ') or ', (end of arg)
+                def _escape_content(m):
+                    content = m.group(1)
+                    # Escape bare backslashes (not already escape sequences)
+                    content = _re.sub(r'\\(?![nrtbf\\\'"])', r'\\\\', content)
+                    # Escape literal control chars
+                    content = content.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
+                    # Escape unescaped single quotes
+                    content = _re.sub(r"(?<!\\)'", r"\\'", content)
+                    return "='" + content + "'"
+                # Greedy match to last ' before ) or , to handle unescaped quotes in content
+                return _re.sub(r"='(.*)'\s*(?=[,)])", _escape_content, text, flags=_re.DOTALL)
 
             model_output = _sanitize_python_strings(model_output)
 '''
