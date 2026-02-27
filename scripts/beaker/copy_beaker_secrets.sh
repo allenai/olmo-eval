@@ -23,7 +23,7 @@ for secret_name in "$@"; do
     secret_value=$(beaker secret read "$secret_name" --workspace "$SOURCE_WORKSPACE")
 
     # Write secret to target workspace
-    echo "$secret_value" | beaker secret write "$secret_name" --workspace "$TARGET_WORKSPACE"
+    printf '%s' "$secret_value" | beaker secret write "$secret_name" --workspace "$TARGET_WORKSPACE"
 done
 
 echo "Done! Copied $# secrets."
