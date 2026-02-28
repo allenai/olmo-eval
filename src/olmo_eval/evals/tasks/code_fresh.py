@@ -37,12 +37,12 @@ class CodeFreshBase(Task):
             self._instances_cache = []
             loader = DataLoader()
             source = self.config.get_data_source()
-            for doc in loader.load(source):
+            for idx, doc in enumerate(loader.load(source)):
                 if doc["file_tokens"] > MAX_LENGTH:
                     # throw away documents that are too long
                     continue
 
-                self._instances_cache.append(self.process_doc(doc))
+                self._instances_cache.append(self.process_doc(doc=doc, index=idx))
         yield from self._instances_cache
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
