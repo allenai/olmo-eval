@@ -124,6 +124,8 @@ class DataSource:
             subset=kwargs.get("subset", subset),
             split=kwargs.get("split", split),
             source_type=kwargs.get("source_type", source_type),
+            data_files=kwargs.get("data_files"),
+            revision=kwargs.get("revision"),
         )
 
     def with_split(self, split: str) -> DataSource:
@@ -133,6 +135,8 @@ class DataSource:
             subset=self.subset,
             split=split,
             source_type=self.source_type,
+            data_files=self.data_files,
+            revision=self.revision,
         )
 
     def with_subset(self, subset: str | None) -> DataSource:
@@ -142,6 +146,8 @@ class DataSource:
             subset=subset,
             split=self.split,
             source_type=self.source_type,
+            data_files=self.data_files,
+            revision=self.revision,
         )
 
     def to_dict(self) -> dict:

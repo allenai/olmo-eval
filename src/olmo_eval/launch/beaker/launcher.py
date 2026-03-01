@@ -387,6 +387,7 @@ class BeakerJobConfig:
         default_factory=lambda: {
             "HF_HOME": "/weka/oe-eval-default/oyvindt/hf-cache",
             "HF_HUB_CACHE": "/weka/oe-eval-default/oyvindt/hf-cache",
+            "INSPECT_CACHE_DIR": "/weka/oe-training-default/olmo-eval/inspect-cache",
         }
     )
     env_secrets: list[BeakerEnvSecret] = field(default_factory=list)
@@ -649,7 +650,7 @@ class BeakerLauncher:
             provider_packages: Optional list of provider-specific dependencies.
             task_packages: Optional list of task-specific packages to install.
             setup_registry_mirror: If True, run setup_dockerio_mirror script with MIRROR_HOSTS.
-            enable_sandbox: If True, set up /dev/net/tun for pasta networking.
+            enable_sandbox: If True, set up /dev/net/tun and Artifact Registry auth.
             setup_store_secrets: If True, run setup_store_secrets to configure database access.
             vllm_isolated_venv: If True, install vLLM in isolated venv for server mode.
 
@@ -675,6 +676,12 @@ class BeakerLauncher:
         if setup_registry_mirror:
             script = "/gantry-runtime/src/olmo_eval/launch/beaker/podman/setup_dockerio_mirror"
             steps.append(f'if [ -n "$MIRROR_HOSTS" ]; then {script} "$MIRROR_HOSTS"; fi')
+
+        # Set up Artifact Registry auth for sandbox image caching
+        # Checks for GOOGLE_APPLICATION_CREDENTIALS and exits gracefully if not set
+        if enable_sandbox:
+            script = "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/setup_artifact_registry"
+            steps.append(f"source {script}")
 
         # Export additional environment variables (e.g., UV_CACHE_DIR)
         if env_exports:

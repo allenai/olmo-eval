@@ -57,6 +57,7 @@ class LaunchConfig:
 
     inject_aws_credentials: bool = False
     inject_gcs_credentials: bool = False
+    inject_gcp_secret: bool = False
 
     uv_cache_dir: str | None = None
 
@@ -151,7 +152,11 @@ class LaunchConfigLoader:
         preemptible = preemptible if preemptible is not None else True
         timeout = timeout or "24h"
 
-        self._validate_required(name, model_specs, task_specs, cluster, workspace, budget)
+        self._validate_required(model_specs, task_specs, cluster, workspace, budget)
+
+        # Auto-generate name if not provided
+        if not name:
+            name = self._generate_experiment_name(model_specs, task_specs)
 
         assert name is not None
         assert cluster is not None
@@ -203,20 +208,17 @@ class LaunchConfigLoader:
             harness_overrides=self.cli_args.get("harness_overrides", []),
             uv_cache_dir=self.cli_args.get("uv_cache_dir"),
             secret_env_overrides=self.cli_args.get("secret_env_overrides", {}),
+            inject_gcp_secret=self.cli_args.get("gcp_secret") or False,
         )
 
     def _validate_required(
         self,
-        name: str | None,
         model_specs: list[str],
         task_specs: list[str],
         cluster: str | None,
         workspace: str | None,
         budget: str | None,
     ) -> None:
-        if not name:
-            console.print("[red]Error:[/red] --name/-n is required")
-            raise SystemExit(1) from None
         if not model_specs:
             console.print("[red]Error:[/red] --model/-m is required")
             raise SystemExit(1) from None
@@ -232,6 +234,25 @@ class LaunchConfigLoader:
         if not budget:
             console.print("[red]Error:[/red] --budget/-B is required")
             raise SystemExit(1) from None
+
+    def _generate_experiment_name(self, model_specs: list[str], task_specs: list[str]) -> str:
+        """Generate experiment name from model and task specs.
+
+        Format:
+        - 1-2 tasks: {model}-{task1}-{task2}
+        - 3+ tasks: {model}-{task1}-and-{N}-more
+        """
+        from olmo_eval.launch import get_model_short_name, sanitize_beaker_name
+
+        # Use first model for the name (multi-model runs append model name later)
+        model_name = get_model_short_name(model_specs[0]) if model_specs else "eval"
+
+        if len(task_specs) <= 2:
+            tasks_part = "-".join(task_specs)
+        else:
+            tasks_part = f"{task_specs[0]}-and-{len(task_specs) - 1}-more"
+
+        return sanitize_beaker_name(f"{model_name}-{tasks_part}")
 
     def _detect_gpu_requirement(self, model_spec: str) -> int:
         """Detect GPU requirement based on provider type.

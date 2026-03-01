@@ -64,6 +64,20 @@ def get_model_short_name(model_name: str, alias: str | None = None) -> str:
     return short_name.lower()
 
 
+def sanitize_beaker_name(name: str) -> str:
+    """Sanitize a string for use in Beaker names.
+
+    Beaker names can only contain letters, digits, periods, dashes, and
+    underscores, and cannot start with a dash.
+    """
+    # Replace invalid characters with underscores
+    sanitized = name.replace(":", "_").replace("@", "_")
+    # Ensure name doesn't start with a dash
+    if sanitized.startswith("-"):
+        sanitized = "_" + sanitized[1:]
+    return sanitized
+
+
 def _shorten_task_name(task: str, max_len: int = 8) -> str:
     """Shorten a single task name for use in experiment naming."""
     if "@" in task:

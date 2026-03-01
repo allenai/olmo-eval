@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import pickle
 import queue
 import time
 from datetime import datetime
@@ -37,6 +38,7 @@ async def process_results(
     scoring_queue: mp.Queue,
     scored_queue: mp.Queue,
     workers: list[mp.process.BaseProcess],
+    scorer_proc: mp.process.BaseProcess,
     total_tasks: int,
     total_instances: int,
     model_name: str,
@@ -55,6 +57,7 @@ async def process_results(
         scoring_queue: Queue to send items for scoring.
         scored_queue: Queue receiving scored responses.
         workers: List of inference worker processes.
+        scorer_proc: The scoring worker process.
         total_tasks: Total number of tasks.
         total_instances: Total number of instances across all tasks.
         model_name: Model name for reporting.
@@ -200,23 +203,27 @@ async def process_results(
             trajectory=trajectory,
         )
 
+        # Send to scoring worker immediately
+        # Pre-pickle to catch errors synchronously (queue.put uses a background thread
+        # that silently swallows pickling errors, causing the job to stall)
         assert tracker.task is not None
-        if result_item.task_id in tasks_needing_async_scoring:
-            scoring_queue.put(
-                ScoringItem(
-                    spec=result_item.task_id,
-                    instance_idx=result_item.instance_idx,
-                    response=response,
-                    task=tracker.task,
-                )
-            )
-            instances_sent[result_item.task_id] += 1
-        else:
-            scored_list = await tracker.task.score_responses([response])
-            scored = scored_list[0] if scored_list else response
-            scored_responses[result_item.task_id][result_item.instance_idx] = scored
-            instances_scored[result_item.task_id] += 1
+        scoring_item = ScoringItem(
+            spec=result_item.task_id,
+            instance_idx=result_item.instance_idx,
+            response=response,
+            task=tracker.task,
+        )
+        try:
+            pickle.dumps(scoring_item)
+        except (pickle.PicklingError, TypeError, AttributeError) as e:
+            task_id = result_item.task_id
+            idx = result_item.instance_idx
+            logger.error(f"Failed to pickle scoring item for {task_id}[{idx}]: {e}")
+            tracker.add_failure(result_item.instance_idx, f"Pickling failed: {e}")
             check_task_completion(result_item.task_id)
+            continue
+        scoring_queue.put(scoring_item)
+        instances_sent[result_item.task_id] += 1
 
     # Wait for remaining scoring to complete
     while tasks_complete < total_tasks:
@@ -230,6 +237,16 @@ async def process_results(
                 raise RuntimeError(f"Scoring worker crashed: {scored.error}")
             handle_scored_response(scored)
         except queue.Empty:
+            # Check if scorer died while we're still waiting for results
+            if not scorer_proc.is_alive():
+                total_sent = sum(instances_sent.values())
+                total_scored = sum(instances_scored.values())
+                missing = total_sent - total_scored
+                raise RuntimeError(
+                    f"Scoring worker exited while {missing} items still pending. "
+                    f"Sent {total_sent}, scored {total_scored}. "
+                    f"Items may have been lost due to queue errors (check logs)."
+                ) from None
             continue
 
     logger.info(f"Scoring complete ({total_tasks} tasks, {total_instances} instances)")

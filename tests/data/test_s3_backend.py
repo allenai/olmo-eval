@@ -290,18 +290,26 @@ class TestS3BackendExists:
 
     def test_exists_file_not_found(self):
         """Test checking if a non-existent file exists."""
+        from botocore.exceptions import ClientError
+
         backend = S3Backend()
         backend._s3_client = MagicMock()
-        backend._s3_client.head_object.side_effect = Exception("Not found")
+        # Simulate S3 404 response
+        error_response = {"Error": {"Code": "404", "Message": "Not Found"}}
+        backend._s3_client.head_object.side_effect = ClientError(error_response, "HeadObject")
         backend._s3_client.list_objects_v2.return_value = {"KeyCount": 0}
 
         assert backend.exists("s3://bucket/nonexistent.jsonl") is False
 
     def test_exists_prefix(self):
         """Test checking if a prefix exists."""
+        from botocore.exceptions import ClientError
+
         backend = S3Backend()
         backend._s3_client = MagicMock()
-        backend._s3_client.head_object.side_effect = Exception("Not found")
+        # Simulate S3 404 response for head_object
+        error_response = {"Error": {"Code": "404", "Message": "Not Found"}}
+        backend._s3_client.head_object.side_effect = ClientError(error_response, "HeadObject")
         backend._s3_client.list_objects_v2.return_value = {"KeyCount": 1}
 
         assert backend.exists("s3://bucket/prefix/") is True

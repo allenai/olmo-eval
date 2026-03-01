@@ -26,6 +26,7 @@ dependencies = [
     "datasets>=3.2.0",
     "numpy>=1.20.0",
     "omegaconf~=2.3.0",
+    "prometheus_client>=0.21.0",
     "rich~=14.3.1",
     "sympy>=1.12",
     "textual-plot>=0.10.1",
@@ -110,6 +111,7 @@ dev = [
     "pre-commit>=4.0.0",
     "olmo-eval-internal[storage]",
     "jinja2>=3.1.6",
+    "google-api-core>=2.0.0",
 ]
 
 # ty file-based overrides for optional dependencies (inference providers use vllm/litellm)
@@ -156,6 +158,8 @@ select = [
 "tests/**/fixtures.py" = ["E501"]
 # Long URLs in model configs
 "src/olmo_eval/common/constants/models.py" = ["E501"]
+# Verbatim prompt templates from asta-bench reference implementation
+"src/olmo_eval/evals/tasks/astabench_sqa.py" = ["E501"]
 
 [tool.ruff.format]
 docstring-code-format = true
