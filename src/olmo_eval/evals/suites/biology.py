@@ -33,12 +33,6 @@ LAB_BENCH_BPB = make_suite(
     description="LAB-Bench with bits-per-byte evaluation",
 )
 
-LAB_BENCH_OLMO3BASE = make_suite(
-    "lab_bench:olmo3base",
-    tuple(f"{t}:olmo3base" for t in _LAB_BENCH_TASKS),
-    description="LAB-Bench with RC cloze format (3-shot, logprob MC)",
-)
-
 make_suite(
     "medmcqa",
     ("medmcqa:mc", "medmcqa:rc"),
@@ -55,16 +49,6 @@ make_suite(
 )
 
 make_suite(
-    "medmcqa:olmo3base",
-    ("medmcqa:rc:olmo3base", "medmcqa:mc:olmo3base"),
-)
-
-make_suite(
     "medqa_en",
     ("medqa_en:rc", "medqa_en:mc"),
-)
-
-make_suite(
-    "medqa_en:olmo3base",
-    ("medqa_en:rc:olmo3base", "medqa_en:mc:olmo3base"),
 )

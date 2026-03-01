@@ -1,5 +1,3 @@
-"""MMLU evaluation suites."""
-
 from olmo_eval.evals.suites.registry import AggregationStrategy, Suite, make_suite, register
 from olmo_eval.evals.tasks.mmlu import _HUMANITIES, _OTHER, _SOCIAL_SCIENCES, _STEM
 
