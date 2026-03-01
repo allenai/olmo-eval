@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.formatters import MultipleChoiceLogprobFormatter
-from olmo_eval.common.metrics import MultipleChoiceFormatter
+from olmo_eval.common.formatters import MultipleChoiceFormatter
+from olmo_eval.common.metrics import LogprobMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, TaskConfig, register
@@ -146,7 +146,7 @@ class MMLUMCTask(Task):
         formatter = self.config.formatter
         if formatter is None:
             raise ValueError(
-                "MMLU MC task requires a formatter (e.g. MultipleChoiceLogprobFormatter)"
+                "MMLU MC task requires a formatter (e.g. MultipleChoiceFormatter)"
             )
         return formatter.format(instance, self.get_fewshot())
 
@@ -165,11 +165,10 @@ class MMLUMCTask(Task):
         return all_fewshot[:k] if k else all_fewshot
 
 
-_MMLU_FORMATTER = MultipleChoiceLogprobFormatter(
+_MMLU_FORMATTER = MultipleChoiceFormatter(
     template="{question}",
-    label_prefix=" ",
     include_choices_in_prompt=False,
-    answer_suffix="\n\nAnswer:",
+    prompt_suffix="\n\nAnswer:",
 )
 
 # Register one task per subject (mmlu_abstract_algebra, mmlu_anatomy, ...)
@@ -180,8 +179,8 @@ for _subject in MMLU_SUBJECTS:
         {
             "data_source": DataSource(path=DEFAULT_MMLU_PATH, subset=_subject, split="test"),
             "formatter": _MMLU_FORMATTER,
-            "metrics": (MultipleChoiceFormatter(),),
-            "primary_metric": MultipleChoiceFormatter(),
+            "metrics": (LogprobMCAccuracyMetric(),),
+            "primary_metric": LogprobMCAccuracyMetric(),
             "num_fewshot": 5,
             "split": Split.TEST,
             "sampling_params": SamplingParams(max_tokens=1, temperature=0.0),
