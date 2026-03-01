@@ -112,6 +112,7 @@ class ScoredResponse:
 
 
 __all__ = [
+    "DEFAULT_SCORING_CONCURRENCY",
     "WORKER_FATAL",
     "SCORER_FATAL",
     "QueueItem",

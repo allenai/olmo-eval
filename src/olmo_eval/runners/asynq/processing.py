@@ -2,17 +2,23 @@
 
 from __future__ import annotations
 
-import asyncio
+import logging
 import multiprocessing as mp
 from typing import TYPE_CHECKING
 
 from olmo_eval.common.logging import get_logger
+from olmo_eval.inference.metrics.core.stats import compute_batch_hash
 from olmo_eval.runners.asynq.types import QueueItem, ResultItem
 
 if TYPE_CHECKING:
     from olmo_eval.harness import Harness
 
 logger = get_logger(__name__)
+
+
+def _get_native_ids(items: list[QueueItem]) -> list[str]:
+    """Extract native IDs from queue items for batch hashing."""
+    return [f"{item.task_id}:{item.instance_idx}" for item in items]
 
 
 def _format_cause(cause: BaseException) -> str:
@@ -68,6 +74,7 @@ async def process_chat_request(
     item: QueueItem,
     harness: Harness,
     result_queue: mp.Queue,
+    worker_logger: logging.Logger | None = None,
 ) -> None:
     """Process a single CHAT request via harness.run().
 
@@ -78,7 +85,9 @@ async def process_chat_request(
         item: Queue item to process (must be CHAT type).
         harness: Harness instance for execution.
         result_queue: Queue to put results.
+        worker_logger: Logger with worker identification.
     """
+    log = worker_logger or logger
     from dataclasses import replace as dataclass_replace
 
     # Build trace metadata for observability
@@ -122,8 +131,11 @@ async def process_chat_request(
         )
 
     except Exception as e:
+        import traceback
+
         error_detail = _format_error_detail(e)
-        logger.warning(f"Error on CHAT instance {item.instance_idx}: {error_detail}")
+        full_tb = traceback.format_exc()
+        log.error(f"Error on CHAT instance {item.instance_idx}: {error_detail}\n{full_tb}")
 
         result_queue.put(
             ResultItem(
@@ -143,6 +155,7 @@ async def process_batch(
     items: list[QueueItem],
     harness: Harness,
     result_queue: mp.Queue,
+    worker_logger: logging.Logger | None = None,
 ) -> None:
     """Process a batch of COMPLETION or LOGLIKELIHOOD requests.
 
@@ -153,8 +166,11 @@ async def process_batch(
         items: List of queue items to process (same type and sampling_params).
         harness: Harness instance for execution.
         result_queue: Queue to put results.
+        worker_logger: Logger with worker identification.
     """
     from olmo_eval.common.types import RequestType
+
+    log = worker_logger or logger
 
     if not items:
         return
@@ -184,10 +200,14 @@ async def process_batch(
                 )
             )
 
+        # Flush metrics after each batch with stable batch hash
+        batch_hash = compute_batch_hash(_get_native_ids(items))
+        harness.flush_metrics(batch_hash)
+
     except Exception as e:
         # Batch failed - report error for all items
         error_detail = _format_error_detail(e)
-        logger.warning(f"Batch error ({len(items)} items): {error_detail}")
+        log.error(f"Batch error ({len(items)} items): {error_detail}")
 
         for item in items:
             result_queue.put(
@@ -209,6 +229,8 @@ async def process_items(
     harness: Harness,
     result_queue: mp.Queue,
     max_concurrency: int | None = None,
+    worker_logger: logging.Logger | None = None,
+    show_progress: bool = True,
 ) -> None:
     """Process queue items, batching where possible.
 
@@ -221,8 +243,12 @@ async def process_items(
         harness: Harness instance for execution.
         result_queue: Queue to put results.
         max_concurrency: Maximum concurrent CHAT requests.
+        worker_logger: Logger with worker identification.
+        show_progress: Whether to show progress logging (disable for streaming).
     """
     from olmo_eval.common.types import RequestType, SamplingParams
+
+    log = worker_logger or logger
 
     chat_items: list[QueueItem] = []
     batchable_items: list[QueueItem] = []
@@ -234,8 +260,6 @@ async def process_items(
             batchable_items.append(item)
 
     if batchable_items:
-        from olmo_eval.common.progress import ProgressLogger
-
         batches: dict[tuple[RequestType, SamplingParams | None], list[QueueItem]] = {}
         for item in batchable_items:
             key = (item.request.request_type, item.sampling_params)
@@ -243,29 +267,42 @@ async def process_items(
                 batches[key] = []
             batches[key].append(item)
 
-        progress = ProgressLogger(
-            total=len(batchable_items), desc="Processed", logger=logger, color="green"
-        )
         for batch in batches.values():
-            await process_batch(batch, harness, result_queue)
-            progress.update(len(batch))
-        progress.close()
+            await process_batch(batch, harness, result_queue, log)
 
     if chat_items:
-        from olmo_eval.common.progress import ProgressLogger
-
-        semaphore = asyncio.Semaphore(max_concurrency or len(chat_items))
-        progress = ProgressLogger(
-            total=len(chat_items), desc="Processed", logger=logger, color="green"
-        )
+        from olmo_eval.inference.dispatch import dispatch_concurrent
 
         async def process(item: QueueItem) -> None:
-            async with semaphore:
-                await process_chat_request(item, harness, result_queue)
+            await process_chat_request(item, harness, result_queue, log)
+
+        if show_progress:
+            from olmo_eval.common.progress import ProgressLogger
+
+            progress = ProgressLogger(
+                total=len(chat_items), desc="Processed", logger=log, color="green"
+            )
+
+            def on_progress(done: int, total: int) -> None:
                 progress.update(1)
 
-        await asyncio.gather(*[process(item) for item in chat_items])
-        progress.close()
+            await dispatch_concurrent(
+                chat_items,
+                process,
+                max_in_flight=max_concurrency or len(chat_items),
+                on_progress=on_progress,
+            )
+            progress.close()
+        else:
+            await dispatch_concurrent(
+                chat_items,
+                process,
+                max_in_flight=max_concurrency or len(chat_items),
+            )
+
+        # Flush metrics after chat requests with stable batch hash
+        batch_hash = compute_batch_hash(_get_native_ids(chat_items))
+        harness.flush_metrics(batch_hash)
 
 
 __all__ = [

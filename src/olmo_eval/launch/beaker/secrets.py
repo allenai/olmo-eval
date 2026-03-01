@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 __all__ = [
+    "COMMON_SECRET_NAMES",
     "get_local_hf_token",
     "get_local_wandb_api_key",
     "ensure_common_secrets",
@@ -40,6 +41,8 @@ __all__ = [
     "get_store_env_defaults",
     "setup_pgpassword_from_arn",
 ]
+
+COMMON_SECRET_NAMES: frozenset[str] = frozenset({"HF_TOKEN"})
 
 
 def get_local_hf_token() -> str | None:
@@ -351,9 +354,9 @@ def setup_pgpassword_from_arn() -> None:
         pgpass_file = Path(PGPASSWORD_FILE)
         pgpass_file.write_text(f"export PGPASSWORD='{password}'\n")
         pgpass_file.chmod(0o600)
-    except Exception:
+    except Exception as e:
         print(
-            f"Error: Failed to fetch password from {OLMO_EVAL_DB_ARN_SECRET_NAME}",
+            f"Error: Failed to fetch password from {OLMO_EVAL_DB_ARN_SECRET_NAME}: {e}",
             file=sys.stderr,
         )
         sys.exit(1)

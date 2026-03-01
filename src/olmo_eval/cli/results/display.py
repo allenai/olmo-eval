@@ -103,13 +103,19 @@ class TaskDisplayInfo:
 
 
 def _build_model_task_scores(
-    experiments: list[Any], task_filter: set[str] | None = None
+    experiments: list[Any],
+    task_filter: set[str] | None = None,
+    show_all: bool = False,
+    show_recent: bool = False,
 ) -> tuple[list[TaskDisplayInfo], dict[str, dict[tuple[str, str], float | None]]]:
     """Build model-task score mapping from experiments.
 
     Args:
         experiments: List of experiment results.
         task_filter: Optional set of task names to include.
+        show_all: If True, include timestamp in model key to show all historical results.
+        show_recent: If True, show most recent result per model (first seen wins).
+            If False (default), show best (highest) score per model.
 
     Returns:
         Tuple of (task_infos, model_scores) where:
@@ -124,6 +130,8 @@ def _build_model_task_scores(
         model_key = exp.model_name
         if exp.model_hash:
             model_key += f" [dim]({exp.model_hash[:4]})[/dim]"
+        if show_all and exp.timestamp:
+            model_key += f" [dim]{format_timestamp(exp.timestamp)}[/dim]"
 
         if model_key not in model_scores:
             model_scores[model_key] = {}
@@ -155,7 +163,22 @@ def _build_model_task_scores(
 
             # Extract primary score from nested metrics
             primary_score = extract_score_from_metrics(task.metrics, task.primary_metric)
-            model_scores[model_key][task_key] = primary_score
+
+            # Determine whether to update the score based on mode
+            existing_score = model_scores[model_key].get(task_key)
+            if show_all:
+                # show_all: each experiment gets its own row (unique model_key)
+                model_scores[model_key][task_key] = primary_score
+            elif show_recent:
+                # show_recent: first seen wins (experiments ordered by timestamp desc)
+                if existing_score is None:
+                    model_scores[model_key][task_key] = primary_score
+            else:
+                # default: keep the best (highest) score
+                if existing_score is None or (
+                    primary_score is not None and primary_score > existing_score
+                ):
+                    model_scores[model_key][task_key] = primary_score
 
     # Sort by (task_name, task_hash) for consistent ordering
     sorted_task_infos = sorted(task_info_map.values(), key=lambda t: t.column_key)
@@ -164,15 +187,22 @@ def _build_model_task_scores(
 
 
 def print_task_comparison_matrix(
-    experiments: list[Any], task_filter: set[str] | None = None
+    experiments: list[Any],
+    task_filter: set[str] | None = None,
+    show_all: bool = False,
+    show_recent: bool = False,
 ) -> None:
     """Print a comparison matrix with models as rows and tasks as columns.
 
     Args:
         experiments: List of experiment results.
         task_filter: Optional set of task names to include.
+        show_all: If True, show all historical results instead of just the best.
+        show_recent: If True, show most recent result per model instead of the best.
     """
-    task_infos, model_scores = _build_model_task_scores(experiments, task_filter)
+    task_infos, model_scores = _build_model_task_scores(
+        experiments, task_filter, show_all, show_recent
+    )
 
     if not task_infos:
         console.print("[dim]No matching tasks found.[/dim]")

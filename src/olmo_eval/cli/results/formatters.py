@@ -151,14 +151,23 @@ def experiments_to_csv(experiments: list[Any]) -> None:
         )
 
 
-def task_comparison_to_csv(experiments: list[Any], task_filter: set[str] | None = None) -> None:
+def task_comparison_to_csv(
+    experiments: list[Any],
+    task_filter: set[str] | None = None,
+    show_all: bool = False,
+    show_recent: bool = False,
+) -> None:
     """Write task comparison matrix to stdout as CSV.
 
     Args:
         experiments: List of experiment results.
         task_filter: Optional set of task names to include.
+        show_all: If True, show all historical results instead of just the best.
+        show_recent: If True, show most recent result per model instead of the best.
     """
-    task_infos, model_scores = _build_model_task_scores(experiments, task_filter)
+    task_infos, model_scores = _build_model_task_scores(
+        experiments, task_filter, show_all, show_recent
+    )
 
     if not task_infos:
         return

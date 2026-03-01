@@ -1,0 +1,1 @@
+"""Core metrics collection infrastructure."""

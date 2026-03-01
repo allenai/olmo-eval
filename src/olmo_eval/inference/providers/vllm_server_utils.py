@@ -147,21 +147,62 @@ def _infer_tool_call_parser(model_name: str) -> str:
         return "llama3_json"
     elif "mistral" in model_lower:
         return "mistral"
+    elif "olmo" in model_lower:
+        return "olmo3"
     else:
-        # Default for Qwen, OLMo, and other models
+        # Default for Qwen and other models
         return "hermes"
 
 
 def _get_vllm_python() -> str:
     """Get the Python interpreter to use for vLLM server.
 
-    Checks VLLM_PYTHON env var first (for separate venv setups),
+    Checks VLLM_PYTHON env var first (for isolated venv setups),
     falls back to current interpreter.
 
     Returns:
         Path to Python interpreter.
     """
     return os.environ.get("VLLM_PYTHON", sys.executable)
+
+
+def _get_olmo3_tool_template_path() -> str:
+    """Get path to bundled OLMo3 tool chat template."""
+    import importlib.resources
+
+    return str(
+        importlib.resources.files("olmo_eval.inference.templates")
+        / "tool_chat_template_olmo3.jinja"
+    )
+
+
+# Kwargs that are used for deployment/setup, not vLLM server CLI arguments
+_NON_VLLM_KWARGS = frozenset({"patch_olmo3_tool_parser"})
+
+
+def _apply_olmo3_tool_parser_patch() -> None:
+    """Apply OLMo3 tool parser patch at runtime.
+
+    This patches vLLM's olmo3_tool_parser.py to handle JSON content in string
+    arguments. The patch is idempotent (checks if already applied).
+
+    See: https://github.com/vllm-project/vllm/issues/32534
+    """
+    import os
+    from pathlib import Path
+
+    from olmo_eval.inference.patches.olmo3_tool_parser_patch import (
+        find_olmo3_parser,
+        patch_parser,
+    )
+
+    # Determine which venv to patch based on VLLM_PYTHON env var
+    vllm_python = os.environ.get("VLLM_PYTHON")
+    venv_path = str(Path(vllm_python).parent.parent) if vllm_python else None
+
+    parser_path = find_olmo3_parser(venv_path)
+    if parser_path:
+        patch_parser(parser_path)
 
 
 def _build_server_command(
@@ -193,14 +234,23 @@ def _build_server_command(
             when enable_auto_tool_choice is True)
         enable_prefix_caching: Enable prefix caching for faster inference (default: True)
         chat_template_kwargs: Extra kwargs for chat template (e.g., {"enable_thinking": false})
-        **kwargs: Additional vLLM server arguments
+        **kwargs: Additional vLLM server arguments. May include patch_olmo3_tool_parser
+            which controls whether to use the custom OLMo3 chat template.
 
     Returns:
         Command list for subprocess
     """
     import json
 
-    # Use VLLM_PYTHON env var if set (for separate venv setups)
+    # Extract deployment kwargs before filtering
+    patch_olmo3_tool_parser = kwargs.get("patch_olmo3_tool_parser", False)
+
+    # Apply OLMo3 tool parser patch at runtime if requested
+    # This patches vLLM to handle JSON content in string arguments
+    if patch_olmo3_tool_parser:
+        _apply_olmo3_tool_parser_patch()
+
+    # Use VLLM_PYTHON env var if set (for isolated venv setups)
     python_executable = _get_vllm_python()
 
     cmd = [
@@ -234,6 +284,10 @@ def _build_server_command(
         parser = tool_call_parser or _infer_tool_call_parser(model_name)
         cmd.extend(["--tool-call-parser", parser])
 
+        # OLMo3 requires custom chat template for tool calling (only when patch is applied)
+        if parser == "olmo3" and patch_olmo3_tool_parser:
+            cmd.extend(["--chat-template", _get_olmo3_tool_template_path()])
+
     # Prefix caching (enabled by default for faster inference)
     if enable_prefix_caching:
         cmd.append("--enable-prefix-caching")
@@ -248,8 +302,10 @@ def _build_server_command(
     else:
         cmd.append("--no-use-tqdm-on-load")
 
-    # Add any extra kwargs as CLI args
+    # Add any extra kwargs as CLI args (filter out non-vLLM kwargs)
     for key, value in kwargs.items():
+        if key in _NON_VLLM_KWARGS:
+            continue
         if value is not None:
             arg_name = f"--{key.replace('_', '-')}"
             if isinstance(value, bool):
@@ -299,7 +355,7 @@ class VLLMServerProcess:
     @property
     def base_url(self) -> str:
         """Get the base URL for the OpenAI-compatible API."""
-        return f"http://localhost:{self.port}/v1"
+        return f"http://127.0.0.1:{self.port}/v1"
 
     def start(self, progress_callback: ProgressCallback | None = None) -> str:
         """Start the vLLM server.
@@ -387,20 +443,12 @@ class VLLMServerProcess:
             progress_callback=progress_callback,
         )
         if not success:
-            # Try to capture any remaining output before stopping
-            if process_output is None and self._process and self._process.stdout:
-                with suppress(Exception):
-                    process_output = self._process.stdout.read().decode("utf-8", errors="replace")
+            # Stop the process first to avoid blocking on stdout.read()
+            self.stop()
 
             # If log_dir is set, output went to file - read it from there
             if process_output is None and self.log_dir:
                 with suppress(Exception):
-                    # Flush and close the log file first
-                    if self._log_file is not None:
-                        self._log_file.flush()
-                        self._log_file.close()
-                        self._log_file = None
-                    # Read the log file contents
                     import pathlib
 
                     log_path = pathlib.Path(self.log_dir) / "vllm_server.log"
@@ -410,8 +458,6 @@ class VLLMServerProcess:
             # Log the captured output for debugging
             if process_output:
                 logger.error(f"vLLM server output:\n{process_output}")
-
-            self.stop()
 
             # Build a detailed error message
             error_msg = (

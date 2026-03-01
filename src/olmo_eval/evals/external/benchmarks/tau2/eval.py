@@ -175,9 +175,10 @@ class Tau2ExternalEval(SandboxedExternalEval):
         all_output: list[str] = []
 
         # Extract URL and model name from provider for sandbox use
-        provider_url = getattr(provider, "base_url", "http://localhost:8000/v1")
+        provider_url = getattr(provider, "base_url", None) or "http://localhost:8000/v1"
         model_name = provider.model_name
-        is_local = hasattr(provider, "_server") or "localhost" in provider_url
+        # Detect if this is a locally-deployed server (vLLM) vs external API
+        is_local = self._is_local_provider(provider, provider_url)
 
         try:
             from olmo_eval.harness.sandbox.executor import SandboxExecutor
@@ -193,15 +194,14 @@ class Tau2ExternalEval(SandboxedExternalEval):
 
                 sandbox_url = self._get_provider_url_for_sandbox(provider_url)
 
-                if not await self._check_provider_health(executor, sandbox_url):
-                    return self._error_result(
-                        f"Provider not reachable at {sandbox_url}",
-                        start_time,
-                        "\n".join(all_output),
-                    )
-
                 if is_local:
-                    # TODO(undfined): Get this from the source  model config in the future.
+                    if not await self._check_provider_health(executor, sandbox_url):
+                        return self._error_result(
+                            f"Provider not reachable at {sandbox_url}",
+                            start_time,
+                            "\n".join(all_output),
+                        )
+                    # TODO(undfined): Get this from the source model config in the future.
                     # OpenAI-compatible servers do not expose /v1/models endpoint.
                     max_model_len = tau2_args.max_model_len or DEFAULT_MAX_TOKENS
                     await self._setup_litellm_wrapper(

@@ -42,7 +42,9 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     type=click.Path(exists=True),
     help="YAML config file (CLI args override config values)",
 )
-@click.option("--name", "-n", help="Experiment name")
+@click.option(
+    "--name", "-n", help="Experiment name (auto-generated from model/tasks if not provided)"
+)
 @click.option(
     "--model",
     "-m",
@@ -109,6 +111,12 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     "--gcs-credentials/--no-gcs-credentials",
     default=None,
     help="Inject GCS credentials for gs:// model access. Auto-detected from gs:// model paths.",
+)
+@click.option(
+    "--use-gcp-creds/--no-use-gcp-creds",
+    "gcp_secret",
+    default=None,
+    help="Inject GOOGLE_APPLICATION_CREDENTIALS from Beaker secret ({user}_...)",
 )
 @click.option(
     "--s3-bucket",
@@ -228,7 +236,7 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     "-G",
     type=int,
     default=None,
-    help="Number of GPUs for external eval jobs. tensor_parallel_size defaults to this value.",
+    help="Number of GPUs. Defaults to 1 for GPU providers, 0 otherwise.",
 )
 def launch(
     config: str | None,
@@ -251,6 +259,7 @@ def launch(
     follow: bool,
     aws_credentials: bool | None,
     gcs_credentials: bool | None,
+    gcp_secret: bool | None,
     s3_bucket: str | None,
     s3_prefix: str | None,
     s3_endpoint_url: str | None,
@@ -343,6 +352,7 @@ def launch(
         "budget": budget,
         "image": image,
         "group": group,
+        "gpus": gpus,
         "s3_bucket": s3_bucket,
         "s3_prefix": s3_prefix,
         "s3_endpoint_url": s3_endpoint_url,
@@ -361,6 +371,7 @@ def launch(
         "harness_overrides": harness_overrides,
         "uv_cache_dir": uv_cache_dir,
         "secret_env_overrides": secret_env_overrides,
+        "gcp_secret": gcp_secret,
     }
 
     # Handle external evaluations mode
@@ -402,6 +413,7 @@ def launch(
             follow=follow,
             aws_credentials=aws_credentials,
             gcs_credentials=gcs_credentials,
+            gcp_secret=gcp_secret,
             s3_bucket=s3_bucket,
             s3_prefix=s3_prefix,
             s3_region=s3_region,
@@ -568,6 +580,7 @@ def launch(
         inject_gcs,
         enable_sandbox=harness_needs_sandbox,
         secret_env_overrides=launch_config.secret_env_overrides,
+        inject_gcp_secret=launch_config.inject_gcp_secret,
     )
 
     job_configs = []
@@ -593,6 +606,7 @@ def launch(
                 Pretty(exp_summary, expand_all=True),
                 title=f"[bold]{exp_summary.name}[/bold]",
                 border_style="cyan",
+                expand=True,
             )
         )
         console.print()
@@ -715,6 +729,7 @@ def _ensure_secrets(
 ) -> tuple[list[tuple[str, str]], list[tuple[str, str]], list[tuple[str, str]]]:
     """Ensure required secrets exist."""
     from olmo_eval.launch.beaker.secrets import (
+        COMMON_SECRET_NAMES,
         ensure_common_secrets,
         ensure_task_secrets,
         get_local_hf_token,
@@ -724,18 +739,20 @@ def _ensure_secrets(
 
     beaker_username = launcher.beaker.user_name
 
+    task_required_secrets = all_required_secrets - COMMON_SECRET_NAMES
+
     if dry_run:
         common_secrets = []
         if get_local_hf_token():
             common_secrets.append(("HF_TOKEN", f"{beaker_username}_HF_TOKEN"))
         if get_local_wandb_api_key():
             common_secrets.append(("WANDB_API_KEY", f"{beaker_username}_WANDB_API_KEY"))
-        task_secrets = [(s, f"{beaker_username}_{s}") for s in sorted(all_required_secrets)]
+        task_secrets = [(s, f"{beaker_username}_{s}") for s in sorted(task_required_secrets)]
     else:
         common_secrets = ensure_common_secrets(workspace=launch_config.workspace)
         try:
             task_secrets = ensure_task_secrets(
-                workspace=launch_config.workspace, required_secrets=all_required_secrets
+                workspace=launch_config.workspace, required_secrets=task_required_secrets
             )
         except ValueError as e:
             console.print(f"[red]Error:[/red] {e}")
@@ -879,6 +896,7 @@ def _prepare_secrets(
         (env_var, secret_name) tuples.
     """
     from olmo_eval.launch.beaker.secrets import (
+        COMMON_SECRET_NAMES,
         ensure_common_secrets,
         ensure_task_secrets,
         get_local_hf_token,
@@ -886,19 +904,21 @@ def _prepare_secrets(
         get_store_secret_mappings,
     )
 
+    task_required_secrets = all_required_secrets - COMMON_SECRET_NAMES
+
     if dry_run:
         common_secrets: list[tuple[str, str]] = []
         if get_local_hf_token():
             common_secrets.append(("HF_TOKEN", f"{beaker_username}_HF_TOKEN"))
         if get_local_wandb_api_key():
             common_secrets.append(("WANDB_API_KEY", f"{beaker_username}_WANDB_API_KEY"))
-        task_secrets = [(s, f"{beaker_username}_{s}") for s in sorted(all_required_secrets)]
+        task_secrets = [(s, f"{beaker_username}_{s}") for s in sorted(task_required_secrets)]
     else:
         common_secrets = ensure_common_secrets(workspace=workspace)
         try:
             task_secrets = ensure_task_secrets(
                 workspace=workspace,
-                required_secrets=all_required_secrets,
+                required_secrets=task_required_secrets,
             )
         except ValueError as e:
             console.print(f"[red]Error:[/red] {e}")
@@ -972,6 +992,7 @@ def _launch_external_evals(
     follow: bool,
     aws_credentials: bool | None,
     gcs_credentials: bool | None,
+    gcp_secret: bool | None,
     s3_bucket: str | None,
     s3_prefix: str | None,
     s3_region: str,
@@ -997,7 +1018,7 @@ def _launch_external_evals(
         BEAKER_SANDBOX_IMAGE,
     )
     from olmo_eval.evals.external import get_external_eval, is_external_eval_registered
-    from olmo_eval.launch import BeakerLauncher, get_model_short_name
+    from olmo_eval.launch import BeakerLauncher, get_model_short_name, sanitize_beaker_name
 
     secret_env_overrides = secret_env_overrides or {}
 
@@ -1127,7 +1148,16 @@ def _launch_external_evals(
 
         # Generate experiment name using shared utility
         short_name = get_model_short_name(model_spec, model_alias)
-        exp_name = name or f"external-{short_name}-{'-'.join(external_evals)}"
+        if name:
+            exp_name = name
+        elif len(external_evals) <= 2:
+            # Short list: include all eval names
+            exp_name = sanitize_beaker_name(f"{short_name}-{'-'.join(external_evals)}-external")
+        else:
+            # Many evals: show first eval + count to keep name reasonable
+            exp_name = sanitize_beaker_name(
+                f"{short_name}-{external_evals[0]}-and-{len(external_evals) - 1}-more-external"
+            )
 
         job_config = assemble_external_eval_job(
             name=exp_name,
@@ -1149,12 +1179,15 @@ def _launch_external_evals(
             env_secrets=env_secrets,
             inject_aws_credentials=inject_aws,
             inject_gcs_credentials=inject_gcs,
+            inject_gcp_secret=gcp_secret or False,
             eval_args=eval_args,
             provider_kwargs=provider_kwargs,
             uv_cache_dir=uv_cache_dir,
             beaker_username=beaker_username,
             preemptible=effective_preemptible,
             retries=retries,
+            provider_kind=str(provider_config.kind),
+            base_url=provider_config.base_url,
         )
         job_configs.append(job_config)
 
@@ -1183,6 +1216,7 @@ def _launch_external_evals(
                 Pretty(summary, expand_all=True),
                 title=f"[bold]{summary.name}[/bold]",
                 border_style="cyan",
+                expand=True,
             )
         )
         console.print()

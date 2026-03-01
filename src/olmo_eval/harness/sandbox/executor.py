@@ -10,9 +10,12 @@ import time
 import uuid
 from typing import Any
 
+import aiohttp
+
 from olmo_eval.common.execution.environment import ExecutionResult
 
 from .config import SandboxConfig, SandboxMode
+from .diagnostics import start_internal_monitor
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +30,9 @@ def _get_log_docker_args(log_dir: str, name: str) -> tuple[str, ...]:
     Returns:
         Docker args tuple for json-file logging.
     """
-    os.makedirs(log_dir, exist_ok=True)
-    log_path = os.path.join(log_dir, f"{name}.log")
+    sandbox_log_dir = os.path.join(log_dir, "sandboxes", name)
+    os.makedirs(sandbox_log_dir, exist_ok=True)
+    log_path = os.path.join(sandbox_log_dir, "container.log")
     return ("--log-driver=json-file", "--log-opt", f"path={log_path}")
 
 
@@ -93,70 +97,6 @@ class SandboxExecutor:
         else:
             logger.log(level, msg)
 
-    async def _get_container_diagnostics(self) -> str:
-        """Gather diagnostic info when sandbox becomes unresponsive."""
-        import subprocess
-
-        diag_lines = ["--- Container Diagnostics ---"]
-
-        # Check if deployment reports alive
-        if self._deployment is not None:
-            try:
-                is_alive = await self._deployment.is_alive()
-                diag_lines.append(f"Deployment is_alive: {is_alive}")
-            except Exception as e:
-                diag_lines.append(f"Deployment is_alive check failed: {e}")
-
-            # Get container name and fetch logs from host
-            container_name = getattr(self._deployment, "container_name", None)
-            if container_name:
-                diag_lines.append(f"Container name: {container_name}")
-
-                # Try to get container status and logs via subprocess
-                runtime = self.config.container_runtime or "docker"
-                try:
-                    # Get container state
-                    inspect_result = subprocess.run(
-                        [runtime, "inspect", "--format", "{{.State.Status}}", container_name],
-                        capture_output=True,
-                        text=True,
-                        timeout=10,
-                    )
-                    if inspect_result.returncode == 0:
-                        diag_lines.append(f"Container status: {inspect_result.stdout.strip()}")
-                    else:
-                        err = inspect_result.stderr.strip()
-                        diag_lines.append(f"Container inspect failed: {err}")
-                except Exception as e:
-                    diag_lines.append(f"Container inspect error: {e}")
-
-                try:
-                    # Get last 50 lines of container logs
-                    logs_result = subprocess.run(
-                        [runtime, "logs", "--tail", "50", container_name],
-                        capture_output=True,
-                        text=True,
-                        timeout=10,
-                    )
-                    if logs_result.returncode == 0:
-                        logs = logs_result.stdout.strip() or logs_result.stderr.strip()
-                        if logs:
-                            diag_lines.append(f"Container logs (last 50 lines):\n{logs}")
-                        else:
-                            diag_lines.append("Container logs: (empty)")
-                    else:
-                        diag_lines.append(f"Container logs failed: {logs_result.stderr.strip()}")
-                except Exception as e:
-                    diag_lines.append(f"Container logs error: {e}")
-            else:
-                diag_lines.append("Container name: not available")
-        else:
-            diag_lines.append("Deployment: None")
-
-        diag = "\n".join(diag_lines)
-        self._log(logging.ERROR, diag)
-        return diag
-
     async def __aenter__(self) -> SandboxExecutor:
         """Start the sandbox environment."""
         await self.start()
@@ -178,10 +118,8 @@ class SandboxExecutor:
             ImportError: If swe-rex is not installed.
             RuntimeError: If container runtime is not available.
         """
-        self._log(logging.INFO, "Creating sandbox deployment...")
-        deployment = self.get_deployment()
-
         self._log(logging.INFO, "Starting sandbox deployment...")
+        deployment = self.get_deployment()
         prefix = f"[{self.name}] " if self.name else ""
         await _run_with_progress(
             deployment.start(),
@@ -192,6 +130,13 @@ class SandboxExecutor:
         self._deployment = deployment
         self._runtime = deployment.runtime
         self._log(logging.INFO, "Sandbox deployment ready!")
+
+        if (
+            self.config.enable_diagnostics
+            and self.config.log_dir
+            and self.config.mode == SandboxMode.DOCKER
+        ):
+            await start_internal_monitor(self._runtime, self.name)
 
     def get_deployment(self) -> Any:
         """Create the appropriate deployment based on configuration.
@@ -216,10 +161,32 @@ class SandboxExecutor:
                 docker_args = list(self.config.docker_args) if self.config.docker_args else []
                 if self.config.log_dir and self.name:
                     docker_args.extend(_get_log_docker_args(self.config.log_dir, self.name))
+                    # Create container-specific subdirectory for system logs
+                    # Mount only this container's subdirectory, not parent
+                    # Use :Z for SELinux relabeling (safe for single-container access)
+                    container_log_dir = os.path.join(self.config.log_dir, "sandboxes", self.name)
+                    os.makedirs(container_log_dir, exist_ok=True, mode=0o777)
+                    # Ensure writable even if directory already existed
+                    os.chmod(container_log_dir, 0o777)
+                    docker_args.extend(["-v", f"{container_log_dir}:/sandbox_logs:Z"])
 
                 # Add environment variables as docker args
                 for key, value in self.config.environment:
                     docker_args.extend(["-e", f"{key}={value}"])
+
+                # Add volume mounts from config
+                for host_path, container_path in self.config.volumes:
+                    if self.config.container_runtime == "podman":
+                        # Use --mount with bind-propagation=rslave for nested mounts
+                        # This ensures mount propagation flows inward for DinD scenarios
+                        docker_args.extend(
+                            [
+                                "--mount",
+                                f"type=bind,src={host_path},dst={container_path},bind-propagation=rslave",
+                            ]
+                        )
+                    else:
+                        docker_args.extend(["-v", f"{host_path}:{container_path}"])
 
                 # Build kwargs, omitting None values (swerex doesn't accept None for some fields)
                 deployment_kwargs: dict[str, Any] = {
@@ -407,6 +374,9 @@ class SandboxExecutor:
         timed_out = False
         consecutive_failures = 0
         max_consecutive_failures = 3
+        output_truncated = False
+        max_output_size = 5 * 1024 * 1024  # 5MB
+        keep_after_truncate = 1 * 1024 * 1024  # Keep last 1MB after truncation
 
         async def kill_process_group() -> None:
             """Kill the background process group."""
@@ -443,22 +413,45 @@ class SandboxExecutor:
                 break
 
             # Stream new output and check for completion in one pass
+            # Also check if output file is too large and truncate if needed
+            poll_start = time.time()
             try:
-                resp = await self._runtime.execute(
-                    Command(
-                        command=[
-                            "bash",
-                            "-c",
-                            f"tail -c +{last_pos + 1} {output_file} 2>/dev/null; "
-                            f"echo '---EXIT_CODE---'; "
-                            f"cat {exit_code_file} 2>/dev/null",
-                        ],
-                        timeout=10.0,
-                    )
+                poll_cmd = (
+                    f"size=$(stat -c%s {output_file} 2>/dev/null || echo 0); "
+                    f'if [ "$size" -gt {max_output_size} ]; then '
+                    f"  tail -c {keep_after_truncate} {output_file} > {output_file}.tmp && "
+                    f"  mv {output_file}.tmp {output_file}; "
+                    f"  echo '---TRUNCATED---'; "
+                    f"fi; "
+                    f"tail -c +{last_pos + 1} {output_file} 2>/dev/null; "
+                    f"echo '---EXIT_CODE---'; "
+                    f"cat {exit_code_file} 2>/dev/null"
                 )
+                resp = await self._runtime.execute(
+                    Command(command=["bash", "-c", poll_cmd], timeout=10.0)
+                )
+                poll_duration = time.time() - poll_start
                 consecutive_failures = 0  # Reset on success
 
-                parts = (resp.stdout or "").split("---EXIT_CODE---")
+                if poll_duration > 5.0:
+                    self._log(logging.WARNING, f"Poll slow ({poll_duration:.1f}s)")
+
+                stdout = resp.stdout or ""
+
+                # Check if output was truncated
+                if "---TRUNCATED---" in stdout:
+                    if not output_truncated:
+                        self._log(
+                            logging.WARNING,
+                            f"Output exceeded {max_output_size // (1024 * 1024)}MB, "
+                            f"truncating to last {keep_after_truncate // 1024}KB",
+                        )
+                        output_truncated = True
+                    # Reset position since file was truncated
+                    last_pos = 0
+                    stdout = stdout.replace("---TRUNCATED---\n", "").replace("---TRUNCATED---", "")
+
+                parts = stdout.split("---EXIT_CODE---")
                 new_output = parts[0] if parts else ""
                 exit_marker = parts[1].strip() if len(parts) > 1 else ""
 
@@ -471,19 +464,56 @@ class SandboxExecutor:
                 if exit_marker:
                     break
 
-            except Exception as e:
+            except TimeoutError:
+                poll_duration = time.time() - poll_start
                 consecutive_failures += 1
                 self._log(
                     logging.WARNING,
-                    f"Poll failed ({consecutive_failures}/{max_consecutive_failures}): {e}",
+                    f"Poll timed out after {poll_duration:.1f}s "
+                    f"({consecutive_failures}/{max_consecutive_failures}) "
+                    "- sandbox may be under resource pressure",
                 )
-                if consecutive_failures >= max_consecutive_failures:
-                    self._log(logging.ERROR, "Sandbox unresponsive, aborting")
-                    await kill_process_group()
-                    await cleanup_temp_files()
-                    diag = await self._get_container_diagnostics()
-                    msg = f"Sandbox unresponsive after {consecutive_failures} polls\n{diag}"
-                    return ExecutionResult(False, msg, -1)
+            except aiohttp.ClientConnectionError as e:
+                poll_duration = time.time() - poll_start
+                consecutive_failures += 1
+                self._log(
+                    logging.WARNING,
+                    f"Poll connection failed after {poll_duration:.1f}s "
+                    f"({consecutive_failures}/{max_consecutive_failures}): {e} "
+                    "- swerex server may be down",
+                )
+            except aiohttp.ClientError as e:
+                poll_duration = time.time() - poll_start
+                consecutive_failures += 1
+                self._log(
+                    logging.WARNING,
+                    f"Poll network error after {poll_duration:.1f}s "
+                    f"({consecutive_failures}/{max_consecutive_failures}): {e}",
+                )
+            except Exception as e:
+                poll_duration = time.time() - poll_start
+                consecutive_failures += 1
+                self._log(
+                    logging.WARNING,
+                    f"Poll failed after {poll_duration:.1f}s "
+                    f"({consecutive_failures}/{max_consecutive_failures}): "
+                    f"{type(e).__name__}: {e}",
+                )
+
+            # Check if we've exceeded max consecutive failures (after any exception)
+            if consecutive_failures >= max_consecutive_failures:
+                self._log(logging.ERROR, "Sandbox unresponsive, aborting")
+                await kill_process_group()
+                await cleanup_temp_files()
+                diagnostics_path = None
+                if self.config.log_dir and self.name:
+                    diagnostics_path = os.path.join(
+                        self.config.log_dir, "sandboxes", self.name, "stats.log"
+                    )
+                msg = f"Sandbox unresponsive after {consecutive_failures} polls"
+                if diagnostics_path:
+                    msg += f"\nDiagnostics available at: {diagnostics_path}"
+                return ExecutionResult(False, msg, -1)
 
         # Read final output and exit code
         full_output = ""
@@ -518,6 +548,13 @@ class SandboxExecutor:
 
         # Clean up temp files
         await cleanup_temp_files()
+
+        if output_truncated:
+            truncate_msg = (
+                f"[Output truncated: exceeded {max_output_size // (1024 * 1024)}MB, "
+                f"showing last {keep_after_truncate // (1024 * 1024)}MB]"
+            )
+            full_output = truncate_msg + "\n" + full_output if full_output else truncate_msg
 
         if timed_out:
             full_output = (full_output + "\n[Command timed out]") if full_output else "[Timed out]"

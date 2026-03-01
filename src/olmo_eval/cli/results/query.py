@@ -93,6 +93,22 @@ from olmo_eval.cli.utils import console
     default="table",
     help="Output format.",
 )
+@click.option(
+    "--all",
+    "-a",
+    "show_all",
+    is_flag=True,
+    default=False,
+    help="Show all historical results instead of just the best per model.",
+)
+@click.option(
+    "--recent",
+    "-r",
+    "show_recent",
+    is_flag=True,
+    default=False,
+    help="Show most recent result per model instead of the best.",
+)
 @db_options
 def query(
     experiment_ids: tuple[str, ...],
@@ -105,6 +121,8 @@ def query(
     limit: int,
     after_id: int | None,
     output_format: str,
+    show_all: bool,
+    show_recent: bool,
     db_host: str,
     db_port: int,
     db_name: str,
@@ -146,70 +164,73 @@ def query(
             "--experiment, --model, --model-hash, --task, --task-hash, or --experiment-group"
         )
 
-    db = get_database_session(db_host, db_port, db_name, db_user, db_password)
+    from olmo_eval.storage.backends.postgres.queries import QueryHelper
+    from olmo_eval.storage.backends.postgres.repository import ExperimentRepository
 
-    try:
-        from olmo_eval.storage.backends.postgres.queries import QueryHelper
-        from olmo_eval.storage.backends.postgres.repository import ExperimentRepository
+    with console.status("[bold blue]Fetching results..."):
+        db = get_database_session(db_host, db_port, db_name, db_user, db_password)
+        try:
+            with db.session() as session:
+                helper = QueryHelper(session)
+                repo = ExperimentRepository(session)
 
-        with db.session() as session:
-            helper = QueryHelper(session)
-            repo = ExperimentRepository(session)
+                # Experiment group with instances uses streaming (early return)
+                if experiment_groups and instances:
+                    _stream_experiment_group_instances(
+                        session, experiment_groups, model_hashes, task_hashes, output_format
+                    )
+                    return
 
-            # Experiment group with instances uses streaming (early return)
-            if experiment_groups and instances:
-                _stream_experiment_group_instances(
-                    session, experiment_groups, model_hashes, task_hashes, output_format
-                )
-                return
-
-            # Fetch experiments based on filters (all combined with AND)
-            all_experiments = _query_experiments(
-                repo,
-                experiment_ids,
-                model_names,
-                model_hashes,
-                task_names,
-                task_hashes,
-                experiment_groups,
-            )
-            if not all_experiments:
-                console.print("[dim]No results found.[/dim]")
-                return
-
-            # Comparison mode: no experiment IDs specified
-            is_comparison = not experiment_ids
-
-            task_filter = set(task_names) if task_names else None
-
-            # Fetch instances if requested
-            instance_data = (
-                _query_instances(
-                    helper,
+                # Fetch experiments based on filters (all combined with AND)
+                all_experiments = _query_experiments(
+                    repo,
                     experiment_ids,
                     model_names,
                     model_hashes,
                     task_names,
                     task_hashes,
-                    limit,
-                    after_id,
+                    experiment_groups,
                 )
-                if instances
-                else []
-            )
 
-            # Output results
-            _output_results(
-                all_experiments,
-                instance_data,
-                is_comparison,
-                task_filter,
-                output_format,
-                instances,
-                limit,
-            )
-    finally:
-        db.dispose()
+                if not all_experiments:
+                    console.print("[dim]No results found.[/dim]")
+                    return
+
+                # Comparison mode: no experiment IDs specified
+                is_comparison = not experiment_ids
+
+                task_filter = set(task_names) if task_names else None
+
+                # Fetch instances if requested
+                if instances:
+                    instance_data = _query_instances(
+                        helper,
+                        experiment_ids,
+                        model_names,
+                        model_hashes,
+                        task_names,
+                        task_hashes,
+                        limit,
+                        after_id,
+                    )
+                else:
+                    instance_data = []
+
+        finally:
+            db.dispose()
+
+    # Output results
+    _output_results(
+        all_experiments,
+        instance_data,
+        is_comparison,
+        task_filter,
+        output_format,
+        instances,
+        limit,
+        show_all,
+        show_recent,
+    )
 
 
 def _stream_experiment_group_instances(
@@ -297,6 +318,8 @@ def _output_results(
     output_format: str,
     include_instances: bool,
     limit: int,
+    show_all: bool = False,
+    show_recent: bool = False,
 ) -> None:
     """Output query results in the requested format."""
     instances_for_output = instance_data if include_instances else None
@@ -318,7 +341,9 @@ def _output_results(
     # CSV output
     if output_format == "csv":
         if is_comparison:
-            task_comparison_to_csv(experiments, task_filter)
+            task_comparison_to_csv(
+                experiments, task_filter, show_all=show_all, show_recent=show_recent
+            )
         else:
             experiments_to_csv(experiments)
         if include_instances and instance_data:
@@ -328,7 +353,9 @@ def _output_results(
 
     # Table output
     if is_comparison:
-        print_task_comparison_matrix(experiments, task_filter)
+        print_task_comparison_matrix(
+            experiments, task_filter, show_all=show_all, show_recent=show_recent
+        )
     else:
         print_experiments_table(experiments, task_filter)
 

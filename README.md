@@ -619,30 +619,6 @@ olmo-eval beaker launch \
 olmo-eval beaker launch -n "test" -m llama3.1-8b -t arc_easy --dry-run
 ```
 
-### Multiple Models
-
-Run the same suite across multiple models by specifying `-m` multiple times.
-Models with compatible runtimes (same cluster, inference provider) are
-grouped into a single experiment:
-
-```bash
-# Compare two models on the same tasks
-olmo-eval beaker launch -n "eval-compare" \
-    -m llama3.1-8b \
-    -m olmo-2-7b \
-    -t mmlu -t gsm8k -t hellaswag
-
-# Creates 1 experiment running both models
-
-# Models with different providers get separate experiments
-olmo-eval beaker launch -n "eval-mixed" \
-    -m llama3.1-8b -o provider.kind=vllm \
-    -m gpt-4o -o provider.kind=litellm \
-    -t mmlu -t gsm8k
-
-# Creates 2 experiments (different inference providers)
-```
-
 ### Per-Task Priorities
 
 Tasks can include an optional `@priority` suffix to set different priorities per task.
@@ -742,41 +718,27 @@ cluster: h100
 | `--follow/--no-follow` | | `true` | Follow logs after launch |
 | `--secret-env` | | none | Map Beaker secret to env var (can specify multiple) |
 
-### Per-Model and Per-Task Overrides
+### Per-Task Overrides
 
-Use the `-o/--override` flag to apply configuration overrides to the preceding `-m` or `-t`:
+Use the `-o/--override` flag to apply configuration overrides to the preceding `-t`:
 
 ```bash
-# Model overrides (apply to the preceding -m)
-olmo-eval beaker launch -n "eval" \
-    -m llama3.1-8b -o provider.kind=vllm -o 'provider.dependencies=[vllm==0.14.0]' \
-    -m gpt-4o -o provider.kind=litellm \
-    -t mmlu -t gsm8k
-
 # Task overrides (apply to the preceding -t)
 olmo-eval beaker launch -n "eval" \
     -m llama3.1-8b \
     -t mmlu -o limit=100 -o num_fewshot=5 \
     -t gsm8k -o limit=50
-
-# Mixed model and task overrides
-olmo-eval beaker launch -n "eval" \
-    -m llama3.1-8b -o provider.kind=vllm \
-    -m gpt-4o -o provider.kind=litellm \
-    -t mmlu -o limit=100 \
-    -t gsm8k
 ```
 
 The `-o` flag uses OmegaConf dotlist syntax, supporting:
 
 | Type | Syntax | Example |
 |------|--------|---------|
-| String | `key=value` | `-o provider.kind=vllm` |
+| String | `key=value` | `-o formatter.template="Q: {q}"` |
 | Number | `key=123` | `-o limit=100` |
 | Boolean | `key=true` | `-o preemptible=false` |
-| Nested | `a.b.c=val` | `-o provider.base_url=http://...` |
-| List | `key=[a,b]` | `-o 'args=[--flag1, --flag2]'` |
-| Dict | `key={a: 1}` | `-o 'config={distributed: true}'` |
+| Nested | `a.b.c=val` | `-o scorer.normalize=true` |
+| List | `key=[a,b]` | `-o 'dependencies=[pkg1, pkg2]'` |
 
 **Note:** Quote complex values to prevent shell interpretation:
 ```bash
@@ -1201,7 +1163,10 @@ olmo-eval task inspect arc_easy --json
 Inspect data during evaluation runs with `olmo-eval run`:
 
 ```bash
-# Inspect the first instance and request before running
+# Enable all inspection flags at once
+olmo-eval run -m llama3.1-8b -t mmlu --inspect
+
+# Or use individual flags for specific inspection
 olmo-eval run -m llama3.1-8b -t mmlu --inspect-instance --inspect-request
 
 # Inspect the response after model generation
@@ -1216,6 +1181,7 @@ olmo-eval run -m llama3.1-8b -t mmlu \
 
 | Flag | Description |
 |------|-------------|
+| `--inspect` | Enable all inspection flags below |
 | `--inspect-instance` | Print the first instance of each task before running |
 | `--inspect-request` | Print the first LM request before model generation |
 | `--inspect-formatted` | Show formatted prompt (after chat template applied) |
@@ -1247,6 +1213,146 @@ olmo-eval beaker launch \
     --inspect-response \
     --cluster h100
 ```
+
+## External Evals
+
+External evals are standalone evaluations that run outside the normal task pipeline.
+
+### Defining an External Eval
+
+```python
+from olmo_eval.evals.external import SandboxedExternalEval, register_external_eval
+
+class MyBenchmarkExternalEval(SandboxedExternalEval):
+    """My benchmark evaluation."""
+
+    name = "my_benchmark"
+    description = "Evaluates model on my benchmark"
+    sandbox_image = "my-benchmark:latest"
+    working_dir = "/workspace"
+    timeout_seconds = 3600
+    required_secrets = ("MY_API_KEY",)
+
+    @property
+    def arguments(self) -> tuple[ExternalEvalArgument, ...]:
+        return (
+            ExternalEvalArgument(name="subset", type="str", default="default"),
+        )
+
+    async def execute(self, provider, args, output_dir, container_runtime):
+        # Run benchmark in sandbox
+        result = await self.run_in_sandbox(provider, args, output_dir)
+        return ExternalEvalResult(
+            name=self.name,
+            metrics={"accuracy": result.score},
+            success=True,
+        )
+
+# Register the eval
+register_external_eval(MyBenchmarkExternalEval())
+```
+
+### Running External Evals
+
+```bash
+# List available external evals
+olmo-eval external list
+
+# Run an external eval
+olmo-eval external run my_benchmark -m llama3.1-8b --subset test
+
+# Run on Beaker
+olmo-eval beaker launch -n "external-eval" --external my_benchmark -m llama3.1-8b
+```
+
+### ExternalEvalResult
+
+External evals return structured results:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `str` | Eval identifier |
+| `metrics` | `dict[str, float]` | Evaluation metrics |
+| `metadata` | `dict` | Additional metadata |
+| `success` | `bool` | Whether the eval completed successfully |
+| `error` | `str \| None` | Error message if failed |
+| `duration_seconds` | `float` | Execution time |
+| `predictions` | `list` | Instance-level predictions |
+
+## Sandboxes
+
+Sandboxes provide isolated execution environments for code execution, tool use, and external evals.
+
+### Configuration
+
+```python
+from olmo_eval.harness.sandbox import SandboxConfig, SandboxMode, Capability
+
+config = SandboxConfig(
+    image="python:3.12-slim",
+    mode=SandboxMode.DOCKER,
+    command_timeout=30.0,
+    startup_timeout=60.0,
+    instances=4,  # Run 4 parallel executors
+    working_dir="/workspace",
+    environment=(("MY_VAR", "value"),),
+    volumes=(("/host/path", "/container/path"),),
+    capabilities=frozenset({Capability.BASH, Capability.PYTHON}),
+)
+```
+
+### SandboxConfig Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `image` | `str` | Required | Container image |
+| `mode` | `SandboxMode` | `DOCKER` | `LOCAL`, `DOCKER`, or `MODAL` |
+| `container_runtime` | `str` | `"docker"` | `"docker"` or `"podman"` |
+| `command_timeout` | `float` | `30.0` | Timeout per command (seconds) |
+| `startup_timeout` | `float` | `60.0` | Container startup timeout |
+| `instances` | `int` | `1` | Number of parallel executors |
+| `working_dir` | `str` | `"/workspace"` | Working directory in container |
+| `environment` | `tuple` | `()` | Environment variables |
+| `volumes` | `tuple` | `()` | Volume mounts (host, container) |
+| `capabilities` | `frozenset` | `{BASH}` | `BASH`, `PYTHON`, etc. |
+
+### Using SandboxManager
+
+The `SandboxManager` manages multiple executors with capability-based routing:
+
+```python
+from olmo_eval.harness.sandbox import SandboxManager, Capability
+
+configs = [
+    SandboxConfig(image="python:3.12", capabilities={Capability.PYTHON}, instances=2),
+    SandboxConfig(image="ubuntu:22.04", capabilities={Capability.BASH}),
+]
+
+manager = SandboxManager(configs, owner="my-scorer")
+await manager.start()
+
+# Execute with specific capability - routes to matching executor
+result = await manager.execute_with_capabilities(
+    "print('hello')",
+    Capability.PYTHON
+)
+
+# Round-robin across matching executors
+results = await asyncio.gather(*[
+    manager.execute_with_capabilities(cmd, Capability.PYTHON)
+    for cmd in commands
+])
+
+await manager.stop()
+```
+
+### Sandbox Modes
+
+| Mode | Description |
+|------|-------------|
+| `LOCAL` | Run commands locally (development only) |
+| `DOCKER` | Run in Docker/Podman containers |
+| `MODAL` | Run on Modal cloud platform |
 
 ## Development
 

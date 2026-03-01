@@ -14,7 +14,7 @@ from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.types import Instance, LMOutput
 
 # Type for judge function: takes prompt, returns judge response
-JudgeFn = Callable[[str], str]
+JudgeFn = Callable[..., str]
 
 # Rubric-based judge prompt template
 RUBRIC_JUDGE_PROMPT_TEMPLATE = """\
@@ -54,7 +54,10 @@ SimpleQAGrade = Literal["CORRECT", "INCORRECT", "NOT_ATTEMPTED"]
 
 
 def build_openai_judge_fn(
-    model: str = "gpt-4o-mini", scorer_name: str = "LLMJudgeScorer"
+    model: str = "gpt-4o-mini",
+    scorer_name: str = "LLMJudgeScorer",
+    max_tokens: int = 10,
+    temperature: float = 0.0,
 ) -> JudgeFn:
     """Build a lazy judge function using OpenAI API.
 
@@ -62,16 +65,21 @@ def build_openai_judge_fn(
     This allows scorers to be instantiated before the environment variable is set
     (e.g., in Beaker jobs where secrets are injected at runtime).
 
+    The function accepts either a plain string prompt (sent as a user message) or
+    can be called with a system_prompt keyword argument for system+user message pairs.
+
     Args:
         model: OpenAI model to use for judging.
         scorer_name: Name of the scorer class (for error messages).
+        max_tokens: Maximum tokens in the judge response.
+        temperature: Sampling temperature for the judge.
 
     Returns:
         A judge function that validates and calls OpenAI on first use.
     """
     _client: list = []  # Mutable container for lazy initialization
 
-    def judge(prompt: str) -> str:
+    def judge(prompt: str, *, system_prompt: str | None = None) -> str:
         import os
 
         if not _client:
@@ -91,11 +99,16 @@ def build_openai_judge_fn(
 
             _client.append(OpenAI(api_key=api_key))
 
+        messages: list[dict[str, str]] = []
+        if system_prompt is not None:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
         response = _client[0].chat.completions.create(
             model=model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.0,
-            max_tokens=10,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
         )
         return response.choices[0].message.content or ""
 

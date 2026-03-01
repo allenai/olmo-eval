@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 from typing import TYPE_CHECKING, Any
 
@@ -11,6 +10,7 @@ from olmo_eval.common.logging import get_logger
 from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.retry import retry_with_backoff
+from olmo_eval.inference.utils import run_async
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -193,6 +193,7 @@ class LiteLLMProvider(InferenceProvider):
             List of output lists, one per request.
         """
         from olmo_eval.common.progress import ProgressLogger
+        from olmo_eval.inference.dispatch import dispatch_concurrent
 
         logger.info(
             f"Sending {len(requests)} requests for {self.model_name}"
@@ -200,18 +201,23 @@ class LiteLLMProvider(InferenceProvider):
         )
 
         params = self._default_sampling_params(sampling_params)
-        semaphore = asyncio.Semaphore(self.max_concurrency)
         progress = ProgressLogger(total=len(requests), desc="Generating", logger=logger)
 
         async def process(req: LMRequest) -> list[LMOutput]:
-            async with semaphore:
-                result = await self._generate_single_async(req, params)
-                progress.update(1)
-                return result
+            return await self._generate_single_async(req, params)
 
-        results = await asyncio.gather(*[process(r) for r in requests])
+        def on_progress(done: int, total: int) -> None:
+            progress.update(1)
+
+        results = await dispatch_concurrent(
+            requests,
+            process,
+            max_in_flight=self.max_concurrency,
+            max_retries=self.max_retries,
+            on_progress=on_progress,
+        )
         progress.close()
-        return list(results)
+        return [r if r is not None else [] for r in results]
 
     def generate(
         self,
@@ -229,7 +235,7 @@ class LiteLLMProvider(InferenceProvider):
         Returns:
             List of output lists, one per request.
         """
-        return asyncio.run(self.agenerate(requests, sampling_params))
+        return run_async(self.agenerate(requests, sampling_params))
 
     async def _logprobs_single_impl(self, request: LMRequest) -> list[LMOutput]:
         """Compute logprobs for a single request."""
@@ -303,24 +309,27 @@ class LiteLLMProvider(InferenceProvider):
             List of output lists with logprobs populated.
         """
         from olmo_eval.common.progress import ProgressLogger
+        from olmo_eval.inference.dispatch import dispatch_concurrent
 
         logger.info(
             f"Sending {len(requests)} logprob requests for {self.model_name}"
             f" with max_concurrency {self.max_concurrency}"
         )
 
-        semaphore = asyncio.Semaphore(self.max_concurrency)
         progress = ProgressLogger(total=len(requests), desc="Logprobs", logger=logger)
 
-        async def process(req: LMRequest) -> list[LMOutput]:
-            async with semaphore:
-                result = await self._logprobs_single_async(req)
-                progress.update(1)
-                return result
+        def on_progress(done: int, total: int) -> None:
+            progress.update(1)
 
-        results = await asyncio.gather(*[process(r) for r in requests])
+        results = await dispatch_concurrent(
+            requests,
+            self._logprobs_single_async,
+            max_in_flight=self.max_concurrency,
+            max_retries=self.max_retries,
+            on_progress=on_progress,
+        )
         progress.close()
-        return list(results)
+        return [r if r is not None else [] for r in results]
 
     def logprobs(
         self,
@@ -340,4 +349,4 @@ class LiteLLMProvider(InferenceProvider):
         Returns:
             List of output lists with logprobs populated.
         """
-        return asyncio.run(self.alogprobs(requests))
+        return run_async(self.alogprobs(requests))
