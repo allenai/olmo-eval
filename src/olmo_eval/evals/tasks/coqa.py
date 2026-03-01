@@ -56,9 +56,7 @@ class CoQA(Task):
         all_answers = doc["answers"]["input_text"]
         source = doc.get("source", "")
         core_id = doc.get("id", "")
-        additional_answers = [
-            x["input_text"] for x in doc.get("additional_answers", {}).values()
-        ]
+        additional_answers = [x["input_text"] for x in doc.get("additional_answers", {}).values()]
 
         instances: list[Instance] = []
         previous_qa: list[dict[str, str]] = []

@@ -263,8 +263,7 @@ class LogprobMCAccuracyMetric(Metric):
             if gold_idx is None or not response.outputs:
                 continue
             logprob_sums = [
-                sum(lp["logprob"] for lp in (o.logprobs or []))
-                for o in response.outputs
+                sum(lp["logprob"] for lp in (o.logprobs or [])) for o in response.outputs
             ]
             if logprob_sums.index(max(logprob_sums)) == gold_idx:
                 correct += 1

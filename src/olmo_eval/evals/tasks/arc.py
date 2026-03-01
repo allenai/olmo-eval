@@ -288,4 +288,6 @@ register_variant("arc_easy", "olmo3base", num_fewshot=5, fewshot_source="olmes_a
 
 register_variant("arc_challenge", "rc")
 register_variant("arc_challenge", "mc", formatter=MultipleChoiceFormatter())
-register_variant("arc_challenge", "olmo3base", num_fewshot=5, fewshot_source="olmes_arc_challenge_fixed")
+register_variant(
+    "arc_challenge", "olmo3base", num_fewshot=5, fewshot_source="olmes_arc_challenge_fixed"
+)

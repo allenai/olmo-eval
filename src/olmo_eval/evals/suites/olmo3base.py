@@ -1,7 +1,5 @@
-from olmo_eval.evals.suites.registry import make_suite
-
 from olmo_eval.evals.suites.biology import _LAB_BENCH_TASKS
-
+from olmo_eval.evals.suites.registry import make_suite
 
 make_suite(
     "lab_bench:olmo3base",

@@ -33,26 +33,6 @@ LAB_BENCH_BPB = make_suite(
     description="LAB-Bench with bits-per-byte evaluation",
 )
 
-make_suite(
-    "medmcqa",
-    ("medmcqa:mc", "medmcqa:rc"),
-)
-
-make_suite(
-    "medmcqa:mc",
-    ("medmcqa:mc",),
-)
-
-make_suite(
-    "medmcqa:rc",
-    ("medmcqa:rc",),
-)
-
-make_suite(
-    "medqa_en",
-    ("medqa_en:rc", "medqa_en:mc"),
-)
-
 # =============================================================================
 # GeneTuring Suite
 # =============================================================================

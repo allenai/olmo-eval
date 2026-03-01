@@ -35,7 +35,11 @@ class SocialIQA(Task):
 
     @property
     def instances(self) -> Iterator[Instance]:
-        split = self.config.data_source.split if isinstance(self.config.data_source, DataSource) else None
+        split = (
+            self.config.data_source.split
+            if isinstance(self.config.data_source, DataSource)
+            else None
+        )
         yield from self._load_instances_cached(split=split)
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:

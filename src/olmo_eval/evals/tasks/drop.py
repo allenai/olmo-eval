@@ -5,7 +5,7 @@ import string
 from collections.abc import Iterator
 from dataclasses import dataclass
 from itertools import permutations
-from typing import Any, ClassVar
+from typing import Any
 
 from olmo_eval.common.metrics import AccuracyMetric, F1Metric
 from olmo_eval.common.scorers import Scorer
@@ -281,9 +281,7 @@ def _parse_answer(answer: dict[str, Any]) -> tuple[str, ...]:
     if answer["spans"] != []:
         return tuple(answer["spans"])
     return (
-        " ".join(
-            [answer["date"]["day"], answer["date"]["month"], answer["date"]["year"]]
-        ).strip(),
+        " ".join([answer["date"]["day"], answer["date"]["month"], answer["date"]["year"]]).strip(),
     )
 
 
@@ -362,9 +360,7 @@ class Drop(Task):
         for doc in DROP_FIXED_FEWSHOT:
             answers = _get_answers(doc)
             gold_answer = " " + ", ".join(answers[0])
-            formatted_question = (
-                f"Passage: {doc['passage']}\nQuestion: {doc['question']}\nAnswer:"
-            )
+            formatted_question = f"Passage: {doc['passage']}\nQuestion: {doc['question']}\nAnswer:"
             instances.append(
                 Instance(
                     question=formatted_question,
