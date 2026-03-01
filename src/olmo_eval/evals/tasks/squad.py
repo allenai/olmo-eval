@@ -113,11 +113,15 @@ class _SQuADBase(Task):
 
         instances = []
         for doc in SQUAD_FIXED_FEWSHOT:
+            answers = doc["answers"]
+            assert isinstance(answers, dict)
             instances.append(
                 Instance(
-                    question=_format_query(doc["title"], doc["context"], doc["question"]),
-                    gold_answer=doc["answers"]["text"][0],
-                    metadata={"id": doc["id"]},
+                    question=_format_query(
+                        str(doc["title"]), str(doc["context"]), str(doc["question"])
+                    ),
+                    gold_answer=str(answers["text"][0]),
+                    metadata={"id": str(doc["id"])},
                 )
             )
         if self.config.num_fewshot and self.config.num_fewshot < len(instances):

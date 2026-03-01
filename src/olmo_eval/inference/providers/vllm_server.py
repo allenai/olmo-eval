@@ -625,27 +625,14 @@ class VLLMServerProvider(InferenceProvider):
                     tokens = logprobs_data.tokens or []
                     token_logprobs = logprobs_data.token_logprobs or []
 
-                    # Skip context tokens, get continuation logprobs
-                    cont_tokens = tokens[context_len:]
-                    cont_token_logprobs = token_logprobs[context_len:]
-
-                    # Look up logprob for the actual continuation token.
-                    # JSON keys are always strings, so try both int and str keys.
-                    lp_info = token_probs.get(token_id)
-                    if lp_info is None:
-                        lp_info = token_probs.get(str(token_id))
-                    if lp_info is None:
-                        continue
-
-                    if isinstance(lp_info, dict):
-                        token_str = lp_info.get("token", tokenizer.decode([token_id]))
-                        logprob = lp_info.get("logprob", 0.0)
-                    else:
-                        token_str = getattr(lp_info, "token", tokenizer.decode([token_id]))
-                        logprob = getattr(lp_info, "logprob", 0.0)
-
-                    logprob_entries.append({"token": token_str, "logprob": logprob})
-                    total += logprob
+                    # Skip context tokens, iterate over continuation logprobs
+                    for token_str, lp in zip(
+                        tokens[context_len:], token_logprobs[context_len:], strict=False
+                    ):
+                        if lp is None:
+                            continue
+                        logprob_entries.append({"token": token_str, "logprob": lp})
+                        total += lp
 
             outputs.append(
                 LMOutput(

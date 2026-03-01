@@ -145,9 +145,7 @@ class MMLUMCTask(Task):
         """Format using the task's formatter (with fewshot if configured)."""
         formatter = self.config.formatter
         if formatter is None:
-            raise ValueError(
-                "MMLU MC task requires a formatter (e.g. MultipleChoiceFormatter)"
-            )
+            raise ValueError("MMLU MC task requires a formatter (e.g. MultipleChoiceFormatter)")
         return formatter.format(instance, self.get_fewshot())
 
     def extract_answer(self, output: LMOutput) -> Any:

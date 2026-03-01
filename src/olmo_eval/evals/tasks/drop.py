@@ -59,10 +59,7 @@ def _normalize(answer: str) -> str:
 def _answer_to_bags(
     answer: str | list[str] | tuple[str, ...],
 ) -> tuple[list[str], list[set[str]]]:
-    if isinstance(answer, (list, tuple)):
-        raw_spans = list(answer)
-    else:
-        raw_spans = [answer]
+    raw_spans = list(answer) if isinstance(answer, (list, tuple)) else [answer]
     normalized_spans: list[str] = []
     token_bags: list[set[str]] = []
     for raw_span in raw_spans:
@@ -74,14 +71,8 @@ def _answer_to_bags(
 
 def _compute_f1(predicted_bag: set[str], gold_bag: set[str]) -> float:
     intersection = len(gold_bag.intersection(predicted_bag))
-    if not predicted_bag:
-        precision = 1.0
-    else:
-        precision = intersection / float(len(predicted_bag))
-    if not gold_bag:
-        recall = 1.0
-    else:
-        recall = intersection / float(len(gold_bag))
+    precision = 1.0 if not predicted_bag else intersection / float(len(predicted_bag))
+    recall = 1.0 if not gold_bag else intersection / float(len(gold_bag))
     if precision == 0.0 and recall == 0.0:
         return 0.0
     return (2 * precision * recall) / (precision + recall)
@@ -90,9 +81,7 @@ def _compute_f1(predicted_bag: set[str], gold_bag: set[str]) -> float:
 def _match_numbers_if_present(gold_bag: set[str], predicted_bag: set[str]) -> bool:
     gold_numbers = {w for w in gold_bag if _is_number(w)}
     predicted_numbers = {w for w in predicted_bag if _is_number(w)}
-    if (not gold_numbers) or gold_numbers.intersection(predicted_numbers):
-        return True
-    return False
+    return (not gold_numbers) or bool(gold_numbers.intersection(predicted_numbers))
 
 
 def _align_bags(predicted_bags: list[set[str]], gold_bags: list[set[str]]) -> list[float]:

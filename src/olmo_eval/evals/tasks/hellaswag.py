@@ -229,7 +229,7 @@ class HellaSwag(Task):
             inst = _process_hellaswag_doc(doc, 0)
             if inst is None:
                 continue
-            label = int(doc["label"]) if doc.get("label", "") != "" else -1
+            label = int(str(doc["label"])) if doc.get("label", "") != "" else -1
             choices = inst.choices or ()
             correct_ending = choices[label] if 0 <= label < len(choices) else ""
             letter = chr(ord("A") + label) if label >= 0 else ""

@@ -160,6 +160,15 @@ select = [
 "src/olmo_eval/common/constants/models.py" = ["E501"]
 # Verbatim prompt templates from asta-bench reference implementation
 "src/olmo_eval/evals/tasks/astabench_sqa.py" = ["E501"]
+# Embedded fewshot data with long string literals
+"src/olmo_eval/evals/tasks/arc.py" = ["E501"]
+"src/olmo_eval/evals/tasks/csqa.py" = ["E501"]
+"src/olmo_eval/evals/tasks/drop.py" = ["E501"]
+"src/olmo_eval/evals/tasks/hellaswag.py" = ["E501"]
+"src/olmo_eval/evals/tasks/jeopardy.py" = ["E501"]
+"src/olmo_eval/evals/tasks/piqa.py" = ["E501"]
+"src/olmo_eval/evals/tasks/socialiqa.py" = ["E501"]
+"src/olmo_eval/evals/tasks/squad.py" = ["E501"]
 
 [tool.ruff.format]
 docstring-code-format = true

@@ -31,10 +31,7 @@ class CoQA(Task):
         loader = DataLoader()
         instances: list[Instance] = []
 
-        if self.config.limit:
-            splits = ["train", "validation"]
-        else:
-            splits = [self.config.split.value]
+        splits = ["train", "validation"] if self.config.limit else [self.config.split.value]
 
         for split in splits:
             source = self.config.get_data_source(split=split)

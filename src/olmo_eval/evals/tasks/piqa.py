@@ -69,15 +69,16 @@ class PiQA(Task):
     def _build_fixed_fewshot(self) -> list[Instance]:
         instances = []
         for doc in PIQA_FIXED_FEWSHOT:
-            correct_sol = doc["sol1"] if doc["label"] == 0 else doc["sol2"]
-            letter = chr(ord("A") + doc["label"])
+            label = int(doc["label"])
+            correct_sol = str(doc["sol1"] if label == 0 else doc["sol2"])
+            letter = chr(ord("A") + label)
             instances.append(
                 Instance(
-                    question=doc["goal"],
-                    choices=(doc["sol1"], doc["sol2"]),
+                    question=str(doc["goal"]),
+                    choices=(str(doc["sol1"]), str(doc["sol2"])),
                     gold_answer=correct_sol,
                     metadata={
-                        "gold_idx": doc["label"],
+                        "gold_idx": label,
                         "gold_text": correct_sol,
                         "mc_answer": letter,
                     },

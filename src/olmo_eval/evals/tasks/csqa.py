@@ -111,9 +111,11 @@ class CommonsenseQA(Task):
     def _build_fixed_fewshot(self) -> list[Instance]:
         instances = []
         for doc in CSQA_FIXED_FEWSHOT:
-            question = doc["question"]
-            choices = tuple(doc["choices"]["text"])
-            answer_key = doc["answerKey"]
+            question = str(doc["question"])
+            choices_data = doc["choices"]
+            assert isinstance(choices_data, dict)
+            choices = tuple(choices_data["text"])
+            answer_key = str(doc["answerKey"])
             gold_idx = ord(answer_key) - ord("A")
             gold_text = choices[gold_idx] if 0 <= gold_idx < len(choices) else ""
 
