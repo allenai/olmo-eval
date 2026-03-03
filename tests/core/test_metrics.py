@@ -217,13 +217,12 @@ class TestBPBMetric:
         assert bpb == 0.0
 
     def test_bpb_aggregates_across_responses(self):
-        """Test that BPB uses byte-weighted aggregation across responses."""
+        """Test that BPB uses simple arithmetic mean across responses."""
         metric = BPBMetric()
 
-        # Response 1: "a" (1 byte), logprob -1.0
-        # Response 2: "ab" (2 bytes), logprob -4.0 (sum of -2.0, -2.0)
-        # Byte-weighted: total_logprobs = 5.0, total_bytes = 3
-        # BPB = 5.0 / (3 * log(2))
+        # Response 1: "a" (1 byte), logprob -1.0 → BPB = 1.0 / (1 * log(2))
+        # Response 2: "ab" (2 bytes), logprob -4.0 (sum of -2.0, -2.0) → BPB = 4.0 / (2 * log(2))
+        # Simple mean: (bpb1 + bpb2) / 2
         responses = [
             self._make_response([self._make_output_with_logprobs("a", [-1.0])]),
             self._make_response([self._make_output_with_logprobs("ab", [-2.0, -2.0])]),
@@ -231,9 +230,9 @@ class TestBPBMetric:
 
         bpb = metric.compute(responses)
 
-        total_logprobs = 1.0 + 4.0  # negated from -1.0 and -4.0
-        total_bytes = 1 + 2
-        expected = total_logprobs / (total_bytes * math.log(2))
+        bpb1 = 1.0 / (1 * math.log(2))
+        bpb2 = 4.0 / (2 * math.log(2))
+        expected = (bpb1 + bpb2) / 2
         assert bpb == pytest.approx(expected)
 
     def test_bpb_no_logprobs_returns_zero(self):
