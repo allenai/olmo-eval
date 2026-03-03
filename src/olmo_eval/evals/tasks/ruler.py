@@ -19,13 +19,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from olmo_eval.common.formatters import PPLFormatter
-from olmo_eval.common.metrics import BPBMetric, RecallMetric
+from olmo_eval.common.metrics import RecallMetric
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.data.ruler_loader import download_ruler_data, load_ruler_dataset
 from olmo_eval.data.ruler_tasks import RULER_TASKS
 from olmo_eval.evals.tasks.common.base import Task, TaskConfig
-from olmo_eval.evals.tasks.common.registry import register, register_variant
+from olmo_eval.evals.tasks.common.registry import register
 
 
 def _normalize_answer(s: str) -> str:
@@ -282,14 +282,3 @@ for _task_name, _task_config in RULER_TASKS.items():
     # Inject into module globals so pickle can find the class by name
     globals()[_cls.__name__] = _cls
     register(f"ruler_{_task_name}")(_cls)
-
-# Register BPB variant for all RULER tasks
-# This allows perplexity-based evaluation as an alternative to generation-based
-for _task_name in RULER_TASKS:
-    register_variant(
-        f"ruler_{_task_name}",
-        "bpb",
-        formatter=PPLFormatter(leading_space=False),
-        metrics=(BPBMetric(),),
-        primary_metric=BPBMetric(),
-    )
