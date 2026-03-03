@@ -625,9 +625,11 @@ class VLLMServerProvider(InferenceProvider):
                     tokens = logprobs_data.tokens or []
                     token_logprobs = logprobs_data.token_logprobs or []
 
-                    # Skip context tokens, get continuation logprobs
-                    cont_tokens = tokens[context_len:]
-                    cont_token_logprobs = token_logprobs[context_len:]
+                    # Extract only continuation token logprobs (exclude extra
+                    # generated tokens from max_tokens=1).
+                    n_cont = len(continuation_enc)
+                    cont_tokens = tokens[context_len : context_len + n_cont]
+                    cont_token_logprobs = token_logprobs[context_len : context_len + n_cont]
 
                     for token_str, logprob in zip(cont_tokens, cont_token_logprobs, strict=False):
                         if logprob is not None:
