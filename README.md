@@ -33,8 +33,17 @@ olmo-eval models
 # List task suites
 olmo-eval suites
 
+# Show tasks in a specific suite
+olmo-eval suite-info core
+
 # List tasks and their regimes
 olmo-eval tasks
+
+# List harness presets
+olmo-eval harnesses
+
+# List external evaluations
+olmo-eval external-evals
 
 # Run evaluation (dry run)
 olmo-eval run -m llama3.1-8b -t humaneval:3shot --dry-run
@@ -257,12 +266,17 @@ config = HarnessConfig(
 |-------|------|---------|-------------|
 | `name` | `str` | Required | Harness identifier |
 | `provider` | `ProviderConfig` | `ProviderConfig()` | Model provider configuration |
-| `tools` | `tuple[Tool, ...]` | `()` | Tool instances (use `@registered_tool` decorator) |
+| `tools` | `tuple[Tool \| str, ...]` | `()` | Tool instances or registered tool names |
 | `system_prompt` | `str \| None` | `None` | System prompt to inject |
 | `tool_choice` | `str` | `"auto"` | Tool selection mode (`auto`, `none`, `required`) |
 | `backend` | `str \| None` | `None` | Execution backend (e.g., `openai_agents`) |
 | `max_turns` | `int \| None` | `None` | Max turns for multi-turn execution |
 | `max_concurrency` | `int \| None` | `None` | Concurrent executions |
+| `scoring_concurrency` | `int \| None` | `None` | Max concurrent scoring operations |
+| `sandboxes` | `tuple[SandboxConfig, ...]` | `()` | Sandbox configurations for isolated tool execution |
+| `backend_kwargs` | `dict[str, Any]` | `{}` | Backend-specific options (e.g., `enable_compaction`) |
+| `metrics` | `MetricsConfig \| None` | `None` | Inference metrics collection config |
+| `batching` | `BatchConfig \| None` | `None` | Batching strategy configuration |
 | `required_secrets` | `tuple[str, ...]` | `()` | Required environment variables |
 
 #### Backends
@@ -297,6 +311,38 @@ config = HarnessConfig(
 harness = Harness(config)
 outputs = harness.generate(requests)  # No backend needed
 ```
+
+#### Inference Metrics
+
+Harness configurations can include `MetricsConfig` to collect inference performance metrics during evaluation:
+
+```python
+from olmo_eval.harness import HarnessConfig, ProviderConfig
+from olmo_eval.inference.metrics import MetricsConfig
+
+config = HarnessConfig(
+    name="with_metrics",
+    provider=ProviderConfig(model="llama3.1-8b", kind="vllm_server"),
+    metrics=MetricsConfig(
+        enabled=True,
+        reporters=("file", "db"),  # Save to file and database
+        collect_vllm_server=True,  # Poll vLLM server /metrics endpoint
+    ),
+)
+```
+
+**Visualizing Metrics:**
+
+```bash
+# Plot metrics from database (requires at least one filter)
+olmo-eval metrics plot -G my-benchmark-group
+olmo-eval metrics plot -m OLMo-3 --metric throughput
+
+# Show statistics table without interactive plots
+olmo-eval metrics plot -e experiment_123 --stats-only
+```
+
+When using the `db` reporter, metrics are stored in a PostgreSQL database (default name: `olmo_eval_metrics`). You must configure your own database connection using the `OLMO_EVAL_DB_*` environment variables (see [Database Configuration](#database-configuration)).
 
 #### Defining Tools
 
@@ -476,15 +522,17 @@ class MyTask(Task):
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `name` | `str` | Required | Task identifier used in CLI |
-| `data_source` | `DataSource \| str` | `None` | Dataset source (HuggingFace, S3, GCS, or local path) |
+| `data_source` | `DataSource \| str` | `None` | Dataset source (HuggingFace, S3, GCS, local, or URI string) |
 | `fewshot_source` | `DataSource \| str` | `None` | Optional separate source for few-shot examples |
 | `formatter` | `Formatter` | `None` | Request formatter |
-| `scorers` | `tuple[Scorer, ...]` | `()` | Answer scorers |
-| `metrics` | `tuple[Metric, ...]` | `()` | Evaluation metrics |
+| `metrics` | `tuple[Metric, ...]` | `()` | Evaluation metrics (scorers are inferred from metrics) |
 | `num_fewshot` | `int` | `0` | Number of few-shot examples |
-| `fewshot_seed` | `int` | `42` | Random seed for few-shot |
+| `fewshot_seed` | `int` | `42` | Random seed for few-shot selection |
+| `seed` | `int` | `42` | General random seed for task |
 | `limit` | `int \| None` | `None` | Max instances to evaluate |
 | `split` | `Split` | `Split.TEST` | Dataset split to use |
+| `primary_metric` | `MetricName \| Metric \| None` | `None` | Primary metric for ranking (defaults to single metric if only one) |
+| `sampling_params` | `SamplingParams \| None` | `None` | Default sampling parameters for this task |
 | `dependencies` | `list[str] \| None` | `None` | Runtime packages to install (e.g., `["pkg==1.0"]`) |
 
 ### Data Sources
@@ -497,8 +545,14 @@ from olmo_eval.data import DataSource
 # HuggingFace datasets - specify path, subset, and split
 DataSource(path="cais/mmlu", subset="abstract_algebra", split="test")
 
+# Using URI string (alternative syntax)
+DataSource.from_uri("hf://cais/mmlu?subset=abstract_algebra&split=test")
+
 # Without subset (for datasets that don't have subsets)
 DataSource(path="openai_humaneval", split="test")
+
+# With specific data files and revision
+DataSource(path="my-org/dataset", data_files="data/test.jsonl", revision="v1.0")
 
 # Local JSONL files
 DataSource(path="/path/to/dataset.jsonl")
@@ -509,6 +563,16 @@ DataSource(path="s3://my-bucket/datasets/data.jsonl")
 # GCS
 DataSource(path="gs://my-bucket/datasets/data.parquet")
 ```
+
+**DataSource Fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `path` | `str` | Required | Dataset path (HuggingFace repo, S3/GCS URI, or local path) |
+| `subset` | `str \| None` | `None` | Dataset subset/config name |
+| `split` | `str` | `"test"` | Dataset split |
+| `data_files` | `str \| None` | `None` | Specific data files to load |
+| `revision` | `str \| None` | `None` | Dataset revision/version |
 
 ### Common Patterns
 
@@ -700,23 +764,33 @@ cluster: h100
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
 | `--config` | `-f` | none | YAML config file (CLI args override config values) |
-| `--name` | `-n` | required | Experiment name |
+| `--name` | `-n` | auto | Experiment name (auto-generated from model/tasks if not provided) |
 | `--model` | `-m` | required | Model name or HuggingFace path (can specify multiple) |
 | `--task` | `-t` | required | Task name with optional `@priority` suffix (can specify multiple) |
 | `--override` | `-o` | none | Override for preceding `-m` or `-t` (can specify multiple) |
 | `--cluster` | `-c` | required | Cluster alias (`h100`, `a100`, `aus`) or full name |
-| `--gpus` | `-G` | `1` | Number of GPUs per model instance |
-| `--parallelism` | `-P` | `1` | Number of model instances to run in parallel |
+| `--gpus` | `-G` | auto | Number of GPUs (defaults to 1 for GPU providers, 0 otherwise) |
 | `--max-gpus-per-node` | | `8` | Maximum GPUs per node (tasks split if exceeded) |
+| `--priority` | `-p` | `normal` | Job priority (`low`, `normal`, `high`, `urgent`) |
 | `--preemptible` | | `true` | Allow preemption |
 | `--timeout` | `-T` | `24h` | Job timeout (e.g., `24h`, `30m`) |
 | `--retries` | `-r` | none | Number of retries on failure |
 | `--workspace` | `-w` | required | Beaker workspace |
 | `--budget` | `-B` | required | Beaker budget |
-| `--group` | `-g` | none | Add experiments to Beaker group(s) (can specify multiple) |
+| `--image` | `-I` | default | Custom Beaker image |
+| `--group` | `-g` | auto | Add experiments to Beaker group(s) (auto-generated if not specified) |
+| `--harness` | `-H` | none | Harness preset name |
+| `--external-eval` | `-E` | none | External evaluation name(s) to run instead of tasks |
+| `--eval-arg` | `-A` | none | Arguments for external evals (`key=value`) |
+| `--provider-kwarg` | `-K` | none | Provider kwargs for external evals (`key=value`) |
+| `--uv-cache-dir` | | default | UV cache directory for package downloads |
 | `--dry-run` | `-d` | `false` | Print spec without launching |
+| `--yes` | `-y` | `false` | Skip confirmation prompt |
 | `--follow/--no-follow` | | `true` | Follow logs after launch |
-| `--secret-env` | | none | Map Beaker secret to env var (can specify multiple) |
+| `--secret-env` | | none | Map Beaker secret to env var (`SECRET:VAR`) |
+| `--aws-credentials` | | auto | Inject AWS credentials (auto-detected from s3:// paths) |
+| `--gcs-credentials` | | auto | Inject GCS credentials (auto-detected from gs:// paths) |
+| `--store` | | `false` | Persist results to configured database |
 
 ### Per-Task Overrides
 
@@ -884,12 +958,11 @@ description: "Full evaluation suite for Llama 70B"
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | yes | Experiment name |
+| `name` | string | no | Experiment name (auto-generated if not provided) |
 | `models` | list | yes | List of ModelConfig objects (each must have `name_or_path` and `provider`) |
 | `tasks` | list | yes | List of task specs (with optional `@priority`) |
 | `cluster` | string | yes | Cluster alias or full name |
-| `gpus` | int | no | Default GPUs per model instance (default: `1`) |
-| `parallelism` | int | no | Model instances to run in parallel (default: `1`) |
+| `gpus` | int | no | Default GPUs per model instance (auto-detected based on provider) |
 | `max_gpus_per_node` | int | no | Max GPUs per node, splits tasks if exceeded (default: `8`) |
 | `priority` | string | no | Default priority (default: `normal`) |
 | `preemptible` | bool | no | Allow preemption (default: `true`) |
@@ -899,6 +972,7 @@ description: "Full evaluation suite for Llama 70B"
 | `budget` | string | yes | Beaker budget |
 | `beaker_image` | string | no | Container image to use (config-only) |
 | `groups` | list | no | Beaker groups to add experiments to |
+| `harness` | string | no | Harness preset name |
 | `description` | string | no | Experiment description (config-only) |
 
 See `examples/beaker/configs/` for more configuration examples.
@@ -1156,6 +1230,9 @@ olmo-eval task inspect arc_easy --json
 | `-T, --tokenizer` | Tokenizer for formatting/tokenization |
 | `--formatted` | Show prompt after template applied (requires `-T`) |
 | `--tokens` | Show token array (requires `-T`) |
+| `--max-tokens` | Max tokens to display (0 for no limit) |
+| `--max-chars` | Max chars for formatted prompt (0 for no limit) |
+| `--max-string-length` | Max chars for instance field values (0 for no limit) |
 | `--json` | Output as JSON |
 
 ### Runtime Inspection Flags
@@ -1221,23 +1298,34 @@ External evals are standalone evaluations that run outside the normal task pipel
 ### Defining an External Eval
 
 ```python
-from olmo_eval.evals.external import SandboxedExternalEval, register_external_eval
+from typing import Any
+
+from olmo_eval.evals.external import SandboxedExternalEval, ExternalEvalResult, register_external_eval
 
 class MyBenchmarkExternalEval(SandboxedExternalEval):
     """My benchmark evaluation."""
 
     name = "my_benchmark"
     description = "Evaluates model on my benchmark"
-    sandbox_image = "my-benchmark:latest"
-    working_dir = "/workspace"
     timeout_seconds = 3600
     required_secrets = ("MY_API_KEY",)
 
     @property
-    def arguments(self) -> tuple[ExternalEvalArgument, ...]:
-        return (
-            ExternalEvalArgument(name="subset", type="str", default="default"),
-        )
+    def sandbox_image(self) -> str:
+        return "my-benchmark:latest"
+
+    @property
+    def working_dir(self) -> str:
+        return "/workspace"
+
+    @property
+    def setup_command(self) -> tuple[str, ...]:
+        return ("pip install -r requirements.txt",)
+
+    @property
+    def arguments(self) -> dict[str, tuple[str, Any | None]]:
+        # Returns dict of arg_name -> (description, default_value)
+        return {"subset": ("Which subset to evaluate", "default")}
 
     async def execute(self, provider, args, output_dir, container_runtime):
         # Run benchmark in sandbox
@@ -1256,13 +1344,13 @@ register_external_eval(MyBenchmarkExternalEval())
 
 ```bash
 # List available external evals
-olmo-eval external list
+olmo-eval external-evals
 
 # Run an external eval
-olmo-eval external run my_benchmark -m llama3.1-8b --subset test
+olmo-eval run-external -e my_benchmark --model llama3.1-8b -A subset=test
 
 # Run on Beaker
-olmo-eval beaker launch -n "external-eval" --external my_benchmark -m llama3.1-8b
+olmo-eval beaker launch -n "external-eval" -E my_benchmark -m llama3.1-8b -A subset=test
 ```
 
 ### ExternalEvalResult
@@ -1277,6 +1365,7 @@ External evals return structured results:
 | `success` | `bool` | Whether the eval completed successfully |
 | `error` | `str \| None` | Error message if failed |
 | `duration_seconds` | `float` | Execution time |
+| `raw_output` | `str \| None` | Raw stdout/stderr from the evaluation |
 | `predictions` | `list` | Instance-level predictions |
 
 ## Sandboxes
@@ -1297,7 +1386,7 @@ config = SandboxConfig(
     working_dir="/workspace",
     environment=(("MY_VAR", "value"),),
     volumes=(("/host/path", "/container/path"),),
-    capabilities=frozenset({Capability.BASH, Capability.PYTHON}),
+    capabilities=Capability.BASH | Capability.PYTHON,  # Union of frozensets
 )
 ```
 
@@ -1307,25 +1396,30 @@ config = SandboxConfig(
 |-------|------|---------|-------------|
 | `image` | `str` | Required | Container image |
 | `mode` | `SandboxMode` | `DOCKER` | `LOCAL`, `DOCKER`, or `MODAL` |
-| `container_runtime` | `str` | `"docker"` | `"docker"` or `"podman"` |
+| `container_runtime` | `str` | `"podman"` | `"docker"` or `"podman"` |
 | `command_timeout` | `float` | `30.0` | Timeout per command (seconds) |
 | `startup_timeout` | `float` | `60.0` | Container startup timeout |
 | `instances` | `int` | `1` | Number of parallel executors |
 | `working_dir` | `str` | `"/workspace"` | Working directory in container |
 | `environment` | `tuple` | `()` | Environment variables |
 | `volumes` | `tuple` | `()` | Volume mounts (host, container) |
-| `capabilities` | `frozenset` | `{BASH}` | `BASH`, `PYTHON`, etc. |
+| `capabilities` | `frozenset[str]` | `Capability.DEFAULT` | Capabilities like `Capability.BASH`, `Capability.PYTHON` |
+| `remove_container` | `bool` | `True` | Remove container after use |
+| `docker_args` | `tuple[str, ...]` | `()` | Additional Docker/Podman arguments |
+| `log_dir` | `str \| None` | `None` | Directory for container logs |
+| `exec_shell` | `tuple[str, ...] \| None` | `None` | Custom shell for command execution |
+| `enable_diagnostics` | `bool` | `True` | Run background diagnostics monitor |
 
 ### Using SandboxManager
 
 The `SandboxManager` manages multiple executors with capability-based routing:
 
 ```python
-from olmo_eval.harness.sandbox import SandboxManager, Capability
+from olmo_eval.harness.sandbox import SandboxConfig, SandboxManager, SandboxMode, Capability
 
 configs = [
-    SandboxConfig(image="python:3.12", capabilities={Capability.PYTHON}, instances=2),
-    SandboxConfig(image="ubuntu:22.04", capabilities={Capability.BASH}),
+    SandboxConfig(image="python:3.12", mode=SandboxMode.DOCKER, capabilities=Capability.PYTHON, instances=2),
+    SandboxConfig(image="ubuntu:22.04", mode=SandboxMode.DOCKER, capabilities=Capability.BASH),
 ]
 
 manager = SandboxManager(configs, owner="my-scorer")
