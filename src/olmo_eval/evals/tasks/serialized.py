@@ -64,9 +64,7 @@ class SerializedTask(Task):
             request_type=rt,
             prompt=record.get("prompt") or "",
             messages=tuple(record["messages"]) if record.get("messages") else (),
-            continuations=(
-                tuple(record["continuations"]) if record.get("continuations") else None
-            ),
+            continuations=(tuple(record["continuations"]) if record.get("continuations") else None),
         )
 
 
