@@ -17,7 +17,7 @@ CATEGORIES = ["niah", "multi_hop_tracing", "aggregation", "qa"]
 
 # Create suites for each (category, context_size) combination
 for size in CONTEXT_SIZES:
-    category_suites = []
+    all_tasks: list[str] = []
 
     for category in CATEGORIES:
         # Find all tasks with this category and context size
@@ -38,14 +38,15 @@ for size in CONTEXT_SIZES:
             description=f"RULER {category} tasks at {size} context length",
         )
         register(suite)
-        category_suites.append(suite)
+        all_tasks.extend(tasks)
 
-    # Create combined suite for all categories at this context size
-    if len(category_suites) > 0:
+    # Create combined suite: flat average of all 13 tasks, matching the paper
+    # ("The performance at a certain length is the average of all 13 tasks in RULER")
+    if len(all_tasks) > 0:
         all_tasks_suite = Suite(
             name=f"ruler_all__{size}",
-            tasks=tuple(s for s in category_suites),  # Reference nested suites
-            aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
-            description=f"All RULER tasks at {size} context length (average of category averages)",
+            tasks=tuple(all_tasks),
+            aggregation=AggregationStrategy.AVERAGE,
+            description=f"All RULER tasks at {size} context length (flat average of all tasks)",
         )
         register(all_tasks_suite)
