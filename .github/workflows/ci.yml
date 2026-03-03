@@ -142,7 +142,7 @@ jobs:
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
       - name: Upload coverage HTML report
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         if: matrix.python-version == '3.12'
         with:
           name: coverage-report
@@ -362,7 +362,7 @@ jobs:
           uv run python -m zipfile -l dist/*.whl | head -50
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/

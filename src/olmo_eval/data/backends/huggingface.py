@@ -46,12 +46,19 @@ class HuggingFaceBackend:
         # Use HF_TOKEN for authentication if available
         token = os.getenv("HF_TOKEN")
 
+        kwargs: dict[str, Any] = {}
+        if source.data_files is not None:
+            kwargs["data_files"] = source.data_files
+        if source.revision is not None:
+            kwargs["revision"] = source.revision
+
         dataset = load_dataset(
             path,
             name=source.subset,
             split=source.split,
             streaming=streaming,
             token=token,
+            **kwargs,
         )
 
         yield from dataset

@@ -12,6 +12,8 @@ from typing import Any
 from olmo_eval.common.constants import BEAKER_RESULT_DIR, LOCAL_RESULT_DIR
 from olmo_eval.common.types import ProviderKind
 from olmo_eval.harness.sandbox import Capability
+from olmo_eval.inference.metrics import MetricsConfig
+from olmo_eval.runners.asynq.batching import BatchConfig
 
 from .config import HarnessConfig, ProviderConfig
 from .constants import (
@@ -62,7 +64,31 @@ def lazy(fn: Callable[[str], HarnessConfig]) -> _Lazy:
 class HarnessPresets:
     """Harness presets. Access as HarnessPresets.name or get_harness_preset("name")."""
 
-    default = HarnessConfig(name="default")
+    @lazy
+    def default(name: str) -> HarnessConfig:
+        """Default preset with vllm_server and batched processing."""
+
+        return HarnessConfig(
+            name=name,
+            provider=ProviderConfig(kind=ProviderKind.VLLM_SERVER),
+            metrics=MetricsConfig(),
+            batching=BatchConfig.batched(),
+        )
+
+    @lazy
+    def simple_agent(name: str) -> HarnessConfig:
+        """Simple agent preset."""
+        return HarnessConfig(
+            name=name,
+            provider=ProviderConfig(
+                kind=ProviderKind.VLLM_SERVER,
+                kwargs={"timeout": 60},
+            ),
+            metrics=MetricsConfig(),
+            backend="openai_agents",
+            max_concurrency=4,
+            batching=BatchConfig.streaming(),
+        )
 
     @lazy
     def dr_tulu(name: str) -> HarnessConfig:
@@ -81,6 +107,7 @@ class HarnessPresets:
             max_concurrency=4,
             backend="openai_agents",
             required_secrets=("S2_API_KEY", "SERPER_API_KEY", "OPENAI_API_KEY"),
+            batching=BatchConfig.streaming(),
         )
 
     @lazy
@@ -92,7 +119,7 @@ class HarnessPresets:
             name=name,
             sandboxes=(
                 SandboxConfig(
-                    instances=3,
+                    instances=1,
                     image="ghcr.io/astral-sh/uv:python3.12-bookworm-slim",
                     mode=SandboxMode.DOCKER,
                     startup_timeout=60.0,
@@ -131,6 +158,7 @@ class HarnessPresets:
                     log_dir=_get_logs_dir(),
                 ),
             ),
+            batching=BatchConfig.streaming(),
         )
 
     @lazy
@@ -162,6 +190,7 @@ class HarnessPresets:
                     log_dir=_get_logs_dir(),
                 ),
             ),
+            batching=BatchConfig.streaming(),
         )
 
 

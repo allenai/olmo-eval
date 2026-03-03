@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from rich.console import Console
+from olmo_eval.common.logging import get_logger
 
 if TYPE_CHECKING:
     from olmo_eval.runners.common.models import S3Config
     from olmo_eval.storage import StorageBackend
 
-console = Console()
+logger = get_logger("storage")
 
 
 class StorageSetup:
@@ -81,16 +81,12 @@ class StorageSetup:
                 password=self.db_password,
             )
             storage.initialize()
-            console.print(
-                f"[green]Connected to postgres storage:[/green] "
-                f"{self.db_host}:{self.db_port}/{self.db_name}"
-            )
             return storage
         except ImportError as e:
-            console.print(f"[red]Storage backend error:[/red] {e}")
+            logger.error("Storage backend error: %s", e)
             raise SystemExit(1) from None
         except Exception as e:
-            console.print(f"[red]Failed to initialize storage backend:[/red] {e}")
+            logger.error("Failed to initialize storage backend: %s", e)
             raise SystemExit(1) from None
 
     def setup_s3_config(self) -> S3Config | None:
@@ -107,13 +103,13 @@ class StorageSetup:
 
         # Validate that all required S3 options are provided
         if not self.s3_bucket:
-            console.print("[red]Error:[/red] --s3-bucket is required for S3 uploads")
+            logger.error("--s3-bucket is required for S3 uploads")
             raise SystemExit(1)
         if not self.s3_prefix:
-            console.print("[red]Error:[/red] --s3-prefix is required for S3 uploads")
+            logger.error("--s3-prefix is required for S3 uploads")
             raise SystemExit(1)
         if not self.s3_group:
-            console.print("[red]Error:[/red] --s3-group is required for S3 uploads")
+            logger.error("--s3-group is required for S3 uploads")
             raise SystemExit(1)
 
         from olmo_eval.runners.common.models import S3Config
@@ -125,9 +121,11 @@ class StorageSetup:
             endpoint_url=self.s3_endpoint_url,
             region=self.s3_region,
         )
-        console.print(
-            f"[green]S3 uploads enabled:[/green] "
-            f"s3://{self.s3_bucket}/{self.s3_prefix}/{self.s3_group}/..."
+        logger.info(
+            "S3 uploads enabled: s3://%s/%s/%s/...",
+            self.s3_bucket,
+            self.s3_prefix,
+            self.s3_group,
         )
         return s3_config
 

@@ -86,12 +86,8 @@ def upgrade() -> None:
     op.create_index("ix_task_results_task_name", "task_results", ["task_name"])
     op.create_index("ix_task_results_primary_score", "task_results", ["primary_score"])
     op.create_index("ix_task_results_task_hash", "task_results", ["task_hash"])
-    op.create_index(
-        "idx_task_results_exp_task", "task_results", ["experiment_pk", "task_name"]
-    )
-    op.create_index(
-        "idx_task_results_model_task", "task_results", ["model_hash", "task_name"]
-    )
+    op.create_index("idx_task_results_exp_task", "task_results", ["experiment_pk", "task_name"])
+    op.create_index("idx_task_results_model_task", "task_results", ["model_hash", "task_name"])
     op.create_index(
         "idx_task_results_score_desc",
         "task_results",
@@ -104,9 +100,7 @@ def upgrade() -> None:
         sa.Column("experiment_pk", sa.Integer(), nullable=False),
         sa.Column("task_hash", sa.String(64), nullable=False),
         sa.Column("native_id", sa.String(255), nullable=False),
-        sa.Column(
-            "instance_metrics", postgresql.JSONB(astext_type=sa.Text()), nullable=False
-        ),
+        sa.Column("instance_metrics", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.PrimaryKeyConstraint("id"),
         sa.ForeignKeyConstraint(
             ["experiment_pk"],

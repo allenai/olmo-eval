@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Literal
 
+from olmo_eval.common.repr import hide_unset
+
 ContainerRuntime = Literal["docker", "podman"]
 
 
@@ -31,6 +33,7 @@ class Capability:
     DEFAULT: frozenset[str] = BASH
 
 
+@hide_unset()
 @dataclass(frozen=True)
 class SandboxConfig:
     """Configuration for sandboxed tool execution via SWE-ReX.
@@ -50,6 +53,7 @@ class SandboxConfig:
         modal_sandbox_kwargs: Additional kwargs for Modal sandbox configuration.
         runtime_timeout: Timeout for Modal runtime in seconds.
         required_secrets: Environment variable names that must be set.
+        enable_diagnostics: Whether to run background diagnostics monitor.
     """
 
     image: str
@@ -69,6 +73,7 @@ class SandboxConfig:
     docker_args: tuple[str, ...] = ()
     log_dir: str | None = None
     exec_shell: tuple[str, ...] | None = None
+    enable_diagnostics: bool = True
 
     @property
     def is_local(self) -> bool:
@@ -110,4 +115,5 @@ class SandboxConfig:
             docker_args=tuple(data.get("docker_args", [])),
             log_dir=data.get("log_dir"),
             exec_shell=tuple(data["exec_shell"]) if data.get("exec_shell") else None,
+            enable_diagnostics=data.get("enable_diagnostics", True),
         )

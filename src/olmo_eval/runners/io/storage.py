@@ -75,14 +75,15 @@ def upload_to_s3(
         experiment_id=experiment_id,
     )
 
-    retry_config = Config(
+    boto_config = Config(
         retries={
             "max_attempts": 5,
             "mode": "adaptive",
-        }
+        },
+        max_pool_connections=50,
     )
 
-    client_kwargs: dict[str, Any] = {"region_name": s3_config.region, "config": retry_config}
+    client_kwargs: dict[str, Any] = {"region_name": s3_config.region, "config": boto_config}
     if s3_config.endpoint_url:
         client_kwargs["endpoint_url"] = s3_config.endpoint_url
     s3 = boto3.client("s3", **client_kwargs)
@@ -277,14 +278,10 @@ def save_results(
             logger.info(f"Saving to {backend_name}...")
             try:
                 storage.save(eval_result, instances_by_task if instances_by_task else None)
+                instance_count = sum(len(preds) for preds in instances_by_task.values())
                 logger.info(
                     f"Saved to {backend_name}: model={model_name}, "
-                    f"experiment_id={exp_id}, tasks={task_count}"
-                )
-                instance_count = sum(len(preds) for preds in instances_by_task.values())
-                console.print(
-                    f"[green]Saved to {backend_name}:[/green] {model_name} "
-                    f"({task_count} tasks, {instance_count} instances, id={exp_id})"
+                    f"experiment_id={exp_id}, tasks={task_count}, instances={instance_count}"
                 )
             except Exception as e:
                 logger.error(f"Failed to save to {backend_name}: {e}")

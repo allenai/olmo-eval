@@ -3,6 +3,14 @@
 from __future__ import annotations
 
 from olmo_eval.storage.backends.postgres.backend import PostgresBackend
+from olmo_eval.storage.backends.postgres.db_url import (
+    build_metrics_db_url,
+    build_results_db_url,
+)
+from olmo_eval.storage.backends.postgres.metrics_models import (
+    InferenceSample,
+    MetricsBase,
+)
 from olmo_eval.storage.backends.postgres.models import (
     Base,
     Experiment,
@@ -24,9 +32,11 @@ from olmo_eval.storage.backends.postgres.session import (
 __all__ = [
     "PostgresBackend",
     "Base",
+    "MetricsBase",
     "Experiment",
     "TaskResult",
     "InstancePrediction",
+    "InferenceSample",
     "DatabaseSession",
     "create_postgres_engine",
     "create_session_factory",
@@ -34,4 +44,6 @@ __all__ = [
     "ExperimentRepository",
     "InstancePredictionRepository",
     "QueryHelper",
+    "build_results_db_url",
+    "build_metrics_db_url",
 ]

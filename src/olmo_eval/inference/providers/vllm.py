@@ -198,7 +198,8 @@ class VLLMProvider(InferenceProvider):
             "n": params.num_samples,
         }
 
-        kwargs["temperature"] = params.temperature
+        if params.temperature is not None:
+            kwargs["temperature"] = params.temperature
         if params.top_p is not None:
             kwargs["top_p"] = params.top_p
         if params.top_k is not None:

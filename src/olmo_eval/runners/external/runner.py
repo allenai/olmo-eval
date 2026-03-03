@@ -19,6 +19,11 @@ from olmo_eval.evals.external import (
     get_external_eval,
     list_external_evals,
 )
+from olmo_eval.inference.metrics import (
+    InstrumentedProvider,
+    MetricsConfig,
+    VLLMMetricsMonitor,
+)
 from olmo_eval.inference.providers.config import ProviderConfig
 from olmo_eval.runners.common.models import S3Config
 from olmo_eval.runners.processing.utils import generate_experiment_id
@@ -48,6 +53,7 @@ class ExternalEvalRunner:
         storages: List of storage backends for persisting results.
         experiment_name: Human-readable experiment name.
         experiment_group: Experiment group for grouping related experiments.
+        metrics: Configuration for metrics collection on the provider.
     """
 
     provider_config: ProviderConfig
@@ -60,6 +66,7 @@ class ExternalEvalRunner:
     storages: list[StorageBackend] = field(default_factory=list)
     experiment_name: str | None = None
     experiment_group: str | None = None
+    metrics: MetricsConfig | None = None
 
     def validate(self) -> None:
         """Validate runner configuration.
@@ -113,23 +120,49 @@ class ExternalEvalRunner:
                 return results
             base_url = server_process.base_url
 
-        try:
-            # Run each evaluation
-            # Create provider once for all evals
-            if server_process is not None:
-                # Use the provider we already started
-                provider = server_process
-            else:
-                # Create provider from config with the base_url
-                provider = self.provider_config.with_overrides(base_url=base_url).create_provider()
+        # Create provider once for all evals
+        if server_process is not None:
+            # Use the provider we already started
+            provider = server_process
+        else:
+            # Create provider from config with the base_url
+            provider = self.provider_config.with_overrides(base_url=base_url).create_provider()
 
+        # Wrap with instrumentation if metrics enabled
+        if self.metrics is not None and self.metrics.enabled:
+            instrumented = InstrumentedProvider(provider)
+            if self.metrics.collect_gpu:
+                instrumented.enable_gpu_monitoring(interval_s=1.0)
+            provider = instrumented
+
+        # Start vLLM server metrics monitoring if enabled and we have a vLLM server
+        vllm_monitor: VLLMMetricsMonitor | None = None
+        is_vllm_provider = self.provider_config.kind in ("vllm", "vllm_server")
+        if (
+            self.metrics is not None
+            and self.metrics.enabled
+            and self.metrics.collect_vllm_server
+            and is_vllm_provider
+            and base_url
+        ):
+            vllm_metrics_path = os.path.join(
+                self.output_dir, "metrics", "vllm_server_metrics.jsonl"
+            )
+            vllm_monitor = VLLMMetricsMonitor(
+                base_url=base_url,
+                output_path=vllm_metrics_path,
+                interval_s=self.metrics.vllm_poll_interval_s,
+            )
+            vllm_monitor.start()
+
+        try:
             for eval_name in self.external_eval_names:
                 logger.info(f"Running external evaluation: {eval_name}")
 
                 try:
                     external_eval = get_external_eval(eval_name)
                     result = await external_eval.execute_with_provider(
-                        provider=provider,
+                        provider=provider,  # type: ignore[arg-type]
                         args=self.eval_args,
                         output_dir=self.output_dir,
                         container_runtime=self.container_runtime,
@@ -148,6 +181,16 @@ class ExternalEvalRunner:
                     results[eval_name] = ExternalEvalResult.from_error(eval_name, str(e))
 
         finally:
+            # Stop vLLM server metrics monitoring
+            if vllm_monitor is not None:
+                vllm_snapshots = vllm_monitor.stop()
+                if vllm_snapshots:
+                    logger.info(f"Collected {len(vllm_snapshots)} vLLM server metrics snapshots")
+
+            # Disable GPU monitoring if enabled
+            if isinstance(provider, InstrumentedProvider):
+                provider.disable_gpu_monitoring()
+
             # Stop the server if we started it
             if server_process is not None:
                 self._stop_server(server_process)

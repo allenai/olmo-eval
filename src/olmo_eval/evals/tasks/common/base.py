@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.formatters import Formatter
 from olmo_eval.common.metrics import Metric
+from olmo_eval.common.repr import hide_unset
 from olmo_eval.common.scorers import Scorer
 from olmo_eval.common.types import (
     Instance,
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
     from olmo_eval.data import DataSource
 
 
+@hide_unset()
 @dataclass
 class TaskConfig:
     """Configuration for a task.

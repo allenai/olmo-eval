@@ -13,7 +13,7 @@ from typing import Any
 from olmo_eval.cli.utils import console
 from olmo_eval.common.configs import expand_tasks
 from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR
-from olmo_eval.common.logging import get_logger, get_worker_id
+from olmo_eval.common.logging import configure_worker_logging, get_logger, get_worker_id
 from olmo_eval.harness.config import HarnessConfig, ProviderConfig
 from olmo_eval.runners.asynq.monitoring import (
     terminate_workers,
@@ -26,7 +26,7 @@ from olmo_eval.runners.asynq.preparation import (
     prepare_task_items,
 )
 from olmo_eval.runners.asynq.results import aggregate_results, process_results
-from olmo_eval.runners.asynq.types import DEFAULT_SCORING_CONCURRENCY, QueueItem, TaskTracker
+from olmo_eval.runners.asynq.types import QueueItem, TaskTracker
 from olmo_eval.runners.asynq.workers import inference_worker, scoring_worker
 from olmo_eval.runners.common.base import BaseEvalRunner
 from olmo_eval.runners.common.mixins import RunnerResultsMixin
@@ -35,6 +35,7 @@ from olmo_eval.runners.processing.utils import compute_task_hash, generate_exper
 from olmo_eval.storage import StorageBackend
 
 logger = get_logger(__name__)
+runner_logger = configure_worker_logging("runner")
 
 
 @dataclass
@@ -70,6 +71,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
     # Output persistence options
     save_predictions: bool = True
     save_requests: bool = True
+
+    # Shuffle seed for deterministic instance ordering (enables future checkpointing)
+    shuffle_seed: int = 42
 
     # Instance inspection options
     inspect_instance: bool = False
@@ -138,10 +142,16 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         # Track experiment start time
         experiment_start = time.time()
 
+        # Generate experiment ID early so metrics can include it
+        experiment_id = generate_experiment_id()
+
         # Prepare tasks
         expanded_tasks, trackers, items = self._prepare_tasks()
         total_instances = len(items)
-        logger.info(f"Total instances: {total_instances}")
+        runner_logger.info(f"Total instances: {total_instances}")
+
+        # Update harness metrics config with experiment metadata before starting workers
+        self._update_metrics_config(experiment_id)
 
         # Setup multiprocessing
         ctx = mp.get_context("spawn")
@@ -156,8 +166,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         manager = ctx.Manager()
         init_times = manager.dict()
 
-        # Shuffle and enqueue items
-        random.shuffle(items)
+        # Shuffle with seed for deterministic ordering (enables future checkpointing)
+        rng = random.Random(self.shuffle_seed)
+        rng.shuffle(items)
         for item in items:
             item_queue.put(item)
 
@@ -179,15 +190,30 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             scorer_ready = ctx.Event()
 
             workers = self._start_workers(
-                ctx, num_workers, total_gpus, item_queue, result_queue, init_times
+                ctx, num_workers, total_gpus, item_queue, result_queue, init_times, total_instances
             )
 
-            scoring_concurrency = (
-                self.harness_config.scoring_concurrency or DEFAULT_SCORING_CONCURRENCY
-            )
+            # Determine scoring concurrency
+            if self.harness_config.scoring_concurrency:
+                scoring_concurrency = self.harness_config.scoring_concurrency
+            elif sandbox_configs_list is not None:
+                # Match sandbox pool size (sum of instances across all configs)
+                sandbox_pool_size = sum(cfg.get("instances", 1) for cfg in sandbox_configs_list)
+                scoring_concurrency = max(1, sandbox_pool_size)
+            else:
+                # CPU-bound scoring - use available cores
+                import os
+
+                cpu_count = os.cpu_count() or 4
+                scoring_concurrency = max(1, int(cpu_count * 0.75))
+
+            runner_logger.info(f"Scoring concurrency: {scoring_concurrency}")
+
+            scorer_id = "scorer-0"  # TODO: support multiple scorers
             scorer_proc = ctx.Process(
                 target=scoring_worker,
                 args=(
+                    scorer_id,
                     scoring_queue,
                     scored_queue,
                     total_instances,
@@ -199,15 +225,14 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             scorer_proc.start()
 
             # Wait for workers to initialize
-            logger.info("Waiting for inference workers to initialize...")
+            runner_logger.info("Waiting for inference workers to initialize...")
             wait_for_workers_ready(workers, result_queue, startup_timeout=60.0)
-            logger.info("Inference workers ready")
 
             # Now wait for scoring worker (runs in parallel with inference worker init)
             if sandbox_configs_list is not None:
-                logger.info("Waiting for scoring worker to initialize...")
+                runner_logger.info("Waiting for scoring worker to initialize...")
                 wait_for_scorer_ready(scorer_proc, scorer_ready, scored_queue, timeout=180.0)
-                logger.info("Scoring worker ready")
+                runner_logger.info("Scoring worker ready")
 
             # Wait for workers to report their init times (also checks for crashes)
             provider_init_seconds = wait_for_init_times(
@@ -227,6 +252,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 scoring_queue,
                 scored_queue,
                 workers,
+                scorer_proc,
                 len(expanded_tasks),
                 total_instances,
             )
@@ -267,6 +293,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             results_dict = self._aggregate_results(results, expanded_tasks)
             return self._finalize_and_save(
                 results_dict,
+                experiment_id=experiment_id,
                 experiment_duration_seconds=experiment_duration_seconds,
                 provider_init_seconds=provider_init_seconds,
             )
@@ -284,6 +311,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
     ) -> tuple[list[str], dict[str, TaskTracker], list[QueueItem]]:
         """Prepare all tasks and return tracking data structures."""
         expanded_tasks = expand_tasks(self.task_specs)
+
+        if not expanded_tasks:
+            raise ValueError("No tasks to run after expansion. Check task_specs configuration.")
 
         trackers: dict[str, TaskTracker] = {}
         items: list[QueueItem] = []
@@ -401,6 +431,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         item_queue: mp.Queue,
         result_queue: mp.Queue,
         init_times: Any,
+        total_instances: int,
     ) -> list[mp.process.BaseProcess]:
         """Start worker processes."""
         workers: list[mp.process.BaseProcess] = []
@@ -420,6 +451,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                     item_queue,
                     result_queue,
                     harness_config_dict,
+                    total_instances,
                     init_times,
                     self.output_dir,
                 ),
@@ -446,6 +478,32 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         """
         return 1
 
+    def _update_metrics_config(self, experiment_id: str) -> None:
+        """Update harness metrics config with experiment metadata.
+
+        This must be called before starting workers so the serialized config
+        includes all metadata for metrics reporting.
+        """
+        from olmo_eval.common.types import compute_model_hash
+
+        if self.harness_config.metrics is None or not self.harness_config.metrics.enabled:
+            return
+
+        # Compute model hash from provider config
+        model_hash = compute_model_hash(self.harness_config.provider.to_dict())
+
+        # Update metrics config with all available metadata
+        updated_metrics = self.harness_config.metrics.with_metadata(
+            experiment_id=experiment_id,
+            experiment_name=self.experiment_name,
+            experiment_group=self.experiment_group,
+            model_name=self.model_name,
+            model_hash=model_hash,
+        )
+
+        # Replace harness config with updated metrics
+        self.harness_config = self.harness_config.with_metrics(updated_metrics)
+
     async def _process_results(
         self,
         trackers: dict[str, TaskTracker],
@@ -453,6 +511,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         scoring_queue: mp.Queue,
         scored_queue: mp.Queue,
         workers: list[mp.process.BaseProcess],
+        scorer_proc: mp.process.BaseProcess,
         total_tasks: int,
         total_instances: int,
     ) -> dict[str, Any]:
@@ -463,6 +522,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             scoring_queue=scoring_queue,
             scored_queue=scored_queue,
             workers=workers,
+            scorer_proc=scorer_proc,
             total_tasks=total_tasks,
             total_instances=total_instances,
             model_name=self.model_name,
@@ -488,6 +548,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
     def _finalize_and_save(
         self,
         results_dict: dict[str, Any],
+        experiment_id: str,
         experiment_duration_seconds: float | None = None,
         provider_init_seconds: dict[str, float] | None = None,
     ) -> dict[str, Any]:
@@ -496,7 +557,6 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
         self._log_summary(results_dict)
 
-        experiment_id = generate_experiment_id()
         model_hash = compute_model_hash(results_dict.get("model_config", {}))
         results_dict["_model_hash"] = model_hash
 

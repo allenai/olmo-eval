@@ -15,7 +15,6 @@ from olmo_eval.runners.asynq.types import (
     DEFAULT_SCORING_CONCURRENCY,
     SCORER_FATAL,
     WORKER_FATAL,
-    QueueItem,
     ResultItem,
     ScoredResponse,
 )
@@ -29,13 +28,15 @@ def inference_worker(
     item_queue: mp.Queue,
     result_queue: mp.Queue,
     harness_config_dict: dict[str, Any],
+    total_instances: int,
     init_times: dict[str, float] | None = None,
     output_dir: str | None = None,
 ) -> None:
     """Worker process that initializes a harness and processes items.
 
-    Collects all items from the queue, then processes them with batching
-    for COMPLETION/LOGLIKELIHOOD and async concurrency for CHAT requests.
+    Processes items in streaming chunks for balanced latency and throughput.
+    COMPLETION/LOGLIKELIHOOD requests are batched, CHAT requests use async
+    concurrency.
 
     Args:
         worker_id: Unique worker identifier.
@@ -43,6 +44,7 @@ def inference_worker(
         item_queue: Queue of QueueItems (None signals shutdown).
         result_queue: Queue to put ResultItems.
         harness_config_dict: Serialized HarnessConfig.
+        total_instances: Total number of instances to process.
         init_times: Optional shared dict for tracking initialization times.
         output_dir: Output directory for persisting logs (e.g., vLLM server logs).
     """
@@ -74,8 +76,11 @@ def inference_worker(
         load_format = provider_kwargs.get("load_format")
         extra_loader_config = provider_kwargs.get("model_loader_extra_config")
 
+        from olmo_eval.launch.config import get_model_short_name
+
+        short_name = get_model_short_name(model_name)
         worker_logger.info(f"Initializing provider: {provider_kind}")
-        worker_logger.info(f"  Model: {model_name}")
+        worker_logger.info(f"  Model: {short_name}")
         if tokenizer:
             worker_logger.info(f"  Tokenizer: {tokenizer}")
         if gpu_ids:
@@ -105,6 +110,16 @@ def inference_worker(
             log_dir=log_dir,
         )
 
+        # Update metrics config with runtime values (output_dir, provider_kind, model_name)
+        if harness_config.metrics is not None and harness_config.metrics.enabled:
+            updated_metrics = harness_config.metrics.with_output_dir(
+                output_dir or ""
+            ).with_metadata(
+                provider_kind=provider_kind,
+                model_name=model_name,
+            )
+            harness_config = harness_config.with_metrics(updated_metrics)
+
         harness = Harness(harness_config)
 
         # Force provider creation to catch import errors early
@@ -115,6 +130,9 @@ def inference_worker(
             from olmo_eval.harness.backends import validate_backend
 
             validate_backend(harness_config.backend)
+
+        # Initialize metrics reporters early to establish database connections
+        harness.initialize_reporters()
 
         init_time = time.time() - init_start
         worker_logger.info(f"Provider ready ({init_time:.1f}s)")
@@ -133,17 +151,34 @@ def inference_worker(
             if harness_config.backend:
                 asyncio.run(harness.backend.initialize(harness_config))
 
-            items: list[QueueItem] = []
-            while True:
-                item = item_queue.get()
-                if item is None:
-                    break
-                items.append(item)
+            # Get batching strategy from config
+            from olmo_eval.runners.asynq.batching import BatchConfig, get_strategy
 
-            if items:
-                from olmo_eval.runners.asynq.processing import process_items
+            batch_config = harness_config.batching or BatchConfig()
+            batch_config.validate_for_provider(provider_kind)
+            strategy = get_strategy(batch_config)
 
-                asyncio.run(process_items(items, harness, result_queue, max_concurrency))
+            concurrency_str = max_concurrency or "unlimited"
+            if batch_config.strategy == "streaming":
+                worker_logger.info(
+                    f"Inference worker ready (strategy={batch_config.strategy}, "
+                    f"max_in_flight={concurrency_str})"
+                )
+            else:
+                worker_logger.info(
+                    f"Inference worker ready (strategy={batch_config.strategy}, "
+                    f"chunk_size={batch_config.chunk_size})"
+                )
+            asyncio.run(
+                strategy.run(
+                    item_queue,
+                    harness,
+                    result_queue,
+                    max_concurrency,
+                    worker_logger,
+                    total_instances,
+                )
+            )
 
             worker_logger.info("Processing complete")
         finally:
@@ -174,6 +209,7 @@ def inference_worker(
 
 
 def scoring_worker(
+    worker_id: str,
     scoring_queue: mp.Queue,
     scored_queue: mp.Queue,
     total_instances: int,
@@ -190,6 +226,7 @@ def scoring_worker(
     similar to how inference_worker manages provider lifecycle.
 
     Args:
+        worker_id: Unique worker identifier (e.g., "scorer-0").
         scoring_queue: Queue of ScoringItems (None signals shutdown).
         scored_queue: Queue to put ScoredResponses.
         total_instances: Total number of instances to score (for progress).
@@ -199,9 +236,10 @@ def scoring_worker(
     """
     import sys
 
-    from olmo_eval.common.logging import configure_logging
+    from olmo_eval.common.logging import configure_logging, configure_worker_logging
 
     configure_logging()
+    worker_logger = configure_worker_logging(worker_id)
 
     from olmo_eval.common.execution import ScoringContext
     from olmo_eval.common.progress import ProgressLogger
@@ -224,7 +262,7 @@ def scoring_worker(
                     scored=scored,
                 )
             except Exception as e:
-                logger.warning(f"Failed to score {item.spec}[{item.instance_idx}]: {e}")
+                worker_logger.warning(f"Failed to score {item.spec}[{item.instance_idx}]: {e}")
                 return ScoredResponse(
                     spec=item.spec,
                     instance_idx=item.instance_idx,
@@ -257,13 +295,14 @@ def scoring_worker(
                 try:
                     item: ScoringItem | None = scoring_queue.get(timeout=0.1)
                 except queue.Empty:
-                    # Timeout - flush any pending batch
+                    # Timeout - flush any pending batch to avoid deadlock
                     if batch:
                         if progress is None:
+                            worker_logger.info("Starting scoring")
                             progress = ProgressLogger(
                                 total=total_instances,
                                 desc="Scored",
-                                logger=logger,
+                                logger=worker_logger,
                                 color="blue",
                             )
                         await process_batch(batch, scoring_context, progress)
@@ -277,22 +316,24 @@ def scoring_worker(
                             progress = ProgressLogger(
                                 total=total_instances,
                                 desc="Scored",
-                                logger=logger,
+                                logger=worker_logger,
                                 color="blue",
                             )
                         await process_batch(batch, scoring_context, progress)
                     break
 
-                # Create progress logger on first item
-                if progress is None:
-                    progress = ProgressLogger(
-                        total=total_instances, desc="Scored", logger=logger, color="blue"
-                    )
-
                 batch.append(item)
 
                 # Process batch when full
                 if len(batch) >= batch_size:
+                    if progress is None:
+                        worker_logger.info("Starting scoring")
+                        progress = ProgressLogger(
+                            total=total_instances,
+                            desc="Scored",
+                            logger=worker_logger,
+                            color="blue",
+                        )
                     await process_batch(batch, scoring_context, progress)
                     batch = []
 
@@ -305,14 +346,16 @@ def scoring_worker(
             from olmo_eval.harness.sandbox import SandboxConfig, SandboxManager
 
             sandbox_configs = [SandboxConfig.from_dict(d) for d in sandbox_configs_list]
-            logger.info(f"Initializing sandbox manager with {len(sandbox_configs)} config(s)...")
+            worker_logger.info(
+                f"Initializing sandbox manager with {len(sandbox_configs)} config(s)..."
+            )
             sandbox_manager = SandboxManager(sandbox_configs, owner="scorer")
 
             # Start sandbox synchronously using asyncio
             try:
                 asyncio.run(sandbox_manager.start())
             except Exception as e:
-                logger.error(f"Failed to start sandbox: {e}")
+                worker_logger.error(f"Failed to start sandbox: {e}")
                 scored_queue.put(
                     ScoredResponse(
                         spec=SCORER_FATAL,
@@ -326,6 +369,7 @@ def scoring_worker(
             scoring_context = ScoringContext(execution_env=sandbox_manager)
 
         # Signal that worker is ready
+        worker_logger.info("Scorer ready")
         if ready_event is not None:
             ready_event.set()
 
@@ -333,7 +377,7 @@ def scoring_worker(
         asyncio.run(run_scoring_loop())
 
     except Exception as e:
-        logger.error(f"Scoring worker failed: {e}")
+        worker_logger.error(f"Scoring worker failed: {e}")
         # Signal fatal error via the scored queue
         scored_queue.put(
             ScoredResponse(
@@ -350,7 +394,7 @@ def scoring_worker(
             try:
                 asyncio.run(sandbox_manager.stop())
             except Exception as e:
-                logger.warning(f"Failed to stop sandbox: {e}")
+                worker_logger.warning(f"Failed to stop sandbox: {e}")
 
 
 __all__ = [

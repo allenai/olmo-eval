@@ -22,4 +22,8 @@ def get_docker_network_args(runtime: str | None = None) -> tuple[str, ...]:
         return ("--add-host=host.docker.internal:host-gateway",)
 
     # Podman: use pasta with --map-guest-addr for fixed host IP access
-    return (f"--network=pasta:--map-guest-addr,{config.pasta_host_ip}",)
+    # Also pass --dns to use Google DNS, avoiding pasta's TCP DNS timeout issues
+    return (
+        f"--network=pasta:--map-guest-addr,{config.pasta_host_ip}",
+        "--dns=8.8.8.8",
+    )

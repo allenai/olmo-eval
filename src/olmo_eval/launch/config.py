@@ -43,12 +43,39 @@ def get_model_short_name(model_name: str, alias: str | None = None) -> str:
         return alias.lower()
 
     name = model_name.rstrip("/")
-    short_name = name.split("/")[-1]
+    parts = name.split("/")
+
+    # Handle checkpoint paths: s3://bucket/checkpoints/{owner}/{model}/{step}
+    # or /weka/oe-training-default/checkpoints/{owner}/{model}/{step}
+    # Returns everything after "checkpoints/"
+    try:
+        checkpoint_idx = parts.index("checkpoints")
+        post_checkpoint = parts[checkpoint_idx + 1 :]
+        if post_checkpoint:
+            return "/".join(post_checkpoint).lower()
+    except (ValueError, IndexError):
+        pass
+
+    short_name = parts[-1]
 
     if not short_name or len(short_name) > 32:
         short_name = name[-16:].lstrip("/").lstrip("-").lstrip("_")
 
     return short_name.lower()
+
+
+def sanitize_beaker_name(name: str) -> str:
+    """Sanitize a string for use in Beaker names.
+
+    Beaker names can only contain letters, digits, periods, dashes, and
+    underscores, and cannot start with a dash.
+    """
+    # Replace invalid characters with underscores
+    sanitized = name.replace(":", "_").replace("@", "_")
+    # Ensure name doesn't start with a dash
+    if sanitized.startswith("-"):
+        sanitized = "_" + sanitized[1:]
+    return sanitized
 
 
 def _shorten_task_name(task: str, max_len: int = 8) -> str:

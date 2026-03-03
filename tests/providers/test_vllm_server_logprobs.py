@@ -25,11 +25,16 @@ class TestVLLMServerProviderLogprobs:
 
     @pytest.fixture
     def mock_completion_response(self):
-        """Create a mock completion response with prompt_logprobs."""
+        """Create a mock completion response with logprobs on choice."""
 
-        def make_response(prompt_logprobs):
+        def make_response(tokens, token_logprobs):
+            logprobs_data = MagicMock()
+            logprobs_data.tokens = tokens
+            logprobs_data.token_logprobs = token_logprobs
+
             choice = MagicMock()
-            choice.prompt_logprobs = prompt_logprobs
+            choice.logprobs = logprobs_data
+
             response = MagicMock()
             response.choices = [choice]
             return response
@@ -60,19 +65,15 @@ class TestVLLMServerProviderLogprobs:
                 mock_encode.return_value = ([0, 1, 2], [3])
                 mock_tokenizer.decode.return_value = "The answer is Paris"
 
-                # Mock the completion response with prompt_logprobs
-                # First 3 entries are context (should be skipped)
-                # 4th entry is continuation token
-                prompt_logprobs = [
-                    None,  # First token has no logprob
-                    {1: {"token": "answer", "logprob": -0.5}},
-                    {2: {"token": "is", "logprob": -0.3}},
-                    {3: {"token": "Paris", "logprob": -0.1}},  # Continuation token
-                ]
+                # Mock the completion response with logprobs
+                # First 3 tokens are context (should be skipped)
+                # 4th token is continuation token
+                tokens = ["The", "answer", "is", "Paris"]
+                token_logprobs = [None, -0.5, -0.3, -0.1]  # Paris has -0.1
 
                 mock_client = AsyncMock()
                 mock_client.completions.create.return_value = mock_completion_response(
-                    prompt_logprobs
+                    tokens, token_logprobs
                 )
                 provider._client = mock_client
                 provider._get_or_create_client = MagicMock(return_value=mock_client)
@@ -94,7 +95,7 @@ class TestVLLMServerProviderLogprobs:
                 assert len(output.logprobs) == 1
                 assert output.logprobs[0]["token"] == "Paris"
                 assert output.logprobs[0]["logprob"] == -0.1
-                assert output.metadata["total_logprob"] == -0.1
+                assert output.metadata["sum_logits"] == -0.1
                 assert output.metadata["num_tokens"] == 1
 
     @pytest.mark.anyio
@@ -124,24 +125,15 @@ class TestVLLMServerProviderLogprobs:
                 call_count[0] += 1
                 # Different logprobs for different continuations
                 if call_count[0] == 1:  # Paris
-                    logprobs = [
-                        None,
-                        {1: {"token": "is", "logprob": -0.2}},
-                        {2: {"token": "Paris", "logprob": -0.1}},
-                    ]
+                    tokens = ["Capital", "is", "Paris"]
+                    token_logprobs = [None, -0.2, -0.1]
                 elif call_count[0] == 2:  # London
-                    logprobs = [
-                        None,
-                        {1: {"token": "is", "logprob": -0.2}},
-                        {2: {"token": "London", "logprob": -0.5}},
-                    ]
+                    tokens = ["Capital", "is", "London"]
+                    token_logprobs = [None, -0.2, -0.5]
                 else:  # Berlin
-                    logprobs = [
-                        None,
-                        {1: {"token": "is", "logprob": -0.2}},
-                        {2: {"token": "Berlin", "logprob": -0.8}},
-                    ]
-                return mock_completion_response(logprobs)
+                    tokens = ["Capital", "is", "Berlin"]
+                    token_logprobs = [None, -0.2, -0.8]
+                return mock_completion_response(tokens, token_logprobs)
 
             mock_client = AsyncMock()
             mock_client.completions.create.side_effect = mock_create
@@ -159,7 +151,7 @@ class TestVLLMServerProviderLogprobs:
 
             assert len(outputs) == 3
             # Paris should have highest logprob (least negative)
-            logprobs = [o.metadata["total_logprob"] for o in outputs]
+            logprobs = [o.metadata["sum_logits"] for o in outputs]
             assert logprobs[0] > logprobs[1] > logprobs[2]
 
     @pytest.mark.anyio
@@ -207,7 +199,7 @@ class TestVLLMServerProviderLogprobs:
             mock_tokenizer.decode.return_value = "text"
 
             mock_client = AsyncMock()
-            mock_response = mock_completion_response([None, {1: {"token": "x", "logprob": -0.1}}])
+            mock_response = mock_completion_response(["Test", "yes"], [None, -0.1])
             mock_client.completions.create.return_value = mock_response
             provider._client = mock_client
             provider._get_or_create_client = MagicMock(return_value=mock_client)
@@ -230,10 +222,10 @@ class TestVLLMServerProviderLogprobs:
             )
 
     @pytest.mark.anyio
-    async def test_logprobs_passes_prompt_logprobs_param(
+    async def test_logprobs_passes_logprobs_and_echo_params(
         self, mock_tokenizer, mock_completion_response
     ):
-        """Test that prompt_logprobs parameter is passed in extra_body."""
+        """Test that logprobs and echo parameters are passed correctly."""
         from olmo_eval.inference.providers.vllm_server import VLLMServerProvider
 
         with patch.object(VLLMServerProvider, "__init__", lambda self, *a, **kw: None):
@@ -246,7 +238,7 @@ class TestVLLMServerProviderLogprobs:
             mock_tokenizer.decode.return_value = "text"
 
             mock_client = AsyncMock()
-            mock_response = mock_completion_response([None, {1: {"token": "x", "logprob": -0.1}}])
+            mock_response = mock_completion_response(["Test", "yes"], [None, -0.1])
             mock_client.completions.create.return_value = mock_response
             provider._client = mock_client
             provider._get_or_create_client = MagicMock(return_value=mock_client)
@@ -260,8 +252,8 @@ class TestVLLMServerProviderLogprobs:
 
             await provider._logprobs_single_impl(request)
 
-            # Check that prompt_logprobs was passed
+            # Check that logprobs and echo parameters are passed
             call_kwargs = mock_client.completions.create.call_args[1]
-            assert "extra_body" in call_kwargs
-            assert call_kwargs["extra_body"]["prompt_logprobs"] == 5
-            assert call_kwargs["max_tokens"] == 0  # Should not generate
+            assert call_kwargs["logprobs"] == 5
+            assert call_kwargs["echo"] is True
+            assert call_kwargs["max_tokens"] == 1
