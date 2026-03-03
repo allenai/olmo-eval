@@ -421,30 +421,6 @@ print(result.trajectory)  # Shows all turns including tool calls
 print(result.final_output)  # Final model response
 ```
 
-#### Beaker Launch with Harness
-
-```bash
-# Launch evaluation with search harness
-olmo-eval beaker launch -n "eval-with-tools" \
-    -m llama3.1-8b \
-    -t simpleqa \
-    --harness dr_tulu \
-    --cluster h100
-```
-
-Or in a config file:
-
-```yaml
-name: eval-with-tools
-models:
-  - name_or_path: llama3.1-8b
-    provider: vllm
-tasks:
-  - simpleqa
-harness: dr_tulu  # Preset name
-cluster: h100
-```
-
 ## Adding New Tasks
 
 This section explains how to create new evaluation tasks.
@@ -826,20 +802,6 @@ olmo-eval run -m mock -t humaneval:3shot:bpb --inspect-request
 olmo-eval run -m mock -t mmlu --dry-run
 ```
 
-### Beaker Job Inspection
-
-The same inspection flags work with Beaker jobs:
-
-```bash
-olmo-eval beaker launch \
-    -n "debug-eval" \
-    -m Qwen/Qwen3-8B \
-    -t mmlu -o limit=10 \
-    --inspect-request \
-    --inspect-response \
-    --cluster h100
-```
-
 ## External Evals
 
 External evals are standalone evaluations that run outside the normal task pipeline.
@@ -897,9 +859,6 @@ olmo-eval external-evals
 
 # Run an external eval
 olmo-eval run-external -e my_benchmark --model llama3.1-8b -A subset=test
-
-# Run on Beaker
-olmo-eval beaker launch -n "external-eval" -E my_benchmark -m llama3.1-8b -A subset=test
 ```
 
 ### ExternalEvalResult
@@ -1033,6 +992,28 @@ olmo-eval beaker launch \
 
 # Preview the Beaker spec without launching
 olmo-eval beaker launch -n "test" -m llama3.1-8b -t arc_easy --dry-run
+
+# With a harness preset for tool-augmented evaluation
+olmo-eval beaker launch -n "eval-with-tools" \
+    -m llama3.1-8b \
+    -t simpleqa \
+    --harness dr_tulu \
+    --cluster h100
+
+# With inspection flags for debugging
+olmo-eval beaker launch -n "debug-eval" \
+    -m llama3.1-8b \
+    -t mmlu -o limit=10 \
+    --inspect-request \
+    --inspect-response \
+    --cluster h100
+
+# Run external evaluations
+olmo-eval beaker launch -n "external-eval" \
+    -E my_benchmark \
+    -m llama3.1-8b \
+    -A subset=test \
+    --cluster h100
 ```
 
 ### Per-Task Priorities
@@ -1385,6 +1366,18 @@ Images are tagged with CUDA and PyTorch versions: `cu{version}-trc{version}-{arc
 **PyTorch version**: Configurable via `--torch-version`
 **Configuration**: See `scripts/build_config.sh`
 
+### Pushing Images
+
+```bash
+# Push most recent build
+./scripts/beaker/push_beaker_image.sh
+
+# Preview without pushing
+./scripts/beaker/push_beaker_image.sh --dry-run
+```
+
+The script auto-detects the image name from the tag (e.g., `olmo-eval-cu128-trc291-amd64`)
+
 ### What's in the Image
 
 The image contains:
@@ -1435,18 +1428,6 @@ olmo-eval beaker launch -n "eval" -m llama3.1-8b \
     -t task_a -o 'dependencies=["pkg1"]' \
     -t task_b -o 'dependencies=["pkg2"]'
 ```
-
-### Pushing to Beaker
-
-```bash
-# Push most recent build
-./scripts/beaker/push_beaker_image.sh
-
-# Preview without pushing
-./scripts/beaker/push_beaker_image.sh --dry-run
-```
-
-The script auto-detects the image name from the tag (e.g., `olmo-eval-cu128-trc291-amd64`)
 
 ## Development
 
