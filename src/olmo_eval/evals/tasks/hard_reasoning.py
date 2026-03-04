@@ -154,7 +154,7 @@ for _subset in HARD_REASONING_TASKS:
         _task_name,
         "chat",
         formatter=ChatFormatter(),
-        sampling_params=SamplingParams(max_tokens=4096, temperature=0.0),
+        sampling_params=SamplingParams(max_tokens=32768, temperature=0.0),
     )
 
 
