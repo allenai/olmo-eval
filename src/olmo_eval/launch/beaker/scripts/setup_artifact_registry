@@ -30,9 +30,8 @@ else
     CLEANUP_CREDS=true
 fi
 
-# Extract service account email and authenticate
-SERVICE_ACCOUNT=$(jq -r '.client_email' "$CREDS_FILE")
-gcloud auth activate-service-account "$SERVICE_ACCOUNT" --key-file="$CREDS_FILE" --quiet
+# Authenticate with gcloud
+gcloud auth activate-service-account --key-file="$CREDS_FILE" --quiet
 
 # Configure docker/podman credential helper for Artifact Registry
 gcloud auth configure-docker us-east1-docker.pkg.dev --quiet
