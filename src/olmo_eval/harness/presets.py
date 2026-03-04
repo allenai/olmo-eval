@@ -23,6 +23,7 @@ from .constants import (
 )
 
 
+# TODO(undfined): Remove reference to beaker
 def _get_logs_dir() -> str:
     """Get the logs directory based on environment."""
     result_dir = BEAKER_RESULT_DIR if os.environ.get("BEAKER_JOB_ID") else LOCAL_RESULT_DIR
@@ -108,6 +109,24 @@ class HarnessPresets:
             backend="openai_agents",
             required_secrets=("S2_API_KEY", "SERPER_API_KEY", "OPENAI_API_KEY"),
             batching=BatchConfig.streaming(),
+        )
+
+    @lazy
+    def codex_universal(name: str) -> HarnessConfig:
+        """Universal code execution preset with multiple capabilities."""
+        from .sandbox import SandboxConfig, SandboxMode
+
+        return HarnessConfig(
+            name=name,
+            sandboxes=(
+                SandboxConfig(
+                    instances=1,
+                    image="volcengine/sandbox-fusion:latest",
+                    mode=SandboxMode.DOCKER,
+                    startup_timeout=300.0,
+                    log_dir=_get_logs_dir(),
+                ),
+            ),
         )
 
     @lazy
