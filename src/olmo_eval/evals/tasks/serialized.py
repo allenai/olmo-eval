@@ -28,7 +28,6 @@ _REQUEST_TYPE_MAP = {
 }
 
 # S3 base path for serialized benchmark data.
-# Override via environment variable OLMO_EVAL_SERIALIZED_S3_BASE if needed.
 _S3_BASE = "s3://ai2-llm/ianm/oe-eval-serialized/olmo3_base_easy_code_bpb"
 
 
