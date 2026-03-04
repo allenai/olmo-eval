@@ -125,6 +125,7 @@ class HarnessPresets:
                     mode=SandboxMode.DOCKER,
                     startup_timeout=300.0,
                     log_dir=_get_logs_dir(),
+                    inject_swerex=True,
                 ),
             ),
         )

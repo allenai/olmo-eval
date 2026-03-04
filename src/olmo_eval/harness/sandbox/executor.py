@@ -157,6 +157,13 @@ class SandboxExecutor:
                         "swe-rex not installed. Install with: pip install swe-rex"
                     ) from e
 
+                # Get image, optionally building a derived image with swe-rex
+                image = self.config.image
+                if self.config.inject_swerex:
+                    from .image import get_swerex_image
+
+                    image = get_swerex_image(image, self.config.container_runtime)
+
                 # Build docker args, adding log args if log_dir is configured
                 docker_args = list(self.config.docker_args) if self.config.docker_args else []
                 if self.config.log_dir and self.name:
@@ -190,7 +197,7 @@ class SandboxExecutor:
 
                 # Build kwargs, omitting None values (swerex doesn't accept None for some fields)
                 deployment_kwargs: dict[str, Any] = {
-                    "image": self.config.image,
+                    "image": image,
                     "container_runtime": self.config.container_runtime,
                     "startup_timeout": self.config.startup_timeout,
                 }

@@ -54,6 +54,7 @@ class SandboxConfig:
         runtime_timeout: Timeout for Modal runtime in seconds.
         required_secrets: Environment variable names that must be set.
         enable_diagnostics: Whether to run background diagnostics monitor.
+        inject_swerex: Whether to build a derived image with swe-rex pre-installed.
     """
 
     image: str
@@ -74,6 +75,7 @@ class SandboxConfig:
     log_dir: str | None = None
     exec_shell: tuple[str, ...] | None = None
     enable_diagnostics: bool = True
+    inject_swerex: bool = False
 
     @property
     def is_local(self) -> bool:
@@ -116,4 +118,5 @@ class SandboxConfig:
             log_dir=data.get("log_dir"),
             exec_shell=tuple(data["exec_shell"]) if data.get("exec_shell") else None,
             enable_diagnostics=data.get("enable_diagnostics", True),
+            inject_swerex=data.get("inject_swerex", False),
         )
