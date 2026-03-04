@@ -77,16 +77,6 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             kind=ProviderKind.VLLM,
             model="mistralai/Mistral-7B-v0.3",
         ),
-        "marin-8b-base": ProviderConfig(
-            kind=ProviderKind.VLLM,
-            model="marin-community/marin-8b-base",
-            max_model_len=32768,
-        ),
-        "nemotron-nano-9b-v2-base": ProviderConfig(
-            kind=ProviderKind.VLLM,
-            model="nvidia/NVIDIA-Nemotron-Nano-9B-v2-Base",
-            trust_remote_code=True,
-        ),
         "gpt-4o": ProviderConfig(
             kind=ProviderKind.LITELLM,
             model="openai/gpt-4o",
@@ -120,20 +110,5 @@ def get_model_presets() -> dict[str, ProviderConfig]:
         "mock": ProviderConfig(
             kind=ProviderKind.MOCK,
             model="mock",
-        ),
-        "Qwen3-8B-Base": ProviderConfig(
-            kind=ProviderKind.VLLM,
-            model="Qwen/Qwen3-8B-Base",
-            trust_remote_code=True,
-            max_model_len=16384,
-            kwargs={"gpu_memory_utilization": 0.7},
-        ),
-        "OLMo3.1-7B-6T-30h-midtrain-deux-soup_step23842-hf5": ProviderConfig(
-            kind=ProviderKind.VLLM,
-            model="/weka/oe-training-default/ai2-llm/checkpoints/willm/linear-rnns/OLMo3.1-7B-6T-30h-midtrain-deux-soup/step23842-hf5",
-            trust_remote_code=True,
-            max_model_len=4096,
-            kwargs={"gpu_memory_utilization": 0.7},
-            dependencies=("git+https://github.com/huggingface/transformers.git",),
         ),
     }
