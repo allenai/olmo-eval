@@ -121,7 +121,7 @@ class HarnessPresets:
             sandboxes=(
                 SandboxConfig(
                     instances=1,
-                    image="volcengine/sandbox-fusion::base-20250609",
+                    image="volcengine/sandbox-fusion:base-20250609",
                     mode=SandboxMode.DOCKER,
                     startup_timeout=300.0,
                     log_dir=_get_logs_dir(),
