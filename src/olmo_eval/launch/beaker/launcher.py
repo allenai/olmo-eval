@@ -702,10 +702,10 @@ class BeakerLauncher:
                 f"/opt/venv/lib/python*/site-packages/nvidia*; do "
                 f'ln -sf "$pkg" {vllm_venv}/lib/python*/site-packages/; done'
             )
-            # Install vLLM (torch already available via symlink)
+            # Install vLLM extra from project (includes vllm + companion packages)
             steps.append(
-                f"VIRTUAL_ENV={vllm_venv} uv pip install "
-                f"--cache-dir \"$UV_CACHE_DIR\" 'vllm[runai]==0.13.0'"
+                f"cd /gantry-runtime && VIRTUAL_ENV={vllm_venv} uv pip install "
+                f"--cache-dir \"$UV_CACHE_DIR\" -e '.[vllm]' -c {constraints}"
             )
             # Set VLLM_PYTHON so VLLMServerProcess uses the isolated venv
             steps.append(f"export VLLM_PYTHON={vllm_venv}/bin/python")
