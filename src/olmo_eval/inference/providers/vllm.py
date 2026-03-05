@@ -151,6 +151,11 @@ class VLLMProvider(InferenceProvider):
         # Disable tqdm loading bar by default, enable with --debug-provider
         engine_kwargs.setdefault("use_tqdm_on_load", is_debug_provider())
 
+        # Extract add_bos_token before passing to LLM (not a valid vLLM EngineArgs parameter).
+        # When False, prompts will be pre-tokenized without special tokens and passed as token IDs,
+        # matching the old framework's behavior (tokenizer(text, add_special_tokens=False)).
+        self._add_bos_token: bool | None = engine_kwargs.pop("add_bos_token", None)
+
         self.llm: LLM = LLM(model=model_name, **engine_kwargs)
 
     @property
@@ -214,14 +219,26 @@ class VLLMProvider(InferenceProvider):
         params = self._default_sampling_params(sampling_params)
         vllm_params = self._build_sampling_params(params)
 
-        prompts = [req.prompt for req in requests]
+        prompt_strs = [req.prompt for req in requests]
 
         if is_debug_requests():
-            for i, prompt in enumerate(prompts):
+            for i, prompt in enumerate(prompt_strs):
                 logger.info(f"Prompt {i}:\n{prompt}")
 
+        # When add_bos_token=False, pre-tokenize without special tokens and pass token IDs.
+        # This bypasses vLLM's internal tokenization, matching the old framework behavior of
+        # calling tokenizer(text, add_special_tokens=False) before passing to vLLM.
+        if self._add_bos_token is False:
+            tokenizer = self.llm.get_tokenizer()
+            vllm_prompts: list = [
+                {"prompt_token_ids": tokenizer.encode(p, add_special_tokens=False)}
+                for p in prompt_strs
+            ]
+        else:
+            vllm_prompts = prompt_strs  # type: ignore[assignment]
+
         # Disable tqdm progress bar - we use our own worker-scoped logging
-        outputs: list[RequestOutput] = self.llm.generate(prompts, vllm_params, use_tqdm=False)
+        outputs: list[RequestOutput] = self.llm.generate(vllm_prompts, vllm_params, use_tqdm=False)
 
         results: list[list[LMOutput]] = []
         for output in outputs:
