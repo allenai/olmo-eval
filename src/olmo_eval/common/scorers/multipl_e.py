@@ -76,9 +76,8 @@ class MultiplEScorer(ExecutionScorer):
         """
         match self.language:
             case "sh":
-                return await env.execute_command(
-                    f"bash -c {shlex.quote(code)}", timeout=self.timeout
-                )
+                cmd = f"echo {shlex.quote(code)} > /tmp/code.sh && sh /tmp/code.sh"
+                return await env.execute_command(cmd, timeout=self.timeout)
             case "js":
                 cmd = f"echo {shlex.quote(code)} > /tmp/code.js && node /tmp/code.js"
                 return await env.execute_command(cmd, timeout=self.timeout)
