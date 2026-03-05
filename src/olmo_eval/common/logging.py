@@ -93,22 +93,27 @@ class FlushingStreamHandler(logging.StreamHandler):
         self.flush()
 
 
-class SwerexTimeoutFilter(logging.Filter):
-    """Filter out noisy CommandTimeoutError tracebacks from swerex.
+class SwerexNoiseFilter(logging.Filter):
+    """Filter out noisy swerex logs that are redundant with our own logging.
 
-    These tracebacks are not actionable - they just indicate that code
-    execution timed out, which is expected for infinite loops.
+    Filters:
+    - CommandTimeoutError tracebacks (not actionable, expected for infinite loops)
+    - "Error making request" messages (redundant with our "Failed to score" warning)
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
         msg = str(record.getMessage())
+
+        if "Error making request" in msg and "retries" in msg:
+            return False
+
         # Filter out timeout-related tracebacks at CRITICAL level
         if record.levelno >= logging.CRITICAL:
-            # Filter any CRITICAL log containing traceback markers
             if "Traceback" in msg or "CommandTimeoutError" in msg:
                 return False
             if "TimeoutExpired" in msg or "timed out" in msg.lower():
                 return False
+
         # Also filter timeout tracebacks at any level
         return not ("CommandTimeoutError" in msg and ("Traceback" in msg or "timed out" in msg))
 
@@ -168,7 +173,7 @@ def configure_logging(level: LogLevel = "INFO") -> None:
             datefmt="%Y-%m-%d %H:%M:%S",
         )
     )
-    handler.addFilter(SwerexTimeoutFilter())  # Filter noisy timeout tracebacks
+    handler.addFilter(SwerexNoiseFilter())  # Filter noisy logging from swe-rex
     root_logger.addHandler(handler)
     root_logger.setLevel(getattr(logging, level))
 
@@ -183,7 +188,7 @@ def configure_logging(level: LogLevel = "INFO") -> None:
     # Allow swerex (sandbox) logs through at DEBUG level, but filter timeout tracebacks
     swerex_logger = logging.getLogger("swerex")
     swerex_logger.setLevel(logging.DEBUG)
-    swerex_logger.addFilter(SwerexTimeoutFilter())
+    swerex_logger.addFilter(SwerexNoiseFilter())
 
     # Set environment variables for third-party libraries
     os.environ.setdefault("HF_DATASETS_DISABLE_PROGRESS_BAR", "1")
