@@ -15,9 +15,9 @@ from olmo_eval.common.formatters import PPLFormatter
 from olmo_eval.common.metrics import BPBMetric, PassAtKMetric
 from olmo_eval.common.scorers import MultiplEScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams
-from olmo_eval.data import DataLoader
+from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import MULTIPL_E_LANGUAGES, MULTIPL_E_STOP_SEQUENCES
-from olmo_eval.evals.tasks.common import Task, register_subtasks
+from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 
 class MultiplETask(Task):
@@ -116,66 +116,73 @@ def _make_scorer_for_language(lang: str) -> type[MultiplEScorer]:
 # =============================================================================
 
 
-def _get_variants(language: str) -> dict[str, dict[str, Any]]:
-    """Get variant configurations for a language."""
-    scorer_cls = _make_scorer_for_language(language)
+def _register_multipl_e_task(
+    task_prefix: str,
+    subset_prefix: str,
+    lang: str,
+) -> None:
+    """Register a MULTIPL_E task for a specific language.
 
-    return {
-        "bpb": {
-            "formatter": PPLFormatter(leading_space=False, always_prepend_separator=True),
-            "metrics": (BPBMetric(),),
-        },
-        "pass_at_1": {
-            "metrics": (PassAtKMetric(k=1, scorer=scorer_cls),),
-        },
-        "pass_at_10": {
-            "metrics": (PassAtKMetric(k=10, scorer=scorer_cls),),
+    Args:
+        task_prefix: Prefix for task name (e.g., "multipl_e_humaneval")
+        subset_prefix: Prefix for dataset subset (e.g., "humaneval")
+        lang: Language code (e.g., "cpp")
+    """
+    task_name = f"{task_prefix}_{lang}"
+    subset_name = f"{subset_prefix}-{lang}"
+    scorer_cls = _make_scorer_for_language(lang)
+
+    # Create the task class dynamically
+    task_cls = type(
+        f"MultiplETask_{subset_prefix}_{lang}",
+        (MultiplETask,),
+        {
+            "language": lang,
+            "data_source": DataSource(path="nuprl/MultiPL-E", subset=subset_name),
+            "metrics": (),
             "sampling_params": SamplingParams(
                 max_tokens=512,
-                temperature=0.8,
-                num_samples=20,
+                temperature=0.0,
+                stop_sequences=MULTIPL_E_STOP_SEQUENCES[lang],
             ),
+            "__module__": __name__,
         },
-    }
+    )
+
+    # Register the task
+    register(task_name)(task_cls)
+
+    # Register variants
+    register_variant(
+        task_name,
+        "bpb",
+        formatter=PPLFormatter(leading_space=False, always_prepend_separator=True),
+        metrics=(BPBMetric(),),
+    )
+    register_variant(
+        task_name,
+        "pass_at_1",
+        metrics=(PassAtKMetric(k=1, scorer=scorer_cls),),
+    )
+    register_variant(
+        task_name,
+        "pass_at_10",
+        metrics=(PassAtKMetric(k=10, scorer=scorer_cls),),
+        sampling_params=SamplingParams(
+            max_tokens=512,
+            temperature=0.8,
+            num_samples=20,
+        ),
+    )
 
 
 # Register HumanEval tasks for each language
 for _lang in MULTIPL_E_LANGUAGES:
-    register_subtasks(
-        MultiplETask,
-        [_lang],
-        task_prefix="multipl_e_humaneval",
-        data_source=f"nuprl/MultiPL-E:humaneval-{_lang}",
-        subtask_attr="language",
-        class_attrs={
-            "metrics": (),
-            "sampling_params": SamplingParams(
-                max_tokens=512,
-                temperature=0.0,
-                stop_sequences=MULTIPL_E_STOP_SEQUENCES[_lang],
-            ),
-        },
-        variants=_get_variants(_lang),
-    )
+    _register_multipl_e_task("multipl_e_humaneval", "humaneval", _lang)
 
 # Register MBPP tasks for each language
 for _lang in MULTIPL_E_LANGUAGES:
-    register_subtasks(
-        MultiplETask,
-        [_lang],
-        task_prefix="multipl_e_mbpp",
-        data_source=f"nuprl/MultiPL-E:mbpp-{_lang}",
-        subtask_attr="language",
-        class_attrs={
-            "metrics": (),
-            "sampling_params": SamplingParams(
-                max_tokens=512,
-                temperature=0.0,
-                stop_sequences=MULTIPL_E_STOP_SEQUENCES[_lang],
-            ),
-        },
-        variants=_get_variants(_lang),
-    )
+    _register_multipl_e_task("multipl_e_mbpp", "mbpp", _lang)
 
 
 # Export

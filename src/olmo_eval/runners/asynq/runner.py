@@ -374,6 +374,14 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
         console.print(table)
 
+        # Fail fast if any tasks failed to prepare
+        failed_tasks = [spec for spec, tracker in trackers.items() if tracker.error]
+        if failed_tasks:
+            error_details = "\n".join(
+                f"  - {spec}: {trackers[spec].error}" for spec in failed_tasks
+            )
+            raise RuntimeError(f"Failed to prepare {len(failed_tasks)} task(s):\n{error_details}")
+
         # Optionally inspect first instance of each task
         if (
             self.inspect_instance
