@@ -248,96 +248,96 @@ def scoring_worker(
     sandbox_manager = None
     scoring_context: ScoringContext | None = None
 
-    async def score_item_async(
-        item: ScoringItem, context: ScoringContext | None, semaphore: asyncio.Semaphore
-    ) -> ScoredResponse:
-        """Score a single item with semaphore-controlled concurrency."""
-        async with semaphore:
-            try:
-                scored_list = await item.task.score_responses([item.response], context=context)
-                scored = scored_list[0] if scored_list else item.response
-                return ScoredResponse(
-                    spec=item.spec,
-                    instance_idx=item.instance_idx,
-                    scored=scored,
-                )
-            except Exception as e:
-                worker_logger.warning(f"Failed to score {item.spec}[{item.instance_idx}]: {e}")
-                return ScoredResponse(
-                    spec=item.spec,
-                    instance_idx=item.instance_idx,
-                    scored=item.response,
-                )
-
-    async def process_batch(
-        items: list[ScoringItem],
-        context: ScoringContext | None,
-        progress: ProgressLogger,
-    ) -> None:
-        """Process a batch of items concurrently."""
-        semaphore = asyncio.Semaphore(max_concurrency)
-        tasks = [score_item_async(item, context, semaphore) for item in items]
-        results = await asyncio.gather(*tasks)
-
-        for result in results:
-            scored_queue.put(result)
-            progress.update(1)
-
     async def run_scoring_loop() -> None:
-        """Main async scoring loop."""
+        """Main async scoring loop with concurrent collection and processing.
+
+        Uses a streaming approach where items are processed immediately as they
+        arrive, rather than being batched. This ensures continuous flow through
+        the pipeline and full utilization of all sandboxes when multiple items
+        are in flight.
+        """
         progress: ProgressLogger | None = None
-        batch: list[ScoringItem] = []
-        batch_size = max_concurrency * 2  # Buffer 2x concurrency for efficiency
+        semaphore = asyncio.Semaphore(max_concurrency)
+        active_tasks: set[asyncio.Task[ScoredResponse]] = set()
+        shutdown = False
+        loop = asyncio.get_event_loop()
+
+        async def process_item(item: ScoringItem) -> ScoredResponse:
+            """Score a single item with semaphore-controlled concurrency."""
+            async with semaphore:
+                try:
+                    scored_list = await item.task.score_responses(
+                        [item.response], context=scoring_context
+                    )
+                    scored = scored_list[0] if scored_list else item.response
+                    return ScoredResponse(
+                        spec=item.spec,
+                        instance_idx=item.instance_idx,
+                        scored=scored,
+                    )
+                except Exception as e:
+                    worker_logger.warning(f"Failed to score {item.spec}[{item.instance_idx}]: {e}")
+                    return ScoredResponse(
+                        spec=item.spec,
+                        instance_idx=item.instance_idx,
+                        scored=item.response,
+                    )
+
+        def on_task_done(task: asyncio.Task[ScoredResponse]) -> None:
+            """Callback when a scoring task completes."""
+            active_tasks.discard(task)
+            try:
+                result = task.result()
+                scored_queue.put(result)
+                if progress is not None:
+                    progress.update(1)
+            except Exception as e:
+                worker_logger.warning(f"Task failed with exception: {e}")
+
+        def get_item_with_timeout(timeout: float) -> ScoringItem | None:
+            """Get item from queue with timeout (for use in executor)."""
+            try:
+                return scoring_queue.get(timeout=timeout)
+            except queue.Empty:
+                raise
 
         try:
-            while True:
-                # Non-blocking check with timeout to allow batching
+            while not shutdown or active_tasks:
+                # Use shorter timeout when tasks are active to stay responsive
+                timeout = 0.1 if active_tasks else 1.0
+
                 try:
-                    item: ScoringItem | None = scoring_queue.get(timeout=0.1)
+                    # Run blocking queue.get in executor to not block event loop
+                    item: ScoringItem | None = await loop.run_in_executor(
+                        None, get_item_with_timeout, timeout
+                    )
                 except queue.Empty:
-                    # Timeout - flush any pending batch to avoid deadlock
-                    if batch:
-                        if progress is None:
-                            worker_logger.info("Starting scoring")
-                            progress = ProgressLogger(
-                                total=total_instances,
-                                desc="Scored",
-                                logger=worker_logger,
-                                color="blue",
-                            )
-                        await process_batch(batch, scoring_context, progress)
-                        batch = []
                     continue
 
                 if item is None:
-                    # Shutdown signal - process remaining batch and exit
-                    if batch:
-                        if progress is None:
-                            progress = ProgressLogger(
-                                total=total_instances,
-                                desc="Scored",
-                                logger=worker_logger,
-                                color="blue",
-                            )
-                        await process_batch(batch, scoring_context, progress)
-                    break
+                    # Shutdown signal received
+                    shutdown = True
+                    continue
 
-                batch.append(item)
+                # Initialize progress on first item
+                if progress is None:
+                    worker_logger.info("Starting scoring")
+                    progress = ProgressLogger(
+                        total=total_instances,
+                        desc="Scored",
+                        logger=worker_logger,
+                        color="blue",
+                    )
 
-                # Process batch when full
-                if len(batch) >= batch_size:
-                    if progress is None:
-                        worker_logger.info("Starting scoring")
-                        progress = ProgressLogger(
-                            total=total_instances,
-                            desc="Scored",
-                            logger=worker_logger,
-                            color="blue",
-                        )
-                    await process_batch(batch, scoring_context, progress)
-                    batch = []
+                # Start scoring task immediately (fire-and-forget with callback)
+                task = asyncio.create_task(process_item(item))
+                active_tasks.add(task)
+                task.add_done_callback(on_task_done)
 
         finally:
+            # Wait for all remaining tasks to complete
+            if active_tasks:
+                await asyncio.gather(*active_tasks, return_exceptions=True)
             if progress is not None:
                 progress.close()
 
