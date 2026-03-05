@@ -92,10 +92,10 @@ class MultiplEScorer(ExecutionScorer):
                 )
                 return await env.execute_command(cmd, timeout=self.timeout)
             case "java":
-                # MULTIPL_E Java uses Main class
+                # MULTIPL_E Java uses Problem class
                 cmd = (
-                    f"echo {shlex.quote(code)} > /tmp/Main.java && "
-                    "cd /tmp && javac Main.java && java Main"
+                    f"echo {shlex.quote(code)} > /tmp/Problem.java && "
+                    "cd /tmp && javac Problem.java && java Problem"
                 )
                 return await env.execute_command(cmd, timeout=self.timeout)
             case "rs":
