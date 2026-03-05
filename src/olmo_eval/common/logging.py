@@ -107,6 +107,10 @@ class SwerexNoiseFilter(logging.Filter):
         if "Error making request" in msg and "retries" in msg:
             return False
 
+        # Filter bare exception class names (e.g., "swerex.exceptions CommandTimeoutError")
+        if msg.startswith("swerex.exceptions"):
+            return False
+
         # Filter out timeout-related tracebacks at CRITICAL level
         if record.levelno >= logging.CRITICAL:
             if "Traceback" in msg or "CommandTimeoutError" in msg:
