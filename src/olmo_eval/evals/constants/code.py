@@ -168,3 +168,31 @@ MULTILINGUAL_MBPP_TASKS_V2: tuple[str, ...] = (
     "mt_mbpp_v2fix_typescript",
 )
 """Multilingual MBPP v2 tasks with bug fixes."""
+
+
+# =============================================================================
+# MULTIPL_E Tasks
+# =============================================================================
+
+MULTIPL_E_LANGUAGES: tuple[str, ...] = ("cpp", "java", "js", "php", "rs", "sh")
+"""MULTIPL_E supported languages (subset with code execution support)."""
+
+MULTIPL_E_STOP_SEQUENCES: dict[str, tuple[str, ...]] = {
+    "cpp": ("\n}",),
+    "java": ("\n }\n", "}\n}", "}\n\n"),
+    "js": ("\nfunction ", "\n/*", "\n//", "\nconsole.log"),
+    "php": ("\nfunction", "\n?>", "\n//", "\n#"),
+    "rs": ("\n}",),
+    "sh": ("\n}",),
+}
+"""Language-specific stop sequences for MULTIPL_E code generation."""
+
+MULTIPL_E_HUMANEVAL_TASKS: tuple[str, ...] = tuple(
+    f"multipl_e_humaneval_{lang}" for lang in MULTIPL_E_LANGUAGES
+)
+"""MULTIPL_E HumanEval tasks across 6 programming languages."""
+
+MULTIPL_E_MBPP_TASKS: tuple[str, ...] = tuple(
+    f"multipl_e_mbpp_{lang}" for lang in MULTIPL_E_LANGUAGES
+)
+"""MULTIPL_E MBPP tasks across 6 programming languages."""

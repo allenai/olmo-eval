@@ -22,6 +22,7 @@ from .llm_judge import (
     SimpleQAJudgeScorer,
     build_openai_judge_fn,
 )
+from .multipl_e import MultiplEScorer
 from .tools import (
     ToolArgumentScorer,
     ToolCallScorer,
@@ -48,6 +49,7 @@ __all__ = [
     "MathVerifyScorer",
     "MinervaMathScorer",
     "MultipleChoiceScorer",
+    "MultiplEScorer",
     "PerplexityScorer",
     "RubricJudgeScorer",
     "SandboxRequiredError",

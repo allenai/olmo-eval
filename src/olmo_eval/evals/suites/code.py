@@ -1,6 +1,10 @@
 """Code evaluation suites."""
 
-from olmo_eval.evals.constants.code import MULTILINGUAL_MBPP_TASKS_V2
+from olmo_eval.evals.constants.code import (
+    MULTILINGUAL_MBPP_TASKS_V2,
+    MULTIPL_E_HUMANEVAL_TASKS,
+    MULTIPL_E_MBPP_TASKS,
+)
 from olmo_eval.evals.suites.registry import AggregationStrategy, Suite, make_suite, register
 
 # =============================================================================
@@ -46,3 +50,27 @@ OLMO3_BASE_EASY_CODE_BPB = register(
         description="OLMo3 base_easy code BPB suite (average of averages)",
     )
 )
+
+
+# =============================================================================
+# MULTIPL_E Suites
+# =============================================================================
+
+_MULTIPL_E_VARIANTS: tuple[tuple[str, str], ...] = (
+    ("", ""),
+    (":bpb", " with BPB evaluation"),
+    (":pass_at_1", " with pass@1 execution evaluation"),
+    (":pass_at_10", " with pass@10 execution evaluation"),
+)
+
+for _suffix, _desc_suffix in _MULTIPL_E_VARIANTS:
+    make_suite(
+        f"multipl_e_humaneval{_suffix}",
+        tuple(f"{t}{_suffix}" for t in MULTIPL_E_HUMANEVAL_TASKS),
+        description=f"MULTIPL_E HumanEval (6 languages){_desc_suffix}",
+    )
+    make_suite(
+        f"multipl_e_mbpp{_suffix}",
+        tuple(f"{t}{_suffix}" for t in MULTIPL_E_MBPP_TASKS),
+        description=f"MULTIPL_E MBPP (6 languages){_desc_suffix}",
+    )
