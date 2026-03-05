@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shlex
+import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -74,35 +75,48 @@ class MultiplEScorer(ExecutionScorer):
         Returns:
             ExecutionResult with success status.
         """
+        # Use a unique temp directory per execution to avoid conflicts with parallel runs
+        tmp_dir = f"/tmp/{uuid.uuid4().hex}"
+        quoted_code = shlex.quote(code)
+
         match self.language:
             case "sh":
                 # MULTIPL_E uses bash-specific syntax (e.g., [[ ]])
-                cmd = f"echo {shlex.quote(code)} > /tmp/code.sh && /bin/bash /tmp/code.sh"
+                cmd = (
+                    f"mkdir -p {tmp_dir} && echo {quoted_code} > {tmp_dir}/code.sh && "
+                    f"/bin/bash {tmp_dir}/code.sh"
+                )
                 return await env.execute_command(cmd, timeout=self.timeout)
             case "js":
-                cmd = f"echo {shlex.quote(code)} > /tmp/code.js && node /tmp/code.js"
+                cmd = (
+                    f"mkdir -p {tmp_dir} && echo {quoted_code} > {tmp_dir}/code.js && "
+                    f"node {tmp_dir}/code.js"
+                )
                 return await env.execute_command(cmd, timeout=self.timeout)
             case "php":
-                cmd = f"echo {shlex.quote(code)} > /tmp/code.php && php /tmp/code.php"
+                cmd = (
+                    f"mkdir -p {tmp_dir} && echo {quoted_code} > {tmp_dir}/code.php && "
+                    f"php {tmp_dir}/code.php"
+                )
                 return await env.execute_command(cmd, timeout=self.timeout)
             case "cpp":
                 cmd = (
-                    f"echo {shlex.quote(code)} > /tmp/code.cpp && "
-                    "g++ -o /tmp/a.out /tmp/code.cpp && /tmp/a.out"
+                    f"mkdir -p {tmp_dir} && echo {quoted_code} > {tmp_dir}/code.cpp && "
+                    f"g++ -o {tmp_dir}/a.out {tmp_dir}/code.cpp && {tmp_dir}/a.out"
                 )
                 return await env.execute_command(cmd, timeout=self.timeout)
             case "java":
                 # MULTIPL_E Java uses Problem class and requires javatuples
                 cmd = (
-                    f"echo {shlex.quote(code)} > /tmp/Problem.java && "
-                    "cd /tmp && javac -cp '/runtime/java/*' Problem.java && "
+                    f"mkdir -p {tmp_dir} && echo {quoted_code} > {tmp_dir}/Problem.java && "
+                    f"cd {tmp_dir} && javac -cp '/runtime/java/*' Problem.java && "
                     "java -cp '/runtime/java/*:.' Problem"
                 )
                 return await env.execute_command(cmd, timeout=self.timeout)
             case "rs":
                 cmd = (
-                    f"echo {shlex.quote(code)} > /tmp/code.rs && "
-                    "rustc -o /tmp/a.out /tmp/code.rs && /tmp/a.out"
+                    f"mkdir -p {tmp_dir} && echo {quoted_code} > {tmp_dir}/code.rs && "
+                    f"rustc -o {tmp_dir}/a.out {tmp_dir}/code.rs && {tmp_dir}/a.out"
                 )
                 return await env.execute_command(cmd, timeout=self.timeout)
             case _:

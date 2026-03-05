@@ -99,27 +99,49 @@ class SwerexNoiseFilter(logging.Filter):
     Filters:
     - CommandTimeoutError tracebacks (not actionable, expected for infinite loops)
     - "Error making request" messages (redundant with our "Failed to score" warning)
+    - Remote runtime error responses containing exception info
     """
 
+    # Patterns to filter (case-sensitive for performance)
+    _FILTER_PATTERNS = (
+        "CommandTimeoutError",
+        "swerex.exceptions",
+        "TimeoutExpired",
+        "pexpect.TIMEOUT",
+    )
+
+    # Patterns only filtered at ERROR level or above
+    _ERROR_PATTERNS = (
+        "Error making request",
+        "Received error response",
+        "Traceback",
+    )
+
     def filter(self, record: logging.LogRecord) -> bool:
+        # Check logger name - filter all timeout-related logs from swerex/rex loggers
+        if record.name.startswith(("swerex", "rex-")):
+            msg = str(record.getMessage())
+            for pattern in self._FILTER_PATTERNS:
+                if pattern in msg:
+                    return False
+            # Also check exc_text for exception tracebacks
+            if record.exc_text and any(p in record.exc_text for p in self._FILTER_PATTERNS):
+                return False
+
         msg = str(record.getMessage())
 
-        if "Error making request" in msg and "retries" in msg:
-            return False
-
-        # Filter bare exception class names (e.g., "swerex.exceptions CommandTimeoutError")
-        if "swerex.exceptions" in msg:
-            return False
-
-        # Filter CommandTimeoutError anywhere in the message
-        if "CommandTimeoutError" in msg:
-            return False
-
-        # Filter out timeout-related tracebacks at CRITICAL level
-        if record.levelno >= logging.CRITICAL:
-            if "Traceback" in msg:
+        # Always filter these patterns regardless of source
+        for pattern in self._FILTER_PATTERNS:
+            if pattern in msg:
                 return False
-            if "TimeoutExpired" in msg or "timed out" in msg.lower():
+
+        # Filter error-level patterns
+        if record.levelno >= logging.ERROR:
+            for pattern in self._ERROR_PATTERNS:
+                if pattern in msg:
+                    return False
+            # Filter any message with "timed out" (case-insensitive)
+            if "timed out" in msg.lower():
                 return False
 
         return True
@@ -193,7 +215,12 @@ def configure_logging(level: LogLevel = "INFO") -> None:
     logging.getLogger("litellm").setLevel(logging.WARNING)
 
     # Suppress noisy swerex logs (DEBUG mode will override this)
-    logging.getLogger("swerex").setLevel(logging.WARNING)
+    # Use ERROR level and add filter to catch timeout-related messages
+    swerex_filter = SwerexNoiseFilter()
+    for logger_name in ("swerex", "rex-runtime", "rex-session"):
+        swerex_logger = logging.getLogger(logger_name)
+        swerex_logger.setLevel(logging.ERROR)
+        swerex_logger.addFilter(swerex_filter)
 
     # Set environment variables for third-party libraries
     os.environ.setdefault("HF_DATASETS_DISABLE_PROGRESS_BAR", "1")
@@ -233,6 +260,7 @@ def configure_worker_logging(worker_id: str) -> logging.Logger:
                 datefmt="%Y-%m-%d %H:%M:%S",
             )
         )
+        handler.addFilter(SwerexNoiseFilter())
         logger.addHandler(handler)
         logger.setLevel(logging.INFO)
         logger.propagate = False
