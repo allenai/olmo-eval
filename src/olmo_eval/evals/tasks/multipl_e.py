@@ -11,8 +11,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
-from olmo_eval.common.formatters import PPLFormatter
-from olmo_eval.common.metrics import BPBMetric, PassAtKMetric
+from olmo_eval.common.metrics import PassAtKMetric
 from olmo_eval.common.scorers import MultiplEScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
@@ -41,15 +40,24 @@ class MultiplETask(Task):
         yield from self._instances_cache
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
-        """Convert a dataset document to an Instance."""
+        """Convert a dataset document to an Instance.
+
+        Dataset schema:
+        - name: Task identifier (e.g., "HumanEval_0_has_close_elements")
+        - language: Programming language (e.g., "cpp")
+        - prompt: Code prefix with includes/imports and function signature
+        - tests: Test code (closing brace + main with assertions)
+        - stop_tokens: Stop sequences for this item
+        """
         return Instance(
             question=doc["prompt"],
             gold_answer="",
             metadata={
                 "id": doc["name"],
-                "language": self.language,
+                "language": doc["language"],
+                "prompt": doc["prompt"],
                 "test": doc["tests"],
-                "answer_prefix": doc["prompt"],
+                "stop_tokens": doc.get("stop_tokens", []),
             },
         )
 
@@ -72,17 +80,17 @@ class MultiplETask(Task):
         return output.text
 
     def _extract_answers(self, responses: Any) -> None:
-        """Extract code and prepend answer prefix.
+        """Extract code and prepend the prompt.
 
         MULTIPL_E follows HumanEval's setup by adding the prompt to the
-        generated code completion, as the prompt may provide necessary
+        generated code completion, as the prompt contains necessary
         imports and function signatures.
         """
         for response in responses:
             for output in response.outputs:
                 code = self.extract_answer(output)
                 if code:
-                    output.extracted_answer = response.instance.metadata["answer_prefix"] + code
+                    output.extracted_answer = response.instance.metadata["prompt"] + code
                 else:
                     output.extracted_answer = None
 
@@ -167,12 +175,6 @@ def _register_multipl_e_task(
     register(task_name)(task_cls)
 
     # Register variants
-    register_variant(
-        task_name,
-        "bpb",
-        formatter=PPLFormatter(leading_space=False, always_prepend_separator=True),
-        metrics=(BPBMetric(),),
-    )
     register_variant(
         task_name,
         "pass_at_1",
