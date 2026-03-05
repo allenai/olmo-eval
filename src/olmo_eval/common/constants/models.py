@@ -36,6 +36,14 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             kind=ProviderKind.VLLM,
             model="meta-llama/Llama-3.1-70B-Instruct",
         ),
+        "olmo-3-1025-7b": ProviderConfig(
+            kind=ProviderKind.VLLM,
+            model="allenai/Olmo-3-1025-7B",
+            trust_remote_code=True,
+            max_model_len=4096,
+            revision="stage2-step47684",
+            kwargs={"gpu_memory_utilization": 0.7, "add_bos_token": False},
+        ),
         "olmo-2-7b": ProviderConfig(
             kind=ProviderKind.VLLM,
             model="allenai/OLMo-2-1124-7B",
