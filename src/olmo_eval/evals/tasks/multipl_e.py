@@ -91,22 +91,34 @@ class MultiplETask(Task):
 # Scorer Factory
 # =============================================================================
 
+# Cache for language-specific scorer classes (needed for pickling)
+_SCORER_CACHE: dict[str, type[MultiplEScorer]] = {}
+
 
 def _make_scorer_for_language(lang: str) -> type[MultiplEScorer]:
     """Create a scorer class for a specific language.
 
     We need a factory because PassAtKMetric takes a scorer type, not an instance.
+    Scorer classes are cached and added to module namespace for pickling support.
     """
+    if lang in _SCORER_CACHE:
+        return _SCORER_CACHE[lang]
+
     # Capture the language value in a local variable for the closure
     default_lang = lang
+    class_name = f"MultiplEScorer_{lang}"
 
     @dataclass(frozen=True, slots=True)
     class LanguageScorer(MultiplEScorer):
         language: str = default_lang
 
     # Set a unique name for each language scorer
-    LanguageScorer.__name__ = f"MultiplEScorer_{lang}"
-    LanguageScorer.__qualname__ = f"MultiplEScorer_{lang}"
+    LanguageScorer.__name__ = class_name
+    LanguageScorer.__qualname__ = class_name
+
+    # Make class picklable by adding to module namespace
+    globals()[class_name] = LanguageScorer
+    _SCORER_CACHE[lang] = LanguageScorer
 
     return LanguageScorer
 
@@ -133,8 +145,9 @@ def _register_multipl_e_task(
     scorer_cls = _make_scorer_for_language(lang)
 
     # Create the task class dynamically
+    class_name = f"MultiplETask_{subset_prefix}_{lang}"
     task_cls = type(
-        f"MultiplETask_{subset_prefix}_{lang}",
+        class_name,
         (MultiplETask,),
         {
             "language": lang,
@@ -146,6 +159,7 @@ def _register_multipl_e_task(
                 stop_sequences=MULTIPL_E_STOP_SEQUENCES[lang],
             ),
             "__module__": __name__,
+            "__qualname__": class_name,
         },
     )
 
