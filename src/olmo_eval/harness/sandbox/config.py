@@ -55,6 +55,7 @@ class SandboxConfig:
         required_secrets: Environment variable names that must be set.
         enable_diagnostics: Whether to run background diagnostics monitor.
         inject_swerex: Whether to build a derived image with swe-rex pre-installed.
+        dockerfile_extra: Additional Dockerfile commands to inject when building derived images.
     """
 
     image: str
@@ -76,6 +77,7 @@ class SandboxConfig:
     exec_shell: tuple[str, ...] | None = None
     enable_diagnostics: bool = True
     inject_swerex: bool = False
+    dockerfile_extra: tuple[str, ...] = ()
 
     @property
     def is_local(self) -> bool:
@@ -119,4 +121,5 @@ class SandboxConfig:
             exec_shell=tuple(data["exec_shell"]) if data.get("exec_shell") else None,
             enable_diagnostics=data.get("enable_diagnostics", True),
             inject_swerex=data.get("inject_swerex", False),
+            dockerfile_extra=tuple(data.get("dockerfile_extra", [])),
         )

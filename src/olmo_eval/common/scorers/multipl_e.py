@@ -76,7 +76,8 @@ class MultiplEScorer(ExecutionScorer):
         """
         match self.language:
             case "sh":
-                cmd = f"echo {shlex.quote(code)} > /tmp/code.sh && sh /tmp/code.sh"
+                # MULTIPL_E uses bash-specific syntax (e.g., [[ ]]), not POSIX sh
+                cmd = f"echo {shlex.quote(code)} > /tmp/code.sh && bash /tmp/code.sh"
                 return await env.execute_command(cmd, timeout=self.timeout)
             case "js":
                 cmd = f"echo {shlex.quote(code)} > /tmp/code.js && node /tmp/code.js"
@@ -91,10 +92,11 @@ class MultiplEScorer(ExecutionScorer):
                 )
                 return await env.execute_command(cmd, timeout=self.timeout)
             case "java":
-                # MULTIPL_E Java uses Problem class
+                # MULTIPL_E Java uses Problem class and requires javatuples
                 cmd = (
                     f"echo {shlex.quote(code)} > /tmp/Problem.java && "
-                    "cd /tmp && javac Problem.java && java Problem"
+                    "cd /tmp && javac -cp '/runtime/java/*' Problem.java && "
+                    "java -cp '/runtime/java/*:.' Problem"
                 )
                 return await env.execute_command(cmd, timeout=self.timeout)
             case "rs":

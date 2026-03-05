@@ -162,7 +162,9 @@ class SandboxExecutor:
                 if self.config.inject_swerex:
                     from .image import get_swerex_image
 
-                    image = get_swerex_image(image, self.config.container_runtime)
+                    image = get_swerex_image(
+                        image, self.config.container_runtime, self.config.dockerfile_extra
+                    )
 
                 # Build docker args, adding log args if log_dir is configured
                 docker_args = list(self.config.docker_args) if self.config.docker_args else []

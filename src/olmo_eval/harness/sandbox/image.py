@@ -20,7 +20,11 @@ PYTHON_STANDALONE_URL = (
 SWEREX_IMAGE_VERSION = "20260304.1"
 
 
-def get_swerex_image(base_image: str, container_runtime: str = "docker") -> str:
+def get_swerex_image(
+    base_image: str,
+    container_runtime: str = "docker",
+    dockerfile_extra: tuple[str, ...] = (),
+) -> str:
     """Build a derived image with Python and swe-rex pre-installed.
 
     Checks local cache first, then registry (if configured), then builds and pushes.
@@ -28,6 +32,7 @@ def get_swerex_image(base_image: str, container_runtime: str = "docker") -> str:
     Args:
         base_image: The base container image.
         container_runtime: Container runtime (docker or podman).
+        dockerfile_extra: Additional Dockerfile commands to inject.
 
     Returns:
         The derived image name with swe-rex installed.
@@ -35,8 +40,9 @@ def get_swerex_image(base_image: str, container_runtime: str = "docker") -> str:
     config = get_infra_config()
     registry = config.swerex_registry
 
-    # Create a deterministic tag based on base image, Python URL, and version
-    hash_input = f"{base_image}:{PYTHON_STANDALONE_URL}:{SWEREX_IMAGE_VERSION}"
+    # Create a deterministic tag based on base image, Python URL, version, and extra commands
+    extra_hash = ":".join(dockerfile_extra) if dockerfile_extra else ""
+    hash_input = f"{base_image}:{PYTHON_STANDALONE_URL}:{SWEREX_IMAGE_VERSION}:{extra_hash}"
     tag_hash = hashlib.sha256(hash_input.encode()).hexdigest()[:12]
 
     # Local image name
@@ -73,6 +79,8 @@ def get_swerex_image(base_image: str, container_runtime: str = "docker") -> str:
     # Build the image with Python, swe-rex, curl, git, and uv
     logger.info(f"Building swerex image from {base_image}...")
 
+    extra_lines = "\n".join(dockerfile_extra) if dockerfile_extra else ""
+
     dockerfile = f"""\
 FROM {base_image}
 USER root
@@ -84,6 +92,7 @@ RUN apt-get update && \\
 ADD {PYTHON_STANDALONE_URL} /tmp/python.tar.gz
 RUN tar xzf /tmp/python.tar.gz -C /root && rm /tmp/python.tar.gz && \\
     /root/python/bin/pip install --no-cache-dir swe-rex uv
+{extra_lines}
 ENV PATH="/root/python/bin:$PATH"
 """
 

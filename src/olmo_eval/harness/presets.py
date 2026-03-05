@@ -127,6 +127,10 @@ class HarnessPresets:
                     startup_timeout=300.0,
                     log_dir=_get_logs_dir(),
                     inject_swerex=True,
+                    dockerfile_extra=(
+                        "RUN mkdir -p /runtime/java",
+                        "RUN curl -L -o /runtime/java/javatuples-1.2.jar https://repo1.maven.org/maven2/org/javatuples/javatuples/1.2/javatuples-1.2.jar",
+                    ),
                 ),
             ),
         )
