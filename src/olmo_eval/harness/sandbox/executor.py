@@ -311,12 +311,23 @@ class SandboxExecutor:
         if stream:
             return await self._execute_streaming(command, effective_timeout, prefix)
 
-        response = await self._runtime.execute(
-            Command(
-                command=["bash", "-c", command],
-                timeout=effective_timeout,
+        try:
+            response = await self._runtime.execute(
+                Command(
+                    command=["bash", "-c", command],
+                    timeout=effective_timeout,
+                )
             )
-        )
+        except Exception as e:
+            # Check for timeout errors (swerex.exceptions.CommandTimeoutError)
+            if "CommandTimeoutError" in type(e).__name__ or "timed out" in str(e).lower():
+                return ExecutionResult(
+                    success=False,
+                    output=f"Command timed out after {effective_timeout}s",
+                    exit_code=-1,
+                    error="timeout",
+                )
+            raise
 
         # Combine stdout and stderr
         output_parts = []
