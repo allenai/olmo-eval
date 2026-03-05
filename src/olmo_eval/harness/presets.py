@@ -118,10 +118,10 @@ class HarnessPresets:
 
         return HarnessConfig(
             name=name,
-            scoring_concurrency=8,
+            scoring_concurrency=16,
             sandboxes=(
                 SandboxConfig(
-                    instances=8,
+                    instances=16,
                     image="volcengine/sandbox-fusion:base-20250609",
                     mode=SandboxMode.DOCKER,
                     startup_timeout=300.0,
