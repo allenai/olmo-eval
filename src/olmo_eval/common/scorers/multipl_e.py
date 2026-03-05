@@ -32,7 +32,7 @@ class MultiplEScorer(ExecutionScorer):
     """
 
     name: str = "multipl_e"
-    timeout: float = 30.0
+    timeout: float = 10.0
     language: str = "cpp"
 
     async def ascore(

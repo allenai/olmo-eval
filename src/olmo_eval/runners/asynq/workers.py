@@ -249,95 +249,108 @@ def scoring_worker(
     scoring_context: ScoringContext | None = None
 
     async def run_scoring_loop() -> None:
-        """Main async scoring loop with concurrent collection and processing.
+        """Main async scoring loop using continuous dispatch pattern.
 
-        Uses a streaming approach where items are processed immediately as they
-        arrive, rather than being batched. This ensures continuous flow through
-        the pipeline and full utilization of all sandboxes when multiple items
-        are in flight.
+        Uses asyncio.wait(return_when=FIRST_COMPLETED) to maintain a pool of
+        in-flight tasks without callbacks or sleeps. This approach is modeled
+        after ContinuousBatchDispatcher in dispatch.py.
         """
         progress: ProgressLogger | None = None
-        semaphore = asyncio.Semaphore(max_concurrency)
-        active_tasks: set[asyncio.Task[ScoredResponse]] = set()
+        in_flight: dict[asyncio.Task[ScoredResponse], ScoringItem] = {}
         shutdown = False
-        loop = asyncio.get_event_loop()
 
-        async def process_item(item: ScoringItem) -> ScoredResponse:
-            """Score a single item with semaphore-controlled concurrency."""
-            async with semaphore:
-                try:
-                    scored_list = await item.task.score_responses(
-                        [item.response], context=scoring_context
-                    )
-                    scored = scored_list[0] if scored_list else item.response
-                    return ScoredResponse(
-                        spec=item.spec,
-                        instance_idx=item.instance_idx,
-                        scored=scored,
-                    )
-                except Exception as e:
-                    worker_logger.warning(f"Failed to score {item.spec}[{item.instance_idx}]: {e}")
-                    return ScoredResponse(
-                        spec=item.spec,
-                        instance_idx=item.instance_idx,
-                        scored=item.response,
-                    )
-
-        def on_task_done(task: asyncio.Task[ScoredResponse]) -> None:
-            """Callback when a scoring task completes."""
-            active_tasks.discard(task)
+        async def score_item(item: ScoringItem) -> ScoredResponse:
+            """Score a single item."""
             try:
-                result = task.result()
-                scored_queue.put(result)
-                if progress is not None:
-                    progress.update(1)
+                scored_list = await item.task.score_responses(
+                    [item.response], context=scoring_context
+                )
+                scored = scored_list[0] if scored_list else item.response
+                return ScoredResponse(
+                    spec=item.spec,
+                    instance_idx=item.instance_idx,
+                    scored=scored,
+                )
             except Exception as e:
-                worker_logger.warning(f"Task failed with exception: {e}")
-
-        def get_item_with_timeout(timeout: float) -> ScoringItem | None:
-            """Get item from queue with timeout (for use in executor)."""
-            try:
-                return scoring_queue.get(timeout=timeout)
-            except queue.Empty:
-                raise
+                worker_logger.warning(f"Failed to score {item.spec}[{item.instance_idx}]: {e}")
+                return ScoredResponse(
+                    spec=item.spec,
+                    instance_idx=item.instance_idx,
+                    scored=item.response,
+                )
 
         try:
-            while not shutdown or active_tasks:
-                # Use shorter timeout when tasks are active to stay responsive
-                timeout = 0.1 if active_tasks else 1.0
+            while not shutdown or in_flight:
+                # Top up in-flight tasks to max_concurrency
+                while len(in_flight) < max_concurrency and not shutdown:
+                    try:
+                        item: ScoringItem | None = scoring_queue.get_nowait()
+                    except queue.Empty:
+                        break
 
-                try:
-                    # Run blocking queue.get in executor to not block event loop
-                    item: ScoringItem | None = await loop.run_in_executor(
-                        None, get_item_with_timeout, timeout
-                    )
-                except queue.Empty:
+                    if item is None:
+                        shutdown = True
+                        break
+
+                    if progress is None:
+                        worker_logger.info("Starting scoring")
+                        progress = ProgressLogger(
+                            total=total_instances,
+                            desc="Scored",
+                            logger=worker_logger,
+                            color="blue",
+                        )
+
+                    task = asyncio.create_task(score_item(item))
+                    in_flight[task] = item
+
+                if not in_flight:
+                    # Nothing in flight - blocking wait for item
+                    if shutdown:
+                        break
+                    try:
+                        item = scoring_queue.get(timeout=1.0)
+                    except queue.Empty:
+                        continue
+
+                    if item is None:
+                        shutdown = True
+                        continue
+
+                    if progress is None:
+                        worker_logger.info("Starting scoring")
+                        progress = ProgressLogger(
+                            total=total_instances,
+                            desc="Scored",
+                            logger=worker_logger,
+                            color="blue",
+                        )
+
+                    task = asyncio.create_task(score_item(item))
+                    in_flight[task] = item
                     continue
 
-                if item is None:
-                    # Shutdown signal received
-                    shutdown = True
-                    continue
+                # Wait for any task to complete (with timeout to poll queue)
+                done, _ = await asyncio.wait(
+                    in_flight.keys(), return_when=asyncio.FIRST_COMPLETED, timeout=0.1
+                )
 
-                # Initialize progress on first item
-                if progress is None:
-                    worker_logger.info("Starting scoring")
-                    progress = ProgressLogger(
-                        total=total_instances,
-                        desc="Scored",
-                        logger=worker_logger,
-                        color="blue",
-                    )
-
-                # Start scoring task immediately (fire-and-forget with callback)
-                task = asyncio.create_task(process_item(item))
-                active_tasks.add(task)
-                task.add_done_callback(on_task_done)
+                for task in done:
+                    in_flight.pop(task)
+                    result = task.result()
+                    scored_queue.put(result)
+                    if progress is not None:
+                        progress.update(1)
 
         finally:
-            # Wait for all remaining tasks to complete
-            if active_tasks:
-                await asyncio.gather(*active_tasks, return_exceptions=True)
+            # Wait for remaining tasks
+            if in_flight:
+                done, _ = await asyncio.wait(in_flight.keys())
+                for task in done:
+                    result = task.result()
+                    scored_queue.put(result)
+                    if progress is not None:
+                        progress.update(1)
             if progress is not None:
                 progress.close()
 
