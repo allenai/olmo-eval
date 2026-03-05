@@ -118,6 +118,7 @@ class HarnessPresets:
 
         return HarnessConfig(
             name=name,
+            scoring_concurrency=8,
             sandboxes=(
                 SandboxConfig(
                     instances=1,
@@ -137,6 +138,7 @@ class HarnessPresets:
 
         return HarnessConfig(
             name=name,
+            scoring_concurrency=8,
             sandboxes=(
                 SandboxConfig(
                     instances=1,
@@ -203,7 +205,7 @@ class HarnessPresets:
             sandboxes=(
                 SandboxConfig(
                     capabilities=frozenset(Capability.BASH),
-                    instances=1,  # Match max_concurrency for parallel execution
+                    instances=1,
                     image="ghcr.io/astral-sh/uv:python3.12-bookworm-slim",
                     mode=SandboxMode.DOCKER,
                     startup_timeout=120.0,
