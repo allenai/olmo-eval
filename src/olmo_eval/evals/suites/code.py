@@ -7,29 +7,21 @@ from olmo_eval.evals.suites.registry import AggregationStrategy, Suite, make_sui
 # Multilingual Code Suites
 # =============================================================================
 
-MT_MBPP_V2FIX = make_suite(
-    "mt_mbpp_v2fix",
-    tuple(MULTILINGUAL_MBPP_TASKS_V2),
-    description="Multilingual MBPP v2 with fixes",
+# Define variant configurations: (suffix, description_suffix)
+_MT_MBPP_VARIANTS: tuple[tuple[str, str], ...] = (
+    ("", ""),
+    (":bpb", " with BPB evaluation"),
+    (":3shot", " with 3-shot prompting"),
+    (":3shot:bpb", " with 3-shot BPB evaluation"),
 )
 
-MT_MBPP_V2FIX_BPB = make_suite(
-    "mt_mbpp_v2fix:bpb",
-    tuple(f"{t}:bpb" for t in MULTILINGUAL_MBPP_TASKS_V2),
-    description="Multilingual MBPP v2 with BPB evaluation",
-)
-
-MT_MBPP_V2FIX_3SHOT = make_suite(
-    "mt_mbpp_v2fix:3shot",
-    tuple(f"{t}:3shot" for t in MULTILINGUAL_MBPP_TASKS_V2),
-    description="Multilingual MBPP v2 with 3-shot prompting",
-)
-
-MT_MBPP_V2FIX_3SHOT_BPB = make_suite(
-    "mt_mbpp_v2fix:3shot:bpb",
-    tuple(f"{t}:3shot:bpb" for t in MULTILINGUAL_MBPP_TASKS_V2),
-    description="Multilingual MBPP v2 with 3-shot BPB evaluation",
-)
+# Generate all suites programmatically
+for _suffix, _desc_suffix in _MT_MBPP_VARIANTS:
+    make_suite(
+        f"mt_mbpp_v2fix{_suffix}",
+        tuple(f"{t}{_suffix}" for t in MULTILINGUAL_MBPP_TASKS_V2),
+        description=f"Multilingual MBPP v2 with fixes{_desc_suffix}",
+    )
 
 
 # =============================================================================
