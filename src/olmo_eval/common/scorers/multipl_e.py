@@ -76,8 +76,8 @@ class MultiplEScorer(ExecutionScorer):
         """
         match self.language:
             case "sh":
-                # MULTIPL_E uses bash-specific syntax (e.g., [[ ]]), not POSIX sh
-                cmd = f"echo {shlex.quote(code)} > /tmp/code.sh && bash /tmp/code.sh"
+                # MULTIPL_E uses bash-specific syntax (e.g., [[ ]])
+                cmd = f"echo {shlex.quote(code)} > /tmp/code.sh && /bin/bash /tmp/code.sh"
                 return await env.execute_command(cmd, timeout=self.timeout)
             case "js":
                 cmd = f"echo {shlex.quote(code)} > /tmp/code.js && node /tmp/code.js"
