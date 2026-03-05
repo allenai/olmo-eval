@@ -108,18 +108,21 @@ class SwerexNoiseFilter(logging.Filter):
             return False
 
         # Filter bare exception class names (e.g., "swerex.exceptions CommandTimeoutError")
-        if msg.startswith("swerex.exceptions"):
+        if "swerex.exceptions" in msg:
+            return False
+
+        # Filter CommandTimeoutError anywhere in the message
+        if "CommandTimeoutError" in msg:
             return False
 
         # Filter out timeout-related tracebacks at CRITICAL level
         if record.levelno >= logging.CRITICAL:
-            if "Traceback" in msg or "CommandTimeoutError" in msg:
+            if "Traceback" in msg:
                 return False
             if "TimeoutExpired" in msg or "timed out" in msg.lower():
                 return False
 
-        # Also filter timeout tracebacks at any level
-        return not ("CommandTimeoutError" in msg and ("Traceback" in msg or "timed out" in msg))
+        return True
 
 
 def filter_warnings() -> None:
@@ -189,10 +192,8 @@ def configure_logging(level: LogLevel = "INFO") -> None:
     logging.getLogger("LiteLLM").setLevel(logging.WARNING)
     logging.getLogger("litellm").setLevel(logging.WARNING)
 
-    # Allow swerex (sandbox) logs through at DEBUG level, but filter timeout tracebacks
-    swerex_logger = logging.getLogger("swerex")
-    swerex_logger.setLevel(logging.DEBUG)
-    swerex_logger.addFilter(SwerexNoiseFilter())
+    # Suppress noisy swerex logs (DEBUG mode will override this)
+    logging.getLogger("swerex").setLevel(logging.WARNING)
 
     # Set environment variables for third-party libraries
     os.environ.setdefault("HF_DATASETS_DISABLE_PROGRESS_BAR", "1")

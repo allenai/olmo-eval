@@ -346,18 +346,24 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
         from rich.table import Table
 
+        # Collect prepared tasks in parallel, but accumulate results for deterministic ordering
+        prepared_results: dict[str, tuple[TaskTracker, list[QueueItem]]] = {}
         with ThreadPoolExecutor(max_workers=min(32, len(expanded_tasks))) as executor:
             futures = {executor.submit(prepare_one, spec): spec for spec in expanded_tasks}
             for future in as_completed(futures):
                 spec, tracker, task_items = future.result()
                 trackers[spec] = tracker
-                items.extend(task_items)
-                if not tracker.error and self.save_requests and task_items and tracker.task:
-                    request_objects = build_requests_from_items(
-                        task_items, tracker.task.config.name
-                    )
-                    task_hash = compute_task_hash(tracker.task.config.to_dict())
-                    self._write_requests(self.model_name, spec, request_objects, task_hash)
+                prepared_results[spec] = (tracker, task_items)
+
+        # Add items in deterministic task spec order (not completion order)
+        # This ensures shuffle produces identical results across runs
+        for spec in expanded_tasks:
+            tracker, task_items = prepared_results[spec]
+            items.extend(task_items)
+            if not tracker.error and self.save_requests and task_items and tracker.task:
+                request_objects = build_requests_from_items(task_items, tracker.task.config.name)
+                task_hash = compute_task_hash(tracker.task.config.to_dict())
+                self._write_requests(self.model_name, spec, request_objects, task_hash)
 
         # Print task preparation summary table
         table = Table(title="Tasks")
