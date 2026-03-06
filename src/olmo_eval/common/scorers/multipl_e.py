@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import base64
+import shlex
 import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, NamedTuple
@@ -99,13 +99,13 @@ class MultiplEScorer(ExecutionScorer):
         tmp_dir = f"/tmp/{uuid.uuid4().hex}"
         file_path = f"{tmp_dir}/{config.filename}"
 
-        # Encode code as base64 to avoid shell escaping issues
-        encoded_code = base64.b64encode(code.encode()).decode()
+        # Use shlex.quote to safely escape code for shell
+        quoted_code = shlex.quote(code)
 
-        # Build command: create dir, decode and write code, compile (if needed), run
+        # Build command: create dir, write code, compile (if needed), run
         parts = [
             f"mkdir -p {tmp_dir}",
-            f"echo '{encoded_code}' | base64 -d > {file_path}",
+            f"printf '%s' {quoted_code} > {file_path}",
         ]
         if config.compile_cmd:
             parts.append(config.compile_cmd.format(d=tmp_dir, f=file_path))
