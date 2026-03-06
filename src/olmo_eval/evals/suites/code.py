@@ -58,7 +58,6 @@ OLMO3_BASE_EASY_CODE_BPB = register(
 
 _MULTIPL_E_VARIANTS: tuple[tuple[str, str], ...] = (
     ("", ""),
-    (":bpb", " with BPB evaluation"),
     (":pass_at_1", " with pass@1 execution evaluation"),
     (":pass_at_10", " with pass@10 execution evaluation"),
 )
@@ -73,4 +72,10 @@ for _suffix, _desc_suffix in _MULTIPL_E_VARIANTS:
         f"multipl_e_mbpp{_suffix}",
         tuple(f"{t}{_suffix}" for t in MULTIPL_E_MBPP_TASKS),
         description=f"MULTIPL_E MBPP (6 languages){_desc_suffix}",
+    )
+    # Combined suite with both HumanEval and MBPP
+    make_suite(
+        f"multipl_e{_suffix}",
+        tuple(f"{t}{_suffix}" for t in MULTIPL_E_HUMANEVAL_TASKS + MULTIPL_E_MBPP_TASKS),
+        description=f"MULTIPL_E HumanEval + MBPP (6 languages each){_desc_suffix}",
     )
