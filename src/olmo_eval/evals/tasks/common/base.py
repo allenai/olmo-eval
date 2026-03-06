@@ -213,6 +213,14 @@ class Task(ABC):
             return self.config.formatter.request_type
         return RequestType.COMPLETION
 
+    def get_sampling_params(self, instance: Instance) -> SamplingParams | None:
+        """Get sampling params for a specific instance.
+
+        Override to provide instance-specific sampling params (e.g., per-instance stop sequences).
+        Default returns the task-level sampling params.
+        """
+        return self.config.sampling_params
+
     @property
     @abstractmethod
     def instances(self) -> Iterator[Instance]:

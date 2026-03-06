@@ -79,6 +79,21 @@ class MultiplETask(Task):
         """
         return output.text
 
+    def get_sampling_params(self, instance: Instance) -> SamplingParams | None:
+        """Get sampling params with instance-specific stop tokens."""
+        from dataclasses import replace
+
+        base_params = self.config.sampling_params or SamplingParams()
+        stop_tokens = instance.metadata.get("stop_tokens", [])
+
+        if stop_tokens:
+            # Merge instance stop_tokens with any existing stop_sequences
+            existing = base_params.stop_sequences or ()
+            merged = tuple(stop_tokens) + existing
+            return replace(base_params, stop_sequences=merged)
+
+        return base_params
+
     def _extract_answers(self, responses: Any) -> None:
         """Extract code and prepend the prompt.
 
