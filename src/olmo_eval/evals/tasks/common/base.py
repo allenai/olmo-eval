@@ -426,6 +426,12 @@ class Task(ABC):
             # Apply each scorer, taking best score across outputs (for multi-sample)
             for scorer in scorers_by_name.values():
                 scores = [scorer.score(response.instance, o) for o in response.outputs]
+                # Store individual scores in output metadata for pass@k expansion
+                for i, output in enumerate(response.outputs):
+                    if output.metadata is None:
+                        output.metadata = {}
+                    output.metadata[f"score:{scorer.name}"] = scores[i] if i < len(scores) else 0.0
+                # Response-level score is max for backward compatibility
                 response.scores[scorer.name] = max(scores) if scores else 0.0
 
     async def _apply_scorers_async(
@@ -479,6 +485,11 @@ class Task(ABC):
         for response in responses:
             for scorer in sync_scorers.values():
                 scores = [scorer.score(response.instance, o) for o in response.outputs]
+                # Store individual scores in output metadata for pass@k expansion
+                for i, output in enumerate(response.outputs):
+                    if output.metadata is None:
+                        output.metadata = {}
+                    output.metadata[f"score:{scorer.name}"] = scores[i] if i < len(scores) else 0.0
                 response.scores[scorer.name] = max(scores) if scores else 0.0
 
         # Apply execution scorers concurrently
@@ -505,20 +516,64 @@ class Task(ABC):
             # Run all scoring tasks concurrently
             results = await asyncio.gather(*tasks)
 
-            # Aggregate results: for each (response, scorer), take max across outputs
-            # Structure: {resp_idx: {scorer_name: [scores]}}
-            scores_by_response: dict[int, dict[str, list[float]]] = {}
-            for resp_idx, scorer_name, _, score in results:
+            # Store individual scores in output metadata for pass@k expansion
+            # Structure: {resp_idx: {scorer_name: {out_idx: score}}}
+            scores_by_response: dict[int, dict[str, dict[int, float]]] = {}
+            for resp_idx, scorer_name, out_idx, score in results:
                 if resp_idx not in scores_by_response:
                     scores_by_response[resp_idx] = {}
                 if scorer_name not in scores_by_response[resp_idx]:
-                    scores_by_response[resp_idx][scorer_name] = []
-                scores_by_response[resp_idx][scorer_name].append(score)
+                    scores_by_response[resp_idx][scorer_name] = {}
+                scores_by_response[resp_idx][scorer_name][out_idx] = score
 
-            # Assign max scores to responses
+            # Store individual scores in output metadata and assign max to response
             for resp_idx, scorer_scores in scores_by_response.items():
-                for scorer_name, scores in scorer_scores.items():
-                    responses[resp_idx].scores[scorer_name] = max(scores) if scores else 0.0
+                response = responses[resp_idx]
+                for scorer_name, output_scores in scorer_scores.items():
+                    # Store per-output scores in metadata
+                    for out_idx, score in output_scores.items():
+                        output = response.outputs[out_idx]
+                        if output.metadata is None:
+                            output.metadata = {}
+                        output.metadata[f"score:{scorer_name}"] = score
+                    # Response-level score is max for backward compatibility
+                    all_scores = list(output_scores.values())
+                    response.scores[scorer_name] = max(all_scores) if all_scores else 0.0
+
+    def _expand_multi_output_responses(self, responses: Sequence[Response]) -> list[Response]:
+        """Expand multi-output responses into individual responses for pass@k.
+
+        When num_samples > 1, each Response has multiple outputs but scores are
+        aggregated to max. For pass@k computation, we need N separate Response
+        objects to count individual passing samples. This method expands each
+        multi-output Response into N single-output Responses, preserving
+        individual scores stored in output.metadata during scoring.
+
+        Args:
+            responses: Responses with potentially multiple outputs each.
+
+        Returns:
+            Expanded list where each Response has exactly one output.
+        """
+        expanded: list[Response] = []
+        for response in responses:
+            if len(response.outputs) <= 1:
+                expanded.append(response)
+            else:
+                for output in response.outputs:
+                    new_response = Response(
+                        instance=response.instance,
+                        request=response.request,
+                        outputs=[output],
+                        trajectory=response.trajectory,
+                    )
+                    # Copy scores from output metadata
+                    for key, value in (output.metadata or {}).items():
+                        if key.startswith("score:"):
+                            scorer_name = key[6:]
+                            new_response.scores[scorer_name] = value
+                    expanded.append(new_response)
+        return expanded
 
     def compute_metrics(self, responses: Sequence[Response]) -> dict[str, dict[str, float]]:
         """Compute all metrics from scored responses.
@@ -527,6 +582,15 @@ class Task(ABC):
         This allows multiple scorers to produce the same metric (e.g., accuracy)
         while preserving which scorer produced which value.
         """
+        from olmo_eval.common.metrics import PassAtKMetric, PassPowKMetric
+
+        # Expand multi-output responses for pass@k/pass^k metrics
+        needs_expansion = any(
+            isinstance(metric, (PassAtKMetric, PassPowKMetric)) for metric in self.config.metrics
+        )
+        if needs_expansion:
+            responses = self._expand_multi_output_responses(responses)
+
         result: dict[str, dict[str, float]] = {}
         for metric in self.config.metrics:
             scorer_name = (

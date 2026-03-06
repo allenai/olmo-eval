@@ -162,8 +162,8 @@ def _register_multipl_e_task(
             "data_source": DataSource(path="nuprl/MultiPL-E", subset=subset_name),
             "metrics": (),
             "sampling_params": SamplingParams(
-                max_tokens=1024,
-                temperature=0.0,
+                max_tokens=512,
+                temperature=0.2,
             ),
             "__module__": __name__,
             "__qualname__": class_name,
