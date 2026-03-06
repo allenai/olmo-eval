@@ -683,6 +683,7 @@ def _get_task_configs(
     """
     from copy import deepcopy
 
+    from olmo_eval.cli.run.config import _apply_dotlist_overrides
     from olmo_eval.evals.tasks.common import get_task as get_task_instance
     from olmo_eval.evals.tasks.common import parse_task_spec
 
@@ -700,25 +701,16 @@ def _get_task_configs(
         # Deep copy the config so we can apply overrides directly
         task_cfg = deepcopy(task_instance.config)
 
-        # Apply CLI overrides directly to config
+        # Apply CLI overrides using dotlist format (supports nested keys and JSON)
         cli_overrides = task_overrides.get(task_spec, [])
-        for override_str in cli_overrides:
-            if "=" in override_str:
-                key, value = override_str.split("=", 1)
-                # Try to parse value as int/float/bool if applicable
-                parsed_value: str | int | float | bool = value
-                try:
-                    if value.lower() in ("true", "false"):
-                        parsed_value = value.lower() == "true"
-                    elif "." in value:
-                        parsed_value = float(value)
-                    else:
-                        parsed_value = int(value)
-                except ValueError:
-                    parsed_value = value
-
+        if cli_overrides:
+            # Convert config to dict, apply overrides, convert back
+            task_dict = task_cfg.to_dict() if hasattr(task_cfg, "to_dict") else vars(task_cfg)
+            task_dict = _apply_dotlist_overrides(task_dict, cli_overrides)
+            # Update config attributes from dict
+            for key, value in task_dict.items():
                 if hasattr(task_cfg, key):
-                    setattr(task_cfg, key, parsed_value)
+                    setattr(task_cfg, key, value)
 
         task_configs[task_spec] = task_cfg
 
@@ -962,57 +954,16 @@ def _apply_harness_overrides(harness_config, overrides: list[str]):
         harness_config: Base HarnessConfig to modify.
         overrides: List of dotlist override strings (e.g., ["sandbox.mode=docker"]).
             Supports list indices like "sandboxes.0.mode=modal".
+            Supports JSON values like 'sandboxes.0={"mode":"modal","instances":4}'.
 
     Returns:
         New HarnessConfig with overrides applied.
     """
+    from olmo_eval.cli.run.config import _apply_dotlist_overrides
     from olmo_eval.harness import HarnessConfig
 
     harness_dict = harness_config.to_dict()
-
-    for override in overrides:
-        if "=" not in override:
-            continue
-        key_path, value = override.split("=", 1)
-        keys = key_path.split(".")
-
-        # Parse value (bool, int, float, or string)
-        if value.lower() == "true":
-            parsed_value: str | int | float | bool = True
-        elif value.lower() == "false":
-            parsed_value = False
-        else:
-            try:
-                parsed_value = int(value)
-            except ValueError:
-                try:
-                    parsed_value = float(value)
-                except ValueError:
-                    parsed_value = value
-
-        # Navigate to the target location and set the value
-        target = harness_dict
-        for key in keys[:-1]:
-            # Check if key is a numeric index for list access
-            if key.isdigit():
-                idx = int(key)
-                if isinstance(target, list) and idx < len(target):
-                    target = target[idx]
-                else:
-                    break
-            else:
-                if key not in target or target[key] is None:
-                    # Create nested dict if needed
-                    target[key] = {}
-                target = target[key]
-
-        # Set the final value
-        final_key = keys[-1]
-        if final_key.isdigit() and isinstance(target, list):
-            target[int(final_key)] = parsed_value
-        elif isinstance(target, dict):
-            target[final_key] = parsed_value
-
+    harness_dict = _apply_dotlist_overrides(harness_dict, overrides)
     return HarnessConfig.from_dict(harness_dict)
 
 

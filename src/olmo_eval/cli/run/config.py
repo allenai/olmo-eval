@@ -12,11 +12,50 @@ from olmo_eval.harness.config import HarnessConfig, ProviderConfig
 console = Console()
 
 
+def _parse_override_value(value: str) -> Any:
+    """Parse an override value, supporting JSON, bool, int, float, and string."""
+    import json
+
+    # Try JSON first (for dicts and arrays)
+    if value.startswith("{") or value.startswith("["):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            pass
+
+    # Parse bool, int, float, or string
+    if value.lower() == "true":
+        return True
+    elif value.lower() == "false":
+        return False
+    else:
+        try:
+            return int(value)
+        except ValueError:
+            try:
+                return float(value)
+            except ValueError:
+                return value
+
+
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Deep merge override into base dict."""
+    for key, value in override.items():
+        if key in base and isinstance(base[key], dict) and isinstance(value, dict):
+            _deep_merge(base[key], value)
+        else:
+            base[key] = value
+    return base
+
+
 def _apply_dotlist_overrides(base_dict: dict[str, Any], overrides: list[str]) -> dict[str, Any]:
     """Apply dotlist overrides to a dictionary, handling list indices.
 
     Unlike OmegaConf.from_dotlist which treats numeric keys as dict keys,
     this function treats them as list indices (e.g., sandboxes.0.mode=modal).
+
+    Supports JSON values for nested structures:
+        sandboxes.0='{"mode":"modal","instances":4}'
 
     Args:
         base_dict: The base dictionary to modify.
@@ -30,20 +69,7 @@ def _apply_dotlist_overrides(base_dict: dict[str, Any], overrides: list[str]) ->
             continue
         key_path, value = override.split("=", 1)
         keys = key_path.split(".")
-
-        # Parse value (bool, int, float, or string)
-        if value.lower() == "true":
-            parsed_value: str | int | float | bool = True
-        elif value.lower() == "false":
-            parsed_value = False
-        else:
-            try:
-                parsed_value = int(value)
-            except ValueError:
-                try:
-                    parsed_value = float(value)
-                except ValueError:
-                    parsed_value = value
+        parsed_value = _parse_override_value(value)
 
         # Navigate to the target location and set the value
         target = base_dict
@@ -64,9 +90,16 @@ def _apply_dotlist_overrides(base_dict: dict[str, Any], overrides: list[str]) ->
         # Set the final value
         final_key = keys[-1]
         if final_key.isdigit() and isinstance(target, list):
-            target[int(final_key)] = parsed_value
+            idx = int(final_key)
+            if isinstance(parsed_value, dict) and isinstance(target[idx], dict):
+                _deep_merge(target[idx], parsed_value)
+            else:
+                target[idx] = parsed_value
         elif isinstance(target, dict):
-            target[final_key] = parsed_value
+            if isinstance(parsed_value, dict) and isinstance(target.get(final_key), dict):
+                _deep_merge(target[final_key], parsed_value)
+            else:
+                target[final_key] = parsed_value
 
     return base_dict
 
@@ -229,16 +262,14 @@ class RunConfigBuilder:
         Returns:
             RunConfig with parsed and validated settings.
         """
-        from omegaconf import OmegaConf
-
         # Build task specs and overrides from CLI -o flags
         task_specs: list[str] = list(self.task)
         task_overrides: dict[str, dict[str, Any]] = {}
         for task_spec, cli_overrides in self.cli_task_overrides.items():
             if cli_overrides:
-                override_config = OmegaConf.from_dotlist(cli_overrides)
-                override_dict = OmegaConf.to_container(override_config)
-                task_overrides[task_spec] = override_dict  # type: ignore[assignment]
+                override_dict: dict[str, Any] = {}
+                _apply_dotlist_overrides(override_dict, cli_overrides)
+                task_overrides[task_spec] = override_dict
 
         # Resolve harness configuration with provider config built in
         harness_config = self._resolve_harness_config(self.model)
