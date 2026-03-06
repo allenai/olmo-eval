@@ -45,6 +45,7 @@ class HarnessConfig:
     backend_kwargs: dict[str, Any] = field(default_factory=dict)
     metrics: MetricsConfig | None = None
     batching: BatchConfig | None = None
+    scorer_startup_timeout: float | None = None
 
     # Cache for resolved tools
     _resolved_tools_cache: tuple[Tool, ...] | None = field(
@@ -142,6 +143,8 @@ class HarnessConfig:
             d["metrics"] = self.metrics.to_dict()
         if self.batching is not None:
             d["batching"] = self.batching.to_dict()
+        if self.scorer_startup_timeout is not None:
+            d["scorer_startup_timeout"] = self.scorer_startup_timeout
         return d
 
     @classmethod
@@ -184,6 +187,7 @@ class HarnessConfig:
             backend_kwargs=data.get("backend_kwargs", {}),
             metrics=metrics,
             batching=batching,
+            scorer_startup_timeout=data.get("scorer_startup_timeout"),
         )
 
     def with_tools(self, *new_tools: Tool | str) -> HarnessConfig:
@@ -210,6 +214,7 @@ class HarnessConfig:
             backend_kwargs=self.backend_kwargs,
             metrics=self.metrics,
             batching=self.batching,
+            scorer_startup_timeout=self.scorer_startup_timeout,
         )
 
     def with_system_prompt(self, system_prompt: str) -> HarnessConfig:
@@ -236,6 +241,7 @@ class HarnessConfig:
             backend_kwargs=self.backend_kwargs,
             metrics=self.metrics,
             batching=self.batching,
+            scorer_startup_timeout=self.scorer_startup_timeout,
         )
 
     def with_provider(self, provider: ProviderConfig) -> HarnessConfig:
@@ -262,6 +268,7 @@ class HarnessConfig:
             backend_kwargs=self.backend_kwargs,
             metrics=self.metrics,
             batching=self.batching,
+            scorer_startup_timeout=self.scorer_startup_timeout,
         )
 
     def merge_provider(self, provider: ProviderConfig) -> HarnessConfig:
@@ -338,6 +345,7 @@ class HarnessConfig:
             backend_kwargs=self.backend_kwargs,
             metrics=metrics,
             batching=self.batching,
+            scorer_startup_timeout=self.scorer_startup_timeout,
         )
 
     def with_batching(self, batching: BatchConfig) -> HarnessConfig:
@@ -364,6 +372,7 @@ class HarnessConfig:
             backend_kwargs=self.backend_kwargs,
             metrics=self.metrics,
             batching=batching,
+            scorer_startup_timeout=self.scorer_startup_timeout,
         )
 
 
@@ -382,6 +391,7 @@ def harness_config(
     backend_kwargs: dict[str, Any] | None = None,
     metrics: MetricsConfig | None = None,
     batching: BatchConfig | None = None,
+    scorer_startup_timeout: float | None = None,
 ) -> HarnessConfig:
     """Create a HarnessConfig.
 
@@ -400,6 +410,8 @@ def harness_config(
         backend_kwargs: Backend-specific kwargs (e.g., enable_compaction for openai_agents).
         metrics: Metrics collection configuration (None = no metrics).
         batching: Batching strategy configuration (None = sequential).
+        scorer_startup_timeout: Timeout for scorer worker startup. If None, derived from
+            sandbox configs (max startup_timeout + 60s buffer) or defaults to 60s.
 
     Returns:
         A new HarnessConfig instance.
@@ -419,4 +431,5 @@ def harness_config(
         backend_kwargs=backend_kwargs or {},
         metrics=metrics,
         batching=batching,
+        scorer_startup_timeout=scorer_startup_timeout,
     )

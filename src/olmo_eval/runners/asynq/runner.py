@@ -230,8 +230,22 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
             # Now wait for scoring worker (runs in parallel with inference worker init)
             if sandbox_configs_list is not None:
-                runner_logger.info("Waiting for scoring worker to initialize...")
-                wait_for_scorer_ready(scorer_proc, scorer_ready, scored_queue, timeout=180.0)
+                # Compute scorer startup timeout
+                if self.harness_config.scorer_startup_timeout is not None:
+                    scorer_timeout = self.harness_config.scorer_startup_timeout
+                else:
+                    # Derive from max sandbox startup_timeout + buffer
+                    max_startup = max(
+                        cfg.get("startup_timeout", 60.0) for cfg in sandbox_configs_list
+                    )
+                    scorer_timeout = max_startup + 60.0
+
+                runner_logger.info(
+                    f"Waiting for scoring worker to initialize (timeout={scorer_timeout}s)..."
+                )
+                wait_for_scorer_ready(
+                    scorer_proc, scorer_ready, scored_queue, timeout=scorer_timeout
+                )
                 runner_logger.info("Scoring worker ready")
 
             # Wait for workers to report their init times (also checks for crashes)
