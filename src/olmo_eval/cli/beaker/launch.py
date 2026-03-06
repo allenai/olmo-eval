@@ -961,20 +961,59 @@ def _apply_harness_overrides(harness_config, overrides: list[str]):
     Args:
         harness_config: Base HarnessConfig to modify.
         overrides: List of dotlist override strings (e.g., ["sandbox.mode=docker"]).
+            Supports list indices like "sandboxes.0.mode=modal".
 
     Returns:
         New HarnessConfig with overrides applied.
     """
-    from omegaconf import OmegaConf
-
     from olmo_eval.harness import HarnessConfig
 
     harness_dict = harness_config.to_dict()
-    override_config = OmegaConf.from_dotlist(overrides)
-    base = OmegaConf.create(harness_dict)
-    merged = OmegaConf.merge(base, override_config)
-    harness_dict = OmegaConf.to_container(merged, resolve=True)
-    return HarnessConfig.from_dict(harness_dict)  # type: ignore[arg-type]
+
+    for override in overrides:
+        if "=" not in override:
+            continue
+        key_path, value = override.split("=", 1)
+        keys = key_path.split(".")
+
+        # Parse value (bool, int, float, or string)
+        if value.lower() == "true":
+            parsed_value: str | int | float | bool = True
+        elif value.lower() == "false":
+            parsed_value = False
+        else:
+            try:
+                parsed_value = int(value)
+            except ValueError:
+                try:
+                    parsed_value = float(value)
+                except ValueError:
+                    parsed_value = value
+
+        # Navigate to the target location and set the value
+        target = harness_dict
+        for key in keys[:-1]:
+            # Check if key is a numeric index for list access
+            if key.isdigit():
+                idx = int(key)
+                if isinstance(target, list) and idx < len(target):
+                    target = target[idx]
+                else:
+                    break
+            else:
+                if key not in target or target[key] is None:
+                    # Create nested dict if needed
+                    target[key] = {}
+                target = target[key]
+
+        # Set the final value
+        final_key = keys[-1]
+        if final_key.isdigit() and isinstance(target, list):
+            target[int(final_key)] = parsed_value
+        elif isinstance(target, dict):
+            target[final_key] = parsed_value
+
+    return HarnessConfig.from_dict(harness_dict)
 
 
 def _launch_external_evals(
