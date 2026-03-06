@@ -121,7 +121,7 @@ class HarnessPresets:
             scoring_concurrency=64,
             sandboxes=(
                 SandboxConfig(
-                    instances=8,
+                    instances=64,
                     image="volcengine/sandbox-fusion:base-20250609",
                     mode=SandboxMode.DOCKER,
                     startup_timeout=300.0,

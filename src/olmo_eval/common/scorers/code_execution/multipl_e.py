@@ -2,48 +2,31 @@
 
 from __future__ import annotations
 
-import shlex
 import uuid
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING
 
 from olmo_eval.common.types import Instance, LMOutput
 
-from .execution import ExecutionScorer
+from ..execution import ExecutionScorer
+from .languages import get_evaluator
+from .languages.base import EvalResult, ExecutionStatus
 
 if TYPE_CHECKING:
     from olmo_eval.common.execution import ExecutionEnvironment, ExecutionResult
-
-
-class LangConfig(NamedTuple):
-    filename: str
-    compile_cmd: str | None  # None for interpreted languages
-    run_cmd: str
-    timeout: float = 10.0  # Default timeout in seconds
-
-
-# Language configurations: (filename, compile_cmd, run_cmd, timeout)
-# {d} = tmp_dir, {f} = full file path
-LANG_CONFIGS: dict[str, LangConfig] = {
-    "sh": LangConfig("code.sh", None, "/bin/bash {f}"),
-    "js": LangConfig("code.js", None, "node {f}"),
-    "php": LangConfig("code.php", None, "php {f}"),
-    "cpp": LangConfig("code.cpp", "g++ -o {d}/a.out {f}", "{d}/a.out", timeout=30.0),
-    "rs": LangConfig("code.rs", "rustc -o {d}/a.out {f}", "{d}/a.out", timeout=30.0),
-    "java": LangConfig(
-        "Problem.java",
-        "cd {d} && javac -cp '/runtime/java/*' Problem.java",
-        "cd {d} && java -cp '/runtime/java/*:.' Problem",
-        timeout=30.0,
-    ),
-}
 
 
 @dataclass(frozen=True, slots=True)
 class MultiplEScorer(ExecutionScorer):
     """Score MULTIPL_E code by compiling/executing against test cases.
 
-    This scorer handles file-based compilation and execution for 6 languages:
+    This scorer handles file-based compilation and execution using language-specific
+    evaluators. Each language evaluator provides:
+    - Compile and run commands
+    - Language-specific error detection (syntax errors, exceptions, etc.)
+    - Appropriate default timeouts
+
+    Currently supported languages:
     - cpp: Compiles with g++ and executes
     - java: Compiles with javac and executes with java
     - js: Executes with node
@@ -88,49 +71,59 @@ class MultiplEScorer(ExecutionScorer):
         # Combine generated code with tests
         full_code = f"{output.extracted_answer}\n\n{test_code}"
 
-        result = await self.exec_for_lang(execution_env, full_code)
+        result = await self._execute_with_evaluator(execution_env, full_code)
 
         # Store execution details (truncate long output)
         MAX_OUTPUT_LEN = 4000
         output.metadata["execution_result"] = {
             "success": result.success,
+            "status": result.status.value,
             "exit_code": result.exit_code,
-            "output": result.output[:MAX_OUTPUT_LEN] if result.output else "",
-            "error": result.error,
+            "stdout": result.stdout[:MAX_OUTPUT_LEN] if result.stdout else "",
+            "stderr": result.stderr[:MAX_OUTPUT_LEN] if result.stderr else "",
         }
 
         return 1.0 if result.success else 0.0
 
-    async def exec_for_lang(self, env: ExecutionEnvironment, code: str) -> ExecutionResult:
-        """Execute code in the appropriate language."""
-        from olmo_eval.common.execution import ExecutionResult
-
-        config = LANG_CONFIGS.get(self.language)
-        if config is None:
-            return ExecutionResult(success=False, error=f"Unsupported language: {self.language}")
+    async def _execute_with_evaluator(self, env: ExecutionEnvironment, code: str) -> EvalResult:
+        """Execute code using the language-specific evaluator."""
+        try:
+            evaluator = get_evaluator(self.language)
+        except ValueError as e:
+            return EvalResult(
+                status=ExecutionStatus.ERROR,
+                exit_code=-1,
+                stderr=str(e),
+            )
 
         # Use explicit timeout if set, otherwise use language default
-        effective_timeout = self.timeout if self.timeout is not None else config.timeout
+        timeout = self.timeout if self.timeout is not None else evaluator.DEFAULT_TIMEOUT
 
         # Use a unique temp directory per execution to avoid conflicts with parallel runs
         tmp_dir = f"/tmp/{uuid.uuid4().hex}"
-        file_path = f"{tmp_dir}/{config.filename}"
 
-        # Use shlex.quote to safely escape code for shell
-        quoted_code = shlex.quote(code)
-
-        # Build command: create dir, write code, compile (if needed), run
-        parts = [
-            f"mkdir -p {tmp_dir}",
-            f"echo {quoted_code} > {file_path}",
-        ]
-        if config.compile_cmd:
-            parts.append(config.compile_cmd.format(d=tmp_dir, f=file_path))
-        parts.append(config.run_cmd.format(d=tmp_dir, f=file_path))
-
-        cmd = " && ".join(parts)
+        # Build the evaluation command
+        cmd = evaluator.build_eval_command(tmp_dir, code)
 
         try:
-            return await env.execute_command(cmd, timeout=effective_timeout)
+            exec_result: ExecutionResult = await env.execute_command(cmd, timeout=timeout)
+
+            # Determine if execution timed out
+            timed_out = (
+                exec_result.error == "timeout"
+                or "timed out" in (exec_result.error or "").lower()
+                or "timed out" in (exec_result.output or "").lower()
+            )
+
+            return evaluator.categorize_result(
+                exit_code=exec_result.exit_code,
+                stdout=exec_result.output or "",
+                stderr="",  # Our shell command combines stderr into stdout
+                timed_out=timed_out,
+            )
         except Exception as e:
-            return ExecutionResult(success=False, output="", exit_code=-1, error=str(e))
+            return EvalResult(
+                status=ExecutionStatus.ERROR,
+                exit_code=-1,
+                stderr=str(e),
+            )

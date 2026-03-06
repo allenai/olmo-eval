@@ -12,7 +12,7 @@ from .base import (
     PerplexityScorer,
     Scorer,
 )
-from .code_execution import CodeExecutionScorer
+from .code_execution import CodeExecutionScorer, MultiplEScorer
 from .execution import ExecutionScorer, SandboxRequiredError
 from .llm_judge import (
     JudgeFn,
@@ -22,7 +22,6 @@ from .llm_judge import (
     SimpleQAJudgeScorer,
     build_openai_judge_fn,
 )
-from .multipl_e import MultiplEScorer
 from .tools import (
     ToolArgumentScorer,
     ToolCallScorer,
