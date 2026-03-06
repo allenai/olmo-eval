@@ -12,6 +12,65 @@ from olmo_eval.harness.config import HarnessConfig, ProviderConfig
 console = Console()
 
 
+def _apply_dotlist_overrides(base_dict: dict[str, Any], overrides: list[str]) -> dict[str, Any]:
+    """Apply dotlist overrides to a dictionary, handling list indices.
+
+    Unlike OmegaConf.from_dotlist which treats numeric keys as dict keys,
+    this function treats them as list indices (e.g., sandboxes.0.mode=modal).
+
+    Args:
+        base_dict: The base dictionary to modify.
+        overrides: List of dotlist strings (e.g., ["sandboxes.0.mode=modal"]).
+
+    Returns:
+        The modified dictionary.
+    """
+    for override in overrides:
+        if "=" not in override:
+            continue
+        key_path, value = override.split("=", 1)
+        keys = key_path.split(".")
+
+        # Parse value (bool, int, float, or string)
+        if value.lower() == "true":
+            parsed_value: str | int | float | bool = True
+        elif value.lower() == "false":
+            parsed_value = False
+        else:
+            try:
+                parsed_value = int(value)
+            except ValueError:
+                try:
+                    parsed_value = float(value)
+                except ValueError:
+                    parsed_value = value
+
+        # Navigate to the target location and set the value
+        target = base_dict
+        for key in keys[:-1]:
+            # Check if key is a numeric index for list access
+            if key.isdigit():
+                idx = int(key)
+                if isinstance(target, list) and idx < len(target):
+                    target = target[idx]
+                else:
+                    break
+            else:
+                if key not in target or target[key] is None:
+                    # Create nested dict if needed
+                    target[key] = {}
+                target = target[key]
+
+        # Set the final value
+        final_key = keys[-1]
+        if final_key.isdigit() and isinstance(target, list):
+            target[int(final_key)] = parsed_value
+        elif isinstance(target, dict):
+            target[final_key] = parsed_value
+
+    return base_dict
+
+
 @dataclass
 class RunConfig:
     """Parsed and validated configuration for an evaluation run.
@@ -223,8 +282,6 @@ class RunConfigBuilder:
         Raises:
             SystemExit: If harness preset or config file is invalid.
         """
-        from omegaconf import OmegaConf
-
         if self.harness_preset and self.harness_config_path:
             console.print("[red]Error:[/red] Cannot specify both --harness and --harness-config")
             raise SystemExit(1)
@@ -272,11 +329,8 @@ class RunConfigBuilder:
         # Apply CLI overrides to harness config
         if self.cli_harness_overrides:
             harness_dict = harness_config.to_dict()
-            override_config = OmegaConf.from_dotlist(self.cli_harness_overrides)
-            base = OmegaConf.create(harness_dict)
-            merged = OmegaConf.merge(base, override_config)
-            harness_dict = OmegaConf.to_container(merged, resolve=True)
-            harness_config = HarnessConfig.from_dict(harness_dict)  # type: ignore[arg-type]
+            harness_dict = _apply_dotlist_overrides(harness_dict, self.cli_harness_overrides)
+            harness_config = HarnessConfig.from_dict(harness_dict)
 
         from olmo_eval.common.configs import get_provider_config
 
