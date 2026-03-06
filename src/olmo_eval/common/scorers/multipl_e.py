@@ -117,7 +117,7 @@ class MultiplEScorer(ExecutionScorer):
         # Build command: create dir, write code, compile (if needed), run
         parts = [
             f"mkdir -p {tmp_dir}",
-            f"printf '%s\\n' {quoted_code} > {file_path}",
+            f"echo {quoted_code} > {file_path}",
         ]
         if config.compile_cmd:
             parts.append(config.compile_cmd.format(d=tmp_dir, f=file_path))
