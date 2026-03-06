@@ -16,9 +16,15 @@ from olmo_eval.harness.tools import Tool
 from olmo_eval.inference.base import InferenceProvider
 
 if TYPE_CHECKING:
-    from olmo_eval.harness.sandbox import SandboxManager
+    from olmo_eval.harness.sandbox import ExecutorBinding, SandboxManager
 
 logger = logging.getLogger(__name__)
+
+
+class BindingHolder:
+    """Mutable holder for current binding, allowing cached closures to use per-run bindings."""
+
+    binding: ExecutorBinding | None = None
 
 
 @register_backend("openai_agents")
@@ -38,6 +44,7 @@ class OpenAIAgentsBackend(Backend):
         self._cached_provider_id: int | None = None
         self._cached_has_sandbox: bool = False
         self._sandbox_manager: SandboxManager | None = None
+        self._binding_holder = BindingHolder()
 
     def clear_cache(self) -> None:
         """Clear cached agent to allow recreation with new config/provider."""
@@ -74,6 +81,7 @@ class OpenAIAgentsBackend(Backend):
         tools: Sequence[Tool],
         function_tool: Any,
         sandbox_manager: SandboxManager | None = None,
+        binding_holder: BindingHolder | None = None,
     ) -> list[Any]:
         """Convert harness tools to agents SDK format.
 
@@ -81,6 +89,7 @@ class OpenAIAgentsBackend(Backend):
             tools: Sequence of Tool instances to convert.
             function_tool: The function_tool decorator from agents SDK.
             sandbox_manager: Optional sandbox manager for tools that require it.
+            binding_holder: Optional binding holder for session tools.
 
         Returns:
             List of agents SDK tool objects.
@@ -91,7 +100,7 @@ class OpenAIAgentsBackend(Backend):
 
             # Wrap sandboxed tools to use the manager
             if tool.sandbox and sandbox_manager is not None:
-                execute_fn = self._wrap_sandboxed_tool(tool, sandbox_manager)
+                execute_fn = self._wrap_sandboxed_tool(tool, sandbox_manager, binding_holder)
 
             # Use function_tool decorator to wrap the execute function
             wrapped = function_tool(strict_mode=False)(execute_fn)
@@ -106,12 +115,14 @@ class OpenAIAgentsBackend(Backend):
         self,
         tool: Tool,
         manager: SandboxManager,
+        binding_holder: BindingHolder | None = None,
     ) -> Any:
         """Create a wrapper function that executes the tool via sandbox manager.
 
         Args:
             tool: The tool requiring sandbox execution.
             manager: The sandbox manager to use for routing.
+            binding_holder: Optional binding holder for session tools.
 
         Returns:
             An async function that executes commands via the sandbox.
@@ -122,12 +133,18 @@ class OpenAIAgentsBackend(Backend):
 
             async def sandboxed_execute(command: str) -> str:
                 """Execute command in sandbox session."""
-                return await manager.execute_in_session_with_capabilities(command, required_caps)
+                if binding_holder is None or binding_holder.binding is None:
+                    raise RuntimeError("No binding set for session tool")
+                result = await binding_holder.binding.execute_in_session(command)
+                output = result.output
+                if result.exit_code != 0:
+                    output += f"\n[Exit code: {result.exit_code}]"
+                return output
         else:
 
             async def sandboxed_execute(command: str) -> str:
                 """Execute command in sandbox."""
-                return await manager.execute_with_capabilities(command, required_caps)
+                return await manager.execute(command, capabilities=required_caps)
 
         return sandboxed_execute
 
@@ -136,6 +153,7 @@ class OpenAIAgentsBackend(Backend):
         provider: InferenceProvider,
         config: HarnessConfig,
         sandbox_manager: SandboxManager | None = None,
+        binding_holder: BindingHolder | None = None,
     ) -> Any:
         """Create a new agent with the given configuration.
 
@@ -143,6 +161,7 @@ class OpenAIAgentsBackend(Backend):
             provider: The inference provider for model calls.
             config: Harness configuration.
             sandbox_manager: Optional sandbox manager for sandboxed tools.
+            binding_holder: Optional binding holder for session tools.
 
         Returns:
             An Agent instance from the agents SDK.
@@ -174,7 +193,9 @@ class OpenAIAgentsBackend(Backend):
             model=provider.model_name,
         )
 
-        agent_tools = self._convert_tools(config.resolved_tools, function_tool, sandbox_manager)
+        agent_tools = self._convert_tools(
+            config.resolved_tools, function_tool, sandbox_manager, binding_holder
+        )
 
         agent = Agent(
             name=self.name,
@@ -190,6 +211,7 @@ class OpenAIAgentsBackend(Backend):
         provider: InferenceProvider,
         config: HarnessConfig,
         sandbox_manager: SandboxManager | None = None,
+        binding_holder: BindingHolder | None = None,
     ) -> Any:
         """Get cached agent or create a new one if config/provider changed.
 
@@ -205,7 +227,7 @@ class OpenAIAgentsBackend(Backend):
         ):
             return self._cached_agent
 
-        agent = self._create_agent(provider, config, sandbox_manager)
+        agent = self._create_agent(provider, config, sandbox_manager, binding_holder)
 
         self._cached_agent = agent
         self._cached_config = config
@@ -277,8 +299,19 @@ class OpenAIAgentsBackend(Backend):
                 f"Sandbox manager started with {self._sandbox_manager.executor_count} executor(s)"
             )
 
-        # Use cached agent (manager is stable, so caching works even with sandbox)
-        agent = self._get_or_create_agent(provider, config, self._sandbox_manager)
+        # Use cached agent (tools capture self._binding_holder)
+        agent = self._get_or_create_agent(
+            provider, config, self._sandbox_manager, self._binding_holder
+        )
+
+        # Acquire binding if session tools are used
+        has_session_tools = any(t.session for t in config.resolved_tools if t.sandbox)
+
+        if has_session_tools and self._sandbox_manager:
+            session_caps = frozenset().union(
+                *(t.sandbox for t in config.resolved_tools if t.session and t.sandbox)
+            )
+            self._binding_holder.binding = await self._sandbox_manager.acquire_binding(session_caps)
 
         # Get the input message
         input_text = ""
@@ -326,6 +359,11 @@ class OpenAIAgentsBackend(Backend):
 
                 logger.error(f"Agent run failed: {e}\n{traceback.format_exc()}")
                 raise
+            finally:
+                # Release binding after run
+                if self._binding_holder.binding:
+                    await self._binding_holder.binding.release()
+                    self._binding_holder.binding = None
 
         # Convert result to HarnessResult
         trajectory = self._convert_trajectory(result)

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 
 from olmo_eval.common.execution.environment import ExecutionResult
 
@@ -14,11 +16,42 @@ from .executor import SandboxExecutor
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class ExecutorBinding:
+    """Pins a caller to a specific executor for session state continuity."""
+
+    id: str
+    executor: SandboxExecutor
+    capabilities: frozenset[str]
+    _manager: SandboxManager
+    _released: bool = field(default=False, repr=False)
+
+    async def execute_in_session(
+        self, command: str, timeout: float | None = None
+    ) -> ExecutionResult:
+        """Execute in the bound executor's bash session."""
+        if self._released:
+            raise RuntimeError("Binding has been released")
+        return await self.executor.execute_in_session(command, timeout)
+
+    async def release(self) -> None:
+        if not self._released:
+            self._released = True
+            await self._manager._release_binding(self)
+
+    async def __aenter__(self) -> ExecutorBinding:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        await self.release()
+
+
 class SandboxManager:
     """Manages multiple sandbox executors with capability-based routing.
 
     Executors are selected using round-robin among those that support the
-    required capabilities.
+    required capabilities. For session-based execution requiring state
+    continuity, use acquire_binding() or the binding() context manager.
 
     Usage:
         from olmo_eval.harness.sandbox import Capability
@@ -27,9 +60,7 @@ class SandboxManager:
         manager = SandboxManager(configs, owner="scorer")
         await manager.start()
         try:
-            result = await manager.execute_with_capabilities(
-                "echo hello", Capability.BASH
-            )
+            result = await manager.execute("echo hello", capabilities=Capability.BASH)
         finally:
             await manager.stop()
     """
@@ -46,6 +77,10 @@ class SandboxManager:
         self._owner = owner
         self._executors: list[SandboxExecutor] = []
         self._round_robin_indices: dict[frozenset[str], int] = {}
+        self._bindings: dict[str, ExecutorBinding] = {}
+        self._bound_executors: set[int] = set()
+        self._binding_lock: asyncio.Lock = asyncio.Lock()
+        self._binding_counter: int = 0
 
     async def start(self) -> None:
         """Start all sandbox executors in parallel."""
@@ -70,6 +105,12 @@ class SandboxManager:
 
     async def stop(self) -> None:
         """Stop all sandbox executors in parallel."""
+        async with self._binding_lock:
+            for binding in self._bindings.values():
+                binding._released = True
+            self._bindings.clear()
+            self._bound_executors.clear()
+
         await asyncio.gather(*[e.stop() for e in self._executors])
         self._executors.clear()
         self._round_robin_indices.clear()
@@ -113,63 +154,39 @@ class SandboxManager:
         self,
         command: str,
         timeout: float | None = None,
+        capabilities: frozenset[str] | None = None,
     ) -> str:
-        """Execute a command on the first available sandbox.
-
-        This method implements the ExecutionEnvironment protocol.
-        For capability-based routing, use execute_with_capabilities.
+        """Execute a command on a sandbox.
 
         Args:
             command: The command to execute.
             timeout: Optional timeout override in seconds.
+            capabilities: Optional required capabilities. If None, uses any executor.
 
         Returns:
             The command output.
         """
-        executor = self.get_executor(frozenset())
+        executor = self.get_executor(capabilities or frozenset())
         return await executor.execute(command, timeout)
 
     async def execute_command(
         self,
         command: str,
         timeout: float | None = None,
+        capabilities: frozenset[str] | None = None,
     ) -> ExecutionResult:
         """Execute a command and return structured result.
-
-        This method implements the ExecutionEnvironment protocol.
-        For capability-based routing, use execute_command_with_capabilities.
 
         Args:
             command: The command to execute.
             timeout: Optional timeout override in seconds.
+            capabilities: Optional required capabilities. If None, uses any executor.
 
         Returns:
             ExecutionResult with success status, output, and exit code.
         """
-        executor = self.get_executor(frozenset())
+        executor = self.get_executor(capabilities or frozenset())
         return await executor.execute_command(command, timeout)
-
-    async def execute_with_capabilities(
-        self,
-        command: str,
-        required_capabilities: frozenset[str],
-        timeout: float | None = None,
-    ) -> str:
-        """Execute a command on a sandbox with required capabilities.
-
-        Uses round-robin selection among executors that support the
-        required capabilities.
-
-        Args:
-            command: The command to execute.
-            required_capabilities: Capabilities needed for execution.
-            timeout: Optional timeout override in seconds.
-
-        Returns:
-            The command output.
-        """
-        executor = self.get_executor(required_capabilities)
-        return await executor.execute(command, timeout)
 
     async def execute_code(
         self,
@@ -193,28 +210,54 @@ class SandboxManager:
         executor = self.get_executor(frozenset())
         return await executor.execute_code(code, language, timeout)
 
-    async def execute_in_session_with_capabilities(
+    async def acquire_binding(
         self,
-        command: str,
-        required_capabilities: frozenset[str],
-        timeout: float | None = None,
-    ) -> str:
-        """Execute in session on a sandbox with required capabilities.
+        capabilities: frozenset[str] | None = None,
+    ) -> ExecutorBinding:
+        """Acquire exclusive binding to an executor for session execution."""
+        required = capabilities or frozenset()
+        async with self._binding_lock:
+            available = [
+                (i, e)
+                for i, e in enumerate(self._executors)
+                if required <= e.config.capabilities and i not in self._bound_executors
+            ]
+            if not available:
+                raise ValueError(f"No available executor for {required}")
 
-        Args:
-            command: The command to execute.
-            required_capabilities: Capabilities needed for execution.
-            timeout: Optional timeout override in seconds.
+            executor_idx, executor = available[0]
+            self._binding_counter += 1
+            binding = ExecutorBinding(
+                id=f"binding-{self._binding_counter}",
+                executor=executor,
+                capabilities=required,
+                _manager=self,
+            )
+            self._bindings[binding.id] = binding
+            self._bound_executors.add(executor_idx)
+            return binding
 
-        Returns:
-            The command output.
-        """
-        executor = self.get_executor(required_capabilities)
-        result = await executor.execute_in_session(command, timeout)
-        output = result.output
-        if result.exit_code != 0:
-            output += f"\n[Exit code: {result.exit_code}]"
-        return output
+    async def _release_binding(self, binding: ExecutorBinding) -> None:
+        async with self._binding_lock:
+            if binding.id not in self._bindings:
+                return
+            for idx, e in enumerate(self._executors):
+                if e is binding.executor:
+                    self._bound_executors.discard(idx)
+                    break
+            del self._bindings[binding.id]
+
+    @asynccontextmanager
+    async def binding(
+        self,
+        capabilities: frozenset[str] | None = None,
+    ) -> AsyncIterator[ExecutorBinding]:
+        """Context manager for executor binding."""
+        b = await self.acquire_binding(capabilities)
+        try:
+            yield b
+        finally:
+            await b.release()
 
     @property
     def is_running(self) -> bool:
