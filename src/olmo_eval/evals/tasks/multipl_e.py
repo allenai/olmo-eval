@@ -136,24 +136,13 @@ def _make_scorer_for_language(lang: str) -> type[MultiplEScorer]:
 # =============================================================================
 
 
-def _register_multipl_e_task(
-    task_prefix: str,
-    subset_prefix: str,
-    lang: str,
-) -> None:
-    """Register a MULTIPL_E task for a specific language.
-
-    Args:
-        task_prefix: Prefix for task name (e.g., "multipl_e_humaneval")
-        subset_prefix: Prefix for dataset subset (e.g., "humaneval")
-        lang: Language code (e.g., "cpp")
-    """
-    task_name = f"{task_prefix}_{lang}"
-    subset_name = f"{subset_prefix}-{lang}"
+def _register_humaneval_task(lang: str) -> None:
+    """Register a MULTIPL_E HumanEval task for a specific language."""
+    task_name = f"multipl_e_humaneval_{lang}"
+    subset_name = f"humaneval-{lang}"
     scorer_cls = _make_scorer_for_language(lang)
 
-    # Create the task class dynamically
-    class_name = f"MultiplETask_{subset_prefix}_{lang}"
+    class_name = f"MultiplETask_humaneval_{lang}"
     task_cls = type(
         class_name,
         (MultiplETask,),
@@ -164,16 +153,17 @@ def _register_multipl_e_task(
             "sampling_params": SamplingParams(
                 max_tokens=512,
                 temperature=0.2,
+                do_sample=True,
+                top_p=0.95,
+                num_samples=20,
             ),
             "__module__": __name__,
             "__qualname__": class_name,
         },
     )
 
-    # Register the task
     register(task_name)(task_cls)
 
-    # Register variants
     register_variant(
         task_name,
         "pass_at_1",
@@ -184,20 +174,57 @@ def _register_multipl_e_task(
         "pass_at_10",
         metrics=(PassAtKMetric(k=10, scorer=scorer_cls),),
         sampling_params=SamplingParams(
-            max_tokens=1024,
+            max_tokens=512,
             temperature=0.8,
+            do_sample=True,
+            top_p=0.95,
             num_samples=20,
         ),
     )
 
 
-# Register HumanEval tasks for each language
-for _lang in MULTIPL_E_LANGUAGES:
-    _register_multipl_e_task("multipl_e_humaneval", "humaneval", _lang)
+def _register_mbpp_task(lang: str) -> None:
+    """Register a MULTIPL_E MBPP task for a specific language."""
+    task_name = f"multipl_e_mbpp_{lang}"
+    subset_name = f"mbpp-{lang}"
+    scorer_cls = _make_scorer_for_language(lang)
 
-# Register MBPP tasks for each language
+    class_name = f"MultiplETask_mbpp_{lang}"
+    task_cls = type(
+        class_name,
+        (MultiplETask,),
+        {
+            "language": lang,
+            "data_source": DataSource(path="nuprl/MultiPL-E", subset=subset_name),
+            "metrics": (),
+            "sampling_params": SamplingParams(
+                max_tokens=512,
+                temperature=0.2,
+                do_sample=True,
+                top_p=0.95,
+                num_samples=20,
+            ),
+            "__module__": __name__,
+            "__qualname__": class_name,
+        },
+    )
+
+    register(task_name)(task_cls)
+
+    register_variant(
+        task_name,
+        "pass_at_1",
+        metrics=(PassAtKMetric(k=1, scorer=scorer_cls),),
+    )
+
+
+# Register HumanEval tasks for each language (20 samples for pass@k)
 for _lang in MULTIPL_E_LANGUAGES:
-    _register_multipl_e_task("multipl_e_mbpp", "mbpp", _lang)
+    _register_humaneval_task(_lang)
+
+# Register MBPP tasks for each language (1 sample, pass@1 only)
+for _lang in MULTIPL_E_LANGUAGES:
+    _register_mbpp_task(_lang)
 
 
 # Export
