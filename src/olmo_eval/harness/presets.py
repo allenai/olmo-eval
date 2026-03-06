@@ -118,7 +118,7 @@ class HarnessPresets:
 
         return HarnessConfig(
             name=name,
-            scoring_concurrency=8,
+            scoring_concurrency=64,
             sandboxes=(
                 SandboxConfig(
                     instances=8,

@@ -19,20 +19,22 @@ class LangConfig(NamedTuple):
     filename: str
     compile_cmd: str | None  # None for interpreted languages
     run_cmd: str
+    timeout: float = 10.0  # Default timeout in seconds
 
 
-# Language configurations: (filename, compile_cmd, run_cmd)
+# Language configurations: (filename, compile_cmd, run_cmd, timeout)
 # {d} = tmp_dir, {f} = full file path
 LANG_CONFIGS: dict[str, LangConfig] = {
     "sh": LangConfig("code.sh", None, "/bin/bash {f}"),
     "js": LangConfig("code.js", None, "node {f}"),
     "php": LangConfig("code.php", None, "php {f}"),
-    "cpp": LangConfig("code.cpp", "g++ -o {d}/a.out {f}", "{d}/a.out"),
-    "rs": LangConfig("code.rs", "rustc -o {d}/a.out {f}", "{d}/a.out"),
+    "cpp": LangConfig("code.cpp", "g++ -o {d}/a.out {f}", "{d}/a.out", timeout=30.0),
+    "rs": LangConfig("code.rs", "rustc -o {d}/a.out {f}", "{d}/a.out", timeout=30.0),
     "java": LangConfig(
         "Problem.java",
         "cd {d} && javac -cp '/runtime/java/*' Problem.java",
         "cd {d} && java -cp '/runtime/java/*:.' Problem",
+        timeout=30.0,
     ),
 }
 
@@ -55,7 +57,7 @@ class MultiplEScorer(ExecutionScorer):
     """
 
     name: str = "multipl_e"
-    timeout: float = 10.0
+    timeout: float | None = None  # None = use language-specific default
     language: str = "cpp"
 
     async def ascore(
@@ -107,6 +109,9 @@ class MultiplEScorer(ExecutionScorer):
         if config is None:
             return ExecutionResult(success=False, error=f"Unsupported language: {self.language}")
 
+        # Use explicit timeout if set, otherwise use language default
+        effective_timeout = self.timeout if self.timeout is not None else config.timeout
+
         # Use a unique temp directory per execution to avoid conflicts with parallel runs
         tmp_dir = f"/tmp/{uuid.uuid4().hex}"
         file_path = f"{tmp_dir}/{config.filename}"
@@ -126,6 +131,6 @@ class MultiplEScorer(ExecutionScorer):
         cmd = " && ".join(parts)
 
         try:
-            return await env.execute_command(cmd, timeout=self.timeout)
+            return await env.execute_command(cmd, timeout=effective_timeout)
         except Exception as e:
             return ExecutionResult(success=False, output="", exit_code=-1, error=str(e))
