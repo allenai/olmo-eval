@@ -9,6 +9,7 @@ from typing import Any, Literal
 from olmo_eval.common.repr import hide_unset
 
 ContainerRuntime = Literal["docker", "podman"]
+ImagePullPolicy = Literal["never", "missing", "always"]
 
 
 class SandboxMode(StrEnum):
@@ -56,6 +57,8 @@ class SandboxConfig:
         enable_diagnostics: Whether to run background diagnostics monitor.
         inject_swerex: Whether to build a derived image with swe-rex pre-installed.
         dockerfile_extra: Additional Dockerfile commands to inject when building derived images.
+        image_pull: Image pull policy for swerex ("never", "missing", "always").
+            Use "never" when inject_swerex=True to skip redundant image checks.
     """
 
     image: str
@@ -78,6 +81,7 @@ class SandboxConfig:
     enable_diagnostics: bool = True
     inject_swerex: bool = False
     dockerfile_extra: tuple[str, ...] = ()
+    image_pull: ImagePullPolicy | None = None
 
     @property
     def is_local(self) -> bool:
@@ -122,4 +126,5 @@ class SandboxConfig:
             enable_diagnostics=data.get("enable_diagnostics", True),
             inject_swerex=data.get("inject_swerex", False),
             dockerfile_extra=tuple(data.get("dockerfile_extra", [])),
+            image_pull=data.get("image_pull"),
         )

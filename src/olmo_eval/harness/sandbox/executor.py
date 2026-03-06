@@ -208,6 +208,12 @@ class SandboxExecutor:
                 if self.config.exec_shell:
                     deployment_kwargs["exec_shell"] = list(self.config.exec_shell)
 
+                # Set image pull policy - default to "never" when we build the image ourselves
+                if self.config.image_pull:
+                    deployment_kwargs["pull"] = self.config.image_pull
+                elif self.config.inject_swerex:
+                    deployment_kwargs["pull"] = "never"
+
                 return DockerDeployment(**deployment_kwargs)
 
             case SandboxMode.LOCAL:
