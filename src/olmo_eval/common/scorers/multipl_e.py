@@ -88,10 +88,10 @@ class MultiplEScorer(ExecutionScorer):
 
     async def exec_for_lang(self, env: ExecutionEnvironment, code: str) -> ExecutionResult:
         """Execute code in the appropriate language."""
+        from olmo_eval.common.execution import ExecutionResult
+
         config = LANG_CONFIGS.get(self.language)
         if config is None:
-            from olmo_eval.common.execution import ExecutionResult
-
             return ExecutionResult(success=False, error=f"Unsupported language: {self.language}")
 
         # Use a unique temp directory per execution to avoid conflicts with parallel runs
@@ -99,14 +99,19 @@ class MultiplEScorer(ExecutionScorer):
         file_path = f"{tmp_dir}/{config.filename}"
 
         # Build command: create dir, write code via heredoc, compile (if needed), run
-        # Using heredoc with quoted delimiter to prevent variable expansion
+        # Heredoc syntax: full command line first, then content, then delimiter alone
         parts = [
             f"mkdir -p {tmp_dir}",
-            f"cat << 'ENDOFCODE' > {file_path}\n{code}\nENDOFCODE",
+            f"cat << 'ENDOFCODE' > {file_path}",
         ]
         if config.compile_cmd:
             parts.append(config.compile_cmd.format(d=tmp_dir, f=file_path))
         parts.append(config.run_cmd.format(d=tmp_dir, f=file_path))
 
-        cmd = " && ".join(parts)
-        return await env.execute_command(cmd, timeout=self.timeout)
+        # Command line first, then heredoc content, then delimiter on its own line
+        cmd = " && ".join(parts) + f"\n{code}\nENDOFCODE"
+
+        try:
+            return await env.execute_command(cmd, timeout=self.timeout)
+        except Exception as e:
+            return ExecutionResult(success=False, output="", exit_code=-1, error=str(e))
