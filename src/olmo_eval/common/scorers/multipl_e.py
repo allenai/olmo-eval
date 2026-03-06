@@ -75,16 +75,28 @@ class MultiplEScorer(ExecutionScorer):
             1.0 if all tests pass, 0.0 otherwise.
         """
         if output.extracted_answer is None:
+            output.metadata["execution_result"] = {"success": False, "error": "No extracted answer"}
             return 0.0
 
         test_code = instance.metadata.get("test", "")
         if not test_code:
+            output.metadata["execution_result"] = {"success": False, "error": "No test code"}
             return 0.0
 
         # Combine generated code with tests
         full_code = f"{output.extracted_answer}\n\n{test_code}"
 
         result = await self.exec_for_lang(execution_env, full_code)
+
+        # Store execution details (truncate long output)
+        MAX_OUTPUT_LEN = 4000
+        output.metadata["execution_result"] = {
+            "success": result.success,
+            "exit_code": result.exit_code,
+            "output": result.output[:MAX_OUTPUT_LEN] if result.output else "",
+            "error": result.error,
+        }
+
         return 1.0 if result.success else 0.0
 
     async def exec_for_lang(self, env: ExecutionEnvironment, code: str) -> ExecutionResult:
