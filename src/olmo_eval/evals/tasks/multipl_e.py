@@ -15,7 +15,7 @@ from olmo_eval.common.metrics import PassAtKMetric
 from olmo_eval.common.scorers import MultiplEScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.constants.code import MULTIPL_E_LANGUAGES, MULTIPL_E_STOP_SEQUENCES
+from olmo_eval.evals.constants.code import MULTIPL_E_LANGUAGES
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 
@@ -164,7 +164,6 @@ def _register_multipl_e_task(
             "sampling_params": SamplingParams(
                 max_tokens=512,
                 temperature=0.0,
-                stop_sequences=MULTIPL_E_STOP_SEQUENCES[lang],
             ),
             "__module__": __name__,
             "__qualname__": class_name,
