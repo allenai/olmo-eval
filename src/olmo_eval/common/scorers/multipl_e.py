@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, NamedTuple
@@ -98,18 +99,19 @@ class MultiplEScorer(ExecutionScorer):
         tmp_dir = f"/tmp/{uuid.uuid4().hex}"
         file_path = f"{tmp_dir}/{config.filename}"
 
-        # Build command: create dir, write code via heredoc, compile (if needed), run
-        # Heredoc syntax: full command line first, then content, then delimiter alone
+        # Encode code as base64 to avoid shell escaping issues
+        encoded_code = base64.b64encode(code.encode()).decode()
+
+        # Build command: create dir, decode and write code, compile (if needed), run
         parts = [
             f"mkdir -p {tmp_dir}",
-            f"cat << 'ENDOFCODE' > {file_path}",
+            f"echo '{encoded_code}' | base64 -d > {file_path}",
         ]
         if config.compile_cmd:
             parts.append(config.compile_cmd.format(d=tmp_dir, f=file_path))
         parts.append(config.run_cmd.format(d=tmp_dir, f=file_path))
 
-        # Command line first, then heredoc content, then delimiter on its own line
-        cmd = " && ".join(parts) + f"\n{code}\nENDOFCODE"
+        cmd = " && ".join(parts)
 
         try:
             return await env.execute_command(cmd, timeout=self.timeout)
