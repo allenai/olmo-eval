@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import shlex
 import uuid
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from olmo_eval.common.types import Instance, LMOutput
 
@@ -13,6 +12,28 @@ from .execution import ExecutionScorer
 
 if TYPE_CHECKING:
     from olmo_eval.common.execution import ExecutionEnvironment, ExecutionResult
+
+
+class LangConfig(NamedTuple):
+    filename: str
+    compile_cmd: str | None  # None for interpreted languages
+    run_cmd: str
+
+
+# Language configurations: (filename, compile_cmd, run_cmd)
+# {d} = tmp_dir, {f} = full file path
+LANG_CONFIGS: dict[str, LangConfig] = {
+    "sh": LangConfig("code.sh", None, "/bin/bash {f}"),
+    "js": LangConfig("code.js", None, "node {f}"),
+    "php": LangConfig("code.php", None, "php {f}"),
+    "cpp": LangConfig("code.cpp", "g++ -o {d}/a.out {f}", "{d}/a.out"),
+    "rs": LangConfig("code.rs", "rustc -o {d}/a.out {f}", "{d}/a.out"),
+    "java": LangConfig(
+        "Problem.java",
+        "cd {d} && javac -cp '/runtime/java/*' Problem.java",
+        "cd {d} && java -cp '/runtime/java/*:.' Problem",
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,66 +83,30 @@ class MultiplEScorer(ExecutionScorer):
         # Combine generated code with tests
         full_code = f"{output.extracted_answer}\n\n{test_code}"
 
-        result = await self._execute_language(execution_env, full_code)
+        result = await self.exec_for_lang(execution_env, full_code)
         return 1.0 if result.success else 0.0
 
-    async def _execute_language(self, env: ExecutionEnvironment, code: str) -> ExecutionResult:
-        """Execute code in the appropriate language.
+    async def exec_for_lang(self, env: ExecutionEnvironment, code: str) -> ExecutionResult:
+        """Execute code in the appropriate language."""
+        config = LANG_CONFIGS.get(self.language)
+        if config is None:
+            from olmo_eval.common.execution import ExecutionResult
 
-        Args:
-            env: The execution environment.
-            code: The full code including tests.
+            return ExecutionResult(success=False, error=f"Unsupported language: {self.language}")
 
-        Returns:
-            ExecutionResult with success status.
-        """
         # Use a unique temp directory per execution to avoid conflicts with parallel runs
         tmp_dir = f"/tmp/{uuid.uuid4().hex}"
-        quoted_code = shlex.quote(code)
+        file_path = f"{tmp_dir}/{config.filename}"
 
-        match self.language:
-            case "sh":
-                # MULTIPL_E uses bash-specific syntax (e.g., [[ ]])
-                cmd = (
-                    f"mkdir -p {tmp_dir} && echo {quoted_code} > {tmp_dir}/code.sh && "
-                    f"/bin/bash {tmp_dir}/code.sh"
-                )
-                return await env.execute_command(cmd, timeout=self.timeout)
-            case "js":
-                cmd = (
-                    f"mkdir -p {tmp_dir} && echo {quoted_code} > {tmp_dir}/code.js && "
-                    f"node {tmp_dir}/code.js"
-                )
-                return await env.execute_command(cmd, timeout=self.timeout)
-            case "php":
-                cmd = (
-                    f"mkdir -p {tmp_dir} && echo {quoted_code} > {tmp_dir}/code.php && "
-                    f"php {tmp_dir}/code.php"
-                )
-                return await env.execute_command(cmd, timeout=self.timeout)
-            case "cpp":
-                cmd = (
-                    f"mkdir -p {tmp_dir} && echo {quoted_code} > {tmp_dir}/code.cpp && "
-                    f"g++ -o {tmp_dir}/a.out {tmp_dir}/code.cpp && {tmp_dir}/a.out"
-                )
-                return await env.execute_command(cmd, timeout=self.timeout)
-            case "java":
-                # MULTIPL_E Java uses Problem class and requires javatuples
-                cmd = (
-                    f"mkdir -p {tmp_dir} && echo {quoted_code} > {tmp_dir}/Problem.java && "
-                    f"cd {tmp_dir} && javac -cp '/runtime/java/*' Problem.java && "
-                    "java -cp '/runtime/java/*:.' Problem"
-                )
-                return await env.execute_command(cmd, timeout=self.timeout)
-            case "rs":
-                cmd = (
-                    f"mkdir -p {tmp_dir} && echo {quoted_code} > {tmp_dir}/code.rs && "
-                    f"rustc -o {tmp_dir}/a.out {tmp_dir}/code.rs && {tmp_dir}/a.out"
-                )
-                return await env.execute_command(cmd, timeout=self.timeout)
-            case _:
-                from olmo_eval.common.execution import ExecutionResult
+        # Build command: create dir, write code via heredoc, compile (if needed), run
+        # Using heredoc with quoted delimiter to prevent variable expansion
+        parts = [
+            f"mkdir -p {tmp_dir}",
+            f"cat << 'ENDOFCODE' > {file_path}\n{code}\nENDOFCODE",
+        ]
+        if config.compile_cmd:
+            parts.append(config.compile_cmd.format(d=tmp_dir, f=file_path))
+        parts.append(config.run_cmd.format(d=tmp_dir, f=file_path))
 
-                return ExecutionResult(
-                    success=False, error=f"Unsupported language: {self.language}"
-                )
+        cmd = " && ".join(parts)
+        return await env.execute_command(cmd, timeout=self.timeout)
