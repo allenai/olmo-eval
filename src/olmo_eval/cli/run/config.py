@@ -13,15 +13,24 @@ console = Console()
 
 
 def _parse_override_value(value: str) -> Any:
-    """Parse an override value, supporting JSON, bool, int, float, and string."""
+    """Parse an override value, supporting JSON, OmegaConf lists, bool, int, float, and string."""
     import json
 
-    # Try JSON first (for dicts and arrays)
+    # Try JSON first (for dicts and arrays with quoted strings)
     if value.startswith("{") or value.startswith("["):
         try:
             return json.loads(value)
         except json.JSONDecodeError:
             pass
+
+        # Try OmegaConf-style list: [item1,item2] without quotes
+        if value.startswith("[") and value.endswith("]"):
+            inner = value[1:-1].strip()
+            if inner:
+                # Split by comma, but be careful with URLs containing commas (rare)
+                items = [item.strip() for item in inner.split(",")]
+                return items
+            return []
 
     # Parse bool, int, float, or string
     if value.lower() == "true":

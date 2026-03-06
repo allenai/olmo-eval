@@ -239,35 +239,40 @@ class SandboxExecutor:
                         "Install with: pip install 'swe-rex[modal]'"
                     ) from e
 
+                import modal
+
                 image: Any = self.config.image
 
+                # Build Modal image from base, using Modal's image building
+                # (no local container runtime needed)
+                if self.config.registry_auth and self.config.registry_auth.secret_name:
+                    secret = modal.Secret.from_name(self.config.registry_auth.secret_name)
+                    match self.config.registry_auth.provider:
+                        case "gcp":
+                            modal_image = modal.Image.from_gcp_artifact_registry(
+                                self.config.image, secret=secret
+                            )
+                        case "ecr":
+                            modal_image = modal.Image.from_aws_ecr(self.config.image, secret=secret)
+                        case "docker":
+                            modal_image = modal.Image.from_registry(
+                                self.config.image, secret=secret
+                            )
+                        case _:
+                            modal_image = modal.Image.from_registry(self.config.image)
+                else:
+                    modal_image = modal.Image.from_registry(self.config.image)
+
+                # Install swe-rex using Modal's image building (runs on Modal infra)
                 if self.config.inject_swerex:
-                    from .image import get_swerex_image
+                    modal_image = modal_image.pip_install("swe-rex", "uv")
 
-                    # Build locally, push to registry
-                    registry_image = get_swerex_image(
-                        self.config.image,
-                        self.config.container_runtime,
-                        self.config.dockerfile_extra,
-                        require_registry=True,
-                    )
+                # Apply any extra dockerfile commands
+                if self.config.dockerfile_extra:
+                    for cmd in self.config.dockerfile_extra:
+                        modal_image = modal_image.run_commands(cmd)
 
-                    # Create modal.Image with auth if configured
-                    if self.config.registry_auth and self.config.registry_auth.secret_name:
-                        import modal
-
-                        secret = modal.Secret.from_name(self.config.registry_auth.secret_name)
-                        match self.config.registry_auth.provider:
-                            case "gcp":
-                                image = modal.Image.from_gcp_artifact_registry(
-                                    registry_image, secret=secret
-                                )
-                            case "ecr":
-                                image = modal.Image.from_aws_ecr(registry_image, secret=secret)
-                            case "docker":
-                                image = modal.Image.from_registry(registry_image, secret=secret)
-                    else:
-                        image = registry_image
+                image = modal_image
 
                 return ModalDeployment(
                     image=image,
