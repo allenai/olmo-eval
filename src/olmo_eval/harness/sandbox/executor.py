@@ -239,8 +239,38 @@ class SandboxExecutor:
                         "Install with: pip install 'swe-rex[modal]'"
                     ) from e
 
+                image: Any = self.config.image
+
+                if self.config.inject_swerex:
+                    from .image import get_swerex_image
+
+                    # Build locally, push to registry
+                    registry_image = get_swerex_image(
+                        self.config.image,
+                        self.config.container_runtime,
+                        self.config.dockerfile_extra,
+                        require_registry=True,
+                    )
+
+                    # Create modal.Image with auth if configured
+                    if self.config.registry_auth and self.config.registry_auth.secret_name:
+                        import modal
+
+                        secret = modal.Secret.from_name(self.config.registry_auth.secret_name)
+                        match self.config.registry_auth.provider:
+                            case "gcp":
+                                image = modal.Image.from_gcp_artifact_registry(
+                                    registry_image, secret=secret
+                                )
+                            case "ecr":
+                                image = modal.Image.from_aws_ecr(registry_image, secret=secret)
+                            case "docker":
+                                image = modal.Image.from_registry(registry_image, secret=secret)
+                    else:
+                        image = registry_image
+
                 return ModalDeployment(
-                    image=self.config.image,
+                    image=image,
                     startup_timeout=self.config.startup_timeout,
                     runtime_timeout=self.config.runtime_timeout,
                     modal_sandbox_kwargs=self.config.modal_sandbox_kwargs,

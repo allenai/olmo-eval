@@ -108,9 +108,10 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     help="Inject AWS credentials for S3 model access. Auto-detected from s3:// model paths.",
 )
 @click.option(
-    "--gcs-credentials/--no-gcs-credentials",
+    "--gcp-credentials/--no-gcp-credentials",
+    "gcs_credentials",
     default=None,
-    help="Inject GCS credentials for gs:// model access. Auto-detected from gs:// model paths.",
+    help="Inject GCP credentials. Auto-detected from gs:// model paths.",
 )
 @click.option(
     "--use-gcp-creds/--no-use-gcp-creds",

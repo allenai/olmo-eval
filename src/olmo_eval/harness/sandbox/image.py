@@ -24,6 +24,7 @@ def get_swerex_image(
     base_image: str,
     container_runtime: str = "docker",
     dockerfile_extra: tuple[str, ...] = (),
+    require_registry: bool = False,
 ) -> str:
     """Build a derived image with Python and swe-rex pre-installed.
 
@@ -33,12 +34,25 @@ def get_swerex_image(
         base_image: The base container image.
         container_runtime: Container runtime (docker or podman).
         dockerfile_extra: Additional Dockerfile commands to inject.
+        require_registry: If True, requires SWEREX_REGISTRY and returns registry URL.
+            Use for Modal which needs remote-accessible images.
 
     Returns:
-        The derived image name with swe-rex installed.
+        The derived image name with swe-rex installed. If require_registry=True,
+        returns the registry URL.
+
+    Raises:
+        ValueError: If require_registry=True but SWEREX_REGISTRY is not set.
+        RuntimeError: If image build or push fails.
     """
     config = get_infra_config()
     registry = config.swerex_registry
+
+    if require_registry and not registry:
+        raise ValueError(
+            "SWEREX_REGISTRY required for Modal deployments with inject_swerex=True. "
+            "Set to your registry URL (e.g., 'us-docker.pkg.dev/project/repo')."
+        )
 
     # Create a deterministic tag based on base image, Python URL, version, and extra commands
     extra_hash = ":".join(dockerfile_extra) if dockerfile_extra else ""
@@ -48,6 +62,9 @@ def get_swerex_image(
     # Local image name
     local_image = f"swerex-{tag_hash}:latest"
 
+    # Registry image name (if registry configured)
+    registry_image = f"{registry}/swerex-{tag_hash}:latest" if registry else None
+
     # Check if image exists locally
     result = subprocess.run(
         [container_runtime, "image", "inspect", local_image],
@@ -55,13 +72,27 @@ def get_swerex_image(
     )
     if result.returncode == 0:
         logger.info(f"Using cached swerex image: {local_image}")
+        if require_registry:
+            # Ensure image is pushed to registry for remote access
+            assert registry_image is not None  # Guaranteed by earlier check
+            subprocess.run(
+                [container_runtime, "tag", local_image, registry_image],
+                capture_output=True,
+            )
+            push_result = subprocess.run(
+                [container_runtime, "push", registry_image], capture_output=True
+            )
+            if push_result.returncode != 0:
+                stderr = push_result.stderr.decode() if push_result.stderr else ""
+                raise RuntimeError(f"Failed to push to registry: {stderr}")
+            logger.info(f"Pushed swerex image to registry: {registry_image}")
+            return registry_image
         return local_image
 
     logger.debug(f"Local image {local_image} not found, checking registry...")
 
     # Try to pull from registry (if configured)
-    if registry:
-        registry_image = f"{registry}/swerex-{tag_hash}:latest"
+    if registry and registry_image:
         result = subprocess.run(
             [container_runtime, "pull", registry_image],
             capture_output=True,
@@ -73,7 +104,7 @@ def get_swerex_image(
                 capture_output=True,
             )
             logger.info(f"Pulled swerex image from registry: {local_image}")
-            return local_image
+            return registry_image if require_registry else local_image
         logger.debug("Registry pull failed, will build locally")
 
     # Build the image with Python, swe-rex, curl, git, and uv
@@ -107,8 +138,7 @@ ENV PATH="/root/python/bin:$PATH"
 
     logger.info(f"Built swerex image: {local_image}")
 
-    if registry:
-        registry_image = f"{registry}/swerex-{tag_hash}:latest"
+    if registry and registry_image:
         logger.info(f"Pushing swerex image to registry: {registry_image}")
         subprocess.run([container_runtime, "tag", local_image, registry_image], capture_output=True)
         push_result = subprocess.run(
@@ -116,8 +146,17 @@ ENV PATH="/root/python/bin:$PATH"
         )
         if push_result.returncode == 0:
             logger.info(f"Pushed swerex image to registry: {registry_image}")
+            if require_registry:
+                return registry_image
         else:
             stderr = push_result.stderr.decode() if push_result.stderr else ""
+            if require_registry:
+                raise RuntimeError(f"Failed to push to registry: {stderr}")
             logger.warning(f"Failed to push to registry (using local image): {stderr}")
+
+    # When require_registry=True, we've already returned above on success or raised on failure
+    # So reaching here with require_registry=True means something unexpected happened
+    if require_registry:
+        raise RuntimeError("Failed to push image to registry (unexpected state)")
 
     return local_image

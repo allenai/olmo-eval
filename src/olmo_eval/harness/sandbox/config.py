@@ -10,6 +10,26 @@ from olmo_eval.common.repr import hide_unset
 
 ContainerRuntime = Literal["docker", "podman"]
 ImagePullPolicy = Literal["never", "missing", "always"]
+RegistryProvider = Literal["gcp", "ecr", "docker"]
+
+
+@dataclass(frozen=True)
+class RegistryAuth:
+    """Authentication for private container registries.
+
+    For Modal deployments, credentials must be pre-stored as Modal Secrets.
+    For Docker deployments, uses local credential helpers (gcloud, aws ecr).
+
+    Attributes:
+        provider: Registry provider ("gcp", "ecr", "docker").
+        secret_name: Modal secret name containing credentials (Modal only).
+            - GCP: Must contain SERVICE_ACCOUNT_JSON
+            - ECR: Must contain AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+            - Docker: Must contain DOCKER_USERNAME, DOCKER_PASSWORD
+    """
+
+    provider: RegistryProvider
+    secret_name: str | None = None  # Required for Modal, ignored for Docker
 
 
 class SandboxMode(StrEnum):
@@ -59,6 +79,7 @@ class SandboxConfig:
         dockerfile_extra: Additional Dockerfile commands to inject when building derived images.
         image_pull: Image pull policy for swerex ("never", "missing", "always").
             Use "never" when inject_swerex=True to skip redundant image checks.
+        registry_auth: Authentication for private container registries (Modal only).
     """
 
     image: str
@@ -82,6 +103,7 @@ class SandboxConfig:
     inject_swerex: bool = False
     dockerfile_extra: tuple[str, ...] = ()
     image_pull: ImagePullPolicy | None = None
+    registry_auth: RegistryAuth | None = None
 
     @property
     def is_local(self) -> bool:
@@ -95,6 +117,8 @@ class SandboxConfig:
         result = asdict(self)
         result["mode"] = self.mode.value
         result["capabilities"] = sorted(self.capabilities)
+        if self.registry_auth is not None:
+            result["registry_auth"] = asdict(self.registry_auth)
         return result
 
     @classmethod
@@ -105,6 +129,8 @@ class SandboxConfig:
         if "mode" not in data:
             raise ValueError("SandboxConfig requires 'mode' to be specified")
         capabilities = data.get("capabilities")
+        registry_auth_data = data.get("registry_auth")
+        registry_auth = RegistryAuth(**registry_auth_data) if registry_auth_data else None
         return cls(
             image=data["image"],
             mode=SandboxMode(data["mode"]),
@@ -127,4 +153,5 @@ class SandboxConfig:
             inject_swerex=data.get("inject_swerex", False),
             dockerfile_extra=tuple(data.get("dockerfile_extra", [])),
             image_pull=data.get("image_pull"),
+            registry_auth=registry_auth,
         )
