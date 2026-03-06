@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
+import time
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -83,7 +85,10 @@ class SandboxManager:
         self._binding_counter: int = 0
 
     async def start(self) -> None:
-        """Start all sandbox executors in parallel."""
+        """Start all sandbox executors in parallel.
+
+        Uses thread pool to avoid event loop blocking from swe-rex subprocess calls.
+        """
         # Track per-type instance indices for naming
         type_indices: dict[str, int] = {}
 
@@ -100,8 +105,27 @@ class SandboxManager:
                 executor = SandboxExecutor(config, name=name)
                 self._executors.append(executor)
 
-        # Start all executors in parallel
-        await asyncio.gather(*[e.start() for e in self._executors])
+        # Start all executors in thread pool to avoid blocking event loop
+        # swe-rex's DockerDeployment.start() has blocking subprocess calls
+        start_time = time.time()
+        logger.info(f"Starting {len(self._executors)} sandbox executors in parallel...")
+
+        def start_in_thread(executor: SandboxExecutor) -> None:
+            """Run executor.start() in a dedicated thread with its own event loop."""
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(executor.start())
+            finally:
+                loop.close()
+
+        loop = asyncio.get_event_loop()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(self._executors)) as pool:
+            futures = [loop.run_in_executor(pool, start_in_thread, e) for e in self._executors]
+            await asyncio.gather(*futures)
+
+        elapsed = time.time() - start_time
+        logger.info(f"All {len(self._executors)} sandbox executors started in {elapsed:.1f}s")
 
     async def stop(self) -> None:
         """Stop all sandbox executors in parallel."""
