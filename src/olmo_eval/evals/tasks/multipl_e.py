@@ -162,7 +162,7 @@ def _register_multipl_e_task(
             "data_source": DataSource(path="nuprl/MultiPL-E", subset=subset_name),
             "metrics": (),
             "sampling_params": SamplingParams(
-                max_tokens=512,
+                max_tokens=1024,
                 temperature=0.0,
             ),
             "__module__": __name__,
@@ -184,7 +184,7 @@ def _register_multipl_e_task(
         "pass_at_10",
         metrics=(PassAtKMetric(k=10, scorer=scorer_cls),),
         sampling_params=SamplingParams(
-            max_tokens=512,
+            max_tokens=1024,
             temperature=0.8,
             num_samples=20,
         ),
