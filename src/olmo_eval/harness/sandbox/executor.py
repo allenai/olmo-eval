@@ -244,10 +244,23 @@ class SandboxExecutor:
                 # Enable Modal output to see image build logs
                 modal.enable_output()
 
-                image: Any = self.config.image
+                # Build image locally and push to registry (same as Docker/Podman mode)
+                # Modal will pull the pre-built image from the registry
+                if self.config.inject_swerex:
+                    from .image import get_swerex_image
 
-                # Build Modal image from base, using Modal's image building
-                # (no local container runtime needed)
+                    # Build locally with swe-rex + dockerfile_extra, push to registry
+                    image = get_swerex_image(
+                        self.config.image,
+                        self.config.container_runtime,
+                        self.config.dockerfile_extra,
+                        require_registry=True,  # Must push to registry for Modal
+                    )
+                    self._log(logging.INFO, f"Using pre-built swerex image: {image}")
+                else:
+                    image = self.config.image
+
+                # Modal pulls pre-built image from registry (no pip_install/run_commands)
                 if self.config.registry_auth and self.config.registry_auth.secret_name:
                     self._log(
                         logging.INFO,
@@ -259,35 +272,22 @@ class SandboxExecutor:
                         case "gcp":
                             self._log(
                                 logging.INFO,
-                                f"Building Modal image from GCP AR: {self.config.image}",
+                                f"Modal pulling from GCP AR: {image}",
                             )
                             modal_image = modal.Image.from_gcp_artifact_registry(
-                                self.config.image, secret=secret
+                                image, secret=secret
                             )
                         case "ecr":
-                            modal_image = modal.Image.from_aws_ecr(self.config.image, secret=secret)
+                            modal_image = modal.Image.from_aws_ecr(image, secret=secret)
                         case "docker":
-                            modal_image = modal.Image.from_registry(
-                                self.config.image, secret=secret
-                            )
+                            modal_image = modal.Image.from_registry(image, secret=secret)
                         case _:
-                            modal_image = modal.Image.from_registry(self.config.image)
+                            modal_image = modal.Image.from_registry(image)
                 else:
-                    modal_image = modal.Image.from_registry(self.config.image)
-
-                # Install swe-rex using Modal's image building (runs on Modal infra)
-                if self.config.inject_swerex:
-                    modal_image = modal_image.pip_install("swe-rex", "uv")
-
-                # Apply any extra dockerfile commands
-                if self.config.dockerfile_extra:
-                    for cmd in self.config.dockerfile_extra:
-                        modal_image = modal_image.run_commands(cmd)
-
-                image = modal_image
+                    modal_image = modal.Image.from_registry(image)
 
                 return ModalDeployment(
-                    image=image,
+                    image=modal_image,
                     startup_timeout=self.config.startup_timeout,
                     runtime_timeout=self.config.runtime_timeout,
                     modal_sandbox_kwargs=self.config.modal_sandbox_kwargs,
