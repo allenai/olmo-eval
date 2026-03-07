@@ -430,6 +430,11 @@ class BeakerJobConfig:
     # Use this for external evals that run vLLM as a server subprocess.
     vllm_isolated_venv: bool = False
 
+    # Setup Modal secret for GCP Artifact Registry access (for Modal sandboxes)
+    # When True, runs setup_modal_gcp_secret script during install.
+    # Requires MODAL_GCP_SECRET_NAME env var to be set with the secret name.
+    setup_modal_gcp_secret: bool = False
+
 
 def resolve_clusters(cluster: str | list[str]) -> list[str]:
     """Resolve cluster aliases to full cluster names.
@@ -633,6 +638,7 @@ class BeakerLauncher:
         enable_sandbox: bool = False,
         setup_store_secrets: bool = False,
         vllm_isolated_venv: bool = False,
+        setup_modal_gcp_secret: bool = False,
     ) -> str:
         """Build installation command for gantry's install_cmd parameter.
 
@@ -653,6 +659,7 @@ class BeakerLauncher:
             enable_sandbox: If True, set up /dev/net/tun and Artifact Registry auth.
             setup_store_secrets: If True, run setup_store_secrets to configure database access.
             vllm_isolated_venv: If True, install vLLM in isolated venv for server mode.
+            setup_modal_gcp_secret: If True, run setup_modal_gcp_secret to create Modal secret.
 
         Returns:
             Shell command string for installation.
@@ -734,6 +741,11 @@ class BeakerLauncher:
             script = "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/setup_store_secrets"
             steps.append(f"source {script}")
 
+        # Set up Modal secret for GCP Artifact Registry (Modal sandboxes)
+        if setup_modal_gcp_secret:
+            script = "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/setup_modal_gcp_secret"
+            steps.append(f"source {script}")
+
         return " && ".join(steps)
 
     def launch(self, config: BeakerJobConfig, dry_run: bool = False) -> BeakerExperiment | None:
@@ -765,6 +777,7 @@ class BeakerLauncher:
             config.enable_sandbox,
             config.setup_store_secrets,
             config.vllm_isolated_venv,
+            config.setup_modal_gcp_secret,
         )
 
         # Build weka mounts as tuples: (bucket, mount_path)

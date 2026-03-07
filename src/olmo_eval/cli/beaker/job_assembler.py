@@ -491,6 +491,7 @@ class JobConfigAssembler:
 
         # Configure sandbox environment and registry mirror
         setup_registry_mirror = False
+        setup_modal_gcp_secret = False
         log.info(f"Sandbox enabled: {self.enable_sandbox}")
         if self.enable_sandbox:
             job_env_vars["BEAKER_ALLOW_SUBCONTAINERS"] = "1"
@@ -502,6 +503,21 @@ class JobConfigAssembler:
             mirror_url = get_registry_mirror_url()
             job_env_vars["MIRROR_HOSTS"] = mirror_url
             setup_registry_mirror = True
+
+        # Check for Modal sandbox with GCP registry auth - auto-setup Modal secret
+        if self.config.harness and preset and preset.sandboxes:
+            from olmo_eval.harness.sandbox.config import SandboxMode
+
+            for sandbox in preset.sandboxes:
+                if (
+                    sandbox.mode == SandboxMode.MODAL
+                    and sandbox.registry_auth
+                    and sandbox.registry_auth.provider == "gcp"
+                    and sandbox.registry_auth.secret_name
+                ):
+                    job_env_vars["MODAL_GCP_SECRET_NAME"] = sandbox.registry_auth.secret_name
+                    setup_modal_gcp_secret = True
+                    log.info(f"Modal GCP secret setup enabled: {sandbox.registry_auth.secret_name}")
 
         # Collect task dependencies and provider dependencies separately
         task_packages = self._extract_task_dependencies(exp.tasks, exp.task_overrides) or None
@@ -542,6 +558,7 @@ class JobConfigAssembler:
             setup_registry_mirror=setup_registry_mirror,
             setup_store_secrets=self.config.store,
             vllm_isolated_venv=vllm_isolated_venv,
+            setup_modal_gcp_secret=setup_modal_gcp_secret,
         )
 
     def _extract_task_dependencies(

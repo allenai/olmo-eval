@@ -239,12 +239,6 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     default=None,
     help="Number of GPUs. Defaults to 1 for GPU providers, 0 otherwise.",
 )
-@click.option(
-    "--setup-modal-secret/--no-setup-modal-secret",
-    "setup_modal_secret",
-    default=True,
-    help="Auto-create Modal secret for GCP registry auth (default: enabled when needed).",
-)
 def launch(
     config: str | None,
     name: str | None,
@@ -289,7 +283,6 @@ def launch(
     uv_cache_dir: str,
     secret_env: tuple[str, ...],
     gpus: int | None,
-    setup_modal_secret: bool,
 ) -> None:
     """Launch an evaluation job on Beaker.
 
@@ -494,7 +487,6 @@ def launch(
     # Check if harness has a sandbox configured with local deployment - if so, use sandbox image
     # Apply harness overrides first so -o sandbox.mode=docker works correctly
     harness_needs_sandbox = False
-    harness_preset = None
     if launch_config.harness:
         from olmo_eval.harness import get_harness_preset
 
@@ -505,34 +497,6 @@ def launch(
             )
         if harness_preset.sandboxes:
             harness_needs_sandbox = any(s.is_local for s in harness_preset.sandboxes)
-
-    # Auto-setup Modal secrets for GCP registry auth if needed
-    if setup_modal_secret and harness_preset and harness_preset.sandboxes:
-        from olmo_eval.harness.sandbox.config import SandboxMode
-
-        for sandbox in harness_preset.sandboxes:
-            if (
-                sandbox.mode == SandboxMode.MODAL
-                and sandbox.registry_auth
-                and sandbox.registry_auth.provider == "gcp"
-                and sandbox.registry_auth.secret_name
-            ):
-                from olmo_eval.launch.modal.secrets import ensure_modal_gcp_secret
-
-                console.print(
-                    f"[dim]Setting up Modal secret: {sandbox.registry_auth.secret_name}[/dim]"
-                )
-                try:
-                    ensure_modal_gcp_secret(secret_name=sandbox.registry_auth.secret_name)
-                except ValueError as e:
-                    console.print(f"[yellow]Warning:[/yellow] {e}")
-                    console.print(
-                        "[dim]Continuing without Modal secret setup. "
-                        "Ensure the secret exists or use --no-setup-modal-secret.[/dim]"
-                    )
-                except RuntimeError as e:
-                    console.print(f"[red]Error:[/red] {e}")
-                    raise SystemExit(1) from None
 
     if image:
         effective_image = image
