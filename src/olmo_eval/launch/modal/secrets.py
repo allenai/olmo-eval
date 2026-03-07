@@ -130,7 +130,7 @@ def ensure_modal_gcp_secret(
 
     Raises:
         ValueError: If no credentials available.
-        ImportError: If modal is not installed.
+        RuntimeError: If Modal CLI fails to create the secret.
 
     Example:
         # Setup (run once or when credentials change):
@@ -144,10 +144,7 @@ def ensure_modal_gcp_secret(
             registry_auth=RegistryAuth(provider="gcp", secret_name=secret_name),
         )
     """
-    import importlib.util
-
-    if importlib.util.find_spec("modal") is None:
-        raise ImportError("Modal not installed. Install with: pip install modal")
+    import subprocess
 
     if credentials is None:
         credentials = get_local_gcp_credentials()
@@ -166,17 +163,29 @@ def ensure_modal_gcp_secret(
     # Modal expects SERVICE_ACCOUNT_JSON for GCP Artifact Registry authentication
     log.info(f"Creating/updating Modal secret '{secret_name}' with GCP credentials")
 
-    # Use modal.Secret.from_dict to create the secret object
-    # Then persist it using the Modal CLI or API
-    # Note: This creates a transient secret. For persistent secrets, users should
-    # use `modal secret create` CLI command with the JSON content.
-    #
-    # For programmatic creation, we provide instructions since Modal's Python API
-    # for secret management is limited.
-    log.info(
-        f"To persist this secret, run:\n"
-        f"  modal secret create {secret_name} SERVICE_ACCOUNT_JSON='<json-content>'\n"
-        f"Or use the Modal dashboard to create the secret."
+    # Use Modal CLI to create secret (handles auth, updates if exists)
+    # The --force flag allows updating an existing secret
+    result = subprocess.run(
+        [
+            "modal",
+            "secret",
+            "create",
+            secret_name,
+            f"SERVICE_ACCOUNT_JSON={credentials.json_key}",
+            "--force",
+        ],
+        capture_output=True,
+        text=True,
     )
 
+    if result.returncode != 0:
+        # Check if it's a "modal not found" error
+        if "command not found" in result.stderr.lower() or "no such file" in result.stderr.lower():
+            raise RuntimeError(
+                "Modal CLI not found. Install with: pip install modal\n"
+                "Then authenticate with: modal token new"
+            )
+        raise RuntimeError(f"Failed to create Modal secret '{secret_name}': {result.stderr}")
+
+    log.info(f"Successfully created/updated Modal secret '{secret_name}'")
     return secret_name
