@@ -241,6 +241,9 @@ class SandboxExecutor:
 
                 import modal
 
+                # Enable Modal output to see image build logs
+                modal.enable_output()
+
                 image: Any = self.config.image
 
                 # Build Modal image from base, using Modal's image building
