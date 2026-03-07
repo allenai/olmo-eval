@@ -165,27 +165,36 @@ def ensure_modal_gcp_secret(
 
     # Use Modal CLI to create secret (handles auth, updates if exists)
     # The --force flag allows updating an existing secret
-    result = subprocess.run(
-        [
-            "modal",
-            "secret",
-            "create",
-            secret_name,
-            f"SERVICE_ACCOUNT_JSON={credentials.json_key}",
-            "--force",
-        ],
-        capture_output=True,
-        text=True,
-    )
+    # Use sys.executable to run modal as a module to avoid PATH issues
+    import sys
+
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "modal",
+                "secret",
+                "create",
+                secret_name,
+                f"SERVICE_ACCOUNT_JSON={credentials.json_key}",
+                "--force",
+            ],
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        raise RuntimeError("Python executable not found. This should not happen.") from None
 
     if result.returncode != 0:
-        # Check if it's a "modal not found" error
-        if "command not found" in result.stderr.lower() or "no such file" in result.stderr.lower():
+        # Check for common error patterns
+        stderr = result.stderr.strip()
+        if "No module named modal" in stderr:
             raise RuntimeError(
-                "Modal CLI not found. Install with: pip install modal\n"
+                "Modal is not installed. Install with: pip install modal\n"
                 "Then authenticate with: modal token new"
             )
-        raise RuntimeError(f"Failed to create Modal secret '{secret_name}': {result.stderr}")
+        raise RuntimeError(f"Failed to create Modal secret '{secret_name}': {stderr}")
 
     log.info(f"Successfully created/updated Modal secret '{secret_name}'")
     return secret_name
