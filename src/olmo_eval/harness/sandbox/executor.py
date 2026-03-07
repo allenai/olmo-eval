@@ -249,9 +249,18 @@ class SandboxExecutor:
                 # Build Modal image from base, using Modal's image building
                 # (no local container runtime needed)
                 if self.config.registry_auth and self.config.registry_auth.secret_name:
+                    self._log(
+                        logging.INFO,
+                        f"Using registry auth: provider={self.config.registry_auth.provider}, "
+                        f"secret={self.config.registry_auth.secret_name}",
+                    )
                     secret = modal.Secret.from_name(self.config.registry_auth.secret_name)
                     match self.config.registry_auth.provider:
                         case "gcp":
+                            self._log(
+                                logging.INFO,
+                                f"Building Modal image from GCP AR: {self.config.image}",
+                            )
                             modal_image = modal.Image.from_gcp_artifact_registry(
                                 self.config.image, secret=secret
                             )
