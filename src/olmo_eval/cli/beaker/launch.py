@@ -484,7 +484,7 @@ def launch(
     )
 
     # Determine effective image
-    # Check if harness has a sandbox configured with local deployment - if so, use sandbox image
+    # Check if harness has a sandbox configured - if so, use sandbox image
     # Apply harness overrides first so -o sandbox.mode=docker works correctly
     harness_needs_sandbox = False
     if launch_config.harness:
@@ -495,8 +495,7 @@ def launch(
             harness_preset = _apply_harness_overrides(
                 harness_preset, launch_config.harness_overrides
             )
-        if harness_preset.sandboxes:
-            harness_needs_sandbox = any(s.is_local for s in harness_preset.sandboxes)
+        harness_needs_sandbox = bool(harness_preset.sandboxes)
 
     if image:
         effective_image = image
