@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from olmo_eval.common.metrics import AccuracyMetric, BPBMetric
+from olmo_eval.common.metrics import AccuracyMetric, BPBMetricByteAvg, BPBMetricInstanceAvg
 from olmo_eval.common.scorers import MultipleChoiceScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
 
@@ -123,8 +123,8 @@ class TestAccuracyMetric:
         assert accuracy == 0.5
 
 
-class TestBPBMetric:
-    """Tests for BPBMetric with gold selection."""
+class TestBPBMetricInstanceAvg:
+    """Tests for BPBMetricInstanceAvg with gold selection."""
 
     def _make_output_with_logprobs(self, text: str, logprobs: list[float]) -> LMOutput:
         """Helper to create an LMOutput with logprobs.
@@ -159,7 +159,7 @@ class TestBPBMetric:
 
     def test_bpb_single_output(self):
         """Test BPB with single output."""
-        metric = BPBMetric()
+        metric = BPBMetricInstanceAvg()
         # Text "ab" = 2 bytes, logprobs sum to -2.0
         # BPB = -(-2.0) / (2 * log(2)) = 2.0 / 1.386 ≈ 1.443
         output = self._make_output_with_logprobs("ab", [-1.0, -1.0])
@@ -172,7 +172,7 @@ class TestBPBMetric:
 
     def test_bpb_multiple_outputs_selects_gold(self):
         """Test that BPB selects the gold/correct output."""
-        metric = BPBMetric()
+        metric = BPBMetricInstanceAvg()
 
         # Create 3 outputs with different BPB values
         # Output 0: "a" (1 byte), logprob -1.0 -> BPB = 1/(1*log2) ≈ 1.443
@@ -193,7 +193,7 @@ class TestBPBMetric:
 
     def test_bpb_multiple_outputs_without_gold_idx_uses_first(self):
         """Test that BPB falls back to first output without gold_idx."""
-        metric = BPBMetric()
+        metric = BPBMetricInstanceAvg()
 
         outputs = [
             self._make_output_with_logprobs("a", [-1.0]),
@@ -210,7 +210,7 @@ class TestBPBMetric:
 
     def test_bpb_empty_responses(self):
         """Test BPB with empty response list."""
-        metric = BPBMetric()
+        metric = BPBMetricInstanceAvg()
 
         bpb = metric.compute([])
 
@@ -218,7 +218,7 @@ class TestBPBMetric:
 
     def test_bpb_aggregates_across_responses(self):
         """Test that BPB uses simple arithmetic mean across responses."""
-        metric = BPBMetric()
+        metric = BPBMetricInstanceAvg()
 
         # Response 1: "a" (1 byte), logprob -1.0 → BPB = 1.0 / (1 * log(2))
         # Response 2: "ab" (2 bytes), logprob -4.0 (sum of -2.0, -2.0) → BPB = 4.0 / (2 * log(2))
@@ -237,7 +237,7 @@ class TestBPBMetric:
 
     def test_bpb_no_logprobs_returns_zero(self):
         """Test that output without logprobs returns 0."""
-        metric = BPBMetric()
+        metric = BPBMetricInstanceAvg()
 
         output = LMOutput(text="test", logprobs=None)
         responses = [self._make_response([output])]
@@ -245,3 +245,74 @@ class TestBPBMetric:
         bpb = metric.compute(responses)
 
         assert bpb == 0.0
+
+
+class TestBPBMetricByteAvg:
+    """Tests for BPBMetricByteAvg (byte-weighted aggregation)."""
+
+    def _make_output_with_logprobs(self, text: str, logprobs: list[float]) -> LMOutput:
+        entries = []
+        for i, lp in enumerate(logprobs):
+            char = text[i] if i < len(text) else ""
+            entries.append(
+                {
+                    "token": char,
+                    "logprob": lp,
+                    "bytes": list(char.encode("utf-8")),
+                }
+            )
+        return LMOutput(text=text, logprobs=entries)
+
+    def _make_response(
+        self,
+        outputs: list[LMOutput],
+        gold_idx: int | None = None,
+    ) -> Response:
+        metadata = {"gold_idx": gold_idx} if gold_idx is not None else {}
+        return Response(
+            instance=Instance(question="Q", gold_answer="A", metadata=metadata),
+            request=LMRequest(request_type=RequestType.COMPLETION, prompt="Q"),
+            outputs=outputs,
+        )
+
+    def test_byte_avg_single_output(self):
+        """Single output should match instance-avg (only one instance)."""
+        metric = BPBMetricByteAvg()
+        output = self._make_output_with_logprobs("ab", [-1.0, -1.0])
+        responses = [self._make_response([output])]
+
+        bpb = metric.compute(responses)
+
+        expected = 2.0 / (2 * math.log(2))
+        assert bpb == pytest.approx(expected)
+
+    def test_byte_avg_weights_by_bytes(self):
+        """Byte-weighted average differs from instance-average when texts vary in length."""
+        metric = BPBMetricByteAvg()
+
+        # Response 1: "a" (1 byte), logprob -1.0 → neg_logprob = 1.0
+        # Response 2: "ab" (2 bytes), logprobs [-2.0, -2.0] → neg_logprob = 4.0
+        # Byte-weighted: (1.0 + 4.0) / ((1 + 2) * log(2)) = 5.0 / (3 * log(2))
+        responses = [
+            self._make_response([self._make_output_with_logprobs("a", [-1.0])]),
+            self._make_response([self._make_output_with_logprobs("ab", [-2.0, -2.0])]),
+        ]
+
+        bpb = metric.compute(responses)
+
+        expected = 5.0 / (3 * math.log(2))
+        assert bpb == pytest.approx(expected)
+
+        # Verify it differs from instance-average
+        instance_avg = BPBMetricInstanceAvg().compute(responses)
+        assert bpb != pytest.approx(instance_avg)
+
+    def test_byte_avg_empty_responses(self):
+        metric = BPBMetricByteAvg()
+        assert metric.compute([]) == 0.0
+
+    def test_byte_avg_no_logprobs_returns_zero(self):
+        metric = BPBMetricByteAvg()
+        output = LMOutput(text="test", logprobs=None)
+        responses = [self._make_response([output])]
+        assert metric.compute(responses) == 0.0

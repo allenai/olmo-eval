@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.metrics import BPBMetric
+from olmo_eval.common.metrics import BPBMetricInstanceAvg
 from olmo_eval.common.types import Instance, LMRequest, RequestType
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -90,10 +90,10 @@ class SerializedTask(Task):
 # Serialized task registrations for olmo3:base_easy:code_bpb
 #
 # Each task points its data_source at the S3 JSONL for that task and
-# uses BPBMetric (matching oe-eval's primary_metric=bits_per_byte_corr).
+# uses BPBMetricInstanceAvg (matching oe-eval's primary_metric=bits_per_byte_corr).
 # =============================================================================
 
-_BPB_METRICS = (BPBMetric(),)
+_BPB_METRICS = (BPBMetricInstanceAvg(),)
 
 # codex_humaneval:3shot:bpb::none
 register_variant(

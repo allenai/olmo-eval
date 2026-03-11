@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from olmo_eval.common.formatters import MCQAChatFormatter, MultipleChoiceFormatter, PPLFormatter
-from olmo_eval.common.metrics import AccuracyMetric, BPBMetric, Metric
+from olmo_eval.common.metrics import AccuracyMetric, BPBMetricByteAvg, Metric
 from olmo_eval.common.scorers import MultipleChoiceScorer, Scorer
 from olmo_eval.common.types import (
     Instance,
@@ -112,7 +112,7 @@ class LabBenchTask(Task):
         cls.sampling_params = _DEFAULT_SAMPLING
         register(name)(cls)
         register_variant(name, "mc", formatter=MultipleChoiceFormatter(), metrics=_DEFAULT_METRICS)
-        register_variant(name, "bpb", formatter=PPLFormatter(), metrics=(BPBMetric(),))
+        register_variant(name, "bpb", formatter=PPLFormatter(), metrics=(BPBMetricByteAvg(),))
 
     @property
     def instances(self) -> Iterator[Instance]:
