@@ -33,12 +33,14 @@ class LiteLLMProvider(InferenceProvider):
         "AZURE_API_KEY": "azure_api_key",
         "AZURE_API_BASE": "azure_api_base",
         "AZURE_API_VERSION": "azure_api_version",
+        "LITELLM_PROXY_API_KEY": "litellm_proxy_api_key",
     }
 
     def __init__(
         self,
         model_name: str,
         base_url: str | None = None,
+        api_base: str | None = None,
         max_concurrency: int = 32,
         max_retries: int = 3,
         retry_delay: float = 1.0,
@@ -49,6 +51,7 @@ class LiteLLMProvider(InferenceProvider):
         Args:
             model_name: Model identifier (e.g., "gpt-4", "claude-3-opus").
             base_url: Optional base URL for OpenAI-compatible endpoints.
+            api_base: Optional API base for litellm.completion.
             max_concurrency: Maximum number of concurrent API requests.
             max_retries: Maximum number of retries for transient errors.
             retry_delay: Base delay in seconds between retries (exponential backoff).
@@ -64,6 +67,7 @@ class LiteLLMProvider(InferenceProvider):
         super().__init__(model_name)
         self._litellm = litellm
         self.base_url = base_url
+        self.api_base = api_base
         self.max_concurrency = max_concurrency
         self.max_retries = max_retries
         self.retry_delay = retry_delay
@@ -117,6 +121,7 @@ class LiteLLMProvider(InferenceProvider):
 
         # Prepare API kwargs
         kwargs: dict[str, Any] = {
+            "api_base": self.api_base,
             "model": self.model_name,
             "messages": messages,
             "n": params.num_samples,
@@ -130,6 +135,9 @@ class LiteLLMProvider(InferenceProvider):
             kwargs["stop"] = list(params.stop_sequences)[:_MAX_STOP_SEQUENCES]
         # Always request logprobs for metrics computation
         kwargs["logprobs"] = True
+        kwargs["top_logprobs"] = (
+            1  # NOTE: workaround for litellm proxy issue https://github.com/BerriAI/litellm/issues/21932
+        )
 
         response = await self._litellm.acompletion(**kwargs)
 
@@ -245,11 +253,13 @@ class LiteLLMProvider(InferenceProvider):
             content = request.prompt
 
         response = await self._litellm.acompletion(
+            api_base=self.api_base,
             model=self.model_name,
             messages=[{"role": "user", "content": content}],
             max_completion_tokens=50,
             temperature=0.0,
             logprobs=True,
+            top_logprobs=1,  # NOTE: workaround for litellm proxy issue https://github.com/BerriAI/litellm/issues/21932
             **self.api_kwargs,
         )
 

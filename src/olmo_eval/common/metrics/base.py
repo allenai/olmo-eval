@@ -13,6 +13,7 @@ from olmo_eval.common.scorers import (
     LogprobScorer,
     PerplexityScorer,
     Scorer,
+    SubstringRecallScorer,
     ToolCallScorer,
 )
 from olmo_eval.common.types import Response
@@ -65,6 +66,36 @@ class F1Metric(Metric):
     scorer: type[Scorer] = F1Scorer
 
     def compute(self, responses: Sequence[Response]) -> float:
+        if not responses:
+            return 0.0
+        scorer_name = self.scorer().name
+        total = sum(r.scores.get(scorer_name, 0.0) for r in responses)
+        return total / len(responses)
+
+
+@dataclass(frozen=True, slots=True)
+class RecallMetric(Metric):
+    """Recall metric.
+
+    Aggregates recall scores across instances by averaging them.
+    Works with any recall-based scorer (e.g., SubstringRecallScorer).
+
+    Used for tasks that measure information retrieval or recall,
+    such as RULER and similar long-context benchmarks.
+    """
+
+    name: str = "recall"
+    scorer: type[Scorer] = SubstringRecallScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        """Compute average recall across all responses.
+
+        Args:
+            responses: Sequence of Response objects with scores
+
+        Returns:
+            Average recall score (0.0 to 1.0)
+        """
         if not responses:
             return 0.0
         scorer_name = self.scorer().name

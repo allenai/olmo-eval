@@ -193,3 +193,9 @@ skip_covered = false
 
 [tool.coverage.html]
 directory = "htmlcov"
+
+
+[tool.gantry]
+gh_token_secret = "GITHUB_TOKEN"
+log_level = "warning"
+quiet = false
