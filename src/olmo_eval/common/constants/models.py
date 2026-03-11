@@ -73,6 +73,11 @@ def get_model_presets() -> dict[str, ProviderConfig]:
         #         "git+https://github.com/deepseek-ai/DeepGEMM.git@v2.1.1.post3 --no-build-isolation",
         #     ),
         # ),
+        "deepseek-r1-distill-8b": ProviderConfig(
+            kind=ProviderKind.VLLM,
+            model="deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
+            max_model_len=32768,
+        ),
         "mistral-7b": ProviderConfig(
             kind=ProviderKind.VLLM,
             model="mistralai/Mistral-7B-v0.3",
