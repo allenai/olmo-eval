@@ -330,7 +330,7 @@ register_variant(
     "chat",
     formatter=ChatFormatter(),
     sampling_params=SamplingParams(
-        max_tokens=4096,
+        max_tokens=16384,
         temperature=0.0,
         stop_sequences=("Problem:",),
     ),
