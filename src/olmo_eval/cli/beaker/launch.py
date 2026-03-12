@@ -239,13 +239,6 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     default=None,
     help="Number of GPUs. Defaults to 1 for GPU providers, 0 otherwise.",
 )
-@click.option(
-    "--num-inference-workers",
-    "-W",
-    type=int,
-    default=None,
-    help="Number of inference workers for data parallelism. GPUs are divided evenly.",
-)
 def launch(
     config: str | None,
     name: str | None,
@@ -290,7 +283,6 @@ def launch(
     uv_cache_dir: str,
     secret_env: tuple[str, ...],
     gpus: int | None,
-    num_inference_workers: int | None,
 ) -> None:
     """Launch an evaluation job on Beaker.
 
@@ -381,7 +373,6 @@ def launch(
         "uv_cache_dir": uv_cache_dir,
         "secret_env_overrides": secret_env_overrides,
         "gcp_secret": gcp_secret,
-        "num_inference_workers": num_inference_workers,
     }
 
     # Handle external evaluations mode
@@ -496,6 +487,7 @@ def launch(
     # Check if harness has a sandbox configured - if so, use sandbox image
     # Apply harness overrides first so -o sandbox.mode=docker works correctly
     harness_needs_sandbox = False
+    harness_preset = None
     if launch_config.harness:
         from olmo_eval.harness import get_harness_preset
 
@@ -505,6 +497,28 @@ def launch(
                 harness_preset, launch_config.harness_overrides
             )
         harness_needs_sandbox = bool(harness_preset.sandboxes)
+
+    # Validate num_inference_workers against GPU count
+    num_inference_workers = harness_preset.num_inference_workers if harness_preset else 1
+    if num_inference_workers > 1:
+        if launch_config.gpus == 0:
+            console.print(
+                f"[red]Error:[/red] num_inference_workers={num_inference_workers} "
+                "requires GPUs, but --gpus is 0"
+            )
+            raise SystemExit(1)
+        if num_inference_workers > launch_config.gpus:
+            console.print(
+                f"[red]Error:[/red] num_inference_workers ({num_inference_workers}) "
+                f"exceeds GPU count ({launch_config.gpus})"
+            )
+            raise SystemExit(1)
+        if launch_config.gpus % num_inference_workers != 0:
+            console.print(
+                f"[red]Error:[/red] GPU count ({launch_config.gpus}) must be evenly "
+                f"divisible by num_inference_workers ({num_inference_workers})"
+            )
+            raise SystemExit(1)
 
     if image:
         effective_image = image

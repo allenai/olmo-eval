@@ -384,6 +384,34 @@ class HarnessConfig:
             num_inference_workers=self.num_inference_workers,
         )
 
+    def with_num_inference_workers(self, num_inference_workers: int) -> HarnessConfig:
+        """Create a new config with updated num_inference_workers.
+
+        Args:
+            num_inference_workers: Number of parallel inference workers.
+
+        Returns:
+            New HarnessConfig with updated num_inference_workers.
+        """
+        return HarnessConfig(
+            name=self.name,
+            provider=self.provider,
+            tools=self.tools,
+            system_prompt=self.system_prompt,
+            tool_choice=self.tool_choice,
+            backend=self.backend,
+            required_secrets=self.required_secrets,
+            max_turns=self.max_turns,
+            max_concurrency=self.max_concurrency,
+            scoring_concurrency=self.scoring_concurrency,
+            sandboxes=self.sandboxes,
+            backend_kwargs=self.backend_kwargs,
+            metrics=self.metrics,
+            batching=self.batching,
+            scorer_startup_timeout=self.scorer_startup_timeout,
+            num_inference_workers=num_inference_workers,
+        )
+
 
 def harness_config(
     name: str,
