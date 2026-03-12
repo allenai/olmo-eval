@@ -54,6 +54,7 @@ class LaunchConfig:
 
     harness: str | None = None
     harness_overrides: list[str] = field(default_factory=list)
+    num_inference_workers: int = 1
 
     inject_aws_credentials: bool = False
     inject_gcs_credentials: bool = False
@@ -209,6 +210,7 @@ class LaunchConfigLoader:
             uv_cache_dir=self.cli_args.get("uv_cache_dir"),
             secret_env_overrides=self.cli_args.get("secret_env_overrides", {}),
             inject_gcp_secret=self.cli_args.get("gcp_secret") or False,
+            num_inference_workers=self.cli_args.get("num_inference_workers") or 1,
         )
 
     def _validate_required(

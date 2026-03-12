@@ -239,6 +239,13 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     default=None,
     help="Number of GPUs. Defaults to 1 for GPU providers, 0 otherwise.",
 )
+@click.option(
+    "--num-inference-workers",
+    "-W",
+    type=int,
+    default=None,
+    help="Number of inference workers for data parallelism. GPUs are divided evenly.",
+)
 def launch(
     config: str | None,
     name: str | None,
@@ -283,6 +290,7 @@ def launch(
     uv_cache_dir: str,
     secret_env: tuple[str, ...],
     gpus: int | None,
+    num_inference_workers: int | None,
 ) -> None:
     """Launch an evaluation job on Beaker.
 
@@ -373,6 +381,7 @@ def launch(
         "uv_cache_dir": uv_cache_dir,
         "secret_env_overrides": secret_env_overrides,
         "gcp_secret": gcp_secret,
+        "num_inference_workers": num_inference_workers,
     }
 
     # Handle external evaluations mode

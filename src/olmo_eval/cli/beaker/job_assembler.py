@@ -656,4 +656,7 @@ class JobConfigAssembler:
         for override in self.config.harness_overrides:
             command.extend(["-o", override])
 
+        if self.config.num_inference_workers > 1:
+            command.extend(["-o", f"num_inference_workers={self.config.num_inference_workers}"])
+
         return command
