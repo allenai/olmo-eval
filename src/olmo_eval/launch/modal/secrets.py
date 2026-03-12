@@ -111,7 +111,7 @@ def get_local_gcp_credentials() -> GCPCredentials | None:
 
 
 def ensure_modal_gcp_secret(
-    secret_name: str = "gcp-artifact-registry",
+    secret_name: str = "SERVICE_ACCOUNT_JSON",
     credentials: GCPCredentials | None = None,
 ) -> str:
     """Ensure Modal secret exists with GCP credentials for Artifact Registry.
