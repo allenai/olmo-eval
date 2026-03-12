@@ -57,6 +57,7 @@ class Tau2Args:
 
     # Agent LLM settings
     max_tokens: int | None = None
+    truncate: str | None = None  # Passed to litellm.completion. Can be "right" or "left".
     max_model_len: int | None = None
     temperature: float | None = None
 
@@ -88,6 +89,7 @@ class Tau2Args:
             max_steps=int(data.get("max_steps", 30)),
             max_concurrency=int(data.get("max_concurrency", 3)),
             max_tokens=_parse_optional(data, "max_tokens", int),
+            truncate=_parse_optional(data, "truncate", str),
             max_model_len=_parse_optional(data, "max_model_len", int),
             temperature=_parse_optional(data, "temperature", float),
             user_llm=data.get("user_llm", "gpt-4o-mini"),
@@ -150,6 +152,7 @@ class Tau2ExternalEval(SandboxedExternalEval):
             "max_steps": ("Max agent steps per trial", 30),
             "max_concurrency": ("Max concurrent requests", 3),
             "max_tokens": ("Max tokens for agent LLM responses", None),
+            "truncate": ("Truncate strategy for agent LLM responses ('right' or 'left')", None),
             "max_model_len": ("Model context length for litellm registration", None),
             "temperature": ("Temperature for agent LLM responses", None),
             "user_llm": ("LLM for simulated user (requires API key)", "gpt-4o-mini"),
@@ -260,6 +263,8 @@ class Tau2ExternalEval(SandboxedExternalEval):
             agent_llm_args["api_base"] = provider_url
         if tau2_args.max_tokens:
             agent_llm_args["max_tokens"] = tau2_args.max_tokens
+        if tau2_args.truncate:
+            agent_llm_args["truncate"] = tau2_args.truncate
         if tau2_args.temperature is not None:
             agent_llm_args["temperature"] = tau2_args.temperature
         if agent_llm_args:
