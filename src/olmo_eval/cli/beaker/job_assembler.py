@@ -513,11 +513,12 @@ class JobConfigAssembler:
                     sandbox.mode == SandboxMode.MODAL
                     and sandbox.registry_auth
                     and sandbox.registry_auth.provider == "gcp"
-                    and sandbox.registry_auth.secret_name
                 ):
-                    job_env_vars["MODAL_GCP_SECRET_NAME"] = sandbox.registry_auth.secret_name
+                    # Use configured secret name or default to SERVICE_ACCOUNT_JSON
+                    secret_name = sandbox.registry_auth.secret_name or "SERVICE_ACCOUNT_JSON"
+                    job_env_vars["MODAL_GCP_SECRET_NAME"] = secret_name
                     setup_modal_gcp_secret = True
-                    log.info(f"Modal GCP secret setup enabled: {sandbox.registry_auth.secret_name}")
+                    log.info(f"Modal GCP secret setup enabled: {secret_name}")
 
         # Collect task dependencies and provider dependencies separately
         task_packages = self._extract_task_dependencies(exp.tasks, exp.task_overrides) or None

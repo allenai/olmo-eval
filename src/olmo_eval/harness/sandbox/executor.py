@@ -261,13 +261,14 @@ class SandboxExecutor:
                     image = self.config.image
 
                 # Modal pulls pre-built image from registry (no pip_install/run_commands)
-                if self.config.registry_auth and self.config.registry_auth.secret_name:
+                if self.config.registry_auth:
+                    secret_name = self.config.registry_auth.secret_name or "SERVICE_ACCOUNT_JSON"
                     self._log(
                         logging.INFO,
                         f"Using registry auth: provider={self.config.registry_auth.provider}, "
-                        f"secret={self.config.registry_auth.secret_name}",
+                        f"secret={secret_name}",
                     )
-                    secret = modal.Secret.from_name(self.config.registry_auth.secret_name)
+                    secret = modal.Secret.from_name(secret_name)
                     match self.config.registry_auth.provider:
                         case "gcp":
                             self._log(
