@@ -23,7 +23,6 @@ from olmo_eval.cli.utils import (
     ConfiguredExternalEval,
     ExperimentSummary,
     ExternalEvalSummary,
-    HarnessSummary,
     OrderedMultiOption,
     RunnerConfig,
     console,
@@ -841,12 +840,10 @@ def _build_experiment_summary(
     provider_config = get_provider_config(exp.model_spec)
     harness_config = harness_config.merge_provider(provider_config)
 
-    harness_summary = HarnessSummary(config=harness_config)
-
     return ExperimentSummary(
         name=exp.name,
         tasks=exp_task_configs,
-        harness=harness_summary,
+        harness=harness_config,
         runner=exp_runner_config,
         beaker=job_config,
     )

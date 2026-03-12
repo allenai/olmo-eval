@@ -16,13 +16,6 @@ if TYPE_CHECKING:
     from olmo_eval.launch.beaker.launcher import BeakerJobConfig
 
 
-@dataclass
-class HarnessSummary:
-    """Display-friendly representation of a Harness."""
-
-    config: "HarnessConfig"
-
-
 console = Console(force_terminal=True, width=120)
 
 
@@ -264,7 +257,7 @@ class ExperimentSummary:
 
     name: str
     tasks: list["TaskConfig"]
-    harness: HarnessSummary
+    harness: "HarnessConfig"
     runner: RunnerConfig
     beaker: "BeakerJobConfig"
 
