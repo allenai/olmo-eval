@@ -262,25 +262,32 @@ class SandboxExecutor:
 
                 # Modal pulls pre-built image from registry (no pip_install/run_commands)
                 if self.config.registry_auth:
-                    secret_name = self.config.registry_auth.secret_name or "SERVICE_ACCOUNT_JSON"
-                    self._log(
-                        logging.INFO,
-                        f"Using registry auth: provider={self.config.registry_auth.provider}, "
-                        f"secret={secret_name}",
-                    )
-                    secret = modal.Secret.from_name(secret_name)
-                    match self.config.registry_auth.provider:
+                    provider = self.config.registry_auth.provider
+                    match provider:
                         case "gcp":
+                            # Default to gcp-service-account-json for GCP
+                            secret_name = (
+                                self.config.registry_auth.secret_name or "gcp-service-account-json"
+                            )
                             self._log(
                                 logging.INFO,
-                                f"Modal pulling from GCP AR: {image}",
+                                f"Modal pulling from GCP AR: {image}, secret={secret_name}",
                             )
+                            secret = modal.Secret.from_name(secret_name)
                             modal_image = modal.Image.from_gcp_artifact_registry(
                                 image, secret=secret
                             )
                         case "ecr":
+                            secret_name = self.config.registry_auth.secret_name
+                            if not secret_name:
+                                raise ValueError("ECR registry_auth requires secret_name")
+                            secret = modal.Secret.from_name(secret_name)
                             modal_image = modal.Image.from_aws_ecr(image, secret=secret)
                         case "docker":
+                            secret_name = self.config.registry_auth.secret_name
+                            if not secret_name:
+                                raise ValueError("Docker registry_auth requires secret_name")
+                            secret = modal.Secret.from_name(secret_name)
                             modal_image = modal.Image.from_registry(image, secret=secret)
                         case _:
                             modal_image = modal.Image.from_registry(image)

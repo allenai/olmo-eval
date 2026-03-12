@@ -514,8 +514,8 @@ class JobConfigAssembler:
                     and sandbox.registry_auth
                     and sandbox.registry_auth.provider == "gcp"
                 ):
-                    # Use configured secret name or default to SERVICE_ACCOUNT_JSON
-                    secret_name = sandbox.registry_auth.secret_name or "SERVICE_ACCOUNT_JSON"
+                    # Use configured secret name or default to gcp-service-account-json
+                    secret_name = sandbox.registry_auth.secret_name or "gcp-service-account-json"
                     job_env_vars["MODAL_GCP_SECRET_NAME"] = secret_name
                     setup_modal_gcp_secret = True
                     log.info(f"Modal GCP secret setup enabled: {secret_name}")
