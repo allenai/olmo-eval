@@ -4,18 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
-import logging
 import time
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 
 from olmo_eval.common.execution.environment import ExecutionResult
+from olmo_eval.common.logging import configure_worker_logging
 
 from .config import SandboxConfig
 from .executor import SandboxExecutor
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -77,6 +75,7 @@ class SandboxManager:
         """
         self._configs = list(configs)
         self._owner = owner
+        self._logger = configure_worker_logging("sb-manager")
         self._executors: list[SandboxExecutor] = []
         self._round_robin_indices: dict[frozenset[str], int] = {}
         self._bindings: dict[str, ExecutorBinding] = {}
@@ -108,7 +107,7 @@ class SandboxManager:
         # Start all executors in thread pool to avoid blocking event loop
         # swe-rex's DockerDeployment.start() has blocking subprocess calls
         start_time = time.time()
-        logger.info(f"Starting {len(self._executors)} sandbox executors in parallel...")
+        self._logger.info(f"Starting {len(self._executors)} sandbox executors in parallel...")
 
         def start_in_thread(executor: SandboxExecutor) -> None:
             """Run executor.start() in a dedicated thread with its own event loop."""
@@ -125,7 +124,7 @@ class SandboxManager:
             await asyncio.gather(*futures)
 
         elapsed = time.time() - start_time
-        logger.info(f"All {len(self._executors)} sandbox executors started in {elapsed:.1f}s")
+        self._logger.info(f"All {len(self._executors)} sandbox executors started in {elapsed:.1f}s")
 
     async def stop(self) -> None:
         """Stop all sandbox executors in parallel."""
@@ -138,7 +137,7 @@ class SandboxManager:
         await asyncio.gather(*[e.stop() for e in self._executors])
         self._executors.clear()
         self._round_robin_indices.clear()
-        logger.info("All sandboxes stopped")
+        self._logger.info("All sandboxes stopped")
 
     def get_executor(self, required_capabilities: frozenset[str]) -> SandboxExecutor:
         """Get an executor that supports the required capabilities.

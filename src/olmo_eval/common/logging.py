@@ -265,6 +265,13 @@ def configure_worker_logging(worker_id: str) -> logging.Logger:
         logger.setLevel(logging.INFO)
         logger.propagate = False
 
+        # Suppress noisy swerex logs in worker subprocesses
+        swerex_filter = SwerexNoiseFilter()
+        for logger_name in ("swerex", "rex-runtime", "rex-session"):
+            swerex_logger = logging.getLogger(logger_name)
+            swerex_logger.setLevel(logging.WARNING)
+            swerex_logger.addFilter(swerex_filter)
+
     return logger
 
 
