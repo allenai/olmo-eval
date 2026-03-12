@@ -97,12 +97,14 @@ class FlushingStreamHandler(logging.StreamHandler):
 
 
 class SwerexNoiseFilter(logging.Filter):
-    """Filter out noisy swerex logs that are redundant with our own logging.
+    """Filter out noisy swerex/modal logs that are redundant with our own logging.
 
     Filters:
+    - All INFO level messages from swerex/modal loggers
     - CommandTimeoutError tracebacks (not actionable, expected for infinite loops)
     - "Error making request" messages (redundant with our "Failed to score" warning)
     - Remote runtime error responses containing exception info
+    - Noisy modal sandbox lifecycle messages
     """
 
     # Patterns to filter (case-sensitive for performance)
@@ -113,6 +115,17 @@ class SwerexNoiseFilter(logging.Filter):
         "pexpect.TIMEOUT",
     )
 
+    # Noisy modal/swerex INFO patterns to always filter
+    _MODAL_NOISE_PATTERNS = (
+        "Starting modal sandbox",
+        "Sandbox created",
+        "Sandbox (sb-",
+        "Check sandbox logs at",
+        "Runtime started",
+        "Starting runtime at",
+        "modal.host",
+    )
+
     # Patterns only filtered at ERROR level or above
     _ERROR_PATTERNS = (
         "Error making request",
@@ -120,18 +133,20 @@ class SwerexNoiseFilter(logging.Filter):
         "Traceback",
     )
 
+    # Logger prefixes that should have INFO filtered
+    _NOISY_LOGGER_PREFIXES = ("swerex", "rex-", "modal")
+
     def filter(self, record: logging.LogRecord) -> bool:
-        # Check logger name - filter all timeout-related logs from swerex/rex loggers
-        if record.name.startswith(("swerex", "rex-")):
-            msg = str(record.getMessage())
-            for pattern in self._FILTER_PATTERNS:
-                if pattern in msg:
-                    return False
-            # Also check exc_text for exception tracebacks
-            if record.exc_text and any(p in record.exc_text for p in self._FILTER_PATTERNS):
-                return False
+        # Filter all INFO (and below) from swerex/modal loggers
+        if record.name.startswith(self._NOISY_LOGGER_PREFIXES) and record.levelno <= logging.INFO:
+            return False
 
         msg = str(record.getMessage())
+
+        # Filter noisy modal sandbox lifecycle messages regardless of source
+        for pattern in self._MODAL_NOISE_PATTERNS:
+            if pattern in msg:
+                return False
 
         # Always filter these patterns regardless of source
         for pattern in self._FILTER_PATTERNS:
@@ -187,6 +202,10 @@ def configure_logging(level: LogLevel = "INFO") -> None:
     Set OLMO_EVAL_DEBUG=1 to bypass all log silencing and warning filters.
     """
     root_logger = logging.getLogger()
+
+    # Clear any existing handlers to ensure clean state
+    # This is important for worker subprocesses that might inherit handlers
+    root_logger.handlers.clear()
 
     # In debug mode, use DEBUG level and don't silence anything
     if _is_debug_mode():
@@ -304,6 +323,11 @@ def configure_worker_logging(worker_id: str) -> logging.Logger:
             noisy_logger = logging.getLogger(logger_name)
             noisy_logger.setLevel(logging.ERROR)
             noisy_logger.addFilter(swerex_filter)
+
+        # Ensure root logger handlers also have the filter
+        root_logger = logging.getLogger()
+        for root_handler in root_logger.handlers:
+            root_handler.addFilter(swerex_filter)
 
     return logger
 

@@ -241,9 +241,6 @@ class SandboxExecutor:
 
                 import modal
 
-                # Enable Modal output to see image build logs
-                modal.enable_output()
-
                 # Build image locally and push to registry (same as Docker/Podman mode)
                 # Modal will pull the pre-built image from the registry
                 if self.config.inject_swerex:
