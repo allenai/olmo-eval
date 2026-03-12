@@ -59,7 +59,7 @@ async def _run_with_progress(
             await asyncio.wait_for(asyncio.shield(task), timeout=interval)
         except TimeoutError:
             elapsed = time.time() - start
-            logger.info(f"{message} ({elapsed:.0f}s elapsed)")
+            logger.debug(f"{message} ({elapsed:.0f}s elapsed)")
 
     return task.result()
 
@@ -270,7 +270,7 @@ class SandboxExecutor:
                                 self.config.registry_auth.secret_name or "gcp-service-account-json"
                             )
                             self._log(
-                                logging.INFO,
+                                logging.DEBUG,
                                 f"Modal pulling from GCP AR: {image}, secret={secret_name}",
                             )
                             secret = modal.Secret.from_name(secret_name)

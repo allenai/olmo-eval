@@ -95,6 +95,7 @@ class ProviderManager:
                     total_instances,
                     init_times,
                     self._output_dir,
+                    self._num_inference_workers,
                 ),
             )
             proc.start()

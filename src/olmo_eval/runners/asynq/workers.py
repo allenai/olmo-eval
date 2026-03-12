@@ -31,6 +31,7 @@ def inference_worker(
     total_instances: int,
     init_times: dict[str, float] | None = None,
     output_dir: str | None = None,
+    num_workers: int = 1,
 ) -> None:
     """Worker process that initializes a harness and processes items.
 
@@ -44,9 +45,10 @@ def inference_worker(
         item_queue: Queue of QueueItems (None signals shutdown).
         result_queue: Queue to put ResultItems.
         harness_config_dict: Serialized HarnessConfig.
-        total_instances: Total number of instances to process.
+        total_instances: Total number of instances across all workers.
         init_times: Optional shared dict for tracking initialization times.
         output_dir: Output directory for persisting logs (e.g., vLLM server logs).
+        num_workers: Number of parallel workers sharing the work.
     """
     import sys
 
@@ -177,6 +179,7 @@ def inference_worker(
                     max_concurrency,
                     worker_logger,
                     total_instances,
+                    num_workers,
                 )
             )
 

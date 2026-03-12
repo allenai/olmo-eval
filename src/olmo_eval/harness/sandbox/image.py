@@ -71,7 +71,7 @@ def get_swerex_image(
         capture_output=True,
     )
     if result.returncode == 0:
-        logger.info(f"Using cached swerex image: {local_image}")
+        logger.debug(f"Using cached swerex image: {local_image}")
         if require_registry:
             # Ensure image is pushed to registry for remote access
             assert registry_image is not None  # Guaranteed by earlier check
@@ -85,7 +85,7 @@ def get_swerex_image(
             if push_result.returncode != 0:
                 stderr = push_result.stderr.decode() if push_result.stderr else ""
                 raise RuntimeError(f"Failed to push to registry: {stderr}")
-            logger.info(f"Pushed swerex image to registry: {registry_image}")
+            logger.debug(f"Pushed swerex image to registry: {registry_image}")
             return registry_image
         return local_image
 
@@ -103,7 +103,7 @@ def get_swerex_image(
                 [container_runtime, "tag", registry_image, local_image],
                 capture_output=True,
             )
-            logger.info(f"Pulled swerex image from registry: {local_image}")
+            logger.debug(f"Pulled swerex image from registry: {local_image}")
             return registry_image if require_registry else local_image
         logger.debug("Registry pull failed, will build locally")
 
@@ -139,13 +139,13 @@ ENV PATH="/root/python/bin:$PATH"
     logger.info(f"Built swerex image: {local_image}")
 
     if registry and registry_image:
-        logger.info(f"Pushing swerex image to registry: {registry_image}")
+        logger.debug(f"Pushing swerex image to registry: {registry_image}")
         subprocess.run([container_runtime, "tag", local_image, registry_image], capture_output=True)
         push_result = subprocess.run(
             [container_runtime, "push", registry_image], capture_output=True
         )
         if push_result.returncode == 0:
-            logger.info(f"Pushed swerex image to registry: {registry_image}")
+            logger.debug(f"Pushed swerex image to registry: {registry_image}")
             if require_registry:
                 return registry_image
         else:
