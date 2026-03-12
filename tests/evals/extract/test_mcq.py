@@ -50,6 +50,24 @@ class TestExtractMcqAnswer:
     def test_boxed_preferred_over_paren(self):
         assert extract_mcq_answer("(A) is likely\n$$\\boxed{C}$$") == "C"
 
+    # --- **X) bold markdown ---
+
+    def test_bold_letter_paren(self):
+        assert extract_mcq_answer("### Final Answer\n\n**D) Intubate**") == "D"
+
+    def test_bold_letter_dot(self):
+        assert extract_mcq_answer("### Final Answer\n\n**C. Staphylococcus aureus**") == "C"
+
+    def test_paren_preferred_over_bold(self):
+        assert extract_mcq_answer("**B) wrong**\n**(C) right**") == "C"
+
+    # --- Answer: must stay on same line ---
+
+    def test_answer_colon_newline_does_not_match_next_word(self):
+        """'Answer:\\n\\nThe ...' must not capture T from 'The'."""
+        text = "### Final Answer:\n\nThe answer is obvious\n\\boxed{D}"
+        assert extract_mcq_answer(text) == "D"
+
     # --- No match ---
 
     def test_no_match(self):
