@@ -379,7 +379,10 @@ def scoring_worker(
                 )
                 sys.exit(1)
 
-            scoring_context = ScoringContext(execution_env=sandbox_manager)
+            scoring_context = ScoringContext(
+                execution_env=sandbox_manager,
+                scoring_concurrency=max_concurrency,
+            )
 
         # Signal that worker is ready
         worker_logger.info("Scorer ready")

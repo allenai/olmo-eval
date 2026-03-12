@@ -446,7 +446,6 @@ class Task(ABC):
         self,
         responses: Sequence[Response],
         context: ScoringContext,
-        max_concurrency: int = 8,
     ) -> None:
         """Run all scorers with context and populate response.scores.
 
@@ -455,8 +454,7 @@ class Task(ABC):
 
         Args:
             responses: Responses to score.
-            context: Scoring context with execution environment.
-            max_concurrency: Maximum concurrent async scoring operations.
+            context: Scoring context with execution environment and concurrency settings.
 
         Raises:
             SandboxRequiredError: If an ExecutionScorer is used without a valid
@@ -502,7 +500,7 @@ class Task(ABC):
 
         # Apply execution scorers concurrently
         if execution_scorers and execution_env is not None:
-            semaphore = asyncio.Semaphore(max_concurrency)
+            semaphore = asyncio.Semaphore(context.scoring_concurrency)
 
             # Build list of async scoring tasks
             # Each task is (response_idx, scorer_name, output_idx, coroutine)
