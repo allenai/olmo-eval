@@ -15,7 +15,7 @@ class PhpEvaluator(BaseLanguageEvaluator):
     LANG_NAME: ClassVar[str] = "PHP"
     LANG_EXT: ClassVar[str] = "php"
     LANG_ID: ClassVar[str] = "php"
-    DEFAULT_TIMEOUT: ClassVar[float] = 10.0
+    DEFAULT_TIMEOUT: ClassVar[float] = 5.0
 
     filename: str = "code.php"
     compile_cmd: str | None = None

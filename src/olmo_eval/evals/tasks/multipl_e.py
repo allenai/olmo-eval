@@ -231,6 +231,18 @@ def _register_mbpp_task(lang: str) -> None:
         "pass_at_1",
         metrics=(PassAtKMetric(k=1, scorer=scorer_cls),),
     )
+    register_variant(
+        task_name,
+        "pass_at_10",
+        metrics=(PassAtKMetric(k=10, scorer=scorer_cls),),
+        sampling_params=SamplingParams(
+            max_tokens=512,
+            temperature=0.8,
+            do_sample=True,
+            top_p=0.95,
+            num_samples=20,
+        ),
+    )
 
 
 # Register HumanEval tasks for each language (20 samples for pass@k)

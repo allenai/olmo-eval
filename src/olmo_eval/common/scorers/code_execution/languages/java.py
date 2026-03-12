@@ -15,7 +15,7 @@ class JavaEvaluator(BaseLanguageEvaluator):
     LANG_NAME: ClassVar[str] = "Java"
     LANG_EXT: ClassVar[str] = "java"
     LANG_ID: ClassVar[str] = "java"
-    DEFAULT_TIMEOUT: ClassVar[float] = 30.0
+    DEFAULT_TIMEOUT: ClassVar[float] = 15.0
 
     filename: str = "Problem.java"
     compile_cmd: str | None = "cd {d} && javac -cp '/runtime/java/*' Problem.java"

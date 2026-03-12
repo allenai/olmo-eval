@@ -15,7 +15,7 @@ class RsEvaluator(BaseLanguageEvaluator):
     LANG_NAME: ClassVar[str] = "Rust"
     LANG_EXT: ClassVar[str] = "rs"
     LANG_ID: ClassVar[str] = "rs"
-    DEFAULT_TIMEOUT: ClassVar[float] = 30.0
+    DEFAULT_TIMEOUT: ClassVar[float] = 15.0
 
     filename: str = "code.rs"
     compile_cmd: str | None = "rustc -o {d}/a.out {f}"

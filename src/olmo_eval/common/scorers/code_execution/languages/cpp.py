@@ -15,7 +15,7 @@ class CppEvaluator(BaseLanguageEvaluator):
     LANG_NAME: ClassVar[str] = "C++"
     LANG_EXT: ClassVar[str] = "cpp"
     LANG_ID: ClassVar[str] = "cpp"
-    DEFAULT_TIMEOUT: ClassVar[float] = 30.0
+    DEFAULT_TIMEOUT: ClassVar[float] = 15.0
 
     filename: str = "code.cpp"
     compile_cmd: str | None = "g++ -o {d}/a.out {f}"
