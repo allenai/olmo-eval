@@ -118,7 +118,7 @@ class SandboxExecutor:
             ImportError: If swe-rex is not installed.
             RuntimeError: If container runtime is not available.
         """
-        self._log(logging.INFO, "Starting sandbox deployment...")
+        self._log(logging.DEBUG, "Starting sandbox deployment...")
         deployment = self.get_deployment()
         prefix = f"[{self.name}] " if self.name else ""
         await _run_with_progress(
@@ -129,7 +129,7 @@ class SandboxExecutor:
 
         self._deployment = deployment
         self._runtime = deployment.runtime
-        self._log(logging.INFO, "Sandbox deployment ready!")
+        self._log(logging.DEBUG, "Sandbox deployment ready!")
 
         if (
             self.config.enable_diagnostics
@@ -256,7 +256,7 @@ class SandboxExecutor:
                         self.config.dockerfile_extra,
                         require_registry=True,  # Must push to registry for Modal
                     )
-                    self._log(logging.INFO, f"Using pre-built swerex image: {image}")
+                    self._log(logging.DEBUG, f"Using pre-built swerex image: {image}")
                 else:
                     image = self.config.image
 
@@ -321,7 +321,7 @@ class SandboxExecutor:
             self._deployment = None
             self._runtime = None
 
-        self._log(logging.INFO, "Sandbox stopped")
+        self._log(logging.DEBUG, "Sandbox stopped")
 
     async def execute(self, command: str, timeout: float | None = None) -> str:
         """Execute a command in the sandbox.
