@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import time
+import uuid
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -12,7 +13,7 @@ from dataclasses import dataclass, field
 from olmo_eval.common.execution.environment import ExecutionResult
 from olmo_eval.common.logging import configure_worker_logging
 
-from .config import SandboxConfig
+from .config import SandboxConfig, SandboxMode
 from .executor import SandboxExecutor
 
 
@@ -82,6 +83,12 @@ class SandboxManager:
         self._bound_executors: set[int] = set()
         self._binding_lock: asyncio.Lock = asyncio.Lock()
         self._binding_counter: int = 0
+        self._modal_app_name: str | None = None
+
+        # Generate shared Modal app name if any config uses Modal
+        if any(c.mode == SandboxMode.MODAL for c in self._configs):
+            self._modal_app_name = f"swerex-{uuid.uuid4().hex[:12]}"
+            self._logger.info(f"Using Modal app: {self._modal_app_name}")
 
     async def start(self) -> None:
         """Start all sandbox executors in parallel.
@@ -105,7 +112,7 @@ class SandboxManager:
                 name = f"sb-{type_name}-{self._owner}-{idx}"
                 type_indices[type_name] = idx + 1
 
-                executor = SandboxExecutor(config, name=name)
+                executor = SandboxExecutor(config, name=name, modal_app_name=self._modal_app_name)
                 self._executors.append(executor)
                 executor_to_config[executor_idx] = config_idx
                 executor_idx += 1

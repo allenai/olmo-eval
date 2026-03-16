@@ -81,15 +81,22 @@ class SandboxExecutor:
             print(result)
     """
 
-    def __init__(self, config: SandboxConfig, name: str | None = None) -> None:
+    def __init__(
+        self,
+        config: SandboxConfig,
+        name: str | None = None,
+        modal_app_name: str | None = None,
+    ) -> None:
         """Initialize the sandbox executor.
 
         Args:
             config: Sandbox configuration.
             name: Optional name for logging (e.g., "sandbox-0").
+            modal_app_name: Optional shared Modal app name for this run.
         """
         self.config = config
         self.name = name
+        self._modal_app_name = modal_app_name
         self._deployment: Any = None
         self._runtime: Any = None
         self._session_created: bool = False
@@ -133,8 +140,10 @@ class SandboxExecutor:
 
             import modal
 
-            app_name = _get_modal_app_name()
-            self._log(logging.INFO, f"Using Modal app: {app_name}")
+            app_name = self._modal_app_name or _get_modal_app_name()
+            if not self._modal_app_name:
+                # Only log if we generated it (manager logs its own)
+                self._log(logging.INFO, f"Using Modal app: {app_name}")
             original_lookup = modal.App.lookup
 
             def patched_lookup(name: str, *args, **kwargs):
