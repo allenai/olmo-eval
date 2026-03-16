@@ -87,11 +87,15 @@ class SandboxManager:
         """Start all sandbox executors in parallel.
 
         Uses thread pool to avoid event loop blocking from swe-rex subprocess calls.
+        Allows partial failures if min_instances is configured on the sandbox config.
         """
         # Track per-type instance indices for naming
         type_indices: dict[str, int] = {}
+        # Track which config each executor belongs to: executor index -> config index
+        executor_to_config: dict[int, int] = {}
 
         # Create all executors first
+        executor_idx = 0
         for config_idx, config in enumerate(self._configs):
             # Derive type name from capabilities
             type_name = "+".join(sorted(config.capabilities)) or str(config_idx)
@@ -103,6 +107,8 @@ class SandboxManager:
 
                 executor = SandboxExecutor(config, name=name)
                 self._executors.append(executor)
+                executor_to_config[executor_idx] = config_idx
+                executor_idx += 1
 
         # Start all executors in thread pool to avoid blocking event loop
         # swe-rex's DockerDeployment.start() has blocking subprocess calls
@@ -121,10 +127,53 @@ class SandboxManager:
         loop = asyncio.get_event_loop()
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(self._executors)) as pool:
             futures = [loop.run_in_executor(pool, start_in_thread, e) for e in self._executors]
-            await asyncio.gather(*futures)
+            results = await asyncio.gather(*futures, return_exceptions=True)
+
+        # Track successes and failures per config
+        num_configs = len(self._configs)
+        config_successes: dict[int, list[SandboxExecutor]] = {i: [] for i in range(num_configs)}
+        config_failures: dict[int, list[tuple[SandboxExecutor, BaseException]]] = {
+            i: [] for i in range(num_configs)
+        }
+
+        for exec_idx, (executor, result) in enumerate(zip(self._executors, results, strict=True)):
+            config_idx = executor_to_config[exec_idx]
+            if isinstance(result, BaseException):
+                config_failures[config_idx].append((executor, result))
+                self._logger.warning(f"Executor {executor.name} failed to start: {result}")
+            else:
+                config_successes[config_idx].append(executor)
+
+        # Check minimum requirements per config
+        for config_idx, config in enumerate(self._configs):
+            min_required = (
+                config.min_instances if config.min_instances is not None else config.instances
+            )
+            started_count = len(config_successes[config_idx])
+            failed_count = len(config_failures[config_idx])
+
+            if started_count < min_required:
+                raise RuntimeError(
+                    f"Sandbox config {config_idx} ({config.image}): "
+                    f"only {started_count}/{min_required} required instances started "
+                    f"({failed_count} failed)"
+                )
+
+            if failed_count > 0:
+                self._logger.warning(
+                    f"Sandbox config {config_idx} ({config.image}): "
+                    f"{started_count}/{config.instances} instances started "
+                    f"({failed_count} failed, min_required={min_required})"
+                )
+
+        # Keep only successfully started executors
+        self._executors = [e for successes in config_successes.values() for e in successes]
 
         elapsed = time.time() - start_time
-        self._logger.info(f"All {len(self._executors)} sandbox executors started in {elapsed:.1f}s")
+        total_attempted = sum(c.instances for c in self._configs)
+        self._logger.info(
+            f"Started {len(self._executors)}/{total_attempted} sandbox executors in {elapsed:.1f}s"
+        )
 
     async def stop(self) -> None:
         """Stop all sandbox executors in parallel."""
