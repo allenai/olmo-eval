@@ -590,12 +590,8 @@ class Task(ABC):
         """
         from olmo_eval.common.metrics import PassAtKMetric, PassPowKMetric
 
-        # Expand multi-output responses for pass@k/pass^k metrics
-        needs_expansion = any(
-            isinstance(metric, (PassAtKMetric, PassPowKMetric)) for metric in self.config.metrics
-        )
-        if needs_expansion:
-            responses = self._expand_multi_output_responses(responses)
+        # Expand multi-output responses for pass@k/pass^k metrics only
+        expanded_responses: Sequence[Response] | None = None
 
         result: dict[str, dict[str, float]] = {}
         for metric in self.config.metrics:
@@ -604,5 +600,12 @@ class Task(ABC):
             )
             if metric.name not in result:
                 result[metric.name] = {}
-            result[metric.name][scorer_name] = metric.compute(responses)
+
+            # Use expanded responses for pass metrics, original for others
+            if isinstance(metric, (PassAtKMetric, PassPowKMetric)):
+                if expanded_responses is None:
+                    expanded_responses = self._expand_multi_output_responses(responses)
+                result[metric.name][scorer_name] = metric.compute(expanded_responses)
+            else:
+                result[metric.name][scorer_name] = metric.compute(responses)
         return result
