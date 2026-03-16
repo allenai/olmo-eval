@@ -82,15 +82,28 @@ def _apply_dotlist_overrides(base_dict: dict[str, Any], overrides: list[str]) ->
 
         # Navigate to the target location and set the value
         target = base_dict
-        for key in keys[:-1]:
+        for i, key in enumerate(keys[:-1]):
+            path_so_far = ".".join(keys[: i + 1])
             # Check if key is a numeric index for list access
             if key.isdigit():
                 idx = int(key)
-                if isinstance(target, list) and idx < len(target):
-                    target = target[idx]
-                else:
-                    break
+                if not isinstance(target, list):
+                    raise ValueError(
+                        f"Invalid override path '{key_path}': '{path_so_far}' uses numeric "
+                        f"index but target is {type(target).__name__}, not list"
+                    )
+                if idx >= len(target):
+                    raise ValueError(
+                        f"Invalid override path '{key_path}': index {idx} out of bounds "
+                        f"for list at '{'.'.join(keys[:i])}' (length {len(target)})"
+                    )
+                target = target[idx]
             else:
+                if not isinstance(target, dict):
+                    raise ValueError(
+                        f"Invalid override path '{key_path}': "
+                        f"'{path_so_far}' expects dict but found {type(target).__name__}"
+                    )
                 if key not in target or target[key] is None:
                     # Create nested dict if needed
                     target[key] = {}
@@ -98,8 +111,18 @@ def _apply_dotlist_overrides(base_dict: dict[str, Any], overrides: list[str]) ->
 
         # Set the final value
         final_key = keys[-1]
-        if final_key.isdigit() and isinstance(target, list):
+        if final_key.isdigit():
             idx = int(final_key)
+            if not isinstance(target, list):
+                raise ValueError(
+                    f"Invalid override path '{key_path}': final key '{final_key}' is numeric "
+                    f"but target is {type(target).__name__}, not list"
+                )
+            if idx >= len(target):
+                raise ValueError(
+                    f"Invalid override path '{key_path}': "
+                    f"index {idx} out of bounds for list (length {len(target)})"
+                )
             if isinstance(parsed_value, dict) and isinstance(target[idx], dict):
                 _deep_merge(target[idx], parsed_value)
             else:
@@ -109,6 +132,11 @@ def _apply_dotlist_overrides(base_dict: dict[str, Any], overrides: list[str]) ->
                 _deep_merge(target[final_key], parsed_value)
             else:
                 target[final_key] = parsed_value
+        else:
+            raise ValueError(
+                f"Invalid override path '{key_path}': "
+                f"cannot set key '{final_key}' on {type(target).__name__}"
+            )
 
     return base_dict
 
