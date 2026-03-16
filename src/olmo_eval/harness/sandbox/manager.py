@@ -156,7 +156,7 @@ class SandboxManager:
         matching = [
             (i, e)
             for i, e in enumerate(self._executors)
-            if required_capabilities <= e.config.capabilities
+            if required_capabilities <= e.config.capabilities and i not in self._bound_executors
         ]
 
         if not matching:

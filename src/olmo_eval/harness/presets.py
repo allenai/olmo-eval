@@ -118,6 +118,7 @@ class HarnessPresets:
 
         return HarnessConfig(
             name=name,
+            metrics=MetricsConfig(),
             sandboxes=(
                 SandboxConfig(
                     instances=16,
@@ -141,6 +142,7 @@ class HarnessPresets:
 
         return HarnessConfig(
             name=name,
+            metrics=MetricsConfig(),
             scoring_concurrency=4,
             sandboxes=(
                 SandboxConfig(
@@ -162,6 +164,7 @@ class HarnessPresets:
 
         return HarnessConfig(
             name=name,
+            metrics=MetricsConfig(),
             provider=ProviderConfig(
                 kind=ProviderKind.VLLM_SERVER,
                 # Higher timeout for multi-turn agent runs (each turn can take time)
@@ -195,6 +198,7 @@ class HarnessPresets:
 
         return HarnessConfig(
             name=name,
+            metrics=MetricsConfig(),
             provider=ProviderConfig(
                 kind=ProviderKind.VLLM_SERVER,
                 kwargs={"timeout": 300},
