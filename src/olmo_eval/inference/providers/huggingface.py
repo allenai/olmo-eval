@@ -55,12 +55,12 @@ class HuggingFaceProvider(InferenceProvider):
         """Get the tokenizer for this provider."""
         return self.tokenizer
 
-    def _build_generate_kwargs(self, params: SamplingParams) -> dict:
+    def _build_generate_kwargs(self, params: SamplingParams) -> dict[str, Any]:
         """Convert SamplingParams to HuggingFace generate kwargs."""
         # Use explicit do_sample flag, overriding temperature-based inference
         do_sample = params.do_sample and params.temperature > 0
 
-        kwargs = {
+        kwargs: dict[str, Any] = {
             "max_new_tokens": params.max_tokens,
             "do_sample": do_sample,
         }
