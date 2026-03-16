@@ -64,6 +64,11 @@ async def _run_with_progress(
     return task.result()
 
 
+def _get_modal_app_name() -> str:
+    """Generate unique Modal app name to avoid conflicts between concurrent runs."""
+    return f"swerex-{uuid.uuid4().hex[:12]}"
+
+
 class SandboxExecutor:
     """Executor for sandboxed command execution via SWE-ReX.
 
@@ -119,8 +124,29 @@ class SandboxExecutor:
             RuntimeError: If container runtime is not available.
         """
         self._log(logging.DEBUG, "Starting sandbox deployment...")
-        deployment = self.get_deployment()
         prefix = f"[{self.name}] " if self.name else ""
+
+        # For Modal deployments, patch app lookup during deployment creation
+        # to use unique app names and avoid conflicts between concurrent runs
+        if self.config.mode == SandboxMode.MODAL:
+            from unittest.mock import patch
+
+            import modal
+
+            app_name = _get_modal_app_name()
+            self._log(logging.INFO, f"Using Modal app: {app_name}")
+            original_lookup = modal.App.lookup
+
+            def patched_lookup(name: str, *args, **kwargs):
+                if name == "swe-rex":
+                    name = app_name
+                return original_lookup(name, *args, **kwargs)
+
+            with patch.object(modal.App, "lookup", patched_lookup):
+                deployment = self.get_deployment()
+        else:
+            deployment = self.get_deployment()
+
         await _run_with_progress(
             deployment.start(),
             f"{prefix}Waiting for sandbox runtime",
