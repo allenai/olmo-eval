@@ -113,12 +113,6 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     help="Inject GCP credentials. Auto-detected from gs:// model paths.",
 )
 @click.option(
-    "--use-gcp-creds/--no-use-gcp-creds",
-    "gcp_secret",
-    default=None,
-    help="Inject GOOGLE_APPLICATION_CREDENTIALS from Beaker secret ({user}_...)",
-)
-@click.option(
     "--s3-bucket",
     help="S3 bucket for storing evaluation results (required for S3 uploads)",
 )
@@ -259,7 +253,6 @@ def launch(
     follow: bool,
     aws_credentials: bool | None,
     gcs_credentials: bool | None,
-    gcp_secret: bool | None,
     s3_bucket: str | None,
     s3_prefix: str | None,
     s3_endpoint_url: str | None,
@@ -371,7 +364,6 @@ def launch(
         "harness_overrides": harness_overrides,
         "uv_cache_dir": uv_cache_dir,
         "secret_env_overrides": secret_env_overrides,
-        "gcp_secret": gcp_secret,
     }
 
     # Handle external evaluations mode
@@ -413,7 +405,6 @@ def launch(
             follow=follow,
             aws_credentials=aws_credentials,
             gcs_credentials=gcs_credentials,
-            gcp_secret=gcp_secret,
             s3_bucket=s3_bucket,
             s3_prefix=s3_prefix,
             s3_region=s3_region,
@@ -602,7 +593,6 @@ def launch(
         inject_gcs,
         enable_sandbox=harness_needs_sandbox,
         secret_env_overrides=launch_config.secret_env_overrides,
-        inject_gcp_secret=launch_config.inject_gcp_secret,
     )
 
     job_configs = []
@@ -1002,7 +992,6 @@ def _launch_external_evals(
     follow: bool,
     aws_credentials: bool | None,
     gcs_credentials: bool | None,
-    gcp_secret: bool | None,
     s3_bucket: str | None,
     s3_prefix: str | None,
     s3_region: str,
@@ -1189,7 +1178,6 @@ def _launch_external_evals(
             env_secrets=env_secrets,
             inject_aws_credentials=inject_aws,
             inject_gcs_credentials=inject_gcs,
-            inject_gcp_secret=gcp_secret or False,
             eval_args=eval_args,
             provider_kwargs=provider_kwargs,
             uv_cache_dir=uv_cache_dir,
