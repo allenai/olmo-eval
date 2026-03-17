@@ -111,6 +111,25 @@ class HarnessPresets:
         )
 
     @lazy
+    def sqa(name: str) -> HarnessConfig:
+        """SQA preset with semantic scholar snippet search."""
+        from .tools.search import semantic_scholar_search
+
+        return HarnessConfig(
+            name=name,
+            provider=ProviderConfig(
+                kind=ProviderKind.VLLM_SERVER,
+                kwargs={"timeout": 120},
+            ),
+            tools=(semantic_scholar_search),
+            max_turns=10,
+            max_concurrency=4,
+            backend="openai_agents",
+            required_secrets=("S2_API_KEY", "OPENAI_API_KEY"),
+            batching=BatchConfig.streaming(),
+        )
+
+    @lazy
     def codex_python(name: str) -> HarnessConfig:
         """Python only code execution preset."""
         from .sandbox import SandboxConfig, SandboxMode
