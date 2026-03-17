@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import atexit
 import concurrent.futures
+import contextlib
 import time
 import uuid
 from collections.abc import AsyncIterator, Sequence
@@ -182,6 +184,8 @@ class SandboxManager:
             f"Started {len(self._executors)}/{total_attempted} sandbox executors in {elapsed:.1f}s"
         )
 
+        atexit.register(self._atexit_cleanup)
+
     async def stop(self) -> None:
         """Stop all sandbox executors in parallel."""
         async with self._binding_lock:
@@ -194,6 +198,19 @@ class SandboxManager:
         self._executors.clear()
         self._round_robin_indices.clear()
         self._logger.info("All sandboxes stopped")
+
+        with contextlib.suppress(Exception):
+            atexit.unregister(self._atexit_cleanup)
+
+    def _atexit_cleanup(self) -> None:
+        """Synchronous cleanup for atexit. Runs stop() if executors are still active."""
+        if not self._executors:
+            return
+        self._logger.info("Cleaning up sandboxes on exit")
+        try:
+            asyncio.run(self.stop())
+        except Exception as e:
+            self._logger.error(f"Sandbox cleanup failed: {e}")
 
     def get_executor(self, required_capabilities: frozenset[str]) -> SandboxExecutor:
         """Get an executor that supports the required capabilities.
