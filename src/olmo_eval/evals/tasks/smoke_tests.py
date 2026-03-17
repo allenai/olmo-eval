@@ -123,7 +123,11 @@ class IdentitySmokeBase(Task):
         )
 
     def format_request(self, instance: Instance) -> LMRequest:
-        return self.config.formatter.format(instance, self.get_fewshot())
+        """Format instance for the language model."""
+        if self.config.formatter is not None:
+            return self.config.formatter.format(instance, self.get_fewshot())
+        # Fallback formatting
+        return LMRequest(request_type=self.request_type, prompt=instance.question)
 
 
 # =============================================================================
@@ -193,7 +197,11 @@ class HelloSmoke(Task):
         )
 
     def format_request(self, instance: Instance) -> LMRequest:
-        return self.config.formatter.format(instance, self.get_fewshot())
+        """Format instance for the language model."""
+        if self.config.formatter is not None:
+            return self.config.formatter.format(instance, self.get_fewshot())
+        # Fallback formatting
+        return LMRequest(request_type=self.request_type, prompt=instance.question)
 
 
 # =============================================================================
