@@ -93,7 +93,7 @@ class SandboxManager:
             self._logger.info(f"Using Modal app: {self._modal_app_name}")
 
     async def start(self) -> None:
-        """Start all sandbox executors in parallel.
+        """Start all sandbox executors.
 
         Uses thread pool to avoid event loop blocking from swe-rex subprocess calls.
         Allows partial failures if min_instances is configured on the sandbox config.
@@ -122,7 +122,7 @@ class SandboxManager:
         # Start all executors in thread pool to avoid blocking event loop
         # swe-rex's DockerDeployment.start() has blocking subprocess calls
         start_time = time.time()
-        self._logger.info(f"Starting {len(self._executors)} sandbox executors in parallel...")
+        self._logger.info(f"Starting {len(self._executors)} sandbox executors...")
 
         def start_in_thread(executor: SandboxExecutor) -> None:
             """Run executor.start() in a dedicated thread with its own event loop."""
@@ -187,7 +187,7 @@ class SandboxManager:
         atexit.register(self._atexit_cleanup)
 
     async def stop(self) -> None:
-        """Stop all sandbox executors in parallel."""
+        """Stop all sandbox executors."""
         async with self._binding_lock:
             for binding in self._bindings.values():
                 binding._released = True
