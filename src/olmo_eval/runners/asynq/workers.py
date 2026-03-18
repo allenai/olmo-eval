@@ -100,7 +100,9 @@ def inference_worker(
             log_dir = os.path.join(output_dir, "logs")
 
         harness_config = harness_config.with_provider_overrides(
-            tensor_parallel_size=len(gpu_ids) if gpu_ids else None,
+            tensor_parallel_size=len(gpu_ids)
+            if (gpu_ids and provider_config.requires_gpu)
+            else None,
             max_model_len=max_model_len,
             max_concurrency=max_concurrency,
             tokenizer=tokenizer,
