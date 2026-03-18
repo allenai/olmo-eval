@@ -121,7 +121,7 @@ class HarnessPresets:
                 kind=ProviderKind.VLLM_SERVER,
                 kwargs={"timeout": 120},
             ),
-            tools=(semantic_scholar_search),
+            tools=(semantic_scholar_search,),
             max_turns=10,
             max_concurrency=4,
             backend="openai_agents",
