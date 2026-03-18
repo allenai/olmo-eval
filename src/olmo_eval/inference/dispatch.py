@@ -59,7 +59,7 @@ class ContinuousBatchDispatcher[T, R]:
         self._stats = DispatchStats(total=total)
 
         # Results array preserves ordering
-        results: list[R | None] = [None] * total
+        results: list[R | None] = [None for _ in range(total)]
 
         # Queue of (index, item, attempt) tuples
         pending: list[tuple[int, T, int]] = [(i, item, 0) for i, item in enumerate(items)]

@@ -107,7 +107,7 @@ class GCSBackend:
 
     def _prefix_has_objects(self, prefix: str) -> bool:
         """Check if a GCS prefix contains any objects."""
-        from google.api_core import exceptions as gcs_exceptions  # type: ignore[import-not-found]
+        from google.api_core import exceptions as gcs_exceptions
 
         bucket_name, blob_prefix = self._parse_gcs_uri(prefix)
         try:
@@ -286,7 +286,7 @@ class GCSBackend:
         Returns:
             True if the path exists (as file or prefix with objects).
         """
-        from google.api_core import exceptions as gcs_exceptions  # type: ignore[import-not-found]
+        from google.api_core import exceptions as gcs_exceptions
 
         bucket_name, blob_name = self._parse_gcs_uri(path)
         bucket = self.gcs_client.bucket(bucket_name)

@@ -235,7 +235,7 @@ class VLLMProvider(InferenceProvider):
                 for p in prompt_strs
             ]
         else:
-            vllm_prompts = prompt_strs  # type: ignore[assignment]
+            vllm_prompts = prompt_strs
 
         # Disable tqdm progress bar - we use our own worker-scoped logging
         outputs: list[RequestOutput] = self.llm.generate(vllm_prompts, vllm_params, use_tqdm=False)
