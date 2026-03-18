@@ -93,7 +93,7 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             model="openai/o3-mini-2025-01-31",
             api_base="https://api.openai.com/v1",
             required_secrets=("OPENAI_API_KEY",),
-            kwargs={"reasoning_effort": "medium"},
+            kwargs={"reasoning_effort": "medium", "drop_params": True},
         ),
         "gpt-4o": ProviderConfig(
             kind=ProviderKind.LITELLM,
