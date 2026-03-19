@@ -178,19 +178,17 @@ class LiteLLMProvider(InferenceProvider):
             if message_tool_calls:
                 tool_calls = [ToolCall.from_openai(tc.model_dump()) for tc in message_tool_calls]
 
-            # Extract reasoning from response (for reasoning models)
-            # Check both 'reasoning' and 'reasoning_content' fields
-            reasoning: str | None = None
-            reasoning_content: str | None = None
+            # Check for reasoning content (for reasoning models)
+            has_reasoning = False
             message_content = getattr(choice.message, "content", None)
             if message_content is not None:
-                if hasattr(message_content, "reasoning"):
-                    reasoning = message_content.reasoning
-                if hasattr(message_content, "reasoning_content"):
-                    reasoning_content = message_content.reasoning_content
+                if getattr(message_content, "reasoning", None):
+                    has_reasoning = True
+                if getattr(message_content, "reasoning_content", None):
+                    has_reasoning = True
             # Also check directly on message for reasoning_content (some APIs use this)
-            if reasoning_content is None:
-                reasoning_content = getattr(choice.message, "reasoning_content", None)
+            if not has_reasoning and getattr(choice.message, "reasoning_content", None):
+                has_reasoning = True
 
             outputs.append(
                 LMOutput(
@@ -198,8 +196,7 @@ class LiteLLMProvider(InferenceProvider):
                     logprobs=logprob_entries,
                     metadata=metadata,
                     tool_calls=tool_calls,
-                    reasoning=reasoning,
-                    reasoning_content=reasoning_content,
+                    provider_extras={"has_reasoning": True} if has_reasoning else {},
                 )
             )
 
