@@ -452,10 +452,6 @@ def launch(
     )
     inject_aws, inject_gcs = cred_manager.detect_and_setup(launcher)
 
-    # Update config with credential settings
-    launch_config.inject_aws_credentials = inject_aws
-    launch_config.inject_gcs_credentials = inject_gcs
-
     if dry_run:
         console.print("[yellow]Dry run mode - not submitting[/yellow]")
 

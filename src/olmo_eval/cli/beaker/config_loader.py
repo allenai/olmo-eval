@@ -55,9 +55,6 @@ class LaunchConfig:
     harness: str | None = None
     harness_overrides: list[str] = field(default_factory=list)
 
-    inject_aws_credentials: bool = False
-    inject_gcs_credentials: bool = False
-
     uv_cache_dir: str | None = None
 
     # Secret env overrides: maps beaker_secret_name -> env_var_name
