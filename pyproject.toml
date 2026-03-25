@@ -74,6 +74,9 @@ postgres = [
 gpu = [
     "nvidia-ml-py>=12.560",
 ]
+hard-reasoning = [
+    "np-hard-reasoning @ git+https://github.com/allenai/np-hard-reasoning.git",
+]
 clients = [
     "openai~=2.21.0",
 ]
@@ -129,6 +132,12 @@ unresolved-import = "ignore"
 # ty overrides for backends module (uses optional openhands/agents dependencies)
 [[tool.ty.overrides]]
 include = ["src/olmo_eval/harness/backends/**"]
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
+# ty overrides for hard_reasoning task (uses optional np-hard-reasoning dependency)
+[[tool.ty.overrides]]
+include = ["src/olmo_eval/evals/tasks/hard_reasoning.py"]
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"
 

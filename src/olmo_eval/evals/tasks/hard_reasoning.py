@@ -14,10 +14,12 @@ from __future__ import annotations
 import json
 import sys
 from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Any
 
 from olmo_eval.common.formatters import ChatFormatter
 from olmo_eval.common.metrics import AccuracyMetric
+from olmo_eval.common.scorers import Scorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 
@@ -58,6 +60,28 @@ def _extract_last_complete_json(s: str) -> dict | None:
     return None
 
 
+@dataclass(frozen=True, slots=True)
+class HardReasoningScorer(Scorer):
+    """Score using the np_hard_reasoning check() function."""
+
+    name: str = "hard_reasoning_check"
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        from np_hard_reasoning.scenarios.registry import SCENARIO_REGISTRY
+
+        if output.extracted_answer is None:
+            return 0.0
+        subset = instance.metadata.get("subset", "")
+        scenario_cls = SCENARIO_REGISTRY.get(subset)
+        if scenario_cls is None:
+            return 0.0
+        try:
+            scenario = scenario_cls.load_from_json(instance.metadata["scenario_data"])
+            return 1.0 if scenario.check_json(str(output.extracted_answer)) else 0.0
+        except Exception:
+            return 0.0
+
+
 class HardReasoningBase(Task):
     """Base class for HardReasoning logic puzzle tasks.
 
@@ -71,7 +95,7 @@ class HardReasoningBase(Task):
         temperature=0.0,
         stop_sequences=("\n\n",),
     )
-    metrics = (AccuracyMetric(),)
+    metrics = (AccuracyMetric(scorer=HardReasoningScorer),)
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -94,14 +118,13 @@ class HardReasoningBase(Task):
                 yield instance
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
-        answer = doc["solver"]["status"]
-        gold_answer = (
-            json.dumps(answer, sort_keys=True) if isinstance(answer, dict) else str(answer)
-        )
         return Instance(
             question=doc["problem"]["prompt"],
-            gold_answer=gold_answer,
-            metadata={"id": doc.get("id", index)},
+            metadata={
+                "id": doc.get("id", index),
+                "scenario_data": doc["problem"],
+                "subset": self.subset,
+            },
         )
 
     def format_request(self, instance: Instance) -> LMRequest:
@@ -113,10 +136,10 @@ class HardReasoningBase(Task):
         )
 
     def extract_answer(self, output: LMOutput) -> str | None:
-        """Extract the solution from the model's JSON response."""
+        """Extract the last complete JSON object from the model's response."""
         json_obj = _extract_last_complete_json(output.text)
-        if json_obj is not None and "solution" in json_obj:
-            return json.dumps(json_obj["solution"], sort_keys=True)
+        if json_obj is not None:
+            return json.dumps(json_obj)
         return output.text.strip() or None
 
     def _build_fewshot(self) -> list[Instance]:
