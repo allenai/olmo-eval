@@ -12,6 +12,135 @@ from olmo_eval.harness.config import HarnessConfig, ProviderConfig
 console = Console()
 
 
+def _parse_override_value(value: str) -> Any:
+    """Parse an override value, supporting JSON, OmegaConf lists, bool, int, float, and string."""
+    import json
+
+    # Try JSON first (for dicts and arrays with quoted strings)
+    if value.startswith("{") or value.startswith("["):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            pass
+
+        # Try OmegaConf-style list: [item1,item2] without quotes
+        if value.startswith("[") and value.endswith("]"):
+            inner = value[1:-1].strip()
+            if inner:
+                # Split by comma, but be careful with URLs containing commas (rare)
+                items = [item.strip() for item in inner.split(",")]
+                return items
+            return []
+
+    # Parse bool, int, float, or string
+    if value.lower() == "true":
+        return True
+    elif value.lower() == "false":
+        return False
+    else:
+        try:
+            return int(value)
+        except ValueError:
+            try:
+                return float(value)
+            except ValueError:
+                return value
+
+
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Deep merge override into base dict."""
+    for key, value in override.items():
+        if key in base and isinstance(base[key], dict) and isinstance(value, dict):
+            _deep_merge(base[key], value)
+        else:
+            base[key] = value
+    return base
+
+
+def _apply_dotlist_overrides(base_dict: dict[str, Any], overrides: list[str]) -> dict[str, Any]:
+    """Apply dotlist overrides to a dictionary, handling list indices.
+
+    Unlike OmegaConf.from_dotlist which treats numeric keys as dict keys,
+    this function treats them as list indices (e.g., sandboxes.0.mode=modal).
+
+    Supports JSON values for nested structures:
+        sandboxes.0='{"mode":"modal","instances":4}'
+
+    Args:
+        base_dict: The base dictionary to modify.
+        overrides: List of dotlist strings (e.g., ["sandboxes.0.mode=modal"]).
+
+    Returns:
+        The modified dictionary.
+    """
+    for override in overrides:
+        if "=" not in override:
+            continue
+        key_path, value = override.split("=", 1)
+        keys = key_path.split(".")
+        parsed_value = _parse_override_value(value)
+
+        # Navigate to the target location and set the value
+        target = base_dict
+        for i, key in enumerate(keys[:-1]):
+            path_so_far = ".".join(keys[: i + 1])
+            # Check if key is a numeric index for list access
+            if key.isdigit():
+                idx = int(key)
+                if not isinstance(target, list):
+                    raise ValueError(
+                        f"Invalid override path '{key_path}': '{path_so_far}' uses numeric "
+                        f"index but target is {type(target).__name__}, not list"
+                    )
+                if idx >= len(target):
+                    raise ValueError(
+                        f"Invalid override path '{key_path}': index {idx} out of bounds "
+                        f"for list at '{'.'.join(keys[:i])}' (length {len(target)})"
+                    )
+                target = target[idx]
+            else:
+                if not isinstance(target, dict):
+                    raise ValueError(
+                        f"Invalid override path '{key_path}': "
+                        f"'{path_so_far}' expects dict but found {type(target).__name__}"
+                    )
+                if key not in target or target[key] is None:
+                    # Create nested dict if needed
+                    target[key] = {}
+                target = target[key]
+
+        # Set the final value
+        final_key = keys[-1]
+        if final_key.isdigit():
+            idx = int(final_key)
+            if not isinstance(target, list):
+                raise ValueError(
+                    f"Invalid override path '{key_path}': final key '{final_key}' is numeric "
+                    f"but target is {type(target).__name__}, not list"
+                )
+            if idx >= len(target):
+                raise ValueError(
+                    f"Invalid override path '{key_path}': "
+                    f"index {idx} out of bounds for list (length {len(target)})"
+                )
+            if isinstance(parsed_value, dict) and isinstance(target[idx], dict):
+                _deep_merge(target[idx], parsed_value)
+            else:
+                target[idx] = parsed_value
+        elif isinstance(target, dict):
+            if isinstance(parsed_value, dict) and isinstance(target.get(final_key), dict):
+                _deep_merge(target[final_key], parsed_value)
+            else:
+                target[final_key] = parsed_value
+        else:
+            raise ValueError(
+                f"Invalid override path '{key_path}': "
+                f"cannot set key '{final_key}' on {type(target).__name__}"
+            )
+
+    return base_dict
+
+
 @dataclass
 class RunConfig:
     """Parsed and validated configuration for an evaluation run.
@@ -170,16 +299,14 @@ class RunConfigBuilder:
         Returns:
             RunConfig with parsed and validated settings.
         """
-        from omegaconf import OmegaConf
-
         # Build task specs and overrides from CLI -o flags
         task_specs: list[str] = list(self.task)
         task_overrides: dict[str, dict[str, Any]] = {}
         for task_spec, cli_overrides in self.cli_task_overrides.items():
             if cli_overrides:
-                override_config = OmegaConf.from_dotlist(cli_overrides)
-                override_dict = OmegaConf.to_container(override_config)
-                task_overrides[task_spec] = override_dict  # type: ignore[assignment]
+                override_dict: dict[str, Any] = {}
+                _apply_dotlist_overrides(override_dict, cli_overrides)
+                task_overrides[task_spec] = override_dict
 
         # Resolve harness configuration with provider config built in
         harness_config = self._resolve_harness_config(self.model)
@@ -223,8 +350,6 @@ class RunConfigBuilder:
         Raises:
             SystemExit: If harness preset or config file is invalid.
         """
-        from omegaconf import OmegaConf
-
         if self.harness_preset and self.harness_config_path:
             console.print("[red]Error:[/red] Cannot specify both --harness and --harness-config")
             raise SystemExit(1)
@@ -272,11 +397,8 @@ class RunConfigBuilder:
         # Apply CLI overrides to harness config
         if self.cli_harness_overrides:
             harness_dict = harness_config.to_dict()
-            override_config = OmegaConf.from_dotlist(self.cli_harness_overrides)
-            base = OmegaConf.create(harness_dict)
-            merged = OmegaConf.merge(base, override_config)
-            harness_dict = OmegaConf.to_container(merged, resolve=True)
-            harness_config = HarnessConfig.from_dict(harness_dict)  # type: ignore[arg-type]
+            harness_dict = _apply_dotlist_overrides(harness_dict, self.cli_harness_overrides)
+            harness_config = HarnessConfig.from_dict(harness_dict)
 
         from olmo_eval.common.configs import get_provider_config
 

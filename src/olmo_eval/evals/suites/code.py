@@ -1,35 +1,31 @@
 """Code evaluation suites."""
 
-from olmo_eval.evals.constants.code import MULTILINGUAL_MBPP_TASKS_V2
+from olmo_eval.evals.constants.code import (
+    MULTILINGUAL_MBPP_TASKS_V2,
+    MULTIPL_E_HUMANEVAL_TASKS,
+    MULTIPL_E_MBPP_TASKS,
+)
 from olmo_eval.evals.suites.registry import AggregationStrategy, Suite, make_suite, register
 
 # =============================================================================
 # Multilingual Code Suites
 # =============================================================================
 
-MT_MBPP_V2FIX = make_suite(
-    "mt_mbpp_v2fix",
-    tuple(MULTILINGUAL_MBPP_TASKS_V2),
-    description="Multilingual MBPP v2 with fixes",
+# Define variant configurations: (suffix, description_suffix)
+_MT_MBPP_VARIANTS: tuple[tuple[str, str], ...] = (
+    ("", ""),
+    (":bpb", " with BPB evaluation"),
+    (":3shot", " with 3-shot prompting"),
+    (":3shot:bpb", " with 3-shot BPB evaluation"),
 )
 
-MT_MBPP_V2FIX_BPB = make_suite(
-    "mt_mbpp_v2fix:bpb",
-    tuple(f"{t}:bpb" for t in MULTILINGUAL_MBPP_TASKS_V2),
-    description="Multilingual MBPP v2 with BPB evaluation",
-)
-
-MT_MBPP_V2FIX_3SHOT = make_suite(
-    "mt_mbpp_v2fix:3shot",
-    tuple(f"{t}:3shot" for t in MULTILINGUAL_MBPP_TASKS_V2),
-    description="Multilingual MBPP v2 with 3-shot prompting",
-)
-
-MT_MBPP_V2FIX_3SHOT_BPB = make_suite(
-    "mt_mbpp_v2fix:3shot:bpb",
-    tuple(f"{t}:3shot:bpb" for t in MULTILINGUAL_MBPP_TASKS_V2),
-    description="Multilingual MBPP v2 with 3-shot BPB evaluation",
-)
+# Generate all suites programmatically
+for _suffix, _desc_suffix in _MT_MBPP_VARIANTS:
+    make_suite(
+        f"mt_mbpp_v2fix{_suffix}",
+        tuple(f"{t}{_suffix}" for t in MULTILINGUAL_MBPP_TASKS_V2),
+        description=f"Multilingual MBPP v2 with fixes{_desc_suffix}",
+    )
 
 
 # =============================================================================
@@ -54,3 +50,32 @@ OLMO3_BASE_EASY_CODE_BPB = register(
         description="OLMo3 base_easy code BPB suite (average of averages)",
     )
 )
+
+
+# =============================================================================
+# MULTIPL_E Suites
+# =============================================================================
+
+_MULTIPL_E_VARIANTS: tuple[tuple[str, str], ...] = (
+    ("", ""),
+    (":pass_at_1", " with pass@1 execution evaluation"),
+    (":pass_at_10", " with pass@10 execution evaluation"),
+)
+
+for _suffix, _desc_suffix in _MULTIPL_E_VARIANTS:
+    make_suite(
+        f"multipl_e_humaneval{_suffix}",
+        tuple(f"{t}{_suffix}" for t in MULTIPL_E_HUMANEVAL_TASKS),
+        description=f"MULTIPL_E HumanEval (6 languages){_desc_suffix}",
+    )
+    make_suite(
+        f"multipl_e_mbpp{_suffix}",
+        tuple(f"{t}{_suffix}" for t in MULTIPL_E_MBPP_TASKS),
+        description=f"MULTIPL_E MBPP (6 languages){_desc_suffix}",
+    )
+    # Combined suite with both HumanEval and MBPP
+    make_suite(
+        f"multipl_e{_suffix}",
+        tuple(f"{t}{_suffix}" for t in MULTIPL_E_HUMANEVAL_TASKS + MULTIPL_E_MBPP_TASKS),
+        description=f"MULTIPL_E HumanEval + MBPP (6 languages each){_desc_suffix}",
+    )

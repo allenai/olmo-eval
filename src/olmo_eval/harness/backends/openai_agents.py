@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.types import LMOutput, LMRequest, SamplingParams
@@ -16,9 +17,11 @@ from olmo_eval.harness.tools import Tool
 from olmo_eval.inference.base import InferenceProvider
 
 if TYPE_CHECKING:
-    from olmo_eval.harness.sandbox import SandboxManager
+    from olmo_eval.harness.sandbox import ExecutorBinding, SandboxManager
 
 logger = logging.getLogger(__name__)
+
+_current_binding: ContextVar[ExecutorBinding | None] = ContextVar("_current_binding", default=None)
 
 
 @register_backend("openai_agents")
@@ -122,12 +125,19 @@ class OpenAIAgentsBackend(Backend):
 
             async def sandboxed_execute(command: str) -> str:
                 """Execute command in sandbox session."""
-                return await manager.execute_in_session_with_capabilities(command, required_caps)
+                binding = _current_binding.get()
+                if binding is None:
+                    raise RuntimeError("No binding set for session tool")
+                result = await binding.execute_in_session(command)
+                output = result.output
+                if result.exit_code != 0:
+                    output += f"\n[Exit code: {result.exit_code}]"
+                return output
         else:
 
             async def sandboxed_execute(command: str) -> str:
                 """Execute command in sandbox."""
-                return await manager.execute_with_capabilities(command, required_caps)
+                return await manager.execute(command, capabilities=required_caps)
 
         return sandboxed_execute
 
@@ -277,8 +287,19 @@ class OpenAIAgentsBackend(Backend):
                 f"Sandbox manager started with {self._sandbox_manager.executor_count} executor(s)"
             )
 
-        # Use cached agent (manager is stable, so caching works even with sandbox)
+        # Use cached agent (tools read from ContextVar at execution time)
         agent = self._get_or_create_agent(provider, config, self._sandbox_manager)
+
+        # Acquire binding if session tools are used
+        has_session_tools = any(t.session for t in config.resolved_tools if t.sandbox)
+        binding_token = None
+
+        if has_session_tools and self._sandbox_manager:
+            session_caps = frozenset().union(
+                *(t.sandbox for t in config.resolved_tools if t.session and t.sandbox)
+            )
+            binding = await self._sandbox_manager.acquire_binding(session_caps)
+            binding_token = _current_binding.set(binding)
 
         # Get the input message
         input_text = ""
@@ -326,6 +347,13 @@ class OpenAIAgentsBackend(Backend):
 
                 logger.error(f"Agent run failed: {e}\n{traceback.format_exc()}")
                 raise
+            finally:
+                # Release binding after run
+                binding = _current_binding.get()
+                if binding is not None:
+                    await binding.release()
+                    if binding_token is not None:
+                        _current_binding.reset(binding_token)
 
         # Convert result to HarnessResult
         trajectory = self._convert_trajectory(result)

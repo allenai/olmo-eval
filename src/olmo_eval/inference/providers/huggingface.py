@@ -57,17 +57,21 @@ class HuggingFaceProvider(InferenceProvider):
 
     def _build_generate_kwargs(self, params: SamplingParams) -> dict[str, Any]:
         """Convert SamplingParams to HuggingFace generate kwargs."""
+        # Use explicit do_sample flag, overriding temperature-based inference
+        do_sample = params.do_sample and params.temperature > 0
+
         kwargs: dict[str, Any] = {
             "max_new_tokens": params.max_tokens,
-            "do_sample": params.temperature > 0,
+            "do_sample": do_sample,
         }
 
-        if params.temperature > 0:
-            kwargs["temperature"] = params.temperature
-        if params.top_p is not None:
-            kwargs["top_p"] = params.top_p
-        if params.top_k is not None:
-            kwargs["top_k"] = params.top_k
+        if do_sample:
+            if params.temperature > 0:
+                kwargs["temperature"] = params.temperature
+            if params.top_p is not None:
+                kwargs["top_p"] = params.top_p
+            if params.top_k is not None:
+                kwargs["top_k"] = params.top_k
 
         return kwargs
 

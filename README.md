@@ -1123,7 +1123,7 @@ cluster: h100
 | `--follow/--no-follow` | | `true` | Follow logs after launch |
 | `--secret-env` | | none | Map Beaker secret to env var (`SECRET:VAR`) |
 | `--aws-credentials` | | auto | Inject AWS credentials (auto-detected from s3:// paths) |
-| `--gcs-credentials` | | auto | Inject GCS credentials (auto-detected from gs:// paths) |
+| `--gcp-credentials` | | auto | Inject GCP credentials (auto-detected from gs:// model paths) |
 | `--store` | | `false` | Persist results to configured database |
 
 ### Per-Task Overrides

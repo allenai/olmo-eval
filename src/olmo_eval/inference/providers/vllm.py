@@ -193,17 +193,22 @@ class VLLMProvider(InferenceProvider):
         """Convert SamplingParams to vLLM SamplingParams."""
         from vllm import SamplingParams as VLLMSamplingParams
 
+        # Handle do_sample=False (greedy decoding)
+        temperature = 0.0 if not params.do_sample else params.temperature
+        top_p = None if not params.do_sample else params.top_p
+        top_k = None if not params.do_sample else params.top_k
+
         kwargs: dict[str, Any] = {
             "max_tokens": params.max_tokens,
             "n": params.num_samples,
         }
 
-        if params.temperature is not None:
-            kwargs["temperature"] = params.temperature
-        if params.top_p is not None:
-            kwargs["top_p"] = params.top_p
-        if params.top_k is not None:
-            kwargs["top_k"] = params.top_k
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+        if top_p is not None:
+            kwargs["top_p"] = top_p
+        if top_k is not None:
+            kwargs["top_k"] = top_k
         if params.stop_sequences:
             kwargs["stop"] = list(params.stop_sequences)
         # Always request logprobs (default to 1) for metrics computation

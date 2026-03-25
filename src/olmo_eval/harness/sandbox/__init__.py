@@ -3,10 +3,11 @@
 from .config import Capability, SandboxConfig, SandboxMode
 from .diagnostics import start_internal_monitor
 from .executor import SandboxExecutor
-from .manager import SandboxManager
+from .manager import ExecutorBinding, SandboxManager
 
 __all__ = [
     "Capability",
+    "ExecutorBinding",
     "SandboxConfig",
     "SandboxExecutor",
     "SandboxManager",
