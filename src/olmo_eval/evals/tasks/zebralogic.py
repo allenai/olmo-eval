@@ -141,6 +141,8 @@ def _evaluate_zebralogic(
                             break
                         predicted = list(predicted.values())[0]
                     if isinstance(predicted, list):
+                        if not predicted or not isinstance(predicted[0], str):
+                            continue
                         predicted_cell = predicted[0].lower().strip()
                     elif isinstance(predicted, str):
                         predicted_cell = predicted.lower().strip()
