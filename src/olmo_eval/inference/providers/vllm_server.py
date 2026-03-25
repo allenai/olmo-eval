@@ -373,8 +373,13 @@ class VLLMServerProvider(InferenceProvider):
             "logprobs": 1,  # Request logprobs for metrics
         }
 
-        if params.temperature > 0:
+        # Handle do_sample=False (greedy decoding)
+        if params.do_sample and params.temperature > 0:
             kwargs["temperature"] = params.temperature
+            if params.top_p is not None:
+                kwargs["top_p"] = params.top_p
+            if params.top_k is not None:
+                kwargs["extra_body"] = {"top_k": params.top_k}
         if params.stop_sequences:
             kwargs["stop"] = list(params.stop_sequences)[:4]
 
@@ -441,8 +446,14 @@ class VLLMServerProvider(InferenceProvider):
             "max_tokens": params.max_tokens,
         }
 
-        if params.temperature > 0:
+        # Handle do_sample=False (greedy decoding)
+        extra_body: dict[str, Any] = {}
+        if params.do_sample and params.temperature > 0:
             kwargs["temperature"] = params.temperature
+            if params.top_p is not None:
+                kwargs["top_p"] = params.top_p
+            if params.top_k is not None:
+                extra_body["top_k"] = params.top_k
         if params.stop_sequences:
             # OpenAI API supports max 4 stop sequences
             kwargs["stop"] = list(params.stop_sequences)[:4]
@@ -455,7 +466,9 @@ class VLLMServerProvider(InferenceProvider):
 
         # Pass chat_template_kwargs via extra_body for vLLM
         if self.chat_template_kwargs:
-            kwargs["extra_body"] = {"chat_template_kwargs": self.chat_template_kwargs}
+            extra_body["chat_template_kwargs"] = self.chat_template_kwargs
+        if extra_body:
+            kwargs["extra_body"] = extra_body
 
         response = await client.chat.completions.create(**kwargs)
 

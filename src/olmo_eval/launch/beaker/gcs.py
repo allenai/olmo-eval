@@ -66,7 +66,7 @@ def get_local_gcs_credentials() -> GCSCredentials | None:
     # Check GOOGLE_APPLICATION_CREDENTIALS first
     creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
     if creds_path:
-        path = Path(creds_path)
+        path = Path(creds_path).expanduser()
         if path.exists():
             try:
                 json_key = path.read_text()

@@ -12,7 +12,7 @@ from .base import (
     PerplexityScorer,
     Scorer,
 )
-from .code_execution import CodeExecutionScorer
+from .code_execution import CodeExecutionScorer, MultiplEScorer
 from .execution import ExecutionScorer, SandboxRequiredError
 from .llm_judge import (
     JudgeFn,
@@ -49,6 +49,7 @@ __all__ = [
     "MathVerifyScorer",
     "MinervaMathScorer",
     "MultipleChoiceScorer",
+    "MultiplEScorer",
     "PerplexityScorer",
     "RubricJudgeScorer",
     "SandboxRequiredError",

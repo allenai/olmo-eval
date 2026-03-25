@@ -11,6 +11,9 @@ LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
 # Package-wide logger
 PACKAGE_LOGGER_NAME = "olmo_eval"
 
+# Current worker ID (set by configure_worker_logging)
+_current_worker_id: str | None = None
+
 # ANSI color codes for terminal output
 _COLORS = (
     # Standard colors (no red - reserved for errors)
@@ -93,6 +96,75 @@ class FlushingStreamHandler(logging.StreamHandler):
         self.flush()
 
 
+class SwerexNoiseFilter(logging.Filter):
+    """Filter out noisy swerex/modal logs that are redundant with our own logging.
+
+    Filters:
+    - All INFO level messages from swerex/modal loggers
+    - CommandTimeoutError tracebacks (not actionable, expected for infinite loops)
+    - "Error making request" messages (redundant with our "Failed to score" warning)
+    - Remote runtime error responses containing exception info
+    - Noisy modal sandbox lifecycle messages
+    """
+
+    # Patterns to filter (case-sensitive for performance)
+    _FILTER_PATTERNS = (
+        "CommandTimeoutError",
+        "swerex.exceptions",
+        "TimeoutExpired",
+        "pexpect.TIMEOUT",
+    )
+
+    # Noisy modal/swerex INFO patterns to always filter
+    _MODAL_NOISE_PATTERNS = (
+        "Starting modal sandbox",
+        "Sandbox created",
+        "Sandbox (sb-",
+        "Check sandbox logs at",
+        "Runtime started",
+        "Starting runtime at",
+        "modal.host",
+    )
+
+    # Patterns only filtered at ERROR level or above
+    _ERROR_PATTERNS = (
+        "Error making request",
+        "Received error response",
+        "Traceback",
+    )
+
+    # Logger prefixes that should have INFO filtered
+    _NOISY_LOGGER_PREFIXES = ("swerex", "rex-", "modal")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Filter all INFO (and below) from swerex/modal loggers
+        if record.name.startswith(self._NOISY_LOGGER_PREFIXES) and record.levelno <= logging.INFO:
+            return False
+
+        msg = str(record.getMessage())
+
+        # Filter noisy modal sandbox lifecycle messages regardless of source
+        for pattern in self._MODAL_NOISE_PATTERNS:
+            if pattern in msg:
+                return False
+
+        # Always filter these patterns regardless of source
+        for pattern in self._FILTER_PATTERNS:
+            if pattern in msg:
+                return False
+
+        # Filter error-level patterns
+        if record.levelno >= logging.ERROR:
+            for pattern in self._ERROR_PATTERNS:
+                if pattern in msg:
+                    return False
+            # Filter any message with "timed out" (case-insensitive)
+            if "timed out" in msg.lower():
+                return False
+
+        return True
+
+
 def filter_warnings() -> None:
     """Suppress noisy deprecation warnings from third-party libraries."""
     # PyTorch deprecation warnings
@@ -113,6 +185,9 @@ def filter_warnings() -> None:
     # Pydantic warnings
     warnings.filterwarnings("ignore", message=r".*Pydantic serializer warnings.*")
 
+    # Modal warnings
+    warnings.filterwarnings("ignore", message=r".*blocking Modal interface.*")
+
 
 def _is_debug_mode() -> bool:
     """Check if debug mode is enabled via OLMO_EVAL_DEBUG environment variable."""
@@ -127,6 +202,10 @@ def configure_logging(level: LogLevel = "INFO") -> None:
     Set OLMO_EVAL_DEBUG=1 to bypass all log silencing and warning filters.
     """
     root_logger = logging.getLogger()
+
+    # Clear any existing handlers to ensure clean state
+    # This is important for worker subprocesses that might inherit handlers
+    root_logger.handlers.clear()
 
     # In debug mode, use DEBUG level and don't silence anything
     if _is_debug_mode():
@@ -148,6 +227,7 @@ def configure_logging(level: LogLevel = "INFO") -> None:
             datefmt="%Y-%m-%d %H:%M:%S",
         )
     )
+    handler.addFilter(SwerexNoiseFilter())  # Filter noisy logging from swe-rex
     root_logger.addHandler(handler)
     root_logger.setLevel(getattr(logging, level))
 
@@ -159,8 +239,22 @@ def configure_logging(level: LogLevel = "INFO") -> None:
     logging.getLogger("LiteLLM").setLevel(logging.WARNING)
     logging.getLogger("litellm").setLevel(logging.WARNING)
 
-    # Allow swerex (sandbox) logs through at DEBUG level
-    logging.getLogger("swerex").setLevel(logging.DEBUG)
+    # Suppress noisy swerex/modal logs (DEBUG mode will override this)
+    swerex_filter = SwerexNoiseFilter()
+    for logger_name in (
+        "swerex",
+        "swerex.deployment",
+        "swerex.deployment.modal",
+        "swerex.deployment.docker",
+        "swerex.runtime",
+        "rex-runtime",
+        "rex-session",
+        "modal",
+        "modal._runtime",
+    ):
+        noisy_logger = logging.getLogger(logger_name)
+        noisy_logger.setLevel(logging.ERROR)
+        noisy_logger.addFilter(swerex_filter)
 
     # Set environment variables for third-party libraries
     os.environ.setdefault("HF_DATASETS_DISABLE_PROGRESS_BAR", "1")
@@ -176,6 +270,11 @@ def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(f"{PACKAGE_LOGGER_NAME}.{name}")
 
 
+def get_current_worker_id() -> str | None:
+    """Get the current worker ID if running in a worker subprocess."""
+    return _current_worker_id
+
+
 def configure_worker_logging(worker_id: str) -> logging.Logger:
     """Configure logging for a worker subprocess.
 
@@ -188,6 +287,9 @@ def configure_worker_logging(worker_id: str) -> logging.Logger:
     Returns:
         Configured logger for this worker
     """
+    global _current_worker_id
+    _current_worker_id = worker_id
+
     logger = logging.getLogger(f"{PACKAGE_LOGGER_NAME}.worker.{worker_id}")
 
     if not logger.handlers:
@@ -200,9 +302,32 @@ def configure_worker_logging(worker_id: str) -> logging.Logger:
                 datefmt="%Y-%m-%d %H:%M:%S",
             )
         )
+        handler.addFilter(SwerexNoiseFilter())
         logger.addHandler(handler)
         logger.setLevel(logging.INFO)
         logger.propagate = False
+
+        # Suppress noisy swerex/modal logs in worker subprocesses
+        swerex_filter = SwerexNoiseFilter()
+        for logger_name in (
+            "swerex",
+            "swerex.deployment",
+            "swerex.deployment.modal",
+            "swerex.deployment.docker",
+            "swerex.runtime",
+            "rex-runtime",
+            "rex-session",
+            "modal",
+            "modal._runtime",
+        ):
+            noisy_logger = logging.getLogger(logger_name)
+            noisy_logger.setLevel(logging.ERROR)
+            noisy_logger.addFilter(swerex_filter)
+
+        # Ensure root logger handlers also have the filter
+        root_logger = logging.getLogger()
+        for root_handler in root_logger.handlers:
+            root_handler.addFilter(swerex_filter)
 
     return logger
 

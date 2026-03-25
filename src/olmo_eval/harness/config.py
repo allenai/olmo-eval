@@ -45,6 +45,8 @@ class HarnessConfig:
     backend_kwargs: dict[str, Any] = field(default_factory=dict)
     metrics: MetricsConfig | None = None
     batching: BatchConfig | None = None
+    scorer_startup_timeout: float | None = None
+    num_inference_workers: int = 1  # Data parallel instances (1 = tensor parallel only)
 
     # Cache for resolved tools
     _resolved_tools_cache: tuple[Tool, ...] | None = field(
@@ -142,6 +144,10 @@ class HarnessConfig:
             d["metrics"] = self.metrics.to_dict()
         if self.batching is not None:
             d["batching"] = self.batching.to_dict()
+        if self.scorer_startup_timeout is not None:
+            d["scorer_startup_timeout"] = self.scorer_startup_timeout
+        if self.num_inference_workers != 1:
+            d["num_inference_workers"] = self.num_inference_workers
         return d
 
     @classmethod
@@ -184,6 +190,8 @@ class HarnessConfig:
             backend_kwargs=data.get("backend_kwargs", {}),
             metrics=metrics,
             batching=batching,
+            scorer_startup_timeout=data.get("scorer_startup_timeout"),
+            num_inference_workers=data.get("num_inference_workers", 1),
         )
 
     def with_tools(self, *new_tools: Tool | str) -> HarnessConfig:
@@ -210,6 +218,8 @@ class HarnessConfig:
             backend_kwargs=self.backend_kwargs,
             metrics=self.metrics,
             batching=self.batching,
+            scorer_startup_timeout=self.scorer_startup_timeout,
+            num_inference_workers=self.num_inference_workers,
         )
 
     def with_system_prompt(self, system_prompt: str) -> HarnessConfig:
@@ -236,6 +246,8 @@ class HarnessConfig:
             backend_kwargs=self.backend_kwargs,
             metrics=self.metrics,
             batching=self.batching,
+            scorer_startup_timeout=self.scorer_startup_timeout,
+            num_inference_workers=self.num_inference_workers,
         )
 
     def with_provider(self, provider: ProviderConfig) -> HarnessConfig:
@@ -262,6 +274,8 @@ class HarnessConfig:
             backend_kwargs=self.backend_kwargs,
             metrics=self.metrics,
             batching=self.batching,
+            scorer_startup_timeout=self.scorer_startup_timeout,
+            num_inference_workers=self.num_inference_workers,
         )
 
     def merge_provider(self, provider: ProviderConfig) -> HarnessConfig:
@@ -338,6 +352,8 @@ class HarnessConfig:
             backend_kwargs=self.backend_kwargs,
             metrics=metrics,
             batching=self.batching,
+            scorer_startup_timeout=self.scorer_startup_timeout,
+            num_inference_workers=self.num_inference_workers,
         )
 
     def with_batching(self, batching: BatchConfig) -> HarnessConfig:
@@ -364,6 +380,36 @@ class HarnessConfig:
             backend_kwargs=self.backend_kwargs,
             metrics=self.metrics,
             batching=batching,
+            scorer_startup_timeout=self.scorer_startup_timeout,
+            num_inference_workers=self.num_inference_workers,
+        )
+
+    def with_num_inference_workers(self, num_inference_workers: int) -> HarnessConfig:
+        """Create a new config with updated num_inference_workers.
+
+        Args:
+            num_inference_workers: Number of parallel inference workers.
+
+        Returns:
+            New HarnessConfig with updated num_inference_workers.
+        """
+        return HarnessConfig(
+            name=self.name,
+            provider=self.provider,
+            tools=self.tools,
+            system_prompt=self.system_prompt,
+            tool_choice=self.tool_choice,
+            backend=self.backend,
+            required_secrets=self.required_secrets,
+            max_turns=self.max_turns,
+            max_concurrency=self.max_concurrency,
+            scoring_concurrency=self.scoring_concurrency,
+            sandboxes=self.sandboxes,
+            backend_kwargs=self.backend_kwargs,
+            metrics=self.metrics,
+            batching=self.batching,
+            scorer_startup_timeout=self.scorer_startup_timeout,
+            num_inference_workers=num_inference_workers,
         )
 
 
@@ -382,6 +428,8 @@ def harness_config(
     backend_kwargs: dict[str, Any] | None = None,
     metrics: MetricsConfig | None = None,
     batching: BatchConfig | None = None,
+    scorer_startup_timeout: float | None = None,
+    num_inference_workers: int = 1,
 ) -> HarnessConfig:
     """Create a HarnessConfig.
 
@@ -400,6 +448,10 @@ def harness_config(
         backend_kwargs: Backend-specific kwargs (e.g., enable_compaction for openai_agents).
         metrics: Metrics collection configuration (None = no metrics).
         batching: Batching strategy configuration (None = sequential).
+        scorer_startup_timeout: Timeout for scorer worker startup. If None, derived from
+            sandbox configs (max startup_timeout + 60s buffer) or defaults to 60s.
+        num_inference_workers: Number of parallel inference workers for data parallelism.
+            GPUs are divided evenly among workers. Default 1 (tensor parallel only).
 
     Returns:
         A new HarnessConfig instance.
@@ -419,4 +471,6 @@ def harness_config(
         backend_kwargs=backend_kwargs or {},
         metrics=metrics,
         batching=batching,
+        scorer_startup_timeout=scorer_startup_timeout,
+        num_inference_workers=num_inference_workers,
     )

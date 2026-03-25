@@ -148,7 +148,6 @@ def assemble_external_eval_job(
     env_secrets: list[tuple[str, str]] | None = None,
     inject_aws_credentials: bool = False,
     inject_gcs_credentials: bool = False,
-    inject_gcp_secret: bool = False,
     eval_args: dict[str, str] | None = None,
     provider_kwargs: dict[str, str] | None = None,
     uv_cache_dir: str | None = None,
@@ -269,13 +268,6 @@ def assemble_external_eval_job(
             BeakerEnvSecret(env_var, secret_name) for env_var, secret_name in env_secrets
         ]
 
-    # Add GCP secret as GOOGLE_APPLICATION_CREDENTIALS env var
-    if inject_gcp_secret and beaker_username:
-        gcp_secret_name = f"{beaker_username}_GOOGLE_APPLICATION_CREDENTIALS"
-        beaker_env_secrets.append(
-            BeakerEnvSecret("GOOGLE_APPLICATION_CREDENTIALS", gcp_secret_name)
-        )
-
     # Add store defaults if enabled
     if store:
         from olmo_eval.launch.beaker.secrets import get_store_env_defaults
@@ -359,7 +351,6 @@ class JobConfigAssembler:
         inject_gcs_credentials: bool,
         enable_sandbox: bool = False,
         secret_env_overrides: dict[str, str] | None = None,
-        inject_gcp_secret: bool = False,
     ):
         self.config = config
         self.effective_image = effective_image
@@ -372,7 +363,6 @@ class JobConfigAssembler:
         self.inject_gcs_credentials = inject_gcs_credentials
         self.enable_sandbox = enable_sandbox
         self.secret_env_overrides = secret_env_overrides or {}
-        self.inject_gcp_secret = inject_gcp_secret
 
     def assemble(self, exp: ExperimentPlan) -> BeakerJobConfig:
         """Assemble a BeakerJobConfig for an experiment."""
@@ -459,11 +449,6 @@ class JobConfigAssembler:
             for beaker_secret, env_var in self.secret_env_overrides.items()
         )
 
-        # Add GCP secret as GOOGLE_APPLICATION_CREDENTIALS env var
-        if self.inject_gcp_secret:
-            gcp_secret_name = f"{self.beaker_username}_GOOGLE_APPLICATION_CREDENTIALS"
-            env_secrets.append(BeakerEnvSecret("GOOGLE_APPLICATION_CREDENTIALS", gcp_secret_name))
-
         job_env_vars: dict[str, str] = {
             "BEAKER_AUTHOR": self.beaker_username,
             "BEAKER_WORKSPACE": self.config.workspace,
@@ -491,6 +476,7 @@ class JobConfigAssembler:
 
         # Configure sandbox environment and registry mirror
         setup_registry_mirror = False
+        setup_modal_gcp_secret = False
         log.info(f"Sandbox enabled: {self.enable_sandbox}")
         if self.enable_sandbox:
             job_env_vars["BEAKER_ALLOW_SUBCONTAINERS"] = "1"
@@ -502,6 +488,22 @@ class JobConfigAssembler:
             mirror_url = get_registry_mirror_url()
             job_env_vars["MIRROR_HOSTS"] = mirror_url
             setup_registry_mirror = True
+
+        # Check for Modal sandbox with GCP registry auth - auto-setup Modal secret
+        if self.config.harness and preset and preset.sandboxes:
+            from olmo_eval.harness.sandbox.config import SandboxMode
+
+            for sandbox in preset.sandboxes:
+                if (
+                    sandbox.mode == SandboxMode.MODAL
+                    and sandbox.registry_auth
+                    and sandbox.registry_auth.provider == "gcp"
+                ):
+                    # Use configured secret name or default to gcp-service-account-json
+                    secret_name = sandbox.registry_auth.secret_name or "gcp-service-account-json"
+                    job_env_vars["MODAL_GCP_SECRET_NAME"] = secret_name
+                    setup_modal_gcp_secret = True
+                    log.info(f"Modal GCP secret setup enabled: {secret_name}")
 
         # Collect task dependencies and provider dependencies separately
         task_packages = self._extract_task_dependencies(exp.tasks, exp.task_overrides) or None
@@ -542,6 +544,7 @@ class JobConfigAssembler:
             setup_registry_mirror=setup_registry_mirror,
             setup_store_secrets=self.config.store,
             vllm_isolated_venv=vllm_isolated_venv,
+            setup_modal_gcp_secret=setup_modal_gcp_secret,
         )
 
     def _extract_task_dependencies(

@@ -133,7 +133,7 @@ class Tau2ExternalEval(SandboxedExternalEval):
     def setup_command(self) -> tuple[str, ...]:
         repo = f"{self.working_dir}/tau2-bench"
         return (
-            f"git clone --depth 1 https://github.com/sierra-research/tau2-bench.git {repo}",
+            f"git clone --depth 1 https://github.com/amazon-agi/tau2-bench-verified.git {repo}",
             f"cd {repo} && uv sync",
             f"mkdir -p {self.results_dir}",
         )

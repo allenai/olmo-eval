@@ -21,9 +21,11 @@ class ScoringContext:
         execution_env: Optional execution environment for code execution.
             If None, scorers requiring execution will fall back to unsafe
             local execution or raise an error.
+        scoring_concurrency: Maximum concurrent async scoring operations.
     """
 
     execution_env: ExecutionEnvironment | None = None
+    scoring_concurrency: int = 8
 
     @property
     def has_execution_env(self) -> bool:

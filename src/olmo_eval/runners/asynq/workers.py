@@ -31,6 +31,7 @@ def inference_worker(
     total_instances: int,
     init_times: dict[str, float] | None = None,
     output_dir: str | None = None,
+    num_workers: int = 1,
 ) -> None:
     """Worker process that initializes a harness and processes items.
 
@@ -44,9 +45,10 @@ def inference_worker(
         item_queue: Queue of QueueItems (None signals shutdown).
         result_queue: Queue to put ResultItems.
         harness_config_dict: Serialized HarnessConfig.
-        total_instances: Total number of instances to process.
+        total_instances: Total number of instances across all workers.
         init_times: Optional shared dict for tracking initialization times.
         output_dir: Output directory for persisting logs (e.g., vLLM server logs).
+        num_workers: Number of parallel workers sharing the work.
     """
     import sys
 
@@ -177,6 +179,7 @@ def inference_worker(
                     max_concurrency,
                     worker_logger,
                     total_instances,
+                    num_workers,
                 )
             )
 
@@ -248,13 +251,23 @@ def scoring_worker(
     sandbox_manager = None
     scoring_context: ScoringContext | None = None
 
-    async def score_item_async(
-        item: ScoringItem, context: ScoringContext | None, semaphore: asyncio.Semaphore
-    ) -> ScoredResponse:
-        """Score a single item with semaphore-controlled concurrency."""
-        async with semaphore:
+    async def run_scoring_loop() -> None:
+        """Main async scoring loop using continuous dispatch pattern.
+
+        Uses asyncio.wait(return_when=FIRST_COMPLETED) to maintain a pool of
+        in-flight tasks without callbacks or sleeps. This approach is modeled
+        after ContinuousBatchDispatcher in dispatch.py.
+        """
+        progress: ProgressLogger | None = None
+        in_flight: dict[asyncio.Task[ScoredResponse], ScoringItem] = {}
+        shutdown = False
+
+        async def score_item(item: ScoringItem) -> ScoredResponse:
+            """Score a single item."""
             try:
-                scored_list = await item.task.score_responses([item.response], context=context)
+                scored_list = await item.task.score_responses(
+                    [item.response], context=scoring_context
+                )
                 scored = scored_list[0] if scored_list else item.response
                 return ScoredResponse(
                     spec=item.spec,
@@ -269,63 +282,19 @@ def scoring_worker(
                     scored=item.response,
                 )
 
-    async def process_batch(
-        items: list[ScoringItem],
-        context: ScoringContext | None,
-        progress: ProgressLogger,
-    ) -> None:
-        """Process a batch of items concurrently."""
-        semaphore = asyncio.Semaphore(max_concurrency)
-        tasks = [score_item_async(item, context, semaphore) for item in items]
-        results = await asyncio.gather(*tasks)
-
-        for result in results:
-            scored_queue.put(result)
-            progress.update(1)
-
-    async def run_scoring_loop() -> None:
-        """Main async scoring loop."""
-        progress: ProgressLogger | None = None
-        batch: list[ScoringItem] = []
-        batch_size = max_concurrency * 2  # Buffer 2x concurrency for efficiency
-
         try:
-            while True:
-                # Non-blocking check with timeout to allow batching
-                try:
-                    item: ScoringItem | None = scoring_queue.get(timeout=0.1)
-                except queue.Empty:
-                    # Timeout - flush any pending batch to avoid deadlock
-                    if batch:
-                        if progress is None:
-                            worker_logger.info("Starting scoring")
-                            progress = ProgressLogger(
-                                total=total_instances,
-                                desc="Scored",
-                                logger=worker_logger,
-                                color="blue",
-                            )
-                        await process_batch(batch, scoring_context, progress)
-                        batch = []
-                    continue
+            while not shutdown or in_flight:
+                # Top up in-flight tasks to max_concurrency
+                while len(in_flight) < max_concurrency and not shutdown:
+                    try:
+                        item: ScoringItem | None = scoring_queue.get_nowait()
+                    except queue.Empty:
+                        break
 
-                if item is None:
-                    # Shutdown signal - process remaining batch and exit
-                    if batch:
-                        if progress is None:
-                            progress = ProgressLogger(
-                                total=total_instances,
-                                desc="Scored",
-                                logger=worker_logger,
-                                color="blue",
-                            )
-                        await process_batch(batch, scoring_context, progress)
-                    break
+                    if item is None:
+                        shutdown = True
+                        break
 
-                batch.append(item)
-
-                # Process batch when full
-                if len(batch) >= batch_size:
                     if progress is None:
                         worker_logger.info("Starting scoring")
                         progress = ProgressLogger(
@@ -334,10 +303,57 @@ def scoring_worker(
                             logger=worker_logger,
                             color="blue",
                         )
-                    await process_batch(batch, scoring_context, progress)
-                    batch = []
+
+                    task = asyncio.create_task(score_item(item))
+                    in_flight[task] = item
+
+                if not in_flight:
+                    # Nothing in flight - blocking wait for item
+                    if shutdown:
+                        break
+                    try:
+                        item = scoring_queue.get(timeout=1.0)
+                    except queue.Empty:
+                        continue
+
+                    if item is None:
+                        shutdown = True
+                        continue
+
+                    if progress is None:
+                        worker_logger.info("Starting scoring")
+                        progress = ProgressLogger(
+                            total=total_instances,
+                            desc="Scored",
+                            logger=worker_logger,
+                            color="blue",
+                        )
+
+                    task = asyncio.create_task(score_item(item))
+                    in_flight[task] = item
+                    continue
+
+                # Wait for any task to complete (with timeout to poll queue)
+                done, _ = await asyncio.wait(
+                    in_flight.keys(), return_when=asyncio.FIRST_COMPLETED, timeout=0.1
+                )
+
+                for task in done:
+                    in_flight.pop(task)
+                    result = task.result()
+                    scored_queue.put(result)
+                    if progress is not None:
+                        progress.update(1)
 
         finally:
+            # Wait for remaining tasks
+            if in_flight:
+                done, _ = await asyncio.wait(in_flight.keys())
+                for task in done:
+                    result = task.result()
+                    scored_queue.put(result)
+                    if progress is not None:
+                        progress.update(1)
             if progress is not None:
                 progress.close()
 
@@ -366,7 +382,10 @@ def scoring_worker(
                 )
                 sys.exit(1)
 
-            scoring_context = ScoringContext(execution_env=sandbox_manager)
+            scoring_context = ScoringContext(
+                execution_env=sandbox_manager,
+                scoring_concurrency=max_concurrency,
+            )
 
         # Signal that worker is ready
         worker_logger.info("Scorer ready")

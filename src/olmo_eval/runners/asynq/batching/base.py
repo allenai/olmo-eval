@@ -33,6 +33,7 @@ class BatchingStrategy(ABC):
         max_concurrency: int | None,
         worker_logger: logging.Logger,
         total_instances: int,
+        num_workers: int = 1,
     ) -> None:
         """Execute the batching strategy.
 
@@ -42,7 +43,8 @@ class BatchingStrategy(ABC):
             result_queue: Queue to put ResultItems.
             max_concurrency: Maximum concurrent requests.
             worker_logger: Logger with worker identification.
-            total_instances: Total number of instances to process.
+            total_instances: Total number of instances across all workers.
+            num_workers: Number of parallel workers sharing the work.
         """
         ...
 
