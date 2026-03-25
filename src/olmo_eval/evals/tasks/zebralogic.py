@@ -122,6 +122,7 @@ def _evaluate_zebralogic(
                 if (
                     isinstance(prediction_table, dict)
                     and house in prediction_table
+                    and isinstance(prediction_table[house], dict)
                     and column in prediction_table[house]
                 ):
                     truth_cell = solution_table[house][column].lower().strip()
@@ -132,6 +133,8 @@ def _evaluate_zebralogic(
                         continue
                     # unwrap nested dicts before checking list or str
                     while isinstance(predicted, dict):
+                        if not predicted:
+                            break
                         predicted = list(predicted.values())[0]
                     if isinstance(predicted, list):
                         predicted_cell = predicted[0].lower().strip()
@@ -147,7 +150,7 @@ def _evaluate_zebralogic(
             "cell_accuracy": this_correct_cells / total_cells,
         }
     except Exception:
-        return {"parsed": 0.0, "puzzle_accuracy": 0.0, "cell_accuracy": 0.0}
+        return {"parsed": 1.0, "puzzle_accuracy": 0.0, "cell_accuracy": 0.0}
 
 
 def _get_zebralogic_scores(instance: Instance, output: LMOutput) -> dict[str, float]:
