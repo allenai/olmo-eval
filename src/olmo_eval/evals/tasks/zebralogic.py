@@ -116,6 +116,10 @@ def _evaluate_zebralogic(
         return {"parsed": 0.0, "puzzle_accuracy": 0.0, "cell_accuracy": 0.0}
     try:
         prediction_table = prediction_table.get("solution", {}) or {}
+        if not isinstance(prediction_table, dict) or not all(
+            house in prediction_table for house in solution_table
+        ):
+            return {"parsed": 0.0, "puzzle_accuracy": 0.0, "cell_accuracy": 0.0}
         this_correct_cells = 0
         for house in solution_table:
             for column in solution_table[house]:
