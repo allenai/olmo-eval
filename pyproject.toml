@@ -54,7 +54,7 @@ agents = [
     "httpx~=0.28.1",
 ]
 openhands = [
-    "openhands-ai~=1.4.0",
+    "openhands-ai~=1.6.0",
 ]
 sandbox = [
     "swe-rex[modal] @ git+https://github.com/jdahm/SWE-ReX.git@johannd/ai2",
