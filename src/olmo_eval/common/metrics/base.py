@@ -287,6 +287,39 @@ class LogprobMCAccuracyMetric(Metric):
 
 
 @dataclass(frozen=True, slots=True)
+class LogprobPerCharMCAccuracyMetric(Metric):
+    """Multiple-choice accuracy via character-length-normalized logprob argmax.
+
+    For each continuation, divides the total logprob by the number of characters
+    in the continuation text, then picks the continuation with the highest
+    normalized logprob. Checks whether its index matches
+    ``instance.metadata["gold_idx"]``.
+
+    This matches the ``acc_per_char`` metric from oe-eval-internal's MCAccuracy.
+    """
+
+    name: str = "accuracy"
+    scorer: type[Scorer] = LogprobScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        if not responses:
+            return 0.0
+        correct = 0
+        for response in responses:
+            gold_idx = response.instance.metadata.get("gold_idx")
+            if gold_idx is None or not response.outputs:
+                continue
+            logprob_per_char = []
+            for o in response.outputs:
+                total_logprob = sum(lp["logprob"] for lp in (o.logprobs or []))
+                num_chars = max(len(o.text) if o.text else 0, 1)
+                logprob_per_char.append(total_logprob / num_chars)
+            if logprob_per_char.index(max(logprob_per_char)) == gold_idx:
+                correct += 1
+        return correct / len(responses)
+
+
+@dataclass(frozen=True, slots=True)
 class GreedyAccuracyMetric(Metric):
     """Greedy decoding accuracy for single-continuation tasks.
 

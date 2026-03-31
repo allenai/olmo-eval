@@ -15,6 +15,7 @@ class LAMBADA(Task):
     data_source = DataSource(path="EleutherAI/lambada_openai")
     split = Split.TEST
     metrics = (GreedyAccuracyMetric(), BPBMetric())
+    primary_metric = GreedyAccuracyMetric()
     num_fewshot = 0
     sampling_params = SamplingParams(temperature=0.0)
 

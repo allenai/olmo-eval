@@ -6,9 +6,9 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter
-from olmo_eval.common.metrics import LogprobMCAccuracyMetric
+from olmo_eval.common.metrics import LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
-from olmo_eval.data import DataSource
+from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 # fmt: off
@@ -213,7 +213,33 @@ class HellaSwag(Task):
 
     @property
     def instances(self) -> Iterator[Instance]:
-        yield from self._load_instances_cached()
+        if self._instances_cache is None:
+            self._instances_cache = self._load_hellaswag_instances()
+        yield from self._instances_cache
+
+    def _load_hellaswag_instances(self) -> list[Instance]:
+        loader = DataLoader()
+        instances: list[Instance] = []
+
+        # When limit is set, load all splits (validation first, then train)
+        # to match oe-eval-internal's split="all" ordering: test -> validation -> train.
+        # HellaSwag has no test split, so: validation -> train.
+        splits = ["validation", "train"] if self.config.limit else [self.config.split.value]
+
+        index = 0
+        for split in splits:
+            source = self.config.get_data_source(split=split)
+            for doc in loader.load(source):
+                inst = self.process_doc(doc, index)
+                if inst is not None:
+                    instances.append(inst)
+                    index += 1
+
+        # Match oe-eval-internal's random subsampling: random.Random(1234).sample(docs, limit)
+        if self.config.limit and len(instances) > self.config.limit:
+            instances = random.Random(1234).sample(instances, self.config.limit)
+
+        return instances
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         return _process_hellaswag_doc(doc, index)
@@ -245,9 +271,10 @@ class HellaSwag(Task):
                     },
                 )
             )
+        # Take the first num_fewshot examples (no random sampling) to match
+        # oe-eval-internal's fewshot_source behavior which uses [:k].
         if self.config.num_fewshot and self.config.num_fewshot < len(instances):
-            rng = random.Random(self.config.fewshot_seed)
-            instances = rng.sample(instances, self.config.num_fewshot)
+            instances = instances[: self.config.num_fewshot]
         return instances
 
     def format_request(self, instance: Instance) -> LMRequest:
@@ -282,7 +309,14 @@ class HellaSwag(Task):
 
 register_variant("hellaswag", "rc")
 register_variant("hellaswag", "mc", formatter=MultipleChoiceFormatter())
-register_variant("hellaswag", "olmo3base", num_fewshot=5, fewshot_source="olmes_hellaswag_fixed")
+register_variant(
+    "hellaswag",
+    "olmo3base",
+    num_fewshot=5,
+    limit=10_000,
+    fewshot_source="olmes_hellaswag_fixed",
+    metrics=(LogprobPerCharMCAccuracyMetric(),),
+)
 register_variant(
     "hellaswag", "xlarge", num_fewshot=5, limit=10_000, fewshot_source="olmes_hellaswag_fixed"
 )
