@@ -2,7 +2,7 @@ import re
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.metrics import F1Metric
+from olmo_eval.common.metrics import SQuADF1Metric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -76,7 +76,7 @@ def _format_query(category: str, question: str) -> str:
 
 class _JeopardyBase(Task):
     fewshot_split: str = "train"
-    metrics = (F1Metric(),)
+    metrics = (SQuADF1Metric(),)
     sampling_params = SamplingParams(
         max_tokens=50,
         temperature=0,
@@ -90,8 +90,6 @@ class _JeopardyBase(Task):
         return super()._build_fewshot()
 
     def _build_fixed_fewshot(self) -> list[Instance]:
-        import random
-
         instances = []
         for doc in JEOPARDY_FIXED_FEWSHOT:
             category, question = _parse_context(doc["context"])
@@ -103,8 +101,7 @@ class _JeopardyBase(Task):
                 )
             )
         if self.config.num_fewshot and self.config.num_fewshot < len(instances):
-            rng = random.Random(self.config.fewshot_seed)
-            instances = rng.sample(instances, self.config.num_fewshot)
+            instances = instances[: self.config.num_fewshot]
         return instances
 
     @property
@@ -156,5 +153,6 @@ register_variant(
     "olmo3base",
     data_source=DataSource(path="soldni/jeopardy", subset="all_questions", split="train"),
     limit=10_000,
+    seed=1234,
     fewshot_source="jeopardy_fixed",
 )

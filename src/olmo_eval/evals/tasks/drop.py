@@ -343,8 +343,6 @@ class Drop(Task):
         return super()._build_fewshot()
 
     def _build_fixed_fewshot(self) -> list[Instance]:
-        import random
-
         instances = []
         for doc in DROP_FIXED_FEWSHOT:
             answers = _get_answers(doc)
@@ -360,8 +358,7 @@ class Drop(Task):
 
         num = self.config.num_fewshot
         if num and num < len(instances):
-            rng = random.Random(self.config.fewshot_seed)
-            instances = rng.sample(instances, num)
+            instances = instances[:num]
         return instances
 
     def format_request(self, instance: Instance) -> LMRequest:

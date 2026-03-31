@@ -287,6 +287,37 @@ class LogprobMCAccuracyMetric(Metric):
 
 
 @dataclass(frozen=True, slots=True)
+class GreedyAccuracyMetric(Metric):
+    """Greedy decoding accuracy for single-continuation tasks.
+
+    Checks whether the model would greedily decode the expected continuation
+    token-by-token, using the ``is_greedy`` flag computed by the inference provider.
+
+    This is the correct metric for tasks like LAMBADA where there is only one
+    continuation per instance and we want to know if the model would have
+    produced that exact continuation via greedy decoding.
+    """
+
+    name: str = "greedy_accuracy"
+    scorer: type[Scorer] = LogprobScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        if not responses:
+            return 0.0
+        correct = 0
+        for response in responses:
+            if not response.outputs:
+                continue
+            # For single-continuation tasks, check the gold continuation
+            gold_idx = response.instance.metadata.get("gold_idx", 0)
+            if gold_idx < len(response.outputs):
+                output = response.outputs[gold_idx]
+                if output.metadata.get("is_greedy", False):
+                    correct += 1
+        return correct / len(responses)
+
+
+@dataclass(frozen=True, slots=True)
 class ToolAccuracyMetric(Metric):
     """Mean tool call accuracy across all responses."""
 
