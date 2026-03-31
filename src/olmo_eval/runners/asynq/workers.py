@@ -258,16 +258,32 @@ def scoring_worker(
         in-flight tasks without callbacks or sleeps. This approach is modeled
         after ContinuousBatchDispatcher in dispatch.py.
         """
+        from olmo_eval.evals.tasks.common import Task
+
         progress: ProgressLogger | None = None
         in_flight: dict[asyncio.Task[ScoredResponse], ScoringItem] = {}
         shutdown = False
 
+        # Cache Task objects by spec so only the first ScoringItem per spec
+        # needs to carry (and unpickle) the full Task.
+        task_cache: dict[str, Task] = {}
+
+        def get_task(item: ScoringItem) -> Task:
+            if item.task is not None:
+                task_cache[item.spec] = item.task
+            task = task_cache.get(item.spec)
+            if task is None:
+                raise RuntimeError(
+                    f"No cached Task for spec {item.spec!r}. "
+                    "The first ScoringItem for each spec must include the Task."
+                )
+            return task
+
         async def score_item(item: ScoringItem) -> ScoredResponse:
             """Score a single item."""
             try:
-                scored_list = await item.task.score_responses(
-                    [item.response], context=scoring_context
-                )
+                task = get_task(item)
+                scored_list = await task.score_responses([item.response], context=scoring_context)
                 scored = scored_list[0] if scored_list else item.response
                 return ScoredResponse(
                     spec=item.spec,

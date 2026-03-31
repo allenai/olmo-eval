@@ -93,12 +93,17 @@ class ResultItem:
 
 @dataclass
 class ScoringItem:
-    """Single response to be scored by the scoring worker."""
+    """Single response to be scored by the scoring worker.
+
+    The ``task`` field is only set on the first item for each spec;
+    the scoring worker caches it and subsequent items leave it as None
+    to avoid re-pickling the full Task object through the multiprocessing queue.
+    """
 
     spec: str
     instance_idx: int
     response: Response
-    task: Task
+    task: Task | None = None
 
 
 @dataclass
