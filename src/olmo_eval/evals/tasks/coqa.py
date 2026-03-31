@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random as random_module
 from collections.abc import Iterator
 from typing import Any
 
@@ -46,13 +47,11 @@ class CoQA(Task):
             source = self.config.get_data_source(split=split)
             for doc in loader.load(source):
                 instances.extend(self._process_doc_to_multi(doc))
-                if self.config.limit and len(instances) >= self.config.limit:
-                    break
-            if self.config.limit and len(instances) >= self.config.limit:
-                break
 
-        if self.config.limit:
-            instances = instances[: self.config.limit]
+        # Match oe-eval-internal's random subsampling: random.Random(1234).sample(docs, limit)
+        # Must load ALL instances first, then sample, to get the same subset.
+        if self.config.limit and len(instances) > self.config.limit:
+            instances = random_module.Random(1234).sample(instances, self.config.limit)
 
         return instances
 
