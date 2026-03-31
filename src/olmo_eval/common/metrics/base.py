@@ -13,6 +13,7 @@ from olmo_eval.common.scorers import (
     LogprobScorer,
     PerplexityScorer,
     Scorer,
+    SQuADF1Scorer,
     ToolCallScorer,
 )
 from olmo_eval.common.types import Response
@@ -63,6 +64,21 @@ class F1Metric(Metric):
 
     name: str = "f1"
     scorer: type[Scorer] = F1Scorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        if not responses:
+            return 0.0
+        scorer_name = self.scorer().name
+        total = sum(r.scores.get(scorer_name, 0.0) for r in responses)
+        return total / len(responses)
+
+
+@dataclass(frozen=True, slots=True)
+class SQuADF1Metric(Metric):
+    """Mean SQuAD-style F1 score: max F1 over all reference answers."""
+
+    name: str = "f1"
+    scorer: type[Scorer] = SQuADF1Scorer
 
     def compute(self, responses: Sequence[Response]) -> float:
         if not responses:

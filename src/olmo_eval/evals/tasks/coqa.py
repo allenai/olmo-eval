@@ -3,17 +3,23 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.metrics import F1Metric
+from olmo_eval.common.metrics import SQuADF1Metric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
+
+COQA_DESCRIPTION = (
+    "Below is a passage followed by a conversation so far, where each turn in "
+    "the conversation contains a question and an answer. Please answer the final "
+    "question by referring to the passage and the previous questions.\n\n"
+)
 
 
 @register("coqa")
 class CoQA(Task):
     data_source = DataSource(path="EleutherAI/coqa")
     split = Split.VALIDATION
-    metrics = (F1Metric(),)
+    metrics = (SQuADF1Metric(),)
     num_fewshot = 0
     sampling_params = SamplingParams(
         max_tokens=50,
@@ -31,7 +37,10 @@ class CoQA(Task):
         loader = DataLoader()
         instances: list[Instance] = []
 
-        splits = ["train", "validation"] if self.config.limit else [self.config.split.value]
+        # When limit is set, load all splits (validation first, then train)
+        # to match oe-eval-internal's split="all" ordering: test -> validation -> train
+        # CoQA has no test split, so: validation -> train
+        splits = ["validation", "train"] if self.config.limit else [self.config.split.value]
 
         for split in splits:
             source = self.config.get_data_source(split=split)
@@ -95,7 +104,7 @@ class CoQA(Task):
     def format_request(self, instance: Instance) -> LMRequest:
         return LMRequest(
             request_type=RequestType.COMPLETION,
-            prompt=instance.question,
+            prompt=COQA_DESCRIPTION + instance.question,
         )
 
 

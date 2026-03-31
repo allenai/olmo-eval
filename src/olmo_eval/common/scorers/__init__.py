@@ -11,6 +11,7 @@ from .base import (
     MultipleChoiceScorer,
     PerplexityScorer,
     Scorer,
+    SQuADF1Scorer,
 )
 from .code_execution import CodeExecutionScorer
 from .execution import ExecutionScorer, SandboxRequiredError
@@ -52,6 +53,7 @@ __all__ = [
     "RubricJudgeScorer",
     "SandboxRequiredError",
     "Scorer",
+    "SQuADF1Scorer",
     "SimpleQAGrade",
     "SimpleQAJudgeScorer",
     "ToolArgumentScorer",
