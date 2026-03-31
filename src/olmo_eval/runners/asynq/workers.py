@@ -199,8 +199,8 @@ def inference_worker(
                 model_name=model_name,
                 task_id=WORKER_FATAL,
                 instance_idx=-1,
-                instance=None,  # type: ignore[arg-type]
-                request=None,  # type: ignore[arg-type]
+                instance=None,
+                request=None,
                 outputs=[],
                 error=f"Worker process crashed: {e}",
             )
@@ -248,13 +248,31 @@ def scoring_worker(
     sandbox_manager = None
     scoring_context: ScoringContext | None = None
 
+    # Cache Task objects by spec so only the first ScoringItem per spec
+    # needs to carry (and unpickle) the full Task.
+    from olmo_eval.evals.tasks.common import Task
+
+    task_cache: dict[str, Task] = {}
+
+    def get_task(item: ScoringItem) -> Task:
+        if item.task is not None:
+            task_cache[item.spec] = item.task
+        task = task_cache.get(item.spec)
+        if task is None:
+            raise RuntimeError(
+                f"No cached Task for spec {item.spec!r}. "
+                "The first ScoringItem for each spec must include the Task."
+            )
+        return task
+
     async def score_item_async(
         item: ScoringItem, context: ScoringContext | None, semaphore: asyncio.Semaphore
     ) -> ScoredResponse:
         """Score a single item with semaphore-controlled concurrency."""
         async with semaphore:
             try:
-                scored_list = await item.task.score_responses([item.response], context=context)
+                task = get_task(item)
+                scored_list = await task.score_responses([item.response], context=context)
                 scored = scored_list[0] if scored_list else item.response
                 return ScoredResponse(
                     spec=item.spec,
