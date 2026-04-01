@@ -574,8 +574,8 @@ class VLLMServerProvider(InferenceProvider):
         logprob of each continuation token given the context.
         """
         client = self._get_or_create_client()
-        # Use local HuggingFace tokenizer for precise token boundary computation
-        tokenizer = self._get_tokenizer(require_local=True)
+        # Use remote tokenizer (no transformers dependency needed)
+        tokenizer = self._get_tokenizer(require_local=False)
 
         # Get the context/prompt text
         context = request.prompt
