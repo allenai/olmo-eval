@@ -98,17 +98,27 @@ def _align_bags(predicted_bags: list[set[str]], gold_bags: list[set[str]]) -> li
             if _match_numbers_if_present(g, p):
                 score_mat[gi][pi] = _compute_f1(p, g)
 
-    min_dim = min(n_gold, n_pred)
     best_scores = [0.0] * max_dim
     best_total = -1.0
 
-    for perm in permutations(range(n_pred), min_dim):
-        total = sum(score_mat[gi][pi] for gi, pi in enumerate(perm))
-        if total > best_total:
-            best_total = total
-            best_scores = [0.0] * max_dim
-            for gi, pi in enumerate(perm):
-                best_scores[gi] = score_mat[gi][pi]
+    if n_gold <= n_pred:
+        # More (or equal) predicted than gold: assign each gold to a unique predicted
+        for perm in permutations(range(n_pred), n_gold):
+            total = sum(score_mat[gi][pi] for gi, pi in enumerate(perm))
+            if total > best_total:
+                best_total = total
+                best_scores = [0.0] * max_dim
+                for gi, pi in enumerate(perm):
+                    best_scores[gi] = score_mat[gi][pi]
+    else:
+        # More gold than predicted: assign each predicted to a unique gold
+        for perm in permutations(range(n_gold), n_pred):
+            total = sum(score_mat[gi][pi] for pi, gi in enumerate(perm))
+            if total > best_total:
+                best_total = total
+                best_scores = [0.0] * max_dim
+                for pi, gi in enumerate(perm):
+                    best_scores[gi] = score_mat[gi][pi]
 
     return best_scores
 
