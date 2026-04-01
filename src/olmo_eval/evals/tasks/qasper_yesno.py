@@ -83,4 +83,5 @@ register_variant(
     "qasper_yesno",
     "olmo3base",
     num_fewshot=5,
+    fewshot_seed=1234,
 )
