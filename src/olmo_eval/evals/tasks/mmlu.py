@@ -3,11 +3,11 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.formatters import MultipleChoiceFormatter
+from olmo_eval.common.formatters import MultipleChoiceLogprobFormatter
 from olmo_eval.common.metrics import LogprobMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams, Split
 from olmo_eval.data import DataSource
-from olmo_eval.evals.tasks.common import Task, TaskConfig, register
+from olmo_eval.evals.tasks.common import Task, TaskConfig, register, register_variant
 
 _STEM = (
     "abstract_algebra",
@@ -84,11 +84,13 @@ DEFAULT_MMLU_PATH = "cais/mmlu"
 
 
 def _make_mcq_prompt(question: str, choices: list[str], label_prefix: str = " ") -> str:
-    lines = [question.strip(), ""]
-    for i, c in enumerate(choices):
-        letter = chr(ord("A") + i)
-        lines.append(f"{label_prefix}{letter}. {c}")
-    return "\n".join(lines)
+    choice_labels = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    label_format = label_prefix + "A."
+    choices_text = "\n".join(
+        f"{label_format.replace('A', label)} {text}"
+        for label, text in zip(choice_labels, choices)
+    )
+    return f"Question: {question}\n{choices_text}\nAnswer:"
 
 
 def _answer_to_index_and_letter(answer: int | str) -> tuple[int, str]:
@@ -163,20 +165,30 @@ class MMLUMCTask(Task):
         return all_fewshot[:k] if k else all_fewshot
 
 
-_MMLU_FORMATTER = MultipleChoiceFormatter(
-    template="{question}",
-    include_choices_in_prompt=False,
-    prompt_suffix="\n\nAnswer:",
-)
+def _format_subject(subject: str) -> str:
+    return " ".join(subject.split("_"))
+
+
+def _make_formatter(subject: str) -> MultipleChoiceLogprobFormatter:
+    description = f"The following are multiple choice questions (with answers) about {_format_subject(subject)}.\n\n"
+    return MultipleChoiceLogprobFormatter(
+        template="{question}",
+        label_prefix=" ",
+        answer_suffix="",  # "Answer:" is already in the question text from _make_mcq_prompt
+        fewshot_separator="\n\n",
+        description=description,
+    )
+
 
 # Register one task per subject (mmlu_abstract_algebra, mmlu_anatomy, ...)
 for _subject in MMLU_SUBJECTS:
+    _formatter = _make_formatter(_subject)
     _cls = type(
         f"MMLU_{_subject}",
         (MMLUMCTask,),
         {
             "data_source": DataSource(path=DEFAULT_MMLU_PATH, subset=_subject, split="test"),
-            "formatter": _MMLU_FORMATTER,
+            "formatter": _formatter,
             "metrics": (LogprobMCAccuracyMetric(),),
             "primary_metric": LogprobMCAccuracyMetric(),
             "num_fewshot": 5,
@@ -187,4 +199,7 @@ for _subject in MMLU_SUBJECTS:
         },
     )
     register(f"mmlu_{_subject}")(_cls)
+    # Register mc and olmo3base variants for spec resolution
+    register_variant(f"mmlu_{_subject}", "mc")
+    register_variant(f"mmlu_{_subject}", "olmo3base")
     globals()[f"MMLU_{_subject}"] = _cls

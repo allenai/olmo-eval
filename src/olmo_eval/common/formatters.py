@@ -172,6 +172,7 @@ class MultipleChoiceLogprobFormatter(Formatter):
     include_choices_in_prompt: bool = False
     answer_suffix: str = "\n\nAnswer:"
     fewshot_separator: str = "\n\n"
+    description: str = ""
 
     @property
     def request_type(self) -> RequestType:
@@ -191,6 +192,9 @@ class MultipleChoiceLogprobFormatter(Formatter):
 
         parts.append(self.template.format(question=instance.question) + self.answer_suffix)
         prompt = self.fewshot_separator.join(parts)
+
+        if self.description:
+            prompt = self.description + prompt
 
         continuations: tuple[str, ...] = ()
         if instance.choices:
