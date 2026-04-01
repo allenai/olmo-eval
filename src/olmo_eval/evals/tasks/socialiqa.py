@@ -26,7 +26,7 @@ SOCIALIQA_FIXED_FEWSHOT = [
 
 @register("socialiqa")
 class SocialIQA(Task):
-    data_source = DataSource(path="social_i_qa", split="validation")
+    data_source = DataSource(path="social_i_qa", split="validation", revision="refs/convert/parquet")
     split = Split.VALIDATION
     metrics = (LogprobMCAccuracyMetric(),)
     num_fewshot = 0
@@ -169,7 +169,7 @@ register_variant("socialiqa", "mc", formatter=MultipleChoiceFormatter())
 register_variant(
     "socialiqa",
     "olmo3base",
-    data_source=DataSource(path="social_i_qa", split="train+validation"),
+    data_source=DataSource(path="social_i_qa", split="train+validation", revision="refs/convert/parquet"),
     num_fewshot=5,
     limit=10000,
     fewshot_source="olmes_socialiqa_fixed",
@@ -177,7 +177,7 @@ register_variant(
 register_variant(
     "socialiqa",
     "xlarge",
-    data_source=DataSource(path="social_i_qa", split="train+validation"),
+    data_source=DataSource(path="social_i_qa", split="train+validation", revision="refs/convert/parquet"),
     num_fewshot=5,
     limit=10000,
     fewshot_source="olmes_socialiqa_fixed",
