@@ -597,14 +597,15 @@ class VLLMServerProvider(InferenceProvider):
 
             context_len = len(context_enc)
 
-            # Build full token sequence and convert back to text for API
+            # Build full token sequence and send token IDs directly to avoid
+            # re-tokenization issues that shift the context/continuation boundary
             full_tokens = context_enc + continuation_enc
-            full_prompt = tokenizer.decode(full_tokens)
 
             # Use completions endpoint with echo=True to get logprobs for prompt tokens
+            # Send token IDs directly as prompt to avoid decode/re-encode round-trip
             response = await client.completions.create(
                 model=self.model_name,
-                prompt=full_prompt,
+                prompt=full_tokens,
                 max_tokens=1,
                 temperature=0.0,
                 logprobs=5,
