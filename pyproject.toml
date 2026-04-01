@@ -77,6 +77,11 @@ gpu = [
 clients = [
     "openai~=2.21.0",
 ]
+swebench = [
+    "olmo-eval-internal[litellm]",
+    "mini-swe-agent @ git+https://github.com/allenai/mini-swe-agent.git@e614105ca837995765512bfd5aa1d216558f002c",
+    "swebench @ git+https://github.com/SWE-bench/SWE-bench.git@f7bbbb2ccdf479001d6467c9e34af59e44a840f9",
+]
 storage = [
     "olmo-eval-internal[s3,postgres]",
 ]
@@ -123,6 +128,12 @@ unresolved-import = "ignore"
 # ty overrides for sandbox module (uses optional swe-rex dependency)
 [[tool.ty.overrides]]
 include = ["src/olmo_eval/harness/sandbox/**"]
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
+# ty overrides for swebench benchmark (uses optional mini-swe-agent/swebench dependencies)
+[[tool.ty.overrides]]
+include = ["src/olmo_eval/evals/external/benchmarks/swebench/**"]
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"
 
