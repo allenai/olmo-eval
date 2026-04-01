@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter
-from olmo_eval.common.metrics import LogprobMCAccuracyMetric
+from olmo_eval.common.metrics import LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -22,7 +22,19 @@ class SciQ(Task):
 
     @property
     def instances(self) -> Iterator[Instance]:
-        yield from self._load_instances_cached()
+        if self.config.split == Split.ALL:
+            if self._instances_cache is None:
+                all_instances: list[Instance] = []
+                for split in ("test", "validation", "train"):
+                    all_instances.extend(self._load_instances(split=split))
+                if self.config.limit and len(all_instances) > self.config.limit:
+                    all_instances = random.Random(1234).sample(
+                        all_instances, self.config.limit
+                    )
+                self._instances_cache = all_instances
+            yield from self._instances_cache
+        else:
+            yield from self._load_instances_cached()
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         question = doc.get("question", "")
@@ -127,4 +139,12 @@ def _format_rc(question: str, answer: str | None = None) -> str:
 
 register_variant("sciq", "rc")
 register_variant("sciq", "mc", formatter=MultipleChoiceFormatter())
-register_variant("sciq", "olmo3base", num_fewshot=5)
+register_variant(
+    "sciq",
+    "olmo3base",
+    num_fewshot=5,
+    split=Split.ALL,
+    limit=10_000,
+    metrics=(LogprobPerCharMCAccuracyMetric(),),
+    fewshot_seed=1234,
+)
