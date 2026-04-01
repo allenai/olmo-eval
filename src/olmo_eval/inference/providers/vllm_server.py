@@ -574,8 +574,8 @@ class VLLMServerProvider(InferenceProvider):
         logprob of each continuation token given the context.
         """
         client = self._get_or_create_client()
-        # Use remote tokenizer (no transformers dependency needed)
-        tokenizer = self._get_tokenizer(require_local=False)
+        # Use local HuggingFace tokenizer for precise token boundary computation
+        tokenizer = self._get_tokenizer(require_local=True)
 
         # Get the context/prompt text
         context = request.prompt
@@ -596,6 +596,7 @@ class VLLMServerProvider(InferenceProvider):
                 context_enc = tokenizer.encode("", add_special_tokens=True)
 
             context_len = len(context_enc)
+            num_cont_tokens = len(continuation_enc)
 
             # Build full token sequence and send token IDs directly to avoid
             # re-tokenization issues that shift the context/continuation boundary
@@ -626,10 +627,11 @@ class VLLMServerProvider(InferenceProvider):
                     token_logprobs = logprobs_data.token_logprobs or []
                     top_logprobs = logprobs_data.top_logprobs or []
 
-                    # Skip context tokens, iterate over continuation logprobs
-                    cont_tokens = tokens[context_len:]
-                    cont_lps = token_logprobs[context_len:]
-                    cont_top = top_logprobs[context_len:] if top_logprobs else []
+                    # Only process exact continuation tokens (exclude generated token)
+                    cont_end = context_len + num_cont_tokens
+                    cont_tokens = tokens[context_len:cont_end]
+                    cont_lps = token_logprobs[context_len:cont_end]
+                    cont_top = top_logprobs[context_len:cont_end] if top_logprobs else []
 
                     for i, (token_str, lp) in enumerate(
                         zip(cont_tokens, cont_lps, strict=False)
@@ -640,11 +642,9 @@ class VLLMServerProvider(InferenceProvider):
                         total += lp
 
                         # Check if this token is the greedy (argmax) choice
-                        # Compare logprob values instead of token strings to avoid
-                        # string representation mismatches for special/byte tokens
                         if is_greedy and i < len(cont_top) and cont_top[i]:
-                            max_lp = max(cont_top[i].values())
-                            if lp < max_lp:
+                            top_token = max(cont_top[i], key=cont_top[i].get)
+                            if top_token != token_str:
                                 is_greedy = False
 
             outputs.append(
