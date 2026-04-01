@@ -140,9 +140,7 @@ def _compute_squad_f1(pred: str, gold: str) -> float:
     pred_tokens = _squad_normalize_answer(pred).split()
     gold_tokens = _squad_normalize_answer(gold).split()
 
-    if not gold_tokens:
-        return 1.0 if not pred_tokens else 0.0
-    if not pred_tokens:
+    if not gold_tokens or not pred_tokens:
         return 0.0
 
     common = Counter(pred_tokens) & Counter(gold_tokens)
