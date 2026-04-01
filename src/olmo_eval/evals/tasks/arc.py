@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import random
 from collections.abc import Iterator
 from typing import Any
 
@@ -190,8 +189,7 @@ def _build_arc_fixed_fewshot(
         )
 
     if num_fewshot and num_fewshot < len(instances):
-        rng = random.Random(seed)
-        instances = rng.sample(instances, num_fewshot)
+        instances = instances[:num_fewshot]
     return instances
 
 
@@ -222,7 +220,15 @@ class _ARCBase(Task):
 
     @property
     def instances(self) -> Iterator[Instance]:
-        yield from self._load_instances_cached()
+        if self.config.split == Split.ALL:
+            if self._instances_cache is None:
+                all_instances: list[Instance] = []
+                for split in ("test", "validation", "train"):
+                    all_instances.extend(self._load_instances(split=split))
+                self._instances_cache = all_instances
+            yield from self._instances_cache
+        else:
+            yield from self._load_instances_cached()
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         return _process_arc_doc(doc, index, self._dataset_name)
@@ -284,10 +290,10 @@ class ARCChallenge(_ARCBase):
 
 register_variant("arc_easy", "rc")
 register_variant("arc_easy", "mc", formatter=MultipleChoiceFormatter())
-register_variant("arc_easy", "olmo3base", num_fewshot=5, fewshot_source="olmes_arc_easy_fixed")
+register_variant("arc_easy", "olmo3base", num_fewshot=5, fewshot_source="olmes_arc_easy_fixed", split=Split.ALL)
 
 register_variant("arc_challenge", "rc")
 register_variant("arc_challenge", "mc", formatter=MultipleChoiceFormatter())
 register_variant(
-    "arc_challenge", "olmo3base", num_fewshot=5, fewshot_source="olmes_arc_challenge_fixed"
+    "arc_challenge", "olmo3base", num_fewshot=5, fewshot_source="olmes_arc_challenge_fixed", split=Split.ALL
 )
