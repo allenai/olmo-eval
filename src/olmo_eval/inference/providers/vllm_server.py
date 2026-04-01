@@ -207,6 +207,7 @@ class VLLMServerProvider(InferenceProvider):
         self._tokenizer_path = tokenizer or model_name
         self._client: AsyncOpenAI | None = None
         self._http_client: httpx.AsyncClient | None = None
+        self._raw_http_client: httpx.AsyncClient | None = None
         self._openai_module: Any = None
         self._tokenizer: Any = None
         self._server: VLLMServerProcess | None = None  # type: ignore[name-defined]
@@ -302,12 +303,25 @@ class VLLMServerProvider(InferenceProvider):
 
     async def aclose(self) -> None:
         """Close the provider and release resources."""
+        if self._raw_http_client is not None:
+            await self._raw_http_client.aclose()
+            self._raw_http_client = None
         if self._http_client is not None:
             await self._http_client.aclose()
             self._http_client = None
         if self._client is not None:
             await self._client.close()
             self._client = None
+
+    def _get_raw_http_client(self) -> httpx.AsyncClient:
+        """Get or create raw HTTP client for direct vLLM API calls.
+
+        Used for prompt_logprobs requests where we need integer-keyed
+        token ID data that the OpenAI SDK converts to string keys.
+        """
+        if self._raw_http_client is None:
+            self._raw_http_client = httpx.AsyncClient(timeout=self.timeout)
+        return self._raw_http_client
 
     def get_openai_client(self) -> AsyncOpenAI:
         """Get the AsyncOpenAI client for this provider."""
@@ -568,17 +582,16 @@ class VLLMServerProvider(InferenceProvider):
         return run_async(self.agenerate(requests, sampling_params))
 
     async def _logprobs_single_impl(self, request: LMRequest) -> list[LMOutput]:
-        """Compute logprobs for continuations.
+        """Compute logprobs for continuations using raw prompt_logprobs.
 
-        Uses the completions endpoint with echo=True to get the actual
-        logprob of each continuation token given the context.
+        Uses vLLM's prompt_logprobs feature with integer token ID keys
+        (via raw HTTP) to avoid string-keyed dict collisions in is_greedy
+        computation. This matches the inline vLLM provider's behavior exactly.
 
         Prefers local HuggingFace tokenizer for accurate context/continuation
         boundary computation (matches oe-eval-internal behavior). Falls back to
         RemoteTokenizer if transformers is not available.
         """
-        client = self._get_or_create_client()
-
         # Prefer local tokenizer for exact boundary matching with inline vLLM
         try:
             tokenizer = self._get_tokenizer(require_local=True)
@@ -589,6 +602,8 @@ class VLLMServerProvider(InferenceProvider):
         context = request.prompt
         if request.messages:
             context = request.messages[0].get("content", "") if request.messages else ""
+
+        http_client = self._get_raw_http_client()
 
         outputs = []
         for continuation in request.continuations or ():
@@ -604,67 +619,91 @@ class VLLMServerProvider(InferenceProvider):
                 context_enc = tokenizer.encode("", add_special_tokens=True)
 
             context_len = len(context_enc)
-            num_cont_tokens = len(continuation_enc)
-
-            # Build full token sequence and send token IDs directly to avoid
-            # re-tokenization issues that shift the context/continuation boundary
             full_tokens = context_enc + continuation_enc
 
-            # Use completions endpoint with echo=True to get logprobs for prompt tokens
-            # Send token IDs directly as prompt to avoid decode/re-encode round-trip
-            # Explicitly disable add_special_tokens to match oe-eval-internal (no BOS)
-            response = await client.completions.create(
-                model=self.model_name,
-                prompt=full_tokens,
-                max_tokens=1,
-                temperature=0.0,
-                logprobs=5,
-                echo=True,
-                extra_body={"add_special_tokens": False},
+            # Use raw HTTP to get integer-keyed prompt_logprobs from vLLM.
+            # The OpenAI SDK's top_logprobs uses string keys (decoded tokens),
+            # which can collide when different token IDs decode to the same string.
+            # prompt_logprobs preserves integer token IDs through JSON serialization
+            # (as string representations of ints), avoiding this collision.
+            resp = await http_client.post(
+                f"{self.base_url}/completions",
+                json={
+                    "model": self.model_name,
+                    "prompt": full_tokens,
+                    "max_tokens": 1,
+                    "temperature": 0.0,
+                    "prompt_logprobs": 5,
+                    "add_special_tokens": False,
+                },
             )
+            resp.raise_for_status()
+            data = resp.json()
 
-            # Extract logprobs for continuation tokens only
+            # Extract prompt_logprobs: list of dict[str(token_id), {logprob, ...}]
+            choice = data["choices"][0]
+            prompt_logprobs_raw = choice.get("prompt_logprobs") or []
+
             logprob_entries: list[LogProbEntry] = []
             total = 0.0
             is_greedy = True
 
-            if response.choices:
-                choice = response.choices[0]
-                logprobs_data = getattr(choice, "logprobs", None)
+            # Process continuation tokens only (skip context positions)
+            cont_logprobs = prompt_logprobs_raw[context_len : context_len + len(continuation_enc)]
+            cont_token_ids = full_tokens[context_len:]
 
-                if logprobs_data and hasattr(logprobs_data, "token_logprobs"):
-                    tokens = logprobs_data.tokens or []
-                    token_logprobs = logprobs_data.token_logprobs or []
-                    top_logprobs = logprobs_data.top_logprobs or []
+            for token_id, token_probs in zip(cont_token_ids, cont_logprobs, strict=True):
+                if not token_probs:
+                    continue
 
-                    # Only process exact continuation tokens (exclude generated token)
-                    cont_end = context_len + num_cont_tokens
-                    cont_tokens = tokens[context_len:cont_end]
-                    cont_lps = token_logprobs[context_len:cont_end]
-                    cont_top = top_logprobs[context_len:cont_end] if top_logprobs else []
+                # JSON serializes integer dict keys as strings
+                token_id_str = str(token_id)
+                lp_obj = token_probs.get(token_id_str)
+                if lp_obj is None:
+                    continue
 
-                    for i, (token_str, lp) in enumerate(
-                        zip(cont_tokens, cont_lps, strict=False)
-                    ):
-                        if lp is None:
-                            continue
-                        logprob_entries.append({"token": token_str, "logprob": lp})
-                        total += lp
+                logprob_val = lp_obj["logprob"] if isinstance(lp_obj, dict) else lp_obj
 
-                        # Check if this token is the greedy (argmax) choice
-                        if is_greedy and i < len(cont_top) and cont_top[i]:
-                            top_token = max(cont_top[i], key=cont_top[i].get)
-                            if top_token != token_str:
-                                is_greedy = False
+                # Get decoded token string
+                if isinstance(lp_obj, dict) and lp_obj.get("decoded_token"):
+                    token_str = lp_obj["decoded_token"]
+                else:
+                    token_str = tokenizer.decode([token_id])
 
+                logprob_entries.append(
+                    {
+                        "token": token_str,
+                        "logprob": logprob_val,
+                        "bytes": list(token_str.encode("utf-8")),
+                    }
+                )
+                total += logprob_val
+
+                # Check is_greedy using integer token IDs (matching inline vLLM exactly).
+                # Keys are string-serialized integers (e.g., "128000"), not decoded tokens,
+                # so no collision between different token IDs.
+                if is_greedy:
+                    max_tid = max(
+                        token_probs.keys(),
+                        key=lambda tid: (
+                            token_probs[tid]["logprob"]
+                            if isinstance(token_probs[tid], dict)
+                            else token_probs[tid]
+                        ),
+                    )
+                    if max_tid != token_id_str:
+                        is_greedy = False
+
+            num_tokens = len(logprob_entries)
             outputs.append(
                 LMOutput(
                     text=continuation,
                     logprobs=logprob_entries if logprob_entries else None,
                     metadata={
+                        "total_logprob": total,
                         "sum_logits": total,
-                        "num_tokens": len(logprob_entries),
-                        "num_tokens_all": len(logprob_entries),
+                        "num_tokens": num_tokens,
+                        "num_tokens_all": num_tokens,
                         "is_greedy": is_greedy,
                     },
                 )
