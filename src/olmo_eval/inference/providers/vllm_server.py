@@ -640,9 +640,11 @@ class VLLMServerProvider(InferenceProvider):
                         total += lp
 
                         # Check if this token is the greedy (argmax) choice
+                        # Compare logprob values instead of token strings to avoid
+                        # string representation mismatches for special/byte tokens
                         if is_greedy and i < len(cont_top) and cont_top[i]:
-                            top_token = max(cont_top[i], key=cont_top[i].get)
-                            if top_token != token_str:
+                            max_lp = max(cont_top[i].values())
+                            if lp < max_lp:
                                 is_greedy = False
 
             outputs.append(
