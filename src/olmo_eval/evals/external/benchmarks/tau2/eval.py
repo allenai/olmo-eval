@@ -53,10 +53,11 @@ class Tau2Args:
     domain: Tau2Domain = "airline"
     num_trials: int = 1
     max_steps: int = 30
-    max_concurrency: int = 3
+    max_concurrency: int = 1
 
     # Agent LLM settings
     max_tokens: int | None = None
+    max_input_tokens: int | None = None
     max_model_len: int | None = None
     temperature: float | None = None
 
@@ -86,8 +87,9 @@ class Tau2Args:
             domain=data.get("domain", "airline"),
             num_trials=int(data.get("num_trials", 1)),
             max_steps=int(data.get("max_steps", 30)),
-            max_concurrency=int(data.get("max_concurrency", 3)),
+            max_concurrency=int(data.get("max_concurrency", 1)),
             max_tokens=_parse_optional(data, "max_tokens", int),
+            max_input_tokens=_parse_optional(data, "max_input_tokens", int),
             max_model_len=_parse_optional(data, "max_model_len", int),
             temperature=_parse_optional(data, "temperature", float),
             user_llm=data.get("user_llm", "gpt-4o-mini"),
@@ -153,8 +155,9 @@ class Tau2ExternalEval(SandboxedExternalEval):
             "domain": ("Task domain: 'airline', 'retail', or 'telecom'", "airline"),
             "num_trials": ("Number of trials per task", 1),
             "max_steps": ("Max agent steps per trial", 30),
-            "max_concurrency": ("Max concurrent requests", 3),
+            "max_concurrency": ("Max concurrent requests (keep low to avoid sandbox hangs)", 1),
             "max_tokens": ("Max tokens for agent LLM responses", None),
+            "max_input_tokens": ("Max input tokens for agent LLM (prevents context overflow)", None),
             "max_model_len": ("Model context length for litellm registration", None),
             "temperature": ("Temperature for agent LLM responses", None),
             "user_llm": ("LLM for simulated user (requires API key)", "gpt-4o-mini"),
@@ -265,6 +268,8 @@ class Tau2ExternalEval(SandboxedExternalEval):
             agent_llm_args["api_base"] = provider_url
         if tau2_args.max_tokens:
             agent_llm_args["max_tokens"] = tau2_args.max_tokens
+        if tau2_args.max_input_tokens:
+            agent_llm_args["max_input_tokens"] = tau2_args.max_input_tokens
         if tau2_args.temperature is not None:
             agent_llm_args["temperature"] = tau2_args.temperature
         if agent_llm_args:

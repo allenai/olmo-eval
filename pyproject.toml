@@ -78,6 +78,11 @@ gpu = [
 clients = [
     "openai~=2.21.0",
 ]
+swebench = [
+    "olmo-eval-internal[litellm]",
+    "mini-swe-agent @ git+https://github.com/allenai/mini-swe-agent.git@e614105ca837995765512bfd5aa1d216558f002c",
+    "swebench @ git+https://github.com/SWE-bench/SWE-bench.git@f7bbbb2ccdf479001d6467c9e34af59e44a840f9",
+]
 storage = [
     "olmo-eval-internal[s3,postgres]",
 ]
@@ -182,6 +187,8 @@ allowed-unresolved-imports = [
     "openai.**",
     "smart_open.**",
     "google.cloud.**",
+    "minisweagent.**",
+    "swebench.**",
 ]
 
 [tool.gantry]
