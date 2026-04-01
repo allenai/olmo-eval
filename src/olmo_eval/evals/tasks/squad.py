@@ -174,5 +174,6 @@ register_variant(
     "squad",
     "olmo3base",
     limit=10_000,
+    seed=1234,
     fewshot_source="squad_fixed",
 )
