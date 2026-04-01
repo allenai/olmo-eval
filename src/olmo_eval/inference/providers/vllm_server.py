@@ -614,6 +614,7 @@ class VLLMServerProvider(InferenceProvider):
             # Extract logprobs for continuation tokens only
             logprob_entries: list[LogProbEntry] = []
             total = 0.0
+            is_greedy = True
 
             if response.choices:
                 choice = response.choices[0]
@@ -622,15 +623,26 @@ class VLLMServerProvider(InferenceProvider):
                 if logprobs_data and hasattr(logprobs_data, "token_logprobs"):
                     tokens = logprobs_data.tokens or []
                     token_logprobs = logprobs_data.token_logprobs or []
+                    top_logprobs = logprobs_data.top_logprobs or []
 
                     # Skip context tokens, iterate over continuation logprobs
-                    for token_str, lp in zip(
-                        tokens[context_len:], token_logprobs[context_len:], strict=False
+                    cont_tokens = tokens[context_len:]
+                    cont_lps = token_logprobs[context_len:]
+                    cont_top = top_logprobs[context_len:] if top_logprobs else []
+
+                    for i, (token_str, lp) in enumerate(
+                        zip(cont_tokens, cont_lps, strict=False)
                     ):
                         if lp is None:
                             continue
                         logprob_entries.append({"token": token_str, "logprob": lp})
                         total += lp
+
+                        # Check if this token is the greedy (argmax) choice
+                        if is_greedy and i < len(cont_top) and cont_top[i]:
+                            top_token = max(cont_top[i], key=cont_top[i].get)
+                            if top_token != token_str:
+                                is_greedy = False
 
             outputs.append(
                 LMOutput(
@@ -640,6 +652,7 @@ class VLLMServerProvider(InferenceProvider):
                         "sum_logits": total,
                         "num_tokens": len(logprob_entries),
                         "num_tokens_all": len(logprob_entries),
+                        "is_greedy": is_greedy,
                     },
                 )
             )
