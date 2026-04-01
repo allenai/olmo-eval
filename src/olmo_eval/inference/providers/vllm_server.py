@@ -373,8 +373,7 @@ class VLLMServerProvider(InferenceProvider):
             "logprobs": 1,  # Request logprobs for metrics
         }
 
-        if params.temperature > 0:
-            kwargs["temperature"] = params.temperature
+        kwargs["temperature"] = params.temperature
         if params.stop_sequences:
             kwargs["stop"] = list(params.stop_sequences)[:4]
 
@@ -441,8 +440,7 @@ class VLLMServerProvider(InferenceProvider):
             "max_tokens": params.max_tokens,
         }
 
-        if params.temperature > 0:
-            kwargs["temperature"] = params.temperature
+        kwargs["temperature"] = params.temperature
         if params.stop_sequences:
             # OpenAI API supports max 4 stop sequences
             kwargs["stop"] = list(params.stop_sequences)[:4]
