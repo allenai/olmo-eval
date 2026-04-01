@@ -572,10 +572,18 @@ class VLLMServerProvider(InferenceProvider):
 
         Uses the completions endpoint with echo=True to get the actual
         logprob of each continuation token given the context.
+
+        Prefers local HuggingFace tokenizer for accurate context/continuation
+        boundary computation (matches oe-eval-internal behavior). Falls back to
+        RemoteTokenizer if transformers is not available.
         """
         client = self._get_or_create_client()
-        # Use remote tokenizer (no transformers dependency needed)
-        tokenizer = self._get_tokenizer(require_local=False)
+
+        # Prefer local tokenizer for exact boundary matching with inline vLLM
+        try:
+            tokenizer = self._get_tokenizer(require_local=True)
+        except (ImportError, Exception):
+            tokenizer = self._get_tokenizer(require_local=False)
 
         # Get the context/prompt text
         context = request.prompt
@@ -604,6 +612,7 @@ class VLLMServerProvider(InferenceProvider):
 
             # Use completions endpoint with echo=True to get logprobs for prompt tokens
             # Send token IDs directly as prompt to avoid decode/re-encode round-trip
+            # Explicitly disable add_special_tokens to match oe-eval-internal (no BOS)
             response = await client.completions.create(
                 model=self.model_name,
                 prompt=full_tokens,
@@ -611,6 +620,7 @@ class VLLMServerProvider(InferenceProvider):
                 temperature=0.0,
                 logprobs=5,
                 echo=True,
+                extra_body={"add_special_tokens": False},
             )
 
             # Extract logprobs for continuation tokens only
