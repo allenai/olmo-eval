@@ -698,7 +698,7 @@ class TestDetectGpuRequirement:
     """Tests for GPU requirement detection in LaunchConfigLoader."""
 
     def test_provider_num_instances_counted_for_gpus(self):
-        """provider.num_instances should be used for GPU calculation, not num_inference_workers."""
+        """provider.num_instances controls GPU allocation."""
         loader = LaunchConfigLoader(
             config_path=None,
             cli_args={

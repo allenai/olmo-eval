@@ -484,25 +484,25 @@ def launch(
             )
         harness_needs_sandbox = bool(harness_preset.sandboxes)
 
-    # Validate num_inference_workers against GPU count
-    num_inference_workers = harness_preset.num_inference_workers if harness_preset else 1
-    if num_inference_workers > 1:
+    # Validate provider.num_instances against GPU count
+    num_instances = harness_preset.provider.num_instances if harness_preset else 1
+    if num_instances > 1:
         if launch_config.gpus == 0:
             console.print(
-                f"[red]Error:[/red] num_inference_workers={num_inference_workers} "
+                f"[red]Error:[/red] provider.num_instances={num_instances} "
                 "requires GPUs, but --gpus is 0"
             )
             raise SystemExit(1)
-        if num_inference_workers > launch_config.gpus:
+        if num_instances > launch_config.gpus:
             console.print(
-                f"[red]Error:[/red] num_inference_workers ({num_inference_workers}) "
+                f"[red]Error:[/red] provider.num_instances ({num_instances}) "
                 f"exceeds GPU count ({launch_config.gpus})"
             )
             raise SystemExit(1)
-        if launch_config.gpus % num_inference_workers != 0:
+        if launch_config.gpus % num_instances != 0:
             console.print(
                 f"[red]Error:[/red] GPU count ({launch_config.gpus}) must be evenly "
-                f"divisible by num_inference_workers ({num_inference_workers})"
+                f"divisible by provider.num_instances ({num_instances})"
             )
             raise SystemExit(1)
 

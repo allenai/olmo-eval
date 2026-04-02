@@ -185,8 +185,6 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 validate_inference_workers,
             )
 
-            num_inference_workers = self.harness_config.num_inference_workers
-
             # Use GPU planner to allocate GPUs for main workers and auxiliary providers
             planner = GPUPlanner.from_harness_config(self.harness_config, total_gpus)
             gpu_plan = planner.plan()
@@ -195,6 +193,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             main_gpu_ids: list[int] = []
             for alloc in gpu_plan.main_workers:
                 main_gpu_ids.extend(alloc.gpu_ids)
+
+            # Number of inference workers is determined by provider.num_instances
+            num_inference_workers = self.harness_config.provider.num_instances
 
             # Validate configuration
             validate_inference_workers(num_inference_workers, len(main_gpu_ids))

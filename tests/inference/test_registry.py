@@ -386,10 +386,8 @@ class TestProviderConfigRequiresLocalGpu:
 class TestGPUPlannerFromHarnessConfig:
     """Test GPUPlanner.from_harness_config behavior."""
 
-    def test_uses_provider_num_instances_not_inference_workers(self):
-        """from_harness_config uses provider.num_instances, not num_inference_workers."""
-        # Create a mock harness config with provider.num_instances=4
-        # but num_inference_workers=1
+    def test_uses_provider_num_instances(self):
+        """from_harness_config uses provider.num_instances for worker count."""
         provider = ProviderConfig(
             kind=ProviderKind.VLLM_SERVER,
             model="test-model",
@@ -398,7 +396,6 @@ class TestGPUPlannerFromHarnessConfig:
         )
 
         class MockHarnessConfig:
-            num_inference_workers = 1  # Should be ignored
             auxiliary_providers = {}
 
         mock_config = MockHarnessConfig()
@@ -406,7 +403,6 @@ class TestGPUPlannerFromHarnessConfig:
 
         planner = GPUPlanner.from_harness_config(mock_config, total_gpus=8)
 
-        # Should use num_instances (4), not num_inference_workers (1)
         assert planner.num_main_workers == 4
         assert planner.main_tensor_parallel == 2
 
@@ -419,11 +415,10 @@ class TestGPUPlannerFromHarnessConfig:
         provider = ProviderConfig(
             kind=ProviderKind.LITELLM,
             model="gpt-4",
-            num_instances=4,  # Should be ignored
+            num_instances=4,  # Ignored for API-backed providers
         )
 
         class MockHarnessConfig:
-            num_inference_workers = 2
             auxiliary_providers = {}
 
         mock_config = MockHarnessConfig()
@@ -443,11 +438,10 @@ class TestGPUPlannerFromHarnessConfig:
             kind=ProviderKind.VLLM_SERVER,
             model="remote-model",
             base_url="http://external:8000/v1",
-            num_instances=4,  # Should be ignored
+            num_instances=4,  # Ignored for external servers
         )
 
         class MockHarnessConfig:
-            num_inference_workers = 2
             auxiliary_providers = {}
 
         mock_config = MockHarnessConfig()
@@ -478,7 +472,6 @@ class TestGPUPlannerFromHarnessConfig:
         )
 
         class MockHarnessConfig:
-            num_inference_workers = 1
             auxiliary_providers = {"judge": aux_provider}
 
         mock_config = MockHarnessConfig()

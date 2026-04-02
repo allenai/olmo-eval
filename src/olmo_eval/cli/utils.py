@@ -104,7 +104,6 @@ HARNESS_CONFIG_FIELDS = frozenset(
         "metrics",
         "batching",
         "scorer_startup_timeout",
-        "num_inference_workers",
     }
 )
 

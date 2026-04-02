@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, replace
 from typing import TYPE_CHECKING, Any, Literal
 
 from olmo_eval.common.repr import hide_unset
@@ -47,7 +47,6 @@ class HarnessConfig:
     metrics: MetricsConfig | None = None
     batching: BatchConfig | None = None
     scorer_startup_timeout: float | None = None
-    num_inference_workers: int = 1  # Data parallel instances (1 = tensor parallel only)
 
     # Cache for resolved tools
     _resolved_tools_cache: tuple[Tool, ...] | None = field(
@@ -150,8 +149,6 @@ class HarnessConfig:
             d["batching"] = self.batching.to_dict()
         if self.scorer_startup_timeout is not None:
             d["scorer_startup_timeout"] = self.scorer_startup_timeout
-        if self.num_inference_workers != 1:
-            d["num_inference_workers"] = self.num_inference_workers
         return d
 
     @classmethod
@@ -201,119 +198,33 @@ class HarnessConfig:
             metrics=metrics,
             batching=batching,
             scorer_startup_timeout=data.get("scorer_startup_timeout"),
-            num_inference_workers=data.get("num_inference_workers", 1),
         )
 
     def with_tools(self, *new_tools: Tool | str) -> HarnessConfig:
-        """Create a new config with additional tools.
-
-        Args:
-            *new_tools: Tool instances or names to add.
-
-        Returns:
-            New HarnessConfig with the additional tools.
-        """
-        return HarnessConfig(
-            name=self.name,
-            provider=self.provider,
-            auxiliary_providers=self.auxiliary_providers,
-            tools=self.tools + new_tools,
-            system_prompt=self.system_prompt,
-            tool_choice=self.tool_choice,
-            backend=self.backend,
-            required_secrets=self.required_secrets,
-            max_turns=self.max_turns,
-            max_concurrency=self.max_concurrency,
-            scoring_concurrency=self.scoring_concurrency,
-            sandboxes=self.sandboxes,
-            backend_kwargs=self.backend_kwargs,
-            metrics=self.metrics,
-            batching=self.batching,
-            scorer_startup_timeout=self.scorer_startup_timeout,
-            num_inference_workers=self.num_inference_workers,
-        )
+        """Create a new config with additional tools."""
+        return replace(self, tools=self.tools + new_tools)
 
     def with_system_prompt(self, system_prompt: str) -> HarnessConfig:
-        """Create a new config with a different system prompt.
-
-        Args:
-            system_prompt: The new system prompt to use.
-
-        Returns:
-            New HarnessConfig with the updated system prompt.
-        """
-        return HarnessConfig(
-            name=self.name,
-            provider=self.provider,
-            auxiliary_providers=self.auxiliary_providers,
-            tools=self.tools,
-            system_prompt=system_prompt,
-            tool_choice=self.tool_choice,
-            backend=self.backend,
-            required_secrets=self.required_secrets,
-            max_turns=self.max_turns,
-            max_concurrency=self.max_concurrency,
-            scoring_concurrency=self.scoring_concurrency,
-            sandboxes=self.sandboxes,
-            backend_kwargs=self.backend_kwargs,
-            metrics=self.metrics,
-            batching=self.batching,
-            scorer_startup_timeout=self.scorer_startup_timeout,
-            num_inference_workers=self.num_inference_workers,
-        )
+        """Create a new config with a different system prompt."""
+        return replace(self, system_prompt=system_prompt)
 
     def with_provider(self, provider: ProviderConfig) -> HarnessConfig:
-        """Create a new config with a different provider configuration.
-
-        Args:
-            provider: The new provider configuration to use.
-
-        Returns:
-            New HarnessConfig with the updated provider.
-        """
-        return HarnessConfig(
-            name=self.name,
-            provider=provider,
-            auxiliary_providers=self.auxiliary_providers,
-            tools=self.tools,
-            system_prompt=self.system_prompt,
-            tool_choice=self.tool_choice,
-            backend=self.backend,
-            required_secrets=self.required_secrets,
-            max_turns=self.max_turns,
-            max_concurrency=self.max_concurrency,
-            scoring_concurrency=self.scoring_concurrency,
-            sandboxes=self.sandboxes,
-            backend_kwargs=self.backend_kwargs,
-            metrics=self.metrics,
-            batching=self.batching,
-            scorer_startup_timeout=self.scorer_startup_timeout,
-            num_inference_workers=self.num_inference_workers,
-        )
+        """Create a new config with a different provider configuration."""
+        return replace(self, provider=provider)
 
     def merge_provider(self, provider: ProviderConfig) -> HarnessConfig:
-        """Create a new config merging model info from provider while preserving harness settings.
+        """Merge model info from provider while preserving harness provider settings.
 
-        This is useful when a harness preset specifies a provider kind (e.g., VLLM_SERVER)
-        but the model name comes from user input. The harness's provider kind takes precedence
-        if explicitly set (non-default), while model-specific fields come from the new provider.
-
-        Args:
-            provider: Provider configuration with model information.
-
-        Returns:
-            New HarnessConfig with merged provider settings.
+        The harness's provider kind takes precedence if explicitly set (non-default),
+        while model-specific fields come from the new provider.
         """
-        from dataclasses import fields, replace
-
-        # Start with incoming provider, overlay non-default harness values
         defaults = ProviderConfig()
         overrides = {
             f.name: getattr(self.provider, f.name)
             for f in fields(self.provider)
             if getattr(self.provider, f.name) != getattr(defaults, f.name)
         }
-        # Special case: kwargs should merge, not replace
+        # kwargs should merge, not replace
         if self.provider.kwargs:
             overrides["kwargs"] = {**provider.kwargs, **self.provider.kwargs}
 
@@ -342,91 +253,12 @@ class HarnessConfig:
         return self.with_provider(self.provider.with_overrides(**overrides))
 
     def with_metrics(self, metrics: MetricsConfig) -> HarnessConfig:
-        """Create a new config with updated metrics configuration.
-
-        Args:
-            metrics: The new metrics configuration.
-
-        Returns:
-            New HarnessConfig with updated metrics.
-        """
-        return HarnessConfig(
-            name=self.name,
-            provider=self.provider,
-            auxiliary_providers=self.auxiliary_providers,
-            tools=self.tools,
-            system_prompt=self.system_prompt,
-            tool_choice=self.tool_choice,
-            backend=self.backend,
-            required_secrets=self.required_secrets,
-            max_turns=self.max_turns,
-            max_concurrency=self.max_concurrency,
-            scoring_concurrency=self.scoring_concurrency,
-            sandboxes=self.sandboxes,
-            backend_kwargs=self.backend_kwargs,
-            metrics=metrics,
-            batching=self.batching,
-            scorer_startup_timeout=self.scorer_startup_timeout,
-            num_inference_workers=self.num_inference_workers,
-        )
+        """Create a new config with updated metrics configuration."""
+        return replace(self, metrics=metrics)
 
     def with_batching(self, batching: BatchConfig) -> HarnessConfig:
-        """Create a new config with updated batching configuration.
-
-        Args:
-            batching: The new batching configuration.
-
-        Returns:
-            New HarnessConfig with updated batching.
-        """
-        return HarnessConfig(
-            name=self.name,
-            provider=self.provider,
-            auxiliary_providers=self.auxiliary_providers,
-            tools=self.tools,
-            system_prompt=self.system_prompt,
-            tool_choice=self.tool_choice,
-            backend=self.backend,
-            required_secrets=self.required_secrets,
-            max_turns=self.max_turns,
-            max_concurrency=self.max_concurrency,
-            scoring_concurrency=self.scoring_concurrency,
-            sandboxes=self.sandboxes,
-            backend_kwargs=self.backend_kwargs,
-            metrics=self.metrics,
-            batching=batching,
-            scorer_startup_timeout=self.scorer_startup_timeout,
-            num_inference_workers=self.num_inference_workers,
-        )
-
-    def with_num_inference_workers(self, num_inference_workers: int) -> HarnessConfig:
-        """Create a new config with updated num_inference_workers.
-
-        Args:
-            num_inference_workers: Number of parallel inference workers.
-
-        Returns:
-            New HarnessConfig with updated num_inference_workers.
-        """
-        return HarnessConfig(
-            name=self.name,
-            provider=self.provider,
-            auxiliary_providers=self.auxiliary_providers,
-            tools=self.tools,
-            system_prompt=self.system_prompt,
-            tool_choice=self.tool_choice,
-            backend=self.backend,
-            required_secrets=self.required_secrets,
-            max_turns=self.max_turns,
-            max_concurrency=self.max_concurrency,
-            scoring_concurrency=self.scoring_concurrency,
-            sandboxes=self.sandboxes,
-            backend_kwargs=self.backend_kwargs,
-            metrics=self.metrics,
-            batching=self.batching,
-            scorer_startup_timeout=self.scorer_startup_timeout,
-            num_inference_workers=num_inference_workers,
-        )
+        """Create a new config with updated batching configuration."""
+        return replace(self, batching=batching)
 
 
 def harness_config(
@@ -446,7 +278,6 @@ def harness_config(
     metrics: MetricsConfig | None = None,
     batching: BatchConfig | None = None,
     scorer_startup_timeout: float | None = None,
-    num_inference_workers: int = 1,
 ) -> HarnessConfig:
     """Create a HarnessConfig.
 
@@ -468,8 +299,6 @@ def harness_config(
         batching: Batching strategy configuration (None = sequential).
         scorer_startup_timeout: Timeout for scorer worker startup. If None, derived from
             sandbox configs (max startup_timeout + 60s buffer) or defaults to 60s.
-        num_inference_workers: Number of parallel inference workers for data parallelism.
-            GPUs are divided evenly among workers. Default 1 (tensor parallel only).
 
     Returns:
         A new HarnessConfig instance.
@@ -491,5 +320,4 @@ def harness_config(
         metrics=metrics,
         batching=batching,
         scorer_startup_timeout=scorer_startup_timeout,
-        num_inference_workers=num_inference_workers,
     )
