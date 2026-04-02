@@ -174,6 +174,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         # Start workers
         workers: list[mp.process.BaseProcess] = []
         scorer_proc: mp.process.BaseProcess | None = None
+        inference_manager = None
 
         try:
             from olmo_eval.inference.provider_manager import (
@@ -201,6 +202,24 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
             # Start workers
             workers = provider_manager.start(ctx, total_instances, init_times)
+
+            # Start auxiliary inference servers if configured
+            registry_config: dict[str, list[dict[str, Any]]] | None = None
+            if self.harness_config.auxiliary_providers:
+                from olmo_eval.inference.gpu_planner import GPUPlanner
+                from olmo_eval.inference.manager import InferenceManager
+
+                # Use GPU planner to get explicit allocation for auxiliary providers
+                planner = GPUPlanner.from_harness_config(self.harness_config, total_gpus)
+                gpu_plan = planner.plan()
+                auxiliary_gpus = gpu_plan.get_auxiliary_gpus()
+
+                inference_manager = InferenceManager(
+                    configs=dict(self.harness_config.auxiliary_providers),
+                    available_gpu_ids=auxiliary_gpus,
+                )
+                registry_config = inference_manager.start()
+                runner_logger.info(f"Auxiliary providers ready: {list(registry_config.keys())}")
 
             # Prepare sandbox configs for scoring worker if configured
             sandbox_configs_list = None
@@ -237,6 +256,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                     sandbox_configs_list,
                     scorer_ready,
                     scoring_concurrency,
+                    registry_config,
                 ),
             )
             scorer_proc.start()
@@ -333,6 +353,8 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             if scorer_proc and scorer_proc.is_alive():
                 scorer_proc.terminate()
                 scorer_proc.join(timeout=5)
+            if inference_manager is not None:
+                inference_manager.shutdown()
             for q in [item_queue, result_queue, scoring_queue, scored_queue]:
                 q.cancel_join_thread()
             manager.shutdown()

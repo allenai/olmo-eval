@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -33,6 +33,7 @@ class HarnessConfig:
 
     name: str
     provider: ProviderConfig = field(default_factory=ProviderConfig)
+    auxiliary_providers: Mapping[str, ProviderConfig] = field(default_factory=dict)
     tools: tuple[Tool | str, ...] = ()
     system_prompt: str | None = None
     tool_choice: Literal["auto", "none", "required"] | str = "auto"
@@ -129,7 +130,10 @@ class HarnessConfig:
             "backend": self.backend,
             "required_secrets": list(self.required_secrets),
         }
-        # Only include agent-specific fields if set
+        if self.auxiliary_providers:
+            d["auxiliary_providers"] = {
+                name: config.to_dict() for name, config in self.auxiliary_providers.items()
+            }
         if self.max_turns is not None:
             d["max_turns"] = self.max_turns
         if self.max_concurrency is not None:
@@ -175,9 +179,15 @@ class HarnessConfig:
         batching_data = data.get("batching")
         batching = BatchConfig.from_dict(batching_data) if batching_data else None
 
+        auxiliary_data = data.get("auxiliary_providers", {})
+        auxiliary_providers = {
+            name: ProviderConfig.from_dict(config) for name, config in auxiliary_data.items()
+        }
+
         return cls(
             name=data.get("name", "default"),
             provider=ProviderConfig.from_dict(provider_data),
+            auxiliary_providers=auxiliary_providers,
             tools=tuple(data.get("tool_names", [])),
             system_prompt=data.get("system_prompt"),
             tool_choice=data.get("tool_choice", "auto"),
@@ -206,6 +216,7 @@ class HarnessConfig:
         return HarnessConfig(
             name=self.name,
             provider=self.provider,
+            auxiliary_providers=self.auxiliary_providers,
             tools=self.tools + new_tools,
             system_prompt=self.system_prompt,
             tool_choice=self.tool_choice,
@@ -234,6 +245,7 @@ class HarnessConfig:
         return HarnessConfig(
             name=self.name,
             provider=self.provider,
+            auxiliary_providers=self.auxiliary_providers,
             tools=self.tools,
             system_prompt=system_prompt,
             tool_choice=self.tool_choice,
@@ -262,6 +274,7 @@ class HarnessConfig:
         return HarnessConfig(
             name=self.name,
             provider=provider,
+            auxiliary_providers=self.auxiliary_providers,
             tools=self.tools,
             system_prompt=self.system_prompt,
             tool_choice=self.tool_choice,
@@ -340,6 +353,7 @@ class HarnessConfig:
         return HarnessConfig(
             name=self.name,
             provider=self.provider,
+            auxiliary_providers=self.auxiliary_providers,
             tools=self.tools,
             system_prompt=self.system_prompt,
             tool_choice=self.tool_choice,
@@ -368,6 +382,7 @@ class HarnessConfig:
         return HarnessConfig(
             name=self.name,
             provider=self.provider,
+            auxiliary_providers=self.auxiliary_providers,
             tools=self.tools,
             system_prompt=self.system_prompt,
             tool_choice=self.tool_choice,
@@ -396,6 +411,7 @@ class HarnessConfig:
         return HarnessConfig(
             name=self.name,
             provider=self.provider,
+            auxiliary_providers=self.auxiliary_providers,
             tools=self.tools,
             system_prompt=self.system_prompt,
             tool_choice=self.tool_choice,
@@ -416,6 +432,7 @@ class HarnessConfig:
 def harness_config(
     name: str,
     provider: ProviderConfig | None = None,
+    auxiliary_providers: Mapping[str, ProviderConfig] | None = None,
     tools: Sequence[Tool | str] = (),
     system_prompt: str | None = None,
     tool_choice: Literal["auto", "none", "required"] | str = "auto",
@@ -436,6 +453,7 @@ def harness_config(
     Args:
         name: Human-readable name for this configuration.
         provider: Provider configuration (defaults to empty ProviderConfig).
+        auxiliary_providers: Named auxiliary providers for scoring, sub-agents, etc.
         tools: Sequence of Tool instances or tool names.
         system_prompt: System prompt to prepend to requests.
         tool_choice: How the model should use tools.
@@ -459,6 +477,7 @@ def harness_config(
     return HarnessConfig(
         name=name,
         provider=provider or ProviderConfig(),
+        auxiliary_providers=auxiliary_providers or {},
         tools=tuple(tools),
         system_prompt=system_prompt,
         tool_choice=tool_choice,

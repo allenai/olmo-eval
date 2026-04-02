@@ -328,6 +328,7 @@ class VLLMServerProcess:
         model_name: str,
         port: int | None = None,
         tensor_parallel_size: int = 1,
+        gpu_ids: list[int] | None = None,
         startup_timeout: float = DEFAULT_STARTUP_TIMEOUT,
         log_dir: str | None = None,
         owner: str | None = None,
@@ -338,7 +339,9 @@ class VLLMServerProcess:
         Args:
             model_name: HuggingFace model ID or local path
             port: Port to serve on (auto-assigned if None)
-            tensor_parallel_size: Number of GPUs for tensor parallelism
+            tensor_parallel_size: Number of GPUs for tensor parallelism.
+                If gpu_ids is provided, this is inferred from len(gpu_ids).
+            gpu_ids: Specific GPU IDs to use. Sets CUDA_VISIBLE_DEVICES.
             startup_timeout: Maximum time to wait for server startup
             log_dir: Directory to write server logs to (if set, logs are persisted)
             owner: Owner identifier for log messages (e.g., worker ID)
@@ -348,7 +351,9 @@ class VLLMServerProcess:
 
         self.model_name = model_name
         self.port = port or _find_free_port()
-        self.tensor_parallel_size = tensor_parallel_size
+        self.gpu_ids = gpu_ids
+        # Infer tensor_parallel_size from gpu_ids if provided
+        self.tensor_parallel_size = len(gpu_ids) if gpu_ids else tensor_parallel_size
         self.startup_timeout = startup_timeout
         self.log_dir = log_dir
         self.owner = owner or get_current_worker_id()
@@ -356,6 +361,7 @@ class VLLMServerProcess:
         self._process: subprocess.Popen | None = None
         self._log_file: Any | None = None
         self._started = False
+        self._env_backup: str | None = None
 
     @property
     def base_url(self) -> str:
@@ -383,6 +389,11 @@ class VLLMServerProcess:
         """
         if self._started:
             return self.base_url
+
+        # Set CUDA_VISIBLE_DEVICES if gpu_ids specified
+        if self.gpu_ids:
+            self._env_backup = os.environ.get("CUDA_VISIBLE_DEVICES")
+            os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in self.gpu_ids)
 
         cmd = _build_server_command(
             model_name=self.model_name,
@@ -529,6 +540,13 @@ class VLLMServerProcess:
                 with suppress(Exception):
                     self._log_file.close()
                 self._log_file = None
+            # Restore CUDA_VISIBLE_DEVICES
+            if self.gpu_ids:
+                if self._env_backup is not None:
+                    os.environ["CUDA_VISIBLE_DEVICES"] = self._env_backup
+                elif "CUDA_VISIBLE_DEVICES" in os.environ:
+                    del os.environ["CUDA_VISIBLE_DEVICES"]
+                self._env_backup = None
 
         self._log(logging.INFO, "vLLM server stopped")
 
