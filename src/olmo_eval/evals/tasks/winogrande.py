@@ -182,20 +182,31 @@ class Winogrande(Task):
             continuations = tuple(
                 f" {chr(ord('A') + i)}" for i in range(len(instance.choices or ()))
             )
+            prompt = "\n\n".join(parts)
+            return LMRequest(
+                request_type=RequestType.LOGLIKELIHOOD,
+                prompt=prompt,
+                continuations=continuations,
+            )
         else:
+            # RC format uses Trinh & Le (2018) partial evaluation:
+            # each option is placed in the prompt context, and only the target
+            # (text after the blank) is scored as the continuation.
             sentence = instance.question
             target = _partial_target(sentence)
-            parts.append(_format_rc(sentence))
-            continuations = tuple(
-                f"{option}{target}" for option in (instance.choices or ())
+            fewshot_prompt = "\n\n".join(parts) if parts else ""
+            continuation_prompts = tuple(
+                ("\n\n".join([*parts, _partial_context(sentence, option)])) if parts
+                else _partial_context(sentence, option)
+                for option in (instance.choices or ())
             )
-
-        prompt = "\n\n".join(parts)
-        return LMRequest(
-            request_type=RequestType.LOGLIKELIHOOD,
-            prompt=prompt,
-            continuations=continuations,
-        )
+            continuations = tuple(target for _ in (instance.choices or ()))
+            return LMRequest(
+                request_type=RequestType.LOGLIKELIHOOD,
+                prompt=fewshot_prompt,
+                continuations=continuations,
+                continuation_prompts=continuation_prompts,
+            )
 
 
 register_variant("winogrande", "rc")
