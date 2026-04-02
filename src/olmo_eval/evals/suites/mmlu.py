@@ -41,5 +41,8 @@ MMLU = register(
 # mc::olmo3base suites (for parity with oe-eval-internal mmlu_*:mc::olmes)
 make_suite("mmlu:stem:mc::olmo3base", _task_names_variant(_STEM, "mc:olmo3base"))
 make_suite("mmlu:humanities:mc::olmo3base", _task_names_variant(_HUMANITIES, "mc:olmo3base"))
-make_suite("mmlu:social_sciences:mc::olmo3base", _task_names_variant(_SOCIAL_SCIENCES, "mc:olmo3base"))
+make_suite(
+    "mmlu:social_sciences:mc::olmo3base",
+    _task_names_variant(_SOCIAL_SCIENCES, "mc:olmo3base"),
+)
 make_suite("mmlu:other:mc::olmo3base", _task_names_variant(_OTHER, "mc:olmo3base"))
