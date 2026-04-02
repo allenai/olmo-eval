@@ -74,7 +74,7 @@ class GSMSymbolic(Task):
     sampling_params = SamplingParams(
         max_tokens=1024,
         temperature=0,
-        stop_sequences=("Question:", "\n\n"),
+        stop_sequences=("Question:", "</s>", "<|im_end|>", "\n\n"),
     )
 
     @property
@@ -157,7 +157,7 @@ register_variant(
         max_tokens=1024,
         temperature=0.6,
         top_p=0.6,
-        stop_sequences=("Question:", "\n\n"),
+        stop_sequences=("Question:", "</s>", "<|im_end|>", "\n\n"),
         num_samples=8,
     ),
 )
