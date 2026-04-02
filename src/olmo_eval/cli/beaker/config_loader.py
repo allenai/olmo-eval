@@ -261,7 +261,7 @@ class LaunchConfigLoader:
         """Detect GPU requirement based on provider and harness configuration.
 
         Calculates total GPUs needed for:
-        - Main model (tensor_parallel_size × num_inference_workers)
+        - Main model (tensor_parallel_size × num_instances)
         - Auxiliary providers (each with their own tensor_parallel_size × num_instances)
 
         Args:
@@ -284,12 +284,13 @@ class LaunchConfigLoader:
         # Build effective harness config with overrides applied
         harness_config = self._get_effective_harness_config(harness_name, harness_overrides)
 
-        # Calculate main worker GPU requirements
-        num_workers = harness_config.num_inference_workers if harness_config else 1
+        # Calculate main provider GPU requirements
+        main_instances = 1
         main_tp = 1
         if harness_config and harness_config.provider:
             main_tp = harness_config.provider.kwargs.get("tensor_parallel_size", 1)
-        main_gpus = num_workers * main_tp
+            main_instances = harness_config.provider.num_instances
+        main_gpus = main_instances * main_tp
 
         # Calculate auxiliary provider GPU requirements
         aux_gpus = 0

@@ -118,25 +118,23 @@ class GPUPlanner:
 
     @classmethod
     def from_harness_config(cls, harness_config: object, total_gpus: int) -> GPUPlanner:
-        num_workers = getattr(harness_config, "num_inference_workers", 1)
         provider = getattr(harness_config, "provider", None)
 
-        # Only allocate main GPUs if provider requires local GPU
+        # Calculate main provider GPU requirements based on num_instances
         main_tp = 1
-        effective_workers = num_workers
+        main_instances = 0
         if provider:
             requires_local = getattr(provider, "requires_local_gpu", True)
-            if requires_local and hasattr(provider, "kwargs"):
-                main_tp = provider.kwargs.get("tensor_parallel_size", 1)
-            elif not requires_local:
-                # API-backed provider - no local GPUs needed
-                effective_workers = 0
+            if requires_local:
+                main_instances = getattr(provider, "num_instances", 1)
+                if hasattr(provider, "kwargs"):
+                    main_tp = provider.kwargs.get("tensor_parallel_size", 1)
 
         aux_configs = dict(getattr(harness_config, "auxiliary_providers", {}) or {})
 
         return cls(
             total_gpus=total_gpus,
-            num_main_workers=effective_workers,
+            num_main_workers=main_instances,
             main_tensor_parallel=main_tp,
             auxiliary_configs=aux_configs,
         )

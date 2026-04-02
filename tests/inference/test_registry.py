@@ -324,6 +324,175 @@ class TestGPUPlanner:
         assert plan.total_gpus_used == 2  # Only main workers
 
 
+class TestProviderConfigRequiresLocalGpu:
+    """Test requires_local_gpu property."""
+
+    def test_vllm_server_without_base_url_requires_local_gpu(self):
+        """vllm_server without base_url requires local GPU."""
+        config = ProviderConfig(
+            kind=ProviderKind.VLLM_SERVER,
+            model="test-model",
+        )
+        assert config.requires_gpu is True
+        assert config.requires_local_gpu is True
+
+    def test_vllm_server_with_base_url_no_local_gpu(self):
+        """vllm_server with base_url doesn't require local GPU."""
+        config = ProviderConfig(
+            kind=ProviderKind.VLLM_SERVER,
+            model="test-model",
+            base_url="http://external:8000/v1",
+        )
+        assert config.requires_gpu is True
+        assert config.requires_local_gpu is False
+
+    def test_litellm_no_local_gpu(self):
+        """litellm provider doesn't require local GPU."""
+        config = ProviderConfig(
+            kind=ProviderKind.LITELLM,
+            model="gpt-4",
+        )
+        assert config.requires_gpu is False
+        assert config.requires_local_gpu is False
+
+    def test_mock_no_local_gpu(self):
+        """mock provider doesn't require local GPU."""
+        config = ProviderConfig(
+            kind=ProviderKind.MOCK,
+            model="mock-model",
+        )
+        assert config.requires_gpu is False
+        assert config.requires_local_gpu is False
+
+    def test_vllm_requires_local_gpu(self):
+        """vllm provider requires local GPU."""
+        config = ProviderConfig(
+            kind=ProviderKind.VLLM,
+            model="test-model",
+        )
+        assert config.requires_gpu is True
+        assert config.requires_local_gpu is True
+
+    def test_hf_requires_local_gpu(self):
+        """hf provider requires local GPU."""
+        config = ProviderConfig(
+            kind=ProviderKind.HF,
+            model="test-model",
+        )
+        assert config.requires_gpu is True
+        assert config.requires_local_gpu is True
+
+
+class TestGPUPlannerFromHarnessConfig:
+    """Test GPUPlanner.from_harness_config behavior."""
+
+    def test_uses_provider_num_instances_not_inference_workers(self):
+        """from_harness_config uses provider.num_instances, not num_inference_workers."""
+        # Create a mock harness config with provider.num_instances=4
+        # but num_inference_workers=1
+        provider = ProviderConfig(
+            kind=ProviderKind.VLLM_SERVER,
+            model="test-model",
+            num_instances=4,
+            kwargs={"tensor_parallel_size": 2},
+        )
+
+        class MockHarnessConfig:
+            num_inference_workers = 1  # Should be ignored
+            auxiliary_providers = {}
+
+        mock_config = MockHarnessConfig()
+        mock_config.provider = provider
+
+        planner = GPUPlanner.from_harness_config(mock_config, total_gpus=8)
+
+        # Should use num_instances (4), not num_inference_workers (1)
+        assert planner.num_main_workers == 4
+        assert planner.main_tensor_parallel == 2
+
+        # Plan should allocate 4 × 2 = 8 GPUs
+        plan = planner.plan()
+        assert plan.total_gpus_used == 8
+
+    def test_api_backed_provider_no_main_gpus(self):
+        """API-backed providers don't consume main GPUs."""
+        provider = ProviderConfig(
+            kind=ProviderKind.LITELLM,
+            model="gpt-4",
+            num_instances=4,  # Should be ignored
+        )
+
+        class MockHarnessConfig:
+            num_inference_workers = 2
+            auxiliary_providers = {}
+
+        mock_config = MockHarnessConfig()
+        mock_config.provider = provider
+
+        planner = GPUPlanner.from_harness_config(mock_config, total_gpus=8)
+
+        # API-backed provider should not consume GPUs
+        assert planner.num_main_workers == 0
+
+        plan = planner.plan()
+        assert plan.total_gpus_used == 0
+
+    def test_external_vllm_server_no_main_gpus(self):
+        """vllm_server with base_url doesn't consume main GPUs."""
+        provider = ProviderConfig(
+            kind=ProviderKind.VLLM_SERVER,
+            model="remote-model",
+            base_url="http://external:8000/v1",
+            num_instances=4,  # Should be ignored
+        )
+
+        class MockHarnessConfig:
+            num_inference_workers = 2
+            auxiliary_providers = {}
+
+        mock_config = MockHarnessConfig()
+        mock_config.provider = provider
+
+        planner = GPUPlanner.from_harness_config(mock_config, total_gpus=8)
+
+        # External server should not consume GPUs
+        assert planner.num_main_workers == 0
+
+        plan = planner.plan()
+        assert plan.total_gpus_used == 0
+
+    def test_main_and_auxiliary_gpu_allocation(self):
+        """Both main and auxiliary providers are allocated GPUs correctly."""
+        main_provider = ProviderConfig(
+            kind=ProviderKind.VLLM_SERVER,
+            model="main-model",
+            num_instances=2,
+            kwargs={"tensor_parallel_size": 2},
+        )
+
+        aux_provider = ProviderConfig(
+            kind=ProviderKind.VLLM_SERVER,
+            model="aux-model",
+            num_instances=1,
+            kwargs={"tensor_parallel_size": 1},
+        )
+
+        class MockHarnessConfig:
+            num_inference_workers = 1
+            auxiliary_providers = {"judge": aux_provider}
+
+        mock_config = MockHarnessConfig()
+        mock_config.provider = main_provider
+
+        planner = GPUPlanner.from_harness_config(mock_config, total_gpus=8)
+
+        # Main: 2 instances × 2 TP = 4 GPUs
+        # Aux: 1 instance × 1 TP = 1 GPU
+        # Total: 5 GPUs
+        plan = planner.plan()
+        assert plan.total_gpus_used == 5
+
+
 class TestValidateGPUPlan:
     """Test GPU plan validation."""
 
