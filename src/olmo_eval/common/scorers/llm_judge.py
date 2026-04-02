@@ -2,9 +2,6 @@
 
 This module provides scorers that use language models to evaluate
 responses, following patterns from benchmarks like SimpleQA.
-
-Supports both OpenAI API (default) and local inference providers
-configured via `auxiliary_providers` in HarnessConfig.
 """
 
 import re
@@ -66,8 +63,7 @@ def build_openai_judge_fn(
     """Build a lazy judge function using OpenAI API.
 
     The returned function validates OPENAI_API_KEY on first call, not at construction.
-    This allows scorers to be instantiated before the environment variable is set
-    (e.g., in Beaker jobs where secrets are injected at runtime).
+    This allows scorers to be instantiated before the environment variable is set.
 
     The function accepts either a plain string prompt (sent as a user message) or
     can be called with a system_prompt keyword argument for system+user message pairs.
@@ -79,7 +75,7 @@ def build_openai_judge_fn(
         temperature: Sampling temperature for the judge.
 
     Returns:
-        A judge function that validates and calls OpenAI on first use.
+        A judge function that validates and calls OpenAI.
     """
     _client: list = []  # Mutable container for lazy initialization
 
@@ -124,10 +120,6 @@ class LLMJudgeScorer(ContextScorer):
     """Abstract base class for LLM-as-judge scorers.
 
     Subclasses must implement format_judge_prompt() and parse_judge_response().
-
-    Requires either:
-    - provider_name set to use a provider from auxiliary_providers
-    - judge_fn set (e.g., OpenAI via build_openai_judge_fn)
     """
 
     name: ClassVar[str] = "llm_judge"
@@ -214,8 +206,7 @@ class LLMJudgeScorer(ContextScorer):
 class SimpleQAJudgeScorer(LLMJudgeScorer):
     """LLM judge following SimpleQA's CORRECT/INCORRECT/NOT_ATTEMPTED grading.
 
-    Uses A/B/C response format. Default uses OpenAI (requires OPENAI_API_KEY).
-    Set provider_name to use a local provider instead.
+    Uses A/B/C response format.
     """
 
     name: ClassVar[str] = "simpleqa_judge"
@@ -274,8 +265,6 @@ class RubricJudgeScorer(LLMJudgeScorer):
     """LLM judge with custom rubric and configurable score extraction.
 
     Allows defining custom evaluation rubrics and score patterns.
-    By default uses OpenAI API with gpt-4o-mini. Requires OPENAI_API_KEY
-    environment variable to be set.
     """
 
     name: ClassVar[str] = "rubric_judge"
