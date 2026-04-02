@@ -34,13 +34,15 @@ class BatchedStrategy(BatchingStrategy):
         max_concurrency: int | None,
         worker_logger: logging.Logger,
         total_instances: int,
+        num_workers: int = 1,
     ) -> None:
         """Execute batched processing."""
         import math
 
         from olmo_eval.runners.asynq.processing import process_items
 
-        total_batches = math.ceil(total_instances / self.config.chunk_size)
+        worker_instances = math.ceil(total_instances / num_workers)
+        total_batches = math.ceil(worker_instances / self.config.chunk_size)
         current_batch = 0
 
         while True:

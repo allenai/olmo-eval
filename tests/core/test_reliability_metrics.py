@@ -1,9 +1,23 @@
 """Tests for pass@k and pass^k reliability metrics."""
 
+from collections.abc import Iterator
+
 from olmo_eval.common.metrics import PassAtKMetric, PassPowKMetric
 from olmo_eval.common.scorers import CodeExecutionScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
 from olmo_eval.common.utils import compute_pass_at_k, compute_pass_pow_k
+from olmo_eval.evals.tasks.common import Task, TaskConfig
+
+
+class MinimalTask(Task):
+    """Minimal task implementation for testing."""
+
+    @property
+    def instances(self) -> Iterator[Instance]:
+        yield Instance(question="test")
+
+    def format_request(self, instance: Instance) -> LMRequest:
+        return LMRequest(request_type=RequestType.CHAT)
 
 
 def make_response(task_id: str, score: float, scorer_name: str = "code_exec") -> Response:
@@ -273,3 +287,146 @@ class TestMetricsComparison:
             pow_k = PassPowKMetric(scorer=CodeExecutionScorer, k=k).compute(responses)
             assert at_k == 1.0
             assert pow_k == 1.0
+
+
+class TestExpandMultiOutputResponses:
+    """Tests for _expand_multi_output_responses method."""
+
+    def test_single_output_unchanged(self):
+        """Test that single-output responses are unchanged."""
+        task = MinimalTask(TaskConfig(name="test"))
+        responses = [
+            Response(
+                instance=Instance(question="q1", metadata={"id": "task1"}),
+                request=LMRequest(request_type=RequestType.CHAT),
+                outputs=[LMOutput(text="output1")],
+            )
+        ]
+
+        expanded = task._expand_multi_output_responses(responses)
+
+        assert len(expanded) == 1
+        assert expanded[0] is responses[0]
+
+    def test_multi_output_expanded(self):
+        """Test that multi-output responses are expanded into separate responses."""
+        task = MinimalTask(TaskConfig(name="test"))
+        outputs = [
+            LMOutput(text="output1", metadata={"score:code_exec": 1.0}),
+            LMOutput(text="output2", metadata={"score:code_exec": 0.0}),
+            LMOutput(text="output3", metadata={"score:code_exec": 1.0}),
+        ]
+        responses = [
+            Response(
+                instance=Instance(question="q1", metadata={"id": "task1"}),
+                request=LMRequest(request_type=RequestType.CHAT),
+                outputs=outputs,
+            )
+        ]
+
+        expanded = task._expand_multi_output_responses(responses)
+
+        assert len(expanded) == 3
+        # Each expanded response should have one output
+        for i, resp in enumerate(expanded):
+            assert len(resp.outputs) == 1
+            assert resp.outputs[0] is outputs[i]
+            assert resp.instance is responses[0].instance
+            assert resp.request is responses[0].request
+
+    def test_scores_copied_from_metadata(self):
+        """Test that scores are copied from output metadata to response scores."""
+        task = MinimalTask(TaskConfig(name="test"))
+        outputs = [
+            LMOutput(text="output1", metadata={"score:code_exec": 1.0}),
+            LMOutput(text="output2", metadata={"score:code_exec": 0.0}),
+        ]
+        responses = [
+            Response(
+                instance=Instance(question="q1", metadata={"id": "task1"}),
+                request=LMRequest(request_type=RequestType.CHAT),
+                outputs=outputs,
+            )
+        ]
+
+        expanded = task._expand_multi_output_responses(responses)
+
+        assert expanded[0].scores["code_exec"] == 1.0
+        assert expanded[1].scores["code_exec"] == 0.0
+
+    def test_multiple_scorer_scores(self):
+        """Test that multiple scorer scores are all copied."""
+        task = MinimalTask(TaskConfig(name="test"))
+        outputs = [
+            LMOutput(
+                text="output1",
+                metadata={"score:code_exec": 1.0, "score:exact_match": 0.5},
+            ),
+            LMOutput(
+                text="output2",
+                metadata={"score:code_exec": 0.0, "score:exact_match": 1.0},
+            ),
+        ]
+        responses = [
+            Response(
+                instance=Instance(question="q1", metadata={"id": "task1"}),
+                request=LMRequest(request_type=RequestType.CHAT),
+                outputs=outputs,
+            )
+        ]
+
+        expanded = task._expand_multi_output_responses(responses)
+
+        assert expanded[0].scores["code_exec"] == 1.0
+        assert expanded[0].scores["exact_match"] == 0.5
+        assert expanded[1].scores["code_exec"] == 0.0
+        assert expanded[1].scores["exact_match"] == 1.0
+
+    def test_empty_metadata_handled(self):
+        """Test that outputs with no metadata are handled gracefully."""
+        task = MinimalTask(TaskConfig(name="test"))
+        outputs = [
+            LMOutput(text="output1"),  # No metadata
+            LMOutput(text="output2", metadata={}),  # Empty metadata
+        ]
+        responses = [
+            Response(
+                instance=Instance(question="q1", metadata={"id": "task1"}),
+                request=LMRequest(request_type=RequestType.CHAT),
+                outputs=outputs,
+            )
+        ]
+
+        expanded = task._expand_multi_output_responses(responses)
+
+        assert len(expanded) == 2
+        assert expanded[0].scores == {}
+        assert expanded[1].scores == {}
+
+    def test_mixed_single_and_multi_output(self):
+        """Test handling of mixed single and multi-output responses."""
+        task = MinimalTask(TaskConfig(name="test"))
+        responses = [
+            Response(
+                instance=Instance(question="q1", metadata={"id": "task1"}),
+                request=LMRequest(request_type=RequestType.CHAT),
+                outputs=[LMOutput(text="single", metadata={"score:code_exec": 1.0})],
+            ),
+            Response(
+                instance=Instance(question="q2", metadata={"id": "task2"}),
+                request=LMRequest(request_type=RequestType.CHAT),
+                outputs=[
+                    LMOutput(text="multi1", metadata={"score:code_exec": 0.0}),
+                    LMOutput(text="multi2", metadata={"score:code_exec": 1.0}),
+                ],
+            ),
+        ]
+
+        expanded = task._expand_multi_output_responses(responses)
+
+        assert len(expanded) == 3
+        # First response unchanged
+        assert expanded[0] is responses[0]
+        # Second response expanded into two
+        assert expanded[1].outputs[0].text == "multi1"
+        assert expanded[2].outputs[0].text == "multi2"

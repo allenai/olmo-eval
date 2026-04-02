@@ -23,7 +23,6 @@ from olmo_eval.cli.utils import (
     ConfiguredExternalEval,
     ExperimentSummary,
     ExternalEvalSummary,
-    HarnessSummary,
     OrderedMultiOption,
     RunnerConfig,
     console,
@@ -108,15 +107,10 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     help="Inject AWS credentials for S3 model access. Auto-detected from s3:// model paths.",
 )
 @click.option(
-    "--gcs-credentials/--no-gcs-credentials",
+    "--gcp-credentials/--no-gcp-credentials",
+    "gcs_credentials",
     default=None,
-    help="Inject GCS credentials for gs:// model access. Auto-detected from gs:// model paths.",
-)
-@click.option(
-    "--use-gcp-creds/--no-use-gcp-creds",
-    "gcp_secret",
-    default=None,
-    help="Inject GOOGLE_APPLICATION_CREDENTIALS from Beaker secret ({user}_...)",
+    help="Inject GCP credentials. Auto-detected from gs:// model paths.",
 )
 @click.option(
     "--s3-bucket",
@@ -259,7 +253,6 @@ def launch(
     follow: bool,
     aws_credentials: bool | None,
     gcs_credentials: bool | None,
-    gcp_secret: bool | None,
     s3_bucket: str | None,
     s3_prefix: str | None,
     s3_endpoint_url: str | None,
@@ -371,7 +364,6 @@ def launch(
         "harness_overrides": harness_overrides,
         "uv_cache_dir": uv_cache_dir,
         "secret_env_overrides": secret_env_overrides,
-        "gcp_secret": gcp_secret,
     }
 
     # Handle external evaluations mode
@@ -413,7 +405,6 @@ def launch(
             follow=follow,
             aws_credentials=aws_credentials,
             gcs_credentials=gcs_credentials,
-            gcp_secret=gcp_secret,
             s3_bucket=s3_bucket,
             s3_prefix=s3_prefix,
             s3_region=s3_region,
@@ -461,10 +452,6 @@ def launch(
     )
     inject_aws, inject_gcs = cred_manager.detect_and_setup(launcher)
 
-    # Update config with credential settings
-    launch_config.inject_aws_credentials = inject_aws
-    launch_config.inject_gcs_credentials = inject_gcs
-
     if dry_run:
         console.print("[yellow]Dry run mode - not submitting[/yellow]")
 
@@ -483,9 +470,10 @@ def launch(
     )
 
     # Determine effective image
-    # Check if harness has a sandbox configured with local deployment - if so, use sandbox image
+    # Check if harness has a sandbox configured - if so, use sandbox image
     # Apply harness overrides first so -o sandbox.mode=docker works correctly
     harness_needs_sandbox = False
+    harness_preset = None
     if launch_config.harness:
         from olmo_eval.harness import get_harness_preset
 
@@ -494,8 +482,29 @@ def launch(
             harness_preset = _apply_harness_overrides(
                 harness_preset, launch_config.harness_overrides
             )
-        if harness_preset.sandboxes:
-            harness_needs_sandbox = any(s.is_local for s in harness_preset.sandboxes)
+        harness_needs_sandbox = bool(harness_preset.sandboxes)
+
+    # Validate num_inference_workers against GPU count
+    num_inference_workers = harness_preset.num_inference_workers if harness_preset else 1
+    if num_inference_workers > 1:
+        if launch_config.gpus == 0:
+            console.print(
+                f"[red]Error:[/red] num_inference_workers={num_inference_workers} "
+                "requires GPUs, but --gpus is 0"
+            )
+            raise SystemExit(1)
+        if num_inference_workers > launch_config.gpus:
+            console.print(
+                f"[red]Error:[/red] num_inference_workers ({num_inference_workers}) "
+                f"exceeds GPU count ({launch_config.gpus})"
+            )
+            raise SystemExit(1)
+        if launch_config.gpus % num_inference_workers != 0:
+            console.print(
+                f"[red]Error:[/red] GPU count ({launch_config.gpus}) must be evenly "
+                f"divisible by num_inference_workers ({num_inference_workers})"
+            )
+            raise SystemExit(1)
 
     if image:
         effective_image = image
@@ -580,7 +589,6 @@ def launch(
         inject_gcs,
         enable_sandbox=harness_needs_sandbox,
         secret_env_overrides=launch_config.secret_env_overrides,
-        inject_gcp_secret=launch_config.inject_gcp_secret,
     )
 
     job_configs = []
@@ -682,6 +690,7 @@ def _get_task_configs(
     """
     from copy import deepcopy
 
+    from olmo_eval.cli.run.config import _apply_dotlist_overrides
     from olmo_eval.evals.tasks.common import get_task as get_task_instance
     from olmo_eval.evals.tasks.common import parse_task_spec
 
@@ -699,25 +708,16 @@ def _get_task_configs(
         # Deep copy the config so we can apply overrides directly
         task_cfg = deepcopy(task_instance.config)
 
-        # Apply CLI overrides directly to config
+        # Apply CLI overrides using dotlist format (supports nested keys and JSON)
         cli_overrides = task_overrides.get(task_spec, [])
-        for override_str in cli_overrides:
-            if "=" in override_str:
-                key, value = override_str.split("=", 1)
-                # Try to parse value as int/float/bool if applicable
-                parsed_value: str | int | float | bool = value
-                try:
-                    if value.lower() in ("true", "false"):
-                        parsed_value = value.lower() == "true"
-                    elif "." in value:
-                        parsed_value = float(value)
-                    else:
-                        parsed_value = int(value)
-                except ValueError:
-                    parsed_value = value
-
+        if cli_overrides:
+            # Convert config to dict, apply overrides, convert back
+            task_dict = task_cfg.to_dict() if hasattr(task_cfg, "to_dict") else vars(task_cfg)
+            task_dict = _apply_dotlist_overrides(task_dict, cli_overrides)
+            # Update config attributes from dict
+            for key, value in task_dict.items():
                 if hasattr(task_cfg, key):
-                    setattr(task_cfg, key, parsed_value)
+                    setattr(task_cfg, key, value)
 
         task_configs[task_spec] = task_cfg
 
@@ -826,12 +826,10 @@ def _build_experiment_summary(
     provider_config = get_provider_config(exp.model_spec)
     harness_config = harness_config.merge_provider(provider_config)
 
-    harness_summary = HarnessSummary(config=harness_config)
-
     return ExperimentSummary(
         name=exp.name,
         tasks=exp_task_configs,
-        harness=harness_summary,
+        harness=harness_config,
         runner=exp_runner_config,
         beaker=job_config,
     )
@@ -960,20 +958,18 @@ def _apply_harness_overrides(harness_config, overrides: list[str]):
     Args:
         harness_config: Base HarnessConfig to modify.
         overrides: List of dotlist override strings (e.g., ["sandbox.mode=docker"]).
+            Supports list indices like "sandboxes.0.mode=modal".
+            Supports JSON values like 'sandboxes.0={"mode":"modal","instances":4}'.
 
     Returns:
         New HarnessConfig with overrides applied.
     """
-    from omegaconf import OmegaConf
-
+    from olmo_eval.cli.run.config import _apply_dotlist_overrides
     from olmo_eval.harness import HarnessConfig
 
     harness_dict = harness_config.to_dict()
-    override_config = OmegaConf.from_dotlist(overrides)
-    base = OmegaConf.create(harness_dict)
-    merged = OmegaConf.merge(base, override_config)
-    harness_dict = OmegaConf.to_container(merged, resolve=True)
-    return HarnessConfig.from_dict(harness_dict)  # type: ignore[arg-type]
+    harness_dict = _apply_dotlist_overrides(harness_dict, overrides)
+    return HarnessConfig.from_dict(harness_dict)
 
 
 def _launch_external_evals(
@@ -992,7 +988,6 @@ def _launch_external_evals(
     follow: bool,
     aws_credentials: bool | None,
     gcs_credentials: bool | None,
-    gcp_secret: bool | None,
     s3_bucket: str | None,
     s3_prefix: str | None,
     s3_region: str,
@@ -1179,7 +1174,6 @@ def _launch_external_evals(
             env_secrets=env_secrets,
             inject_aws_credentials=inject_aws,
             inject_gcs_credentials=inject_gcs,
-            inject_gcp_secret=gcp_secret or False,
             eval_args=eval_args,
             provider_kwargs=provider_kwargs,
             uv_cache_dir=uv_cache_dir,

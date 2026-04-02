@@ -211,7 +211,7 @@ class ToolResult:
         Returns:
             Dictionary representation of the ToolResult.
         """
-        result = {
+        result: dict[str, Any] = {
             "tool_call_id": self.tool_call_id,
             "content": self.content,
             "is_error": self.is_error,
@@ -256,16 +256,17 @@ class ToolSchema:
         Returns:
             Dictionary suitable for use in OpenAI's tools parameter.
         """
+        function_payload: dict[str, Any] = {
+            "name": self.name,
+            "description": self.description,
+            "parameters": self.parameters,
+        }
         result: dict[str, Any] = {
             "type": "function",
-            "function": {
-                "name": self.name,
-                "description": self.description,
-                "parameters": self.parameters,
-            },
+            "function": function_payload,
         }
         if self.strict:
-            result["function"]["strict"] = True
+            function_payload["strict"] = True
         return result
 
     @classmethod

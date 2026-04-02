@@ -13,7 +13,7 @@ from .base import (
     Scorer,
     SQuADF1Scorer,
 )
-from .code_execution import CodeExecutionScorer
+from .code_execution import CodeExecutionScorer, MultiplEScorer
 from .execution import ExecutionScorer, SandboxRequiredError
 from .llm_judge import (
     JudgeFn,
@@ -23,6 +23,7 @@ from .llm_judge import (
     SimpleQAJudgeScorer,
     build_openai_judge_fn,
 )
+from .substring import SubstringRecallScorer
 from .tools import (
     ToolArgumentScorer,
     ToolCallScorer,
@@ -49,6 +50,7 @@ __all__ = [
     "MathVerifyScorer",
     "MinervaMathScorer",
     "MultipleChoiceScorer",
+    "MultiplEScorer",
     "PerplexityScorer",
     "RubricJudgeScorer",
     "SandboxRequiredError",
@@ -56,6 +58,7 @@ __all__ = [
     "SQuADF1Scorer",
     "SimpleQAGrade",
     "SimpleQAJudgeScorer",
+    "SubstringRecallScorer",
     "ToolArgumentScorer",
     "ToolCallScorer",
     "ToolSequenceScorer",

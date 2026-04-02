@@ -43,6 +43,7 @@ def register(name: str) -> Callable[[T], T]:
     """Register a task class with a name.
 
     Config is built from class attributes that match TaskConfig fields.
+    Dynamically created classes are added to their module's namespace for pickling.
 
     Usage:
         @register("mmlu")
@@ -51,12 +52,19 @@ def register(name: str) -> Callable[[T], T]:
             metrics = (AccuracyMetric(),)
             ...
     """
+    import sys
 
     def decorator(cls: T) -> T:
         if name in _tasks:
             raise ValueError(f"Task '{name}' already registered")
         _tasks[name] = cls
         _configs[name] = _build_config(name, cls)
+
+        # Make dynamically created classes picklable by adding to module namespace
+        module = sys.modules.get(cls.__module__)
+        if module is not None and not hasattr(module, cls.__name__):
+            setattr(module, cls.__name__, cls)
+
         return cls
 
     return decorator

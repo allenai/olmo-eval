@@ -23,6 +23,7 @@ from .constants import (
 )
 
 
+# TODO(undfined): Remove reference to beaker
 def _get_logs_dir() -> str:
     """Get the logs directory based on environment."""
     result_dir = BEAKER_RESULT_DIR if os.environ.get("BEAKER_JOB_ID") else LOCAL_RESULT_DIR
@@ -111,15 +112,41 @@ class HarnessPresets:
         )
 
     @lazy
+    def codex_universal(name: str) -> HarnessConfig:
+        """Universal code execution preset with multiple capabilities."""
+        from .sandbox import SandboxConfig, SandboxMode
+
+        return HarnessConfig(
+            name=name,
+            metrics=MetricsConfig(),
+            sandboxes=(
+                SandboxConfig(
+                    instances=16,
+                    image="volcengine/sandbox-fusion:base-20250609",
+                    mode=SandboxMode.DOCKER,
+                    startup_timeout=300.0,
+                    log_dir=_get_logs_dir(),
+                    inject_swerex=True,
+                    dockerfile_extra=(
+                        "RUN mkdir -p /runtime/java",
+                        "RUN curl -L -o /runtime/java/javatuples-1.2.jar https://repo1.maven.org/maven2/org/javatuples/javatuples/1.2/javatuples-1.2.jar",
+                    ),
+                ),
+            ),
+        )
+
+    @lazy
     def codex_python(name: str) -> HarnessConfig:
         """Python only code execution preset."""
         from .sandbox import SandboxConfig, SandboxMode
 
         return HarnessConfig(
             name=name,
+            metrics=MetricsConfig(),
+            scoring_concurrency=4,
             sandboxes=(
                 SandboxConfig(
-                    instances=1,
+                    instances=4,
                     image="ghcr.io/astral-sh/uv:python3.12-bookworm-slim",
                     mode=SandboxMode.DOCKER,
                     startup_timeout=60.0,
@@ -137,6 +164,7 @@ class HarnessPresets:
 
         return HarnessConfig(
             name=name,
+            metrics=MetricsConfig(),
             provider=ProviderConfig(
                 kind=ProviderKind.VLLM_SERVER,
                 # Higher timeout for multi-turn agent runs (each turn can take time)
@@ -170,6 +198,7 @@ class HarnessPresets:
 
         return HarnessConfig(
             name=name,
+            metrics=MetricsConfig(),
             provider=ProviderConfig(
                 kind=ProviderKind.VLLM_SERVER,
                 kwargs={"timeout": 300},
@@ -183,7 +212,7 @@ class HarnessPresets:
             sandboxes=(
                 SandboxConfig(
                     capabilities=frozenset(Capability.BASH),
-                    instances=1,  # Match max_concurrency for parallel execution
+                    instances=1,
                     image="ghcr.io/astral-sh/uv:python3.12-bookworm-slim",
                     mode=SandboxMode.DOCKER,
                     startup_timeout=120.0,

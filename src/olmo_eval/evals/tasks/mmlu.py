@@ -88,7 +88,7 @@ def _make_mcq_prompt(question: str, choices: list[str], label_prefix: str = " ")
     label_format = label_prefix + "A."
     choices_text = "\n".join(
         f"{label_format.replace('A', label)} {text}"
-        for label, text in zip(choice_labels, choices)
+        for label, text in zip(choice_labels, choices, strict=False)
     )
     return f"Question: {question}\n{choices_text}\nAnswer:"
 
@@ -170,7 +170,10 @@ def _format_subject(subject: str) -> str:
 
 
 def _make_formatter(subject: str) -> MultipleChoiceLogprobFormatter:
-    description = f"The following are multiple choice questions (with answers) about {_format_subject(subject)}.\n\n"
+    subject_text = _format_subject(subject)
+    description = (
+        f"The following are multiple choice questions (with answers) about {subject_text}.\n\n"
+    )
     return MultipleChoiceLogprobFormatter(
         template="{question}",
         label_prefix=" ",

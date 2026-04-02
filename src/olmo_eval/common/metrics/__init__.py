@@ -13,6 +13,7 @@ from .base import (
     Metric,
     PassAtKMetric,
     PassPowKMetric,
+    RecallMetric,
     SQuADF1Metric,
     ToolAccuracyMetric,
 )
@@ -30,6 +31,7 @@ __all__ = [
     "Metric",
     "PassAtKMetric",
     "PassPowKMetric",
+    "RecallMetric",
     "SQuADF1Metric",
     "ToolAccuracyMetric",
 ]

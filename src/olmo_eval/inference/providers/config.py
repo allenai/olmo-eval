@@ -43,6 +43,7 @@ class ProviderConfig:
     model: str = ""
     alias: str | None = None
     base_url: str | None = None
+    api_base: str | None = None
     tokenizer: str | None = None
     revision: str | None = None
     trust_remote_code: bool = False
@@ -75,7 +76,7 @@ class ProviderConfig:
             "max_concurrency",
             "max_model_len",
         ),
-        "litellm": ("base_url", "max_concurrency"),
+        "litellm": ("base_url", "api_base", "max_concurrency"),
         "hf": ("tokenizer", "trust_remote_code", "dtype"),
         "mock": (),
     }
@@ -137,6 +138,8 @@ class ProviderConfig:
         }
         if self.base_url is not None:
             d["base_url"] = self.base_url
+        if self.api_base is not None:
+            d["api_base"] = self.api_base
         if self.tokenizer is not None:
             d["tokenizer"] = self.tokenizer
         if self.revision is not None:
@@ -182,6 +185,7 @@ class ProviderConfig:
             kind=data.get("kind", ProviderKind.VLLM),
             model=data.get("model", data.get("model_name", "")),
             base_url=data.get("base_url"),
+            api_base=data.get("api_base"),
             tokenizer=data.get("tokenizer"),
             revision=data.get("revision"),
             trust_remote_code=data.get("trust_remote_code", False),
