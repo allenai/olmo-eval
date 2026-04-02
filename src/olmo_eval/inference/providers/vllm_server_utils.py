@@ -400,11 +400,6 @@ class VLLMServerProcess:
         # Start the server process
         env = os.environ.copy()
 
-        # Use legacy V0 engine for more consistent logprob behavior
-        if self.server_kwargs.pop("use_v0_engine", False):
-            env["VLLM_USE_V1"] = "0"
-            self._log(logging.INFO, "Using vLLM V0 engine (VLLM_USE_V1=0)")
-
         # Allow extended max_model_len when user specifies it (e.g., with rope_scaling)
         # This is needed when max_model_len > model's max_position_embeddings
         if self.server_kwargs.get("max_model_len"):
