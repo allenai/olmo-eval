@@ -280,7 +280,7 @@ class VLLMProvider(InferenceProvider):
         from vllm import SamplingParams as VLLMSamplingParams
 
         vllm_params = VLLMSamplingParams(
-            prompt_logprobs=5,
+            prompt_logprobs=1,
             max_tokens=1,
             temperature=0.0,
         )
