@@ -69,6 +69,18 @@ class ProviderConfig:
         """
         return str(self.kind) in self._GPU_PROVIDERS
 
+    @property
+    def requires_local_gpu(self) -> bool:
+        """Whether this provider needs local GPU resources.
+
+        Returns True for local inference (vllm, vllm_server, hf) without external base_url.
+        Returns False for API-backed providers or configs pointing to external servers.
+        """
+        if not self.requires_gpu:
+            return False
+        # vllm_server with base_url points to external server
+        return not self.base_url
+
     # Config fields accepted by each provider kind (fields with non-default values are passed)
     _PROVIDER_FIELDS: ClassVar[dict[str, tuple[str, ...]]] = {
         "vllm": ("tokenizer", "revision", "trust_remote_code", "dtype", "max_model_len"),

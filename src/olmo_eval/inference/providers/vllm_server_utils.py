@@ -361,7 +361,6 @@ class VLLMServerProcess:
         self._process: subprocess.Popen | None = None
         self._log_file: Any | None = None
         self._started = False
-        self._env_backup: str | None = None
 
     @property
     def base_url(self) -> str:
@@ -390,11 +389,6 @@ class VLLMServerProcess:
         if self._started:
             return self.base_url
 
-        # Set CUDA_VISIBLE_DEVICES if gpu_ids specified
-        if self.gpu_ids:
-            self._env_backup = os.environ.get("CUDA_VISIBLE_DEVICES")
-            os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in self.gpu_ids)
-
         cmd = _build_server_command(
             model_name=self.model_name,
             port=self.port,
@@ -408,8 +402,10 @@ class VLLMServerProcess:
         if progress_callback:
             progress_callback(f"Starting vLLM server for {self.model_name}...")
 
-        # Start the server process
+        # Build environment for subprocess (child only, don't mutate parent)
         env = os.environ.copy()
+        if self.gpu_ids:
+            env["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in self.gpu_ids)
 
         # Allow extended max_model_len when user specifies it (e.g., with rope_scaling)
         # This is needed when max_model_len > model's max_position_embeddings
@@ -540,13 +536,6 @@ class VLLMServerProcess:
                 with suppress(Exception):
                     self._log_file.close()
                 self._log_file = None
-            # Restore CUDA_VISIBLE_DEVICES
-            if self.gpu_ids:
-                if self._env_backup is not None:
-                    os.environ["CUDA_VISIBLE_DEVICES"] = self._env_backup
-                elif "CUDA_VISIBLE_DEVICES" in os.environ:
-                    del os.environ["CUDA_VISIBLE_DEVICES"]
-                self._env_backup = None
 
         self._log(logging.INFO, "vLLM server stopped")
 

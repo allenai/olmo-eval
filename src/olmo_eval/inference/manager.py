@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
@@ -24,6 +25,8 @@ def _create_server(config: ProviderConfig, gpu_ids: list[int] | None = None) -> 
         max_model_len=config.max_model_len,
         dtype=config.dtype,
         tokenizer=config.tokenizer,
+        trust_remote_code=config.trust_remote_code,
+        revision=config.revision,
         **dict(config.kwargs),
     )
 
@@ -61,60 +64,72 @@ class InferenceManager:
             return self.get_resolved_configs()
 
         gpu_pool = list(self.available_gpu_ids)
+        started_servers: list[VLLMServerProcess] = []  # Track for cleanup on failure
 
-        for name, config in self.configs.items():
-            if config.base_url:
-                logger.info(f"Using external server for {name!r}: {config.base_url}")
-                resolved = replace(config, num_instances=1)
-                self._servers[name] = ServerInfo(
-                    name=name,
-                    resolved_configs=[resolved],
-                    servers=[None],
-                )
-
-            elif config.kind in LOCAL_SERVER_KINDS:
-                num_instances = config.num_instances
-                tensor_parallel = config.kwargs.get("tensor_parallel_size", 1)
-                gpus_needed = num_instances * tensor_parallel
-
-                if len(gpu_pool) < gpus_needed:
-                    raise RuntimeError(
-                        f"Not enough GPUs for {name!r}. "
-                        f"Needs {gpus_needed} ({num_instances} instances × {tensor_parallel} TP), "
-                        f"available: {len(gpu_pool)}"
+        try:
+            for name, config in self.configs.items():
+                # External server or API-backed provider - no local resources needed
+                if not config.requires_local_gpu:
+                    logger.info(f"Using provider {name!r} without local GPU (kind={config.kind})")
+                    resolved = replace(config, num_instances=1)
+                    self._servers[name] = ServerInfo(
+                        name=name,
+                        resolved_configs=[resolved],
+                        servers=[None],
                     )
 
-                servers: list[VLLMServerProcess | None] = []
-                resolved_configs: list[ProviderConfig] = []
+                elif config.kind in LOCAL_SERVER_KINDS:
+                    num_instances = config.num_instances
+                    tensor_parallel = config.kwargs.get("tensor_parallel_size", 1)
+                    gpus_needed = num_instances * tensor_parallel
 
-                for i in range(num_instances):
-                    instance_gpus = [gpu_pool.pop(0) for _ in range(tensor_parallel)]
+                    if len(gpu_pool) < gpus_needed:
+                        raise RuntimeError(
+                            f"Not enough GPUs for {name!r}. "
+                            f"Needs {gpus_needed} ({num_instances} × {tensor_parallel} TP), "
+                            f"available: {len(gpu_pool)}"
+                        )
 
-                    logger.info(
-                        f"Starting server {name!r} instance {i + 1}/{num_instances} "
-                        f"(model={config.model}, gpus={instance_gpus})"
+                    servers: list[VLLMServerProcess | None] = []
+                    resolved_configs: list[ProviderConfig] = []
+
+                    for i in range(num_instances):
+                        instance_gpus = [gpu_pool.pop(0) for _ in range(tensor_parallel)]
+
+                        logger.info(
+                            f"Starting server {name!r} instance {i + 1}/{num_instances} "
+                            f"(model={config.model}, gpus={instance_gpus})"
+                        )
+
+                        server = _create_server(config=config, gpu_ids=instance_gpus)
+                        base_url = server.start()
+                        started_servers.append(server)  # Track immediately for cleanup
+                        servers.append(server)
+
+                        resolved = replace(config, base_url=base_url, num_instances=1)
+                        resolved_configs.append(resolved)
+
+                        logger.info(f"Server {name!r} instance {i + 1} ready at {base_url}")
+
+                    self._servers[name] = ServerInfo(
+                        name=name,
+                        resolved_configs=resolved_configs,
+                        servers=servers,
                     )
 
-                    server = _create_server(config=config, gpu_ids=instance_gpus)
-                    base_url = server.start()
-                    servers.append(server)
+                else:
+                    raise ValueError(
+                        f"Unsupported local GPU provider kind: {config.kind!r}. "
+                        f"Use {sorted(LOCAL_SERVER_KINDS)} for local servers."
+                    )
 
-                    resolved = replace(config, base_url=base_url, num_instances=1)
-                    resolved_configs.append(resolved)
-
-                    logger.info(f"Server {name!r} instance {i + 1} ready at {base_url}")
-
-                self._servers[name] = ServerInfo(
-                    name=name,
-                    resolved_configs=resolved_configs,
-                    servers=servers,
-                )
-
-            else:
-                raise ValueError(
-                    f"Unsupported provider kind: {config.kind!r}. "
-                    f"Use {sorted(LOCAL_SERVER_KINDS)} or provide base_url."
-                )
+        except Exception:
+            # Clean up any started servers on failure
+            for server in started_servers:
+                with suppress(Exception):
+                    server.stop()
+            self._servers.clear()
+            raise
 
         self._started = True
         return self.get_resolved_configs()

@@ -276,7 +276,7 @@ class LaunchConfigLoader:
 
         try:
             provider_config = get_provider_config(model_spec)
-            if not provider_config.requires_gpu:
+            if not provider_config.requires_local_gpu:
                 return 0
         except Exception:
             pass
@@ -295,8 +295,8 @@ class LaunchConfigLoader:
         aux_gpus = 0
         if harness_config and harness_config.auxiliary_providers:
             for config in harness_config.auxiliary_providers.values():
-                if config.base_url:
-                    # External server - no GPUs needed
+                if not config.requires_local_gpu:
+                    # API-backed or external server - no GPUs needed
                     continue
                 num_instances = config.num_instances
                 tensor_parallel = config.kwargs.get("tensor_parallel_size", 1)
