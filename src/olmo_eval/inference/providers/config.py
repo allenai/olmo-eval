@@ -51,7 +51,7 @@ class ProviderConfig:
     dtype: str = "auto"
     max_model_len: int | None = None
     max_concurrency: int | None = None
-    num_instances: int = 1  # Number of server instances for horizontal scaling
+    num_instances: int = 1
     required_secrets: tuple[str, ...] = ()
     package: str | None = None
     dependencies: tuple[str, ...] = ()
