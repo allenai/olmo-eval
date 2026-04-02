@@ -1,13 +1,39 @@
 from collections.abc import Iterator
 from typing import Any
 
+from dataclasses import dataclass
+
 from olmo_eval.common.formatters import CompletionFormatter, PPLFormatter
 from olmo_eval.common.metrics import AccuracyMetric, BPBMetric, PassAtKMetric
 from olmo_eval.common.scorers import MinervaMathScorer
-from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.extract import MathExtractor
 from olmo_eval.evals.tasks.common import Task, register, register_variant
+
+
+@dataclass(slots=True)
+class _MinervaCompletionFormatter(CompletionFormatter):
+    """CompletionFormatter that omits answer_prefix from the final (test) instance."""
+
+    def format(
+        self,
+        instance: Instance,
+        fewshot: list[Instance] | None = None,
+    ) -> LMRequest:
+        parts: list[str] = []
+        for ex in fewshot or []:
+            example = self.template.format(question=ex.question)
+            if self.fewshot_answer_key and self.fewshot_answer_key in ex.metadata:
+                answer = ex.metadata[self.fewshot_answer_key]
+            else:
+                answer = ex.gold_answer
+            if answer:
+                example += self.answer_prefix + str(answer)
+            parts.append(example)
+        parts.append(self.template.format(question=instance.question))
+        prompt = self.fewshot_separator.join(parts)
+        return LMRequest(request_type=self.request_type, prompt=prompt)
 
 MATH_SUBSETS = [
     "algebra",
@@ -45,7 +71,7 @@ MINERVA_MATH_FIXED_FEWSHOT = [
 class MinervaMathTask(Task):
     fewshot_split: str = "train"
     formatter = CompletionFormatter(
-        template="Problem:\n{question}\n\nSolution: ",
+        template="Problem:\n{question}\n\nSolution:",
         fewshot_answer_key="solution_text",
     )
     metrics = (AccuracyMetric(scorer=MinervaMathScorer),)
@@ -208,6 +234,31 @@ for _subset in MATH_SUBSETS:
         _task_name,
         "olmes_n4_v2",
         fewshot_source="minerva_math_fixed",
+        metrics=(
+            AccuracyMetric(scorer=MinervaMathScorer),
+            PassAtKMetric(k=1, scorer=MinervaMathScorer),
+            PassAtKMetric(k=2, scorer=MinervaMathScorer),
+            PassAtKMetric(k=4, scorer=MinervaMathScorer),
+        ),
+        primary_metric=PassAtKMetric(k=1, scorer=MinervaMathScorer),
+        sampling_params=SamplingParams(
+            max_tokens=1024,
+            temperature=0.6,
+            top_p=0.6,
+            stop_sequences=("Problem:", "\n\n"),
+            num_samples=4,
+        ),
+    )
+
+    register_variant(
+        _task_name,
+        "olmo3base",
+        fewshot_source="minerva_math_fixed",
+        formatter=_MinervaCompletionFormatter(
+            template="Problem:\n{question}\n\nSolution:",
+            answer_prefix=" ",
+            fewshot_answer_key="solution_text",
+        ),
         metrics=(
             AccuracyMetric(scorer=MinervaMathScorer),
             PassAtKMetric(k=1, scorer=MinervaMathScorer),

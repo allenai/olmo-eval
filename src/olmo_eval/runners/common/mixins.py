@@ -94,9 +94,18 @@ class RunnerResultsMixin:
                 continue
 
             # Parse task_name[:variant1[:variant2...]] format
-            task_name, variants, _overrides = parse_task_spec(spec)
+            # Try progressively shorter prefixes to handle tasks with colons in names
+            parts = spec.split(":")
+            task_name = None
+            variants: list[str] = []
+            for i in range(len(parts), 0, -1):
+                candidate = ":".join(parts[:i])
+                if candidate in available_tasks:
+                    task_name = candidate
+                    variants = [v for v in parts[i:] if v]
+                    break
 
-            if task_name not in available_tasks:
+            if task_name is None:
                 errors.append(f"Unknown task or suite: '{spec}'")
                 continue
 

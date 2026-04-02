@@ -1,5 +1,6 @@
 from olmo_eval.evals.suites.biology import _LAB_BENCH_TASKS
 from olmo_eval.evals.suites.registry import make_suite
+from olmo_eval.evals.tasks.basic_skills import BASIC_SKILLS_SUBTASKS
 
 make_suite(
     "lab_bench:olmo3base",
@@ -47,6 +48,11 @@ make_suite(
     ("coqa:gen:olmo3base",),
 )
 
+make_suite(
+    "coqa:mc:olmo3base",
+    ("coqa:mc:olmo3base",),
+)
+
 
 make_suite(
     "hellaswag:olmo3base",
@@ -57,6 +63,12 @@ make_suite(
 make_suite(
     "jeopardy:gen:olmo3base",
     ("jeopardy:gen:olmo3base",),
+)
+
+
+make_suite(
+    "jeopardy:mc:olmo3base",
+    ("jeopardy:mc::olmo3base",),
 )
 
 
@@ -75,4 +87,34 @@ make_suite(
 make_suite(
     "sciriff_yesno:olmo3base",
     ("sciriff_yesno:rc:olmo3base",),
+)
+
+
+make_suite(
+    "drop:mc:olmo3base",
+    ("drop:mc:olmo3base",),
+)
+
+
+make_suite(
+    "squad:mc:olmo3base",
+    ("squad:mc:olmo3base", "squad:rc:olmo3base"),
+)
+
+
+make_suite(
+    "winogrande:olmo3base",
+    ("winogrande:rc:olmo3base", "winogrande:mc:olmo3base"),
+)
+
+
+make_suite(
+    "naturalqs:mc:olmo3base",
+    ("naturalqs:mc:olmo3base", "naturalqs:rc:olmo3base"),
+)
+
+
+make_suite(
+    "basic_skills:rc:olmo3base",
+    tuple(f"basic_skills_{s}:rc::olmo3base" for s in BASIC_SKILLS_SUBTASKS),
 )
