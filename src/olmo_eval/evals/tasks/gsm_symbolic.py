@@ -147,12 +147,12 @@ register_variant(
     "olmo3base",
     metrics=(
         AccuracyMetric(scorer=ExactMatchScorer),
-        PassAtKMetric(k=1, scorer=ExactMatchScorer),
-        PassAtKMetric(k=2, scorer=ExactMatchScorer),
-        PassAtKMetric(k=4, scorer=ExactMatchScorer),
-        PassAtKMetric(k=8, scorer=ExactMatchScorer),
+        PassAtKMetric(name="pass_at_1", k=1, scorer=ExactMatchScorer),
+        PassAtKMetric(name="pass_at_2", k=2, scorer=ExactMatchScorer),
+        PassAtKMetric(name="pass_at_4", k=4, scorer=ExactMatchScorer),
+        PassAtKMetric(name="pass_at_8", k=8, scorer=ExactMatchScorer),
     ),
-    primary_metric=PassAtKMetric(k=1, scorer=ExactMatchScorer),
+    primary_metric=PassAtKMetric(name="pass_at_1", k=1, scorer=ExactMatchScorer),
     sampling_params=SamplingParams(
         max_tokens=1024,
         temperature=0.6,
