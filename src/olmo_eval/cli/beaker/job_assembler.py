@@ -306,6 +306,13 @@ def assemble_external_eval_job(
             if extra not in extras:
                 extras.append(extra)
 
+    # Collect extras required by each external eval
+    for eval_name in external_evals:
+        eval_instance = get_external_eval(eval_name)
+        for extra in eval_instance.required_extras:
+            if extra not in extras:
+                extras.append(extra)
+
     provider_packages = get_provider_dependencies(model) or None
 
     return BeakerJobConfig(

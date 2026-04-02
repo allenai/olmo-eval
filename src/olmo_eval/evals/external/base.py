@@ -52,6 +52,11 @@ class ExternalEval(ABC):
         return ()
 
     @property
+    def required_extras(self) -> tuple[str, ...]:
+        """Package extras (from pyproject.toml) required to run this evaluation."""
+        return ()
+
+    @property
     def arguments(self) -> dict[str, tuple[str, Any | None]]:
         """Arguments that can be passed to this evaluation.
 

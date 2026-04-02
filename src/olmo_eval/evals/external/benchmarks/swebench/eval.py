@@ -83,6 +83,10 @@ class SWEBenchExternalEval(ExternalEval):
         return 14400.0  # 4 hours
 
     @property
+    def required_extras(self) -> tuple[str, ...]:
+        return ("swebench",)
+
+    @property
     def arguments(self) -> dict[str, tuple[str, Any | None]]:
         return {
             "dataset": ("Dataset: 'lite', 'verified', 'full', or a HuggingFace path", "lite"),
