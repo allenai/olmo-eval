@@ -242,9 +242,12 @@ class SWEBenchExternalEval(ExternalEval):
             env["DOCKER_HOST"] = f"unix:///run/user/{uid}/podman/podman.sock"
 
         logger.info(f"[{self.name}] Running SWE-bench harness: {shlex.join(cmd)}")
-        return await self._run_subprocess(
+        ok, output = await self._run_subprocess(
             cmd, timeout=self.timeout_seconds * 0.2, cwd=str(work_dir), env=env
         )
+        if not ok:
+            logger.warning(f"[{self.name}] Scoring subprocess output:\n{output}")
+        return ok, output
 
     async def _run_subprocess(
         self,
