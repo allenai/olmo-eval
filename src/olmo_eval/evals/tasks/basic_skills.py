@@ -94,11 +94,19 @@ class _BasicSkillsBase(Task):
         if not all_instances:
             return []
 
+        # Sample one extra so we can exclude the evaluated instance (matching oe-eval-internal)
+        k = min(self.config.num_fewshot + 1, len(all_instances))
         rng = random.Random(self.config.fewshot_seed)
-        return rng.sample(all_instances, min(self.config.num_fewshot, len(all_instances)))
+        return rng.sample(all_instances, k)
 
     def format_request(self, instance: Instance) -> LMRequest:
-        fewshot = self.get_fewshot()
+        fewshot_candidates = self.get_fewshot()
+
+        # Exclude the current instance from fewshot (matching oe-eval-internal behavior)
+        instance_id = instance.metadata.get("id")
+        fewshot = [ex for ex in fewshot_candidates if ex.metadata.get("id") != instance_id][
+            : self.config.num_fewshot
+        ]
 
         parts: list[str] = []
         for ex in fewshot:
