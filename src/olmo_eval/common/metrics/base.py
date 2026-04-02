@@ -235,14 +235,22 @@ class PassAtKMetric(Metric):
             return 0.0
 
         scorer_name = self.scorer().name
+        score_key = f"score:{scorer_name}"
 
-        # Group by task ID
+        # Group per-output scores by task ID
         task_results: dict[str, list[float]] = {}
         for r in responses:
             task_id = r.instance.metadata.get("id", "unknown")
             if task_id not in task_results:
                 task_results[task_id] = []
-            task_results[task_id].append(r.scores.get(scorer_name, 0.0))
+            # Use per-output scores stored during scoring (one score per sample)
+            for output in r.outputs:
+                if output.metadata and score_key in output.metadata:
+                    task_results[task_id].append(output.metadata[score_key])
+                else:
+                    # Fallback: single-sample response, use response-level score
+                    task_results[task_id].append(r.scores.get(scorer_name, 0.0))
+                    break
 
         # Compute pass@k for each task
         pass_at_k_values = []
@@ -271,14 +279,22 @@ class PassPowKMetric(Metric):
             return 0.0
 
         scorer_name = self.scorer().name
+        score_key = f"score:{scorer_name}"
 
-        # Group by task ID
+        # Group per-output scores by task ID
         task_results: dict[str, list[float]] = {}
         for r in responses:
             task_id = r.instance.metadata.get("id", "unknown")
             if task_id not in task_results:
                 task_results[task_id] = []
-            task_results[task_id].append(r.scores.get(scorer_name, 0.0))
+            # Use per-output scores stored during scoring (one score per sample)
+            for output in r.outputs:
+                if output.metadata and score_key in output.metadata:
+                    task_results[task_id].append(output.metadata[score_key])
+                else:
+                    # Fallback: single-sample response, use response-level score
+                    task_results[task_id].append(r.scores.get(scorer_name, 0.0))
+                    break
 
         # Compute pass^k for each task
         pass_pow_k_values = []
