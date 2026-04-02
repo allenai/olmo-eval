@@ -229,6 +229,10 @@ class PassAtKMetric(Metric):
     k: int = 1
     scorer: type[Scorer] = field(kw_only=True)
 
+    def __post_init__(self) -> None:
+        # Use unique name per k value so metrics don't overwrite each other
+        object.__setattr__(self, "name", f"pass_at_{self.k}")
+
     def compute(self, responses: Sequence[Response]) -> float:
         """Compute pass@k across all tasks."""
         if not responses:
@@ -272,6 +276,10 @@ class PassPowKMetric(Metric):
     name: str = "pass_pow_k"
     k: int = 1
     scorer: type[Scorer] = field(kw_only=True)
+
+    def __post_init__(self) -> None:
+        # Use unique name per k value so metrics don't overwrite each other
+        object.__setattr__(self, "name", f"pass_pow_{self.k}")
 
     def compute(self, responses: Sequence[Response]) -> float:
         """Compute pass^k across all tasks."""
