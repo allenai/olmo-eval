@@ -163,10 +163,12 @@ class HuggingFaceProvider(InferenceProvider):
         results = []
         for request in requests:
             request_outputs = []
-            for continuation in request.continuations or ():
+            cont_prompts = request.continuation_prompts
+            for i, continuation in enumerate(request.continuations or ()):
+                prompt = cont_prompts[i] if cont_prompts else request.prompt
                 # Use shared utility for BOS handling and trailing space logic
                 context_enc, continuation_enc = encode_context_and_continuation(
-                    self.tokenizer, request.prompt, continuation
+                    self.tokenizer, prompt, continuation
                 )
 
                 # Build full sequence as tensor

@@ -294,9 +294,11 @@ class VLLMProvider(InferenceProvider):
 
         for request in requests:
             continuations = request.continuations or ()
-            for continuation in continuations:
+            cont_prompts = request.continuation_prompts
+            for i, continuation in enumerate(continuations):
+                prompt = cont_prompts[i] if cont_prompts else request.prompt
                 context_enc, continuation_enc = encode_context_and_continuation(
-                    tokenizer, request.prompt, continuation
+                    tokenizer, prompt, continuation
                 )
 
                 # Calculate overflow and left-truncate to max_length - 1
