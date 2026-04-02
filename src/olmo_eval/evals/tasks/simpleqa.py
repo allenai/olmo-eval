@@ -115,8 +115,6 @@ class SimpleQA(Task):
 # Variant Registrations
 # =============================================================================
 
-# Judge variant - uses LLM-as-judge scoring for factual accuracy
-# Auto-detects local "judge" provider if configured via auxiliary_providers
 register_variant(
     "simpleqa",
     "judge",
