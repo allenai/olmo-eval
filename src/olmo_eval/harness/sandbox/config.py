@@ -9,6 +9,27 @@ from typing import Any, Literal
 from olmo_eval.common.repr import hide_unset
 
 ContainerRuntime = Literal["docker", "podman"]
+ImagePullPolicy = Literal["never", "missing", "always"]
+RegistryProvider = Literal["gcp", "ecr", "docker"]
+
+
+@dataclass(frozen=True)
+class RegistryAuth:
+    """Authentication for private container registries.
+
+    For Modal deployments, credentials must be pre-stored as Modal Secrets.
+    For Docker deployments, uses local credential helpers (gcloud, aws ecr).
+
+    Attributes:
+        provider: Registry provider ("gcp", "ecr", "docker").
+        secret_name: Modal secret name containing credentials (Modal only).
+            - GCP: Must contain SERVICE_ACCOUNT_JSON
+            - ECR: Must contain AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+            - Docker: Must contain DOCKER_USERNAME, DOCKER_PASSWORD
+    """
+
+    provider: RegistryProvider
+    secret_name: str | None = None  # Required for Modal, ignored for Docker
 
 
 class SandboxMode(StrEnum):
@@ -44,6 +65,9 @@ class SandboxConfig:
         capabilities: Capabilities this sandbox provides (e.g., {"bash"}).
         instances: Number of executor instances to create from this config.
             Multiple instances enable higher throughput via round-robin.
+        min_instances: Minimum instances that must start successfully.
+            None (default) means all instances are required. Set to a lower
+            value to allow partial failures during startup.
         startup_timeout: Timeout for container startup in seconds.
         command_timeout: Default timeout for command execution in seconds.
         remove_container: Whether to remove container after use.
@@ -54,12 +78,18 @@ class SandboxConfig:
         runtime_timeout: Timeout for Modal runtime in seconds.
         required_secrets: Environment variable names that must be set.
         enable_diagnostics: Whether to run background diagnostics monitor.
+        inject_swerex: Whether to build a derived image with swe-rex pre-installed.
+        dockerfile_extra: Additional Dockerfile commands to inject when building derived images.
+        image_pull: Image pull policy for swerex ("never", "missing", "always").
+            Use "never" when inject_swerex=True to skip redundant image checks.
+        registry_auth: Authentication for private container registries (Modal only).
     """
 
     image: str
     mode: SandboxMode
     capabilities: frozenset[str] = Capability.DEFAULT
     instances: int = 1
+    min_instances: int | None = None
     container_runtime: ContainerRuntime = "podman"
     startup_timeout: float = 60.0
     command_timeout: float = 30.0
@@ -74,6 +104,10 @@ class SandboxConfig:
     log_dir: str | None = None
     exec_shell: tuple[str, ...] | None = None
     enable_diagnostics: bool = True
+    inject_swerex: bool = False
+    dockerfile_extra: tuple[str, ...] = ()
+    image_pull: ImagePullPolicy | None = None
+    registry_auth: RegistryAuth | None = None
 
     @property
     def is_local(self) -> bool:
@@ -87,6 +121,8 @@ class SandboxConfig:
         result = asdict(self)
         result["mode"] = self.mode.value
         result["capabilities"] = sorted(self.capabilities)
+        if self.registry_auth is not None:
+            result["registry_auth"] = asdict(self.registry_auth)
         return result
 
     @classmethod
@@ -97,11 +133,14 @@ class SandboxConfig:
         if "mode" not in data:
             raise ValueError("SandboxConfig requires 'mode' to be specified")
         capabilities = data.get("capabilities")
+        registry_auth_data = data.get("registry_auth")
+        registry_auth = RegistryAuth(**registry_auth_data) if registry_auth_data else None
         return cls(
             image=data["image"],
             mode=SandboxMode(data["mode"]),
             capabilities=frozenset(capabilities) if capabilities else Capability.DEFAULT,
             instances=data.get("instances", 1),
+            min_instances=data.get("min_instances"),
             container_runtime=data.get("container_runtime", "podman"),
             startup_timeout=data.get("startup_timeout", 60.0),
             command_timeout=data.get("command_timeout", 30.0),
@@ -116,4 +155,8 @@ class SandboxConfig:
             log_dir=data.get("log_dir"),
             exec_shell=tuple(data["exec_shell"]) if data.get("exec_shell") else None,
             enable_diagnostics=data.get("enable_diagnostics", True),
+            inject_swerex=data.get("inject_swerex", False),
+            dockerfile_extra=tuple(data.get("dockerfile_extra", [])),
+            image_pull=data.get("image_pull"),
+            registry_auth=registry_auth,
         )

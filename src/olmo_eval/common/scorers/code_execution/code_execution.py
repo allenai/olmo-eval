@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from olmo_eval.common.types import Instance, LMOutput
 
-from .execution import ExecutionScorer
+from ..execution import ExecutionScorer
 
 if TYPE_CHECKING:
     from olmo_eval.common.execution import ExecutionEnvironment

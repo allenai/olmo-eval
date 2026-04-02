@@ -154,6 +154,7 @@ class SamplingParams:
     stop_sequences: tuple[str, ...] | None = None
     num_samples: int = 1
     logprobs: int | None = None
+    do_sample: bool = True
 
 
 @dataclass(slots=True)

@@ -330,6 +330,7 @@ class VLLMServerProcess:
         tensor_parallel_size: int = 1,
         startup_timeout: float = DEFAULT_STARTUP_TIMEOUT,
         log_dir: str | None = None,
+        owner: str | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize the server manager.
@@ -340,13 +341,17 @@ class VLLMServerProcess:
             tensor_parallel_size: Number of GPUs for tensor parallelism
             startup_timeout: Maximum time to wait for server startup
             log_dir: Directory to write server logs to (if set, logs are persisted)
+            owner: Owner identifier for log messages (e.g., worker ID)
             **kwargs: Additional arguments passed to vLLM server
         """
+        from olmo_eval.common.logging import get_current_worker_id
+
         self.model_name = model_name
         self.port = port or _find_free_port()
         self.tensor_parallel_size = tensor_parallel_size
         self.startup_timeout = startup_timeout
         self.log_dir = log_dir
+        self.owner = owner or get_current_worker_id()
         self.server_kwargs = kwargs
         self._process: subprocess.Popen | None = None
         self._log_file: Any | None = None
@@ -356,6 +361,13 @@ class VLLMServerProcess:
     def base_url(self) -> str:
         """Get the base URL for the OpenAI-compatible API."""
         return f"http://127.0.0.1:{self.port}/v1"
+
+    def _log(self, level: int, msg: str) -> None:
+        """Log a message with optional owner prefix."""
+        if self.owner:
+            logger.log(level, f"[{self.owner}] {msg}")
+        else:
+            logger.log(level, msg)
 
     def start(self, progress_callback: ProgressCallback | None = None) -> str:
         """Start the vLLM server.
@@ -381,7 +393,7 @@ class VLLMServerProcess:
 
         import shlex
 
-        logger.info(f"Starting vLLM server: {shlex.join(cmd)}")
+        self._log(logging.INFO, f"Starting vLLM server: {shlex.join(cmd)}")
         if progress_callback:
             progress_callback(f"Starting vLLM server for {self.model_name}...")
 
@@ -396,7 +408,7 @@ class VLLMServerProcess:
         # Enable verbose vLLM logging when debugging
         if is_debug_provider():
             env["VLLM_LOGGING_LEVEL"] = "DEBUG"
-            logger.info("vLLM debug logging enabled (OLMO_EVAL_DEBUG_PROVIDER=1)")
+            self._log(logging.INFO, "vLLM debug logging enabled (OLMO_EVAL_DEBUG_PROVIDER=1)")
 
         # Determine output handling:
         # 1. If log_dir is set, write to file for persistence
@@ -457,7 +469,7 @@ class VLLMServerProcess:
 
             # Log the captured output for debugging
             if process_output:
-                logger.error(f"vLLM server output:\n{process_output}")
+                self._log(logging.ERROR, f"vLLM server output:\n{process_output}")
 
             # Build a detailed error message
             error_msg = (
@@ -485,7 +497,7 @@ class VLLMServerProcess:
         if self._process is None:
             return
 
-        logger.info("Stopping vLLM server...")
+        self._log(logging.INFO, "Stopping vLLM server...")
 
         try:
             # Try graceful shutdown first
@@ -518,7 +530,7 @@ class VLLMServerProcess:
                     self._log_file.close()
                 self._log_file = None
 
-        logger.info("vLLM server stopped")
+        self._log(logging.INFO, "vLLM server stopped")
 
     def __enter__(self) -> str:
         """Context manager entry - start server and return URL."""

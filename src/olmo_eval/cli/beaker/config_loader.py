@@ -55,10 +55,6 @@ class LaunchConfig:
     harness: str | None = None
     harness_overrides: list[str] = field(default_factory=list)
 
-    inject_aws_credentials: bool = False
-    inject_gcs_credentials: bool = False
-    inject_gcp_secret: bool = False
-
     uv_cache_dir: str | None = None
 
     # Secret env overrides: maps beaker_secret_name -> env_var_name
@@ -208,7 +204,6 @@ class LaunchConfigLoader:
             harness_overrides=self.cli_args.get("harness_overrides", []),
             uv_cache_dir=self.cli_args.get("uv_cache_dir"),
             secret_env_overrides=self.cli_args.get("secret_env_overrides", {}),
-            inject_gcp_secret=self.cli_args.get("gcp_secret") or False,
         )
 
     def _validate_required(

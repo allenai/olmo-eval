@@ -58,6 +58,10 @@ def build_predictions(scored: Sequence[Any]) -> list[dict]:
 
             out_data["num_chars"] = num_chars
 
+            # Include execution result if present
+            if "execution_result" in meta:
+                out_data["execution_result"] = meta["execution_result"]
+
             model_output.append(out_data)
 
         # Get label from metadata or gold_answer
