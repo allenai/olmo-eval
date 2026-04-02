@@ -621,10 +621,13 @@ class VLLMServerProvider(InferenceProvider):
         http_client = self._get_raw_http_client()
 
         outputs = []
-        for continuation in request.continuations or ():
+        cont_prompts = request.continuation_prompts
+        for i, continuation in enumerate(request.continuations or ()):
+            # Use per-continuation prompt when available (e.g. Trinh & Le partial eval)
+            ctx = cont_prompts[i] if cont_prompts else context
             # Use shared utility for proper tokenization (handles BOS, trailing spaces)
             context_enc, continuation_enc = encode_context_and_continuation(
-                tokenizer, context, continuation
+                tokenizer, ctx, continuation
             )
 
             # RemoteTokenizer doesn't have BOS/EOS token IDs, so for empty contexts
