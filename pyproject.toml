@@ -114,29 +114,23 @@ dev = [
     "google-api-core>=2.0.0",
 ]
 
-# ty file-based overrides for optional dependencies (inference providers use vllm/litellm)
-[[tool.ty.overrides]]
-include = ["src/olmo_eval/inference/**"]
-[tool.ty.overrides.rules]
-unresolved-import = "ignore"
-
-# ty overrides for sandbox module (uses optional swe-rex dependency)
-[[tool.ty.overrides]]
-include = ["src/olmo_eval/harness/sandbox/**"]
-[tool.ty.overrides.rules]
-unresolved-import = "ignore"
-
-# ty overrides for backends module (uses optional openhands/agents dependencies)
-[[tool.ty.overrides]]
-include = ["src/olmo_eval/harness/backends/**"]
-[tool.ty.overrides.rules]
-unresolved-import = "ignore"
-
-# ty overrides for adapters module (uses optional openhands/swe-rex dependencies)
-[[tool.ty.overrides]]
-include = ["src/olmo_eval/harness/adapters/**"]
-[tool.ty.overrides.rules]
-unresolved-import = "ignore"
+[tool.ty.rules]
+# Optional dependencies (torch, vllm, openai, smart_open, math_verify, etc.)
+# are imported conditionally via try/except across many modules.
+unresolved-import = "warn"
+# Deferred/conditional imports used as string annotations (e.g. BeakerLauncher).
+unresolved-reference = "warn"
+# Subprocess stdin/stdout are Optional[IO[str]] but guarded by runtime checks;
+# SQLAlchemy Result.rowcount; Callable __name__ attribute; dynamic __rich_repr__.
+unresolved-attribute = "warn"
+# OmegaConf.to_object() return type, asyncio coroutine narrowing, overloaded
+# decorators — all suppressed with existing # type: ignore[return-value] comments.
+invalid-return-type = "warn"
+# Complex generic patterns (dataclass fields(), Tool.from_function, etc.)
+# suppressed with existing # type: ignore[arg-type] comments.
+invalid-argument-type = "warn"
+# Type narrowing edge cases suppressed with # type: ignore[assignment] comments.
+invalid-assignment = "warn"
 
 [tool.ruff]
 line-length = 100
