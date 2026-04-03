@@ -139,14 +139,23 @@ class SWEBenchExternalEval(ExternalEval):
         model_name = provider.model_name
         is_local = self._is_local_provider(provider, provider_url)
 
+        # Set up real-time log files if output_dir is provided
+        logs_dir = work_dir / "logs" if output_dir else None
+        agent_log = logs_dir / "mini_swe_agent.log" if logs_dir else None
+        scoring_log = logs_dir / "swebench_scoring.log" if logs_dir else None
+
         try:
             # Phase 1: generate patches with mini-swe-agent
             gen_ok, gen_output = await self._run_agent(
-                provider_url, model_name, is_local, swe_args, work_dir, container_runtime
+                provider_url,
+                model_name,
+                is_local,
+                swe_args,
+                work_dir,
+                container_runtime,
+                log_file=agent_log,
             )
             logger.info(f"[{self.name}] Patch generation exit: {'ok' if gen_ok else 'failed'}")
-            if output_dir:
-                self._write_log_file(work_dir, "mini_swe_agent", gen_output)
 
             if not gen_ok or not preds_path.exists():
                 return self._error_result(
@@ -155,11 +164,14 @@ class SWEBenchExternalEval(ExternalEval):
 
             # Phase 2: score patches with the SWE-bench harness
             score_ok, score_output = await self._run_scoring(
-                swe_args, preds_path, run_id, work_dir, container_runtime
+                swe_args,
+                preds_path,
+                run_id,
+                work_dir,
+                container_runtime,
+                log_file=scoring_log,
             )
             logger.info(f"[{self.name}] Scoring exit: {'ok' if score_ok else 'failed'}")
-            if output_dir:
-                self._write_log_file(work_dir, "swebench_scoring", score_output)
 
             all_output = gen_output + "\n" + score_output
             result = self._parse_results(work_dir, run_id, score_ok, all_output, start_time)
@@ -186,6 +198,7 @@ class SWEBenchExternalEval(ExternalEval):
         swe_args: SWEBenchArgs,
         work_dir: Path,
         container_runtime: str,
+        log_file: Path | None = None,
     ) -> tuple[bool, str]:
         """Run mini-swe-agent to generate patches. Returns (success, output)."""
         # For local vLLM servers, use the hosted_vllm/ litellm prefix with api_base config.
@@ -231,7 +244,9 @@ class SWEBenchExternalEval(ExternalEval):
 
         logger.info(f"[{self.name}] Running mini-swe-agent: {shlex.join(cmd)}")
         # Reserve 20% of total timeout for the scoring phase
-        return await self._run_subprocess(cmd, timeout=self.timeout_seconds * 0.8, env=env)
+        return await self._run_subprocess(
+            cmd, timeout=self.timeout_seconds * 0.8, env=env, log_file=log_file
+        )
 
     async def _run_scoring(
         self,
@@ -240,6 +255,7 @@ class SWEBenchExternalEval(ExternalEval):
         run_id: str,
         work_dir: Path,
         container_runtime: str,
+        log_file: Path | None = None,
     ) -> tuple[bool, str]:
         """Run the SWE-bench evaluation harness to score patches."""
         dataset_hf = _DATASET_HF_PATHS.get(swe_args.dataset, swe_args.dataset)
@@ -267,7 +283,11 @@ class SWEBenchExternalEval(ExternalEval):
 
         logger.info(f"[{self.name}] Running SWE-bench harness: {shlex.join(cmd)}")
         ok, output = await self._run_subprocess(
-            cmd, timeout=self.timeout_seconds * 0.2, cwd=str(work_dir), env=env
+            cmd,
+            timeout=self.timeout_seconds * 0.2,
+            cwd=str(work_dir),
+            env=env,
+            log_file=log_file,
         )
         if not ok:
             logger.warning(f"[{self.name}] Scoring subprocess output:\n{output}")
@@ -279,8 +299,12 @@ class SWEBenchExternalEval(ExternalEval):
         timeout: float,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
+        log_file: Path | None = None,
     ) -> tuple[bool, str]:
-        """Run a subprocess and return (success, combined stdout+stderr)."""
+        """Run a subprocess and return (success, combined stdout+stderr).
+
+        If log_file is provided, output is streamed to the file in real-time.
+        """
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -288,23 +312,41 @@ class SWEBenchExternalEval(ExternalEval):
             cwd=cwd,
             env=env if env is not None else os.environ.copy(),
         )
+
+        output_chunks: list[str] = []
+        log_handle = None
+
+        if log_file:
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            log_handle = log_file.open("w")
+
         try:
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+
+            async def stream_output() -> None:
+                assert proc.stdout is not None
+                while True:
+                    chunk = await proc.stdout.read(4096)
+                    if not chunk:
+                        break
+                    decoded = chunk.decode(errors="replace")
+                    output_chunks.append(decoded)
+                    if log_handle:
+                        log_handle.write(decoded)
+                        log_handle.flush()
+
+            await asyncio.wait_for(stream_output(), timeout=timeout)
+            await proc.wait()
         except TimeoutError:
             proc.kill()
             await proc.communicate()
+            if log_handle:
+                log_handle.write(f"\n[Subprocess timed out after {timeout:.0f}s]\n")
             return False, f"[Subprocess timed out after {timeout:.0f}s]"
+        finally:
+            if log_handle:
+                log_handle.close()
 
-        output = stdout.decode(errors="replace")
-        return proc.returncode == 0, output
-
-    def _write_log_file(self, output_dir: Path, name: str, content: str) -> None:
-        """Write subprocess output to a log file."""
-        logs_dir = output_dir / "logs"
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        log_path = logs_dir / f"{name}.log"
-        log_path.write_text(content)
-        logger.info(f"[{self.name}] Log saved to {log_path}")
+        return proc.returncode == 0, "".join(output_chunks)
 
     def _parse_results(
         self,
