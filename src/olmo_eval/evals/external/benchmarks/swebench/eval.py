@@ -374,13 +374,14 @@ class SWEBenchExternalEval(ExternalEval):
         start_time: float,
     ) -> ExternalEvalResult:
         """Parse the SWE-bench harness results JSON into an ExternalEvalResult."""
-        # SWE-bench writes <run_id>.json to the working directory; some versions
-        # use an evaluation_results/ subdirectory instead.
-        candidates = [
-            work_dir / f"{run_id}.json",
-            work_dir / "evaluation_results" / f"{run_id}.json",
-        ]
-        results_file = next((p for p in candidates if p.exists()), None)
+        # SWE-bench writes results with pattern {model_name}.{run_id}.json where
+        # model slashes become double underscores. Search for any file ending
+        # in the run_id pattern.
+        pattern = f"*{run_id}.json"
+        matches = list(work_dir.glob(pattern))
+        # Also check evaluation_results/ subdirectory (older harness versions)
+        matches.extend(work_dir.glob(f"evaluation_results/{pattern}"))
+        results_file = matches[0] if matches else None
 
         if results_file is None:
             return ExternalEvalResult(
