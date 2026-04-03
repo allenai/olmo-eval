@@ -118,7 +118,7 @@ class InferenceManager:
 
                     # Start all servers in parallel
                     servers: list[VLLMServerProcess | None] = [None] * num_instances
-                    resolved_configs: list[ProviderConfig] = [None] * num_instances  # type: ignore[list-item]
+                    resolved_configs: list[ProviderConfig] = [None] * num_instances  # type: ignore[ty:invalid-assignment]
 
                     with ThreadPoolExecutor(max_workers=num_instances) as executor:
                         futures = {
