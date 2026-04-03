@@ -120,19 +120,9 @@ class _BasicSkillsBase(Task):
         parts.append(instance.question)
         prompt = "\n\n".join(parts)
 
-        if self._is_bpb():
-            gold_idx = instance.metadata.get("gold_idx", 0)
-            gold_text = (
-                instance.choices[gold_idx]
-                if instance.choices and 0 <= gold_idx < len(instance.choices)
-                else instance.gold_answer
-            )
-            return LMRequest(
-                request_type=RequestType.LOGLIKELIHOOD,
-                prompt=prompt,
-                continuations=(f" {gold_text}",),
-            )
-
+        # Always send all choices as continuations so that vLLM prefix-sharing
+        # produces identical logprobs for the gold choice regardless of whether
+        # we are computing BPB or RC accuracy.
         continuations = tuple(f" {c}" for c in (instance.choices or ()))
         return LMRequest(
             request_type=RequestType.LOGLIKELIHOOD,
