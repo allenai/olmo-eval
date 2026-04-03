@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter
-from olmo_eval.common.metrics import LogprobPerTokenMCAccuracyMetric
+from olmo_eval.common.metrics import BPBMetric, LogprobPerTokenMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -154,5 +154,7 @@ register_variant(
     limit=1000,
     fewshot_source="olmes_piqa_fixed",
 )
+
+register_variant("piqa", "bpb", metrics=(BPBMetric(),))
 
 register_variant("piqa", "full", limit=None)

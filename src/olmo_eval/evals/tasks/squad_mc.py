@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.formatters import MultipleChoiceFormatter
-from olmo_eval.common.metrics import LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric
+from olmo_eval.common.formatters import MultipleChoiceFormatter, PPLFormatter
+from olmo_eval.common.metrics import BPBMetric, LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -290,6 +290,29 @@ register_variant(
 
 register_variant(
     "squad:rc",
+    "olmo3base",
+    limit=10_000,
+    seed=1234,
+    fewshot_source="squad_mc_fixed",
+)
+
+
+@register("squad:bpb")
+class SquadBPB(_SquadMCBase):
+    data_source = DataSource(path="allenai/squad_mc", split="validation")
+    split = Split.VALIDATION
+    formatter = PPLFormatter()
+    metrics = (BPBMetric(),)
+    fewshot_source = "squad_mc_fixed"
+
+    def format_request(self, instance: Instance) -> LMRequest:
+        if self.config.formatter is not None:
+            return self.config.formatter.format(instance, self.get_fewshot())
+        return super().format_request(instance)
+
+
+register_variant(
+    "squad:bpb",
     "olmo3base",
     limit=10_000,
     seed=1234,

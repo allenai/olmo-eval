@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.formatters import MultipleChoiceFormatter
-from olmo_eval.common.metrics import LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric, LogprobUncondMCAccuracyMetric
+from olmo_eval.common.formatters import MultipleChoiceFormatter, PPLFormatter
+from olmo_eval.common.metrics import BPBMetric, LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric, LogprobUncondMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -248,9 +248,36 @@ class _ARCBase(Task):
             for m in self.config.metrics
         )
 
-    def format_request(self, instance: Instance) -> LMRequest:
+    def _is_bpb(self) -> bool:
+        return any(isinstance(m, BPBMetric) for m in self.config.metrics)
+
+    def _format_bpb_request(self, instance: Instance) -> LMRequest:
         fewshot = self.get_fewshot()
-        is_mc = self.config.formatter is not None
+        parts: list[str] = []
+        for ex in fewshot:
+            answer = ex.gold_answer or ex.metadata.get("gold_text", "")
+            parts.append(_format_rc(ex.question, answer))
+        parts.append(_format_rc(instance.question))
+        prompt = "\n\n".join(parts)
+
+        gold_idx = instance.metadata.get("gold_idx", 0)
+        gold_text = (
+            instance.choices[gold_idx]
+            if instance.choices and 0 <= gold_idx < len(instance.choices)
+            else instance.gold_answer
+        )
+        return LMRequest(
+            request_type=RequestType.LOGLIKELIHOOD,
+            prompt=prompt,
+            continuations=(f" {gold_text}",),
+        )
+
+    def format_request(self, instance: Instance) -> LMRequest:
+        if self._is_bpb():
+            return self._format_bpb_request(instance)
+
+        fewshot = self.get_fewshot()
+        is_mc = isinstance(self.config.formatter, MultipleChoiceFormatter)
 
         parts: list[str] = []
         for ex in fewshot:
@@ -315,12 +342,14 @@ class ARCChallenge(_ARCBase):
 
 register_variant("arc_easy", "rc")
 register_variant("arc_easy", "mc", formatter=MultipleChoiceFormatter())
+register_variant("arc_easy", "bpb", formatter=PPLFormatter(), metrics=(BPBMetric(),))
 register_variant("arc_easy", "olmo3base", num_fewshot=5, fewshot_source="olmes_arc_easy_fixed", split=Split.TEST, metrics=(LogprobPerCharMCAccuracyMetric(),))
 register_variant("arc_easy", "olmes", num_fewshot=5, fewshot_source="olmes_arc_easy_fixed")
 register_variant("arc_easy", "full")
 
 register_variant("arc_challenge", "rc")
 register_variant("arc_challenge", "mc", formatter=MultipleChoiceFormatter())
+register_variant("arc_challenge", "bpb", formatter=PPLFormatter(), metrics=(BPBMetric(),))
 register_variant(
     "arc_challenge", "olmo3base", num_fewshot=5, fewshot_source="olmes_arc_challenge_fixed", split=Split.TEST, metrics=(LogprobUncondMCAccuracyMetric(),)
 )

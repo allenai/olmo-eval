@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceLogprobFormatter
-from olmo_eval.common.metrics import LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric
+from olmo_eval.common.metrics import BPBMetric, LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -323,4 +323,10 @@ for _subject in MMLU_SUBJECTS:
     )
     register(f"mmlu_{_subject}:rc")(_rc_cls)
     register_variant(f"mmlu_{_subject}:rc", "olmo3base")
+    register_variant(
+        f"mmlu_{_subject}:rc",
+        "bpb",
+        metrics=(BPBMetric(),),
+        primary_metric=BPBMetric(),
+    )
     globals()[f"MMLU_RC_{_subject}"] = _rc_cls

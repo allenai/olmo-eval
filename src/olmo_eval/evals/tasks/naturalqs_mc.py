@@ -3,7 +3,8 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.metrics import LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric
+from olmo_eval.common.formatters import PPLFormatter
+from olmo_eval.common.metrics import BPBMetric, LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -239,6 +240,89 @@ register_variant(
 
 register_variant(
     "naturalqs:rc",
+    "olmo3base",
+    limit=10_000,
+    seed=1234,
+    fewshot_source="nq_mc_fixed",
+)
+
+
+@register("naturalqs:bpb")
+class NaturalQsBPB(_NaturalQsMCBase):
+    data_source = DataSource(path="allenai/nq-gen2mc", split="validation")
+    split = Split.VALIDATION
+    formatter = PPLFormatter()
+    metrics = (BPBMetric(),)
+    primary_metric = BPBMetric()
+    num_fewshot = 5
+    fewshot_source = "nq_mc_fixed"
+
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
+        question = doc.get("question", "")
+        choices_data = doc.get("choices", {})
+        choices = choices_data.get("text", [])
+        answer_key = doc.get("answerKey", "")
+
+        if not question or not choices:
+            return None
+
+        gold_idx = ord(answer_key) - ord("A") if answer_key else 0
+        gold_text = choices[gold_idx] if 0 <= gold_idx < len(choices) else ""
+
+        formatted_question = f"Question: {question}\nAnswer:"
+
+        return Instance(
+            question=formatted_question,
+            choices=tuple(choices),
+            gold_answer=" " + gold_text,
+            metadata={
+                "id": doc.get("id", f"nq_bpb_{index}"),
+                "index": index,
+                "gold_idx": gold_idx,
+                "gold_text": gold_text,
+            },
+        )
+
+    def _build_fewshot(self) -> list[Instance]:
+        if self.config.fewshot_source == "nq_mc_fixed":
+            return self._build_bpb_fixed_fewshot()
+        return super()._build_fewshot()
+
+    def _build_bpb_fixed_fewshot(self) -> list[Instance]:
+        instances = []
+        for doc in NQ_MC_FIXED_FEWSHOT:
+            question = doc["question"]
+            choices = tuple(doc["choices"]["text"])
+            answer_key = doc["answerKey"]
+            gold_idx = ord(answer_key) - ord("A")
+            gold_text = choices[gold_idx] if 0 <= gold_idx < len(choices) else ""
+
+            formatted_question = f"Question: {question}\nAnswer:"
+
+            instances.append(
+                Instance(
+                    question=formatted_question,
+                    choices=choices,
+                    gold_answer=" " + gold_text,
+                    metadata={
+                        "gold_idx": gold_idx,
+                        "gold_text": gold_text,
+                    },
+                )
+            )
+
+        num = self.config.num_fewshot
+        if num and num < len(instances):
+            instances = instances[:num]
+        return instances
+
+    def format_request(self, instance: Instance) -> LMRequest:
+        assert self.config.formatter is not None
+        return self.config.formatter.format(instance, self.get_fewshot())
+
+
+register_variant(
+    "naturalqs:bpb",
     "olmo3base",
     limit=10_000,
     seed=1234,

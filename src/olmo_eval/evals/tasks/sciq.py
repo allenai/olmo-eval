@@ -4,8 +4,8 @@ import random
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.formatters import MultipleChoiceFormatter
-from olmo_eval.common.metrics import LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric
+from olmo_eval.common.formatters import MultipleChoiceFormatter, PPLFormatter
+from olmo_eval.common.metrics import BPBMetric, LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -152,5 +152,25 @@ register_variant(
     num_fewshot=5,
     split=Split.VALIDATION,
     metrics=(LogprobPerCharMCAccuracyMetric(),),
+    fewshot_seed=1234,
+)
+
+
+@register("sciq:bpb")
+class SciQBPB(SciQ):
+    formatter = PPLFormatter()
+    metrics = (BPBMetric(),)
+
+    def format_request(self, instance: Instance) -> LMRequest:
+        if self.config.formatter is not None:
+            return self.config.formatter.format(instance, self.get_fewshot())
+        return super().format_request(instance)
+
+
+register_variant(
+    "sciq:bpb",
+    "olmo3base",
+    num_fewshot=5,
+    split=Split.VALIDATION,
     fewshot_seed=1234,
 )

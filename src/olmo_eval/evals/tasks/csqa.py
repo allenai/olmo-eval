@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter
-from olmo_eval.common.metrics import LogprobMCAccuracyMetric, LogprobUncondMCAccuracyMetric
+from olmo_eval.common.metrics import BPBMetric, LogprobMCAccuracyMetric, LogprobUncondMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -215,5 +215,6 @@ register_variant(
     limit=10000,
     fewshot_source="olmes_csqa_fixed",
 )
+register_variant("csqa", "bpb", metrics=(BPBMetric(),), primary_metric=BPBMetric())
 register_variant("csqa", "olmes", num_fewshot=5, fewshot_source="olmes_csqa_fixed", metrics=(LogprobUncondMCAccuracyMetric(),))
 register_variant("csqa", "full")

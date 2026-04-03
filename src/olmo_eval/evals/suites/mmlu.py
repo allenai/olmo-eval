@@ -1,5 +1,5 @@
 from olmo_eval.evals.suites.registry import AggregationStrategy, Suite, make_suite, register
-from olmo_eval.evals.tasks.mmlu import _HUMANITIES, _OTHER, _SOCIAL_SCIENCES, _STEM
+from olmo_eval.evals.tasks.mmlu import MMLU_SUBJECTS, _HUMANITIES, _OTHER, _SOCIAL_SCIENCES, _STEM
 
 
 def _task_names(subjects: tuple[str, ...]) -> tuple[str, ...]:
@@ -83,4 +83,9 @@ MMLU_RC = register(
         ),
         aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
     )
+)
+
+MMLU_BPB = make_suite(
+    "mmlu:bpb",
+    tuple(f"mmlu_{s}:rc:bpb" for s in MMLU_SUBJECTS),
 )

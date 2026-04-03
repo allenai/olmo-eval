@@ -157,6 +157,40 @@ class MBPPPlus(MBPPPlusBase):
     )
 
 
+@register("mbpp:bpb")
+class MBPPBPB(MBPPBase):
+    data_source = DataSource(path="google-research-datasets/mbpp")
+    formatter = PPLFormatter(leading_space=False)
+    metrics = (BPBMetric(),)
+
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
+        question = doc["text"].strip() + "\n```python\n"
+        gold_answer = doc["code"].rstrip("\n").rstrip().replace("\r", "") + "\n```"
+
+        tests = doc.get("test_setup_code", "") or ""
+        if tests:
+            tests += "\n"
+        tests += "\n".join(doc["test_list"])
+
+        return Instance(
+            question=question,
+            gold_answer=gold_answer,
+            metadata={
+                "id": doc["task_id"],
+                "test": tests,
+            },
+        )
+
+
+register_variant(
+    "mbpp:bpb",
+    "olmo3base",
+    num_fewshot=3,
+    limit=500,
+    fewshot_seed=1234,
+)
+
+
 # =============================================================================
 # Variant Registrations
 # =============================================================================

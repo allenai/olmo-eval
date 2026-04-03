@@ -144,6 +144,7 @@ _VARIANTS: dict = {
         "metrics": (BPBMetric(),),
     },
     "3shot": {"num_fewshot": 3},
+    "olmo3base": {"num_fewshot": 3, "fewshot_seed": 1234},
 }
 
 for _base, _prefix in [

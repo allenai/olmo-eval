@@ -254,6 +254,12 @@ for _subset in MATH_SUBSETS:
         _task_name,
         "olmo3base",
         fewshot_source="minerva_math_fixed",
+    )
+
+    register_variant(
+        _task_name,
+        "olmo3base_gen",
+        fewshot_source="minerva_math_fixed",
         formatter=_MinervaCompletionFormatter(
             template="Problem:\n{question}\n\nSolution:",
             answer_prefix=" ",
@@ -283,6 +289,12 @@ for _subset in MATH_SUBSETS:
         primary_metric=BPBMetric(),
     )
 
+    register_variant(
+        _task_name,
+        "olmes",
+        fewshot_source="minerva_math_fixed",
+    )
+
 register_variant(
     "math500",
     "bpb",
@@ -290,3 +302,55 @@ register_variant(
     metrics=(BPBMetric(),),
     primary_metric=BPBMetric(),
 )
+
+
+class MinervaMathBPBTask(MinervaMathTask):
+    formatter = PPLFormatter()
+    metrics = (BPBMetric(),)
+    primary_metric = BPBMetric()
+
+    def format_request(self, instance: Instance) -> LMRequest:
+        fewshot = self.get_fewshot()
+        parts: list[str] = []
+        for ex in fewshot:
+            text = f"Problem:\n{ex.question}\n\nSolution:"
+            solution = ex.metadata.get("solution_text", ex.gold_answer or "")
+            if solution:
+                text += " " + str(solution)
+            parts.append(text)
+        parts.append(f"Problem:\n{instance.question}\n\nSolution:")
+        prompt = "\n\n".join(parts)
+
+        gold_text = instance.metadata.get("solution_text") or instance.gold_answer
+        if gold_text is None:
+            raise ValueError("BPB task requires a gold answer")
+        if not gold_text.startswith(("\n", " ")):
+            gold_text = " " + gold_text
+
+        return LMRequest(
+            request_type=RequestType.LOGLIKELIHOOD,
+            prompt=prompt,
+            continuations=(gold_text,),
+        )
+
+
+for _bpb_subset in MATH_SUBSETS:
+    _bpb_task_name = f"minerva_math_{_bpb_subset}:bpb"
+    _bpb_class_name = f"MinervaMathBPB_{_bpb_subset.title().replace('_', '')}"
+
+    _bpb_cls = type(
+        _bpb_class_name,
+        (MinervaMathBPBTask,),
+        {
+            "__module__": __name__,
+            "__qualname__": _bpb_class_name,
+            "data_source": DataSource(
+                path="EleutherAI/hendrycks_math",
+                subset=_bpb_subset,
+            ),
+        },
+    )
+    globals()[_bpb_class_name] = _bpb_cls
+    register(_bpb_task_name)(_bpb_cls)
+
+    register_variant(_bpb_task_name, "olmo3base", fewshot_source="minerva_math_fixed")
