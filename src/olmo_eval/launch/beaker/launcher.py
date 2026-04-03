@@ -717,10 +717,14 @@ class BeakerLauncher:
                 f"/opt/venv/lib/python*/site-packages/nvidia*; do "
                 f'ln -sf "$pkg" {vllm_venv}/lib/python*/site-packages/; done'
             )
-            # Install vLLM from package extras (torch already available via symlink)
+            # Extract all vllm deps from pyproject.toml and install directly
+            # (installing via .[vllm] extra causes uv to re-resolve torch, ignoring symlinks)
             steps.append(
-                f"cd /gantry-runtime && VIRTUAL_ENV={vllm_venv} uv pip install "
-                f"--cache-dir \"$UV_CACHE_DIR\" -e '.[vllm]' -c {constraints}"
+                f'VLLM_DEPS=$(python -c "import tomllib; '
+                f"print(' '.join(tomllib.load(open('/gantry-runtime/pyproject.toml','rb'))"
+                f"['project']['optional-dependencies']['vllm']))\") && "
+                f"VIRTUAL_ENV={vllm_venv} uv pip install "
+                f'--cache-dir "$UV_CACHE_DIR" $VLLM_DEPS -c {constraints}'
             )
             # Set VLLM_PYTHON so VLLMServerProcess uses the isolated venv
             steps.append(f"export VLLM_PYTHON={vllm_venv}/bin/python")
