@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.formatters import MultipleChoiceFormatter, PPLFormatter
+from olmo_eval.common.formatters import MultipleChoiceFormatter
 from olmo_eval.common.metrics import BPBMetric, LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
@@ -301,14 +301,35 @@ register_variant(
 class SquadBPB(_SquadMCBase):
     data_source = DataSource(path="allenai/squad_mc", split="validation")
     split = Split.VALIDATION
-    formatter = PPLFormatter()
     metrics = (BPBMetric(),)
     fewshot_source = "squad_mc_fixed"
 
     def format_request(self, instance: Instance) -> LMRequest:
-        if self.config.formatter is not None:
-            return self.config.formatter.format(instance, self.get_fewshot())
-        return super().format_request(instance)
+        fewshot = self.get_fewshot()
+
+        # Use RC-style formatting to match oe-eval-internal's SquadRC BPB computation.
+        # Fewshot examples: "Title: ...\nQuestion: ...\nAnswer: <gold_text>"
+        # Test prompt: "Title: ...\nQuestion: ...\nAnswer:"
+        # Continuation: only the gold answer text (for BPB).
+        parts: list[str] = []
+        for ex in fewshot:
+            answer = ex.gold_answer or ex.metadata.get("gold_text", "")
+            parts.append(_format_rc(ex.question, answer))
+
+        parts.append(_format_rc(instance.question))
+
+        gold_idx = instance.metadata.get("gold_idx", 0)
+        if instance.choices and 0 <= gold_idx < len(instance.choices):
+            gold_text = instance.choices[gold_idx]
+        else:
+            gold_text = instance.gold_answer or ""
+
+        prompt = "\n\n".join(parts)
+        return LMRequest(
+            request_type=RequestType.LOGLIKELIHOOD,
+            prompt=prompt,
+            continuations=(f" {gold_text}",),
+        )
 
 
 register_variant(
