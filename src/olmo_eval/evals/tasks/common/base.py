@@ -440,12 +440,10 @@ class Task(ABC):
         for response in responses:
             for scorer in scorers_by_name.values():
                 scores = [scorer.score(response.instance, o) for o in response.outputs]
-                # Store individual scores in output metadata for pass@k expansion
                 for i, output in enumerate(response.outputs):
                     if output.metadata is None:
                         output.metadata = {}
                     output.metadata[f"score:{scorer.name}"] = scores[i] if i < len(scores) else 0.0
-                # Response-level score is max for backward compatibility
                 response.scores[scorer.name] = max(scores) if scores else 0.0
 
     async def _apply_scorers_async(
