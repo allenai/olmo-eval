@@ -123,11 +123,8 @@ class RecallMetric(Metric):
 class BPBMetric(Metric):
     """Aggregate bits-per-byte of the gold/correct completion.
 
-    Computes BPB by summing total logprobs and total bytes across all responses,
-    then computing: -total_logprobs / (total_bytes * log(2))
-
-    This byte-weighted approach means longer texts contribute proportionally more
-    to the final metric, matching the standard aggregate BPB calculation.
+    Computes per-instance BPB as: -logprob / (num_bytes * log(2)),
+    then returns the simple (unweighted) mean across all instances.
 
     For tasks with multiple continuations (e.g., multiple choice), this uses
     the correct continuation via `instance.metadata["gold_idx"]`.
@@ -141,8 +138,7 @@ class BPBMetric(Metric):
             return 0.0
 
         scorer = self.scorer()
-        weighted_sum = 0.0
-        total_bytes = 0
+        bpb_values: list[float] = []
 
         for response in responses:
             outputs = response.outputs
@@ -168,13 +164,12 @@ class BPBMetric(Metric):
 
             # Use scorer for BPB calculation
             bpb = scorer.score(response.instance, output)
-            weighted_sum += bpb * num_bytes
-            total_bytes += num_bytes
+            bpb_values.append(bpb)
 
-        if total_bytes == 0:
+        if not bpb_values:
             return 0.0
 
-        return weighted_sum / total_bytes
+        return sum(bpb_values) / len(bpb_values)
 
 
 @dataclass(frozen=True, slots=True)
