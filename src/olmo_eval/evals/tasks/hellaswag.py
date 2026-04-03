@@ -313,7 +313,6 @@ register_variant(
     "hellaswag",
     "olmo3base",
     num_fewshot=5,
-    limit=10_000,
     fewshot_source="olmes_hellaswag_fixed",
     metrics=(LogprobPerCharMCAccuracyMetric(),),
 )
