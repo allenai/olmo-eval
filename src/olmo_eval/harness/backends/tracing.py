@@ -8,8 +8,8 @@ import os
 from functools import lru_cache
 from typing import Any
 
-from agents import set_trace_processors
-from agents.tracing.processors import BatchTraceProcessor
+from agents import set_trace_processors  # type: ignore[ty:unresolved-import]
+from agents.tracing.processors import BatchTraceProcessor  # type: ignore[ty:unresolved-import]
 
 logger = logging.getLogger(__name__)
 

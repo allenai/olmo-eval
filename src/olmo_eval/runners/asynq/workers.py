@@ -202,8 +202,8 @@ def inference_worker(
                 model_name=model_name,
                 task_id=WORKER_FATAL,
                 instance_idx=-1,
-                instance=None,  # type: ignore[arg-type]
-                request=None,  # type: ignore[arg-type]
+                instance=None,  # type: ignore[ty:invalid-argument-type]
+                request=None,  # type: ignore[ty:invalid-argument-type]
                 outputs=[],
                 error=f"Worker process crashed: {e}",
             )

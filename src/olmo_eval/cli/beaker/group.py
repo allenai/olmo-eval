@@ -1,14 +1,19 @@
 """Beaker group management commands."""
 
 from datetime import UTC
+from typing import TYPE_CHECKING
 
 import click
 from rich.table import Table
 
 from olmo_eval.cli.utils import console
+from olmo_eval.launch import BeakerLauncher
+
+if TYPE_CHECKING:
+    from beaker import BeakerGroup
 
 
-def _get_launcher() -> "BeakerLauncher":  # type: ignore[name-defined]  # noqa: F821
+def _get_launcher() -> BeakerLauncher:
     """Get BeakerLauncher instance, handling import errors."""
     try:
         from olmo_eval.launch import BeakerLauncher
@@ -21,7 +26,7 @@ def _get_launcher() -> "BeakerLauncher":  # type: ignore[name-defined]  # noqa: 
     return BeakerLauncher()
 
 
-def _get_beaker_group(launcher: "BeakerLauncher", group_name: str) -> "BeakerGroup":  # type: ignore[name-defined]  # noqa: F821
+def _get_beaker_group(launcher: BeakerLauncher, group_name: str) -> BeakerGroup:
     """Get a Beaker group by name, handling errors."""
     try:
         from beaker.exceptions import BeakerGroupNotFound

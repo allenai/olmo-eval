@@ -35,7 +35,7 @@ def _ensure_nvml() -> bool:
     _nvml_initialized = True
 
     try:
-        import pynvml
+        import pynvml  # type: ignore[ty:unresolved-import]
 
         pynvml.nvmlInit()
         _nvml_available = True
@@ -129,7 +129,7 @@ def collect_gpu_snapshots() -> tuple[GPUSnapshot, ...]:
         return ()
 
     try:
-        import pynvml
+        import pynvml  # type: ignore[ty:unresolved-import]
 
         device_count = pynvml.nvmlDeviceGetCount()
         if device_count == 0:
@@ -168,7 +168,7 @@ def _collect_device_snapshot(
     Returns:
         GPUSnapshot with device metrics.
     """
-    import pynvml
+    import pynvml  # type: ignore[ty:unresolved-import]
 
     # Get device name
     name = pynvml.nvmlDeviceGetName(handle)
@@ -244,7 +244,7 @@ def is_gpu_available() -> bool:
         return False
 
     try:
-        import pynvml
+        import pynvml  # type: ignore[ty:unresolved-import]
 
         return pynvml.nvmlDeviceGetCount() > 0
     except Exception:
@@ -261,7 +261,7 @@ def get_gpu_count() -> int:
         return 0
 
     try:
-        import pynvml
+        import pynvml  # type: ignore[ty:unresolved-import]
 
         return pynvml.nvmlDeviceGetCount()
     except Exception:

@@ -138,7 +138,7 @@ class SandboxExecutor:
         if self.config.mode == SandboxMode.MODAL:
             from unittest.mock import patch
 
-            import modal
+            import modal  # type: ignore[ty:unresolved-import]
 
             app_name = self._modal_app_name or _get_modal_app_name()
             if not self._modal_app_name:
@@ -186,7 +186,9 @@ class SandboxExecutor:
         match self.config.mode:
             case SandboxMode.DOCKER:
                 try:
-                    from swerex.deployment.docker import DockerDeployment
+                    from swerex.deployment.docker import (  # type: ignore[ty:unresolved-import]
+                        DockerDeployment,
+                    )
                 except ImportError as e:
                     raise ImportError(
                         "swe-rex not installed. Install with: pip install swe-rex"
@@ -253,7 +255,9 @@ class SandboxExecutor:
 
             case SandboxMode.LOCAL:
                 try:
-                    from swerex.deployment.local import LocalDeployment
+                    from swerex.deployment.local import (  # type: ignore[ty:unresolved-import]
+                        LocalDeployment,
+                    )
                 except ImportError as e:
                     raise ImportError(
                         "swe-rex not installed. Install with: pip install swe-rex"
@@ -267,14 +271,16 @@ class SandboxExecutor:
 
             case SandboxMode.MODAL:
                 try:
-                    from swerex.deployment.modal import ModalDeployment
+                    from swerex.deployment.modal import (  # type: ignore[ty:unresolved-import]
+                        ModalDeployment,
+                    )
                 except ImportError as e:
                     raise ImportError(
                         "swe-rex modal support not installed. "
                         "Install with: pip install 'swe-rex[modal]'"
                     ) from e
 
-                import modal
+                import modal  # type: ignore[ty:unresolved-import]
 
                 # Build image locally and push to registry (same as Docker/Podman mode)
                 # Modal will pull the pre-built image from the registry
@@ -338,7 +344,9 @@ class SandboxExecutor:
         # Close session before stopping deployment
         if self._session_created and self._runtime is not None:
             try:
-                from swerex.runtime.abstract import CloseBashSessionRequest
+                from swerex.runtime.abstract import (  # type: ignore[ty:unresolved-import]
+                    CloseBashSessionRequest,
+                )
 
                 await self._runtime.close_session(CloseBashSessionRequest(session="default"))
             except Exception as e:
@@ -398,7 +406,7 @@ class SandboxExecutor:
         if self._runtime is None:
             raise RuntimeError("Sandbox not started. Call start() first or use async context.")
 
-        from swerex.runtime.abstract import Command
+        from swerex.runtime.abstract import Command  # type: ignore[ty:unresolved-import]
 
         effective_timeout = timeout if timeout is not None else self.config.command_timeout
         prefix = log_prefix or self.name or "sandbox"
@@ -444,7 +452,7 @@ class SandboxExecutor:
 
         Uses background execution to avoid swerex HTTP timeout issues.
         """
-        from swerex.runtime.abstract import Command
+        from swerex.runtime.abstract import Command  # type: ignore[ty:unresolved-import]
 
         # Use unique temp paths to avoid conflicts with concurrent executions
         cmd_id = uuid.uuid4().hex[:12]
@@ -711,7 +719,7 @@ class SandboxExecutor:
             )
 
         try:
-            from swerex.runtime.abstract import Command
+            from swerex.runtime.abstract import Command  # type: ignore[ty:unresolved-import]
 
             effective_timeout = timeout if timeout is not None else self.config.command_timeout
 
@@ -750,7 +758,9 @@ class SandboxExecutor:
             if self._session_created:
                 return
 
-            from swerex.runtime.abstract import CreateBashSessionRequest
+            from swerex.runtime.abstract import (  # type: ignore[ty:unresolved-import]
+                CreateBashSessionRequest,
+            )
 
             await self._runtime.create_session(CreateBashSessionRequest(session="default"))
             self._session_created = True
@@ -784,7 +794,7 @@ class SandboxExecutor:
 
         await self._ensure_session()
 
-        from swerex.runtime.abstract import BashAction
+        from swerex.runtime.abstract import BashAction  # type: ignore[ty:unresolved-import]
 
         effective_timeout = timeout if timeout is not None else self.config.command_timeout
         prefix = log_prefix or self.name or "sandbox"

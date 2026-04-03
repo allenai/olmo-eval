@@ -13,7 +13,7 @@ from olmo_eval.inference.retry import retry_with_backoff
 from olmo_eval.inference.utils import run_async
 
 if TYPE_CHECKING:
-    from openai import AsyncOpenAI
+    from openai import AsyncOpenAI  # type: ignore[ty:unresolved-import]
 
 # Maximum stop sequences supported by OpenAI-compatible APIs
 _MAX_STOP_SEQUENCES = 4
@@ -58,7 +58,7 @@ class LiteLLMProvider(InferenceProvider):
             **api_kwargs: Additional arguments passed to litellm.completion.
         """
         try:
-            import litellm
+            import litellm  # type: ignore[ty:unresolved-import]
         except ImportError as e:
             raise ImportError(
                 "litellm is required for LiteLLMProvider. Install with: uv pip install litellm"
@@ -100,7 +100,7 @@ class LiteLLMProvider(InferenceProvider):
             return None
 
         if self._client is None:
-            from openai import AsyncOpenAI
+            from openai import AsyncOpenAI  # type: ignore[ty:unresolved-import]
 
             self._client = AsyncOpenAI(
                 base_url=self.base_url,

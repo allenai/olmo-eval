@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from olmo_eval.common.types import LMOutput, LMRequest, SamplingParams
 
 if TYPE_CHECKING:
-    from openai import AsyncOpenAI
+    from openai import AsyncOpenAI  # type: ignore[ty:unresolved-import]
 
 
 class InferenceProvider(ABC):

@@ -100,4 +100,4 @@ def apply_braille_or_patch() -> None:
                 final_style = OVERLAP_STYLE if is_overlap else style
                 self.set_pixel(cell_x, cell_y, char=char, style=final_style)
 
-    Canvas.set_hires_pixels = set_hires_pixels_with_or  # type: ignore[method-assign]
+    Canvas.set_hires_pixels = set_hires_pixels_with_or  # type: ignore[ty:invalid-assignment]

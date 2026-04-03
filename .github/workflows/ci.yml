@@ -81,10 +81,10 @@ jobs:
             uv-${{ runner.os }}-
 
       - name: Install dependencies
-        run: uv sync --dev --extra beaker --extra hf
+        run: uv sync --dev --extra beaker --extra hf --extra postgres
 
       - name: Run type checker
-        run: uv run ty check src/
+        run: uv run ty check src/ alembic/
 
   # ============================================================================
   # Unit Tests

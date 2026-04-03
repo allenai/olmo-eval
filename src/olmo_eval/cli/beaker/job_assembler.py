@@ -517,7 +517,7 @@ class JobConfigAssembler:
             provider_packages.append(harness_provider_package)
         provider_packages.extend(get_provider_dependencies(exp.model_spec))
         provider_packages.extend(harness_provider_deps)
-        provider_packages = provider_packages or None  # type: ignore[assignment]
+        provider_packages = provider_packages or None  # type: ignore[ty:invalid-assignment]
 
         return BeakerJobConfig(
             name=exp.name,
