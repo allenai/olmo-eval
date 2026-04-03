@@ -676,6 +676,23 @@ class VLLMServerProvider(InferenceProvider):
 
                 # JSON serializes integer dict keys as strings
                 token_id_str = str(token_id)
+
+                # Check is_greedy BEFORE the lp_obj gate so we catch non-greedy tokens
+                # even when they aren't in the top-k returned by prompt_logprobs.
+                # Keys are string-serialized integers (e.g., "128000"), not decoded tokens,
+                # so no collision between different token IDs.
+                if is_greedy:
+                    max_tid = max(
+                        token_probs.keys(),
+                        key=lambda tid: (
+                            token_probs[tid]["logprob"]
+                            if isinstance(token_probs[tid], dict)
+                            else token_probs[tid]
+                        ),
+                    )
+                    if max_tid != token_id_str:
+                        is_greedy = False
+
                 lp_obj = token_probs.get(token_id_str)
                 if lp_obj is None:
                     continue
@@ -696,21 +713,6 @@ class VLLMServerProvider(InferenceProvider):
                     }
                 )
                 total += logprob_val
-
-                # Check is_greedy using integer token IDs (matching inline vLLM exactly).
-                # Keys are string-serialized integers (e.g., "128000"), not decoded tokens,
-                # so no collision between different token IDs.
-                if is_greedy:
-                    max_tid = max(
-                        token_probs.keys(),
-                        key=lambda tid: (
-                            token_probs[tid]["logprob"]
-                            if isinstance(token_probs[tid], dict)
-                            else token_probs[tid]
-                        ),
-                    )
-                    if max_tid != token_id_str:
-                        is_greedy = False
 
             num_tokens = len(logprob_entries)
             outputs.append(
