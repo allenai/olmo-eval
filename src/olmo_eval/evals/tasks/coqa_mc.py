@@ -124,7 +124,7 @@ register_variant("coqa:rc", "olmo3base")
 
 
 @register("coqa:bpb")
-class CoqaBPB(CoqaMC):
+class CoqaBPB(CoqaRC):
     formatter = PPLFormatter()
     metrics = (BPBMetric(),)
 
