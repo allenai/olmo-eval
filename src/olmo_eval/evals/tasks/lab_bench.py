@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from olmo_eval.common.formatters import MCQAChatFormatter, MultipleChoiceFormatter, PPLFormatter
-from olmo_eval.common.metrics import AccuracyMetric, BPBMetric, LogprobMCAccuracyMetric, Metric
+from olmo_eval.common.metrics import AccuracyMetric, BPBMetric, LogprobPerCharMCAccuracyMetric, Metric
 from olmo_eval.common.scorers import MultipleChoiceScorer, Scorer
 from olmo_eval.common.types import (
     Instance,
@@ -119,7 +119,8 @@ class LabBenchTask(Task):
             "olmo3base",
             formatter=None,
             num_fewshot=3,
-            metrics=(LogprobMCAccuracyMetric(),),
+            fewshot_seed=1234,
+            metrics=(LogprobPerCharMCAccuracyMetric(),),
         )
 
     @property
@@ -143,19 +144,29 @@ class LabBenchTask(Task):
         if not question or not ideal:
             return None
 
-        # Build choices: ideal + distractors (deduplicate in case ideal appears in distractors)
-        choices = [ideal] + [d for d in distractors if d != ideal]
+        rc_mode = self.config.formatter is None
 
-        # Inject refuse option per the LAB-Bench evaluation protocol
-        choices.append(_REFUSE_CHOICE)
+        if rc_mode:
+            # RC mode (olmo3base): match old oe-eval-internal behavior exactly.
+            # No refuse option, no shuffling, distractors + [ideal] order.
+            choices = list(distractors) + [ideal]
+            gold_idx = len(distractors)
+            refuse_idx = -1
+        else:
+            # Build choices: ideal + distractors (deduplicate in case ideal appears in distractors)
+            choices = [ideal] + [d for d in distractors if d != ideal]
 
-        # Deterministic per-question shuffle
-        rng = random.Random(f"{self.config.seed}:{index}")
-        rng.shuffle(choices)
+            # Inject refuse option per the LAB-Bench evaluation protocol
+            choices.append(_REFUSE_CHOICE)
 
-        gold_idx = choices.index(ideal)
+            # Deterministic per-question shuffle
+            rng = random.Random(f"{self.config.seed}:{index}")
+            rng.shuffle(choices)
+
+            gold_idx = choices.index(ideal)
+            refuse_idx = choices.index(_REFUSE_CHOICE)
+
         gold_letter = chr(ord("A") + gold_idx)
-        refuse_idx = choices.index(_REFUSE_CHOICE)
 
         metadata: dict[str, Any] = {
             "id": doc.get("id", f"lab_bench_{index}"),
