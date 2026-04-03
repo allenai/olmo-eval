@@ -221,6 +221,11 @@ class SWEBenchExternalEval(ExternalEval):
         env = os.environ.copy()
         env["MSWEA_DOCKER_EXECUTABLE"] = container_runtime
 
+        # LiteLLM's OpenAI provider requires an API key even for local servers.
+        # Set a dummy key when using local vLLM to satisfy the requirement.
+        if is_local and "OPENAI_API_KEY" not in env:
+            env["OPENAI_API_KEY"] = "EMPTY"
+
         logger.info(f"[{self.name}] Running mini-swe-agent: {shlex.join(cmd)}")
         # Reserve 20% of total timeout for the scoring phase
         return await self._run_subprocess(cmd, timeout=self.timeout_seconds * 0.8, env=env)
