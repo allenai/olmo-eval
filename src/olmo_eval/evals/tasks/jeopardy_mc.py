@@ -18,7 +18,7 @@ JEOPARDY_MC_FIXED_FEWSHOT = [
             "label": ["A", "B", "C", "D"],
         },
         "answerKey": "B",
-        "context_original": "HISTORY: Under the 1814 Treaty of Kiel, this country gave Norway to Sweden but kept Greenland & other islands",
+        "context_original": "HISTORY: Under the 1814 Treaty of Kiel, this country gave Norway to Sweden but kept Greenland & other islands",  # noqa: E501
     },
     {
         "id": "jeopardy_mc_format_fewshot_1",
@@ -27,7 +27,7 @@ JEOPARDY_MC_FIXED_FEWSHOT = [
             "label": ["A", "B", "C", "D"],
         },
         "answerKey": "A",
-        "context_original": "U.S. HISTORY: In the 1968 election, he won 13 1/2 percent of the popular vote & carried 5 southern states",
+        "context_original": "U.S. HISTORY: In the 1968 election, he won 13 1/2 percent of the popular vote & carried 5 southern states",  # noqa: E501
     },
     {
         "id": "jeopardy_mc_format_fewshot_2",
@@ -36,7 +36,7 @@ JEOPARDY_MC_FIXED_FEWSHOT = [
             "label": ["A", "B", "C", "D"],
         },
         "answerKey": "D",
-        "context_original": 'SHAKESPEARE: In "The Merchant of Venice" he tells his friend Tubal, "Meet me at our synagogue"',
+        "context_original": 'SHAKESPEARE: In "The Merchant of Venice" he tells his friend Tubal, "Meet me at our synagogue"',  # noqa: E501
     },
     {
         "id": "jeopardy_mc_format_fewshot_3",
@@ -45,7 +45,7 @@ JEOPARDY_MC_FIXED_FEWSHOT = [
             "label": ["A", "B", "C", "D"],
         },
         "answerKey": "C",
-        "context_original": 'SCIENCE & NATURE: Sir Humphry Davy named this yellowish-green gas from a Greek word meaning "greenish-yellow"',
+        "context_original": 'SCIENCE & NATURE: Sir Humphry Davy named this yellowish-green gas from a Greek word meaning "greenish-yellow"',  # noqa: E501
     },
     {
         "id": "jeopardy_mc_format_fewshot_5",
@@ -54,7 +54,7 @@ JEOPARDY_MC_FIXED_FEWSHOT = [
             "label": ["A", "B", "C", "D"],
         },
         "answerKey": "A",
-        "context_original": "HISTORY: In the midst of the Korean War, this South Korean president was elected to his second of 4 terms",
+        "context_original": "HISTORY: In the midst of the Korean War, this South Korean president was elected to his second of 4 terms",  # noqa: E501
     },
     {
         "id": "jeopardy_mc_format_fewshot_6",
@@ -68,7 +68,7 @@ JEOPARDY_MC_FIXED_FEWSHOT = [
             "label": ["A", "B", "C", "D"],
         },
         "answerKey": "D",
-        "context_original": "U.S. HISTORY: In 1878 an amendment for this was introduced in Congress; its adoption didn't occur until 1920",
+        "context_original": "U.S. HISTORY: In 1878 an amendment for this was introduced in Congress; its adoption didn't occur until 1920",  # noqa: E501
     },
     {
         "id": "jeopardy_mc_format_fewshot_4",
@@ -77,7 +77,7 @@ JEOPARDY_MC_FIXED_FEWSHOT = [
             "label": ["A", "B", "C", "D"],
         },
         "answerKey": "B",
-        "context_original": 'IN THE DICTIONARY: This car name may come from an abbreviation of "general purpose vehicle"',
+        "context_original": 'IN THE DICTIONARY: This car name may come from an abbreviation of "general purpose vehicle"',  # noqa: E501
     },
     {
         "id": "jeopardy_mc_format_fewshot_7",
@@ -95,7 +95,7 @@ JEOPARDY_MC_FIXED_FEWSHOT = [
             "label": ["A", "B", "C", "D"],
         },
         "answerKey": "A",
-        "context_original": "SCIENCE & NATURE: Take the fibrinogen out of blood plasma & you're left with a fluid called this",
+        "context_original": "SCIENCE & NATURE: Take the fibrinogen out of blood plasma & you're left with a fluid called this",  # noqa: E501
     },
     {
         "id": "jeopardy_mc_format_fewshot_9",
@@ -104,7 +104,7 @@ JEOPARDY_MC_FIXED_FEWSHOT = [
             "label": ["A", "B", "C", "D"],
         },
         "answerKey": "C",
-        "context_original": 'ADDICTED TO ADJECTIVES: This adjective derives from the name of the author of "Martin Chuzzlewit"',
+        "context_original": 'ADDICTED TO ADJECTIVES: This adjective derives from the name of the author of "Martin Chuzzlewit"',  # noqa: E501
     },
 ]
 # fmt: on
@@ -219,9 +219,7 @@ class JeopardyMC(Task):
         for ex in fewshot:
             ex_category = ex.metadata.get("category", "")
             ex_answer = ex.metadata.get("mc_answer", "")
-            parts.append(
-                _format_jeopardy_mc(ex_category, ex.question, ex.choices or (), ex_answer)
-            )
+            parts.append(_format_jeopardy_mc(ex_category, ex.question, ex.choices or (), ex_answer))
 
         parts.append(_format_jeopardy_mc(category, instance.question, choices))
         prompt = "\n\n".join(parts)

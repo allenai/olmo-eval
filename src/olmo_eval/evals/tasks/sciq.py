@@ -28,9 +28,7 @@ class SciQ(Task):
                 for split in ("test", "validation", "train"):
                     all_instances.extend(self._load_instances(split=split))
                 if self.config.limit and len(all_instances) > self.config.limit:
-                    all_instances = random.Random(1234).sample(
-                        all_instances, self.config.limit
-                    )
+                    all_instances = random.Random(1234).sample(all_instances, self.config.limit)
                 self._instances_cache = all_instances
             yield from self._instances_cache
         else:

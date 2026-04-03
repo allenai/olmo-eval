@@ -1,12 +1,11 @@
 from collections.abc import Iterator
-from typing import Any
-
 from dataclasses import dataclass
+from typing import Any
 
 from olmo_eval.common.formatters import CompletionFormatter, PPLFormatter
 from olmo_eval.common.metrics import AccuracyMetric, BPBMetric, PassAtKMetric
 from olmo_eval.common.scorers import MinervaMathScorer
-from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.extract import MathExtractor
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -34,6 +33,7 @@ class _MinervaCompletionFormatter(CompletionFormatter):
         parts.append(self.template.format(question=instance.question))
         prompt = self.fewshot_separator.join(parts)
         return LMRequest(request_type=self.request_type, prompt=prompt)
+
 
 MATH_SUBSETS = [
     "algebra",

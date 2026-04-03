@@ -13,9 +13,7 @@ from olmo_eval.evals.tasks.common import Task, register, register_variant
 _HF_BASE = "hf://datasets/allenai/basic-skills"
 
 
-def _shuffle_and_insert(
-    lst: list[str], value: str, rnd: random.Random
-) -> tuple[list[str], int]:
+def _shuffle_and_insert(lst: list[str], value: str, rnd: random.Random) -> tuple[list[str], int]:
     shuffled = lst.copy()
     rnd.shuffle(shuffled)
     insert_index = rnd.randint(0, len(shuffled))
@@ -65,9 +63,7 @@ class _BasicSkillsBase(Task):
         answer = doc["answer"]
         wrong_answers = doc["wrong_answers"]
 
-        choices, answer_index = _shuffle_and_insert(
-            wrong_answers, answer, random.Random(doc["id"])
-        )
+        choices, answer_index = _shuffle_and_insert(wrong_answers, answer, random.Random(doc["id"]))
         return Instance(
             question=question,
             choices=tuple(choices),

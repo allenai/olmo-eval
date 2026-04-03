@@ -117,9 +117,7 @@ def _process_nq_mc_doc(doc: dict[str, Any], index: int) -> Instance | None:
     )
 
 
-def _build_nq_mc_fixed_fewshot(
-    raw_docs: list[dict[str, Any]], num_fewshot: int
-) -> list[Instance]:
+def _build_nq_mc_fixed_fewshot(raw_docs: list[dict[str, Any]], num_fewshot: int) -> list[Instance]:
     instances = []
     for doc in raw_docs:
         question = doc["question"]
@@ -176,9 +174,7 @@ class _NaturalQsMCBase(Task):
 
     def _build_fewshot(self) -> list[Instance]:
         if getattr(self.config, "fewshot_source", None) == self._fewshot_source_name:
-            return _build_nq_mc_fixed_fewshot(
-                NQ_MC_FIXED_FEWSHOT, self.config.num_fewshot
-            )
+            return _build_nq_mc_fixed_fewshot(NQ_MC_FIXED_FEWSHOT, self.config.num_fewshot)
         return super()._build_fewshot()
 
     def format_request(self, instance: Instance) -> LMRequest:
