@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter
-from olmo_eval.common.metrics import LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric
+from olmo_eval.common.metrics import LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric, LogprobUncondMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -159,6 +159,7 @@ def _process_arc_doc(doc: dict[str, Any], index: int, dataset: str) -> Instance 
             "dataset": dataset,
             "gold_idx": gold_idx,
             "gold_text": gold_text,
+            "num_choices": len(choices),
         },
     )
 
@@ -240,6 +241,13 @@ class _ARCBase(Task):
             )
         return super()._build_fewshot()
 
+    def _uses_uncond_metric(self) -> bool:
+        """Check if any configured metric requires unconditional normalization."""
+        return any(
+            isinstance(m, LogprobUncondMCAccuracyMetric)
+            for m in self.config.metrics
+        )
+
     def format_request(self, instance: Instance) -> LMRequest:
         fewshot = self.get_fewshot()
         is_mc = self.config.formatter is not None
@@ -263,6 +271,23 @@ class _ARCBase(Task):
             continuations = tuple(f" {c}" for c in (instance.choices or ()))
 
         prompt = "\n\n".join(parts)
+
+        # For unconditional normalization (acc_uncond), generate both conditioned
+        # and unconditional continuations using continuation_prompts.
+        if not is_mc and self._uses_uncond_metric():
+            uncond_prompt = "Answer:"
+            num_choices = len(continuations)
+            # Double continuations: first N conditioned, next N unconditional
+            all_continuations = continuations + continuations
+            # Per-continuation prompts: conditioned use full context, uncond use "Answer:"
+            all_cont_prompts = tuple([prompt] * num_choices + [uncond_prompt] * num_choices)
+            return LMRequest(
+                request_type=RequestType.LOGLIKELIHOOD,
+                prompt=prompt,
+                continuations=all_continuations,
+                continuation_prompts=all_cont_prompts,
+            )
+
         return LMRequest(
             request_type=RequestType.LOGLIKELIHOOD,
             prompt=prompt,
@@ -297,7 +322,7 @@ register_variant("arc_easy", "full")
 register_variant("arc_challenge", "rc")
 register_variant("arc_challenge", "mc", formatter=MultipleChoiceFormatter())
 register_variant(
-    "arc_challenge", "olmo3base", num_fewshot=5, fewshot_source="olmes_arc_challenge_fixed", split=Split.TEST, metrics=(LogprobPerCharMCAccuracyMetric(),)
+    "arc_challenge", "olmo3base", num_fewshot=5, fewshot_source="olmes_arc_challenge_fixed", split=Split.TEST, metrics=(LogprobUncondMCAccuracyMetric(),)
 )
 register_variant("arc_challenge", "olmes", num_fewshot=5, fewshot_source="olmes_arc_challenge_fixed")
 register_variant("arc_challenge", "full")

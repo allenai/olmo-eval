@@ -342,6 +342,49 @@ class LogprobMCAccuracyMetric(Metric):
 
 
 @dataclass(frozen=True, slots=True)
+class LogprobUncondMCAccuracyMetric(Metric):
+    """Multiple-choice accuracy with unconditional normalization (acc_uncond).
+
+    Expects responses where the first half of outputs are conditioned (full
+    context) and the second half are unconditional (e.g. just "Answer:").
+    The number of actual choices is stored in ``instance.metadata["num_choices"]``.
+
+    For each choice *i*, computes::
+
+        score_i = sum_logprob_conditioned[i] - sum_logprob_unconditional[i]
+
+    Picks the choice with the highest score and checks whether it matches
+    ``instance.metadata["gold_idx"]``.
+
+    This matches the ``acc_uncond`` metric from oe-eval-internal's MCAccuracy.
+    """
+
+    name: str = "accuracy"
+    scorer: type[Scorer] = LogprobScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        if not responses:
+            return 0.0
+        correct = 0
+        for response in responses:
+            gold_idx = response.instance.metadata.get("gold_idx")
+            num_choices = response.instance.metadata.get("num_choices")
+            if gold_idx is None or num_choices is None or not response.outputs:
+                continue
+            outputs = response.outputs
+            cond_outputs = outputs[:num_choices]
+            uncond_outputs = outputs[num_choices:]
+            scores = []
+            for cond, uncond in zip(cond_outputs, uncond_outputs):
+                cond_lp = sum(lp["logprob"] for lp in (cond.logprobs or []))
+                uncond_lp = sum(lp["logprob"] for lp in (uncond.logprobs or []))
+                scores.append(cond_lp - uncond_lp)
+            if scores.index(max(scores)) == gold_idx:
+                correct += 1
+        return correct / len(responses)
+
+
+@dataclass(frozen=True, slots=True)
 class LogprobPerCharMCAccuracyMetric(Metric):
     """Multiple-choice accuracy via character-length-normalized logprob argmax.
 
