@@ -238,6 +238,11 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     default=None,
     help="Number of GPUs. Defaults to 1 for GPU providers, 0 otherwise.",
 )
+@click.option(
+    "--enable-podman-service",
+    is_flag=True,
+    help="Start podman system service for Docker API compatibility (e.g., swebench harness).",
+)
 def launch(
     config: str | None,
     name: str | None,
@@ -282,6 +287,7 @@ def launch(
     uv_cache_dir: str,
     secret_env: tuple[str, ...],
     gpus: int | None,
+    enable_podman_service: bool,
 ) -> None:
     """Launch an evaluation job on Beaker.
 
@@ -425,6 +431,7 @@ def launch(
             preemptible=preemptible,
             retries=retries,
             gpus=gpus,
+            enable_podman_service=enable_podman_service,
         )
         return
 
@@ -1004,6 +1011,7 @@ def _launch_external_evals(
     preemptible: bool | None = None,
     retries: int | None = None,
     gpus: int | None = None,
+    enable_podman_service: bool = False,
 ) -> None:
     """Launch external evaluation jobs on Beaker.
 
@@ -1188,6 +1196,7 @@ def _launch_external_evals(
             retries=retries,
             provider_kind=str(provider_config.kind),
             base_url=provider_config.base_url,
+            enable_podman_service=enable_podman_service,
         )
         job_configs.append(job_config)
 
