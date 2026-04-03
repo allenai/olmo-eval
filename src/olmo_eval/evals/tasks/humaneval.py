@@ -58,10 +58,51 @@ class HumanEval(Task):
             },
         )
 
+    def _build_fewshot(self) -> list[Instance]:
+        """Sample one extra fewshot example for deduplication.
+
+        HumanEval only has a test split, so fewshot examples come from the same
+        pool as eval instances.  The old oe-eval framework samples k+1 and then
+        removes the eval doc if it appears in the fewshot set.  We replicate that
+        behaviour here.
+        """
+        import random
+
+        if self.config.num_fewshot == 0:
+            return []
+
+        loader = DataLoader()
+        source = self._get_source_for_split(self.fewshot_split)
+        all_instances = [
+            inst
+            for doc in loader.load(source)
+            if (inst := self.process_doc(doc)) is not None
+        ]
+
+        if not all_instances:
+            return []
+
+        rng = random.Random(self.config.fewshot_seed)
+        # Sample one extra to allow per-instance deduplication
+        k = min(self.config.num_fewshot + 1, len(all_instances))
+        return rng.sample(all_instances, k)
+
     def format_request(self, instance: Instance) -> LMRequest:
-        """Format an instance into an LM request."""
+        """Format an instance into an LM request.
+
+        Excludes the current instance from the fewshot set if it appears there
+        (possible because HumanEval draws fewshot from the test split).
+        """
         if self.config.formatter is not None:
-            return self.config.formatter.format(instance, self.get_fewshot())
+            fewshot = self.get_fewshot()
+            instance_id = instance.metadata.get("id")
+            if instance_id is not None:
+                filtered = [ex for ex in fewshot if ex.metadata.get("id") != instance_id]
+            else:
+                filtered = list(fewshot)
+            # Keep only num_fewshot examples
+            filtered = filtered[: self.config.num_fewshot]
+            return self.config.formatter.format(instance, filtered)
 
         return LMRequest(
             request_type=self.request_type,
