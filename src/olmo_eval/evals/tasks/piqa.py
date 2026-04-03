@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter
-from olmo_eval.common.metrics import LogprobPerCharMCAccuracyMetric
+from olmo_eval.common.metrics import LogprobPerTokenMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -26,7 +26,7 @@ PIQA_FIXED_FEWSHOT = [
 class PiQA(Task):
     data_source = DataSource(path="piqa", split="validation", revision="refs/convert/parquet")
     split = Split.VALIDATION
-    metrics = (LogprobPerCharMCAccuracyMetric(),)
+    metrics = (LogprobPerTokenMCAccuracyMetric(),)
     num_fewshot = 0
     fewshot_split = "train"
     sampling_params = SamplingParams(temperature=0.0)
