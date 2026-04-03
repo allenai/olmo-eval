@@ -249,7 +249,7 @@ register_variant(
 
 @register("naturalqs:bpb")
 class NaturalQsBPB(_NaturalQsMCBase):
-    data_source = DataSource(path="allenai/nq-gen2mc", split="validation")
+    data_source = DataSource(path="allenai/nq_open_mc", split="validation")
     split = Split.VALIDATION
     formatter = PPLFormatter()
     metrics = (BPBMetric(),)
