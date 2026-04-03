@@ -651,7 +651,7 @@ class VLLMServerProvider(InferenceProvider):
                     "prompt": full_tokens,
                     "max_tokens": 1,
                     "temperature": 0.0,
-                    "prompt_logprobs": 5,
+                    "prompt_logprobs": 1,
                     "add_special_tokens": False,
                 },
             )
