@@ -36,7 +36,7 @@ from olmo_eval.common.types import (
     Split,
 )
 from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.tasks.common import Task, register, register_regime, register_variant
+from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 # Regex for "ANSWER: X" pattern (case-insensitive)
 _ANSWER_PATTERN = re.compile(r"ANSWER\s*:\s*([A-Z])", re.IGNORECASE)
