@@ -48,7 +48,7 @@ class MultilingualMBPPTask(Task):
     The v2fix version normalizes Windows line endings (\\r\\n -> \\n).
     """
 
-    normalize_line_endings: bool = False  # Set True for v2fix
+    normalize_line_endings: bool = True  # Always normalize for correctness
     language: str = "python"  # Override in subclasses
 
     @property
@@ -174,7 +174,7 @@ _VARIANTS: dict = {
 }
 
 for _base, _prefix in [
-    (MultilingualMBPPV2FixTask, "mt_mbpp"),
+    (MultilingualMBPPTask, "mt_mbpp"),
     (MultilingualMBPPV2FixTask, "mt_mbpp_v2fix"),
 ]:
     register_subtasks(
