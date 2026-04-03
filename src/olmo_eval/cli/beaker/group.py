@@ -1,5 +1,7 @@
 """Beaker group management commands."""
 
+from __future__ import annotations
+
 from datetime import UTC
 from typing import TYPE_CHECKING
 
