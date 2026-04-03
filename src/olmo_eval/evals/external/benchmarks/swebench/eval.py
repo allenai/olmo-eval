@@ -212,7 +212,6 @@ class SWEBenchExternalEval(ExternalEval):
         ]
         if is_local:
             cmd += ["-c", f"model.api_base={provider_url}"]
-            cmd += ["-c", "model.api_key=local"]
         if swe_args.instance_filter:
             cmd += ["--filter", swe_args.instance_filter]
         if swe_args.instance_slice:
@@ -221,6 +220,9 @@ class SWEBenchExternalEval(ExternalEval):
         # mini-swe-agent respects MSWEA_DOCKER_EXECUTABLE to switch container runtimes
         env = os.environ.copy()
         env["MSWEA_DOCKER_EXECUTABLE"] = container_runtime
+        if is_local:
+            env["HOSTED_VLLM_API_KEY"] = "local"
+            env["HOSTED_VLLM_API_BASE"] = provider_url
 
         logger.info(f"[{self.name}] Running mini-swe-agent: {shlex.join(cmd)}")
         # Reserve 20% of total timeout for the scoring phase
@@ -254,11 +256,8 @@ class SWEBenchExternalEval(ExternalEval):
         cmd.extend(["--max_workers", str(swe_args.max_workers_eval)])
 
         if swe_args.use_modal:
-            # Modal handles containers in the cloud
             cmd.extend(["--modal", "true"])
         elif "DOCKER_HOST" not in env:
-            # Use podman service socket (started by Beaker launcher)
-            # DOCKER_HOST should already be set by _build_install_cmd
             logger.warning("DOCKER_HOST not set. Scoring may fail without podman service or Modal.")
 
         logger.info(f"[{self.name}] Running SWE-bench harness: {shlex.join(cmd)}")
