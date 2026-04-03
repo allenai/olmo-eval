@@ -39,7 +39,7 @@ Issues = "https://github.com/allenai/olmo-eval/issues"
 
 [project.optional-dependencies]
 hf = [
-    "transformers>=5.5.0",
+    "transformers~=4.57.3",
 ]
 vllm = [
     "vllm[runai]==0.17.1",  # runai extras enable S3 model loading
