@@ -353,6 +353,17 @@ class VLLMProvider(InferenceProvider):
                     if not token_probs:
                         continue
 
+                    # Check if this token is the argmax (greedy choice).
+                    # Must check BEFORE the lp_obj gate so we catch non-greedy tokens
+                    # even when they aren't in the top-k returned by prompt_logprobs.
+                    if is_greedy:
+                        max_token_id = max(
+                            token_probs.keys(),
+                            key=lambda tid: _coerce_logprob_to_num(token_probs[tid]),
+                        )
+                        if max_token_id != token_id:
+                            is_greedy = False
+
                     # Look up logprob for the actual continuation token (not first key in dict)
                     lp_obj = token_probs.get(token_id)
                     if lp_obj is None:
@@ -368,15 +379,6 @@ class VLLMProvider(InferenceProvider):
                         }
                     )
                     total += logprob_val
-
-                    # Check if this token is the argmax (greedy choice)
-                    if is_greedy:
-                        max_token_id = max(
-                            token_probs.keys(),
-                            key=lambda tid: _coerce_logprob_to_num(token_probs[tid]),
-                        )
-                        if max_token_id != token_id:
-                            is_greedy = False
 
                 num_tokens = len(logprob_entries)
                 request_outputs.append(
