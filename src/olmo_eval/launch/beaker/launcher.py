@@ -717,14 +717,22 @@ class BeakerLauncher:
                 f"/opt/venv/lib/python*/site-packages/nvidia*; do "
                 f'ln -sf "$pkg" {vllm_venv}/lib/python*/site-packages/; done'
             )
-            # Extract all vllm deps from pyproject.toml and install directly
-            # (installing via .[vllm] extra causes uv to re-resolve torch, ignoring symlinks)
+            # Install vllm deps from pyproject.toml:
+            # - vllm itself with --no-deps to skip torch resolution (torch is symlinked)
+            # - other deps normally
             steps.append(
                 f'VLLM_DEPS=$(python -c "import tomllib; '
-                f"print(' '.join(tomllib.load(open('/gantry-runtime/pyproject.toml','rb'))"
-                f"['project']['optional-dependencies']['vllm']))\") && "
+                f"deps = tomllib.load(open('/gantry-runtime/pyproject.toml','rb'))"
+                f"['project']['optional-dependencies']['vllm']; "
+                f"vllm_pkg = next(d for d in deps if d.startswith('vllm')); "
+                f"other_deps = [d for d in deps if not d.startswith('vllm')]; "
+                f"print(vllm_pkg + '\\n' + ' '.join(other_deps))\") && "
+                f'VLLM_PKG=$(echo "$VLLM_DEPS" | head -1) && '
+                f'OTHER_DEPS=$(echo "$VLLM_DEPS" | tail -1) && '
                 f"VIRTUAL_ENV={vllm_venv} uv pip install "
-                f'--cache-dir "$UV_CACHE_DIR" $VLLM_DEPS -c {constraints}'
+                f'--cache-dir "$UV_CACHE_DIR" --no-deps "$VLLM_PKG" -c {constraints} && '
+                f"VIRTUAL_ENV={vllm_venv} uv pip install "
+                f'--cache-dir "$UV_CACHE_DIR" $OTHER_DEPS -c {constraints}'
             )
             # Set VLLM_PYTHON so VLLMServerProcess uses the isolated venv
             steps.append(f"export VLLM_PYTHON={vllm_venv}/bin/python")
