@@ -191,7 +191,7 @@ class _NaturalQsMCBase(Task):
                 answer = ex.metadata.get("mc_answer", "")
                 parts.append(_format_mc(ex.question, ex.choices or (), answer))
             else:
-                answer = ex.gold_answer or ex.metadata.get("gold_text", "")
+                answer = ex.metadata.get("gold_text", "") or ex.gold_answer
                 parts.append(_format_rc(ex.question, ex.choices or (), answer))
 
         if is_mc:
