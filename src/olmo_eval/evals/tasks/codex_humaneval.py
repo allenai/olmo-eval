@@ -26,4 +26,4 @@ register_variant(
     formatter=CompletionFormatter(),
 )
 
-register_variant("codex_humaneval", "olmo3base")
+register_variant("codex_humaneval", "olmo3base", num_fewshot=3, fewshot_seed=1234)
