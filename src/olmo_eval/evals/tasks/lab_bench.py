@@ -122,16 +122,29 @@ class LabBenchTask(Task):
             fewshot_seed=1234,
             metrics=(LogprobPerCharMCAccuracyMetric(),),
         )
-        # Regime version of olmo3base: only sets formatter/fewshot, NOT metrics.
-        # Used via ::olmo3base (after ::) so that task:bpb::olmo3base preserves
-        # the BPB metric from the :bpb variant.
-        register_regime(
-            name,
-            "olmo3base",
-            formatter=None,
-            num_fewshot=3,
-            fewshot_seed=1234,
+        # Register name:bpb as a separate task (like drop:bpb) so that
+        # name:bpb:olmo3base works reliably without needing the :: regime
+        # mechanism. This matches the old oe-eval-internal lab_bench_*:bpb
+        # config: RC format, 3-shot, seed 1234, BPB metric.
+        import sys
+
+        bpb_name = f"{name}:bpb"
+        bpb_cls = type(
+            f"{cls.__name__}BPB",
+            (cls,),
+            {
+                "formatter": None,
+                "metrics": (BPBMetric(),),
+                "primary_metric": BPBMetric(),
+                "num_fewshot": 3,
+                "fewshot_seed": 1234,
+                "__module__": cls.__module__,
+                "__qualname__": f"{cls.__name__}BPB",
+            },
         )
+        setattr(sys.modules[cls.__module__], f"{cls.__name__}BPB", bpb_cls)
+        register(bpb_name)(bpb_cls)
+        register_variant(bpb_name, "olmo3base")
 
     @property
     def instances(self) -> Iterator[Instance]:
