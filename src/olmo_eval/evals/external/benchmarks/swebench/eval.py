@@ -44,6 +44,7 @@ class SWEBenchArgs:
     max_workers_eval: int = 4
     temperature: float = 0.0
     max_turns: int = 30
+    use_modal: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SWEBenchArgs:
@@ -56,6 +57,7 @@ class SWEBenchArgs:
             max_workers_eval=int(data.get("max_workers_eval", 4)),
             temperature=float(data.get("temperature", 0.0)),
             max_turns=int(data.get("max_turns", 30)),
+            use_modal=data.get("use_modal", False) in (True, "true", "True", "1", 1),
         )
 
 
@@ -97,6 +99,7 @@ class SWEBenchExternalEval(ExternalEval):
             "max_workers_eval": ("Parallel workers for the SWE-bench scoring harness", 4),
             "temperature": ("Sampling temperature", 0.0),
             "max_turns": ("Max agent turns per instance", 30),
+            "use_modal": ("Run scoring harness on Modal cloud", False),
         }
 
     async def execute(
@@ -108,6 +111,18 @@ class SWEBenchExternalEval(ExternalEval):
     ) -> ExternalEvalResult:
         start_time = time.time()
         swe_args = SWEBenchArgs.from_dict(args)
+
+        if swe_args.use_modal:
+            missing = []
+            if not os.environ.get("MODAL_TOKEN_ID"):
+                missing.append("MODAL_TOKEN_ID")
+            if not os.environ.get("MODAL_TOKEN_SECRET"):
+                missing.append("MODAL_TOKEN_SECRET")
+            if missing:
+                return self._error_result(
+                    f"Modal credentials missing: {', '.join(missing)}",
+                    start_time,
+                )
 
         tmp_dir = None
         if output_dir is None:
@@ -218,8 +233,9 @@ class SWEBenchExternalEval(ExternalEval):
         work_dir: Path,
         container_runtime: str,
     ) -> tuple[bool, str]:
-        """Run the SWE-bench evaluation harness to score patches. Returns (success, output)."""
+        """Run the SWE-bench evaluation harness to score patches."""
         dataset_hf = _DATASET_HF_PATHS.get(swe_args.dataset, swe_args.dataset)
+
         cmd = [
             sys.executable,
             "-m",
@@ -228,18 +244,23 @@ class SWEBenchExternalEval(ExternalEval):
             dataset_hf,
             "--predictions_path",
             str(preds_path),
-            "--max_workers",
-            str(swe_args.max_workers_eval),
             "--run_id",
             run_id,
         ]
 
-        # The SWE-bench harness uses the Docker Python SDK, which reads DOCKER_HOST.
-        # When using podman, point it at the podman socket so the SDK can find it.
         env = os.environ.copy()
-        if container_runtime == "podman" and "DOCKER_HOST" not in env:
-            uid = os.getuid()
-            env["DOCKER_HOST"] = f"unix:///run/user/{uid}/podman/podman.sock"
+
+        if swe_args.use_modal:
+            # Modal handles containers in the cloud
+            cmd.extend(["--modal", "true", "--parallelism", str(swe_args.max_workers_eval)])
+        else:
+            # Use podman service socket (started by Beaker launcher)
+            # DOCKER_HOST should already be set by _build_install_cmd
+            cmd.extend(["--max_workers", str(swe_args.max_workers_eval)])
+            if "DOCKER_HOST" not in env:
+                logger.warning(
+                    "DOCKER_HOST not set. Scoring may fail without podman service or Modal."
+                )
 
         logger.info(f"[{self.name}] Running SWE-bench harness: {shlex.join(cmd)}")
         ok, output = await self._run_subprocess(

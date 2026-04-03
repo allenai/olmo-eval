@@ -430,6 +430,10 @@ class BeakerJobConfig:
     # Use this for external evals that run vLLM as a server subprocess.
     vllm_isolated_venv: bool = False
 
+    # Start podman system service for Docker API compatibility (swebench harness, etc.)
+    # When True, starts `podman system service` and sets DOCKER_HOST env var.
+    enable_podman_service: bool = False
+
 
 def resolve_clusters(cluster: str | list[str]) -> list[str]:
     """Resolve cluster aliases to full cluster names.
@@ -633,6 +637,7 @@ class BeakerLauncher:
         enable_sandbox: bool = False,
         setup_store_secrets: bool = False,
         vllm_isolated_venv: bool = False,
+        enable_podman_service: bool = False,
     ) -> str:
         """Build installation command for gantry's install_cmd parameter.
 
@@ -653,6 +658,7 @@ class BeakerLauncher:
             enable_sandbox: If True, set up /dev/net/tun and Artifact Registry auth.
             setup_store_secrets: If True, run setup_store_secrets to configure database access.
             vllm_isolated_venv: If True, install vLLM in isolated venv for server mode.
+            enable_podman_service: If True, start podman system service and set DOCKER_HOST.
 
         Returns:
             Shell command string for installation.
@@ -682,6 +688,12 @@ class BeakerLauncher:
         if enable_sandbox:
             script = "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/setup_artifact_registry"
             steps.append(f"source {script}")
+
+        # Start podman system service for Docker API compatibility (swebench harness, etc.)
+        if enable_podman_service:
+            steps.append("podman system service --time=0 unix:///tmp/podman.sock &")
+            steps.append("sleep 2")
+            steps.append("export DOCKER_HOST=unix:///tmp/podman.sock")
 
         # Export additional environment variables (e.g., UV_CACHE_DIR)
         if env_exports:
@@ -765,6 +777,7 @@ class BeakerLauncher:
             config.enable_sandbox,
             config.setup_store_secrets,
             config.vllm_isolated_venv,
+            config.enable_podman_service,
         )
 
         # Build weka mounts as tuples: (bucket, mount_path)
