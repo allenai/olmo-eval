@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter
-from olmo_eval.common.metrics import BPBMetric, LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric
+from olmo_eval.common.metrics import BPBMetric, LogprobPerCharMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -28,7 +28,7 @@ SOCIALIQA_FIXED_FEWSHOT = [
 class SocialIQA(Task):
     data_source = DataSource(path="social_i_qa", split="validation", revision="refs/convert/parquet")
     split = Split.VALIDATION
-    metrics = (LogprobMCAccuracyMetric(),)
+    metrics = (LogprobPerCharMCAccuracyMetric(),)
     num_fewshot = 0
     fewshot_split = "train"
     sampling_params = SamplingParams(temperature=0.0)
@@ -171,7 +171,6 @@ register_variant(
     "olmo3base",
     num_fewshot=5,
     fewshot_source="olmes_socialiqa_fixed",
-    metrics=(LogprobPerCharMCAccuracyMetric(),),
 )
 register_variant(
     "socialiqa",
