@@ -691,9 +691,12 @@ class BeakerLauncher:
 
         # Start podman system service for Docker API compatibility (swebench harness, etc.)
         if enable_podman_service:
-            steps.append("podman system service --time=0 unix:///tmp/podman.sock &")
-            steps.append("sleep 2")
-            steps.append("export DOCKER_HOST=unix:///tmp/podman.sock")
+            # Use semicolons after backgrounded command since && requires exit status
+            steps.append(
+                "podman system service --time=0 unix:///tmp/podman.sock & "
+                "sleep 2; "
+                "export DOCKER_HOST=unix:///tmp/podman.sock"
+            )
 
         # Export additional environment variables (e.g., UV_CACHE_DIR)
         if env_exports:
