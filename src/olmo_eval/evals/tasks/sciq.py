@@ -158,13 +158,29 @@ register_variant(
 
 @register("sciq:bpb")
 class SciQBPB(SciQ):
-    formatter = PPLFormatter()
     metrics = (BPBMetric(),)
 
     def format_request(self, instance: Instance) -> LMRequest:
-        if self.config.formatter is not None:
-            return self.config.formatter.format(instance, self.get_fewshot())
-        return super().format_request(instance)
+        fewshot = self.get_fewshot()
+
+        parts: list[str] = []
+        for ex in fewshot:
+            answer = ex.gold_answer or ex.metadata.get("gold_text", "")
+            parts.append(_format_rc(ex.question, answer))
+
+        parts.append(_format_rc(instance.question))
+        prompt = "\n\n".join(parts)
+
+        # Only compute BPB on the gold answer (matches old suite's compute_gold_bpb=True)
+        gold_idx = instance.metadata.get("gold_idx", 3)
+        choices = instance.choices or ()
+        gold_text = choices[gold_idx] if choices else (instance.gold_answer or "")
+
+        return LMRequest(
+            request_type=RequestType.LOGLIKELIHOOD,
+            prompt=prompt,
+            continuations=(f" {gold_text}",),
+        )
 
 
 register_variant(
