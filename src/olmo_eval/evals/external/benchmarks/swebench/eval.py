@@ -212,6 +212,7 @@ class SWEBenchExternalEval(ExternalEval):
         ]
         if is_local:
             cmd += ["-c", f"model.api_base={provider_url}"]
+            cmd += ["-c", "model.api_key=local"]
         if swe_args.instance_filter:
             cmd += ["--filter", swe_args.instance_filter]
         if swe_args.instance_slice:
