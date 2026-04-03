@@ -184,9 +184,9 @@ class SWEBenchExternalEval(ExternalEval):
         container_runtime: str,
     ) -> tuple[bool, str]:
         """Run mini-swe-agent to generate patches. Returns (success, output)."""
-        # For local vLLM servers, use the openai/ litellm prefix with api_base config.
+        # For local vLLM servers, use the hosted_vllm/ litellm prefix with api_base config.
         # For external APIs (OpenAI etc.), pass the model name as-is.
-        litellm_model = f"openai/{model_name}" if is_local else model_name
+        litellm_model = f"hosted_vllm/{model_name}" if is_local else model_name
 
         cmd = [
             sys.executable,
@@ -220,11 +220,6 @@ class SWEBenchExternalEval(ExternalEval):
         # mini-swe-agent respects MSWEA_DOCKER_EXECUTABLE to switch container runtimes
         env = os.environ.copy()
         env["MSWEA_DOCKER_EXECUTABLE"] = container_runtime
-
-        # LiteLLM's OpenAI provider requires an API key even for local servers.
-        # Set a dummy key when using local vLLM to satisfy the requirement.
-        if is_local and "OPENAI_API_KEY" not in env:
-            env["OPENAI_API_KEY"] = "EMPTY"
 
         logger.info(f"[{self.name}] Running mini-swe-agent: {shlex.join(cmd)}")
         # Reserve 20% of total timeout for the scoring phase
