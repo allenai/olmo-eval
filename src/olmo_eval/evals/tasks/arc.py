@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter
-from olmo_eval.common.metrics import LogprobMCAccuracyMetric
+from olmo_eval.common.metrics import LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -290,14 +290,14 @@ class ARCChallenge(_ARCBase):
 
 register_variant("arc_easy", "rc")
 register_variant("arc_easy", "mc", formatter=MultipleChoiceFormatter())
-register_variant("arc_easy", "olmo3base", num_fewshot=5, fewshot_source="olmes_arc_easy_fixed", split=Split.ALL)
+register_variant("arc_easy", "olmo3base", num_fewshot=5, fewshot_source="olmes_arc_easy_fixed", split=Split.TEST, metrics=(LogprobPerCharMCAccuracyMetric(),))
 register_variant("arc_easy", "olmes", num_fewshot=5, fewshot_source="olmes_arc_easy_fixed")
 register_variant("arc_easy", "full")
 
 register_variant("arc_challenge", "rc")
 register_variant("arc_challenge", "mc", formatter=MultipleChoiceFormatter())
 register_variant(
-    "arc_challenge", "olmo3base", num_fewshot=5, fewshot_source="olmes_arc_challenge_fixed", split=Split.ALL
+    "arc_challenge", "olmo3base", num_fewshot=5, fewshot_source="olmes_arc_challenge_fixed", split=Split.TEST, metrics=(LogprobPerCharMCAccuracyMetric(),)
 )
 register_variant("arc_challenge", "olmes", num_fewshot=5, fewshot_source="olmes_arc_challenge_fixed")
 register_variant("arc_challenge", "full")
