@@ -48,12 +48,19 @@ class SciQ(Task):
             doc["correct_answer"],
         ]
 
-        rng = random.Random(index)
-        num_choices = len(choices)
-        positions = list(range(num_choices))
-        rng.shuffle(positions)
-        shuffled_choices = [choices[i] for i in positions]
-        gold_idx = positions.index(num_choices - 1)
+        # Only shuffle choices for MC format (matches old oe-eval-internal behavior
+        # where RC keeps fixed order: distractors first, correct answer last)
+        if self.config.formatter is not None:
+            rng = random.Random(index)
+            num_choices = len(choices)
+            positions = list(range(num_choices))
+            rng.shuffle(positions)
+            shuffled_choices = [choices[i] for i in positions]
+            gold_idx = positions.index(num_choices - 1)
+        else:
+            shuffled_choices = choices
+            gold_idx = 3  # correct_answer is always last
+
         gold_text = doc["correct_answer"]
         letter = chr(ord("A") + gold_idx)
 
