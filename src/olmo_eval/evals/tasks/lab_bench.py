@@ -36,7 +36,7 @@ from olmo_eval.common.types import (
     Split,
 )
 from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.tasks.common import Task, register, register_variant
+from olmo_eval.evals.tasks.common import Task, register, register_regime, register_variant
 
 # Regex for "ANSWER: X" pattern (case-insensitive)
 _ANSWER_PATTERN = re.compile(r"ANSWER\s*:\s*([A-Z])", re.IGNORECASE)
@@ -121,6 +121,16 @@ class LabBenchTask(Task):
             num_fewshot=3,
             fewshot_seed=1234,
             metrics=(LogprobPerCharMCAccuracyMetric(),),
+        )
+        # Regime version of olmo3base: only sets formatter/fewshot, NOT metrics.
+        # Used via ::olmo3base (after ::) so that task:bpb::olmo3base preserves
+        # the BPB metric from the :bpb variant.
+        register_regime(
+            name,
+            "olmo3base",
+            formatter=None,
+            num_fewshot=3,
+            fewshot_seed=1234,
         )
 
     @property
