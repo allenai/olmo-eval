@@ -174,7 +174,7 @@ _VARIANTS: dict = {
 }
 
 for _base, _prefix in [
-    (MultilingualMBPPTask, "mt_mbpp"),
+    (MultilingualMBPPV2FixTask, "mt_mbpp"),
     (MultilingualMBPPV2FixTask, "mt_mbpp_v2fix"),
 ]:
     register_subtasks(
