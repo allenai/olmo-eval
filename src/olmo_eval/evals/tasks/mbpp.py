@@ -70,12 +70,36 @@ class MBPPBase(Task):
 
         MBPP has a dedicated 'prompt' split with 10 examples for few-shot prompting.
         Falls back to 'train' split if 'prompt' is not available.
+
+        Uses shuffle+slice (not sample) to match the legacy oe-eval-internal behavior.
         """
-        return self._build_fewshot_from_source(
-            split="prompt",
-            sample=True,
-            fallback_splits=["train"],
-        )
+        import random
+
+        if self.config.num_fewshot == 0:
+            return []
+
+        loader = DataLoader()
+        all_instances: list[Instance] = []
+
+        for split in ["prompt", "train"]:
+            try:
+                source = self._get_source_for_split(split)
+                all_instances = [
+                    inst
+                    for doc in loader.load(source)
+                    if (inst := self.process_doc(doc)) is not None
+                ]
+                if all_instances:
+                    break
+            except Exception:
+                continue
+
+        if not all_instances:
+            return []
+
+        rng = random.Random(self.config.fewshot_seed)
+        rng.shuffle(all_instances)
+        return all_instances[: self.config.num_fewshot]
 
 
 @register("mbpp")
