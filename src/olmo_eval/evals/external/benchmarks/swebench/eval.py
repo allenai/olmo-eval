@@ -32,6 +32,20 @@ _DATASET_HF_PATHS = {
 }
 
 
+def _ensure_modal_config_exists() -> None:
+    """Create empty ~/.modal.toml if missing.
+
+    SWE-bench's validate_modal_credentials() checks for this file's existence,
+    but Modal SDK uses MODAL_TOKEN_ID/MODAL_TOKEN_SECRET env vars for auth
+    (which take precedence over the file). We create an empty file to satisfy
+    the validation while keeping credentials in env vars only.
+    """
+    modal_toml = Path.home() / ".modal.toml"
+    if not modal_toml.exists():
+        modal_toml.touch()
+        logger.info("Created empty ~/.modal.toml to satisfy SWE-bench validation")
+
+
 @dataclass
 class SWEBenchArgs:
     """Arguments for the swe_bench evaluation."""
@@ -258,6 +272,9 @@ class SWEBenchExternalEval(ExternalEval):
         log_file: Path | None = None,
     ) -> tuple[bool, str]:
         """Run the SWE-bench evaluation harness to score patches."""
+        if swe_args.use_modal:
+            _ensure_modal_config_exists()
+
         dataset_hf = _DATASET_HF_PATHS.get(swe_args.dataset, swe_args.dataset)
 
         cmd = [
