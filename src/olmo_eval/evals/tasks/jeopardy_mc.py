@@ -4,7 +4,8 @@ import re
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.metrics import LogprobMCAccuracyMetric
+from olmo_eval.common.formatters import MultipleChoiceFormatter
+from olmo_eval.common.metrics import LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -127,6 +128,15 @@ def _format_jeopardy_mc(
     return prompt
 
 
+def _format_jeopardy_rc(
+    category: str, question: str, answer: str | None = None
+) -> str:
+    prompt = f"Category: {category}\nQuestion: {question}\nAnswer:"
+    if answer:
+        prompt += f" {answer}"
+    return prompt
+
+
 def _build_jeopardy_mc_fixed_fewshot(
     raw_docs: list[dict[str, Any]], num_fewshot: int
 ) -> list[Instance]:
@@ -158,8 +168,7 @@ def _build_jeopardy_mc_fixed_fewshot(
     return instances
 
 
-@register("jeopardy:mc")
-class JeopardyMC(Task):
+class _JeopardyMCBase(Task):
     data_source = DataSource(path="allenai/jeopardy_mc", split="test")
     split = Split.TEST
     metrics = (LogprobMCAccuracyMetric(),)
@@ -212,21 +221,30 @@ class JeopardyMC(Task):
 
     def format_request(self, instance: Instance) -> LMRequest:
         fewshot = self.get_fewshot()
+        is_mc = self.config.formatter is not None
         category = instance.metadata.get("category", "")
         choices = instance.choices or ()
 
         parts: list[str] = []
         for ex in fewshot:
             ex_category = ex.metadata.get("category", "")
-            ex_answer = ex.metadata.get("mc_answer", "")
-            parts.append(
-                _format_jeopardy_mc(ex_category, ex.question, ex.choices or (), ex_answer)
-            )
+            if is_mc:
+                ex_answer = ex.metadata.get("mc_answer", "")
+                parts.append(
+                    _format_jeopardy_mc(ex_category, ex.question, ex.choices or (), ex_answer)
+                )
+            else:
+                ex_answer = ex.metadata.get("gold_text", "")
+                parts.append(_format_jeopardy_rc(ex_category, ex.question, ex_answer))
 
-        parts.append(_format_jeopardy_mc(category, instance.question, choices))
+        if is_mc:
+            parts.append(_format_jeopardy_mc(category, instance.question, choices))
+            continuations = tuple(f" {chr(ord('A') + i)}" for i in range(len(choices)))
+        else:
+            parts.append(_format_jeopardy_rc(category, instance.question))
+            continuations = tuple(f" {c}" for c in choices)
+
         prompt = "\n\n".join(parts)
-
-        continuations = tuple(f" {chr(ord('A') + i)}" for i in range(len(choices)))
 
         return LMRequest(
             request_type=RequestType.LOGLIKELIHOOD,
@@ -235,4 +253,21 @@ class JeopardyMC(Task):
         )
 
 
+@register("jeopardy:mc")
+class JeopardyMC(_JeopardyMCBase):
+    data_source = DataSource(path="allenai/jeopardy_mc", split="test")
+    split = Split.TEST
+    formatter = MultipleChoiceFormatter()
+    fewshot_source = "jeopardy_mc_fixed"
+
+
+@register("jeopardy:rc")
+class JeopardyRC(_JeopardyMCBase):
+    data_source = DataSource(path="allenai/jeopardy_mc", split="test")
+    split = Split.TEST
+    metrics = (LogprobPerCharMCAccuracyMetric(),)
+    fewshot_source = "jeopardy_mc_fixed"
+
+
 register_variant("jeopardy:mc", "olmo3base")
+register_variant("jeopardy:rc", "olmo3base")

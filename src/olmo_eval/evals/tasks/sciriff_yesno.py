@@ -80,6 +80,13 @@ register_variant("sciriff_yesno", "rc")
 
 register_variant(
     "sciriff_yesno",
+    "olmes",
+    num_fewshot=5,
+    fewshot_seed=1234,
+)
+
+register_variant(
+    "sciriff_yesno",
     "olmo3base",
     num_fewshot=5,
     fewshot_seed=1234,

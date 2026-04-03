@@ -53,6 +53,11 @@ make_suite(
     ("coqa:mc:olmo3base",),
 )
 
+make_suite(
+    "coqa:rc:olmo3base",
+    ("coqa:rc:olmo3base",),
+)
+
 
 make_suite(
     "hellaswag:olmo3base",
@@ -69,6 +74,12 @@ make_suite(
 make_suite(
     "jeopardy:mc:olmo3base",
     ("jeopardy:mc::olmo3base",),
+)
+
+
+make_suite(
+    "jeopardy:rc:olmo3base",
+    ("jeopardy:rc:olmo3base",),
 )
 
 
@@ -93,6 +104,12 @@ make_suite(
 make_suite(
     "drop:mc:olmo3base",
     ("drop:mc:olmo3base",),
+)
+
+
+make_suite(
+    "drop:rc:olmo3base",
+    ("drop:rc:olmo3base",),
 )
 
 

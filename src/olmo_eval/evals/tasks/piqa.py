@@ -25,7 +25,7 @@ PIQA_FIXED_FEWSHOT = [
 
 @register("piqa")
 class PiQA(Task):
-    data_source = DataSource(path="piqa", split="validation")
+    data_source = DataSource(path="piqa", split="validation", revision="refs/convert/parquet")
     split = Split.VALIDATION
     metrics = (LogprobMCAccuracyMetric(),)
     num_fewshot = 0
@@ -148,3 +148,13 @@ register_variant(
     num_fewshot=5,
     fewshot_source="olmes_piqa_fixed",
 )
+
+register_variant(
+    "piqa",
+    "olmes",
+    num_fewshot=5,
+    limit=1000,
+    fewshot_source="olmes_piqa_fixed",
+)
+
+register_variant("piqa", "full", limit=None)

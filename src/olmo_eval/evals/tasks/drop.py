@@ -8,7 +8,7 @@ from itertools import permutations
 from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter
-from olmo_eval.common.metrics import AccuracyMetric, F1Metric, LogprobMCAccuracyMetric
+from olmo_eval.common.metrics import AccuracyMetric, F1Metric, LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric
 from olmo_eval.common.scorers import Scorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
@@ -356,6 +356,13 @@ def _format_drop_mc(
     return prompt
 
 
+def _format_drop_rc(passage: str, question: str, answer: str | None = None) -> str:
+    prompt = f"Passage: {passage}\nQuestion: {question}\nAnswer:"
+    if answer:
+        prompt += f" {answer}"
+    return prompt
+
+
 def _get_answers(doc: dict[str, Any]) -> list[tuple[str, ...]]:
     def _flatten_validated_answers(validated_answers: dict[str, Any]) -> list[dict[str, Any]]:
         valid_answers = []
@@ -551,3 +558,36 @@ register_variant(
     num_fewshot=5,
     fewshot_source="olmes_drop_mc_fixed",
 )
+
+
+@register("drop:rc")
+class DropRC(Drop):
+    data_source = DataSource(path="allenai/drop_mc", split="validation")
+    split = Split.VALIDATION
+    metrics = (LogprobPerCharMCAccuracyMetric(),)
+    primary_metric = LogprobPerCharMCAccuracyMetric()
+    num_fewshot = 5
+    fewshot_source = "olmes_drop_mc_fixed"
+
+    def format_request(self, instance: Instance) -> LMRequest:
+        fewshot = self.get_fewshot()
+
+        parts: list[str] = []
+        for ex in fewshot:
+            answer = ex.gold_answer or ex.metadata.get("gold_text", "")
+            passage = ex.metadata.get("passage", "")
+            parts.append(_format_drop_rc(passage, ex.question, answer))
+
+        passage = instance.metadata.get("passage", "")
+        parts.append(_format_drop_rc(passage, instance.question))
+        continuations = tuple(f" {c}" for c in (instance.choices or ()))
+
+        prompt = "\n\n".join(parts)
+        return LMRequest(
+            request_type=RequestType.LOGLIKELIHOOD,
+            prompt=prompt,
+            continuations=continuations,
+        )
+
+
+register_variant("drop:rc", "olmo3base")

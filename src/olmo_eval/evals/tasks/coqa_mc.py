@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.metrics import LogprobMCAccuracyMetric
+from olmo_eval.common.metrics import LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -67,3 +67,56 @@ class CoqaMC(Task):
 
 
 register_variant("coqa:mc", "olmo3base")
+
+
+@register("coqa:rc")
+class CoqaRC(Task):
+    data_source = DataSource(path="allenai/coqa_mc", split="validation")
+    split = Split.VALIDATION
+    metrics = (LogprobPerCharMCAccuracyMetric(),)
+    num_fewshot = 0
+    sampling_params = SamplingParams(temperature=0.0)
+
+    @property
+    def instances(self) -> Iterator[Instance]:
+        yield from self._load_instances_cached()
+
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
+        query_original = doc.get("query_original", "")
+        if not query_original:
+            return None
+
+        choices_data = doc.get("choices", {})
+        choices = choices_data.get("text", [])
+        if not choices:
+            return None
+
+        answer_key = doc.get("answerKey", "")
+        gold_idx = ord(answer_key) - ord("A") if answer_key else 0
+        gold_text = choices[gold_idx] if 0 <= gold_idx < len(choices) else ""
+
+        return Instance(
+            question=query_original,
+            choices=tuple(choices),
+            gold_answer=answer_key,
+            metadata={
+                "id": doc.get("id", f"coqa_rc_{index}"),
+                "index": index,
+                "dataset": "coqa_rc",
+                "gold_idx": gold_idx,
+                "gold_text": gold_text,
+            },
+        )
+
+    def format_request(self, instance: Instance) -> LMRequest:
+        choices = instance.choices or ()
+        continuations = tuple(f" {c}" for c in choices)
+
+        return LMRequest(
+            request_type=RequestType.LOGLIKELIHOOD,
+            prompt=instance.question,
+            continuations=continuations,
+        )
+
+
+register_variant("coqa:rc", "olmo3base")

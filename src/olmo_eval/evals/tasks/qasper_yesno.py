@@ -85,3 +85,10 @@ register_variant(
     num_fewshot=5,
     fewshot_seed=1234,
 )
+
+register_variant(
+    "qasper_yesno",
+    "olmes",
+    num_fewshot=5,
+    fewshot_seed=1234,
+)
