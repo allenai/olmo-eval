@@ -250,17 +250,15 @@ class SWEBenchExternalEval(ExternalEval):
 
         env = os.environ.copy()
 
+        cmd.extend(["--max_workers", str(swe_args.max_workers_eval)])
+
         if swe_args.use_modal:
             # Modal handles containers in the cloud
-            cmd.extend(["--modal", "true", "--parallelism", str(swe_args.max_workers_eval)])
-        else:
+            cmd.extend(["--modal", "true"])
+        elif "DOCKER_HOST" not in env:
             # Use podman service socket (started by Beaker launcher)
             # DOCKER_HOST should already be set by _build_install_cmd
-            cmd.extend(["--max_workers", str(swe_args.max_workers_eval)])
-            if "DOCKER_HOST" not in env:
-                logger.warning(
-                    "DOCKER_HOST not set. Scoring may fail without podman service or Modal."
-                )
+            logger.warning("DOCKER_HOST not set. Scoring may fail without podman service or Modal.")
 
         logger.info(f"[{self.name}] Running SWE-bench harness: {shlex.join(cmd)}")
         ok, output = await self._run_subprocess(
