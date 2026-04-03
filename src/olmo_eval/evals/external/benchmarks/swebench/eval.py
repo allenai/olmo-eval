@@ -237,7 +237,7 @@ class SWEBenchExternalEval(ExternalEval):
             "-c",
             "swebench.yaml",
             "-c",
-            f"agent.max_iterations={swe_args.max_turns}",
+            f"agent.step_limit={swe_args.max_turns}",
             "-c",
             f"model.model_kwargs.temperature={swe_args.temperature}",
         ]
