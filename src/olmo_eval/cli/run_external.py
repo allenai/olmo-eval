@@ -7,7 +7,12 @@ from typing import Any
 
 import click
 
-from olmo_eval.cli.utils import ConfiguredExternalEval, console, parse_key_value_args
+from olmo_eval.cli.utils import (
+    ConfiguredExternalEval,
+    console,
+    parse_key_value_args,
+    print_runtime_environment,
+)
 from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR
 
 
@@ -199,6 +204,9 @@ def run_external(
     from olmo_eval.common.logging import configure_logging
 
     configure_logging(level="INFO")
+
+    # Print runtime environment summary
+    print_runtime_environment()
 
     # Build provider config
     from olmo_eval.common.configs import get_provider_config
