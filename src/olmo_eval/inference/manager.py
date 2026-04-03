@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
@@ -29,6 +30,17 @@ def _create_server(config: ProviderConfig, gpu_ids: list[int] | None = None) -> 
         revision=config.revision,
         **dict(config.kwargs),
     )
+
+
+def _start_server_instance(
+    name: str,
+    server: VLLMServerProcess,
+    gpus: list[int],
+) -> tuple[VLLMServerProcess, str]:
+    """Start a single server instance (for parallel execution)."""
+    server._log(logging.INFO, f"Starting server {name!r} (gpus={gpus})")
+    url = server.start()
+    return server, url
 
 
 @dataclass
@@ -90,26 +102,42 @@ class InferenceManager:
                             f"available: {len(gpu_pool)}"
                         )
 
-                    servers: list[VLLMServerProcess | None] = []
-                    resolved_configs: list[ProviderConfig] = []
-
+                    # Pre-allocate GPUs and create all server instances first
+                    pending_servers: list[tuple[int, VLLMServerProcess, list[int]]] = []
                     for i in range(num_instances):
                         instance_gpus = [gpu_pool.pop(0) for _ in range(tensor_parallel)]
-
-                        logger.info(
-                            f"Starting server {name!r} instance {i + 1}/{num_instances} "
-                            f"(model={config.model}, gpus={instance_gpus})"
-                        )
-
                         server = _create_server(config=config, gpu_ids=instance_gpus)
-                        base_url = server.start()
-                        started_servers.append(server)  # Track immediately for cleanup
-                        servers.append(server)
+                        pending_servers.append((i, server, instance_gpus))
 
-                        resolved = replace(config, base_url=base_url, num_instances=1)
-                        resolved_configs.append(resolved)
+                    # Log using first server's owner
+                    pending_servers[0][1]._log(
+                        logging.INFO,
+                        f"Starting {num_instances} server(s) for {name!r} in parallel "
+                        f"(model={config.model})",
+                    )
 
-                        logger.info(f"Server {name!r} instance {i + 1} ready at {base_url}")
+                    # Start all servers in parallel
+                    servers: list[VLLMServerProcess | None] = [None] * num_instances
+                    resolved_configs: list[ProviderConfig] = [None] * num_instances  # type: ignore[list-item]
+
+                    with ThreadPoolExecutor(max_workers=num_instances) as executor:
+                        futures = {
+                            executor.submit(_start_server_instance, name, srv, gpus): idx
+                            for idx, srv, gpus in pending_servers
+                        }
+                        for future in as_completed(futures):
+                            idx = futures[future]
+                            server, base_url = future.result()
+                            started_servers.append(server)
+                            servers[idx] = server
+                            resolved_configs[idx] = replace(
+                                config, base_url=base_url, num_instances=1
+                            )
+                            server._log(
+                                logging.INFO,
+                                f"Server {name!r} instance {idx + 1}/{num_instances} "
+                                f"ready at {base_url}",
+                            )
 
                     self._servers[name] = ServerInfo(
                         name=name,
@@ -150,10 +178,12 @@ class InferenceManager:
             for i, server in enumerate(info.servers):
                 if server is not None:
                     try:
-                        logger.info(f"Stopping server {name!r} instance {i + 1}")
+                        server._log(logging.INFO, f"Stopping server {name!r} instance {i + 1}")
                         server.stop()
                     except Exception as e:
-                        logger.warning(f"Error stopping server {name!r} instance {i + 1}: {e}")
+                        server._log(
+                            logging.WARNING, f"Error stopping server {name!r} instance {i + 1}: {e}"
+                        )
 
         self._servers.clear()
         self._started = False
