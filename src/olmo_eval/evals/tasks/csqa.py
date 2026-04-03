@@ -206,7 +206,7 @@ def _format_rc(question: str, answer: str | None = None) -> str:
 
 register_variant("csqa", "rc")
 register_variant("csqa", "mc", formatter=MultipleChoiceFormatter())
-register_variant("csqa", "olmo3base", num_fewshot=5, fewshot_source="olmes_csqa_fixed", metrics=(LogprobUncondMCAccuracyMetric(),))
+register_variant("csqa", "olmo3base", num_fewshot=5, fewshot_source="olmes_csqa_fixed", metrics=(LogprobUncondMCAccuracyMetric(), BPBMetric()))
 register_variant(
     "csqa",
     "xlarge",
