@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import random
 from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter
-from olmo_eval.common.metrics import LogprobMCAccuracyMetric
+from olmo_eval.common.metrics import LogprobPerCharMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -27,7 +26,7 @@ PIQA_FIXED_FEWSHOT = [
 class PiQA(Task):
     data_source = DataSource(path="piqa", split="validation", revision="refs/convert/parquet")
     split = Split.VALIDATION
-    metrics = (LogprobMCAccuracyMetric(),)
+    metrics = (LogprobPerCharMCAccuracyMetric(),)
     num_fewshot = 0
     fewshot_split = "train"
     sampling_params = SamplingParams(temperature=0.0)
@@ -85,8 +84,7 @@ class PiQA(Task):
                 )
             )
         if self.config.num_fewshot and self.config.num_fewshot < len(instances):
-            rng = random.Random(self.config.fewshot_seed)
-            instances = rng.sample(instances, self.config.num_fewshot)
+            instances = instances[: self.config.num_fewshot]
         return instances
 
     def format_request(self, instance: Instance) -> LMRequest:

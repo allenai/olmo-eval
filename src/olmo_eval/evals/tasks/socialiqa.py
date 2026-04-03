@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter
-from olmo_eval.common.metrics import LogprobMCAccuracyMetric
+from olmo_eval.common.metrics import LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -169,10 +169,9 @@ register_variant("socialiqa", "mc", formatter=MultipleChoiceFormatter())
 register_variant(
     "socialiqa",
     "olmo3base",
-    data_source=DataSource(path="social_i_qa", split="train+validation", revision="refs/convert/parquet"),
     num_fewshot=5,
-    limit=10000,
     fewshot_source="olmes_socialiqa_fixed",
+    metrics=(LogprobPerCharMCAccuracyMetric(),),
 )
 register_variant(
     "socialiqa",
