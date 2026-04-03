@@ -223,6 +223,7 @@ class SWEBenchExternalEval(ExternalEval):
         if is_local:
             env["HOSTED_VLLM_API_KEY"] = "local"
             env["HOSTED_VLLM_API_BASE"] = provider_url
+            env["MSWEA_COST_TRACKING"] = "ignore_errors"
 
         logger.info(f"[{self.name}] Running mini-swe-agent: {shlex.join(cmd)}")
         # Reserve 20% of total timeout for the scoring phase
