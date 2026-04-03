@@ -145,6 +145,8 @@ class SWEBenchExternalEval(ExternalEval):
                 provider_url, model_name, is_local, swe_args, work_dir, container_runtime
             )
             logger.info(f"[{self.name}] Patch generation exit: {'ok' if gen_ok else 'failed'}")
+            if output_dir:
+                self._write_log_file(work_dir, "mini_swe_agent", gen_output)
 
             if not gen_ok or not preds_path.exists():
                 return self._error_result(
@@ -156,6 +158,8 @@ class SWEBenchExternalEval(ExternalEval):
                 swe_args, preds_path, run_id, work_dir, container_runtime
             )
             logger.info(f"[{self.name}] Scoring exit: {'ok' if score_ok else 'failed'}")
+            if output_dir:
+                self._write_log_file(work_dir, "swebench_scoring", score_output)
 
             all_output = gen_output + "\n" + score_output
             result = self._parse_results(work_dir, run_id, score_ok, all_output, start_time)
@@ -293,6 +297,14 @@ class SWEBenchExternalEval(ExternalEval):
 
         output = stdout.decode(errors="replace")
         return proc.returncode == 0, output
+
+    def _write_log_file(self, output_dir: Path, name: str, content: str) -> None:
+        """Write subprocess output to a log file."""
+        logs_dir = output_dir / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        log_path = logs_dir / f"{name}.log"
+        log_path.write_text(content)
+        logger.info(f"[{self.name}] Log saved to {log_path}")
 
     def _parse_results(
         self,
