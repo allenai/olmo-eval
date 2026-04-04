@@ -403,17 +403,20 @@ class SWEBenchExternalEval(ExternalEval):
                 duration_seconds=time.time() - start_time,
             )
 
-        resolved = data.get("resolved_instances", data.get("resolved", []))
-        unresolved = data.get("unresolved_instances", data.get("unresolved", []))
-        total = len(resolved) + len(unresolved)
-        resolve_rate = len(resolved) / total if total > 0 else 0.0
+        resolved_ids = data.get("resolved_ids", [])
+        unresolved_ids = data.get("unresolved_ids", [])
+        resolved_count = data.get("resolved", 0)
+        unresolved_count = data.get("unresolved", 0)
+
+        total = resolved_count + unresolved_count
+        resolve_rate = resolved_count / total if total > 0 else 0.0
 
         predictions = [
             {"native_id": iid, "instance_metrics": {"resolved": {"external": 1.0}}}
-            for iid in resolved
+            for iid in resolved_ids
         ] + [
             {"native_id": iid, "instance_metrics": {"resolved": {"external": 0.0}}}
-            for iid in unresolved
+            for iid in unresolved_ids
         ]
 
         return ExternalEvalResult(
@@ -421,10 +424,10 @@ class SWEBenchExternalEval(ExternalEval):
             success=score_ok and total > 0,
             metrics={
                 "resolve_rate": resolve_rate,
-                "resolved": float(len(resolved)),
+                "resolved": float(resolved_count),
                 "total": float(total),
             },
-            metadata={"run_id": run_id, "resolved_instances": resolved},
+            metadata={"run_id": run_id, "resolved_instances": resolved_ids},
             raw_output=raw_output,
             predictions=predictions if predictions else None,
         )
