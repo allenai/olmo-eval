@@ -161,9 +161,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         scored_queue: mp.Queue = ctx.Queue()
         total_gpus = self._get_gpu_count()
 
-        # Create shared dict for tracking worker init times
-        manager = ctx.Manager()
-        init_times = manager.dict()
+        # Queue for workers to report init times (replaces mp.Manager dict to
+        # avoid a long-lived server process that can zombie and hang on shutdown)
+        init_queue: mp.Queue = ctx.Queue()
 
         # Shuffle with seed for deterministic ordering (enables future checkpointing)
         rng = random.Random(self.shuffle_seed)
@@ -200,7 +200,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             provider_manager.add_poison_pills()
 
             # Start workers
-            workers = provider_manager.start(ctx, total_instances, init_times)
+            workers = provider_manager.start(ctx, total_instances, init_queue)
 
             # Prepare sandbox configs for scoring worker if configured
             sandbox_configs_list = None
@@ -267,7 +267,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
             # Wait for workers to report their init times (also checks for crashes)
             provider_init_seconds = wait_for_init_times(
-                init_times, num_inference_workers, workers=workers, result_queue=result_queue
+                init_queue, num_inference_workers, workers=workers, result_queue=result_queue
             )
 
             # Reset tracker start times now that workers are ready
@@ -293,7 +293,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             scorer_proc.join(timeout=30)
             if scorer_proc.is_alive():
                 scorer_proc.terminate()
-                scorer_proc.join()
+                scorer_proc.join(timeout=10)
 
             # Wait for all workers
             for worker in workers:
@@ -333,9 +333,8 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             if scorer_proc and scorer_proc.is_alive():
                 scorer_proc.terminate()
                 scorer_proc.join(timeout=5)
-            for q in [item_queue, result_queue, scoring_queue, scored_queue]:
+            for q in [item_queue, result_queue, scoring_queue, scored_queue, init_queue]:
                 q.cancel_join_thread()
-            manager.shutdown()
 
     def _prepare_tasks(
         self,

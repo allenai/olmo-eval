@@ -29,7 +29,7 @@ def inference_worker(
     result_queue: mp.Queue,
     harness_config_dict: dict[str, Any],
     total_instances: int,
-    init_times: dict[str, float] | None = None,
+    init_queue: mp.Queue | None = None,
     output_dir: str | None = None,
     num_workers: int = 1,
 ) -> None:
@@ -46,7 +46,7 @@ def inference_worker(
         result_queue: Queue to put ResultItems.
         harness_config_dict: Serialized HarnessConfig.
         total_instances: Total number of instances across all workers.
-        init_times: Optional shared dict for tracking initialization times.
+        init_queue: Optional queue for reporting initialization times.
         output_dir: Output directory for persisting logs (e.g., vLLM server logs).
         num_workers: Number of parallel workers sharing the work.
     """
@@ -139,8 +139,8 @@ def inference_worker(
         init_time = time.time() - init_start
         worker_logger.info(f"Provider ready ({init_time:.1f}s)")
 
-        if init_times is not None:
-            init_times[worker_id] = init_time
+        if init_queue is not None:
+            init_queue.put((worker_id, init_time))
 
         try:
             # Configure agent trace output if using openai_agents backend

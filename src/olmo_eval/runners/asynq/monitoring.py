@@ -141,7 +141,7 @@ def wait_for_workers_ready(
 
 
 def wait_for_init_times(
-    init_times: Any,
+    init_queue: mp.Queue,
     num_workers: int,
     workers: list[mp.process.BaseProcess] | None = None,
     result_queue: mp.Queue | None = None,
@@ -151,7 +151,7 @@ def wait_for_init_times(
     """Wait for all workers to report their initialization times.
 
     Args:
-        init_times: Shared manager dict that workers write their init times to.
+        init_queue: Queue that workers put (worker_id, init_time) tuples on.
         num_workers: Expected number of workers.
         workers: Optional list of worker processes to check for crashes.
         result_queue: Optional queue to check for fatal error markers.
@@ -164,11 +164,23 @@ def wait_for_init_times(
     Raises:
         RuntimeError: If a worker crashes during initialization.
     """
+    collected: dict[str, float] = {}
     start_time = time.time()
 
     while time.time() - start_time < timeout:
-        if len(init_times) >= num_workers:
-            return dict(init_times)
+        if len(collected) >= num_workers:
+            return collected
+
+        # Drain all available init times from the queue
+        while True:
+            try:
+                worker_id, init_time = init_queue.get_nowait()
+                collected[worker_id] = init_time
+            except queue.Empty:
+                break
+
+        if len(collected) >= num_workers:
+            return collected
 
         # Check for worker crashes if workers and queue are provided
         if workers is not None and result_queue is not None:
@@ -177,8 +189,10 @@ def wait_for_init_times(
         time.sleep(check_interval)
 
     # Return what we have even if incomplete
-    logger.warning(f"Timed out waiting for init times: got {len(init_times)}/{num_workers} workers")
-    return dict(init_times)
+    logger.warning(
+        f"Timed out waiting for init times: got {len(collected)}/{num_workers} workers"
+    )
+    return collected
 
 
 def wait_for_scorer_ready(
