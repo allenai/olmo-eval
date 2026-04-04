@@ -331,6 +331,8 @@ class LogprobMCAccuracyMetric(Metric):
             logprob_sums = [
                 sum(lp["logprob"] for lp in (o.logprobs or [])) for o in response.outputs
             ]
+            if not logprob_sums:
+                continue
             if logprob_sums.index(max(logprob_sums)) == gold_idx:
                 correct += 1
         return correct / len(responses)
@@ -374,6 +376,8 @@ class LogprobUncondMCAccuracyMetric(Metric):
                 cond_lp = sum(lp["logprob"] for lp in (cond.logprobs or []))
                 uncond_lp = sum(lp["logprob"] for lp in (uncond.logprobs or []))
                 scores.append(cond_lp - uncond_lp)
+            if not scores:
+                continue
             if scores.index(max(scores)) == gold_idx:
                 correct += 1
         return correct / len(responses)
@@ -407,6 +411,8 @@ class LogprobPerCharMCAccuracyMetric(Metric):
                 total_logprob = sum(lp["logprob"] for lp in (o.logprobs or []))
                 num_chars = max(len(o.text) if o.text else 0, 1)
                 logprob_per_char.append(total_logprob / num_chars)
+            if not logprob_per_char:
+                continue
             if logprob_per_char.index(max(logprob_per_char)) == gold_idx:
                 correct += 1
         return correct / len(responses)
@@ -439,6 +445,8 @@ class LogprobPerTokenMCAccuracyMetric(Metric):
                 total_logprob = sum(lp["logprob"] for lp in (o.logprobs or []))
                 num_tokens = max(len(o.logprobs) if o.logprobs else 0, 1)
                 logprob_per_token.append(total_logprob / num_tokens)
+            if not logprob_per_token:
+                continue
             if logprob_per_token.index(max(logprob_per_token)) == gold_idx:
                 correct += 1
         return correct / len(responses)
