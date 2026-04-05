@@ -5,7 +5,6 @@ Aggregate suites for the OLMo Base evaluation regime, organized by task type
 """
 
 import olmo_eval.evals.suites.mmlu  # noqa: F401 – register MMLU suites
-import olmo_eval.evals.suites.olmo3base  # noqa: F401 – register OLMo3 base suites
 from olmo_eval.evals.suites.registry import (
     AggregationStrategy,
     Suite,
@@ -13,11 +12,33 @@ from olmo_eval.evals.suites.registry import (
     make_suite,
     register,
 )
+from olmo_eval.evals.tasks.basic_skills import BASIC_SKILLS_SUBTASKS
 from olmo_eval.evals.tasks.minerva_math import MATH_SUBSETS
+from olmo_eval.evals.tasks.multilingual_mbpp import MULTILINGUAL_MBPP_LANGUAGES
 
 # =============================================================================
 # Helper sub-suites
 # =============================================================================
+
+make_suite(
+    "basic_skills:rc:olmo3base",
+    tuple(f"basic_skills_{s}:rc::olmo3base" for s in BASIC_SKILLS_SUBTASKS),
+)
+
+make_suite(
+    "basic_skills:bpb:olmo3base",
+    tuple(f"basic_skills_{s}:bpb::olmo3base" for s in BASIC_SKILLS_SUBTASKS),
+)
+
+make_suite(
+    "minerva_math:bpb:olmo3base",
+    tuple(f"minerva_math_{t}:bpb::olmo3base" for t in MATH_SUBSETS),
+)
+
+make_suite(
+    "mt_mbpp:bpb:olmo3base",
+    tuple(f"mt_mbpp_{lang}:bpb::olmo3base" for lang in MULTILINGUAL_MBPP_LANGUAGES),
+)
 
 _GSM_SYMB = make_suite(
     "gsm_symb:olmo3base",
