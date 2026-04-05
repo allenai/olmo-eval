@@ -89,7 +89,8 @@ def build_single_model_metrics(
     if "suites" in results:
         for suite_name, suite_data in results["suites"].items():
             metrics = suite_data.get("metrics", {})
-            primary = get_primary_metric(metrics)
+            preferred = suite_data.get("primary_metric")
+            primary = get_primary_metric(metrics, preferred)
             if primary:
                 metric_scorer, score = primary
                 summary[suite_name] = ScoreSummary(metric=metric_scorer, score=score)
@@ -179,7 +180,8 @@ def build_multi_model_metrics(
         if "suites" in model_data:
             for suite_name, suite_data in model_data["suites"].items():
                 metrics = suite_data.get("metrics", {})
-                primary = get_primary_metric(metrics)
+                preferred = suite_data.get("primary_metric")
+                primary = get_primary_metric(metrics, preferred)
                 if primary:
                     metric_scorer, score = primary
                     summary[model_name][suite_name] = ScoreSummary(
