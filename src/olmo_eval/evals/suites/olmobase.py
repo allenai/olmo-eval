@@ -38,6 +38,11 @@ _ARC_RC = make_suite(
     ("arc_challenge:rc::olmo3base", "arc_easy:rc::olmo3base"),
 )
 
+_ARC_MC = make_suite(
+    "arc:mc::olmo3base",
+    ("arc_challenge:mc::olmo3base", "arc_easy:mc::olmo3base"),
+)
+
 _ARC_BPB = make_suite(
     "arc:bpb::olmo3base",
     ("arc_challenge:bpb::olmo3base", "arc_easy:bpb::olmo3base"),
@@ -51,7 +56,7 @@ register(
     Suite(
         name="olmobase:mcqa_stem",
         tasks=(
-            get_suite("arc:mc:olmo3base"),
+            get_suite("arc:mc::olmo3base"),
             get_suite("mmlu:stem:mc::olmo3base"),
             "medmcqa:mc::olmo3base",
             "medqa_en:mc::olmo3base",
