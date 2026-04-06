@@ -197,6 +197,17 @@ skip_covered = false
 directory = "htmlcov"
 
 
+[tool.ty.analysis]
+# Optional dependencies that may not be installed in every environment
+allowed-unresolved-imports = [
+    "vllm.**",
+    "torch.**",
+    "math_verify.**",
+    "openai.**",
+    "smart_open.**",
+    "google.cloud.**",
+]
+
 [tool.gantry]
 gh_token_secret = "GITHUB_TOKEN"
 log_level = "warning"
