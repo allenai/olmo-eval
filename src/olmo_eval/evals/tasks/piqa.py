@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from collections.abc import Iterator
 from typing import Any
 
@@ -7,7 +8,7 @@ from olmo_eval.common.formatters import MultipleChoiceFormatter
 from olmo_eval.common.metrics import BPBMetric, LogprobPerTokenMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
-from olmo_eval.evals.tasks.common import Task, register, register_variant
+from olmo_eval.evals.tasks.common import Task, register, register_regime, register_variant
 
 # fmt: off
 PIQA_FIXED_FEWSHOT = [
@@ -33,7 +34,19 @@ class PiQA(Task):
 
     @property
     def instances(self) -> Iterator[Instance]:
-        yield from self._load_instances_cached()
+        if self.config.split == Split.ALL:
+            if self._instances_cache is None:
+                all_instances: list[Instance] = []
+                for split in ("test", "validation", "train"):
+                    all_instances.extend(self._load_instances(split=split))
+                if self.config.limit and len(all_instances) > self.config.limit:
+                    all_instances = random.Random(1234).sample(
+                        all_instances, self.config.limit
+                    )
+                self._instances_cache = all_instances
+            yield from self._instances_cache
+        else:
+            yield from self._load_instances_cached()
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         goal = doc.get("goal", "")
@@ -145,6 +158,18 @@ register_variant(
     "olmo3base",
     num_fewshot=5,
     fewshot_source="olmes_piqa_fixed",
+    split=Split.ALL,
+    limit=10_000,
+)
+# Register olmo3base as a regime (without metrics) so that combining with other variants
+# like mc (e.g. piqa:mc::olmo3base) preserves the variant's metrics.
+register_regime(
+    "piqa",
+    "olmo3base",
+    num_fewshot=5,
+    fewshot_source="olmes_piqa_fixed",
+    split=Split.ALL,
+    limit=10_000,
 )
 
 register_variant(
