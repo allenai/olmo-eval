@@ -198,13 +198,13 @@ class timeout:
 def minerva_is_equiv(x1: str, x2: str) -> bool:
     """
     x1 and x2 are normalized latex string.
-    Uses sympy parse_latex with backend="lark" (no antlr4 dependency; compatible with omegaconf).
+    Uses sympy parse_latex with default (antlr4) backend for parity with oe-eval-internal.
     """
     try:
         with timeout(seconds=5):
             try:
-                parsed_x1 = parse_latex(x1, backend="lark")
-                parsed_x2 = parse_latex(x2, backend="lark")
+                parsed_x1 = parse_latex(x1)
+                parsed_x2 = parse_latex(x2)
             except (
                 sympy.parsing.latex.errors.LaTeXParsingError,
                 sympy.SympifyError,
