@@ -301,15 +301,12 @@ class SWEBenchExternalEval(ExternalEval):
 
         env = os.environ.copy()
 
+        cmd.extend(["--max_workers", str(swe_args.max_workers_eval)])
+
         if swe_args.use_modal:
-            cmd.extend(["--parallelism", str(swe_args.max_workers_eval)])
             cmd.extend(["--modal", "true"])
-        else:
-            cmd.extend(["--max_workers", str(swe_args.max_workers_eval)])
-            if "DOCKER_HOST" not in env:
-                logger.warning(
-                    "DOCKER_HOST not set. Scoring may fail without podman service or Modal."
-                )
+        elif "DOCKER_HOST" not in env:
+            logger.warning("DOCKER_HOST not set. Scoring may fail without podman service or Modal.")
 
         logger.info(f"[{self.name}] Running SWE-bench harness: {shlex.join(cmd)}")
         ok, output = await self._run_subprocess(

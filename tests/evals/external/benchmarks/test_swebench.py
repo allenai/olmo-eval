@@ -196,12 +196,11 @@ async def test_run_scoring_uses_max_workers_without_modal(tmp_path, monkeypatch)
     assert cmd[:3] == [sys.executable, "-m", "swebench.harness.run_evaluation"]
     assert "--max_workers" in cmd
     assert cmd[cmd.index("--max_workers") + 1] == "7"
-    assert "--parallelism" not in cmd
     assert "--modal" not in cmd
 
 
 @pytest.mark.anyio
-async def test_run_scoring_uses_parallelism_with_modal(tmp_path, monkeypatch):
+async def test_run_scoring_uses_max_workers_with_modal(tmp_path, monkeypatch):
     eval_obj = SWEBenchExternalEval()
     captured: dict[str, object] = {}
 
@@ -228,8 +227,7 @@ async def test_run_scoring_uses_parallelism_with_modal(tmp_path, monkeypatch):
 
     cmd = captured["cmd"]
     assert isinstance(cmd, list)
-    assert "--parallelism" in cmd
-    assert cmd[cmd.index("--parallelism") + 1] == "7"
+    assert "--max_workers" in cmd
+    assert cmd[cmd.index("--max_workers") + 1] == "7"
     assert "--modal" in cmd
     assert cmd[cmd.index("--modal") + 1] == "true"
-    assert "--max_workers" not in cmd
