@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.formatters import PPLFormatter
 from olmo_eval.common.metrics import BPBMetric, LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
@@ -125,13 +124,10 @@ register_variant("coqa:rc", "olmo3base")
 
 @register("coqa:bpb")
 class CoqaBPB(CoqaRC):
-    formatter = PPLFormatter()
+    # Send all choices as continuations (not just gold) so that vLLM prefix-sharing
+    # produces identical logprobs to the RC variant. BPBMetric selects the gold
+    # choice via gold_idx.
     metrics = (BPBMetric(),)
-
-    def format_request(self, instance: Instance) -> LMRequest:
-        if self.config.formatter is not None:
-            return self.config.formatter.format(instance, self.get_fewshot())
-        return super().format_request(instance)
 
 
 register_variant("coqa:bpb", "olmo3base")
