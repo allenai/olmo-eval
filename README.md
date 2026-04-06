@@ -344,6 +344,31 @@ olmo-eval metrics plot -e experiment_123 --stats-only
 
 When using the `db` reporter, metrics are stored in a PostgreSQL database (default name: `olmo_eval_metrics`). You must configure your own database connection using the `OLMO_EVAL_DB_*` environment variables (see [Database Configuration](#database-configuration)).
 
+#### Auxiliary Providers and Local Judge Models
+
+Some tasks use LLM-as-judge scoring, where a separate model evaluates responses. The `auxiliary_providers` configuration lets you specify additional inference providers for scoring/judging. By convention, tasks that need a judge model look for a provider named `judge`.
+
+**Local example with `olmo-eval run`:**
+
+```bash
+olmo-eval run -m Qwen/Qwen3-8B -t simpleqa:judge \
+    --harness dr_tulu \
+    -o auxiliary_providers.judge.kind=vllm_server \
+    -o auxiliary_providers.judge.model=Qwen/Qwen3-8B \
+    -o auxiliary_providers.judge.num_instances=1 \
+    -o scoring_concurrency=8
+```
+
+**Key configuration options:**
+
+| Option | Description |
+|--------|-------------|
+| `auxiliary_providers.judge.kind` | Provider type: `vllm_server`, `litellm`, etc. |
+| `auxiliary_providers.judge.model` | Model to use for judging |
+| `auxiliary_providers.judge.num_instances` | Number of parallel vLLM instances |
+| `auxiliary_providers.judge.base_url` | URL for external servers (when not spawning locally) |
+| `scoring_concurrency` | Number of concurrent scoring requests |
+
 #### Defining Tools
 
 Tools combine schema (for the LLM) and implementation (for execution) in a single definition:
@@ -1014,6 +1039,33 @@ olmo-eval beaker launch -n "external-eval" \
     -m llama3.1-8b \
     -A subset=test \
     --cluster h100
+```
+
+### Advanced Usage
+
+#### Local Judge Models
+
+For tasks that use LLM-as-judge scoring (like `simpleqa:judge`), you can run a local judge model alongside the main model. Allocate enough GPUs to run both models (e.g., 6 GPUs total: 4 for the main model, 2 for the judge).
+
+```bash
+olmo-eval beaker launch \
+    --harness dr_tulu \
+    -o provider.max_model_len=16384 -o provider.num_instances=4 \
+    -o 'metrics.reporters=[file]' \
+    -o "metrics.collect_gpu=true" \
+    -o 'provider.kwargs.timeout=300' \
+    -o auxiliary_providers.judge.kind=vllm_server \
+    -o auxiliary_providers.judge.model=Qwen/Qwen3-8B \
+    -o auxiliary_providers.judge.num_instances=2 \
+    -o scoring_concurrency=8 \
+    -m Qwen/Qwen3-8B \
+    -t "simpleqa:judge@urgent" \
+    -o limit=100 \
+    -w "ai2/olmo-eval-debug" \
+    -B "ai2/oe-base" \
+    --cluster h100 \
+    --gpus 6 \
+    --group olmo-eval-local-judge-2 -y
 ```
 
 ### Per-Task Priorities
