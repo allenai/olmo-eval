@@ -340,14 +340,14 @@ class ARCChallenge(_ARCBase):
     _dataset_name = "arc_challenge"
 
 
-register_variant("arc_easy", "rc")
+register_variant("arc_easy", "rc", metrics=(LogprobPerCharMCAccuracyMetric(),))
 register_variant("arc_easy", "mc", formatter=MultipleChoiceFormatter())
 register_variant("arc_easy", "bpb", formatter=PPLFormatter(), metrics=(BPBMetric(),))
-register_variant("arc_easy", "olmo3base", num_fewshot=5, fewshot_source="olmes_arc_easy_fixed", split=Split.ALL, metrics=(LogprobPerCharMCAccuracyMetric(),))
+register_variant("arc_easy", "olmo3base", num_fewshot=5, fewshot_source="olmes_arc_easy_fixed", split=Split.TEST, metrics=(LogprobPerCharMCAccuracyMetric(),))
 # Register olmo3base as a regime (without metrics) so that combining with other variants
 # like bpb (e.g. arc_easy:bpb::olmo3base) preserves the variant's metrics.
 register_regime(
-    "arc_easy", "olmo3base", num_fewshot=5, fewshot_source="olmes_arc_easy_fixed", split=Split.ALL
+    "arc_easy", "olmo3base", num_fewshot=5, fewshot_source="olmes_arc_easy_fixed", split=Split.TEST
 )
 register_variant("arc_easy", "olmes", num_fewshot=5, fewshot_source="olmes_arc_easy_fixed")
 register_variant("arc_easy", "full")
