@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter
-from olmo_eval.common.metrics import BPBMetric, LogprobPerTokenMCAccuracyMetric
+from olmo_eval.common.metrics import BPBMetric, LogprobPerCharMCAccuracyMetric, LogprobPerTokenMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_regime, register_variant
@@ -160,8 +160,8 @@ register_variant(
     "olmo3base",
     num_fewshot=5,
     fewshot_source="olmes_piqa_fixed",
-    split=Split.ALL,
-    limit=10_000,
+    split=Split.VALIDATION,
+    metrics=(LogprobPerCharMCAccuracyMetric(),),
 )
 # Register olmo3base as a regime (without metrics) so that combining with other variants
 # like mc (e.g. piqa:mc::olmo3base) preserves the variant's metrics.
@@ -170,8 +170,7 @@ register_regime(
     "olmo3base",
     num_fewshot=5,
     fewshot_source="olmes_piqa_fixed",
-    split=Split.ALL,
-    limit=10_000,
+    split=Split.VALIDATION,
 )
 
 register_variant(
