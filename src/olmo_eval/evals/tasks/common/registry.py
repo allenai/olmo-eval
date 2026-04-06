@@ -296,6 +296,9 @@ def get_task(spec: str, config_overrides: dict[str, Any] | None = None) -> Task:
         task_name = parts[0]
         variants = parts[1:] if len(parts) > 1 else []
 
+    # Filter empty variants (from :: separators in task specs like "task:rc::regime")
+    variants = [v for v in variants if v]
+
     if task_name not in _tasks:
         available = ", ".join(sorted(_tasks.keys()))
         raise KeyError(f"Unknown task '{task_name}'. Available: {available}")

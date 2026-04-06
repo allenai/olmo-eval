@@ -719,6 +719,10 @@ class BeakerLauncher:
 
         # Install main package (without vllm extra only when using isolated venv)
         main_extras = [e for e in extras if e != "vllm"] if use_isolated_vllm_venv else list(extras)
+
+        # vllm_server mode needs HuggingFace tokenizer for accurate logprobs boundary
+        if use_isolated_vllm_venv and "hf" not in main_extras:
+            main_extras.append("hf")
         if main_extras:
             extras_str = ",".join(main_extras)
             install_cmd = f"uv pip install -e '.[{extras_str}]' -c {constraints}"

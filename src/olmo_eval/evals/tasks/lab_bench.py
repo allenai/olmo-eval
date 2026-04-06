@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from olmo_eval.common.formatters import MCQAChatFormatter, MultipleChoiceFormatter, PPLFormatter
-from olmo_eval.common.metrics import AccuracyMetric, BPBMetric, Metric
+from olmo_eval.common.metrics import AccuracyMetric, BPBMetric, LogprobMCAccuracyMetric, Metric
 from olmo_eval.common.scorers import MultipleChoiceScorer, Scorer
 from olmo_eval.common.types import (
     Instance,
@@ -89,15 +89,16 @@ class CoverageMetric(Metric):
         return committed / len(responses)
 
 
+def _format_lab_bench_rc(question: str, answer: str | None = None) -> str:
+    prompt = f"Question: {question}\nAnswer:"
+    if answer:
+        prompt += f" {answer}"
+    return prompt
+
+
 class LabBenchTask(Task):
-    """Base class for text-only LAB-Bench subtasks.
-
-    Handles the shared pattern: combine `ideal` + `distractors` into shuffled
-    choices, extract letter answers from model output.
-    """
-
-    # LAB-Bench only publishes a "train" split on HuggingFace
     split = Split.TRAIN
+    fewshot_split = "train"
 
     def __init_subclass__(cls, subset: str | None = None, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -113,6 +114,13 @@ class LabBenchTask(Task):
         register(name)(cls)
         register_variant(name, "mc", formatter=MultipleChoiceFormatter(), metrics=_DEFAULT_METRICS)
         register_variant(name, "bpb", formatter=PPLFormatter(), metrics=(BPBMetric(),))
+        register_variant(
+            name,
+            "olmo3base",
+            formatter=None,
+            num_fewshot=3,
+            metrics=(LogprobMCAccuracyMetric(),),
+        )
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -168,14 +176,24 @@ class LabBenchTask(Task):
     def request_type(self) -> RequestType:
         if self.config.formatter is not None:
             return self.config.formatter.request_type
-        return RequestType.CHAT
+        return RequestType.LOGLIKELIHOOD
 
     def format_request(self, instance: Instance) -> LMRequest:
         if self.config.formatter is not None:
             return self.config.formatter.format(instance, self.get_fewshot())
+        # RC format (cloze): "Question: {q}\nAnswer:" with choice text continuations
+        fewshot = self.get_fewshot()
+        parts: list[str] = []
+        for ex in fewshot:
+            answer = ex.metadata.get("gold_text", ex.gold_answer or "")
+            parts.append(_format_lab_bench_rc(ex.question, answer))
+        parts.append(_format_lab_bench_rc(instance.question))
+        continuations = tuple(f" {c}" for c in (instance.choices or ()))
+        prompt = "\n\n".join(parts)
         return LMRequest(
-            request_type=RequestType.CHAT,
-            messages=({"role": "user", "content": instance.question},),
+            request_type=RequestType.LOGLIKELIHOOD,
+            prompt=prompt,
+            continuations=continuations,
         )
 
     def _extract_answers(self, responses: Sequence[Response]) -> None:
@@ -243,11 +261,14 @@ class CloningScenarios(LabBenchTask, subset="CloningScenarios"): ...
 
 
 class ProtocolQA(LabBenchTask, subset="ProtocolQA"):
-    """Prepends the protocol text to the question."""
+    """Prepends the protocol text to the question (chat/MC modes only)."""
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
-        protocol = doc.get("protocol", "")
-        if protocol:
-            question = doc.get("question", "")
-            doc = {**doc, "question": f"Protocol:\n{protocol}\n\nQuestion: {question}"}
+        # Only prepend protocol for chat/MC evaluation; RC mode (formatter=None)
+        # matches the old oe-eval-internal behaviour which uses the bare question.
+        if self.config.formatter is not None:
+            protocol = doc.get("protocol", "")
+            if protocol:
+                question = doc.get("question", "")
+                doc = {**doc, "question": f"Protocol:\n{protocol}\n\nQuestion: {question}"}
         return super().process_doc(doc, index)

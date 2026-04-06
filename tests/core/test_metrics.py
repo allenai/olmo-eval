@@ -4,7 +4,12 @@ import math
 
 import pytest
 
-from olmo_eval.common.metrics import AccuracyMetric, BPBMetric
+from olmo_eval.common.metrics import (
+    AccuracyMetric,
+    BPBMetric,
+    LogprobMCAccuracyMetric,
+    LogprobPerCharMCAccuracyMetric,
+)
 from olmo_eval.common.scorers import MultipleChoiceScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
 
@@ -246,3 +251,130 @@ class TestBPBMetric:
         bpb = metric.compute(responses)
 
         assert bpb == 0.0
+
+
+class TestLogprobMCAccuracyMetric:
+    """Tests for LogprobMCAccuracyMetric."""
+
+    def _make_output(self, text: str, logprobs: list[float] | None) -> LMOutput:
+        if logprobs is None:
+            return LMOutput(text=text, logprobs=None)
+        entries = [{"token": f"t{i}", "logprob": lp} for i, lp in enumerate(logprobs)]
+        return LMOutput(text=text, logprobs=entries)
+
+    def _make_response(self, outputs: list[LMOutput], gold_idx: int) -> Response:
+        return Response(
+            instance=Instance(
+                question="Q",
+                gold_answer="A",
+                choices=("a", "b", "c"),
+                metadata={"gold_idx": gold_idx},
+            ),
+            request=LMRequest(request_type=RequestType.LOGLIKELIHOOD, prompt="Q"),
+            outputs=outputs,
+        )
+
+    def test_selects_highest_logprob(self):
+        metric = LogprobMCAccuracyMetric()
+        outputs = [
+            self._make_output("a", [-5.0, -5.0]),
+            self._make_output("b", [-1.0, -1.0]),
+            self._make_output("c", [-3.0, -3.0]),
+        ]
+        responses = [self._make_response(outputs, gold_idx=1)]
+        assert metric.compute(responses) == 1.0
+
+    def test_incorrect_prediction(self):
+        metric = LogprobMCAccuracyMetric()
+        outputs = [
+            self._make_output("a", [-1.0]),
+            self._make_output("b", [-5.0]),
+            self._make_output("c", [-3.0]),
+        ]
+        responses = [self._make_response(outputs, gold_idx=1)]
+        assert metric.compute(responses) == 0.0
+
+    def test_missing_logprobs_treated_as_neg_inf(self):
+        """Outputs with missing logprobs should score -inf, never winning."""
+        metric = LogprobMCAccuracyMetric()
+        outputs = [
+            self._make_output("a", None),
+            self._make_output("b", [-1.0]),
+            self._make_output("c", None),
+        ]
+        responses = [self._make_response(outputs, gold_idx=1)]
+        assert metric.compute(responses) == 1.0
+
+    def test_empty_logprobs_treated_as_neg_inf(self):
+        """Outputs with empty logprobs list should score -inf."""
+        metric = LogprobMCAccuracyMetric()
+        outputs = [
+            self._make_output("a", []),
+            self._make_output("b", [-2.0]),
+            self._make_output("c", []),
+        ]
+        responses = [self._make_response(outputs, gold_idx=1)]
+        assert metric.compute(responses) == 1.0
+
+    def test_empty_responses(self):
+        metric = LogprobMCAccuracyMetric()
+        assert metric.compute([]) == 0.0
+
+    def test_missing_gold_idx_skipped(self):
+        metric = LogprobMCAccuracyMetric()
+        response = Response(
+            instance=Instance(question="Q", gold_answer="A", metadata={}),
+            request=LMRequest(request_type=RequestType.LOGLIKELIHOOD, prompt="Q"),
+            outputs=[self._make_output("a", [-1.0])],
+        )
+        assert metric.compute([response]) == 0.0
+
+
+class TestLogprobPerCharMCAccuracyMetric:
+    """Tests for LogprobPerCharMCAccuracyMetric."""
+
+    def _make_output(self, text: str, logprobs: list[float] | None) -> LMOutput:
+        if logprobs is None:
+            return LMOutput(text=text, logprobs=None)
+        entries = [{"token": f"t{i}", "logprob": lp} for i, lp in enumerate(logprobs)]
+        return LMOutput(text=text, logprobs=entries)
+
+    def _make_response(self, outputs: list[LMOutput], gold_idx: int) -> Response:
+        return Response(
+            instance=Instance(
+                question="Q",
+                gold_answer="A",
+                choices=("a", "bb", "ccc"),
+                metadata={"gold_idx": gold_idx},
+            ),
+            request=LMRequest(request_type=RequestType.LOGLIKELIHOOD, prompt="Q"),
+            outputs=outputs,
+        )
+
+    def test_normalizes_by_char_length(self):
+        """Shorter text with same total logprob should have higher per-char score."""
+        metric = LogprobPerCharMCAccuracyMetric()
+        # "a" (1 char): total=-2, per_char=-2/1=-2
+        # "bb" (2 chars): total=-2, per_char=-2/2=-1 (highest)
+        # "ccc" (3 chars): total=-6, per_char=-6/3=-2
+        outputs = [
+            self._make_output("a", [-2.0]),
+            self._make_output("bb", [-1.0, -1.0]),
+            self._make_output("ccc", [-2.0, -2.0, -2.0]),
+        ]
+        responses = [self._make_response(outputs, gold_idx=1)]
+        assert metric.compute(responses) == 1.0
+
+    def test_missing_logprobs_treated_as_neg_inf(self):
+        metric = LogprobPerCharMCAccuracyMetric()
+        outputs = [
+            self._make_output("a", None),
+            self._make_output("bb", [-1.0]),
+            self._make_output("ccc", None),
+        ]
+        responses = [self._make_response(outputs, gold_idx=1)]
+        assert metric.compute(responses) == 1.0
+
+    def test_empty_responses(self):
+        metric = LogprobPerCharMCAccuracyMetric()
+        assert metric.compute([]) == 0.0

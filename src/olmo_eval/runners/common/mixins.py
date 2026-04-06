@@ -106,6 +106,8 @@ class RunnerResultsMixin:
             all_valid_variants = task_variants | task_regimes
 
             for variant in variants:
+                if not variant:
+                    continue
                 if variant not in all_valid_variants:
                     available_list = sorted(all_valid_variants)
                     if available_list:
