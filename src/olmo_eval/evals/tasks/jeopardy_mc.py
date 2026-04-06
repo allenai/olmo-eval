@@ -281,8 +281,4 @@ class JeopardyBPB(JeopardyRC):
     metrics = (BPBMetric(),)
 
 
-register_variant(
-    "jeopardy:bpb",
-    "olmo3base",
-    data_source=DataSource(path="allenai/jeopardy-gen2mc", split="test"),
-)
+register_variant("jeopardy:bpb", "olmo3base")
