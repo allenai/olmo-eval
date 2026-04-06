@@ -450,9 +450,14 @@ class Drop(Task):
         )
 
     def _build_fewshot(self) -> list[Instance]:
-        if self.config.fewshot_source == "olmes_drop_fixed":
+        fewshot_source = self.config.fewshot_source
+        # In gen mode (base Drop class, no formatter), use generation-format fewshot
+        # even if MC source was specified by the suite variant.
+        if fewshot_source == "olmes_drop_mc_fixed" and type(self) is Drop and self.config.formatter is None:
+            fewshot_source = "olmes_drop_fixed"
+        if fewshot_source == "olmes_drop_fixed":
             return self._build_fixed_fewshot()
-        if self.config.fewshot_source == "olmes_drop_mc_fixed":
+        if fewshot_source == "olmes_drop_mc_fixed":
             return self._build_mc_fixed_fewshot()
         return super()._build_fewshot()
 
