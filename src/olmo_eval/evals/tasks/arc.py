@@ -343,11 +343,11 @@ class ARCChallenge(_ARCBase):
 register_variant("arc_easy", "rc")
 register_variant("arc_easy", "mc", formatter=MultipleChoiceFormatter())
 register_variant("arc_easy", "bpb", formatter=PPLFormatter(), metrics=(BPBMetric(),))
-register_variant("arc_easy", "olmo3base", num_fewshot=5, fewshot_source="olmes_arc_easy_fixed", split=Split.TEST, metrics=(LogprobPerCharMCAccuracyMetric(),))
+register_variant("arc_easy", "olmo3base", num_fewshot=5, fewshot_source="olmes_arc_easy_fixed", split=Split.ALL, metrics=(LogprobPerCharMCAccuracyMetric(),))
 # Register olmo3base as a regime (without metrics) so that combining with other variants
 # like bpb (e.g. arc_easy:bpb::olmo3base) preserves the variant's metrics.
 register_regime(
-    "arc_easy", "olmo3base", num_fewshot=5, fewshot_source="olmes_arc_easy_fixed", split=Split.TEST
+    "arc_easy", "olmo3base", num_fewshot=5, fewshot_source="olmes_arc_easy_fixed", split=Split.ALL
 )
 register_variant("arc_easy", "olmes", num_fewshot=5, fewshot_source="olmes_arc_easy_fixed")
 register_variant("arc_easy", "full")
@@ -356,12 +356,12 @@ register_variant("arc_challenge", "rc")
 register_variant("arc_challenge", "mc", formatter=MultipleChoiceFormatter())
 register_variant("arc_challenge", "bpb", formatter=PPLFormatter(), metrics=(BPBMetric(),))
 register_variant(
-    "arc_challenge", "olmo3base", num_fewshot=5, fewshot_source="olmes_arc_challenge_fixed", split=Split.TEST, metrics=(LogprobUncondMCAccuracyMetric(),)
+    "arc_challenge", "olmo3base", num_fewshot=5, fewshot_source="olmes_arc_challenge_fixed", split=Split.ALL, metrics=(LogprobUncondMCAccuracyMetric(),)
 )
 # Register olmo3base as a regime (without metrics) so that combining with other variants
 # like bpb (e.g. arc_challenge:bpb::olmo3base) preserves the variant's metrics.
 register_regime(
-    "arc_challenge", "olmo3base", num_fewshot=5, fewshot_source="olmes_arc_challenge_fixed", split=Split.TEST
+    "arc_challenge", "olmo3base", num_fewshot=5, fewshot_source="olmes_arc_challenge_fixed", split=Split.ALL
 )
 register_variant("arc_challenge", "olmes", num_fewshot=5, fewshot_source="olmes_arc_challenge_fixed")
 register_variant("arc_challenge", "full")
