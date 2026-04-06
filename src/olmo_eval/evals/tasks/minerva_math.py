@@ -254,6 +254,11 @@ for _subset in MATH_SUBSETS:
         _task_name,
         "olmo3base",
         fewshot_source="minerva_math_fixed",
+        formatter=_MinervaCompletionFormatter(
+            template="Problem:\n{question}\n\nSolution:",
+            answer_prefix=" ",
+            fewshot_answer_key="solution_text",
+        ),
     )
 
     register_variant(
