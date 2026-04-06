@@ -37,7 +37,9 @@ class PiQA(Task):
         if self.config.split == Split.ALL:
             if self._instances_cache is None:
                 all_instances: list[Instance] = []
-                for split in ("test", "validation", "train"):
+                # PiQA has no usable test split (labels are -1/unknown),
+                # matching the old system's has_test_docs=False.
+                for split in ("validation", "train"):
                     all_instances.extend(self._load_instances(split=split))
                 if self.config.limit and len(all_instances) > self.config.limit:
                     all_instances = random.Random(1234).sample(
