@@ -129,6 +129,7 @@ class MultipleChoiceFormatter(Formatter):
     template: str = "{question}"
     choice_template: str = "{choice}"
     include_choices_in_prompt: bool = True
+    prompt_suffix: str = ""
 
     @property
     def request_type(self) -> RequestType:
@@ -149,6 +150,56 @@ class MultipleChoiceFormatter(Formatter):
                 )
                 prompt = f"{prompt}\n\n{choices_text}"
             continuations = tuple(self.choice_template.format(choice=c) for c in instance.choices)
+        if self.prompt_suffix:
+            prompt = f"{prompt}{self.prompt_suffix}"
+        return LMRequest(
+            request_type=self.request_type,
+            prompt=prompt,
+            continuations=continuations,
+        )
+
+
+@dataclass(slots=True)
+class MultipleChoiceLogprobFormatter(Formatter):
+    """Format multiple choice for logprob scoring with label continuations.
+
+    Builds a prompt from the question (which already contains formatted choices)
+    with an answer suffix, and uses the choice labels as continuations.
+    """
+
+    template: str = "{question}"
+    label_prefix: str = " "
+    include_choices_in_prompt: bool = False
+    answer_suffix: str = "\n\nAnswer:"
+    fewshot_separator: str = "\n\n"
+    description: str = ""
+
+    @property
+    def request_type(self) -> RequestType:
+        return RequestType.LOGLIKELIHOOD
+
+    def format(
+        self,
+        instance: Instance,
+        fewshot: list[Instance] | None = None,
+    ) -> LMRequest:
+        parts: list[str] = []
+        for ex in fewshot or []:
+            example = self.template.format(question=ex.question) + self.answer_suffix
+            if ex.gold_answer:
+                example += self.label_prefix + ex.gold_answer
+            parts.append(example)
+
+        parts.append(self.template.format(question=instance.question) + self.answer_suffix)
+        prompt = self.fewshot_separator.join(parts)
+
+        if self.description:
+            prompt = self.description + prompt
+
+        continuations: tuple[str, ...] = ()
+        if instance.choices:
+            continuations = tuple(f"{self.label_prefix}{c}" for c in instance.choices)
+
         return LMRequest(
             request_type=self.request_type,
             prompt=prompt,
