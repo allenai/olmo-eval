@@ -233,7 +233,6 @@ class NaturalQsRC(_NaturalQsMCBase):
 register_variant(
     "naturalqs:mc",
     "olmo3base",
-    data_source=DataSource(path="allenai/nq-gen2mc", split="validation"),
     limit=10_000,
     seed=1234,
     fewshot_source="nq_mc_fixed",
@@ -242,7 +241,6 @@ register_variant(
 register_variant(
     "naturalqs:rc",
     "olmo3base",
-    data_source=DataSource(path="allenai/nq-gen2mc", split="validation"),
     limit=10_000,
     seed=1234,
     fewshot_source="nq_mc_fixed",
@@ -326,7 +324,6 @@ class NaturalQsBPB(_NaturalQsMCBase):
 register_variant(
     "naturalqs:bpb",
     "olmo3base",
-    data_source=DataSource(path="allenai/nq-gen2mc", split="validation"),
     limit=10_000,
     seed=1234,
     fewshot_source="nq_mc_fixed",
