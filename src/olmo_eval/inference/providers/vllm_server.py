@@ -414,9 +414,9 @@ class VLLMServerProvider(InferenceProvider):
             "logprobs": 1,  # Request logprobs for metrics
         }
 
-        # Handle do_sample=False (greedy decoding)
+        # Always send temperature explicitly to avoid server defaults (OpenAI API defaults to 1.0)
+        kwargs["temperature"] = params.temperature
         if params.do_sample and params.temperature > 0:
-            kwargs["temperature"] = params.temperature
             if params.top_p is not None:
                 kwargs["top_p"] = params.top_p
             if params.top_k is not None:
@@ -487,10 +487,10 @@ class VLLMServerProvider(InferenceProvider):
             "max_tokens": params.max_tokens,
         }
 
-        # Handle do_sample=False (greedy decoding)
+        # Always send temperature explicitly to avoid server defaults (OpenAI API defaults to 1.0)
+        kwargs["temperature"] = params.temperature
         extra_body: dict[str, Any] = {}
         if params.do_sample and params.temperature > 0:
-            kwargs["temperature"] = params.temperature
             if params.top_p is not None:
                 kwargs["top_p"] = params.top_p
             if params.top_k is not None:
