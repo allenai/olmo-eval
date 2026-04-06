@@ -157,12 +157,10 @@ for _subtask in BASIC_SKILLS_SUBTASKS:
         "olmo3base",
         num_fewshot=5,
         fewshot_seed=1234,
-        metrics=(LogprobPerTokenMCAccuracyMetric(),),
     )
     register_variant(
         _task_name,
         "olmes",
         num_fewshot=5,
         fewshot_seed=1234,
-        metrics=(LogprobPerTokenMCAccuracyMetric(),),
     )
