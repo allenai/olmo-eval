@@ -350,6 +350,7 @@ class MinervaMathBPBTask(MinervaMathTask):
             request_type=RequestType.LOGLIKELIHOOD,
             prompt=prompt,
             continuations=(gold_text,),
+            max_length=self.config.max_length,
         )
 
 
@@ -372,4 +373,4 @@ for _bpb_subset in MATH_SUBSETS:
     globals()[_bpb_class_name] = _bpb_cls
     register(_bpb_task_name)(_bpb_cls)
 
-    register_variant(_bpb_task_name, "olmo3base", fewshot_source="minerva_math_fixed")
+    register_variant(_bpb_task_name, "olmo3base", fewshot_source="minerva_math_fixed", max_length=2048)
