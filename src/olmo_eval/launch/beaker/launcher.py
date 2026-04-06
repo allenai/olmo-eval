@@ -430,6 +430,10 @@ class BeakerJobConfig:
     # Use this for external evals that run vLLM as a server subprocess.
     vllm_isolated_venv: bool = False
 
+    # Start podman system service for Docker API compatibility (swebench harness, etc.)
+    # When True, starts `podman system service` and sets DOCKER_HOST env var.
+    enable_podman_service: bool = False
+
 
 def resolve_clusters(cluster: str | list[str]) -> list[str]:
     """Resolve cluster aliases to full cluster names.
@@ -633,6 +637,7 @@ class BeakerLauncher:
         enable_sandbox: bool = False,
         setup_store_secrets: bool = False,
         vllm_isolated_venv: bool = False,
+        enable_podman_service: bool = False,
     ) -> str:
         """Build installation command for gantry's install_cmd parameter.
 
@@ -653,6 +658,7 @@ class BeakerLauncher:
             enable_sandbox: If True, set up /dev/net/tun and Artifact Registry auth.
             setup_store_secrets: If True, run setup_store_secrets to configure database access.
             vllm_isolated_venv: If True, install vLLM in isolated venv for server mode.
+            enable_podman_service: If True, start podman system service and set DOCKER_HOST.
 
         Returns:
             Shell command string for installation.
@@ -683,6 +689,15 @@ class BeakerLauncher:
             script = "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/setup_artifact_registry"
             steps.append(f"source {script}")
 
+        # Start podman system service for Docker API compatibility (swebench harness, etc.)
+        if enable_podman_service:
+            # Use semicolons after backgrounded command since && requires exit status
+            steps.append(
+                "podman system service --time=0 unix:///tmp/podman.sock & "
+                "sleep 2; "
+                "export DOCKER_HOST=unix:///tmp/podman.sock"
+            )
+
         # Export additional environment variables (e.g., UV_CACHE_DIR)
         if env_exports:
             for key, value in env_exports.items():
@@ -702,10 +717,10 @@ class BeakerLauncher:
                 f"/opt/venv/lib/python*/site-packages/nvidia*; do "
                 f'ln -sf "$pkg" {vllm_venv}/lib/python*/site-packages/; done'
             )
-            # Install vLLM (torch already available via symlink)
+            # Install vLLM extra from project (no torch constraint - it's symlinked)
             steps.append(
-                f"VIRTUAL_ENV={vllm_venv} uv pip install "
-                f"--cache-dir \"$UV_CACHE_DIR\" 'vllm[runai]==0.13.0'"
+                f"cd /gantry-runtime && VIRTUAL_ENV={vllm_venv} uv pip install "
+                f"--cache-dir \"$UV_CACHE_DIR\" -e '.[vllm]'"
             )
             # Set VLLM_PYTHON so VLLMServerProcess uses the isolated venv
             steps.append(f"export VLLM_PYTHON={vllm_venv}/bin/python")
@@ -765,6 +780,7 @@ class BeakerLauncher:
             config.enable_sandbox,
             config.setup_store_secrets,
             config.vllm_isolated_venv,
+            config.enable_podman_service,
         )
 
         # Build weka mounts as tuples: (bucket, mount_path)

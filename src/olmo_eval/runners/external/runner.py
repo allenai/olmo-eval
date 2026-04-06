@@ -174,7 +174,7 @@ class ExternalEvalRunner:
                         for metric, value in result.metrics.items():
                             logger.info(f"  {metric}: {value}")
                     else:
-                        logger.error(f"[{eval_name}] Failed: {result.error}")
+                        logger.error(f"[{eval_name}] Failed: {result.failure_reason()}")
 
                 except Exception as e:
                     logger.exception(f"[{eval_name}] Unexpected error")

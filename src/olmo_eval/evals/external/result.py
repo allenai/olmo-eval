@@ -29,6 +29,19 @@ class ExternalEvalResult:
     raw_output: str | None = None
     predictions: list[dict[str, Any]] | None = None
 
+    def failure_reason(self) -> str:
+        """Return a user-facing failure reason."""
+        if self.error:
+            return self.error
+
+        if self.metrics:
+            metrics = ", ".join(
+                f"{name}={self._format_metric_value(value)}" for name, value in self.metrics.items()
+            )
+            return f"Unknown error (metrics: {metrics})"
+
+        return "Unknown error"
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         result: dict[str, Any] = {
@@ -69,3 +82,11 @@ class ExternalEvalResult:
             success=False,
             error=error,
         )
+
+    @staticmethod
+    def _format_metric_value(value: Any) -> str:
+        if isinstance(value, float):
+            if value == int(value):
+                return str(int(value))
+            return f"{value:.4f}"
+        return str(value)

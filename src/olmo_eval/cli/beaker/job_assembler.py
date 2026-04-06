@@ -157,6 +157,7 @@ def assemble_external_eval_job(
     retries: int | None = None,
     provider_kind: str | None = None,
     base_url: str | None = None,
+    enable_podman_service: bool = False,
 ) -> Any:
     """Assemble a BeakerJobConfig for running external evaluations.
 
@@ -347,6 +348,7 @@ def assemble_external_eval_job(
         extras=extras,
         provider_packages=provider_packages,
         vllm_isolated_venv=vllm_isolated_venv,
+        enable_podman_service=enable_podman_service,
     )
 
 
