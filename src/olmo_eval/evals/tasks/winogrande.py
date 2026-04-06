@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from collections.abc import Iterator
 from typing import Any
 
@@ -126,7 +127,7 @@ class Winogrande(Task):
                     index += 1
 
         if self.config.limit and len(instances) > self.config.limit:
-            instances = instances[:self.config.limit]
+            instances = random.Random(1234).sample(instances, self.config.limit)
 
         return instances
 
