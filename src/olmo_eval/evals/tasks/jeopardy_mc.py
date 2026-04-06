@@ -351,4 +351,8 @@ class JeopardyBPB(_JeopardyMCBase):
         return self.config.formatter.format(instance, self.get_fewshot())
 
 
-register_variant("jeopardy:bpb", "olmo3base")
+register_variant(
+    "jeopardy:bpb",
+    "olmo3base",
+    data_source=DataSource(path="allenai/jeopardy-gen2mc", split="test"),
+)
