@@ -211,8 +211,9 @@ register_variant(
     "olmo3base",
     num_fewshot=5,
     fewshot_source="olmes_csqa_fixed",
-    data_source=DataSource(path="commonsense_qa", split="train+validation"),
+    data_source=DataSource(path="commonsense_qa", split="validation+train"),
     limit=10000,
+    seed=1234,
     metrics=(LogprobUncondMCAccuracyMetric(),),
 )
 # Register olmo3base as a regime (without metrics) so that combining with other variants
@@ -222,15 +223,17 @@ register_regime(
     "olmo3base",
     num_fewshot=5,
     fewshot_source="olmes_csqa_fixed",
-    data_source=DataSource(path="commonsense_qa", split="train+validation"),
+    data_source=DataSource(path="commonsense_qa", split="validation+train"),
     limit=10000,
+    seed=1234,
 )
 register_variant(
     "csqa",
     "xlarge",
-    data_source=DataSource(path="commonsense_qa", split="train+validation"),
+    data_source=DataSource(path="commonsense_qa", split="validation+train"),
     num_fewshot=5,
     limit=10000,
+    seed=1234,
     fewshot_source="olmes_csqa_fixed",
 )
 register_variant("csqa", "bpb", metrics=(BPBMetric(),), primary_metric=BPBMetric())
