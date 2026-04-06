@@ -666,7 +666,8 @@ class VLLMServerProvider(InferenceProvider):
             # Left-truncate to max_length - 1 to match inline vLLM provider behavior.
             # This ensures long prompts are handled the same way as oe-eval-internal:
             # the context is left-truncated while preserving the continuation tokens.
-            max_len = self.max_length
+            # Use per-request max_length if set (e.g., from task config), else provider default.
+            max_len = request.max_length or self.max_length
             full_tokens = context_enc + continuation_enc
             if len(full_tokens) > max_len - 1:
                 full_tokens = full_tokens[-(max_len - 1) :]

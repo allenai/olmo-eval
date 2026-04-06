@@ -526,6 +526,7 @@ class Drop(Task):
                 request_type=RequestType.LOGLIKELIHOOD,
                 prompt=prompt,
                 continuations=continuations,
+                max_length=self.config.max_length,
             )
 
         parts = []
@@ -557,6 +558,7 @@ register_variant(
     "olmo3base",
     num_fewshot=5,
     fewshot_source="olmes_drop_mc_fixed",
+    max_length=2048,
 )
 
 

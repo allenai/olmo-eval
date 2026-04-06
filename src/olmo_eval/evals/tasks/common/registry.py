@@ -172,6 +172,7 @@ def parse_overrides(override_str: str) -> dict[str, Any]:
                 "limit",
                 "fewshot_seed",
                 "seed",
+                "max_length",
                 "max_tokens",
                 "max_model_len",
                 "top_k",
