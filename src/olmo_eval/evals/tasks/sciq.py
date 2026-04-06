@@ -150,8 +150,7 @@ register_variant(
     "sciq",
     "olmo3base",
     num_fewshot=5,
-    split=Split.ALL,
-    limit=10_000,
+    split=Split.VALIDATION,
     metrics=(LogprobPerCharMCAccuracyMetric(),),
     fewshot_seed=1234,
 )
