@@ -130,4 +130,8 @@ class CoqaBPB(CoqaRC):
     metrics = (BPBMetric(),)
 
 
-register_variant("coqa:bpb", "olmo3base")
+register_variant(
+    "coqa:bpb",
+    "olmo3base",
+    data_source=DataSource(path="allenai/coqa-gen2mc", split="validation"),
+)
