@@ -9,6 +9,12 @@ from olmo_eval.common.metrics import LogprobMCAccuracyMetric, LogprobPerCharMCAc
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
+from olmo_eval.evals.tasks.common.format_helpers import (
+    format_mc as _format_mc,
+)
+from olmo_eval.evals.tasks.common.format_helpers import (
+    format_rc as _format_rc,
+)
 
 
 @register("sciq")
@@ -118,21 +124,6 @@ class SciQ(Task):
             prompt=prompt,
             continuations=continuations,
         )
-
-
-def _format_mc(question: str, choices: tuple[str, ...], answer: str | None = None) -> str:
-    choices_text = "\n".join(f" {chr(ord('A') + i)}. {c}" for i, c in enumerate(choices))
-    prompt = f"Question: {question}\n{choices_text}\nAnswer:"
-    if answer:
-        prompt += f" {answer}"
-    return prompt
-
-
-def _format_rc(question: str, answer: str | None = None) -> str:
-    prompt = f"Question: {question}\nAnswer:"
-    if answer:
-        prompt += f" {answer}"
-    return prompt
 
 
 register_variant("sciq", "rc")
