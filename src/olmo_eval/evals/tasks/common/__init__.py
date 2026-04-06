@@ -1,6 +1,7 @@
 """Core task framework - base classes, registry, and configuration."""
 
 from .base import Task, TaskConfig
+from .format_helpers import format_mc, format_rc
 from .registry import (
     clear_registry,
     get_base_task_name,
@@ -22,6 +23,8 @@ __all__ = [
     "Task",
     "TaskConfig",
     "clear_registry",
+    "format_mc",
+    "format_rc",
     "get_base_task_name",
     "get_task",
     "get_task_dependencies",

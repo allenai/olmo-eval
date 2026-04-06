@@ -1,5 +1,4 @@
 from collections.abc import Iterator
-from dataclasses import dataclass
 from typing import Any
 
 from olmo_eval.common.formatters import CompletionFormatter, PPLFormatter
@@ -9,31 +8,7 @@ from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.extract import MathExtractor
 from olmo_eval.evals.tasks.common import Task, register, register_variant
-
-
-@dataclass(slots=True)
-class _MinervaCompletionFormatter(CompletionFormatter):
-    """CompletionFormatter that omits answer_prefix from the final (test) instance."""
-
-    def format(
-        self,
-        instance: Instance,
-        fewshot: list[Instance] | None = None,
-    ) -> LMRequest:
-        parts: list[str] = []
-        for ex in fewshot or []:
-            example = self.template.format(question=ex.question)
-            if self.fewshot_answer_key and self.fewshot_answer_key in ex.metadata:
-                answer = ex.metadata[self.fewshot_answer_key]
-            else:
-                answer = ex.gold_answer
-            if answer:
-                example += self.answer_prefix + str(answer)
-            parts.append(example)
-        parts.append(self.template.format(question=instance.question))
-        prompt = self.fewshot_separator.join(parts)
-        return LMRequest(request_type=self.request_type, prompt=prompt)
-
+from olmo_eval.evals.tasks.constants.minerva_math import MINERVA_MATH_FIXED_FEWSHOT
 
 MATH_SUBSETS = [
     "algebra",
@@ -45,33 +20,11 @@ MATH_SUBSETS = [
     "precalculus",
 ]
 
-# Fixed 4 few-shot examples (from oe-eval)
-# fmt: off
-MINERVA_MATH_FIXED_FEWSHOT = [
-    {
-        "problem": "Find the domain of the expression  $\\frac{\\sqrt{x-2}}{\\sqrt{5-x}}$.}",
-        "solution": "The expressions inside each square root must be non-negative. Therefore, $x-2 \\ge 0$, so $x\\ge2$, and $5 - x \\ge 0$, so $x \\le 5$. Also, the denominator cannot be equal to zero, so $5-x>0$, which gives $x<5$. Therefore, the domain of the expression is $\\boxed{[2,5)}$.\nFinal Answer: The final answer is $[2,5)$. I hope it is correct.",  # noqa: E501
-    },
-    {
-        "problem": "If $\\det \\mathbf{A} = 2$ and $\\det \\mathbf{B} = 12,$ then find $\\det (\\mathbf{A} \\mathbf{B}).$",  # noqa: E501
-        "solution": "We have that $\\det (\\mathbf{A} \\mathbf{B}) = (\\det \\mathbf{A})(\\det \\mathbf{B}) = (2)(12) = \\boxed{24}.$\nFinal Answer: The final answer is $24$. I hope it is correct.",  # noqa: E501
-    },
-    {
-        "problem": "Terrell usually lifts two 20-pound weights 12 times. If he uses two 15-pound weights instead, how many times must Terrell lift them in order to lift the same total weight?",  # noqa: E501
-        "solution": "If Terrell lifts two 20-pound weights 12 times, he lifts a total of $2\\cdot 12\\cdot20=480$ pounds of weight.  If he lifts two 15-pound weights instead for $n$ times, he will lift a total of $2\\cdot15\\cdot n=30n$ pounds of weight.  Equating this to 480 pounds, we can solve for $n$:\n\\begin{align*}\n30n&=480\\\n\\Rightarrow\\qquad n&=480/30=\\boxed{16}\n\\end{align*}\nFinal Answer: The final answer is $16$. I hope it is correct.",  # noqa: E501
-    },
-    {
-        "problem": "If the system of equations\n\\begin{align*}\n6x-4y&=a,\\\n6y-9x &=b.\n\\end{align*}\nhas a solution $(x, y)$ where $x$ and $y$ are both nonzero, find $\\frac{a}{b},$ assuming $b$ is nonzero.",  # noqa: E501
-        "solution": "If we multiply the first equation by $-\\frac{3}{2}$, we obtain $$6y-9x=-\\frac{3}{2}a.$$Since we also know that $6y-9x=b$, we have $$-\\frac{3}{2}a=b\\Rightarrow\\frac{a}{b}=\\boxed{-\\frac{2}{3}}.$$\nFinal Answer: The final answer is $-\\frac{2}{3}$. I hope it is correct.",  # noqa: E501
-    },
-]
-# fmt: on
-
 
 class MinervaMathTask(Task):
     fewshot_split: str = "train"
     formatter = CompletionFormatter(
-        template="Problem:\n{question}\n\nSolution:",
+        template="Problem:\n{question}\n\nSolution: ",
         fewshot_answer_key="solution_text",
     )
     metrics = (AccuracyMetric(scorer=MinervaMathScorer),)
@@ -234,31 +187,6 @@ for _subset in MATH_SUBSETS:
         _task_name,
         "olmes_n4_v2",
         fewshot_source="minerva_math_fixed",
-        metrics=(
-            AccuracyMetric(scorer=MinervaMathScorer),
-            PassAtKMetric(k=1, scorer=MinervaMathScorer),
-            PassAtKMetric(k=2, scorer=MinervaMathScorer),
-            PassAtKMetric(k=4, scorer=MinervaMathScorer),
-        ),
-        primary_metric=PassAtKMetric(k=1, scorer=MinervaMathScorer),
-        sampling_params=SamplingParams(
-            max_tokens=1024,
-            temperature=0.6,
-            top_p=0.6,
-            stop_sequences=("Problem:", "\n\n"),
-            num_samples=4,
-        ),
-    )
-
-    register_variant(
-        _task_name,
-        "olmo3base",
-        fewshot_source="minerva_math_fixed",
-        formatter=_MinervaCompletionFormatter(
-            template="Problem:\n{question}\n\nSolution:",
-            answer_prefix=" ",
-            fewshot_answer_key="solution_text",
-        ),
         metrics=(
             AccuracyMetric(scorer=MinervaMathScorer),
             PassAtKMetric(k=1, scorer=MinervaMathScorer),
