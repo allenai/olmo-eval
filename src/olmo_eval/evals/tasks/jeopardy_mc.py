@@ -280,14 +280,5 @@ class JeopardyBPB(JeopardyRC):
     # choice via gold_idx.
     metrics = (BPBMetric(),)
 
-    def _build_fewshot(self) -> list[Instance]:
-        # When fewshot_source is None (olmo3base variant), sample from test split
-        # to match old oe-eval-internal jeopardy:rc::gen2mc behavior.
-        if self.config.fewshot_source is None:
-            return self._build_fewshot_from_source(split="test", sample=True)
-        return super()._build_fewshot()
 
-
-# olmo3base: match old jeopardy:rc:bpb::gen2mc which has no fewshot_source
-# (samples from test split) and uses fewshot_seed=1234 (old default).
-register_variant("jeopardy:bpb", "olmo3base", fewshot_source=None, fewshot_seed=1234)
+register_variant("jeopardy:bpb", "olmo3base")
