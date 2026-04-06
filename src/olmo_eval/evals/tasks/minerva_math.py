@@ -343,6 +343,8 @@ class MinervaMathBPBTask(MinervaMathTask):
         gold_text = instance.metadata.get("solution_text") or instance.gold_answer
         if gold_text is None:
             raise ValueError("BPB task requires a gold answer")
+        if not gold_text.startswith(("\n", " ")):
+            gold_text = " " + gold_text
 
         return LMRequest(
             request_type=RequestType.LOGLIKELIHOOD,
