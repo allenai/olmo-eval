@@ -367,7 +367,7 @@ def run_external(
             metrics = "\n".join(metrics_lines)
         else:
             status = "[red]Failed[/red]"
-            metrics = result.error or "Unknown error"
+            metrics = result.failure_reason()
 
         results_table.add_row(name, status, metrics)
 

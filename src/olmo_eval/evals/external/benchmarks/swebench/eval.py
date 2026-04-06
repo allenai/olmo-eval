@@ -23,6 +23,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_INSTANCE_REPORT_KEYS = frozenset(
+    {
+        "patch_is_None",
+        "patch_exists",
+        "patch_successfully_applied",
+        "resolved",
+        "tests_status",
+    }
+)
+
 # Maps short aliases to HuggingFace dataset paths used by the SWE-bench harness.
 # mini-swe-agent has its own alias table; we pass aliases through to it directly.
 _DATASET_HF_PATHS = {
@@ -291,12 +301,15 @@ class SWEBenchExternalEval(ExternalEval):
 
         env = os.environ.copy()
 
-        cmd.extend(["--max_workers", str(swe_args.max_workers_eval)])
-
         if swe_args.use_modal:
+            cmd.extend(["--parallelism", str(swe_args.max_workers_eval)])
             cmd.extend(["--modal", "true"])
-        elif "DOCKER_HOST" not in env:
-            logger.warning("DOCKER_HOST not set. Scoring may fail without podman service or Modal.")
+        else:
+            cmd.extend(["--max_workers", str(swe_args.max_workers_eval)])
+            if "DOCKER_HOST" not in env:
+                logger.warning(
+                    "DOCKER_HOST not set. Scoring may fail without podman service or Modal."
+                )
 
         logger.info(f"[{self.name}] Running SWE-bench harness: {shlex.join(cmd)}")
         ok, output = await self._run_subprocess(
@@ -403,21 +416,52 @@ class SWEBenchExternalEval(ExternalEval):
                 duration_seconds=time.time() - start_time,
             )
 
-        resolved_ids = data.get("resolved_ids", [])
-        unresolved_ids = data.get("unresolved_ids", [])
-        resolved_count = data.get("resolved", 0)
-        unresolved_count = data.get("unresolved", 0)
+        resolved_ids = self._coerce_instance_ids(data.get("resolved_ids", []))
+        unresolved_ids = self._coerce_instance_ids(data.get("unresolved_ids", []))
+        submitted_ids = self._coerce_instance_ids(data.get("submitted_ids", []))
+        instance_reports = self._find_instance_reports(work_dir, results_file)
+        exit_statuses = self._find_exit_statuses(work_dir)
+        predictions = self._build_predictions(
+            submitted_ids=submitted_ids,
+            resolved_ids=resolved_ids,
+            unresolved_ids=unresolved_ids,
+            instance_reports=instance_reports,
+            exit_statuses=exit_statuses,
+        )
 
-        total = resolved_count + unresolved_count
+        if predictions:
+            resolved_instances = [
+                pred["native_id"]
+                for pred in predictions
+                if pred["instance_metrics"]["resolved"]["external"] == 1.0
+            ]
+            resolved_count = len(resolved_instances)
+            total = len(predictions)
+        else:
+            resolved_count = self._read_int(
+                data.get("resolved"),
+                data.get("resolved_instances"),
+                len(resolved_ids),
+            )
+            unresolved_count = self._read_int(
+                data.get("unresolved"),
+                data.get("unresolved_instances"),
+                len(unresolved_ids),
+            )
+            submitted_count = self._read_int(
+                data.get("submitted_instances"),
+                len(submitted_ids),
+            )
+            total = submitted_count if submitted_count > 0 else resolved_count + unresolved_count
+            resolved_instances = resolved_ids
+
         resolve_rate = resolved_count / total if total > 0 else 0.0
-
-        predictions = [
-            {"native_id": iid, "instance_metrics": {"resolved": {"external": 1.0}}}
-            for iid in resolved_ids
-        ] + [
-            {"native_id": iid, "instance_metrics": {"resolved": {"external": 0.0}}}
-            for iid in unresolved_ids
-        ]
+        metadata: dict[str, Any] = {
+            "run_id": run_id,
+            "resolved_instances": resolved_instances,
+        }
+        if exit_statuses:
+            metadata["instance_exit_statuses"] = exit_statuses
 
         return ExternalEvalResult(
             name=self.name,
@@ -427,7 +471,220 @@ class SWEBenchExternalEval(ExternalEval):
                 "resolved": float(resolved_count),
                 "total": float(total),
             },
-            metadata={"run_id": run_id, "resolved_instances": resolved_ids},
+            metadata=metadata,
             raw_output=raw_output,
             predictions=predictions if predictions else None,
         )
+
+    def _build_predictions(
+        self,
+        submitted_ids: list[str],
+        resolved_ids: list[str],
+        unresolved_ids: list[str],
+        instance_reports: dict[str, dict[str, Any]],
+        exit_statuses: dict[str, str],
+    ) -> list[dict[str, Any]]:
+        """Build per-instance predictions from any available SWE-bench artifacts."""
+        instance_ids = self._ordered_unique_ids(
+            resolved_ids,
+            unresolved_ids,
+            submitted_ids,
+            instance_reports.keys(),
+            exit_statuses.keys(),
+        )
+        return [
+            {
+                "native_id": instance_id,
+                "instance_metrics": {
+                    "resolved": {
+                        "external": self._resolve_prediction_score(
+                            instance_id,
+                            resolved_ids=resolved_ids,
+                            unresolved_ids=unresolved_ids,
+                            instance_reports=instance_reports,
+                        )
+                    }
+                },
+            }
+            for instance_id in instance_ids
+        ]
+
+    def _coerce_instance_ids(self, value: Any) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        return [str(item) for item in value if item is not None]
+
+    def _ordered_unique_ids(self, *groups: Any) -> list[str]:
+        ordered_ids: list[str] = []
+        seen: set[str] = set()
+
+        for group in groups:
+            for instance_id in group:
+                if instance_id in seen:
+                    continue
+                seen.add(instance_id)
+                ordered_ids.append(str(instance_id))
+
+        return ordered_ids
+
+    def _resolve_prediction_score(
+        self,
+        instance_id: str,
+        resolved_ids: list[str],
+        unresolved_ids: list[str],
+        instance_reports: dict[str, dict[str, Any]],
+    ) -> float:
+        report_resolved = instance_reports.get(instance_id, {}).get("resolved")
+        if isinstance(report_resolved, bool):
+            return 1.0 if report_resolved else 0.0
+
+        if instance_id in resolved_ids:
+            return 1.0
+
+        if instance_id in unresolved_ids:
+            return 0.0
+
+        return 0.0
+
+    def _read_int(self, *values: Any) -> int:
+        for value in values:
+            try:
+                if value is None:
+                    continue
+                return int(value)
+            except (TypeError, ValueError):
+                continue
+        return 0
+
+    def _find_instance_reports(
+        self, work_dir: Path, results_file: Path
+    ) -> dict[str, dict[str, Any]]:
+        """Locate a per-instance report JSON if the harness emitted one."""
+        for candidate in sorted(work_dir.rglob("*.json")):
+            if candidate == results_file:
+                continue
+            payload = self._load_json(candidate)
+            if payload is None:
+                continue
+            reports = self._extract_instance_reports(payload)
+            if reports:
+                return reports
+        return {}
+
+    def _load_json(self, path: Path) -> Any | None:
+        try:
+            return json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return None
+
+    def _extract_instance_reports(self, payload: Any) -> dict[str, dict[str, Any]]:
+        if isinstance(payload, dict):
+            if (
+                payload
+                and all(isinstance(v, dict) for v in payload.values())
+                and any(self._looks_like_instance_report(v) for v in payload.values())
+            ):
+                return {str(k): v for k, v in payload.items() if isinstance(v, dict)}
+
+            for value in payload.values():
+                nested = self._extract_instance_reports(value)
+                if nested:
+                    return nested
+
+        if isinstance(payload, list):
+            for value in payload:
+                nested = self._extract_instance_reports(value)
+                if nested:
+                    return nested
+
+        return {}
+
+    def _looks_like_instance_report(self, value: dict[str, Any]) -> bool:
+        return bool(_INSTANCE_REPORT_KEYS.intersection(value))
+
+    def _find_exit_statuses(self, work_dir: Path) -> dict[str, str]:
+        """Locate and parse instances_by_exit_status if present."""
+        for candidate in sorted(work_dir.rglob("*")):
+            if not candidate.is_file():
+                continue
+            try:
+                if candidate.suffix == ".json":
+                    payload = self._load_json(candidate)
+                    statuses = self._extract_exit_statuses_from_json(payload)
+                    if statuses:
+                        return statuses
+
+                text = candidate.read_text(errors="ignore")
+            except OSError:
+                continue
+
+            statuses = self._parse_instances_by_exit_status(text)
+            if statuses:
+                return statuses
+
+        return {}
+
+    def _extract_exit_statuses_from_json(self, payload: Any) -> dict[str, str]:
+        if isinstance(payload, dict):
+            grouped = payload.get("instances_by_exit_status")
+            if isinstance(grouped, dict):
+                return self._coerce_exit_status_mapping(grouped)
+
+            for value in payload.values():
+                nested = self._extract_exit_statuses_from_json(value)
+                if nested:
+                    return nested
+
+        if isinstance(payload, list):
+            for value in payload:
+                nested = self._extract_exit_statuses_from_json(value)
+                if nested:
+                    return nested
+
+        return {}
+
+    def _coerce_exit_status_mapping(self, grouped: dict[str, Any]) -> dict[str, str]:
+        statuses: dict[str, str] = {}
+        for status, instance_ids in grouped.items():
+            if not isinstance(instance_ids, list):
+                continue
+            for instance_id in instance_ids:
+                if instance_id is not None:
+                    statuses[str(instance_id)] = str(status)
+        return statuses
+
+    def _parse_instances_by_exit_status(self, text: str) -> dict[str, str]:
+        marker = "instances_by_exit_status:"
+        if marker not in text:
+            return {}
+
+        statuses: dict[str, str] = {}
+        in_section = False
+        section_indent = 0
+        current_status: str | None = None
+
+        for raw_line in text.splitlines():
+            stripped = raw_line.strip()
+            if not in_section:
+                if stripped == marker:
+                    in_section = True
+                    section_indent = len(raw_line) - len(raw_line.lstrip())
+                continue
+
+            if not stripped:
+                continue
+
+            indent = len(raw_line) - len(raw_line.lstrip())
+            if indent <= section_indent and not stripped.startswith("-"):
+                break
+
+            if stripped.endswith(":") and not stripped.startswith("-"):
+                current_status = stripped[:-1]
+                continue
+
+            if stripped.startswith("-") and current_status is not None:
+                instance_id = stripped[1:].strip()
+                if instance_id:
+                    statuses[instance_id] = current_status
+
+        return statuses
