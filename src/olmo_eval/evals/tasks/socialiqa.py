@@ -170,7 +170,6 @@ register_variant(
     "socialiqa",
     "olmo3base",
     num_fewshot=5,
-    limit=10000,
     fewshot_source="olmes_socialiqa_fixed",
 )
 register_variant(
