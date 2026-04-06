@@ -72,17 +72,9 @@ _MMLU_RC_OTHER = make_suite(
     _rc_task_names_variant(_OTHER, "olmo3base"),
 )
 
-MMLU_RC = register(
-    Suite(
-        name="mmlu:rc::olmo3base",
-        tasks=(
-            _MMLU_RC_STEM,
-            _MMLU_RC_HUMANITIES,
-            _MMLU_RC_SOCIAL_SCIENCES,
-            _MMLU_RC_OTHER,
-        ),
-        aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
-    )
+MMLU_RC = make_suite(
+    "mmlu:rc::olmo3base",
+    tuple(f"mmlu_{s}:rc:olmo3base" for s in MMLU_SUBJECTS),
 )
 
 MMLU_BPB = make_suite(
