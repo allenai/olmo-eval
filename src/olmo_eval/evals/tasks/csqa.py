@@ -7,7 +7,7 @@ from olmo_eval.common.formatters import MultipleChoiceFormatter
 from olmo_eval.common.metrics import BPBMetric, LogprobMCAccuracyMetric, LogprobUncondMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
-from olmo_eval.evals.tasks.common import Task, register, register_variant
+from olmo_eval.evals.tasks.common import Task, register, register_regime, register_variant
 
 # fmt: off
 CSQA_FIXED_FEWSHOT = [
@@ -204,9 +204,27 @@ def _format_rc(question: str, answer: str | None = None) -> str:
     return prompt
 
 
-register_variant("csqa", "rc")
+register_variant("csqa", "rc", metrics=(LogprobUncondMCAccuracyMetric(),))
 register_variant("csqa", "mc", formatter=MultipleChoiceFormatter())
-register_variant("csqa", "olmo3base", num_fewshot=5, fewshot_source="olmes_csqa_fixed", metrics=(LogprobUncondMCAccuracyMetric(), BPBMetric()))
+register_variant(
+    "csqa",
+    "olmo3base",
+    num_fewshot=5,
+    fewshot_source="olmes_csqa_fixed",
+    data_source=DataSource(path="commonsense_qa", split="train+validation"),
+    limit=10000,
+    metrics=(LogprobUncondMCAccuracyMetric(),),
+)
+# Register olmo3base as a regime (without metrics) so that combining with other variants
+# like mc or bpb (e.g. csqa:mc::olmo3base) preserves the variant's metrics.
+register_regime(
+    "csqa",
+    "olmo3base",
+    num_fewshot=5,
+    fewshot_source="olmes_csqa_fixed",
+    data_source=DataSource(path="commonsense_qa", split="train+validation"),
+    limit=10000,
+)
 register_variant(
     "csqa",
     "xlarge",
