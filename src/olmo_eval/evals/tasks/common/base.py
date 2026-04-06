@@ -205,6 +205,8 @@ class Task(ABC):
         self.config = config
         self._fewshot_cache: list[Instance] | None = None
         self._instances_cache: list[Instance] | None = None
+        self._scorers_cache: dict[str, Scorer] | None = None
+        self._has_async_cache: bool | None = None
 
     @property
     def request_type(self) -> RequestType:
@@ -405,21 +407,32 @@ class Task(ABC):
 
         return responses
 
+    def _get_scorers(self) -> dict[str, Scorer]:
+        """Return scorer instances, keyed by name. Cached after first call."""
+        if self._scorers_cache is None:
+            scorers_by_name: dict[str, Scorer] = {}
+            for metric in self.config.metrics:
+                if hasattr(metric, "scorer") and metric.scorer is not None:
+                    scorer_instance = metric.scorer()
+                    if scorer_instance.name not in scorers_by_name:
+                        scorers_by_name[scorer_instance.name] = scorer_instance
+            self._scorers_cache = scorers_by_name
+        return self._scorers_cache
+
     def _has_async_scorers(self) -> bool:
         """Check if any configured scorers require async execution.
 
         This includes ExecutionScorer (sandboxed code) and ContextScorer (LLM judges).
         """
-        from olmo_eval.common.scorers.execution import ContextScorer, ExecutionScorer
+        if self._has_async_cache is None:
+            from olmo_eval.common.scorers.execution import ContextScorer, ExecutionScorer
 
-        for metric in self.config.metrics:
-            if hasattr(metric, "scorer") and metric.scorer is not None:
-                scorer_instance = metric.scorer()
-                if isinstance(scorer_instance, (ExecutionScorer, ContextScorer)):
-                    return True
-                if getattr(scorer_instance, "requires_async", False):
-                    return True
-        return False
+            self._has_async_cache = any(
+                isinstance(s, (ExecutionScorer, ContextScorer))
+                or getattr(s, "requires_async", False)
+                for s in self._get_scorers().values()
+            )
+        return self._has_async_cache
 
     def _extract_answers(self, responses: Sequence[Response]) -> None:
         """Extract answers from outputs. Override for custom extraction logic."""
@@ -429,24 +442,15 @@ class Task(ABC):
 
     def _apply_scorers(self, responses: Sequence[Response]) -> None:
         """Run all scorers synchronously and populate response.scores."""
-        # Collect scorers from metrics, avoiding duplicates by name
-        scorers_by_name: dict[str, Scorer] = {}
-        for metric in self.config.metrics:
-            if hasattr(metric, "scorer") and metric.scorer is not None:
-                scorer_instance = metric.scorer()
-                if scorer_instance.name not in scorers_by_name:
-                    scorers_by_name[scorer_instance.name] = scorer_instance
+        scorers_by_name = self._get_scorers()
 
         for response in responses:
-            # Apply each scorer, taking best score across outputs (for multi-sample)
             for scorer in scorers_by_name.values():
                 scores = [scorer.score(response.instance, o) for o in response.outputs]
-                # Store individual scores in output metadata for pass@k expansion
                 for i, output in enumerate(response.outputs):
                     if output.metadata is None:
                         output.metadata = {}
                     output.metadata[f"score:{scorer.name}"] = scores[i] if i < len(scores) else 0.0
-                # Response-level score is max for backward compatibility
                 response.scores[scorer.name] = max(scores) if scores else 0.0
 
     async def _apply_scorers_async(
@@ -475,16 +479,8 @@ class Task(ABC):
             SandboxRequiredError,
         )
 
-        # Validate execution environment for execution scorers
         execution_env = context.execution_env if context.has_execution_env else None
-
-        # Collect scorers from metrics, avoiding duplicates by name
-        scorers_by_name: dict[str, Scorer] = {}
-        for metric in self.config.metrics:
-            if hasattr(metric, "scorer") and metric.scorer is not None:
-                scorer_instance = metric.scorer()
-                if scorer_instance.name not in scorers_by_name:
-                    scorers_by_name[scorer_instance.name] = scorer_instance
+        scorers_by_name = self._get_scorers()
 
         # Separate scorers by type: execution (sandbox), context (LLM judge), sync
         execution_scorers: dict[str, ExecutionScorer] = {}

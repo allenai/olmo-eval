@@ -75,6 +75,10 @@ async def process_results(
     instances_sent: dict[str, int] = {spec: 0 for spec in trackers}
     instances_scored: dict[str, int] = {spec: 0 for spec in trackers}
 
+    # Track which tasks have been sent to the scoring worker so we only
+    # pickle the full Task object once per spec (the dominant serialization cost).
+    tasks_sent_to_scorer: set[str] = set()
+
     def check_task_completion(spec: str) -> None:
         """Check if task is complete and finalize if so."""
         nonlocal tasks_complete
@@ -187,6 +191,8 @@ async def process_results(
             if traj_dict:
                 trajectory = AgentTrajectory.from_dict(traj_dict)
 
+        assert result_item.instance is not None
+        assert result_item.request is not None
         response = Response(
             instance=result_item.instance,
             request=result_item.request,
@@ -194,25 +200,31 @@ async def process_results(
             trajectory=trajectory,
         )
 
-        # Send to scoring worker immediately
-        # Pre-pickle to catch errors synchronously (queue.put uses a background thread
-        # that silently swallows pickling errors, causing the job to stall)
+        # Send to scoring worker immediately.
+        # Include the Task only on the first item per spec so the scoring
+        # worker can cache it; subsequent items skip the expensive Task pickle.
         assert tracker.task is not None
+        include_task = result_item.task_id not in tasks_sent_to_scorer
         scoring_item = ScoringItem(
             spec=result_item.task_id,
             instance_idx=result_item.instance_idx,
             response=response,
-            task=tracker.task,
+            task=tracker.task if include_task else None,
         )
-        try:
-            pickle.dumps(scoring_item)
-        except (pickle.PicklingError, TypeError, AttributeError) as e:
-            task_id = result_item.task_id
-            idx = result_item.instance_idx
-            logger.error(f"Failed to pickle scoring item for {task_id}[{idx}]: {e}")
-            tracker.add_failure(result_item.instance_idx, f"Pickling failed: {e}")
-            check_task_completion(result_item.task_id)
-            continue
+        if include_task:
+            # Validate pickling on the first item (which carries the Task).
+            # queue.put uses a background thread that silently swallows
+            # pickling errors, causing the job to stall.
+            try:
+                pickle.dumps(scoring_item)
+            except (pickle.PicklingError, TypeError, AttributeError) as e:
+                task_id = result_item.task_id
+                idx = result_item.instance_idx
+                logger.error(f"Failed to pickle scoring item for {task_id}[{idx}]: {e}")
+                tracker.add_failure(result_item.instance_idx, f"Pickling failed: {e}")
+                check_task_completion(result_item.task_id)
+                continue
+            tasks_sent_to_scorer.add(result_item.task_id)
         scoring_queue.put(scoring_item)
         instances_sent[result_item.task_id] += 1
 
