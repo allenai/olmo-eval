@@ -329,6 +329,7 @@ class SquadBPB(_SquadMCBase):
             request_type=RequestType.LOGLIKELIHOOD,
             prompt=prompt,
             continuations=(f" {gold_text}",),
+            max_length=self.config.max_length,
         )
 
 
@@ -338,4 +339,5 @@ register_variant(
     limit=10_000,
     seed=1234,
     fewshot_source="squad_mc_fixed",
+    max_length=2048,
 )
