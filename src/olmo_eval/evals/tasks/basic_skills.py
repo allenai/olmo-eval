@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import PPLFormatter
-from olmo_eval.common.metrics import BPBMetric, LogprobPerTokenMCAccuracyMetric
+from olmo_eval.common.metrics import BPBMetric, LogprobMCAccuracyMetric, LogprobPerTokenMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -157,10 +157,12 @@ for _subtask in BASIC_SKILLS_SUBTASKS:
         "olmo3base",
         num_fewshot=5,
         fewshot_seed=1234,
+        metrics=(LogprobMCAccuracyMetric(),),
     )
     register_variant(
         _task_name,
         "olmes",
         num_fewshot=5,
         fewshot_seed=1234,
+        metrics=(LogprobMCAccuracyMetric(),),
     )
