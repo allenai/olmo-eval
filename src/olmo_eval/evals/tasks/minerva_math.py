@@ -259,6 +259,20 @@ for _subset in MATH_SUBSETS:
             answer_prefix=" ",
             fewshot_answer_key="solution_text",
         ),
+        metrics=(
+            AccuracyMetric(scorer=MinervaMathScorer),
+            PassAtKMetric(k=1, scorer=MinervaMathScorer),
+            PassAtKMetric(k=2, scorer=MinervaMathScorer),
+            PassAtKMetric(k=4, scorer=MinervaMathScorer),
+        ),
+        primary_metric=PassAtKMetric(k=1, scorer=MinervaMathScorer),
+        sampling_params=SamplingParams(
+            max_tokens=1024,
+            temperature=0.6,
+            top_p=0.6,
+            stop_sequences=("Problem:", "\n\n"),
+            num_samples=4,
+        ),
     )
 
     register_variant(
