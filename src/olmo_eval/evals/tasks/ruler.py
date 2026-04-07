@@ -138,7 +138,7 @@ class RulerTask(Task):
         # Generate instances
         self._instances_cache = []
         for idx, doc in enumerate(self._dataset):  # type: ignore
-            instance = self.process_doc(doc, index=idx)
+            instance = self.process_doc(doc, index=idx)  # type: ignore
             if instance is not None:
                 self._instances_cache.append(instance)
                 yield instance

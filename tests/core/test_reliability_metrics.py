@@ -195,7 +195,7 @@ class TestPassAtKMetric:
         metric = PassAtKMetric(scorer=CodeExecutionScorer, k=5)
         d = metric.to_dict()
         assert d["type"] == "PassAtKMetric"
-        assert d["name"] == "pass_at_k"
+        assert d["name"] == "pass_at_5"
 
 
 class TestPassPowKMetric:
@@ -254,7 +254,7 @@ class TestPassPowKMetric:
         metric = PassPowKMetric(scorer=CodeExecutionScorer, k=3)
         d = metric.to_dict()
         assert d["type"] == "PassPowKMetric"
-        assert d["name"] == "pass_pow_k"
+        assert d["name"] == "pass_pow_3"
 
 
 class TestMetricsComparison:

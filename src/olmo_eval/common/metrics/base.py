@@ -323,14 +323,13 @@ class LogprobMCAccuracyMetric(Metric):
     def compute(self, responses: Sequence[Response]) -> float:
         if not responses:
             return 0.0
+        scorer = self.scorer()
         correct = 0
         for response in responses:
             gold_idx = response.instance.metadata.get("gold_idx")
             if gold_idx is None or not response.outputs:
                 continue
-            logprob_sums = [
-                sum(lp["logprob"] for lp in (o.logprobs or [])) for o in response.outputs
-            ]
+            logprob_sums = [scorer.score(response.instance, o) for o in response.outputs]
             if logprob_sums.index(max(logprob_sums)) == gold_idx:
                 correct += 1
         return correct / len(responses)
@@ -397,6 +396,7 @@ class LogprobPerCharMCAccuracyMetric(Metric):
     def compute(self, responses: Sequence[Response]) -> float:
         if not responses:
             return 0.0
+        scorer = self.scorer()
         correct = 0
         for response in responses:
             gold_idx = response.instance.metadata.get("gold_idx")
@@ -404,7 +404,7 @@ class LogprobPerCharMCAccuracyMetric(Metric):
                 continue
             logprob_per_char = []
             for o in response.outputs:
-                total_logprob = sum(lp["logprob"] for lp in (o.logprobs or []))
+                total_logprob = scorer.score(response.instance, o)
                 num_chars = max(len(o.text) if o.text else 0, 1)
                 logprob_per_char.append(total_logprob / num_chars)
             if logprob_per_char.index(max(logprob_per_char)) == gold_idx:
@@ -429,6 +429,7 @@ class LogprobPerTokenMCAccuracyMetric(Metric):
     def compute(self, responses: Sequence[Response]) -> float:
         if not responses:
             return 0.0
+        scorer = self.scorer()
         correct = 0
         for response in responses:
             gold_idx = response.instance.metadata.get("gold_idx")
@@ -436,7 +437,7 @@ class LogprobPerTokenMCAccuracyMetric(Metric):
                 continue
             logprob_per_token = []
             for o in response.outputs:
-                total_logprob = sum(lp["logprob"] for lp in (o.logprobs or []))
+                total_logprob = scorer.score(response.instance, o)
                 num_tokens = max(len(o.logprobs) if o.logprobs else 0, 1)
                 logprob_per_token.append(total_logprob / num_tokens)
             if logprob_per_token.index(max(logprob_per_token)) == gold_idx:

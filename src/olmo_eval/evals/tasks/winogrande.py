@@ -12,31 +12,31 @@ from olmo_eval.evals.tasks.common import Task, register, register_variant
 # fmt: off
 WINOGRANDE_FIXED_FEWSHOT = [
     {
-        "sentence": "John moved the couch from the garage to the backyard to create space. The _ is small.",
+        "sentence": "John moved the couch from the garage to the backyard to create space. The _ is small.",  # noqa: E501
         "option1": "garage",
         "option2": "backyard",
         "answer": "1",
     },
     {
-        "sentence": "Dennis drew up a business proposal to present to Logan because _ wants his investment.",
+        "sentence": "Dennis drew up a business proposal to present to Logan because _ wants his investment.",  # noqa: E501
         "option1": "Dennis",
         "option2": "Logan",
         "answer": "1",
     },
     {
-        "sentence": "Felicia unexpectedly made fried eggs for breakfast in the morning for Katrina and now _ owes a favor.",
+        "sentence": "Felicia unexpectedly made fried eggs for breakfast in the morning for Katrina and now _ owes a favor.",  # noqa: E501
         "option1": "Felicia",
         "option2": "Katrina",
         "answer": "2",
     },
     {
-        "sentence": "The circuit failed to power the television but kept the radio going, as the _ had a weak connection.",
+        "sentence": "The circuit failed to power the television but kept the radio going, as the _ had a weak connection.",  # noqa: E501
         "option1": "television",
         "option2": "radio",
         "answer": "1",
     },
     {
-        "sentence": "Neil told Craig that he has to take care of the child for the day because _ promised to do so.",
+        "sentence": "Neil told Craig that he has to take care of the child for the day because _ promised to do so.",  # noqa: E501
         "option1": "Neil",
         "option2": "Craig",
         "answer": "2",
@@ -83,7 +83,7 @@ def _process_winogrande_doc(doc: dict[str, Any], index: int) -> Instance | None:
 def _format_rc(sentence: str, option: str | None = None) -> str:
     if option:
         return _partial_context(sentence, option) + _partial_target(sentence)
-    return sentence[:sentence.index("_")]
+    return sentence[: sentence.index("_")]
 
 
 def _format_mc(sentence: str, options: tuple[str, ...], answer: str | None = None) -> str:
@@ -126,7 +126,7 @@ class Winogrande(Task):
                     index += 1
 
         if self.config.limit and len(instances) > self.config.limit:
-            instances = instances[:self.config.limit]
+            instances = instances[: self.config.limit]
 
         return instances
 
@@ -196,7 +196,8 @@ class Winogrande(Task):
             target = _partial_target(sentence)
             fewshot_prompt = "\n\n".join(parts) if parts else ""
             continuation_prompts = tuple(
-                ("\n\n".join([*parts, _partial_context(sentence, option)])) if parts
+                ("\n\n".join([*parts, _partial_context(sentence, option)]))
+                if parts
                 else _partial_context(sentence, option)
                 for option in (instance.choices or ())
             )
