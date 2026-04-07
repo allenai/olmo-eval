@@ -225,9 +225,12 @@ class PassAtKMetric(Metric):
     The probability that at least one of k samples passes.
     """
 
-    name: str = "pass_at_k"
+    name: str = field(init=False)
     k: int = 1
     scorer: type[Scorer] = field(kw_only=True)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "name", f"pass_at_{self.k}")
 
     def compute(self, responses: Sequence[Response]) -> float:
         """Compute pass@k across all tasks."""
@@ -261,9 +264,12 @@ class PassPowKMetric(Metric):
     The probability that k consecutive runs all succeed. Computed as (success_rate)^k.
     """
 
-    name: str = "pass_pow_k"
+    name: str = field(init=False)
     k: int = 1
     scorer: type[Scorer] = field(kw_only=True)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "name", f"pass_pow_{self.k}")
 
     def compute(self, responses: Sequence[Response]) -> float:
         """Compute pass^k across all tasks."""

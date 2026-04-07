@@ -168,7 +168,7 @@ class VLLMServerProvider(InferenceProvider):
         self,
         model_name: str,
         base_url: str | None = None,
-        timeout: float = 60.0,
+        timeout: float = 86400.0,
         max_concurrency: int = 32,
         max_retries: int = 3,
         tensor_parallel_size: int = 1,
@@ -575,7 +575,6 @@ class VLLMServerProvider(InferenceProvider):
             max_in_flight=self.max_concurrency,
             max_retries=self.max_retries,
         )
-        # Replace None with empty list for failed requests
         return [r if r is not None else [] for r in results]
 
     def generate(
