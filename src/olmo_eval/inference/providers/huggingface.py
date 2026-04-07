@@ -200,8 +200,8 @@ class HuggingFaceProvider(InferenceProvider):
 
                 logprob_entries = []
                 total = 0.0
-                for i, tok in enumerate(continuation_enc):
-                    lp = log_probs[ctx_len + i - 1, tok].item()
+                for j, tok in enumerate(continuation_enc):
+                    lp = log_probs[ctx_len + j - 1, tok].item()
                     token_str = self.tokenizer.decode(tok, skip_special_tokens=False)
                     logprob_entries.append(
                         {
