@@ -293,6 +293,11 @@ class PPLFormatter(Formatter):
         if gold_text is None:
             raise ValueError("PPLFormatter requires a gold answer to be set")
 
+        # Apply answer_prefix to the continuation (same as for fewshot examples)
+        # This matches oe-eval's doc_to_target which always prepends the prefix.
+        if self.answer_prefix:
+            gold_text = self.answer_prefix + gold_text
+
         # Build prompt with few-shot examples
         parts: list[str] = []
         for ex in fewshot or []:
