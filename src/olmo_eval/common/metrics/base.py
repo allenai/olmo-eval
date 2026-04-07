@@ -13,6 +13,7 @@ from olmo_eval.common.scorers import (
     LogprobScorer,
     PerplexityScorer,
     Scorer,
+    SQuADF1Scorer,
     SubstringRecallScorer,
     ToolCallScorer,
 )
@@ -64,6 +65,21 @@ class F1Metric(Metric):
 
     name: str = "f1"
     scorer: type[Scorer] = F1Scorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        if not responses:
+            return 0.0
+        scorer_name = self.scorer().name
+        total = sum(r.scores.get(scorer_name, 0.0) for r in responses)
+        return total / len(responses)
+
+
+@dataclass(frozen=True, slots=True)
+class SQuADF1Metric(Metric):
+    """Mean SQuAD-style F1 score: max F1 over all reference answers."""
+
+    name: str = "f1"
+    scorer: type[Scorer] = SQuADF1Scorer
 
     def compute(self, responses: Sequence[Response]) -> float:
         if not responses:
@@ -209,9 +225,12 @@ class PassAtKMetric(Metric):
     The probability that at least one of k samples passes.
     """
 
-    name: str = "pass_at_k"
+    name: str = field(init=False)
     k: int = 1
     scorer: type[Scorer] = field(kw_only=True)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "name", f"pass_at_{self.k}")
 
     def compute(self, responses: Sequence[Response]) -> float:
         """Compute pass@k across all tasks."""
@@ -245,9 +264,12 @@ class PassPowKMetric(Metric):
     The probability that k consecutive runs all succeed. Computed as (success_rate)^k.
     """
 
-    name: str = "pass_pow_k"
+    name: str = field(init=False)
     k: int = 1
     scorer: type[Scorer] = field(kw_only=True)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "name", f"pass_pow_{self.k}")
 
     def compute(self, responses: Sequence[Response]) -> float:
         """Compute pass^k across all tasks."""
@@ -272,6 +294,97 @@ class PassPowKMetric(Metric):
             pass_pow_k_values.append(compute_pass_pow_k(n, c, self.k))
 
         return sum(pass_pow_k_values) / len(pass_pow_k_values) if pass_pow_k_values else 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class LogprobMCAccuracyMetric(Metric):
+    """Multiple-choice accuracy via logprob argmax.
+
+    Picks the continuation with the highest total logprob and checks whether
+    its index matches ``instance.metadata["gold_idx"]``.
+    """
+
+    name: str = "accuracy"
+    scorer: type[Scorer] = LogprobScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        if not responses:
+            return 0.0
+        scorer = self.scorer()
+        correct = 0
+        for response in responses:
+            gold_idx = response.instance.metadata.get("gold_idx")
+            if gold_idx is None or not response.outputs:
+                continue
+            logprob_sums = [scorer.score(response.instance, o) for o in response.outputs]
+            if logprob_sums.index(max(logprob_sums)) == gold_idx:
+                correct += 1
+        return correct / len(responses)
+
+
+@dataclass(frozen=True, slots=True)
+class LogprobPerCharMCAccuracyMetric(Metric):
+    """Multiple-choice accuracy via character-length-normalized logprob argmax.
+
+    For each continuation, divides the total logprob by the number of characters
+    in the continuation text, then picks the continuation with the highest
+    normalized logprob. Checks whether its index matches
+    ``instance.metadata["gold_idx"]``.
+
+    This matches the ``acc_per_char`` metric from oe-eval-internal's MCAccuracy.
+    """
+
+    name: str = "accuracy"
+    scorer: type[Scorer] = LogprobScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        if not responses:
+            return 0.0
+        scorer = self.scorer()
+        correct = 0
+        for response in responses:
+            gold_idx = response.instance.metadata.get("gold_idx")
+            if gold_idx is None or not response.outputs:
+                continue
+            logprob_per_char = []
+            for o in response.outputs:
+                total_logprob = scorer.score(response.instance, o)
+                num_chars = max(len(o.text) if o.text else 0, 1)
+                logprob_per_char.append(total_logprob / num_chars)
+            if logprob_per_char.index(max(logprob_per_char)) == gold_idx:
+                correct += 1
+        return correct / len(responses)
+
+
+@dataclass(frozen=True, slots=True)
+class GreedyAccuracyMetric(Metric):
+    """Greedy decoding accuracy for single-continuation tasks.
+
+    Checks whether the model would greedily decode the expected continuation
+    token-by-token, using the ``is_greedy`` flag computed by the inference provider.
+
+    This is the correct metric for tasks like LAMBADA where there is only one
+    continuation per instance and we want to know if the model would have
+    produced that exact continuation via greedy decoding.
+    """
+
+    name: str = "greedy_accuracy"
+    scorer: type[Scorer] = LogprobScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        if not responses:
+            return 0.0
+        correct = 0
+        for response in responses:
+            if not response.outputs:
+                continue
+            # For single-continuation tasks, check the gold continuation
+            gold_idx = response.instance.metadata.get("gold_idx", 0)
+            if gold_idx < len(response.outputs):
+                output = response.outputs[gold_idx]
+                if output.metadata.get("is_greedy", False):
+                    correct += 1
+        return correct / len(responses)
 
 
 @dataclass(frozen=True, slots=True)

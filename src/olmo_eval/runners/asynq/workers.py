@@ -102,7 +102,9 @@ def inference_worker(
             log_dir = os.path.join(output_dir, "logs")
 
         harness_config = harness_config.with_provider_overrides(
-            tensor_parallel_size=len(gpu_ids) if gpu_ids else None,
+            tensor_parallel_size=len(gpu_ids)
+            if (gpu_ids and provider_config.requires_gpu)
+            else None,
             max_model_len=max_model_len,
             max_concurrency=max_concurrency,
             tokenizer=tokenizer,
@@ -202,8 +204,8 @@ def inference_worker(
                 model_name=model_name,
                 task_id=WORKER_FATAL,
                 instance_idx=-1,
-                instance=None,  # type: ignore[arg-type]
-                request=None,  # type: ignore[arg-type]
+                instance=None,
+                request=None,
                 outputs=[],
                 error=f"Worker process crashed: {e}",
             )
@@ -219,6 +221,7 @@ def scoring_worker(
     sandbox_configs_list: list[dict[str, Any]] | None = None,
     ready_event: MPEvent | None = None,
     max_concurrency: int = DEFAULT_SCORING_CONCURRENCY,
+    registry_config: dict[str, list[dict[str, Any]]] | None = None,
 ) -> None:
     """Worker process that scores responses with concurrent execution.
 
@@ -236,6 +239,9 @@ def scoring_worker(
         sandbox_configs_list: Optional list of serialized SandboxConfigs for code execution.
         ready_event: Optional event to signal when worker is ready.
         max_concurrency: Maximum concurrent scoring operations.
+        registry_config: Optional config for ProviderRegistry (auxiliary providers).
+            Format: {name: [config_dict, ...]} where each config_dict is a
+            serialized ProviderConfig with base_url set.
     """
     import sys
 
@@ -251,6 +257,23 @@ def scoring_worker(
     sandbox_manager = None
     scoring_context: ScoringContext | None = None
 
+    # Cache Task objects by spec so only the first ScoringItem per spec
+    # needs to carry (and unpickle) the full Task.
+    from olmo_eval.evals.tasks.common import Task
+
+    task_cache: dict[str, Task] = {}
+
+    def get_task(item: ScoringItem) -> Task:
+        if item.task is not None:
+            task_cache[item.spec] = item.task
+        task = task_cache.get(item.spec)
+        if task is None:
+            raise RuntimeError(
+                f"No cached Task for spec {item.spec!r}. "
+                "The first ScoringItem for each spec must include the Task."
+            )
+        return task
+
     async def run_scoring_loop() -> None:
         """Main async scoring loop using continuous dispatch pattern.
 
@@ -258,16 +281,32 @@ def scoring_worker(
         in-flight tasks without callbacks or sleeps. This approach is modeled
         after ContinuousBatchDispatcher in dispatch.py.
         """
+        from olmo_eval.evals.tasks.common import Task
+
         progress: ProgressLogger | None = None
         in_flight: dict[asyncio.Task[ScoredResponse], ScoringItem] = {}
         shutdown = False
 
+        # Cache Task objects by spec so only the first ScoringItem per spec
+        # needs to carry (and unpickle) the full Task.
+        task_cache: dict[str, Task] = {}
+
+        def get_task(item: ScoringItem) -> Task:
+            if item.task is not None:
+                task_cache[item.spec] = item.task
+            task = task_cache.get(item.spec)
+            if task is None:
+                raise RuntimeError(
+                    f"No cached Task for spec {item.spec!r}. "
+                    "The first ScoringItem for each spec must include the Task."
+                )
+            return task
+
         async def score_item(item: ScoringItem) -> ScoredResponse:
             """Score a single item."""
             try:
-                scored_list = await item.task.score_responses(
-                    [item.response], context=scoring_context
-                )
+                task = get_task(item)
+                scored_list = await task.score_responses([item.response], context=scoring_context)
                 scored = scored_list[0] if scored_list else item.response
                 return ScoredResponse(
                     spec=item.spec,
@@ -382,10 +421,22 @@ def scoring_worker(
                 )
                 sys.exit(1)
 
-            scoring_context = ScoringContext(
-                execution_env=sandbox_manager,
-                scoring_concurrency=max_concurrency,
-            )
+        # Create provider registry from config (servers already running)
+        provider_registry = None
+        if registry_config:
+            from olmo_eval.inference.registry import ProviderRegistry
+
+            provider_registry = ProviderRegistry.from_serialized(registry_config)
+            if provider_registry:
+                worker_logger.info(
+                    f"Provider registry ready with providers: {provider_registry.names}"
+                )
+
+        scoring_context = ScoringContext(
+            execution_env=sandbox_manager,
+            scoring_concurrency=max_concurrency,
+            inference_pool=provider_registry,
+        )
 
         # Signal that worker is ready
         worker_logger.info("Scorer ready")

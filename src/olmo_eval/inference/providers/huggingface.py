@@ -10,12 +10,12 @@ from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 
 if TYPE_CHECKING:
-    import torch
+    import torch  # type: ignore[ty:unresolved-import]
 
 
 def _get_device() -> torch.device:
     """Detect the best available device."""
-    import torch
+    import torch  # type: ignore[ty:unresolved-import]
 
     if torch.cuda.is_available():
         return torch.device("cuda")
@@ -97,7 +97,7 @@ class HuggingFaceProvider(InferenceProvider):
         requests: list[LMRequest],
         sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
-        import torch
+        import torch  # type: ignore[ty:unresolved-import]
 
         params = self._default_sampling_params(sampling_params)
         gen_kwargs = self._build_generate_kwargs(params)
@@ -158,7 +158,7 @@ class HuggingFaceProvider(InferenceProvider):
         self,
         requests: list[LMRequest],
     ) -> list[list[LMOutput]]:
-        import torch
+        import torch  # type: ignore[ty:unresolved-import]
 
         results = []
         for request in requests:

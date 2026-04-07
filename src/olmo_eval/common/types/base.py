@@ -65,6 +65,7 @@ class Split(StrEnum):
     TRAIN = "train"
     VALIDATION = "validation"
     TEST = "test"
+    ALL = "all"
 
 
 class MetricName(StrEnum):

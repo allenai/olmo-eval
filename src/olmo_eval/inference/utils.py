@@ -43,8 +43,8 @@ def patch_openai_agents_for_vllm() -> None:
     Call this once before creating any agents that will talk to vLLM.
     Safe to call multiple times (idempotent).
     """
-    from agents import FunctionTool
-    from agents.models.chatcmpl_converter import Converter
+    from agents import FunctionTool  # type: ignore[ty:unresolved-import]
+    from agents.models.chatcmpl_converter import Converter  # type: ignore[ty:unresolved-import]
 
     # Check if already patched
     if getattr(Converter, "_vllm_patched", False):

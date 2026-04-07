@@ -2,6 +2,7 @@
 
 import pytest
 
+from olmo_eval.cli.beaker.config_loader import LaunchConfigLoader
 from olmo_eval.launch.beaker import (
     BeakerEnvSecret,
     BeakerJobConfig,
@@ -691,3 +692,117 @@ class TestBuildInstallCommand:
         """Test without constraints file."""
         cmd = build_install_command("vllm==0.14.0", None)
         assert cmd == "uv pip install 'vllm==0.14.0'"
+
+
+class TestDetectGpuRequirement:
+    """Tests for GPU requirement detection in LaunchConfigLoader."""
+
+    def test_provider_num_instances_counted_for_gpus(self):
+        """provider.num_instances controls GPU allocation."""
+        loader = LaunchConfigLoader(
+            config_path=None,
+            cli_args={
+                "harness": "dr_tulu",
+                "harness_overrides": [
+                    "provider.num_instances=4",
+                    "provider.kwargs.tensor_parallel_size=2",
+                ],
+            },
+        )
+
+        gpus = loader._detect_gpu_requirement(
+            model_spec="Qwen/Qwen3-8B",
+            harness_name="dr_tulu",
+            harness_overrides=[
+                "provider.num_instances=4",
+                "provider.kwargs.tensor_parallel_size=2",
+            ],
+        )
+
+        # 4 instances × 2 TP = 8 GPUs for main provider
+        assert gpus == 8
+
+    def test_main_and_auxiliary_gpu_sum(self):
+        """Total GPUs should include both main and auxiliary providers."""
+        loader = LaunchConfigLoader(
+            config_path=None,
+            cli_args={
+                "harness": "dr_tulu",
+                "harness_overrides": [
+                    "provider.num_instances=4",
+                    "auxiliary_providers.judge.kind=vllm_server",
+                    "auxiliary_providers.judge.model=Qwen/Qwen3-8B",
+                    "auxiliary_providers.judge.num_instances=1",
+                ],
+            },
+        )
+
+        gpus = loader._detect_gpu_requirement(
+            model_spec="Qwen/Qwen3-8B",
+            harness_name="dr_tulu",
+            harness_overrides=[
+                "provider.num_instances=4",
+                "auxiliary_providers.judge.kind=vllm_server",
+                "auxiliary_providers.judge.model=Qwen/Qwen3-8B",
+                "auxiliary_providers.judge.num_instances=1",
+            ],
+        )
+
+        # 4 instances × 1 TP (main) + 1 instance × 1 TP (aux) = 5 GPUs
+        assert gpus == 5
+
+    def test_api_backed_auxiliary_no_gpus(self):
+        """API-backed auxiliary providers should not consume GPUs."""
+        loader = LaunchConfigLoader(
+            config_path=None,
+            cli_args={
+                "harness": "dr_tulu",
+                "harness_overrides": [
+                    "provider.num_instances=2",
+                    "auxiliary_providers.judge.kind=litellm",
+                    "auxiliary_providers.judge.model=gpt-4o",
+                ],
+            },
+        )
+
+        gpus = loader._detect_gpu_requirement(
+            model_spec="Qwen/Qwen3-8B",
+            harness_name="dr_tulu",
+            harness_overrides=[
+                "provider.num_instances=2",
+                "auxiliary_providers.judge.kind=litellm",
+                "auxiliary_providers.judge.model=gpt-4o",
+            ],
+        )
+
+        # 2 instances × 1 TP (main) + 0 (litellm is API-backed) = 2 GPUs
+        assert gpus == 2
+
+    def test_external_auxiliary_server_no_gpus(self):
+        """Auxiliary providers with base_url should not consume GPUs."""
+        loader = LaunchConfigLoader(
+            config_path=None,
+            cli_args={
+                "harness": "dr_tulu",
+                "harness_overrides": [
+                    "provider.num_instances=2",
+                    "auxiliary_providers.judge.kind=vllm_server",
+                    "auxiliary_providers.judge.model=some-model",
+                    "auxiliary_providers.judge.base_url=http://external:8000/v1",
+                ],
+            },
+        )
+
+        gpus = loader._detect_gpu_requirement(
+            model_spec="Qwen/Qwen3-8B",
+            harness_name="dr_tulu",
+            harness_overrides=[
+                "provider.num_instances=2",
+                "auxiliary_providers.judge.kind=vllm_server",
+                "auxiliary_providers.judge.model=some-model",
+                "auxiliary_providers.judge.base_url=http://external:8000/v1",
+            ],
+        )
+
+        # 2 instances × 1 TP (main) + 0 (external server) = 2 GPUs
+        assert gpus == 2

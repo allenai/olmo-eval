@@ -328,6 +328,7 @@ class VLLMServerProcess:
         model_name: str,
         port: int | None = None,
         tensor_parallel_size: int = 1,
+        gpu_ids: list[int] | None = None,
         startup_timeout: float = DEFAULT_STARTUP_TIMEOUT,
         log_dir: str | None = None,
         owner: str | None = None,
@@ -338,7 +339,9 @@ class VLLMServerProcess:
         Args:
             model_name: HuggingFace model ID or local path
             port: Port to serve on (auto-assigned if None)
-            tensor_parallel_size: Number of GPUs for tensor parallelism
+            tensor_parallel_size: Number of GPUs for tensor parallelism.
+                If gpu_ids is provided, this is inferred from len(gpu_ids).
+            gpu_ids: Specific GPU IDs to use. Sets CUDA_VISIBLE_DEVICES.
             startup_timeout: Maximum time to wait for server startup
             log_dir: Directory to write server logs to (if set, logs are persisted)
             owner: Owner identifier for log messages (e.g., worker ID)
@@ -348,7 +351,9 @@ class VLLMServerProcess:
 
         self.model_name = model_name
         self.port = port or _find_free_port()
-        self.tensor_parallel_size = tensor_parallel_size
+        self.gpu_ids = gpu_ids
+        # Infer tensor_parallel_size from gpu_ids if provided
+        self.tensor_parallel_size = len(gpu_ids) if gpu_ids else tensor_parallel_size
         self.startup_timeout = startup_timeout
         self.log_dir = log_dir
         self.owner = owner or get_current_worker_id()
@@ -397,8 +402,10 @@ class VLLMServerProcess:
         if progress_callback:
             progress_callback(f"Starting vLLM server for {self.model_name}...")
 
-        # Start the server process
+        # Build environment for subprocess (child only, don't mutate parent)
         env = os.environ.copy()
+        if self.gpu_ids:
+            env["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in self.gpu_ids)
 
         # Allow extended max_model_len when user specifies it (e.g., with rope_scaling)
         # This is needed when max_model_len > model's max_position_embeddings
