@@ -121,20 +121,21 @@ class MultilingualMBPPTask(Task):
         return self._fewshot_pool
 
     def _get_per_instance_fewshot(self) -> list[Instance]:
-        """Get fewshot examples with an advancing RNG, matching legacy oe-eval behavior.
+        """Get fewshot examples matching legacy oe-eval behavior.
 
-        The old code used a mutable default argument rnd=random.Random(1234) which
-        meant the RNG state advanced across calls. Each test document got a different
-        shuffle of the prompt pool, producing different fewshot examples per instance.
+        The old code (base_task.py build_all_requests) creates a fresh
+        random.Random(fewshot_seed) for EVERY instance, so all instances
+        get the same shuffle and the same fewshot examples.
         """
         if self.config.num_fewshot == 0:
             return []
 
-        if self._fewshot_rng is None:
-            self._fewshot_rng = random.Random(self.config.fewshot_seed)
+        # Fresh RNG per instance to match old behavior:
+        # rnd = random.Random(fewshot_seed) is created per doc in build_all_requests
+        rng = random.Random(self.config.fewshot_seed)
 
         pool = list(self._get_fewshot_pool())  # copy to avoid mutating cache
-        self._fewshot_rng.shuffle(pool)
+        rng.shuffle(pool)
         return pool[: self.config.num_fewshot]
 
     def format_request(self, instance: Instance) -> LMRequest:
