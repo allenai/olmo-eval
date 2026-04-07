@@ -10,7 +10,6 @@ Languages:
 Dataset: allenai/multilingual_mbpp
 """
 
-import random
 from collections.abc import Iterator
 from typing import Any
 
@@ -52,14 +51,6 @@ class MultilingualMBPPTask(Task):
     normalize_line_endings: bool = True  # Always normalize for correctness
     language: str = "python"  # Override in subclasses
 
-    def __init__(self, config: Any) -> None:
-        super().__init__(config)
-        # Per-instance fewshot state: matches legacy oe-eval behavior where a mutable
-        # default rnd=random.Random(1234) advances across calls to fewshot_context(),
-        # giving each test document a different set of fewshot examples.
-        self._fewshot_rng: random.Random | None = None
-        self._fewshot_pool: list[Instance] | None = None
-
     @property
     def instances(self) -> Iterator[Instance]:
         """Yield instances from the test split."""
@@ -100,47 +91,10 @@ class MultilingualMBPPTask(Task):
             },
         )
 
-    def _get_fewshot_pool(self) -> list[Instance]:
-        """Load and cache the full pool of fewshot examples from the prompt split."""
-        if self._fewshot_pool is None:
-            loader = DataLoader()
-            for split in ["prompt", "train"]:
-                try:
-                    source = self._get_source_for_split(split)
-                    self._fewshot_pool = [
-                        inst
-                        for doc in loader.load(source)
-                        if (inst := self.process_doc(doc)) is not None
-                    ]
-                    if self._fewshot_pool:
-                        break
-                except Exception:
-                    continue
-            if self._fewshot_pool is None:
-                self._fewshot_pool = []
-        return self._fewshot_pool
-
-    def _get_per_instance_fewshot(self) -> list[Instance]:
-        """Get fewshot examples with an advancing RNG, matching legacy oe-eval behavior.
-
-        The old code used a mutable default argument rnd=random.Random(1234) which
-        meant the RNG state advanced across calls. Each test document got a different
-        shuffle of the prompt pool, producing different fewshot examples per instance.
-        """
-        if self.config.num_fewshot == 0:
-            return []
-
-        if self._fewshot_rng is None:
-            self._fewshot_rng = random.Random(self.config.fewshot_seed)
-
-        pool = list(self._get_fewshot_pool())  # copy to avoid mutating cache
-        self._fewshot_rng.shuffle(pool)
-        return pool[: self.config.num_fewshot]
-
     def format_request(self, instance: Instance) -> LMRequest:
         """Format an instance into an LM request."""
         if self.config.formatter is not None:
-            return self.config.formatter.format(instance, self._get_per_instance_fewshot())
+            return self.config.formatter.format(instance, self.get_fewshot())
 
         return LMRequest(
             request_type=self.request_type,
