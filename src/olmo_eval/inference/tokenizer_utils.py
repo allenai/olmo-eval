@@ -87,20 +87,17 @@ def encode_context_and_continuation(
         continuation_enc = tokenizer.encode(continuation, add_special_tokens=False)
         return context_enc, continuation_enc
 
-    # Match lm_eval behavior: move trailing spaces from context to continuation
-    n_spaces = len(context) - len(context.rstrip())
-    if n_spaces > 0:
-        continuation = context[-n_spaces:] + continuation
-        context = context[:-n_spaces]
+    # Note: we do NOT move trailing spaces from context to continuation here.
+    # The old oe-eval-internal code (eleuther_olmo_core._encode_pair) tokenizes
+    # context and continuation independently without any trailing-space adjustment.
+    # Matching that behavior is required for BPB parity with the old eval suite.
 
-    # Match lm_eval behavior: add BOS token if the tokenizer is configured for it
-    # (lm_eval's tok_encode uses add_special_tokens=tokenizer.add_bos_token)
+    # Add BOS token if the tokenizer is configured for it
     add_bos = getattr(tokenizer, "add_bos_token", False)
     bos_ids = get_bos_token_ids(tokenizer, fallback_to_eos=fallback_to_eos) if add_bos else []
 
-    # Encode the full sequence and extract continuation tokens
-    whole_enc = tokenizer.encode(context + continuation, add_special_tokens=False)
+    # Tokenize independently (matches old oe-eval _encode_pair behavior)
     context_enc = tokenizer.encode(context, add_special_tokens=False)
-    continuation_enc = whole_enc[len(context_enc) :]
+    continuation_enc = tokenizer.encode(continuation, add_special_tokens=False)
 
     return bos_ids + context_enc, continuation_enc
