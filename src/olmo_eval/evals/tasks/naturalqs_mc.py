@@ -49,7 +49,7 @@ def _build_nq_mc_fixed_fewshot(raw_docs: list[dict[str, Any]], num_fewshot: int)
             Instance(
                 question=question,
                 choices=choices,
-                gold_answer=answer_key,
+                gold_answer=gold_text,
                 metadata={
                     "gold_idx": gold_idx,
                     "gold_text": gold_text,

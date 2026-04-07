@@ -93,10 +93,20 @@ def register(suite: Suite) -> Suite:
         The same Suite, for chaining.
 
     Raises:
-        ValueError: If a suite with the same name is already registered.
+        ValueError: If a suite with the same name is already registered,
+            or if the name collides with a registered task spec.
     """
     if suite.name in _REGISTRY:
         raise ValueError(f"Suite {suite.name!r} is already registered")
+
+    from olmo_eval.evals.tasks.common.registry import task_exists
+
+    if task_exists(suite.name):
+        raise ValueError(
+            f"Suite name {suite.name!r} collides with a registered task spec. "
+            f"Choose a different suite name to avoid ambiguity."
+        )
+
     _REGISTRY[suite.name] = suite
     return suite
 

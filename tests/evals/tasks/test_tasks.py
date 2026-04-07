@@ -4,6 +4,56 @@ import pytest
 
 from olmo_eval.common.types import Instance, LMOutput, RequestType
 from olmo_eval.evals.tasks.common import get_task, list_tasks
+from olmo_eval.evals.tasks.gsm8k import _clean_short_answer, _extract_last_number
+
+
+class TestGSMNumberExtraction:
+    """Tests for GSM8K/GSM-Symbolic number extraction helpers."""
+
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ("The answer is 42.", "42"),
+            ("So the answer is 6.", "6"),
+            ("5 + 4 = 9. So the answer is 9.", "9"),
+            # Negative integers
+            ("The temperature dropped to -3 degrees.", "-3"),
+            ("The answer is -15.", "-15"),
+            # Positive sign
+            ("The result is +7.", "+7"),
+            # Floats
+            ("The answer is 3.14.", "3.14"),
+            ("She has -2.5 dollars.", "-2.5"),
+            ("A gain of +0.75 points.", "+0.75"),
+            # Comma-separated numbers
+            ("The population is 1,000,000.", "1000000"),
+            ("He earned $2,500.", "2500"),
+            # Last number wins
+            ("First 10, then 20, finally 30.", "30"),
+            ("Step 1: 100 - 60 = 40. Step 2: 40 - 8 = 32.", "32"),
+            # No numbers
+            ("There is no number here.", None),
+            ("", None),
+            # Edge: bare decimal
+            (".5 liters", ".5"),
+        ],
+    )
+    def test_extract_last_number(self, text: str, expected: str | None):
+        assert _extract_last_number(text) == expected
+
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ("6", "6"),
+            ("-3", "-3"),
+            ("3.14", "3.14"),
+            ("1,200", "1200"),
+            # Falls back to original text when no number is found
+            ("no number", "no number"),
+        ],
+    )
+    def test_clean_short_answer(self, text: str, expected: str):
+        assert _clean_short_answer(text) == expected
 
 
 class TestTaskRegistration:

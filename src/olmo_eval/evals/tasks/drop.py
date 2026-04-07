@@ -406,5 +406,5 @@ register_variant(
     "drop",
     "olmo3base",
     num_fewshot=5,
-    fewshot_source="olmes_drop_mc_fixed",
+    fewshot_source="olmes_drop_fixed",
 )

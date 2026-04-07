@@ -1,4 +1,3 @@
-import re
 from collections.abc import Iterator
 from typing import Any
 
@@ -8,18 +7,7 @@ from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, S
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 from olmo_eval.evals.tasks.constants.gsm_symbolic import GSM8K_FIXED_FEWSHOT
-
-
-def _extract_last_number(text: str) -> str | None:
-    output = re.sub(r"(\d),(\d)", r"\1\2", text)
-    numbers = re.findall(r"[-+]?\d*\.\d+|\d+", output)
-    return numbers[-1] if numbers else None
-
-
-def _clean_short_answer(text: str) -> str:
-    output = re.sub(r"(\d),(\d)", r"\1\2", text)
-    numbers = re.findall(r"[-+]?\d*\.\d+|\d+", output)
-    return numbers[-1] if numbers else text
+from olmo_eval.evals.tasks.gsm8k import _clean_short_answer, _extract_last_number
 
 
 @register("gsm_symbolic")
