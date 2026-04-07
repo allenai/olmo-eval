@@ -54,10 +54,6 @@ class MultilingualMBPPTask(Task):
 
     def __init__(self, config: Any) -> None:
         super().__init__(config)
-        # Per-instance fewshot state: matches legacy oe-eval behavior where a mutable
-        # default rnd=random.Random(1234) advances across calls to fewshot_context(),
-        # giving each test document a different set of fewshot examples.
-        self._fewshot_rng: random.Random | None = None
         self._fewshot_pool: list[Instance] | None = None
 
     @property
