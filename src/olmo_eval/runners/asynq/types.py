@@ -84,8 +84,8 @@ class ResultItem:
     model_name: str  # Which model produced this result
     task_id: str
     instance_idx: int
-    instance: Instance
-    request: LMRequest
+    instance: Instance | None  # None only for fatal error signals
+    request: LMRequest | None  # None only for fatal error signals
     outputs: list[LMOutput]
     error: str | None = None
     attempt: int = 0
@@ -93,12 +93,17 @@ class ResultItem:
 
 @dataclass
 class ScoringItem:
-    """Single response to be scored by the scoring worker."""
+    """Single response to be scored by the scoring worker.
+
+    The ``task`` field is only set on the first item for each spec;
+    the scoring worker caches it and subsequent items leave it as None
+    to avoid re-pickling the full Task object through the multiprocessing queue.
+    """
 
     spec: str
     instance_idx: int
     response: Response
-    task: Task
+    task: Task | None = None
 
 
 @dataclass

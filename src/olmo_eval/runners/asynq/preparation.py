@@ -53,12 +53,10 @@ def prepare_task_items(
     task.config = replace(task.config, sampling_params=existing_params)
 
     instances = list(task.instances)
-    if task.config.limit:
-        # Shuffle with seed for reproducible random sampling
+    if task.config.limit and len(instances) > task.config.limit:
+        # Use random.sample for reproducible random sampling (matches oe-eval-internal behavior)
         rng = random.Random(task.config.seed)
-        instances = instances.copy()
-        rng.shuffle(instances)
-        instances = instances[: task.config.limit]
+        instances = rng.sample(instances, task.config.limit)
 
     items = [
         QueueItem(
@@ -67,7 +65,7 @@ def prepare_task_items(
             instance_idx=idx,
             instance=inst,
             request=task.format_request(inst),
-            sampling_params=existing_params,
+            sampling_params=task.get_sampling_params(inst) or existing_params,
         )
         for idx, inst in enumerate(instances)
     ]

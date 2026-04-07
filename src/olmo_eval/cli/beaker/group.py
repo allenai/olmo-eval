@@ -1,14 +1,21 @@
 """Beaker group management commands."""
 
+from __future__ import annotations
+
 from datetime import UTC
+from typing import TYPE_CHECKING, Any
 
 import click
 from rich.table import Table
 
 from olmo_eval.cli.utils import console
+from olmo_eval.launch import BeakerLauncher
+
+if TYPE_CHECKING:
+    from beaker import BeakerGroup
 
 
-def _get_launcher() -> "BeakerLauncher":  # type: ignore[name-defined]  # noqa: F821
+def _get_launcher() -> BeakerLauncher:
     """Get BeakerLauncher instance, handling import errors."""
     try:
         from olmo_eval.launch import BeakerLauncher
@@ -21,7 +28,7 @@ def _get_launcher() -> "BeakerLauncher":  # type: ignore[name-defined]  # noqa: 
     return BeakerLauncher()
 
 
-def _get_beaker_group(launcher: "BeakerLauncher", group_name: str) -> "BeakerGroup":  # type: ignore[name-defined]  # noqa: F821
+def _get_beaker_group(launcher: BeakerLauncher, group_name: str) -> BeakerGroup:
     """Get a Beaker group by name, handling errors."""
     try:
         from beaker.exceptions import BeakerGroupNotFound
@@ -113,7 +120,7 @@ def group_info(
         for exp in experiments:
             workload = launcher.beaker.workload.get(exp.id)
             status_enum = BeakerWorkloadStatus(workload.status)
-            exp_info = {
+            exp_info: dict[str, Any] = {
                 "id": exp.id,
                 "name": exp.name,
                 "status": status_enum.name,
@@ -128,7 +135,7 @@ def group_info(
                             BeakerWorkloadStatus(task.status).name if task.status else "unknown"
                         )
                         task_list.append({"id": task.id, "name": task.name, "status": task_status})
-                    exp_info["tasks"] = task_list
+                    exp_info["tasks"] = task_list  # type: ignore
                 except Exception:
                     pass
 

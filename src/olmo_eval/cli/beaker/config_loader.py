@@ -55,10 +55,6 @@ class LaunchConfig:
     harness: str | None = None
     harness_overrides: list[str] = field(default_factory=list)
 
-    inject_aws_credentials: bool = False
-    inject_gcs_credentials: bool = False
-    inject_gcp_secret: bool = False
-
     uv_cache_dir: str | None = None
 
     # Secret env overrides: maps beaker_secret_name -> env_var_name
@@ -139,9 +135,12 @@ class LaunchConfigLoader:
             gpus = cli_gpus  # None means auto-detect from provider
             image = cli_image
 
-        # Auto-detect GPU requirements from provider if not explicitly set
+        # Auto-detect GPU requirements from provider and harness if not explicitly set
+        harness_name = self.cli_args.get("harness")
+        harness_overrides = self.cli_args.get("harness_overrides", [])
+
         if gpus is None and model_specs:
-            gpus = self._detect_gpu_requirement(model_specs[0])
+            gpus = self._detect_gpu_requirement(model_specs[0], harness_name, harness_overrides)
         elif gpus is None:
             gpus = 0  # Default to 0 if no model specified
 
@@ -208,7 +207,6 @@ class LaunchConfigLoader:
             harness_overrides=self.cli_args.get("harness_overrides", []),
             uv_cache_dir=self.cli_args.get("uv_cache_dir"),
             secret_env_overrides=self.cli_args.get("secret_env_overrides", {}),
-            inject_gcp_secret=self.cli_args.get("gcp_secret") or False,
         )
 
     def _validate_required(
@@ -254,20 +252,87 @@ class LaunchConfigLoader:
 
         return sanitize_beaker_name(f"{model_name}-{tasks_part}")
 
-    def _detect_gpu_requirement(self, model_spec: str) -> int:
-        """Detect GPU requirement based on provider type.
+    def _detect_gpu_requirement(
+        self,
+        model_spec: str,
+        harness_name: str | None = None,
+        harness_overrides: list[str] | None = None,
+    ) -> int:
+        """Detect GPU requirement based on provider and harness configuration.
+
+        Calculates total GPUs needed for:
+        - Main model (tensor_parallel_size × num_instances)
+        - Auxiliary providers (each with their own tensor_parallel_size × num_instances)
 
         Args:
             model_spec: Model specification (name or preset).
+            harness_name: Optional harness preset name.
+            harness_overrides: Optional list of harness override strings.
 
         Returns:
-            1 if provider requires GPU (vllm, hf), 0 otherwise (litellm, mock).
+            Total number of GPUs required.
         """
         from olmo_eval.common.configs import get_provider_config
 
         try:
             provider_config = get_provider_config(model_spec)
-            return 1 if provider_config.requires_gpu else 0
+            if not provider_config.requires_local_gpu:
+                return 0
         except Exception:
-            # If we can't determine, default to 1 GPU for safety
-            return 1
+            pass
+
+        # Build effective harness config with overrides applied
+        harness_config = self._get_effective_harness_config(harness_name, harness_overrides)
+
+        # Calculate main provider GPU requirements
+        main_instances = 1
+        main_tp = 1
+        if harness_config and harness_config.provider:
+            main_tp = harness_config.provider.kwargs.get("tensor_parallel_size", 1)
+            main_instances = harness_config.provider.num_instances
+        main_gpus = main_instances * main_tp
+
+        # Calculate auxiliary provider GPU requirements
+        aux_gpus = 0
+        if harness_config and harness_config.auxiliary_providers:
+            for config in harness_config.auxiliary_providers.values():
+                if not config.requires_local_gpu:
+                    # API-backed or external server - no GPUs needed
+                    continue
+                num_instances = config.num_instances
+                tensor_parallel = config.kwargs.get("tensor_parallel_size", 1)
+                aux_gpus += num_instances * tensor_parallel
+
+        return main_gpus + aux_gpus
+
+    def _get_effective_harness_config(
+        self,
+        harness_name: str | None,
+        harness_overrides: list[str] | None,
+    ):
+        """Get harness config with overrides applied.
+
+        Args:
+            harness_name: Optional harness preset name.
+            harness_overrides: Optional list of harness override strings.
+
+        Returns:
+            HarnessConfig with overrides applied, or None if no harness specified.
+        """
+        if not harness_name:
+            return None
+
+        from olmo_eval.cli.run.config import _apply_dotlist_overrides
+        from olmo_eval.harness import HarnessConfig, get_harness_preset
+
+        try:
+            harness_config = get_harness_preset(harness_name)
+        except Exception:
+            return None
+
+        if harness_overrides:
+            harness_dict = harness_config.to_dict()
+            harness_dict = _apply_dotlist_overrides(harness_dict, harness_overrides)
+            harness_config = HarnessConfig.from_dict(harness_dict)
+
+        return harness_config

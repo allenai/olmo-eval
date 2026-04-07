@@ -117,6 +117,66 @@ class F1Scorer(Scorer):
         return _compute_f1(str(output.extracted_answer), str(instance.gold_answer))
 
 
+def _squad_normalize_answer(text: str) -> str:
+    """Normalize text using SQuAD-style normalization.
+
+    Lowercases, removes punctuation, removes articles (a, an, the),
+    and normalizes whitespace. Matches the standard SQuAD evaluation script.
+    """
+    import re
+    import string
+
+    text = text.lower()
+    text = "".join(ch for ch in text if ch not in set(string.punctuation))
+    text = re.sub(r"\b(a|an|the)\b", " ", text)
+    text = " ".join(text.split())
+    return text
+
+
+def _compute_squad_f1(pred: str, gold: str) -> float:
+    """Compute token-level F1 using SQuAD-style normalization."""
+    from collections import Counter
+
+    pred_tokens = _squad_normalize_answer(pred).split()
+    gold_tokens = _squad_normalize_answer(gold).split()
+
+    if not gold_tokens or not pred_tokens:
+        return 0.0
+
+    common = Counter(pred_tokens) & Counter(gold_tokens)
+    num_same = sum(common.values())
+
+    if num_same == 0:
+        return 0.0
+
+    precision = num_same / len(pred_tokens)
+    recall = num_same / len(gold_tokens)
+    f1 = (2 * precision * recall) / (precision + recall)
+    return f1
+
+
+@dataclass(frozen=True, slots=True)
+class SQuADF1Scorer(Scorer):
+    """Score using SQuAD-style F1: max token-level F1 over all reference answers.
+
+    Uses metadata["all_answers"] for multiple references. Falls back to
+    instance.gold_answer if metadata is not present.
+    """
+
+    name: str = "f1"
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        if output.extracted_answer is None:
+            return 0.0
+        pred = str(output.extracted_answer)
+        all_answers = instance.metadata.get("all_answers", [])
+        if not all_answers:
+            if instance.gold_answer is None:
+                return 0.0
+            all_answers = [instance.gold_answer]
+        return max(_compute_squad_f1(pred, ref) for ref in all_answers)
+
+
 @dataclass(frozen=True, slots=True)
 class BitsPerByteScorer(Scorer):
     """Compute bits per byte from logprobs.
@@ -298,7 +358,7 @@ class MathVerifyScorer(Scorer):
 
         # Try using math_verify first (optional dependency)
         try:
-            from math_verify import verify  # type: ignore[import-not-found]
+            from math_verify import verify  # type: ignore[ty:unresolved-import]
 
             result = verify(gold, pred)
             return 1.0 if result else 0.0

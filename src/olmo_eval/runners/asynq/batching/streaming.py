@@ -31,8 +31,11 @@ class StreamingStrategy(BatchingStrategy):
         max_concurrency: int | None,
         worker_logger: logging.Logger,
         total_instances: int,
+        num_workers: int = 1,
     ) -> None:
         """Execute streaming to provider."""
+        import math
+
         from olmo_eval.common.progress import ProgressLogger
         from olmo_eval.runners.asynq.processing import process_items
 
@@ -40,8 +43,9 @@ class StreamingStrategy(BatchingStrategy):
         semaphore = asyncio.Semaphore(concurrency)
         in_flight: set[asyncio.Task] = set()
 
+        worker_instances = math.ceil(total_instances / num_workers)
         progress = ProgressLogger(
-            total=total_instances,
+            total=worker_instances,
             desc="Processed",
             logger=worker_logger,
             color="green",

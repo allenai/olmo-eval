@@ -15,8 +15,8 @@ from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from vllm import LLM
-    from vllm.outputs import RequestOutput
+    from vllm import LLM  # type: ignore[ty:unresolved-import]
+    from vllm.outputs import RequestOutput  # type: ignore[ty:unresolved-import]
 
 
 def _configure_vllm_logger(worker_id: str | None) -> None:
@@ -128,7 +128,7 @@ class VLLMProvider(InferenceProvider):
             _configure_vllm_logger(worker_id)
 
         try:
-            from vllm import LLM
+            from vllm import LLM  # type: ignore[ty:unresolved-import]
         except ImportError as e:
             import traceback
 
@@ -191,19 +191,24 @@ class VLLMProvider(InferenceProvider):
 
     def _build_sampling_params(self, params: SamplingParams) -> Any:
         """Convert SamplingParams to vLLM SamplingParams."""
-        from vllm import SamplingParams as VLLMSamplingParams
+        from vllm import SamplingParams as VLLMSamplingParams  # type: ignore[ty:unresolved-import]
+
+        # Handle do_sample=False (greedy decoding)
+        temperature = 0.0 if not params.do_sample else params.temperature
+        top_p = None if not params.do_sample else params.top_p
+        top_k = None if not params.do_sample else params.top_k
 
         kwargs: dict[str, Any] = {
             "max_tokens": params.max_tokens,
             "n": params.num_samples,
         }
 
-        if params.temperature is not None:
-            kwargs["temperature"] = params.temperature
-        if params.top_p is not None:
-            kwargs["top_p"] = params.top_p
-        if params.top_k is not None:
-            kwargs["top_k"] = params.top_k
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+        if top_p is not None:
+            kwargs["top_p"] = top_p
+        if top_k is not None:
+            kwargs["top_k"] = top_k
         if params.stop_sequences:
             kwargs["stop"] = list(params.stop_sequences)
         # Always request logprobs (default to 1) for metrics computation
@@ -272,7 +277,7 @@ class VLLMProvider(InferenceProvider):
         self,
         requests: list[LMRequest],
     ) -> list[list[LMOutput]]:
-        from vllm import SamplingParams as VLLMSamplingParams
+        from vllm import SamplingParams as VLLMSamplingParams  # type: ignore[ty:unresolved-import]
 
         vllm_params = VLLMSamplingParams(
             prompt_logprobs=5,

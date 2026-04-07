@@ -16,13 +16,6 @@ if TYPE_CHECKING:
     from olmo_eval.launch.beaker.launcher import BeakerJobConfig
 
 
-@dataclass
-class HarnessSummary:
-    """Display-friendly representation of a Harness."""
-
-    config: "HarnessConfig"
-
-
 console = Console(force_terminal=True, width=120)
 
 
@@ -92,6 +85,55 @@ def reconstruct_ordered_args(args: list[str]) -> list[FlaggedArg]:
     return ordered
 
 
+# Valid top-level fields for override validation
+HARNESS_CONFIG_FIELDS = frozenset(
+    {
+        "name",
+        "provider",
+        "auxiliary_providers",
+        "tools",
+        "system_prompt",
+        "tool_choice",
+        "backend",
+        "required_secrets",
+        "max_turns",
+        "max_concurrency",
+        "scoring_concurrency",
+        "sandboxes",
+        "backend_kwargs",
+        "metrics",
+        "batching",
+        "scorer_startup_timeout",
+    }
+)
+
+TASK_CONFIG_FIELDS = frozenset(
+    {
+        "name",
+        "data_source",
+        "fewshot_source",
+        "formatter",
+        "metrics",
+        "num_fewshot",
+        "fewshot_seed",
+        "limit",
+        "seed",
+        "split",
+        "primary_metric",
+        "sampling_params",
+        "dependencies",
+        "priority",  # Special: extracted for job priority, not a real TaskConfig field
+    }
+)
+
+
+def _get_override_top_level_key(override: str) -> str:
+    """Extract top-level key from override string like 'foo.bar=value' -> 'foo'."""
+    # Handle both 'key=value' and 'key.subkey=value'
+    key_part = override.split("=", 1)[0]
+    return key_part.split(".", 1)[0]
+
+
 def process_ordered_args(
     ordered: list[FlaggedArg],
 ) -> tuple[dict[str, list[str]], list[str]]:
@@ -106,7 +148,8 @@ def process_ordered_args(
         - harness_overrides is a list of override strings for the harness
 
     Raises:
-        click.UsageError: If -o appears without a preceding -t or --harness.
+        click.UsageError: If -o appears without a preceding -t or --harness,
+            or if the override key is not valid for the target config type.
     """
     task_overrides: dict[str, list[str]] = {}
     harness_overrides: list[str] = []
@@ -123,10 +166,22 @@ def process_ordered_args(
         elif arg.flag == "h":
             last_flag = "h"
         elif arg.flag == "o":
-            # Apply to task or harness
+            top_key = _get_override_top_level_key(arg.value)
+
+            # Apply to task or harness with validation
             if last_flag == "t" and current_task:
+                if top_key not in TASK_CONFIG_FIELDS:
+                    raise click.UsageError(
+                        f"Invalid task override: '{top_key}' is not a TaskConfig field. "
+                        f"Did you mean to put this after --harness instead of -t?"
+                    )
                 task_overrides[current_task].append(arg.value)
             elif last_flag == "h":
+                if top_key not in HARNESS_CONFIG_FIELDS:
+                    raise click.UsageError(
+                        f"Invalid harness override: '{top_key}' is not a HarnessConfig field. "
+                        f"Did you mean to put this after -t instead of --harness?"
+                    )
                 harness_overrides.append(arg.value)
             else:
                 raise click.UsageError("-o/--override must follow -t/--task or --harness")
@@ -264,7 +319,7 @@ class ExperimentSummary:
 
     name: str
     tasks: list["TaskConfig"]
-    harness: HarnessSummary
+    harness: "HarnessConfig"
     runner: RunnerConfig
     beaker: "BeakerJobConfig"
 
@@ -360,7 +415,7 @@ def _get_vllm_version() -> str | None:
 
     # First check current environment
     try:
-        import vllm  # type: ignore[import-not-found]
+        import vllm  # type: ignore[ty:unresolved-import]
 
         return vllm.__version__
     except ImportError:
@@ -431,7 +486,7 @@ def print_runtime_environment() -> None:
     table.add_row("Python", sys.version.split()[0])
 
     try:
-        import torch  # type: ignore[import-not-found]
+        import torch  # type: ignore[ty:unresolved-import]
 
         table.add_row("PyTorch", torch.__version__)
         table.add_row("CUDA available", str(torch.cuda.is_available()))

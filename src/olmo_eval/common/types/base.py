@@ -65,6 +65,7 @@ class Split(StrEnum):
     TRAIN = "train"
     VALIDATION = "validation"
     TEST = "test"
+    ALL = "all"
 
 
 class MetricName(StrEnum):
@@ -153,6 +154,7 @@ class SamplingParams:
     stop_sequences: tuple[str, ...] | None = None
     num_samples: int = 1
     logprobs: int | None = None
+    do_sample: bool = True
 
 
 @dataclass(slots=True)

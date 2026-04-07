@@ -10,12 +10,12 @@ from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 
 if TYPE_CHECKING:
-    import torch
+    import torch  # type: ignore[ty:unresolved-import]
 
 
 def _get_device() -> torch.device:
     """Detect the best available device."""
-    import torch
+    import torch  # type: ignore[ty:unresolved-import]
 
     if torch.cuda.is_available():
         return torch.device("cuda")
@@ -57,17 +57,21 @@ class HuggingFaceProvider(InferenceProvider):
 
     def _build_generate_kwargs(self, params: SamplingParams) -> dict[str, Any]:
         """Convert SamplingParams to HuggingFace generate kwargs."""
+        # Use explicit do_sample flag, overriding temperature-based inference
+        do_sample = params.do_sample and params.temperature > 0
+
         kwargs: dict[str, Any] = {
             "max_new_tokens": params.max_tokens,
-            "do_sample": params.temperature > 0,
+            "do_sample": do_sample,
         }
 
-        if params.temperature > 0:
-            kwargs["temperature"] = params.temperature
-        if params.top_p is not None:
-            kwargs["top_p"] = params.top_p
-        if params.top_k is not None:
-            kwargs["top_k"] = params.top_k
+        if do_sample:
+            if params.temperature > 0:
+                kwargs["temperature"] = params.temperature
+            if params.top_p is not None:
+                kwargs["top_p"] = params.top_p
+            if params.top_k is not None:
+                kwargs["top_k"] = params.top_k
 
         return kwargs
 
@@ -93,7 +97,7 @@ class HuggingFaceProvider(InferenceProvider):
         requests: list[LMRequest],
         sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
-        import torch
+        import torch  # type: ignore[ty:unresolved-import]
 
         params = self._default_sampling_params(sampling_params)
         gen_kwargs = self._build_generate_kwargs(params)
@@ -154,7 +158,7 @@ class HuggingFaceProvider(InferenceProvider):
         self,
         requests: list[LMRequest],
     ) -> list[list[LMOutput]]:
-        import torch
+        import torch  # type: ignore[ty:unresolved-import]
 
         results = []
         for request in requests:

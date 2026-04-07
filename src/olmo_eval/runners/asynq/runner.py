@@ -10,10 +10,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any
 
-from olmo_eval.cli.utils import console
+from rich.console import Console
+
 from olmo_eval.common.configs import expand_tasks
 from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR
-from olmo_eval.common.logging import configure_worker_logging, get_logger, get_worker_id
+from olmo_eval.common.logging import configure_worker_logging, get_logger
 from olmo_eval.harness.config import HarnessConfig, ProviderConfig
 from olmo_eval.runners.asynq.monitoring import (
     terminate_workers,
@@ -27,7 +28,7 @@ from olmo_eval.runners.asynq.preparation import (
 )
 from olmo_eval.runners.asynq.results import aggregate_results, process_results
 from olmo_eval.runners.asynq.types import QueueItem, TaskTracker
-from olmo_eval.runners.asynq.workers import inference_worker, scoring_worker
+from olmo_eval.runners.asynq.workers import scoring_worker
 from olmo_eval.runners.common.base import BaseEvalRunner
 from olmo_eval.runners.common.mixins import RunnerResultsMixin
 from olmo_eval.runners.common.models import S3Config
@@ -36,6 +37,7 @@ from olmo_eval.storage import StorageBackend
 
 logger = get_logger(__name__)
 runner_logger = configure_worker_logging("runner")
+console = Console(force_terminal=True, width=120)
 
 
 @dataclass
@@ -159,7 +161,6 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         result_queue: mp.Queue = ctx.Queue()
         scoring_queue: mp.Queue = ctx.Queue()
         scored_queue: mp.Queue = ctx.Queue()
-        num_workers = self._get_num_workers()
         total_gpus = self._get_gpu_count()
 
         # Create shared dict for tracking worker init times
@@ -172,15 +173,62 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         for item in items:
             item_queue.put(item)
 
-        # Add poison pills AFTER all items are enqueued
-        for _ in range(num_workers):
-            item_queue.put(None)
-
         # Start workers
         workers: list[mp.process.BaseProcess] = []
         scorer_proc: mp.process.BaseProcess | None = None
+        inference_manager = None
 
         try:
+            from olmo_eval.inference.gpu_planner import GPUPlanner
+            from olmo_eval.inference.provider_manager import (
+                ProviderManager,
+                validate_inference_workers,
+            )
+
+            # Use GPU planner to allocate GPUs for main workers and auxiliary providers
+            planner = GPUPlanner.from_harness_config(self.harness_config, total_gpus)
+            gpu_plan = planner.plan()
+
+            # Get main worker GPUs (flattened list from all worker allocations)
+            main_gpu_ids: list[int] = []
+            for alloc in gpu_plan.main_workers:
+                main_gpu_ids.extend(alloc.gpu_ids)
+
+            # Number of inference workers is determined by provider.num_instances
+            num_inference_workers = self.harness_config.provider.num_instances
+
+            # Validate configuration
+            validate_inference_workers(num_inference_workers, len(main_gpu_ids))
+
+            provider_manager = ProviderManager(
+                harness_config=self.harness_config,
+                num_inference_workers=num_inference_workers,
+                gpu_ids=main_gpu_ids,
+                item_queue=item_queue,
+                result_queue=result_queue,
+                output_dir=self.output_dir,
+            )
+
+            # Add poison pills (one per worker)
+            provider_manager.add_poison_pills()
+
+            # Start workers
+            workers = provider_manager.start(ctx, total_instances, init_times)
+
+            # Start auxiliary inference servers if configured
+            registry_config: dict[str, list[dict[str, Any]]] | None = None
+            if self.harness_config.auxiliary_providers:
+                from olmo_eval.inference.manager import InferenceManager
+
+                auxiliary_gpus = gpu_plan.get_auxiliary_gpus()
+
+                inference_manager = InferenceManager(
+                    configs=dict(self.harness_config.auxiliary_providers),
+                    available_gpu_ids=auxiliary_gpus,
+                )
+                registry_config = inference_manager.start()
+                runner_logger.info(f"Auxiliary providers ready: {list(registry_config.keys())}")
+
             # Prepare sandbox configs for scoring worker if configured
             sandbox_configs_list = None
             if self.harness_config.sandboxes:
@@ -188,10 +236,6 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
             # Create ready event for scoring worker
             scorer_ready = ctx.Event()
-
-            workers = self._start_workers(
-                ctx, num_workers, total_gpus, item_queue, result_queue, init_times, total_instances
-            )
 
             # Determine scoring concurrency
             if self.harness_config.scoring_concurrency:
@@ -220,6 +264,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                     sandbox_configs_list,
                     scorer_ready,
                     scoring_concurrency,
+                    registry_config,
                 ),
             )
             scorer_proc.start()
@@ -230,13 +275,27 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
             # Now wait for scoring worker (runs in parallel with inference worker init)
             if sandbox_configs_list is not None:
-                runner_logger.info("Waiting for scoring worker to initialize...")
-                wait_for_scorer_ready(scorer_proc, scorer_ready, scored_queue, timeout=180.0)
+                # Compute scorer startup timeout
+                if self.harness_config.scorer_startup_timeout is not None:
+                    scorer_timeout = self.harness_config.scorer_startup_timeout
+                else:
+                    # Derive from max sandbox startup_timeout + buffer
+                    max_startup = max(
+                        cfg.get("startup_timeout", 60.0) for cfg in sandbox_configs_list
+                    )
+                    scorer_timeout = max_startup + 60.0
+
+                runner_logger.info(
+                    f"Waiting for scoring worker to initialize (timeout={scorer_timeout}s)..."
+                )
+                wait_for_scorer_ready(
+                    scorer_proc, scorer_ready, scored_queue, timeout=scorer_timeout
+                )
                 runner_logger.info("Scoring worker ready")
 
             # Wait for workers to report their init times (also checks for crashes)
             provider_init_seconds = wait_for_init_times(
-                init_times, num_workers, workers=workers, result_queue=result_queue
+                init_times, num_inference_workers, workers=workers, result_queue=result_queue
             )
 
             # Reset tracker start times now that workers are ready
@@ -302,6 +361,8 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             if scorer_proc and scorer_proc.is_alive():
                 scorer_proc.terminate()
                 scorer_proc.join(timeout=5)
+            if inference_manager is not None:
+                inference_manager.shutdown()
             for q in [item_queue, result_queue, scoring_queue, scored_queue]:
                 q.cancel_join_thread()
             manager.shutdown()
@@ -346,18 +407,24 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
         from rich.table import Table
 
+        # Collect prepared tasks in parallel, but accumulate results for deterministic ordering
+        prepared_results: dict[str, tuple[TaskTracker, list[QueueItem]]] = {}
         with ThreadPoolExecutor(max_workers=min(32, len(expanded_tasks))) as executor:
             futures = {executor.submit(prepare_one, spec): spec for spec in expanded_tasks}
             for future in as_completed(futures):
                 spec, tracker, task_items = future.result()
                 trackers[spec] = tracker
-                items.extend(task_items)
-                if not tracker.error and self.save_requests and task_items and tracker.task:
-                    request_objects = build_requests_from_items(
-                        task_items, tracker.task.config.name
-                    )
-                    task_hash = compute_task_hash(tracker.task.config.to_dict())
-                    self._write_requests(self.model_name, spec, request_objects, task_hash)
+                prepared_results[spec] = (tracker, task_items)
+
+        # Add items in deterministic task spec order (not completion order)
+        # This ensures shuffle produces identical results across runs
+        for spec in expanded_tasks:
+            tracker, task_items = prepared_results[spec]
+            items.extend(task_items)
+            if not tracker.error and self.save_requests and task_items and tracker.task:
+                request_objects = build_requests_from_items(task_items, tracker.task.config.name)
+                task_hash = compute_task_hash(tracker.task.config.to_dict())
+                self._write_requests(self.model_name, spec, request_objects, task_hash)
 
         # Print task preparation summary table
         table = Table(title="Tasks")
@@ -373,6 +440,14 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 table.add_row(spec, str(tracker.total_instances), "[green]Ready[/green]")
 
         console.print(table)
+
+        # Fail fast if any tasks failed to prepare
+        failed_tasks = [spec for spec, tracker in trackers.items() if tracker.error]
+        if failed_tasks:
+            error_details = "\n".join(
+                f"  - {spec}: {trackers[spec].error}" for spec in failed_tasks
+            )
+            raise RuntimeError(f"Failed to prepare {len(failed_tasks)} task(s):\n{error_details}")
 
         # Optionally inspect first instance of each task
         if (
@@ -423,60 +498,14 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
         return task_overrides, sampling_overrides
 
-    def _start_workers(
-        self,
-        ctx: Any,
-        num_workers: int,
-        total_gpus: int,
-        item_queue: mp.Queue,
-        result_queue: mp.Queue,
-        init_times: Any,
-        total_instances: int,
-    ) -> list[mp.process.BaseProcess]:
-        """Start worker processes."""
-        workers: list[mp.process.BaseProcess] = []
-        harness_config_dict = self.harness_config.to_dict()
-
-        for i in range(num_workers):
-            worker_id = get_worker_id(self.provider_config.model, i)
-
-            # All GPUs are assigned to the single worker for tensor parallelism
-            gpu_ids = list(range(total_gpus)) if total_gpus > 0 else []
-
-            worker = ctx.Process(
-                target=inference_worker,
-                args=(
-                    worker_id,
-                    gpu_ids,
-                    item_queue,
-                    result_queue,
-                    harness_config_dict,
-                    total_instances,
-                    init_times,
-                    self.output_dir,
-                ),
-            )
-            worker.start()
-            workers.append(worker)
-
-        return workers
-
     def _get_gpu_count(self) -> int:
         """Get total number of available GPUs."""
         try:
-            import torch  # type: ignore[import-not-found]
+            import torch  # type: ignore[ty:unresolved-import]
 
             return torch.cuda.device_count()
         except ImportError:
             return 0
-
-    def _get_num_workers(self) -> int:
-        """Get number of workers based on provider requirements.
-
-        For single-GPU or CPU providers, returns 1.
-        Multi-GPU tensor parallelism is handled within a single worker.
-        """
-        return 1
 
     def _update_metrics_config(self, experiment_id: str) -> None:
         """Update harness metrics config with experiment metadata.

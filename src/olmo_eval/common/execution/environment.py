@@ -1,21 +1,18 @@
-"""Execution environment protocol for sandboxed code execution."""
+"""Execution environment and scoring context."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from olmo_eval.inference.base import InferenceProvider
+    from olmo_eval.inference.registry import ProviderLookup
 
 
 @dataclass(frozen=True)
 class ExecutionResult:
-    """Result from executing code in an environment.
-
-    Attributes:
-        success: Whether execution completed without errors.
-        output: Combined stdout/stderr from execution.
-        exit_code: Exit code from the execution (0 = success).
-        error: Error message if execution failed to start.
-    """
+    """Result from executing code in an environment."""
 
     success: bool
     output: str = ""
@@ -25,66 +22,35 @@ class ExecutionResult:
 
 @runtime_checkable
 class ExecutionEnvironment(Protocol):
-    """Protocol for code execution environments.
-
-    This abstraction allows scorers to execute code without depending
-    on specific sandbox implementations. Implementations include:
-    - SandboxExecutor (Docker/Podman via SWE-ReX)
-    - LocalExecutionEnvironment (unsafe, for testing only)
-
-    The environment must be started before use and stopped after.
-    """
+    """Protocol for code execution environments."""
 
     @property
-    def is_running(self) -> bool:
-        """Check if the environment is ready for execution."""
-        ...
+    def is_running(self) -> bool: ...
 
-    async def execute(self, command: str, timeout: float | None = None) -> str:
-        """Execute a command and return the output.
-
-        Args:
-            command: Shell command to execute.
-            timeout: Optional timeout in seconds.
-
-        Returns:
-            Command output (stdout + stderr combined).
-        """
-        ...
+    async def execute(self, command: str, timeout: float | None = None) -> str: ...
 
     async def execute_command(
-        self,
-        command: str,
-        timeout: float | None = None,
-    ) -> ExecutionResult:
-        """Execute a shell command and return structured result.
-
-        Args:
-            command: Shell command to execute.
-            timeout: Optional timeout in seconds.
-
-        Returns:
-            ExecutionResult with success status, output, and exit code.
-        """
-        ...
+        self, command: str, timeout: float | None = None
+    ) -> ExecutionResult: ...
 
     async def execute_code(
-        self,
-        code: str,
-        language: str = "python",
-        timeout: float | None = None,
-    ) -> ExecutionResult:
-        """Execute code in the specified language.
+        self, code: str, language: str = "python", timeout: float | None = None
+    ) -> ExecutionResult: ...
 
-        This is a higher-level method that handles writing code to a file,
-        executing it, and capturing the result.
 
-        Args:
-            code: Source code to execute.
-            language: Programming language (default: "python").
-            timeout: Optional timeout in seconds.
+@dataclass
+class ScoringContext:
+    """Context passed to scorers during evaluation."""
 
-        Returns:
-            ExecutionResult with success status and output.
-        """
-        ...
+    execution_env: ExecutionEnvironment | None = None
+    scoring_concurrency: int = 8
+    inference_pool: ProviderLookup | None = None
+
+    @property
+    def has_execution_env(self) -> bool:
+        return self.execution_env is not None and self.execution_env.is_running
+
+    def get_provider(self, name: str) -> InferenceProvider:
+        if self.inference_pool is None:
+            raise RuntimeError("No inference pool configured.")
+        return self.inference_pool.get(name)

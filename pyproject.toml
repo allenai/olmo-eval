@@ -115,30 +115,6 @@ dev = [
     "google-api-core>=2.0.0",
 ]
 
-# ty file-based overrides for optional dependencies (inference providers use vllm/litellm)
-[[tool.ty.overrides]]
-include = ["src/olmo_eval/inference/**"]
-[tool.ty.overrides.rules]
-unresolved-import = "ignore"
-
-# ty overrides for sandbox module (uses optional swe-rex dependency)
-[[tool.ty.overrides]]
-include = ["src/olmo_eval/harness/sandbox/**"]
-[tool.ty.overrides.rules]
-unresolved-import = "ignore"
-
-# ty overrides for backends module (uses optional openhands/agents dependencies)
-[[tool.ty.overrides]]
-include = ["src/olmo_eval/harness/backends/**"]
-[tool.ty.overrides.rules]
-unresolved-import = "ignore"
-
-# ty overrides for adapters module (uses optional openhands/swe-rex dependencies)
-[[tool.ty.overrides]]
-include = ["src/olmo_eval/harness/adapters/**"]
-[tool.ty.overrides.rules]
-unresolved-import = "ignore"
-
 [tool.ruff]
 line-length = 100
 target-version = "py312"
@@ -161,6 +137,8 @@ select = [
 "src/olmo_eval/common/constants/models.py" = ["E501"]
 # Verbatim prompt templates from asta-bench reference implementation
 "src/olmo_eval/evals/tasks/astabench_sqa.py" = ["E501"]
+# Static fewshot data with long string literals
+"src/olmo_eval/evals/tasks/constants/*" = ["E501"]
 
 [tool.ruff.format]
 docstring-code-format = true
@@ -195,6 +173,17 @@ skip_covered = false
 [tool.coverage.html]
 directory = "htmlcov"
 
+
+[tool.ty.analysis]
+# Optional dependencies that may not be installed in every environment
+allowed-unresolved-imports = [
+    "vllm.**",
+    "torch.**",
+    "math_verify.**",
+    "openai.**",
+    "smart_open.**",
+    "google.cloud.**",
+]
 
 [tool.gantry]
 gh_token_secret = "GITHUB_TOKEN"

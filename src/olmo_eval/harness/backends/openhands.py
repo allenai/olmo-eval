@@ -91,19 +91,19 @@ class OpenHandsBackend(Backend):
             HarnessResult with trajectory from SDK execution.
         """
         try:
-            from openhands.sdk import (
+            from openhands.sdk import (  # type: ignore[ty:unresolved-import]
                 LLM,
                 Conversation,
             )
-            from openhands.sdk.conversation.state import (
+            from openhands.sdk.conversation.state import (  # type: ignore[ty:unresolved-import]
                 ConversationExecutionStatus,
             )
-            from openhands.sdk.event import (
+            from openhands.sdk.event import (  # type: ignore[ty:unresolved-import]
                 ActionEvent,
                 MessageEvent,
                 ObservationEvent,
             )
-            from openhands.sdk.event.conversation_error import (
+            from openhands.sdk.event.conversation_error import (  # type: ignore[ty:unresolved-import]
                 ConversationErrorEvent,
             )
         except ImportError as e:

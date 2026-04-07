@@ -59,9 +59,14 @@ async def _run_with_progress(
             await asyncio.wait_for(asyncio.shield(task), timeout=interval)
         except TimeoutError:
             elapsed = time.time() - start
-            logger.info(f"{message} ({elapsed:.0f}s elapsed)")
+            logger.debug(f"{message} ({elapsed:.0f}s elapsed)")
 
     return task.result()
+
+
+def _get_modal_app_name() -> str:
+    """Generate unique Modal app name to avoid conflicts between concurrent runs."""
+    return f"swerex-{uuid.uuid4().hex[:12]}"
 
 
 class SandboxExecutor:
@@ -76,15 +81,22 @@ class SandboxExecutor:
             print(result)
     """
 
-    def __init__(self, config: SandboxConfig, name: str | None = None) -> None:
+    def __init__(
+        self,
+        config: SandboxConfig,
+        name: str | None = None,
+        modal_app_name: str | None = None,
+    ) -> None:
         """Initialize the sandbox executor.
 
         Args:
             config: Sandbox configuration.
             name: Optional name for logging (e.g., "sandbox-0").
+            modal_app_name: Optional shared Modal app name for this run.
         """
         self.config = config
         self.name = name
+        self._modal_app_name = modal_app_name
         self._deployment: Any = None
         self._runtime: Any = None
         self._session_created: bool = False
@@ -118,9 +130,32 @@ class SandboxExecutor:
             ImportError: If swe-rex is not installed.
             RuntimeError: If container runtime is not available.
         """
-        self._log(logging.INFO, "Starting sandbox deployment...")
-        deployment = self.get_deployment()
+        self._log(logging.DEBUG, "Starting sandbox deployment...")
         prefix = f"[{self.name}] " if self.name else ""
+
+        # For Modal deployments, patch app lookup during deployment creation
+        # to use unique app names and avoid conflicts between concurrent runs
+        if self.config.mode == SandboxMode.MODAL:
+            from unittest.mock import patch
+
+            import modal  # type: ignore[ty:unresolved-import]
+
+            app_name = self._modal_app_name or _get_modal_app_name()
+            if not self._modal_app_name:
+                # Only log if we generated it (manager logs its own)
+                self._log(logging.INFO, f"Using Modal app: {app_name}")
+            original_lookup = modal.App.lookup
+
+            def patched_lookup(name: str, *args, **kwargs):
+                if name == "swe-rex":
+                    name = app_name
+                return original_lookup(name, *args, **kwargs)
+
+            with patch.object(modal.App, "lookup", patched_lookup):
+                deployment = self.get_deployment()
+        else:
+            deployment = self.get_deployment()
+
         await _run_with_progress(
             deployment.start(),
             f"{prefix}Waiting for sandbox runtime",
@@ -129,7 +164,7 @@ class SandboxExecutor:
 
         self._deployment = deployment
         self._runtime = deployment.runtime
-        self._log(logging.INFO, "Sandbox deployment ready!")
+        self._log(logging.DEBUG, "Sandbox deployment ready!")
 
         if (
             self.config.enable_diagnostics
@@ -151,11 +186,22 @@ class SandboxExecutor:
         match self.config.mode:
             case SandboxMode.DOCKER:
                 try:
-                    from swerex.deployment.docker import DockerDeployment
+                    from swerex.deployment.docker import (  # type: ignore[ty:unresolved-import]
+                        DockerDeployment,
+                    )
                 except ImportError as e:
                     raise ImportError(
                         "swe-rex not installed. Install with: pip install swe-rex"
                     ) from e
+
+                # Get image, optionally building a derived image with swe-rex
+                image = self.config.image
+                if self.config.inject_swerex:
+                    from .image import get_swerex_image
+
+                    image = get_swerex_image(
+                        image, self.config.container_runtime, self.config.dockerfile_extra
+                    )
 
                 # Build docker args, adding log args if log_dir is configured
                 docker_args = list(self.config.docker_args) if self.config.docker_args else []
@@ -190,7 +236,7 @@ class SandboxExecutor:
 
                 # Build kwargs, omitting None values (swerex doesn't accept None for some fields)
                 deployment_kwargs: dict[str, Any] = {
-                    "image": self.config.image,
+                    "image": image,
                     "container_runtime": self.config.container_runtime,
                     "startup_timeout": self.config.startup_timeout,
                 }
@@ -199,11 +245,19 @@ class SandboxExecutor:
                 if self.config.exec_shell:
                     deployment_kwargs["exec_shell"] = list(self.config.exec_shell)
 
+                # Set image pull policy - default to "never" when we build the image ourselves
+                if self.config.image_pull:
+                    deployment_kwargs["pull"] = self.config.image_pull
+                elif self.config.inject_swerex:
+                    deployment_kwargs["pull"] = "never"
+
                 return DockerDeployment(**deployment_kwargs)
 
             case SandboxMode.LOCAL:
                 try:
-                    from swerex.deployment.local import LocalDeployment
+                    from swerex.deployment.local import (  # type: ignore[ty:unresolved-import]
+                        LocalDeployment,
+                    )
                 except ImportError as e:
                     raise ImportError(
                         "swe-rex not installed. Install with: pip install swe-rex"
@@ -217,15 +271,69 @@ class SandboxExecutor:
 
             case SandboxMode.MODAL:
                 try:
-                    from swerex.deployment.modal import ModalDeployment
+                    from swerex.deployment.modal import (  # type: ignore[ty:unresolved-import]
+                        ModalDeployment,
+                    )
                 except ImportError as e:
                     raise ImportError(
                         "swe-rex modal support not installed. "
                         "Install with: pip install 'swe-rex[modal]'"
                     ) from e
 
+                import modal  # type: ignore[ty:unresolved-import]
+
+                # Build image locally and push to registry (same as Docker/Podman mode)
+                # Modal will pull the pre-built image from the registry
+                if self.config.inject_swerex:
+                    from .image import get_swerex_image
+
+                    # Build locally with swe-rex + dockerfile_extra, push to registry
+                    image = get_swerex_image(
+                        self.config.image,
+                        self.config.container_runtime,
+                        self.config.dockerfile_extra,
+                        require_registry=True,  # Must push to registry for Modal
+                    )
+                    self._log(logging.DEBUG, f"Using pre-built swerex image: {image}")
+                else:
+                    image = self.config.image
+
+                # Modal pulls pre-built image from registry (no pip_install/run_commands)
+                if self.config.registry_auth:
+                    provider = self.config.registry_auth.provider
+                    match provider:
+                        case "gcp":
+                            # Default to gcp-service-account-json for GCP
+                            secret_name = (
+                                self.config.registry_auth.secret_name or "gcp-service-account-json"
+                            )
+                            self._log(
+                                logging.DEBUG,
+                                f"Modal pulling from GCP AR: {image}, secret={secret_name}",
+                            )
+                            secret = modal.Secret.from_name(secret_name)
+                            modal_image = modal.Image.from_gcp_artifact_registry(
+                                image, secret=secret
+                            )
+                        case "ecr":
+                            secret_name = self.config.registry_auth.secret_name
+                            if not secret_name:
+                                raise ValueError("ECR registry_auth requires secret_name")
+                            secret = modal.Secret.from_name(secret_name)
+                            modal_image = modal.Image.from_aws_ecr(image, secret=secret)
+                        case "docker":
+                            secret_name = self.config.registry_auth.secret_name
+                            if not secret_name:
+                                raise ValueError("Docker registry_auth requires secret_name")
+                            secret = modal.Secret.from_name(secret_name)
+                            modal_image = modal.Image.from_registry(image, secret=secret)
+                        case _:
+                            modal_image = modal.Image.from_registry(image)
+                else:
+                    modal_image = modal.Image.from_registry(image)
+
                 return ModalDeployment(
-                    image=self.config.image,
+                    image=modal_image,
                     startup_timeout=self.config.startup_timeout,
                     runtime_timeout=self.config.runtime_timeout,
                     modal_sandbox_kwargs=self.config.modal_sandbox_kwargs,
@@ -236,7 +344,9 @@ class SandboxExecutor:
         # Close session before stopping deployment
         if self._session_created and self._runtime is not None:
             try:
-                from swerex.runtime.abstract import CloseBashSessionRequest
+                from swerex.runtime.abstract import (  # type: ignore[ty:unresolved-import]
+                    CloseBashSessionRequest,
+                )
 
                 await self._runtime.close_session(CloseBashSessionRequest(session="default"))
             except Exception as e:
@@ -251,7 +361,7 @@ class SandboxExecutor:
             self._deployment = None
             self._runtime = None
 
-        self._log(logging.INFO, "Sandbox stopped")
+        self._log(logging.DEBUG, "Sandbox stopped")
 
     async def execute(self, command: str, timeout: float | None = None) -> str:
         """Execute a command in the sandbox.
@@ -296,7 +406,7 @@ class SandboxExecutor:
         if self._runtime is None:
             raise RuntimeError("Sandbox not started. Call start() first or use async context.")
 
-        from swerex.runtime.abstract import Command
+        from swerex.runtime.abstract import Command  # type: ignore[ty:unresolved-import]
 
         effective_timeout = timeout if timeout is not None else self.config.command_timeout
         prefix = log_prefix or self.name or "sandbox"
@@ -304,12 +414,23 @@ class SandboxExecutor:
         if stream:
             return await self._execute_streaming(command, effective_timeout, prefix)
 
-        response = await self._runtime.execute(
-            Command(
-                command=["bash", "-c", command],
-                timeout=effective_timeout,
+        try:
+            response = await self._runtime.execute(
+                Command(
+                    command=["bash", "-c", command],
+                    timeout=effective_timeout,
+                )
             )
-        )
+        except Exception as e:
+            # Check for timeout errors (swerex.exceptions.CommandTimeoutError)
+            if "CommandTimeoutError" in type(e).__name__ or "timed out" in str(e).lower():
+                return ExecutionResult(
+                    success=False,
+                    output=f"Command timed out after {effective_timeout}s",
+                    exit_code=-1,
+                    error="timeout",
+                )
+            raise
 
         # Combine stdout and stderr
         output_parts = []
@@ -331,7 +452,7 @@ class SandboxExecutor:
 
         Uses background execution to avoid swerex HTTP timeout issues.
         """
-        from swerex.runtime.abstract import Command
+        from swerex.runtime.abstract import Command  # type: ignore[ty:unresolved-import]
 
         # Use unique temp paths to avoid conflicts with concurrent executions
         cmd_id = uuid.uuid4().hex[:12]
@@ -598,7 +719,7 @@ class SandboxExecutor:
             )
 
         try:
-            from swerex.runtime.abstract import Command
+            from swerex.runtime.abstract import Command  # type: ignore[ty:unresolved-import]
 
             effective_timeout = timeout if timeout is not None else self.config.command_timeout
 
@@ -637,7 +758,9 @@ class SandboxExecutor:
             if self._session_created:
                 return
 
-            from swerex.runtime.abstract import CreateBashSessionRequest
+            from swerex.runtime.abstract import (  # type: ignore[ty:unresolved-import]
+                CreateBashSessionRequest,
+            )
 
             await self._runtime.create_session(CreateBashSessionRequest(session="default"))
             self._session_created = True
@@ -671,7 +794,7 @@ class SandboxExecutor:
 
         await self._ensure_session()
 
-        from swerex.runtime.abstract import BashAction
+        from swerex.runtime.abstract import BashAction  # type: ignore[ty:unresolved-import]
 
         effective_timeout = timeout if timeout is not None else self.config.command_timeout
         prefix = log_prefix or self.name or "sandbox"
