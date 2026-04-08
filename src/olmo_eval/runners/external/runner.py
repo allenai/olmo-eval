@@ -162,7 +162,7 @@ class ExternalEvalRunner:
                 try:
                     external_eval = get_external_eval(eval_name)
                     result = await external_eval.execute_with_provider(
-                        provider=provider,  # type: ignore
+                        provider=provider,  # type: ignore[ty:invalid-argument-type]
                         args=self.eval_args,
                         output_dir=self.output_dir,
                         container_runtime=self.container_runtime,

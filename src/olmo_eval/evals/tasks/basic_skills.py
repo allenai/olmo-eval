@@ -116,9 +116,6 @@ class _BasicSkillsBase(Task):
         parts.append(instance.question)
         prompt = "\n\n".join(parts)
 
-        # Always send all choices as continuations so that vLLM prefix-sharing
-        # produces identical logprobs for the gold choice regardless of whether
-        # we are computing BPB or RC accuracy.
         continuations = tuple(f" {c}" for c in (instance.choices or ()))
         return LMRequest(
             request_type=RequestType.LOGLIKELIHOOD,

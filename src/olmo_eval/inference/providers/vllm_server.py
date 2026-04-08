@@ -15,7 +15,7 @@ from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 from olmo_eval.inference.utils import run_async
 
 if TYPE_CHECKING:
-    from openai import AsyncOpenAI
+    from openai import AsyncOpenAI  # type: ignore[ty:unresolved-import]
 
     from .vllm_server_utils import VLLMServerProcess
 
@@ -96,7 +96,7 @@ class RemoteTokenizer:
         tokens = self.encode(text)
         result: dict[str, Any] = {"input_ids": tokens}
         if return_tensors == "pt":
-            import torch
+            import torch  # type: ignore[ty:unresolved-import]
 
             result["input_ids"] = torch.tensor([tokens])
         return result
@@ -168,7 +168,7 @@ class VLLMServerProvider(InferenceProvider):
         self,
         model_name: str,
         base_url: str | None = None,
-        timeout: float = 60.0,
+        timeout: float = 86400.0,
         max_concurrency: int = 32,
         max_retries: int = 3,
         tensor_parallel_size: int = 1,
@@ -210,7 +210,7 @@ class VLLMServerProvider(InferenceProvider):
         self._raw_http_client: httpx.AsyncClient | None = None
         self._openai_module: Any = None
         self._tokenizer: Any = None
-        self._server: VLLMServerProcess | None = None  # type: ignore[name-defined]
+        self._server: VLLMServerProcess | None = None  # type: ignore[ty:unresolved-reference]
         self._max_length: int | None = None
 
         if base_url:
@@ -283,8 +283,8 @@ class VLLMServerProvider(InferenceProvider):
     def _get_or_create_client(self) -> AsyncOpenAI:
         """Get or create the AsyncOpenAI client."""
         if self._client is None:
-            import openai
-            from openai import AsyncOpenAI
+            import openai  # type: ignore[ty:unresolved-import]
+            from openai import AsyncOpenAI  # type: ignore[ty:unresolved-import]
 
             self._openai_module = openai
 
@@ -602,7 +602,6 @@ class VLLMServerProvider(InferenceProvider):
             max_in_flight=self.max_concurrency,
             max_retries=self.max_retries,
         )
-        # Replace None with empty list for failed requests
         return [r if r is not None else [] for r in results]
 
     def generate(
@@ -670,7 +669,8 @@ class VLLMServerProvider(InferenceProvider):
             full_tokens = context_enc + continuation_enc
             if len(full_tokens) > max_len - 1:
                 full_tokens = full_tokens[-(max_len - 1) :]
-                context_len = max(0, len(context_enc) - (len(context_enc) + len(continuation_enc) - (max_len - 1)))
+                overflow = len(context_enc) + len(continuation_enc) - (max_len - 1)
+                context_len = max(0, len(context_enc) - overflow)
             else:
                 context_len = len(context_enc)
 
@@ -686,7 +686,7 @@ class VLLMServerProvider(InferenceProvider):
                     "prompt": full_tokens,
                     "max_tokens": 1,
                     "temperature": 0.0,
-                    "prompt_logprobs": 1,
+                    "prompt_logprobs": 5,
                     "add_special_tokens": False,
                 },
             )

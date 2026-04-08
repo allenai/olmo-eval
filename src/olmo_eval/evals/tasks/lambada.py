@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import PPLFormatter
-from olmo_eval.common.metrics import BPBMetric, GreedyAccuracyMetric
+from olmo_eval.common.metrics import BPBMetricByteAvg, GreedyAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -14,7 +14,7 @@ from olmo_eval.evals.tasks.common import Task, register, register_variant
 class LAMBADA(Task):
     data_source = DataSource(path="EleutherAI/lambada_openai")
     split = Split.TEST
-    metrics = (GreedyAccuracyMetric(), BPBMetric())
+    metrics = (GreedyAccuracyMetric(), BPBMetricByteAvg())
     primary_metric = GreedyAccuracyMetric()
     num_fewshot = 0
     sampling_params = SamplingParams(temperature=0.0)
@@ -59,6 +59,6 @@ class LAMBADA(Task):
         )
 
 
-register_variant("lambada", "bpb", formatter=PPLFormatter(), metrics=(BPBMetric(),))
+register_variant("lambada", "bpb", formatter=PPLFormatter(), metrics=(BPBMetricByteAvg(),))
 
 register_variant("lambada", "olmo3base")

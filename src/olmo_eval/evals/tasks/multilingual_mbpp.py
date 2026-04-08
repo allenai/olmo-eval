@@ -14,7 +14,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import PPLFormatter
-from olmo_eval.common.metrics import BPBMetric
+from olmo_eval.common.metrics import BPBMetricByteAvg
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams
 from olmo_eval.data import DataLoader
 from olmo_eval.evals.tasks.common import Task, register_subtasks
@@ -166,8 +166,8 @@ _SHARED_ATTRS: dict = {
 
 _VARIANTS: dict = {
     "bpb": {
-        "formatter": PPLFormatter(leading_space=False, always_prepend_separator=False),
-        "metrics": (BPBMetric(),),
+        "formatter": PPLFormatter(leading_space=False, always_prepend_separator=True),
+        "metrics": (BPBMetricByteAvg(),),
     },
     "3shot": {"num_fewshot": 3},
     "olmo3base": {"num_fewshot": 3, "fewshot_seed": 1234},

@@ -39,7 +39,7 @@ import logging
 from collections.abc import Coroutine, Sequence
 from typing import TYPE_CHECKING, Any
 
-from openhands.sdk import (
+from openhands.sdk import (  # type: ignore[ty:unresolved-import]
     LLM,
     Action,
     Agent,
@@ -48,23 +48,29 @@ from openhands.sdk import (
     TextContent,
     Tool,
 )
-from openhands.sdk.tool import (
+from openhands.sdk.tool import (  # type: ignore[ty:unresolved-import]
     ToolAnnotations,
     ToolDefinition,
     ToolExecutor,
     register_tool,
 )
-from openhands.tools.terminal.definition import (
+from openhands.tools.terminal.definition import (  # type: ignore[ty:unresolved-import]
     TOOL_DESCRIPTION,
     TerminalAction,
     TerminalObservation,
 )
-from openhands.tools.terminal.metadata import CmdOutputMetadata
+from openhands.tools.terminal.metadata import (  # type: ignore[ty:unresolved-import]
+    CmdOutputMetadata,
+)
 
 if TYPE_CHECKING:
-    from openhands.sdk.conversation.impl.local_conversation import LocalConversation
-    from openhands.sdk.conversation.state import ConversationState
-    from swerex.runtime.abstract import AbstractRuntime
+    from openhands.sdk.conversation.impl.local_conversation import (  # type: ignore[ty:unresolved-import]
+        LocalConversation,
+    )
+    from openhands.sdk.conversation.state import (  # type: ignore[ty:unresolved-import]
+        ConversationState,
+    )
+    from swerex.runtime.abstract import AbstractRuntime  # type: ignore[ty:unresolved-import]
 
     from olmo_eval.harness.tools import Tool as HarnessTool
 
@@ -153,14 +159,16 @@ class SandboxTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation])
             if self._session_created:
                 return
 
-            from swerex.runtime.abstract import CreateBashSessionRequest
+            from swerex.runtime.abstract import (  # type: ignore[ty:unresolved-import]
+                CreateBashSessionRequest,
+            )
 
             await self._runtime.create_session(CreateBashSessionRequest(session=self._session_name))
             self._session_created = True
 
             # Set initial working directory if specified
             if self._working_dir:
-                from swerex.runtime.abstract import BashAction
+                from swerex.runtime.abstract import BashAction  # type: ignore[ty:unresolved-import]
 
                 await self._runtime.run_in_session(
                     BashAction(
@@ -181,7 +189,9 @@ class SandboxTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation])
                 return
 
             try:
-                from swerex.runtime.abstract import CloseBashSessionRequest
+                from swerex.runtime.abstract import (  # type: ignore[ty:unresolved-import]
+                    CloseBashSessionRequest,
+                )
 
                 await self._runtime.close_session(
                     CloseBashSessionRequest(session=self._session_name)
@@ -260,7 +270,7 @@ class SandboxTerminalExecutor(ToolExecutor[TerminalAction, TerminalObservation])
         Returns:
             TerminalObservation with command output and exit code.
         """
-        from swerex.runtime.abstract import BashAction
+        from swerex.runtime.abstract import BashAction  # type: ignore[ty:unresolved-import]
 
         # Handle special cases
         if action.command == "C-c":
@@ -522,7 +532,7 @@ def _create_action_class_for_tool(tool: HarnessTool) -> type[Action]:
     OpenHands generates tool schemas from Action class fields, so we need
     action classes with the correct parameter names and types.
     """
-    from pydantic import Field, create_model
+    from pydantic import Field, create_model  # type: ignore[ty:unresolved-import]
 
     field_definitions: dict[str, Any] = {}
     properties = tool.parameters.get("properties", {})
@@ -739,7 +749,7 @@ def create_sandbox_agent(
         ...
         ...     await deployment.stop()
     """
-    from openhands.sdk import AgentContext
+    from openhands.sdk import AgentContext  # type: ignore[ty:unresolved-import]
 
     tools_list: list[Tool] = []
     sandbox_executor: SandboxTerminalExecutor | None = None

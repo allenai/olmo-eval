@@ -4,7 +4,11 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter
-from olmo_eval.common.metrics import BPBMetric, LogprobMCAccuracyMetric, LogprobUncondMCAccuracyMetric
+from olmo_eval.common.metrics import (
+    BPBMetric,
+    LogprobMCAccuracyMetric,
+    LogprobUncondMCAccuracyMetric,
+)
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -92,15 +96,12 @@ class CommonsenseQA(Task):
                 )
             )
         if self.config.num_fewshot and self.config.num_fewshot < len(instances):
-            instances = instances[:self.config.num_fewshot]
+            instances = instances[: self.config.num_fewshot]
         return instances
 
     def _uses_uncond_metric(self) -> bool:
         """Check if any configured metric requires unconditional normalization."""
-        return any(
-            isinstance(m, LogprobUncondMCAccuracyMetric)
-            for m in self.config.metrics
-        )
+        return any(isinstance(m, LogprobUncondMCAccuracyMetric) for m in self.config.metrics)
 
     def format_request(self, instance: Instance) -> LMRequest:
         fewshot = self.get_fewshot()
@@ -151,7 +152,13 @@ class CommonsenseQA(Task):
 
 register_variant("csqa", "rc")
 register_variant("csqa", "mc", formatter=MultipleChoiceFormatter())
-register_variant("csqa", "olmo3base", num_fewshot=5, fewshot_source="olmes_csqa_fixed", metrics=(LogprobUncondMCAccuracyMetric(), BPBMetric()))
+register_variant(
+    "csqa",
+    "olmo3base",
+    num_fewshot=5,
+    fewshot_source="olmes_csqa_fixed",
+    metrics=(LogprobUncondMCAccuracyMetric(), BPBMetric()),
+)
 register_variant(
     "csqa",
     "xlarge",
@@ -161,5 +168,11 @@ register_variant(
     fewshot_source="olmes_csqa_fixed",
 )
 register_variant("csqa", "bpb", metrics=(BPBMetric(),), primary_metric=BPBMetric())
-register_variant("csqa", "olmes", num_fewshot=5, fewshot_source="olmes_csqa_fixed", metrics=(LogprobUncondMCAccuracyMetric(),))
+register_variant(
+    "csqa",
+    "olmes",
+    num_fewshot=5,
+    fewshot_source="olmes_csqa_fixed",
+    metrics=(LogprobUncondMCAccuracyMetric(),),
+)
 register_variant("csqa", "full")

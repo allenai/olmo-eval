@@ -4,7 +4,11 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter
-from olmo_eval.common.metrics import BPBMetric, LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric
+from olmo_eval.common.metrics import (
+    BPBMetric,
+    LogprobMCAccuracyMetric,
+    LogprobPerCharMCAccuracyMetric,
+)
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -179,10 +183,6 @@ class SquadBPB(_SquadMCBase):
     def format_request(self, instance: Instance) -> LMRequest:
         fewshot = self.get_fewshot()
 
-        # Use RC-style formatting to match oe-eval-internal's SquadRC BPB computation.
-        # Fewshot examples: "Title: ...\nQuestion: ...\nAnswer: <gold_text>"
-        # Test prompt: "Title: ...\nQuestion: ...\nAnswer:"
-        # Continuation: only the gold answer text (for BPB).
         parts: list[str] = []
         for ex in fewshot:
             answer = ex.gold_answer or ex.metadata.get("gold_text", "")

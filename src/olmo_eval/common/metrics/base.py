@@ -74,6 +74,37 @@ class F1Metric(Metric):
         return total / len(responses)
 
 
+def _select_gold_output(response: Response):
+    """Select the gold/correct output from a response.
+
+    For multi-output responses (e.g. multiple choice), uses
+    ``instance.metadata["gold_idx"]`` to pick the correct one,
+    falling back to the first output.  Returns None if the response
+    has no outputs or the selected output has no logprobs / zero bytes.
+    """
+    outputs = response.outputs
+    if not outputs:
+        return None
+
+    if len(outputs) > 1:
+        gold_idx = response.instance.metadata.get("gold_idx")
+        if gold_idx is not None and 0 <= gold_idx < len(outputs):
+            output = outputs[gold_idx]
+        else:
+            output = outputs[0]
+    else:
+        output = outputs[0]
+
+    if output.logprobs is None:
+        return None
+
+    num_bytes = len(output.text.encode("utf-8")) if output.text else 0
+    if num_bytes == 0:
+        return None
+
+    return output
+
+
 @dataclass(frozen=True, slots=True)
 class SQuADF1Metric(Metric):
     """Mean SQuAD-style F1 score: max F1 over all reference answers."""
@@ -120,14 +151,12 @@ class RecallMetric(Metric):
 
 
 @dataclass(frozen=True, slots=True)
-class BPBMetric(Metric):
-    """Aggregate bits-per-byte of the gold/correct completion.
+class BPBMetricInstanceAvg(Metric):
+    """Arithmetic mean of per-instance bits-per-byte.
 
-    Computes per-instance BPB as: -logprob / (num_bytes * log(2)),
-    then returns the simple (unweighted) mean across all instances.
-
-    For tasks with multiple continuations (e.g., multiple choice), this uses
-    the correct continuation via `instance.metadata["gold_idx"]`.
+    Each instance's BPB is computed independently via the scorer, then averaged
+    with equal weight regardless of text length.  This matches the aggregation
+    used by oe-eval (simple mean of per-doc ``bits_per_byte_corr``).
     """
 
     name: str = "bits_per_byte"
@@ -141,35 +170,53 @@ class BPBMetric(Metric):
         bpb_values: list[float] = []
 
         for response in responses:
-            outputs = response.outputs
-            if not outputs:
+            output = _select_gold_output(response)
+            if output is None:
                 continue
-
-            # Select gold output
-            if len(outputs) > 1:
-                gold_idx = response.instance.metadata.get("gold_idx")
-                if gold_idx is not None and 0 <= gold_idx < len(outputs):
-                    output = outputs[gold_idx]
-                else:
-                    output = outputs[0]
-            else:
-                output = outputs[0]
-
-            if output.logprobs is None:
-                continue
-
-            num_bytes = len(output.text.encode("utf-8")) if output.text else 0
-            if num_bytes == 0:
-                continue
-
-            # Use scorer for BPB calculation
-            bpb = scorer.score(response.instance, output)
-            bpb_values.append(bpb)
+            bpb_values.append(scorer.score(response.instance, output))
 
         if not bpb_values:
             return 0.0
 
         return sum(bpb_values) / len(bpb_values)
+
+
+@dataclass(frozen=True, slots=True)
+class BPBMetricByteAvg(Metric):
+    """Byte-weighted (corpus-level) bits-per-byte.
+
+    Each instance's BPB is computed via the scorer, then weighted by its byte
+    count so that longer texts contribute proportionally more to the result.
+    Equivalent to ``-sum(logprobs) / (sum(bytes) * log(2))`` across the corpus.
+    """
+
+    name: str = "bits_per_byte"
+    scorer: type[Scorer] = BitsPerByteScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        if not responses:
+            return 0.0
+
+        scorer = self.scorer()
+        weighted_sum = 0.0
+        total_bytes = 0
+
+        for response in responses:
+            output = _select_gold_output(response)
+            if output is None:
+                continue
+
+            num_bytes = len(output.text.encode("utf-8")) if output.text else 0
+            if num_bytes == 0:
+                continue
+            bpb = scorer.score(response.instance, output)
+            weighted_sum += bpb * num_bytes
+            total_bytes += num_bytes
+
+        if total_bytes == 0:
+            return 0.0
+
+        return weighted_sum / total_bytes
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,12 +267,11 @@ class PassAtKMetric(Metric):
     The probability that at least one of k samples passes.
     """
 
-    name: str = "pass_at_k"
+    name: str = field(init=False)
     k: int = 1
     scorer: type[Scorer] = field(kw_only=True)
 
     def __post_init__(self) -> None:
-        # Use unique name per k value so metrics don't overwrite each other
         object.__setattr__(self, "name", f"pass_at_{self.k}")
 
     def compute(self, responses: Sequence[Response]) -> float:
@@ -268,12 +314,11 @@ class PassPowKMetric(Metric):
     The probability that k consecutive runs all succeed. Computed as (success_rate)^k.
     """
 
-    name: str = "pass_pow_k"
+    name: str = field(init=False)
     k: int = 1
     scorer: type[Scorer] = field(kw_only=True)
 
     def __post_init__(self) -> None:
-        # Use unique name per k value so metrics don't overwrite each other
         object.__setattr__(self, "name", f"pass_pow_{self.k}")
 
     def compute(self, responses: Sequence[Response]) -> float:
@@ -369,7 +414,7 @@ class LogprobUncondMCAccuracyMetric(Metric):
             cond_outputs = outputs[:num_choices]
             uncond_outputs = outputs[num_choices:]
             scores = []
-            for cond, uncond in zip(cond_outputs, uncond_outputs):
+            for cond, uncond in zip(cond_outputs, uncond_outputs, strict=True):
                 cond_lp = sum(lp["logprob"] for lp in (cond.logprobs or []))
                 uncond_lp = sum(lp["logprob"] for lp in (uncond.logprobs or []))
                 scores.append(cond_lp - uncond_lp)

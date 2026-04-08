@@ -8,7 +8,13 @@ from itertools import permutations
 from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter, PPLFormatter
-from olmo_eval.common.metrics import AccuracyMetric, BPBMetric, F1Metric, LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric
+from olmo_eval.common.metrics import (
+    AccuracyMetric,
+    BPBMetric,
+    F1Metric,
+    LogprobMCAccuracyMetric,
+    LogprobPerCharMCAccuracyMetric,
+)
 from olmo_eval.common.scorers import Scorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource

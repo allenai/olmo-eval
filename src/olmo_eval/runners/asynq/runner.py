@@ -10,7 +10,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any
 
-from olmo_eval.cli.utils import console
+from rich.console import Console
+
 from olmo_eval.common.configs import expand_tasks
 from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR
 from olmo_eval.common.logging import configure_worker_logging, get_logger
@@ -36,6 +37,7 @@ from olmo_eval.storage import StorageBackend
 
 logger = get_logger(__name__)
 runner_logger = configure_worker_logging("runner")
+console = Console(force_terminal=True, width=120)
 
 
 @dataclass
@@ -174,23 +176,34 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         # Start workers
         workers: list[mp.process.BaseProcess] = []
         scorer_proc: mp.process.BaseProcess | None = None
+        inference_manager = None
 
         try:
+            from olmo_eval.inference.gpu_planner import GPUPlanner
             from olmo_eval.inference.provider_manager import (
                 ProviderManager,
                 validate_inference_workers,
             )
 
-            num_inference_workers = self.harness_config.num_inference_workers
-            gpu_ids = list(range(total_gpus)) if total_gpus > 0 else []
+            # Use GPU planner to allocate GPUs for main workers and auxiliary providers
+            planner = GPUPlanner.from_harness_config(self.harness_config, total_gpus)
+            gpu_plan = planner.plan()
+
+            # Get main worker GPUs (flattened list from all worker allocations)
+            main_gpu_ids: list[int] = []
+            for alloc in gpu_plan.main_workers:
+                main_gpu_ids.extend(alloc.gpu_ids)
+
+            # Number of inference workers is determined by provider.num_instances
+            num_inference_workers = self.harness_config.provider.num_instances
 
             # Validate configuration
-            validate_inference_workers(num_inference_workers, total_gpus)
+            validate_inference_workers(num_inference_workers, len(main_gpu_ids))
 
             provider_manager = ProviderManager(
                 harness_config=self.harness_config,
                 num_inference_workers=num_inference_workers,
-                gpu_ids=gpu_ids,
+                gpu_ids=main_gpu_ids,
                 item_queue=item_queue,
                 result_queue=result_queue,
                 output_dir=self.output_dir,
@@ -201,6 +214,20 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
             # Start workers
             workers = provider_manager.start(ctx, total_instances, init_times)
+
+            # Start auxiliary inference servers if configured
+            registry_config: dict[str, list[dict[str, Any]]] | None = None
+            if self.harness_config.auxiliary_providers:
+                from olmo_eval.inference.manager import InferenceManager
+
+                auxiliary_gpus = gpu_plan.get_auxiliary_gpus()
+
+                inference_manager = InferenceManager(
+                    configs=dict(self.harness_config.auxiliary_providers),
+                    available_gpu_ids=auxiliary_gpus,
+                )
+                registry_config = inference_manager.start()
+                runner_logger.info(f"Auxiliary providers ready: {list(registry_config.keys())}")
 
             # Prepare sandbox configs for scoring worker if configured
             sandbox_configs_list = None
@@ -237,6 +264,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                     sandbox_configs_list,
                     scorer_ready,
                     scoring_concurrency,
+                    registry_config,
                 ),
             )
             scorer_proc.start()
@@ -333,6 +361,8 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             if scorer_proc and scorer_proc.is_alive():
                 scorer_proc.terminate()
                 scorer_proc.join(timeout=5)
+            if inference_manager is not None:
+                inference_manager.shutdown()
             for q in [item_queue, result_queue, scoring_queue, scored_queue]:
                 q.cancel_join_thread()
             manager.shutdown()
@@ -471,7 +501,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
     def _get_gpu_count(self) -> int:
         """Get total number of available GPUs."""
         try:
-            import torch  # type: ignore[import-not-found]
+            import torch  # type: ignore[ty:unresolved-import]
 
             return torch.cuda.device_count()
         except ImportError:

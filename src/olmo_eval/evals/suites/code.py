@@ -53,6 +53,29 @@ OLMO3_BASE_EASY_CODE_BPB = register(
 
 
 # =============================================================================
+# Serialized code BPB suite (pre-formatted data from oe-eval-internal)
+# =============================================================================
+
+_SERIALIZED_MT_MBPP_V2FIX_BPB = Suite(
+    name="_serialized_mt_mbpp_v2fix_bpb",
+    tasks=tuple(f"serialized:{t}" for t in MULTILINGUAL_MBPP_TASKS_V2),
+    aggregation=AggregationStrategy.AVERAGE,
+    description="Serialized multilingual MBPP v2 BPB evaluation",
+)
+
+OLMO3_BASE_EASY_CODE_BPB_SERIALIZED = register(
+    Suite(
+        name="olmo3:base_easy:code:bpb:serialized",
+        tasks=(
+            "serialized:codex_humaneval_3shot_bpb",
+            "serialized:mbpp_3shot_bpb",
+            _SERIALIZED_MT_MBPP_V2FIX_BPB,
+        ),
+        aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+        description="OLMo3 base_easy code BPB suite from serialized data",
+    )
+)
+# =============================================================================
 # MULTIPL_E Suites
 # =============================================================================
 

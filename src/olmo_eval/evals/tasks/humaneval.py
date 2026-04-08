@@ -4,7 +4,7 @@ from collections.abc import Iterator, Sequence
 from typing import Any
 
 from olmo_eval.common.formatters import ChatFormatter, CompletionFormatter, PPLFormatter
-from olmo_eval.common.metrics import BPBMetric, PassAtKMetric
+from olmo_eval.common.metrics import BPBMetricByteAvg, PassAtKMetric
 from olmo_eval.common.scorers import CodeExecutionScorer
 from olmo_eval.common.types import (
     Instance,
@@ -74,9 +74,7 @@ class HumanEval(Task):
         loader = DataLoader()
         source = self._get_source_for_split(self.fewshot_split)
         all_instances = [
-            inst
-            for doc in loader.load(source)
-            if (inst := self.process_doc(doc)) is not None
+            inst for doc in loader.load(source) if (inst := self.process_doc(doc)) is not None
         ]
 
         if not all_instances:
@@ -158,14 +156,14 @@ register_variant(
     "humaneval",
     "bpb",
     formatter=PPLFormatter(leading_space=True, answer_prefix=" "),
-    metrics=(BPBMetric(),),
+    metrics=(BPBMetricByteAvg(),),
 )
 
 register_variant(
     "humaneval_plus",
     "bpb",
     formatter=PPLFormatter(leading_space=True, answer_prefix=" "),
-    metrics=(BPBMetric(),),
+    metrics=(BPBMetricByteAvg(),),
 )
 
 # 3shot variants - composable with bpb (e.g., humaneval:3shot:bpb)

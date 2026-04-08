@@ -10,7 +10,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import ClassVar, Literal
 
-from olmo_eval.common.scorers.base import Scorer
+from olmo_eval.common.execution import ScoringContext
+from olmo_eval.common.scorers.execution import ContextScorer
 from olmo_eval.common.types import Instance, LMOutput
 
 # Type for judge function: takes prompt, returns judge response
@@ -62,8 +63,7 @@ def build_openai_judge_fn(
     """Build a lazy judge function using OpenAI API.
 
     The returned function validates OPENAI_API_KEY on first call, not at construction.
-    This allows scorers to be instantiated before the environment variable is set
-    (e.g., in Beaker jobs where secrets are injected at runtime).
+    This allows scorers to be instantiated before the environment variable is set.
 
     The function accepts either a plain string prompt (sent as a user message) or
     can be called with a system_prompt keyword argument for system+user message pairs.
@@ -75,7 +75,7 @@ def build_openai_judge_fn(
         temperature: Sampling temperature for the judge.
 
     Returns:
-        A judge function that validates and calls OpenAI on first use.
+        A judge function that validates and calls OpenAI.
     """
     _client: list = []  # Mutable container for lazy initialization
 
@@ -90,7 +90,7 @@ def build_openai_judge_fn(
                 )
 
             try:
-                from openai import OpenAI  # type: ignore[import-not-found,unresolved-import]
+                from openai import OpenAI  # type: ignore[ty:unresolved-import]
             except ImportError:
                 raise ValueError(
                     f"openai package is required for {scorer_name}. "
@@ -116,18 +116,15 @@ def build_openai_judge_fn(
 
 
 @dataclass(frozen=True)
-class LLMJudgeScorer(Scorer):
+class LLMJudgeScorer(ContextScorer):
     """Abstract base class for LLM-as-judge scorers.
 
     Subclasses must implement format_judge_prompt() and parse_judge_response().
-    By default uses OpenAI API with gpt-4o-mini. Requires OPENAI_API_KEY
-    environment variable to be set.
     """
 
     name: ClassVar[str] = "llm_judge"
-    judge_fn: JudgeFn = field(
-        default_factory=lambda: build_openai_judge_fn(scorer_name="LLMJudgeScorer")
-    )
+    provider_name: str | None = None
+    judge_fn: JudgeFn | None = None
 
     @abstractmethod
     def format_judge_prompt(self, instance: Instance, output: LMOutput) -> str:
@@ -155,17 +152,53 @@ class LLMJudgeScorer(Scorer):
         ...
 
     def score(self, instance: Instance, output: LMOutput) -> float:
-        """Score using the judge function.
-
-        Args:
-            instance: The evaluation instance.
-            output: The model output to evaluate.
-
-        Returns:
-            Score from the judge (0.0 to 1.0).
-        """
+        """Score using judge_fn (sync). Requires judge_fn to be configured."""
+        if self.provider_name:
+            raise RuntimeError(
+                f"{self.__class__.__name__} with provider_name requires async execution."
+            )
         prompt = self.format_judge_prompt(instance, output)
-        response = self.judge_fn(prompt)
+        response = self._score_with_judge_fn(prompt)
+        return self.parse_judge_response(response)
+
+    async def _score_with_provider(self, prompt: str, context: ScoringContext) -> str:
+        """Score using configured provider from inference pool."""
+        if self.provider_name is None:
+            raise RuntimeError("provider_name is required for provider-based scoring.")
+        if context.inference_pool is None:
+            raise RuntimeError("No inference pool configured.")
+
+        from olmo_eval.common.types import LMRequest, RequestType, SamplingParams
+
+        provider = context.get_provider(self.provider_name)
+        request = LMRequest(
+            request_type=RequestType.CHAT,
+            messages=({"role": "user", "content": prompt},),
+        )
+        sampling_params = SamplingParams(temperature=0.0, max_tokens=10)
+        results = await provider.agenerate([request], sampling_params)
+        return results[0][0].text if results and results[0] else ""
+
+    def _score_with_judge_fn(self, prompt: str) -> str:
+        """Score using configured judge function."""
+        if self.judge_fn is None:
+            raise RuntimeError("No judge_fn configured.")
+        return self.judge_fn(prompt)
+
+    async def ascore_with_context(
+        self,
+        instance: Instance,
+        output: LMOutput,
+        context: ScoringContext,
+    ) -> float:
+        """Score using configured provider or judge_fn."""
+        prompt = self.format_judge_prompt(instance, output)
+
+        if self.provider_name is not None:
+            response = await self._score_with_provider(prompt, context)
+        else:
+            response = self._score_with_judge_fn(prompt)
+
         return self.parse_judge_response(response)
 
 
@@ -173,13 +206,7 @@ class LLMJudgeScorer(Scorer):
 class SimpleQAJudgeScorer(LLMJudgeScorer):
     """LLM judge following SimpleQA's CORRECT/INCORRECT/NOT_ATTEMPTED grading.
 
-    Uses A/B/C response format where:
-    - A = CORRECT
-    - B = INCORRECT
-    - C = NOT_ATTEMPTED
-
-    By default uses OpenAI API with gpt-4o-mini. Requires OPENAI_API_KEY
-    environment variable to be set.
+    Uses A/B/C response format.
     """
 
     name: ClassVar[str] = "simpleqa_judge"
@@ -238,8 +265,6 @@ class RubricJudgeScorer(LLMJudgeScorer):
     """LLM judge with custom rubric and configurable score extraction.
 
     Allows defining custom evaluation rubrics and score patterns.
-    By default uses OpenAI API with gpt-4o-mini. Requires OPENAI_API_KEY
-    environment variable to be set.
     """
 
     name: ClassVar[str] = "rubric_judge"

@@ -33,7 +33,7 @@ def hide_unset(*, skip: frozenset[str] = frozenset()) -> Any:
 
     def decorator(cls: type[T]) -> type[T]:
         def __rich_repr__(self: T) -> Iterator[tuple[str, Any]]:
-            for f in fields(self):  # type: ignore
+            for f in fields(self):  # type: ignore[ty:invalid-argument-type]
                 if f.name in skip:
                     continue
                 value = getattr(self, f.name)
@@ -43,7 +43,7 @@ def hide_unset(*, skip: frozenset[str] = frozenset()) -> Any:
                     continue
                 yield f.name, value
 
-        cls.__rich_repr__ = __rich_repr__  # type: ignore
+        cls.__rich_repr__ = __rich_repr__  # type: ignore[ty:unresolved-attribute]
         return cls
 
     return decorator

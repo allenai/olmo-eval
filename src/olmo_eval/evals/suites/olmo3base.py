@@ -23,18 +23,8 @@ make_suite(
 
 
 make_suite(
-    "medmcqa:bpb:olmo3base",
-    ("medmcqa:bpb::olmo3base",),
-)
-
-make_suite(
     "medqa_en:rc_mc:olmo3base",
     ("medqa_en:rc:olmo3base", "medqa_en:mc:olmo3base"),
-)
-
-make_suite(
-    "medqa_en:bpb:olmo3base",
-    ("medqa_en:bpb::olmo3base",),
 )
 
 
@@ -49,11 +39,6 @@ make_suite(
     ("csqa:rc:olmo3base", "csqa:mc:olmo3base"),
 )
 
-make_suite(
-    "csqa:bpb:olmo3base",
-    ("csqa:bpb::olmo3base",),
-)
-
 
 make_suite(
     "socialiqa:rc_mc:olmo3base",
@@ -65,54 +50,16 @@ make_suite(
     ("coqa:gen:olmo3base",),
 )
 
-make_suite(
-    "coqa:mc:olmo3base",
-    ("coqa:mc:olmo3base",),
-)
-
-make_suite(
-    "coqa:rc:olmo3base",
-    ("coqa:rc:olmo3base",),
-)
-
-make_suite(
-    "coqa:bpb:olmo3base",
-    ("coqa:bpb::olmo3base",),
-)
-
 
 make_suite(
     "hellaswag:rc_mc:olmo3base",
     ("hellaswag:rc:olmo3base", "hellaswag:mc:olmo3base"),
 )
 
-make_suite(
-    "hellaswag:bpb:olmo3base",
-    ("hellaswag:bpb::olmo3base",),
-)
-
 
 make_suite(
     "jeopardy:gen_only:olmo3base",
     ("jeopardy:gen:olmo3base",),
-)
-
-
-make_suite(
-    "jeopardy:mc:olmo3base",
-    ("jeopardy:mc::olmo3base",),
-)
-
-
-make_suite(
-    "jeopardy:rc:olmo3base",
-    ("jeopardy:rc:olmo3base",),
-)
-
-
-make_suite(
-    "jeopardy:bpb:olmo3base",
-    ("jeopardy:bpb::olmo3base",),
 )
 
 
@@ -127,38 +74,10 @@ make_suite(
     ("sciq:rc:olmo3base", "sciq:mc:olmo3base"),
 )
 
-make_suite(
-    "sciq:bpb:olmo3base",
-    ("sciq:bpb::olmo3base",),
-)
-
 
 make_suite(
     "sciriff_yesno:rc_only:olmo3base",
     ("sciriff_yesno:rc:olmo3base",),
-)
-
-make_suite(
-    "sciriff_yesno:bpb:olmo3base",
-    ("sciriff_yesno:bpb::olmo3base",),
-)
-
-
-make_suite(
-    "drop:mc:olmo3base",
-    ("drop:mc:olmo3base",),
-)
-
-
-make_suite(
-    "drop:rc:olmo3base",
-    ("drop:rc:olmo3base",),
-)
-
-
-make_suite(
-    "drop:bpb:olmo3base",
-    ("drop:bpb:olmo3base",),
 )
 
 
@@ -167,42 +86,16 @@ make_suite(
     ("squad:mc:olmo3base", "squad:rc:olmo3base"),
 )
 
-make_suite(
-    "squad:bpb:olmo3base",
-    ("squad:bpb::olmo3base",),
-)
-
 
 make_suite(
     "winogrande:rc_mc:olmo3base",
     ("winogrande:rc:olmo3base", "winogrande:mc:olmo3base"),
 )
 
-make_suite(
-    "winogrande:bpb:olmo3base",
-    ("winogrande:bpb::olmo3base",),
-)
-
 
 make_suite(
     "naturalqs:olmo3base",
     ("naturalqs:mc:olmo3base", "naturalqs:rc:olmo3base"),
-)
-
-make_suite(
-    "naturalqs:bpb:olmo3base",
-    ("naturalqs:bpb::olmo3base",),
-)
-
-make_suite(
-    "lambada:bpb:olmo3base",
-    ("lambada:bpb::olmo3base",),
-)
-
-
-make_suite(
-    "mbpp:bpb:olmo3base",
-    ("mbpp:bpb::olmo3base",),
 )
 
 make_suite(
@@ -218,11 +111,6 @@ make_suite(
 make_suite(
     "minerva_math:bpb:olmo3base",
     tuple(f"minerva_math_{t}:bpb::olmo3base" for t in MATH_SUBSETS),
-)
-
-make_suite(
-    "codex_humaneval:bpb:olmo3base",
-    ("codex_humaneval:bpb::olmo3base",),
 )
 
 make_suite(

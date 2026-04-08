@@ -36,6 +36,7 @@ class TestVLLMServerProviderLogprobs:
             p._http_client = None
             p._raw_http_client = None
             p._server = None
+            p._max_length = 4096
             p._get_tokenizer = MagicMock(return_value=mock_tokenizer)
             return p
 
