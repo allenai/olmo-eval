@@ -74,7 +74,7 @@ the model):
 | Field | Type | Description |
 |-------|------|-------------|
 | `doc_id` | `int` | Unique numeric ID within the file |
-| `question` | `str` | Raw question text (best-effort; may not be a clean question for all task types) |
+| `question` | `str` | Raw question text |
 | `gold_answers` | `list[str]` | Valid gold answers; first element maps to `Instance.gold_answer` |
 | `choices` | `list[str] \| null` | Answer choices for MC tasks, null otherwise |
 | `metadata` | `dict` | Arbitrary per-instance metadata; always includes `task_name`, may include `gold_idx` for MC, plus any scorer-specific fields |
@@ -99,11 +99,9 @@ The JSONL does **not** capture:
 
 - **SamplingParams** (max_tokens, temperature, stop_sequences, etc.) --
   these are runtime concerns configured via `TaskConfig` or CLI overrides.
-- **Formatter, Scorer, and Metric definitions** -- these live in olmo-eval
+- **Scorer and Metric definitions** -- these live in olmo-eval
   task registrations, not in the data.
 - **Answer extraction logic** -- implemented by scorers in olmo-eval.
-- **system_prompt** -- supported by `LMRequest` but not currently read from
-  metadata by the default `SerializedTask` (easy to add by subclassing).
 
 ---
 
@@ -116,7 +114,7 @@ if you have a task that already exists in oe-eval.
 ### Step 1: Serialize the data
 
 The script
-[`oe_eval/serialize_benchmark.py`](https://github.com/allenai/oe-eval-internal/blob/main/oe_eval/serialize_benchmark.py)
+[`oe_eval/serialize_benchmark.py`](https://github.com/allenai/oe-eval-internal/blob/ianm-serialize-bench-data-vllm-schema/oe_eval/serialize_benchmark.py)
 converts oe-eval tasks into JSONL files. It loads a task through oe-eval's
 own `load_task` / `build_all_requests` pipeline, then extracts the formatted
 prompt and instance fields into `SerializedRecord` objects
@@ -131,8 +129,7 @@ python -m oe_eval.serialize_benchmark \
 This produces one JSONL file per leaf task plus a `manifest.json`. The
 script handles collapsing multiple-choice request instances into a single
 record with `choices` and `continuations` lists, and extracts metadata
-fields like `test` and `entry_point` from the underlying dataset document
-(see lines 221-256 for the extraction logic).
+fields like `test` and `entry_point` from the underlying dataset document.
 
 Note that this script does not necessarily cover every task type in oe-eval
 out of the box. It was written to migrate the code BPB suite and serves as
@@ -184,10 +181,6 @@ register_variant(
 Each call overrides `TaskConfig` fields on the `serialized` base task.
 The kwargs you can pass are any `TaskConfig` field: `data_source`,
 `metrics`, `limit`, `primary_metric`, `sampling_params`, etc.
-
-For the full set of registrations including the per-language multilingual
-MBPP variants, see
-[`serialized.py` lines 96-149](../src/olmo_eval/evals/tasks/serialized.py).
 
 ### Step 4: Define a suite
 
@@ -310,13 +303,12 @@ or reading `system_prompt` from metadata into `LMRequest` -- subclass
 Serialization works well for straightforward completion, loglikelihood, and
 chat tasks. More complex task types can introduce complications:
 
-- **Baked-in formatting is model-specific.** The serialized prompt includes
+- **Baked-in formatting is model-specific.** If the serialized prompt includes
   any chat template, FIM tokens, or context-window truncation applied during
   serialization. A JSONL file produced for one model family may not be valid
-  for another. This is usually fine since evaluation suites tend to be
-  model-specific already.
+  for another.
 
-- **Dual-mode tasks (generation + BPB).** Some oe-eval tasks issue both a
+- **Dual-mode tasks (generation + BPB).** Some tasks issue both a
   `generate_until` and a `loglikelihood` request per instance. These need
   two separate JSONL files -- one per request type -- registered as separate
   variants with different metrics.
