@@ -262,8 +262,7 @@ Add a registration pointing at your JSONL. For a multiple-choice task
 scored by logprob:
 
 ```python
-from olmo_eval.common.metrics import AccuracyMetric
-from olmo_eval.common.scorers import MultipleChoiceScorer
+from olmo_eval.common.metrics import LogprobMCAccuracyMetric
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import register_variant
 
@@ -271,7 +270,7 @@ register_variant(
     "serialized",
     "sciq_mc",
     data_source=DataSource(path="/tmp/sciq_serialized.jsonl"),
-    metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
+    metrics=(LogprobMCAccuracyMetric(),),
 )
 ```
 

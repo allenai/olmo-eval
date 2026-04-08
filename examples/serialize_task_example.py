@@ -15,7 +15,7 @@ After producing the file you can register it in olmo-eval:
         "serialized",
         "sciq_mc",
         data_source=DataSource(path="/tmp/sciq_serialized.jsonl"),
-        metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
+        metrics=(LogprobMCAccuracyMetric(),),
     )
 
 See docs/serialized_tasks.md for the full guide.

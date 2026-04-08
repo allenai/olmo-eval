@@ -24,8 +24,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.metrics import AccuracyMetric, BPBMetricInstanceAvg
-from olmo_eval.common.scorers import MultipleChoiceScorer
+from olmo_eval.common.metrics import BPBMetricInstanceAvg, LogprobMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -160,5 +159,5 @@ register_variant(
     data_source=DataSource(
         path="s3://ai2-llm/ianm/oe-eval-serialized/examples/sciq_serialized.jsonl"
     ),
-    metrics=(AccuracyMetric(scorer=MultipleChoiceScorer),),
+    metrics=(LogprobMCAccuracyMetric(),),
 )
