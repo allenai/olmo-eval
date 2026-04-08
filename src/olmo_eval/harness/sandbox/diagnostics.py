@@ -31,7 +31,7 @@ async def start_internal_monitor(
     if runtime is None:
         return False
 
-    from swerex.runtime.abstract import Command
+    from swerex.runtime.abstract import Command  # type: ignore[ty:unresolved-import]
 
     from .scripts import get_script
 

@@ -124,9 +124,6 @@ register_variant("coqa:rc", "olmo3base")
 
 @register("coqa:bpb")
 class CoqaBPB(CoqaRC):
-    # Send all choices as continuations (not just gold) so that vLLM prefix-sharing
-    # produces identical logprobs to the RC variant. BPBMetric selects the gold
-    # choice via gold_idx.
     metrics = (BPBMetric(),)
 
 

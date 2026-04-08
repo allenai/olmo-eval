@@ -4,7 +4,11 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceLogprobFormatter
-from olmo_eval.common.metrics import BPBMetric, LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric
+from olmo_eval.common.metrics import (
+    BPBMetric,
+    LogprobMCAccuracyMetric,
+    LogprobPerCharMCAccuracyMetric,
+)
 from olmo_eval.common.types import (
     Instance,
     LMOutput,

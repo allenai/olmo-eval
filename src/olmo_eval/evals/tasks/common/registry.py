@@ -82,13 +82,24 @@ def register_variant(task_name: str, variant: str, **overrides: Any) -> None:
         **overrides: TaskConfig field overrides for this variant.
 
     Raises:
-        ValueError: If the task is not registered.
+        ValueError: If the task is not registered, or if the resulting task
+            spec collides with a registered suite name.
     """
     if task_name not in _tasks:
         raise ValueError(
             f"Cannot register variant '{variant}' for unknown task '{task_name}'. "
             f"Register the task first using @register()."
         )
+
+    from olmo_eval.evals.suites.registry import suite_exists
+
+    spec = f"{task_name}:{variant}"
+    if suite_exists(spec):
+        raise ValueError(
+            f"Task spec {spec!r} collides with a registered suite name. "
+            f"Rename the suite to avoid ambiguity."
+        )
+
     _variants.setdefault(task_name, {})[variant] = overrides
 
 
@@ -484,7 +495,7 @@ def register_subtasks(
                 "sampling_params": SamplingParams(max_tokens=1024),
             },
             variants={
-                "bpb": {"formatter": PPLFormatter(), "metrics": (BPBMetric(),)},
+                "bpb": {"formatter": PPLFormatter(), "metrics": (BPBMetricByteAvg(),)},
                 "3shot": {"num_fewshot": 3},
             },
         )

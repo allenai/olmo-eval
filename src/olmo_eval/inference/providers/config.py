@@ -33,6 +33,7 @@ class ProviderConfig:
         dtype: Data type for model weights (auto, float16, bfloat16, float32).
         max_model_len: Maximum sequence length (overrides model default).
         max_concurrency: Maximum concurrent requests.
+        num_instances: Number of server instances for horizontal scaling.
         required_secrets: Environment variable names that must be set.
         package: Package specifier that overrides the default provider extra (e.g., vllm fork).
         dependencies: Additional package specifiers for runtime installation.
@@ -50,6 +51,7 @@ class ProviderConfig:
     dtype: str = "auto"
     max_model_len: int | None = None
     max_concurrency: int | None = None
+    num_instances: int = 1
     required_secrets: tuple[str, ...] = ()
     package: str | None = None
     dependencies: tuple[str, ...] = ()
@@ -66,6 +68,18 @@ class ProviderConfig:
         Returns False for API-based providers (litellm, mock).
         """
         return str(self.kind) in self._GPU_PROVIDERS
+
+    @property
+    def requires_local_gpu(self) -> bool:
+        """Whether this provider needs local GPU resources.
+
+        Returns True for local inference (vllm, vllm_server, hf) without external base_url.
+        Returns False for API-backed providers or configs pointing to external servers.
+        """
+        if not self.requires_gpu:
+            return False
+        # vllm_server with base_url points to external server
+        return not self.base_url
 
     # Config fields accepted by each provider kind (fields with non-default values are passed)
     _PROVIDER_FIELDS: ClassVar[dict[str, tuple[str, ...]]] = {
@@ -152,6 +166,8 @@ class ProviderConfig:
             d["max_model_len"] = self.max_model_len
         if self.max_concurrency is not None:
             d["max_concurrency"] = self.max_concurrency
+        if self.num_instances != 1:
+            d["num_instances"] = self.num_instances
         if self.required_secrets:
             d["required_secrets"] = list(self.required_secrets)
         if self.package:
@@ -192,6 +208,7 @@ class ProviderConfig:
             dtype=data.get("dtype", "auto"),
             max_model_len=data.get("max_model_len"),
             max_concurrency=data.get("max_concurrency"),
+            num_instances=data.get("num_instances", 1),
             required_secrets=tuple(data.get("required_secrets", [])),
             package=data.get("package"),
             dependencies=tuple(deps),

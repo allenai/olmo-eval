@@ -1,5 +1,5 @@
 from olmo_eval.evals.suites.registry import AggregationStrategy, Suite, make_suite, register
-from olmo_eval.evals.tasks.mmlu import MMLU_SUBJECTS, _HUMANITIES, _OTHER, _SOCIAL_SCIENCES, _STEM
+from olmo_eval.evals.tasks.mmlu import _HUMANITIES, _OTHER, _SOCIAL_SCIENCES, _STEM, MMLU_SUBJECTS
 
 
 def _task_names(subjects: tuple[str, ...]) -> tuple[str, ...]:
@@ -49,9 +49,7 @@ make_suite("mmlu:other:mc::olmo3base", _task_names_variant(_OTHER, "mc:olmo3base
 
 
 # rc (cloze) variants — for parity with oe-eval-internal mmlu_*:rc::olmes
-def _rc_task_names_variant(
-    subjects: tuple[str, ...], variant: str
-) -> tuple[str, ...]:
+def _rc_task_names_variant(subjects: tuple[str, ...], variant: str) -> tuple[str, ...]:
     return tuple(f"mmlu_{s}:rc:{variant}" for s in subjects)
 
 
@@ -72,9 +70,17 @@ _MMLU_RC_OTHER = make_suite(
     _rc_task_names_variant(_OTHER, "olmo3base"),
 )
 
-MMLU_RC = make_suite(
-    "mmlu:rc::olmo3base",
-    tuple(f"mmlu_{s}:rc:olmo3base" for s in MMLU_SUBJECTS),
+MMLU_RC = register(
+    Suite(
+        name="mmlu:rc::olmo3base",
+        tasks=(
+            _MMLU_RC_STEM,
+            _MMLU_RC_HUMANITIES,
+            _MMLU_RC_SOCIAL_SCIENCES,
+            _MMLU_RC_OTHER,
+        ),
+        aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+    )
 )
 
 MMLU_BPB = make_suite(

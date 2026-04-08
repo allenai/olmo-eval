@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import PPLFormatter
-from olmo_eval.common.metrics import BPBMetric, PassAtKMetric
+from olmo_eval.common.metrics import BPBMetric, BPBMetricByteAvg, PassAtKMetric
 from olmo_eval.common.scorers import CodeExecutionScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
@@ -224,14 +224,14 @@ register_variant(
     "mbpp",
     "bpb",
     formatter=PPLFormatter(leading_space=False),
-    metrics=(BPBMetric(),),
+    metrics=(BPBMetricByteAvg(),),
 )
 
 register_variant(
     "mbpp_plus",
     "bpb",
     formatter=PPLFormatter(leading_space=False),
-    metrics=(BPBMetric(),),
+    metrics=(BPBMetricByteAvg(),),
 )
 
 # 3shot variant - composable with bpb (e.g., mbpp:3shot:bpb)

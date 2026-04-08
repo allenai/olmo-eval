@@ -550,7 +550,7 @@ class SubprocessTokenizer:
                     "waiting for ready signal"
                 )
 
-        ready_line = self._proc.stdout.readline()  # type: ignore[union-attr]
+        ready_line = self._proc.stdout.readline()  # type: ignore[ty:unresolved-attribute]
         if not ready_line:
             self._proc.kill()
             self._proc.wait()
@@ -570,10 +570,10 @@ class SubprocessTokenizer:
         if self._proc.poll() is not None:
             raise RuntimeError("Tokenizer subprocess has terminated")
 
-        self._proc.stdin.write(json.dumps(req) + "\n")  # type: ignore[union-attr]
-        self._proc.stdin.flush()  # type: ignore[union-attr]
+        self._proc.stdin.write(json.dumps(req) + "\n")  # type: ignore[ty:unresolved-attribute]
+        self._proc.stdin.flush()  # type: ignore[ty:unresolved-attribute]
 
-        response_line = self._proc.stdout.readline()  # type: ignore[union-attr]
+        response_line = self._proc.stdout.readline()  # type: ignore[ty:unresolved-attribute]
         if not response_line:
             raise RuntimeError("Tokenizer subprocess returned empty response")
 
@@ -627,8 +627,8 @@ class SubprocessTokenizer:
         if self._proc.poll() is None:
             try:
                 # Send quit command for graceful shutdown
-                self._proc.stdin.write('{"cmd": "quit"}\n')  # type: ignore[union-attr]
-                self._proc.stdin.flush()  # type: ignore[union-attr]
+                self._proc.stdin.write('{"cmd": "quit"}\n')  # type: ignore[ty:unresolved-attribute]
+                self._proc.stdin.flush()  # type: ignore[ty:unresolved-attribute]
                 self._proc.wait(timeout=2)
             except Exception:
                 # Force kill if graceful shutdown fails

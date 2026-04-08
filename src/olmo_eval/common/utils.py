@@ -13,7 +13,7 @@ class Serializable:
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary, excluding None values."""
         result: dict[str, Any] = {}
-        for f in fields(self):  # type: ignore[arg-type]
+        for f in fields(self):  # type: ignore[ty:invalid-argument-type]
             value = getattr(self, f.name)
             if value is None:
                 continue

@@ -158,14 +158,14 @@ class EvalConfig:
             override_config = OmegaConf.from_dotlist(overrides)
             merged = OmegaConf.merge(merged, override_config)
 
-        return OmegaConf.to_object(merged)  # type: ignore[return-value]
+        return OmegaConf.to_object(merged)  # type: ignore[ty:invalid-return-type]
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> EvalConfig:
         """Create configuration from a dictionary."""
         schema = OmegaConf.structured(cls)
         merged = OmegaConf.merge(schema, OmegaConf.create(data))
-        return OmegaConf.to_object(merged)  # type: ignore[return-value]
+        return OmegaConf.to_object(merged)  # type: ignore[ty:invalid-return-type]
 
     def to_yaml(self, path: str | Path | None = None) -> str:
         """Export configuration to YAML."""

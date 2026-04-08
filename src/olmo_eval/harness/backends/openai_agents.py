@@ -157,7 +157,7 @@ class OpenAIAgentsBackend(Backend):
         Returns:
             An Agent instance from the agents SDK.
         """
-        from agents import (
+        from agents import (  # type: ignore[ty:unresolved-import]
             Agent,
             OpenAIChatCompletionsModel,
             function_tool,
@@ -249,7 +249,7 @@ class OpenAIAgentsBackend(Backend):
         """
         enable_compaction = kwargs.get("enable_compaction", True)
         try:
-            from agents import Runner, trace
+            from agents import Runner, trace  # type: ignore[ty:unresolved-import]
         except ImportError as e:
             raise ImportError(
                 "OpenAI Agents SDK not installed. Install with: pip install openai-agents"
@@ -259,8 +259,8 @@ class OpenAIAgentsBackend(Backend):
         session = None
         if enable_compaction:
             try:
-                from agents import SQLiteSession
-                from agents.memory import (
+                from agents import SQLiteSession  # type: ignore[ty:unresolved-import]
+                from agents.memory import (  # type: ignore[ty:unresolved-import]
                     OpenAIResponsesCompactionSession,
                 )
 

@@ -82,7 +82,6 @@ class RunnerResultsMixin:
         from olmo_eval.common.configs import expand_tasks, validate_task_metrics
         from olmo_eval.evals.suites import suite_exists
         from olmo_eval.evals.tasks.common import list_regimes, list_tasks, list_variants
-        from olmo_eval.evals.tasks.common.registry import parse_task_spec
 
         errors: list[str] = []
         available_tasks = set(list_tasks())

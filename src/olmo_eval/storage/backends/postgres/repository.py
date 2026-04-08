@@ -141,7 +141,7 @@ class ExperimentRepository:
             True if deleted, False if not found.
         """
         result = self.session.execute(delete(Experiment).where(Experiment.id == experiment_pk))
-        return result.rowcount > 0  # type: ignore[union-attr]
+        return result.rowcount > 0  # type: ignore[ty:unresolved-attribute]
 
     def delete_by_experiment_id(self, experiment_id: str) -> int:
         """Delete all experiments with a given experiment_id.
@@ -155,7 +155,7 @@ class ExperimentRepository:
         result = self.session.execute(
             delete(Experiment).where(Experiment.experiment_id == experiment_id)
         )
-        return result.rowcount  # type: ignore[union-attr]
+        return result.rowcount  # type: ignore[ty:unresolved-attribute]
 
     def query(
         self,
