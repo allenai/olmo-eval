@@ -15,7 +15,7 @@ from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 from olmo_eval.inference.utils import run_async
 
 if TYPE_CHECKING:
-    from openai import AsyncOpenAI  # type: ignore[ty:unresolved-import]
+    from openai import AsyncOpenAI
 
     from .vllm_server_utils import VLLMServerProcess
 
@@ -96,7 +96,7 @@ class RemoteTokenizer:
         tokens = self.encode(text)
         result: dict[str, Any] = {"input_ids": tokens}
         if return_tensors == "pt":
-            import torch  # type: ignore[ty:unresolved-import]
+            import torch
 
             result["input_ids"] = torch.tensor([tokens])
         return result
@@ -210,7 +210,7 @@ class VLLMServerProvider(InferenceProvider):
         self._raw_http_client: httpx.AsyncClient | None = None
         self._openai_module: Any = None
         self._tokenizer: Any = None
-        self._server: VLLMServerProcess | None = None  # type: ignore[ty:unresolved-reference]
+        self._server: VLLMServerProcess | None = None
         self._max_length: int | None = None
 
         if base_url:
@@ -283,8 +283,8 @@ class VLLMServerProvider(InferenceProvider):
     def _get_or_create_client(self) -> AsyncOpenAI:
         """Get or create the AsyncOpenAI client."""
         if self._client is None:
-            import openai  # type: ignore[ty:unresolved-import]
-            from openai import AsyncOpenAI  # type: ignore[ty:unresolved-import]
+            import openai
+            from openai import AsyncOpenAI
 
             self._openai_module = openai
 

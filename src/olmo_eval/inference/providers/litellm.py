@@ -13,7 +13,7 @@ from olmo_eval.inference.retry import retry_with_backoff
 from olmo_eval.inference.utils import run_async
 
 if TYPE_CHECKING:
-    from openai import AsyncOpenAI  # type: ignore[ty:unresolved-import]
+    from openai import AsyncOpenAI
 
 # Maximum stop sequences supported by OpenAI-compatible APIs
 _MAX_STOP_SEQUENCES = 4
@@ -100,7 +100,7 @@ class LiteLLMProvider(InferenceProvider):
             return None
 
         if self._client is None:
-            from openai import AsyncOpenAI  # type: ignore[ty:unresolved-import]
+            from openai import AsyncOpenAI
 
             self._client = AsyncOpenAI(
                 base_url=self.base_url,

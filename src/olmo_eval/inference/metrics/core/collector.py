@@ -10,7 +10,7 @@ from .schema import GPUSnapshot, RequestMetrics
 from .timer import Timer
 
 if TYPE_CHECKING:
-    from openai import AsyncOpenAI  # type: ignore[ty:unresolved-import]
+    from openai import AsyncOpenAI
 
     from olmo_eval.common.types import LMOutput, LMRequest, SamplingParams
     from olmo_eval.harness import Harness

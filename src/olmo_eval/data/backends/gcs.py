@@ -50,7 +50,7 @@ class GCSBackend:
         """Lazily initialize the GCS client."""
         if self._gcs_client is None:
             try:
-                from google.cloud import storage  # type: ignore[ty:unresolved-import]
+                from google.cloud import storage
             except ImportError as err:
                 raise ImportError(
                     "google-cloud-storage is required for GCS access: "
@@ -212,7 +212,7 @@ class GCSBackend:
     def _get_smart_open(self):
         """Get smart_open configured for GCS."""
         try:
-            from smart_open import open as smart_open  # type: ignore[ty:unresolved-import]
+            from smart_open import open as smart_open
         except ImportError as err:
             raise ImportError(
                 "smart_open is required for GCS access: pip install smart_open[gcs]"

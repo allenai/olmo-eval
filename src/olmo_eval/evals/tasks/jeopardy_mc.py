@@ -223,10 +223,12 @@ class JeopardyBPB(_JeopardyMCBase):
     def _build_bpb_fixed_fewshot(self) -> list[Instance]:
         instances = []
         for doc in JEOPARDY_MC_FIXED_FEWSHOT:
-            context = doc["context_original"]
+            context = str(doc["context_original"])
             category, question = _parse_context(context)
-            choices = tuple(doc["choices"]["text"])
-            answer_key = doc["answerKey"]
+            choices_data = doc["choices"]
+            assert isinstance(choices_data, dict)
+            choices = tuple(choices_data["text"])
+            answer_key = str(doc["answerKey"])
             gold_idx = ord(answer_key) - ord("A")
             gold_text = choices[gold_idx] if 0 <= gold_idx < len(choices) else ""
 

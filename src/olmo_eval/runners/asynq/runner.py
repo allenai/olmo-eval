@@ -501,7 +501,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
     def _get_gpu_count(self) -> int:
         """Get total number of available GPUs."""
         try:
-            import torch  # type: ignore[ty:unresolved-import]
+            import torch
 
             return torch.cuda.device_count()
         except ImportError:

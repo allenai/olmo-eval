@@ -90,7 +90,7 @@ def build_openai_judge_fn(
                 )
 
             try:
-                from openai import OpenAI  # type: ignore[ty:unresolved-import]
+                from openai import OpenAI
             except ImportError:
                 raise ValueError(
                     f"openai package is required for {scorer_name}. "

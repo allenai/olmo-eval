@@ -415,7 +415,7 @@ def _get_vllm_version() -> str | None:
 
     # First check current environment
     try:
-        import vllm  # type: ignore[ty:unresolved-import]
+        import vllm
 
         return vllm.__version__
     except ImportError:
@@ -486,7 +486,7 @@ def print_runtime_environment() -> None:
     table.add_row("Python", sys.version.split()[0])
 
     try:
-        import torch  # type: ignore[ty:unresolved-import]
+        import torch
 
         table.add_row("PyTorch", torch.__version__)
         table.add_row("CUDA available", str(torch.cuda.is_available()))

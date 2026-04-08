@@ -226,7 +226,7 @@ class S3Backend:
     def _get_smart_open(self):
         """Get smart_open with proper transport params."""
         try:
-            from smart_open import open as smart_open  # type: ignore[ty:unresolved-import]
+            from smart_open import open as smart_open
         except ImportError as err:
             raise ImportError(
                 "smart_open is required for S3 access: pip install smart_open[s3]"
