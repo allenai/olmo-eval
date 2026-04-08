@@ -2,7 +2,8 @@
 
 from .base import (
     AccuracyMetric,
-    BPBMetric,
+    BPBMetricByteAvg,
+    BPBMetricInstanceAvg,
     CorpusPerplexityMetric,
     F1Metric,
     GreedyAccuracyMetric,
@@ -20,7 +21,8 @@ from .base import (
 
 __all__ = [
     "AccuracyMetric",
-    "BPBMetric",
+    "BPBMetricByteAvg",
+    "BPBMetricInstanceAvg",
     "CorpusPerplexityMetric",
     "F1Metric",
     "GreedyAccuracyMetric",

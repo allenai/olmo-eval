@@ -55,10 +55,10 @@ class Harness:
                 instrumented = InstrumentedProvider(provider)
                 if self.config.metrics.collect_gpu:
                     instrumented.enable_gpu_monitoring(interval_s=1.0)
-                self._provider = instrumented  # type: ignore
+                self._provider = instrumented  # type: ignore[ty:invalid-assignment]
             else:
                 self._provider = provider
-        return self._provider  # type: ignore
+        return self._provider  # type: ignore[ty:invalid-return-type]
 
     @property
     def backend(self) -> Backend:

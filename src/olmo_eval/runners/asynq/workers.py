@@ -102,7 +102,9 @@ def inference_worker(
             log_dir = os.path.join(output_dir, "logs")
 
         harness_config = harness_config.with_provider_overrides(
-            tensor_parallel_size=len(gpu_ids) if gpu_ids else None,
+            tensor_parallel_size=len(gpu_ids)
+            if (gpu_ids and provider_config.requires_gpu)
+            else None,
             max_model_len=max_model_len,
             max_concurrency=max_concurrency,
             tokenizer=tokenizer,
@@ -219,6 +221,7 @@ def scoring_worker(
     sandbox_configs_list: list[dict[str, Any]] | None = None,
     ready_event: MPEvent | None = None,
     max_concurrency: int = DEFAULT_SCORING_CONCURRENCY,
+    registry_config: dict[str, list[dict[str, Any]]] | None = None,
 ) -> None:
     """Worker process that scores responses with concurrent execution.
 
@@ -236,6 +239,9 @@ def scoring_worker(
         sandbox_configs_list: Optional list of serialized SandboxConfigs for code execution.
         ready_event: Optional event to signal when worker is ready.
         max_concurrency: Maximum concurrent scoring operations.
+        registry_config: Optional config for ProviderRegistry (auxiliary providers).
+            Format: {name: [config_dict, ...]} where each config_dict is a
+            serialized ProviderConfig with base_url set.
     """
     import sys
 
@@ -415,10 +421,22 @@ def scoring_worker(
                 )
                 sys.exit(1)
 
-            scoring_context = ScoringContext(
-                execution_env=sandbox_manager,
-                scoring_concurrency=max_concurrency,
-            )
+        # Create provider registry from config (servers already running)
+        provider_registry = None
+        if registry_config:
+            from olmo_eval.inference.registry import ProviderRegistry
+
+            provider_registry = ProviderRegistry.from_serialized(registry_config)
+            if provider_registry:
+                worker_logger.info(
+                    f"Provider registry ready with providers: {provider_registry.names}"
+                )
+
+        scoring_context = ScoringContext(
+            execution_env=sandbox_manager,
+            scoring_concurrency=max_concurrency,
+            inference_pool=provider_registry,
+        )
 
         # Signal that worker is ready
         worker_logger.info("Scorer ready")

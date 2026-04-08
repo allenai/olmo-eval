@@ -455,7 +455,7 @@ def register_subtasks(
                 "sampling_params": SamplingParams(max_tokens=1024),
             },
             variants={
-                "bpb": {"formatter": PPLFormatter(), "metrics": (BPBMetric(),)},
+                "bpb": {"formatter": PPLFormatter(), "metrics": (BPBMetricByteAvg(),)},
                 "3shot": {"num_fewshot": 3},
             },
         )

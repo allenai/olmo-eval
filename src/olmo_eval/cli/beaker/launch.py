@@ -484,25 +484,38 @@ def launch(
             )
         harness_needs_sandbox = bool(harness_preset.sandboxes)
 
-    # Validate num_inference_workers against GPU count
-    num_inference_workers = harness_preset.num_inference_workers if harness_preset else 1
-    if num_inference_workers > 1:
+    # Validate provider.num_instances against GPU count
+    num_instances = harness_preset.provider.num_instances if harness_preset else 1
+    if num_instances > 1:
         if launch_config.gpus == 0:
             console.print(
-                f"[red]Error:[/red] num_inference_workers={num_inference_workers} "
+                f"[red]Error:[/red] provider.num_instances={num_instances} "
                 "requires GPUs, but --gpus is 0"
             )
             raise SystemExit(1)
-        if num_inference_workers > launch_config.gpus:
+
+        # Calculate GPUs needed for auxiliary providers
+        aux_gpus = 0
+        if harness_preset and harness_preset.auxiliary_providers:
+            for aux_config in harness_preset.auxiliary_providers.values():
+                if getattr(aux_config, "requires_local_gpu", True):
+                    aux_instances = aux_config.num_instances
+                    aux_tp = aux_config.kwargs.get("tensor_parallel_size", 1)
+                    aux_gpus += aux_instances * aux_tp
+
+        main_gpus = launch_config.gpus - aux_gpus
+        if num_instances > main_gpus:
             console.print(
-                f"[red]Error:[/red] num_inference_workers ({num_inference_workers}) "
-                f"exceeds GPU count ({launch_config.gpus})"
+                f"[red]Error:[/red] provider.num_instances ({num_instances}) "
+                f"exceeds available main GPUs ({main_gpus})"
+                + (f" (total: {launch_config.gpus}, aux: {aux_gpus})" if aux_gpus else "")
             )
             raise SystemExit(1)
-        if launch_config.gpus % num_inference_workers != 0:
+        if main_gpus % num_instances != 0:
             console.print(
-                f"[red]Error:[/red] GPU count ({launch_config.gpus}) must be evenly "
-                f"divisible by num_inference_workers ({num_inference_workers})"
+                f"[red]Error:[/red] Main GPU count ({main_gpus}) must be evenly "
+                f"divisible by provider.num_instances ({num_instances})"
+                + (f" (total: {launch_config.gpus}, aux: {aux_gpus})" if aux_gpus else "")
             )
             raise SystemExit(1)
 

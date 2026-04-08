@@ -3,17 +3,16 @@
 from __future__ import annotations
 
 from datetime import UTC
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 from rich.table import Table
 
 from olmo_eval.cli.utils import console
+from olmo_eval.launch import BeakerLauncher
 
 if TYPE_CHECKING:
     from beaker import BeakerGroup
-
-    from olmo_eval.launch import BeakerLauncher
 
 
 def _get_launcher() -> BeakerLauncher:
@@ -121,7 +120,7 @@ def group_info(
         for exp in experiments:
             workload = launcher.beaker.workload.get(exp.id)
             status_enum = BeakerWorkloadStatus(workload.status)
-            exp_info = {
+            exp_info: dict[str, Any] = {
                 "id": exp.id,
                 "name": exp.name,
                 "status": status_enum.name,
