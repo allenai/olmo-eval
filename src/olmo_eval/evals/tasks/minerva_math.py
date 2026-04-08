@@ -333,3 +333,4 @@ for _bpb_subset in MATH_SUBSETS:
     register(_bpb_task_name)(_bpb_cls)
 
     register_variant(_bpb_task_name, "olmo3base", fewshot_source="minerva_math_fixed")
+    register_variant(_bpb_task_name, "olmes", fewshot_source="minerva_math_fixed")

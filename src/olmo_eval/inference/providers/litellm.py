@@ -249,37 +249,38 @@ class LiteLLMProvider(InferenceProvider):
     async def _logprobs_single_impl(self, request: LMRequest) -> list[LMOutput]:
         """Compute logprobs for a single request."""
         if request.messages:
-            content = request.messages[0].get("content", "") if request.messages else ""
+            default_content = request.messages[0].get("content", "") if request.messages else ""
         else:
-            content = request.prompt
+            default_content = request.prompt
 
-        response = await self._litellm.acompletion(
-            api_base=self.api_base,
-            model=self.model_name,
-            messages=[{"role": "user", "content": content}],
-            max_completion_tokens=50,
-            temperature=0.0,
-            logprobs=True,
-            top_logprobs=1,  # NOTE: workaround for litellm proxy issue https://github.com/BerriAI/litellm/issues/21932
-            **self.api_kwargs,
-        )
-
-        # Extract logprobs from response
-        completion_logprobs: list[LogProbEntry] = []
-        if response.choices:
-            choice = response.choices[0]
-            logprobs_data = getattr(choice, "logprobs", None)
-            if logprobs_data and hasattr(logprobs_data, "content") and logprobs_data.content:
-                for lp in logprobs_data.content:
-                    entry: LogProbEntry = {"token": lp.token, "logprob": lp.logprob}
-                    lp_bytes = getattr(lp, "bytes", None)
-                    if lp_bytes is not None:
-                        entry["bytes"] = lp_bytes
-                    completion_logprobs.append(entry)
-
-        # Map to continuations
         outputs = []
-        for continuation in request.continuations or ():
+        cont_prompts = request.continuation_prompts
+        for i, continuation in enumerate(request.continuations or ()):
+            content = cont_prompts[i] if cont_prompts else default_content
+
+            response = await self._litellm.acompletion(
+                api_base=self.api_base,
+                model=self.model_name,
+                messages=[{"role": "user", "content": content}],
+                max_completion_tokens=50,
+                temperature=0.0,
+                logprobs=True,
+                top_logprobs=1,  # NOTE: workaround for litellm proxy issue https://github.com/BerriAI/litellm/issues/21932
+                **self.api_kwargs,
+            )
+
+            completion_logprobs: list[LogProbEntry] = []
+            if response.choices:
+                choice = response.choices[0]
+                logprobs_data = getattr(choice, "logprobs", None)
+                if logprobs_data and hasattr(logprobs_data, "content") and logprobs_data.content:
+                    for lp in logprobs_data.content:
+                        entry: LogProbEntry = {"token": lp.token, "logprob": lp.logprob}
+                        lp_bytes = getattr(lp, "bytes", None)
+                        if lp_bytes is not None:
+                            entry["bytes"] = lp_bytes
+                        completion_logprobs.append(entry)
+
             total = (
                 sum(lp["logprob"] for lp in completion_logprobs[:5]) if completion_logprobs else 0.0
             )

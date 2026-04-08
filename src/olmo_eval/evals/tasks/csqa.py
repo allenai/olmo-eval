@@ -158,6 +158,7 @@ register_variant(
     num_fewshot=5,
     fewshot_source="olmes_csqa_fixed",
     metrics=(LogprobUncondMCAccuracyMetric(), BPBMetric()),
+    primary_metric=LogprobUncondMCAccuracyMetric(),
 )
 register_variant(
     "csqa",
