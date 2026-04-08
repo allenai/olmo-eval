@@ -75,6 +75,7 @@ OLMO3_BASE_EASY_CODE_BPB_SERIALIZED = register(
         description="OLMo3 base_easy code BPB suite from serialized data",
     )
 )
+
 # =============================================================================
 # MULTIPL_E Suites
 # =============================================================================
