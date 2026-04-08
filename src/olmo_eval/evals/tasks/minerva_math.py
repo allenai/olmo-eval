@@ -2,8 +2,6 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
-from dataclasses import dataclass
-
 from olmo_eval.common.formatters import CompletionFormatter, PPLFormatter
 from olmo_eval.common.metrics import AccuracyMetric, BPBMetric, BPBMetricByteAvg, PassAtKMetric
 from olmo_eval.common.scorers import MinervaMathScorer
@@ -38,7 +36,6 @@ class _MinervaCompletionFormatter(CompletionFormatter):
         return LMRequest(request_type=self.request_type, prompt=prompt)
 
 
-
 @dataclass(slots=True)
 class _MinervaCompletionFormatter(CompletionFormatter):
     """CompletionFormatter that omits answer_prefix from the final (test) instance."""
@@ -61,6 +58,7 @@ class _MinervaCompletionFormatter(CompletionFormatter):
         parts.append(self.template.format(question=instance.question))
         prompt = self.fewshot_separator.join(parts)
         return LMRequest(request_type=self.request_type, prompt=prompt)
+
 
 MATH_SUBSETS = [
     "algebra",

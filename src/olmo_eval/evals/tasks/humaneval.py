@@ -74,9 +74,7 @@ class HumanEval(Task):
         loader = DataLoader()
         source = self._get_source_for_split(self.fewshot_split)
         all_instances = [
-            inst
-            for doc in loader.load(source)
-            if (inst := self.process_doc(doc)) is not None
+            inst for doc in loader.load(source) if (inst := self.process_doc(doc)) is not None
         ]
 
         if not all_instances:

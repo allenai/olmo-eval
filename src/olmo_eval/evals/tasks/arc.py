@@ -250,5 +250,7 @@ register_regime(
     fewshot_source="olmes_arc_challenge_fixed",
     split=Split.TEST,
 )
-register_variant("arc_challenge", "olmes", num_fewshot=5, fewshot_source="olmes_arc_challenge_fixed")
+register_variant(
+    "arc_challenge", "olmes", num_fewshot=5, fewshot_source="olmes_arc_challenge_fixed"
+)
 register_variant("arc_challenge", "full")

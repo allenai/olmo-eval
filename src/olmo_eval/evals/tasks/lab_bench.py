@@ -24,7 +24,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from olmo_eval.common.formatters import MCQAChatFormatter, MultipleChoiceFormatter, PPLFormatter
-from olmo_eval.common.metrics import AccuracyMetric, BPBMetric, LogprobPerCharMCAccuracyMetric, Metric
+from olmo_eval.common.metrics import (
+    AccuracyMetric,
+    BPBMetric,
+    LogprobPerCharMCAccuracyMetric,
+    Metric,
+)
 from olmo_eval.common.scorers import MultipleChoiceScorer, Scorer
 from olmo_eval.common.types import (
     Instance,

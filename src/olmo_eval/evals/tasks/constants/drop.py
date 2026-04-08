@@ -1,7 +1,9 @@
 """Static few-shot examples for DROP."""
 
+from typing import Any
+
 # fmt: off
-DROP_FIXED_FEWSHOT = [
+DROP_FIXED_FEWSHOT: list[dict[str, Any]] = [
     {
         "section_id": "nfl_2201",
         "passage": "To start the season, the Lions traveled south to Tampa, Florida to take on the Tampa Bay Buccaneers. The Lions scored first in the first quarter with a 23-yard field goal by Jason Hanson. The Buccaneers tied it up with a 38-yard field goal by Connor Barth, then took the lead when Aqib Talib intercepted a pass from Matthew Stafford and ran it in 28 yards. The Lions responded with a 28-yard field goal. In the second quarter, Detroit took the lead with a 36-yard touchdown catch by Calvin Johnson, and later added more points when Tony Scheffler caught an 11-yard TD pass. Tampa Bay responded with a 31-yard field goal just before halftime. The second half was relatively quiet, with each team only scoring one touchdown. First, Detroit's Calvin Johnson caught a 1-yard pass in the third quarter. The game's final points came when Mike Williams of Tampa Bay caught a 5-yard pass.  The Lions won their regular season opener for the first time since 2007",
@@ -84,7 +86,7 @@ DROP_FIXED_FEWSHOT = [
     },
 ]
 
-DROP_MC_FIXED_FEWSHOT = [
+DROP_MC_FIXED_FEWSHOT: list[dict[str, Any]] = [
     {
         "id": "drop_mc_format_fewshot_0",
         "choices": {"text": ["1", "2", "3", "4"], "label": ["A", "B", "C", "D"]},

@@ -5,7 +5,11 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter
-from olmo_eval.common.metrics import BPBMetric, LogprobPerCharMCAccuracyMetric, LogprobPerTokenMCAccuracyMetric
+from olmo_eval.common.metrics import (
+    BPBMetric,
+    LogprobPerCharMCAccuracyMetric,
+    LogprobPerTokenMCAccuracyMetric,
+)
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_regime, register_variant
@@ -29,9 +33,7 @@ class PiQA(Task):
                 for split in ("validation", "train"):
                     all_instances.extend(self._load_instances(split=split))
                 if self.config.limit and len(all_instances) > self.config.limit:
-                    all_instances = random.Random(1234).sample(
-                        all_instances, self.config.limit
-                    )
+                    all_instances = random.Random(1234).sample(all_instances, self.config.limit)
                 self._instances_cache = all_instances
             yield from self._instances_cache
         else:

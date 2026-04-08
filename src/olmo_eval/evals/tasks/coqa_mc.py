@@ -3,7 +3,11 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.metrics import BPBMetric, LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric
+from olmo_eval.common.metrics import (
+    BPBMetric,
+    LogprobMCAccuracyMetric,
+    LogprobPerCharMCAccuracyMetric,
+)
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant

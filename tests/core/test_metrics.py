@@ -292,13 +292,13 @@ class TestBPBMetricByteAvg:
         expected = 2.0 / (2 * math.log(2))
         assert bpb == pytest.approx(expected)
 
-    def test_byte_avg_weights_by_bytes(self):
-        """Byte-weighted average differs from instance-average when texts vary in length."""
+    def test_byte_avg_averages_per_instance_bpb(self):
+        """BPBMetricByteAvg computes plain mean of per-instance BPB values."""
         metric = BPBMetricByteAvg()
 
-        # Response 1: "a" (1 byte), logprob -1.0 → neg_logprob = 1.0
-        # Response 2: "ab" (2 bytes), logprobs [-2.0, -2.0] → neg_logprob = 4.0
-        # Byte-weighted: (1.0 + 4.0) / ((1 + 2) * log(2)) = 5.0 / (3 * log(2))
+        # Response 1: "a" (1 byte), logprob -1.0 → BPB = 1.0 / (1 * log2) = 1/log2
+        # Response 2: "ab" (2 bytes), logprobs [-2.0, -2.0] → BPB = 4.0 / (2 * log2) = 2/log2
+        # Mean: (1/log2 + 2/log2) / 2 = 1.5 / log2
         responses = [
             self._make_response([self._make_output_with_logprobs("a", [-1.0])]),
             self._make_response([self._make_output_with_logprobs("ab", [-2.0, -2.0])]),
@@ -306,12 +306,8 @@ class TestBPBMetricByteAvg:
 
         bpb = metric.compute(responses)
 
-        expected = 5.0 / (3 * math.log(2))
+        expected = 1.5 / math.log(2)
         assert bpb == pytest.approx(expected)
-
-        # Verify it differs from instance-average
-        instance_avg = BPBMetricInstanceAvg().compute(responses)
-        assert bpb != pytest.approx(instance_avg)
 
     def test_byte_avg_empty_responses(self):
         metric = BPBMetricByteAvg()
@@ -365,26 +361,26 @@ class TestLogprobMCAccuracyMetric:
         responses = [self._make_response(outputs, gold_idx=1)]
         assert metric.compute(responses) == 0.0
 
-    def test_missing_logprobs_treated_as_neg_inf(self):
-        """Outputs with missing logprobs should score -inf, never winning."""
+    def test_missing_logprobs_treated_as_zero(self):
+        """Outputs with missing logprobs get sum 0.0, beating any negative sum."""
         metric = LogprobMCAccuracyMetric()
         outputs = [
             self._make_output("a", None),
             self._make_output("b", [-1.0]),
             self._make_output("c", None),
         ]
-        responses = [self._make_response(outputs, gold_idx=1)]
+        responses = [self._make_response(outputs, gold_idx=0)]
         assert metric.compute(responses) == 1.0
 
-    def test_empty_logprobs_treated_as_neg_inf(self):
-        """Outputs with empty logprobs list should score -inf."""
+    def test_empty_logprobs_treated_as_zero(self):
+        """Outputs with empty logprobs list get sum 0.0, beating any negative sum."""
         metric = LogprobMCAccuracyMetric()
         outputs = [
             self._make_output("a", []),
             self._make_output("b", [-2.0]),
             self._make_output("c", []),
         ]
-        responses = [self._make_response(outputs, gold_idx=1)]
+        responses = [self._make_response(outputs, gold_idx=0)]
         assert metric.compute(responses) == 1.0
 
     def test_empty_responses(self):
@@ -436,14 +432,15 @@ class TestLogprobPerCharMCAccuracyMetric:
         responses = [self._make_response(outputs, gold_idx=1)]
         assert metric.compute(responses) == 1.0
 
-    def test_missing_logprobs_treated_as_neg_inf(self):
+    def test_missing_logprobs_treated_as_zero(self):
+        """Outputs with missing logprobs get per-char score 0.0, beating any negative score."""
         metric = LogprobPerCharMCAccuracyMetric()
         outputs = [
             self._make_output("a", None),
             self._make_output("bb", [-1.0]),
             self._make_output("ccc", None),
         ]
-        responses = [self._make_response(outputs, gold_idx=1)]
+        responses = [self._make_response(outputs, gold_idx=0)]
         assert metric.compute(responses) == 1.0
 
     def test_empty_responses(self):

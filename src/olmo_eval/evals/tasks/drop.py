@@ -312,7 +312,11 @@ class Drop(Task):
 
     def _build_fewshot(self) -> list[Instance]:
         fewshot_source = self.config.fewshot_source
-        if fewshot_source == "olmes_drop_mc_fixed" and type(self) is Drop and self.config.formatter is None:
+        if (
+            fewshot_source == "olmes_drop_mc_fixed"
+            and type(self) is Drop
+            and self.config.formatter is None
+        ):
             fewshot_source = "olmes_drop_fixed"
         if fewshot_source == "olmes_drop_fixed":
             return self._build_fixed_fewshot()

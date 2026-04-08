@@ -189,9 +189,7 @@ def wait_for_init_times(
         time.sleep(check_interval)
 
     # Return what we have even if incomplete
-    logger.warning(
-        f"Timed out waiting for init times: got {len(collected)}/{num_workers} workers"
-    )
+    logger.warning(f"Timed out waiting for init times: got {len(collected)}/{num_workers} workers")
     return collected
 
 
