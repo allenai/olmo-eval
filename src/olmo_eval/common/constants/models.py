@@ -77,6 +77,7 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             kind=ProviderKind.VLLM,
             model="deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
             max_model_len=32768,
+            num_instances=4,
         ),
         "mistral-7b": ProviderConfig(
             kind=ProviderKind.VLLM,
