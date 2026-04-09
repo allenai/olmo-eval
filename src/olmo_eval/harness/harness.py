@@ -316,19 +316,19 @@ class Harness:
         Returns:
             New request with config applied.
         """
-        from olmo_eval.common.types import RequestType
 
         messages = self._inject_system_prompt(request.messages)
 
-        if request.request_type == RequestType.CHAT:
-            from olmo_eval.common.inspection import format_with_chat_template
+        # if request.request_type == RequestType.CHAT:
+        #     from olmo_eval.common.inspection import format_with_chat_template
 
-            formatted_prompt = format_with_chat_template(request, self.provider.get_tokenizer())
+        #     formatted_prompt = format_with_chat_template(request, self.provider.get_tokenizer())
 
         return LMRequest(
             request_type=request.request_type,
             messages=messages,
-            prompt=formatted_prompt or request.prompt,
+            # prompt=formatted_prompt or request.prompt,
+            prompt=request.prompt,
             continuations=request.continuations,
             tools=self.config.tool_schemas if self.config.has_tools else request.tools,
             system_prompt=self.config.system_prompt or request.system_prompt,
