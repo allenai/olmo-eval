@@ -108,12 +108,15 @@ class HardReasoningBase(Task):
 
     def _load_hard_reasoning_split(self, split: str) -> Iterator[Instance]:
         """Load instances from a specific split of the hard-reasoning dataset."""
+        import os
+
         import datasets as hf_datasets
 
         file_name = "dev_t1.jsonl" if split == "validation" else "test_t1.jsonl"
         dataset = hf_datasets.load_dataset(
             "allenai/hard-reasoning",
             data_files={split: f"{self.subset}/{file_name}"},
+            token=os.environ.get("HF_TOKEN"),
         )[split]
         for index, doc in enumerate(dataset):
             instance = self.process_doc(doc, index)
