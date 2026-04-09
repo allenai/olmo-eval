@@ -8,7 +8,7 @@ from olmo_eval.common.metrics import BPBMetric, BPBMetricByteAvg, PassAtKMetric
 from olmo_eval.common.scorers import CodeExecutionScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.constants.code import MBPP_STOP_SEQUENCES
+from olmo_eval.evals.constants.code import MBPP_STOP_SEQUENCES, OLMO3_MBPP_STOP_SEQUENCES
 from olmo_eval.evals.extract import extract_code
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 
@@ -297,5 +297,108 @@ register_variant(
         temperature=0.8,
         num_samples=10,
         stop_sequences=MBPP_STOP_SEQUENCES,
+    ),
+)
+
+
+# =============================================================================
+# EvalPlus Variant (different prompt format)
+# =============================================================================
+
+
+@register("mbpp_olmo3base")
+class MBPPOlmo3Base(MBPPBase):
+    """MBPP with EvalPlus-style prompt format for OLMo3 base evaluation.
+
+    Wraps the problem in an instruction + markdown code block with a sample test case.
+    """
+
+    data_source = DataSource(path="google-research-datasets/mbpp")
+    sampling_params = SamplingParams(
+        max_tokens=1024,
+        temperature=0.6,
+        top_p=0.6,
+        do_sample=True,
+        stop_sequences=OLMO3_MBPP_STOP_SEQUENCES,
+    )
+
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
+        random_test = doc["test_list"][0] if doc.get("test_list") else ""
+        question = (
+            "Please provide a self-contained Python script that solves the "
+            "following problem in a markdown code block:\n```\n"
+            + doc["text"].strip()
+            + "\n"
+            + random_test
+            + "\n```\n"
+        )
+
+        tests = doc.get("test_setup_code", "") or ""
+        if tests:
+            tests += "\n"
+        tests += "\n".join(doc["test_list"])
+
+        return Instance(
+            question=question,
+            gold_answer=doc["code"] + "\n",
+            metadata={
+                "id": doc["task_id"],
+                "answer_prefix": "",
+                "test": tests,
+            },
+        )
+
+
+register_variant(
+    "mbpp_olmo3base",
+    "3shot",
+    num_fewshot=3,
+    fewshot_seed=1234,
+)
+
+register_variant(
+    "mbpp_olmo3base",
+    "n32",
+    sampling_params=SamplingParams(
+        max_tokens=1024,
+        temperature=0.6,
+        top_p=0.6,
+        do_sample=True,
+        num_samples=32,
+        stop_sequences=OLMO3_MBPP_STOP_SEQUENCES,
+    ),
+    metrics=(
+        PassAtKMetric(k=1, scorer=CodeExecutionScorer),
+        PassAtKMetric(k=2, scorer=CodeExecutionScorer),
+        PassAtKMetric(k=4, scorer=CodeExecutionScorer),
+        PassAtKMetric(k=8, scorer=CodeExecutionScorer),
+        PassAtKMetric(k=16, scorer=CodeExecutionScorer),
+    ),
+)
+
+register_variant(
+    "mbpp_olmo3base",
+    "bpb",
+    formatter=PPLFormatter(leading_space=False),
+    metrics=(BPBMetricByteAvg(),),
+)
+
+register_variant(
+    "mbpp",
+    "olmo3base",
+    sampling_params=SamplingParams(
+        max_tokens=1024,
+        temperature=0.6,
+        top_p=0.6,
+        do_sample=True,
+        num_samples=32,
+        stop_sequences=OLMO3_MBPP_STOP_SEQUENCES,
+    ),
+    metrics=(
+        PassAtKMetric(k=1, scorer=CodeExecutionScorer),
+        PassAtKMetric(k=2, scorer=CodeExecutionScorer),
+        PassAtKMetric(k=4, scorer=CodeExecutionScorer),
+        PassAtKMetric(k=8, scorer=CodeExecutionScorer),
+        PassAtKMetric(k=16, scorer=CodeExecutionScorer),
     ),
 )

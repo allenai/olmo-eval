@@ -102,3 +102,53 @@ for _suffix, _desc_suffix in _MULTIPL_E_VARIANTS:
         tuple(f"{t}{_suffix}" for t in MULTIPL_E_HUMANEVAL_TASKS + MULTIPL_E_MBPP_TASKS),
         description=f"MULTIPL_E HumanEval + MBPP (6 languages each){_desc_suffix}",
     )
+
+# OLMo3 base variants (pass@k evaluation with 32 samples)
+make_suite(
+    "multipl_e_humaneval:olmo3base",
+    tuple(f"{t}:olmo3base" for t in MULTIPL_E_HUMANEVAL_TASKS),
+    description="MULTIPL_E HumanEval (6 languages) OLMo3 base pass@k evaluation",
+)
+make_suite(
+    "multipl_e_mbpp:olmo3base",
+    tuple(f"{t}:olmo3base" for t in MULTIPL_E_MBPP_TASKS),
+    description="MULTIPL_E MBPP (6 languages) OLMo3 base pass@k evaluation",
+)
+make_suite(
+    "multipl_e:olmo3base",
+    tuple(f"{t}:olmo3base" for t in MULTIPL_E_HUMANEVAL_TASKS + MULTIPL_E_MBPP_TASKS),
+    description="MULTIPL_E HumanEval + MBPP (6 languages each) OLMo3 base pass@k evaluation",
+)
+
+# FIM infilling suite
+make_suite(
+    "codex_humanevalfim",
+    ("codex_humanevalfim_single", "codex_humanevalfim_multi", "codex_humanevalfim_random"),
+    description="HumanEval FIM infilling tasks (single, multi, random)",
+)
+
+# =============================================================================
+# OLMoBase Evaluation Suites
+# =============================================================================
+
+make_suite(
+    "olmobase:code",
+    (
+        "bigcodebench::olmo3base",
+        "codex_humaneval::olmo3base",
+        "deepseek_leetcode::olmo3base",
+        "ds1000:3shot::olmo3base",
+        "mbpp:3shot::olmo3base",
+    ),
+    description="OLMoBase code generation evaluation suite",
+)
+
+make_suite(
+    "olmobase:code_fim",
+    (
+        "codex_humanevalfim_single::olmo3",
+        "codex_humanevalfim_multi::olmo3",
+        "codex_humanevalfim_random::olmo3",
+    ),
+    description="OLMoBase FIM code completion evaluation suite",
+)

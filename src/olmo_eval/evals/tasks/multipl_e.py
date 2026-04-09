@@ -196,6 +196,24 @@ def _register_humaneval_task(lang: str) -> None:
             num_samples=20,
         ),
     )
+    register_variant(
+        task_name,
+        "olmo3base",
+        sampling_params=SamplingParams(
+            max_tokens=1024,
+            temperature=0.6,
+            top_p=0.6,
+            do_sample=True,
+            num_samples=32,
+        ),
+        metrics=(
+            PassAtKMetric(k=1, scorer=scorer_cls),
+            PassAtKMetric(k=2, scorer=scorer_cls),
+            PassAtKMetric(k=4, scorer=scorer_cls),
+            PassAtKMetric(k=8, scorer=scorer_cls),
+            PassAtKMetric(k=16, scorer=scorer_cls),
+        ),
+    )
 
 
 def _register_mbpp_task(lang: str) -> None:
@@ -241,6 +259,24 @@ def _register_mbpp_task(lang: str) -> None:
             do_sample=True,
             top_p=0.95,
             num_samples=20,
+        ),
+    )
+    register_variant(
+        task_name,
+        "olmo3base",
+        sampling_params=SamplingParams(
+            max_tokens=1024,
+            temperature=0.6,
+            top_p=0.6,
+            do_sample=True,
+            num_samples=32,
+        ),
+        metrics=(
+            PassAtKMetric(k=1, scorer=scorer_cls),
+            PassAtKMetric(k=2, scorer=scorer_cls),
+            PassAtKMetric(k=4, scorer=scorer_cls),
+            PassAtKMetric(k=8, scorer=scorer_cls),
+            PassAtKMetric(k=16, scorer=scorer_cls),
         ),
     )
 
