@@ -140,11 +140,12 @@ class FakeGenerateModel:
         self._call_idx += 1
         return SimpleNamespace(sequences=self._sequences[call_idx])
 
-    def __call__(self, input_ids=None, attention_mask=None):
+    def __call__(self, input_ids=None, attention_mask=None, use_cache=None):
         self.forward_calls.append(
             {
                 "input_ids": input_ids.clone(),
                 "attention_mask": attention_mask.clone(),
+                "use_cache": use_cache,
             }
         )
         logits = self._forward_logits[self._forward_idx]
@@ -159,14 +160,84 @@ class FakeForwardModel:
         self.logits = logits
         self.forward_calls = []
 
-    def __call__(self, input_ids=None, attention_mask=None):
+    def __call__(self, input_ids=None, attention_mask=None, use_cache=None):
         self.forward_calls.append(
             {
                 "input_ids": input_ids.clone(),
                 "attention_mask": attention_mask.clone(),
+                "use_cache": use_cache,
             }
         )
         return SimpleNamespace(logits=self.logits)
+
+
+class RetryingGenerateModel:
+    """Generate stub that forces the provider to split oversized generate batches."""
+
+    def __init__(self) -> None:
+        self.generate_calls = []
+
+    def generate(self, **kwargs):
+        self.generate_calls.append(kwargs)
+        if kwargs["input_ids"].shape[0] > 1:
+            raise RuntimeError("CUDA out of memory")
+        return SimpleNamespace(sequences=kwargs["input_ids"].clone())
+
+    def __call__(self, *args, **kwargs):
+        raise AssertionError("Scoring should not run when no tokens are generated")
+
+
+class RetryingForwardModel:
+    """Forward stub that forces the provider to split oversized scoring batches."""
+
+    def __init__(self) -> None:
+        self.forward_calls = []
+
+    def _make_logits(self, sequence, targets):
+        logits = torch.full((1, len(sequence), 64), -100.0, dtype=torch.float32)
+        for position, token_id, target_logit, competitor_id in targets:
+            logits[0, position, token_id] = target_logit
+            logits[0, position, competitor_id] = target_logit - 1.0
+        return logits
+
+    def __call__(self, input_ids=None, attention_mask=None, use_cache=None):
+        self.forward_calls.append(
+            {
+                "input_ids": input_ids.clone(),
+                "attention_mask": attention_mask.clone(),
+                "use_cache": use_cache,
+            }
+        )
+        if input_ids.shape[0] > 1:
+            raise RuntimeError(
+                "The size of tensor a (8) must match the size of tensor b (5472) "
+                "at non-singleton dimension 1"
+            )
+
+        sequence = input_ids[0].tolist()
+        if sequence == [10, 11, 12, 13]:
+            return SimpleNamespace(
+                logits=self._make_logits(
+                    sequence,
+                    [(1, 12, 2.0, 1), (2, 13, 1.5, 2)],
+                )
+            )
+        if sequence == [20, 21]:
+            return SimpleNamespace(
+                logits=self._make_logits(
+                    sequence,
+                    [(0, 21, 3.0, 0)],
+                )
+            )
+        if sequence == [30, 31, 32, 33]:
+            return SimpleNamespace(
+                logits=self._make_logits(
+                    sequence,
+                    [(2, 33, 0.7, 3)],
+                )
+            )
+
+        raise AssertionError(f"Unexpected sequence: {sequence}")
 
 
 def _make_provider(model):
@@ -178,6 +249,9 @@ def _make_provider(model):
         provider.device = torch.device("cpu")
         provider.model = model
         provider.tokenizer = FakeTokenizer()
+        provider.max_batch_size = None
+        provider.max_generate_batch_size = None
+        provider.max_score_batch_size = None
         return provider
 
 
@@ -218,6 +292,7 @@ class TestHuggingFaceProviderBatching:
             [1, 1, 1, 1, 0],
             [1, 1, 1, 1, 1],
         ]
+        assert first_forward["use_cache"] is False
 
         assert [[output.text for output in request_outputs] for request_outputs in outputs] == [
             ["AB", "EF"],
@@ -280,6 +355,7 @@ class TestHuggingFaceProviderBatching:
             [1, 1, 0, 0],
             [1, 1, 1, 1],
         ]
+        assert call["use_cache"] is False
 
         log_probs = torch.log_softmax(logits, dim=-1)
         expected_first = log_probs[0, 1, 12].item() + log_probs[0, 2, 13].item()
@@ -293,3 +369,54 @@ class TestHuggingFaceProviderBatching:
         assert outputs[0][0].metadata["total_logprob"] == pytest.approx(expected_first)
         assert outputs[0][1].metadata["total_logprob"] == pytest.approx(expected_second)
         assert outputs[1][0].metadata["total_logprob"] == pytest.approx(expected_third)
+
+    def test_generate_splits_retryable_oom_batches(self):
+        """Generation should retry smaller microbatches after a retryable OOM."""
+        provider = _make_provider(RetryingGenerateModel())
+        requests = [
+            LMRequest(request_type=RequestType.COMPLETION, prompt="short"),
+            LMRequest(request_type=RequestType.COMPLETION, prompt="longer"),
+        ]
+
+        outputs = provider.generate(requests, sampling_params=SamplingParams(max_tokens=2))
+
+        assert [call["input_ids"].shape[0] for call in provider.model.generate_calls] == [2, 1, 1]
+        assert [[output.text for output in request_outputs] for request_outputs in outputs] == [
+            [""],
+            [""],
+        ]
+
+    def test_logprobs_splits_retryable_shape_mismatch_batches(self):
+        """Logprob scoring should retry smaller microbatches for retryable model errors."""
+        provider = _make_provider(RetryingForwardModel())
+        requests = [
+            LMRequest(
+                request_type=RequestType.LOGLIKELIHOOD,
+                prompt="prompt-1",
+                continuations=("cont-1", "cont-2"),
+            ),
+            LMRequest(
+                request_type=RequestType.LOGLIKELIHOOD,
+                prompt="prompt-2",
+                continuations=("cont-3",),
+            ),
+        ]
+
+        with patch(
+            "olmo_eval.inference.providers.huggingface.encode_context_and_continuation"
+        ) as mock_encode:
+            mock_encode.side_effect = [
+                ([10, 11], [12, 13]),
+                ([20], [21]),
+                ([30, 31, 32], [33]),
+            ]
+            outputs = provider.logprobs(requests)
+
+        assert [call["input_ids"].shape[0] for call in provider.model.forward_calls] == [3, 1, 2, 1, 1]
+        assert all(call["use_cache"] is False for call in provider.model.forward_calls)
+        assert [[output.text for output in request_outputs] for request_outputs in outputs] == [
+            ["cont-1", "cont-2"],
+            ["cont-3"],
+        ]
+        assert outputs[0][0].metadata["total_logprob"] < 0
+        assert outputs[1][0].metadata["total_logprob"] < 0
