@@ -216,6 +216,19 @@ class VLLMProvider(InferenceProvider):
 
         return VLLMSamplingParams(**kwargs)
 
+    def _format_prompt(self, request: LMRequest) -> str:
+        """Convert a request to a prompt string, applying chat template for CHAT requests."""
+        from olmo_eval.common.types import RequestType
+
+        if request.request_type == RequestType.CHAT and request.messages:
+            tokenizer = self.llm.get_tokenizer()
+            return tokenizer.apply_chat_template(
+                list(request.messages),
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        return request.prompt
+
     def generate(
         self,
         requests: list[LMRequest],
@@ -224,7 +237,7 @@ class VLLMProvider(InferenceProvider):
         params = self._default_sampling_params(sampling_params)
         vllm_params = self._build_sampling_params(params)
 
-        prompt_strs = [req.prompt for req in requests]
+        prompt_strs = [self._format_prompt(req) for req in requests]
 
         if is_debug_requests():
             for i, prompt in enumerate(prompt_strs):
