@@ -7,8 +7,11 @@ Paper: https://arxiv.org/pdf/2406.15877
 Dataset: bigcode/bigcodebench
 """
 
+from __future__ import annotations
+
 from collections.abc import Iterator, Sequence
-from typing import Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.formatters import CompletionFormatter, PPLFormatter
 from olmo_eval.common.metrics import BPBMetricByteAvg, PassAtKMetric
@@ -18,6 +21,45 @@ from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import BIGCODEBENCH_STOP_SEQUENCES
 from olmo_eval.evals.extract import extract_code
 from olmo_eval.evals.tasks.common import Task, register, register_variant
+
+if TYPE_CHECKING:
+    from olmo_eval.common.execution import ExecutionEnvironment
+
+
+@dataclass(frozen=True, slots=True)
+class BigCodeBenchScorer(CodeExecutionScorer):
+    """Scorer for BigCodeBench that invokes unittest after test class definition.
+
+    BigCodeBench test code defines unittest.TestCase classes but does not
+    invoke the test runner. Without unittest.main(), the test classes are
+    defined but never executed, causing all submissions to appear to pass.
+    """
+
+    timeout: float = 60.0
+
+    async def ascore(
+        self,
+        instance: Instance,
+        output: LMOutput,
+        execution_env: ExecutionEnvironment,
+    ) -> float:
+        if output.extracted_answer is None:
+            return 0.0
+
+        test_code = instance.metadata.get("test", "")
+        if not test_code:
+            return 0.0
+
+        full_code = (
+            f"{output.extracted_answer}\n\n{test_code}\n\nimport unittest\nunittest.main()\n"
+        )
+
+        result = await execution_env.execute_code(
+            full_code,
+            language=self.language,
+            timeout=self.timeout,
+        )
+        return 1.0 if result.success else 0.0
 
 
 @register("bigcodebench")
@@ -62,9 +104,36 @@ class BigCodeBench(Task):
             },
         )
 
+    def _build_fewshot(self) -> list[Instance]:
+        """Sample one extra for per-instance dedup (fewshot == eval split)."""
+        import random
+
+        if self.config.num_fewshot == 0:
+            return []
+
+        loader = DataLoader()
+        source = self._get_source_for_split(self.fewshot_split)
+        all_instances = [
+            inst for doc in loader.load(source) if (inst := self.process_doc(doc)) is not None
+        ]
+
+        if not all_instances:
+            return []
+
+        rng = random.Random(self.config.fewshot_seed)
+        k = min(self.config.num_fewshot + 1, len(all_instances))
+        return rng.sample(all_instances, k)
+
     def format_request(self, instance: Instance) -> LMRequest:
         if self.config.formatter is not None:
-            return self.config.formatter.format(instance, self.get_fewshot())
+            fewshot = self.get_fewshot()
+            instance_id = instance.metadata.get("id")
+            if instance_id is not None:
+                filtered = [ex for ex in fewshot if ex.metadata.get("id") != instance_id]
+            else:
+                filtered = list(fewshot)
+            filtered = filtered[: self.config.num_fewshot]
+            return self.config.formatter.format(instance, filtered)
 
         return LMRequest(
             request_type=self.request_type,
@@ -102,7 +171,7 @@ register_variant(
 register_variant(
     "bigcodebench",
     "pass_at_1",
-    metrics=(PassAtKMetric(k=1, scorer=CodeExecutionScorer),),
+    metrics=(PassAtKMetric(k=1, scorer=BigCodeBenchScorer),),
 )
 
 register_variant(
@@ -111,5 +180,5 @@ register_variant(
     num_fewshot=3,
     fewshot_seed=1234,
     formatter=CompletionFormatter(answer_prefix=""),
-    metrics=(PassAtKMetric(k=1, scorer=CodeExecutionScorer),),
+    metrics=(PassAtKMetric(k=1, scorer=BigCodeBenchScorer),),
 )

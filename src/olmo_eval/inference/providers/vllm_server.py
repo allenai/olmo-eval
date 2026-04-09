@@ -210,7 +210,7 @@ class VLLMServerProvider(InferenceProvider):
         self._raw_http_client: httpx.AsyncClient | None = None
         self._openai_module: Any = None
         self._tokenizer: Any = None
-        self._server: VLLMServerProcess | None = None
+        self._server: VLLMServerProcess | None = None  # type: ignore[possibly-unresolved-reference]
         self._max_length: int | None = None
 
         if base_url:
@@ -278,6 +278,7 @@ class VLLMServerProvider(InferenceProvider):
                     "Could not determine max_model_len from server, defaulting to %d",
                     self._max_length,
                 )
+        assert self._max_length is not None
         return self._max_length
 
     def _get_or_create_client(self) -> AsyncOpenAI:

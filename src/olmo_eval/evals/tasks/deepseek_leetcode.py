@@ -90,8 +90,7 @@ class DeepSeekLeetCode(Task):
             for output in response.outputs:
                 code = self.extract_answer(output)
                 if code:
-                    # Prepend the prompt (function definition) to the generated body
-                    output.extracted_answer = response.instance.metadata["prompt"] + code
+                    output.extracted_answer = code
                 else:
                     output.extracted_answer = None
 

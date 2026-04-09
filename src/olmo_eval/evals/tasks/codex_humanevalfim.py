@@ -122,10 +122,7 @@ class CodexHumanEvalFIMMulti(CodexHumanEvalFIMSingle):
         num_samples=1,
         stop_sequences=OLMO_FIM.stop_sequences,
     )
-    metrics = (
-        PassAtKMetric(k=1, scorer=CodeExecutionScorer),
-        PassAtKMetric(k=10, scorer=CodeExecutionScorer),
-    )
+    metrics = (PassAtKMetric(k=1, scorer=CodeExecutionScorer),)
 
 
 @register("codex_humanevalfim_random")
@@ -146,7 +143,7 @@ class CodexHumanEvalFIMRandom(CodexHumanEvalFIMSingle):
     )
     metrics = (
         PassAtKMetric(k=1, scorer=CodeExecutionScorer),
-        PassAtKMetric(k=10, scorer=CodeExecutionScorer),
+        PassAtKMetric(k=5, scorer=CodeExecutionScorer),
     )
 
 

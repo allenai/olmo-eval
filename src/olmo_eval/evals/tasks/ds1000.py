@@ -7,8 +7,11 @@ Paper: https://arxiv.org/abs/2211.11501
 Dataset: xlangai/DS-1000
 """
 
+from __future__ import annotations
+
 from collections.abc import Iterator, Sequence
-from typing import Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.formatters import CompletionFormatter, PPLFormatter
 from olmo_eval.common.metrics import BPBMetricByteAvg, PassAtKMetric
@@ -18,12 +21,45 @@ from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import DS1000_STOP_SEQUENCES
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 
-# DS-1000 requires longer timeout for data science libraries
-_DS1000_SCORER = type(
-    "DS1000Scorer",
-    (CodeExecutionScorer,),
-    {"timeout": 120.0, "__module__": __name__, "__qualname__": "DS1000Scorer"},
-)
+if TYPE_CHECKING:
+    from olmo_eval.common.execution import ExecutionEnvironment
+
+
+@dataclass(frozen=True, slots=True)
+class DS1000Scorer(CodeExecutionScorer):
+    """Scorer for DS-1000 that executes the pre-assembled test program directly.
+
+    Unlike other code tasks where metadata["test"] contains static test code
+    and extracted_answer contains just the generated code, DS-1000 assembles
+    the complete test program (code_context + model continuation) into
+    extracted_answer. metadata["test"] is intentionally empty.
+    """
+
+    timeout: float = 120.0
+
+    async def ascore(
+        self,
+        instance: Instance,
+        output: LMOutput,
+        execution_env: ExecutionEnvironment,
+    ) -> float:
+        if output.extracted_answer is None:
+            return 0.0
+
+        test_code = instance.metadata.get("test", "")
+        if test_code:
+            full_code = f"{output.extracted_answer}\n\n{test_code}"
+        else:
+            # DS-1000: extracted_answer IS the complete test program
+            # (assembled by _extract_answers from code_context + continuation)
+            full_code = output.extracted_answer
+
+        result = await execution_env.execute_code(
+            full_code,
+            language=self.language,
+            timeout=self.timeout,
+        )
+        return 1.0 if result.success else 0.0
 
 
 @register("ds1000")
@@ -89,9 +125,36 @@ class DS1000(Task):
         text = text.rstrip("\n") + "\n"
         return text
 
+    def _build_fewshot(self) -> list[Instance]:
+        """Sample one extra for per-instance dedup (fewshot == eval split)."""
+        import random
+
+        if self.config.num_fewshot == 0:
+            return []
+
+        loader = DataLoader()
+        source = self._get_source_for_split(self.fewshot_split)
+        all_instances = [
+            inst for doc in loader.load(source) if (inst := self.process_doc(doc)) is not None
+        ]
+
+        if not all_instances:
+            return []
+
+        rng = random.Random(self.config.fewshot_seed)
+        k = min(self.config.num_fewshot + 1, len(all_instances))
+        return rng.sample(all_instances, k)
+
     def format_request(self, instance: Instance) -> LMRequest:
         if self.config.formatter is not None:
-            return self.config.formatter.format(instance, self.get_fewshot())
+            fewshot = self.get_fewshot()
+            instance_id = instance.metadata.get("id")
+            if instance_id is not None:
+                filtered = [ex for ex in fewshot if ex.metadata.get("id") != instance_id]
+            else:
+                filtered = list(fewshot)
+            filtered = filtered[: self.config.num_fewshot]
+            return self.config.formatter.format(instance, filtered)
 
         return LMRequest(
             request_type=self.request_type,
@@ -140,11 +203,11 @@ register_variant(
 register_variant(
     "ds1000",
     "pass_at_1",
-    metrics=(PassAtKMetric(k=1, scorer=_DS1000_SCORER),),
+    metrics=(PassAtKMetric(k=1, scorer=DS1000Scorer),),
 )
 
 register_variant(
     "ds1000",
     "olmo3base",
-    metrics=(PassAtKMetric(k=1, scorer=_DS1000_SCORER),),
+    metrics=(PassAtKMetric(k=1, scorer=DS1000Scorer),),
 )
