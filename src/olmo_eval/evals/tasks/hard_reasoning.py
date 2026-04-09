@@ -90,6 +90,9 @@ class HardReasoningBase(Task):
     """
 
     subset: str = "bringing_toys"
+    dependencies = [
+        "git+https://github.com/allenai/np-hard-reasoning.git@fa8bbb2a5554e34a7ce051b71e9357e44dbabd0f",
+    ]
     sampling_params = SamplingParams(
         max_tokens=4096,
         temperature=0.0,
