@@ -108,21 +108,24 @@ class HardReasoningBase(Task):
 
     def _load_hard_reasoning_split(self, split: str) -> Iterator[Instance]:
         """Load instances from a specific split of the hard-reasoning dataset."""
+        import json
         import os
 
-        import datasets as hf_datasets
+        from huggingface_hub import hf_hub_download
 
         file_name = "dev_t1.jsonl" if split == "validation" else "test_t1.jsonl"
-        dataset = hf_datasets.load_dataset(
-            "allenai/hard-reasoning",
-            data_files={split: f"{self.subset}/{file_name}"},
+        local_path = hf_hub_download(
+            repo_id="allenai/hard-reasoning",
+            filename=f"{self.subset}/{file_name}",
+            repo_type="dataset",
             token=os.environ.get("HF_TOKEN"),
-            streaming=True,
-        )[split]
-        for index, doc in enumerate(dataset):
-            instance = self.process_doc(doc, index)
-            if instance is not None:
-                yield instance
+        )
+        with open(local_path) as f:
+            for index, line in enumerate(f):
+                doc = json.loads(line)
+                instance = self.process_doc(doc, index)
+                if instance is not None:
+                    yield instance
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         return Instance(
