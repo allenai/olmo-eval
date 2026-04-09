@@ -87,10 +87,11 @@ class DeepSeekLeetCode(Task):
 
     def _extract_answers(self, responses: Sequence[Response]) -> None:
         for response in responses:
+            prompt = response.instance.metadata["prompt"]
             for output in response.outputs:
                 code = self.extract_answer(output)
                 if code:
-                    output.extracted_answer = code
+                    output.extracted_answer = prompt + code
                 else:
                     output.extracted_answer = None
 

@@ -1,12 +1,12 @@
 """MBPP code generation task implementations."""
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from typing import Any
 
 from olmo_eval.common.formatters import PPLFormatter
 from olmo_eval.common.metrics import BPBMetric, BPBMetricByteAvg, PassAtKMetric
 from olmo_eval.common.scorers import CodeExecutionScorer
-from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, Response, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import MBPP_STOP_SEQUENCES, OLMO3_MBPP_STOP_SEQUENCES
 from olmo_eval.evals.extract import extract_code
@@ -30,7 +30,8 @@ class MBPPBase(Task):
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         # Build prompt from text and function signature
-        question = doc["text"].strip() + "\n" + doc["code"].split(":")[0] + ":"
+        func_sig = doc["code"].split(":")[0] + ":"
+        question = doc["text"].strip() + "\n" + func_sig
 
         # Build test code
         tests = doc.get("test_setup_code", "") or ""
@@ -43,7 +44,7 @@ class MBPPBase(Task):
             gold_answer=doc["code"],
             metadata={
                 "id": doc["task_id"],
-                "answer_prefix": question,
+                "answer_prefix": func_sig,
                 "test": tests,
             },
         )
@@ -60,10 +61,22 @@ class MBPPBase(Task):
 
     def extract_answer(self, output: LMOutput) -> str | None:
         """Extract code from model output."""
-        code = extract_code(output.text)
-        if code and "answer_prefix" in (output.metadata or {}):
-            return output.metadata["answer_prefix"] + code
-        return code
+        return extract_code(output.text)
+
+    def _extract_answers(self, responses: Sequence[Response]) -> None:
+        """Extract code and prepend the function signature.
+
+        The answer_prefix contains the function signature (e.g. ``def func(x):``).
+        Prepending it ensures the generated body is wrapped in a valid function
+        definition so that test assertions can call the function.
+        """
+        for response in responses:
+            for output in response.outputs:
+                code = self.extract_answer(output)
+                if code:
+                    output.extracted_answer = response.instance.metadata["answer_prefix"] + code
+                else:
+                    output.extracted_answer = None
 
     def _build_fewshot(self) -> list[Instance]:
         """Build few-shot examples from the prompt split.

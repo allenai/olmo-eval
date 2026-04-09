@@ -36,6 +36,7 @@ register_variant(
     "olmo3base",
     num_fewshot=3,
     fewshot_seed=1234,
+    formatter=CompletionFormatter(),
     sampling_params=SamplingParams(
         max_tokens=1024,
         temperature=0.6,
