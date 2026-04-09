@@ -28,6 +28,23 @@ if TYPE_CHECKING:
     from olmo_eval.data import DataSource
 
 
+@dataclass(frozen=True, slots=True)
+class SandboxEnv:
+    """Named sandbox environment with dependencies for code execution scoring.
+
+    Tasks sharing the same name share a container. Different names get
+    isolated containers with only their declared dependencies installed.
+    """
+
+    name: str
+    dependencies: tuple[str, ...] = ()
+
+    @property
+    def capability(self) -> frozenset[str]:
+        """Capability tag used to route execution to this sandbox."""
+        return frozenset({f"sandbox:{self.name}"})
+
+
 @hide_unset()
 @dataclass
 class TaskConfig:
@@ -67,6 +84,9 @@ class TaskConfig:
 
     #: Runtime dependencies to install for this task (package specs like "pkg==1.0" or git URLs)
     dependencies: list[str] | None = None
+
+    #: Sandbox environment for code execution scoring. None = use default sandbox.
+    sandbox_env: SandboxEnv | None = None
 
     def get_data_source(self, split: str | None = None) -> DataSource:
         """Get the data source for a specific split.
@@ -482,13 +502,20 @@ class Task(ABC):
         execution_env = context.execution_env if context.has_execution_env else None
         scorers_by_name = self._get_scorers()
 
+        # Route to task-specific sandbox if sandbox_env is configured
+        sandbox_cap = self.config.sandbox_env.capability if self.config.sandbox_env else None
+        if sandbox_cap and execution_env is not None and hasattr(execution_env, "get_executor"):
+            task_executor = execution_env.get_executor(sandbox_cap)  # type: ignore[union-attr]
+        else:
+            task_executor = execution_env
+
         # Separate scorers by type: execution (sandbox), context (LLM judge), sync
         execution_scorers: dict[str, ExecutionScorer] = {}
         context_scorers: dict[str, ContextScorer] = {}
         sync_scorers: dict[str, Scorer] = {}
         for name, scorer in scorers_by_name.items():
             if isinstance(scorer, ExecutionScorer):
-                if execution_env is None:
+                if task_executor is None:
                     raise SandboxRequiredError(
                         f"{scorer.__class__.__name__} requires a sandbox. "
                         "Configure sandboxes in HarnessConfig."
@@ -521,9 +548,8 @@ class Task(ABC):
                 async with semaphore:
                     response = responses[resp_idx]
                     output = response.outputs[out_idx]
-                    # execution_env is guaranteed non-None since we raise SandboxRequiredError above
-                    assert execution_env is not None
-                    score = await scorer.ascore(response.instance, output, execution_env)
+                    assert task_executor is not None
+                    score = await scorer.ascore(response.instance, output, task_executor)
                     return (resp_idx, scorer.name, out_idx, score)
 
             async def score_context(

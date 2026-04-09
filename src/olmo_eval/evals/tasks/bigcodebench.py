@@ -20,7 +20,7 @@ from olmo_eval.common.types import Instance, LMOutput, LMRequest, Response, Samp
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import BIGCODEBENCH_STOP_SEQUENCES
 from olmo_eval.evals.extract import extract_code
-from olmo_eval.evals.tasks.common import Task, register, register_variant
+from olmo_eval.evals.tasks.common import SandboxEnv, Task, register, register_variant
 
 if TYPE_CHECKING:
     from olmo_eval.common.execution import ExecutionEnvironment
@@ -67,6 +67,7 @@ class BigCodeBench(Task):
     """BigCodeBench code completion task (full subset, complete prompt variant)."""
 
     data_source = DataSource(path="bigcode/bigcodebench")
+    sandbox_env = SandboxEnv("bigcodebench", ("bigcodebench[eval]>=0.2",))
     sampling_params = SamplingParams(
         max_tokens=1280,
         temperature=0.6,

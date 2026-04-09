@@ -7,7 +7,7 @@ import multiprocessing as mp
 import random
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from rich.console import Console
@@ -232,7 +232,25 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             # Prepare sandbox configs for scoring worker if configured
             sandbox_configs_list = None
             if self.harness_config.sandboxes:
-                sandbox_configs_list = [s.to_dict() for s in self.harness_config.sandboxes]
+                sandboxes = list(self.harness_config.sandboxes)
+
+                # Generate isolated sandbox configs for each named sandbox environment
+                from olmo_eval.evals.tasks.common import get_sandbox_envs
+                from olmo_eval.harness.sandbox.image import dependencies_to_dockerfile_extra
+
+                for senv in get_sandbox_envs(expanded_tasks):
+                    extra = dependencies_to_dockerfile_extra(senv.dependencies)
+                    template = self.harness_config.sandboxes[0]
+                    dep_sandbox = replace(
+                        template,
+                        capabilities=senv.capability,
+                        dockerfile_extra=template.dockerfile_extra + extra,
+                        inject_swerex=True,
+                    )
+                    sandboxes.append(dep_sandbox)
+                    runner_logger.info(f"Sandbox env '{senv.name}': {sorted(senv.dependencies)}")
+
+                sandbox_configs_list = [s.to_dict() for s in sandboxes]
 
             # Create ready event for scoring worker
             scorer_ready = ctx.Event()

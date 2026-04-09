@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import shlex
 import subprocess
 
 from olmo_eval.common.config import get_infra_config
@@ -160,3 +161,20 @@ ENV PATH="/root/python/bin:$PATH"
         raise RuntimeError("Failed to push image to registry (unexpected state)")
 
     return local_image
+
+
+def dependencies_to_dockerfile_extra(dependencies: tuple[str, ...]) -> tuple[str, ...]:
+    """Convert package specs to Dockerfile RUN commands for sandbox images.
+
+    Uses /root/python/bin/uv which is pre-installed by get_swerex_image().
+
+    Args:
+        dependencies: Package specs (e.g., ("numpy", "pandas>=2.0")).
+
+    Returns:
+        Tuple of Dockerfile command strings, or empty tuple if no dependencies.
+    """
+    if not dependencies:
+        return ()
+    pkgs = " ".join(shlex.quote(dep) for dep in dependencies)
+    return (f"RUN /root/python/bin/uv pip install --no-cache {pkgs}",)

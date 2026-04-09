@@ -19,7 +19,7 @@ from olmo_eval.common.scorers import CodeExecutionScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, Response, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import DS1000_STOP_SEQUENCES
-from olmo_eval.evals.tasks.common import Task, register, register_variant
+from olmo_eval.evals.tasks.common import SandboxEnv, Task, register, register_variant
 
 if TYPE_CHECKING:
     from olmo_eval.common.execution import ExecutionEnvironment
@@ -67,6 +67,7 @@ class DS1000(Task):
     """DS-1000 data science code generation task."""
 
     data_source = DataSource(path="xlangai/DS-1000")
+    sandbox_env = SandboxEnv("ds1000", ("numpy", "pandas", "matplotlib", "scipy", "scikit-learn"))
     sampling_params = SamplingParams(
         max_tokens=1024,
         temperature=0.6,

@@ -289,6 +289,7 @@ class SandboxManager:
         code: str,
         language: str = "python",
         timeout: float | None = None,
+        capabilities: frozenset[str] | None = None,
     ) -> ExecutionResult:
         """Execute code in the specified language.
 
@@ -299,11 +300,12 @@ class SandboxManager:
             code: Source code to execute.
             language: Programming language (default: "python").
             timeout: Optional timeout in seconds.
+            capabilities: Optional required capabilities. If None, uses any executor.
 
         Returns:
             ExecutionResult with success status and output.
         """
-        executor = self.get_executor(frozenset())
+        executor = self.get_executor(capabilities or frozenset())
         return await executor.execute_code(code, language, timeout)
 
     async def acquire_binding(
