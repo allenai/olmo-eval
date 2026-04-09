@@ -117,6 +117,7 @@ class HardReasoningBase(Task):
             "allenai/hard-reasoning",
             data_files={split: f"{self.subset}/{file_name}"},
             token=os.environ.get("HF_TOKEN"),
+            streaming=True,
         )[split]
         for index, doc in enumerate(dataset):
             instance = self.process_doc(doc, index)
