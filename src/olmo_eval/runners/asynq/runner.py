@@ -263,20 +263,36 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                             f"{sorted(senv.dependencies)}"
                         )
 
-                # Pre-build sandbox images to avoid parallel build races
-                # in the scoring worker (each executor would otherwise build independently)
+                # Pre-build unique sandbox images in parallel to avoid
+                # duplicate builds when multiple executors share the same image
+                from concurrent.futures import ThreadPoolExecutor
+
                 from olmo_eval.harness.sandbox.image import get_swerex_image
 
+                # Dedupe by (image, dockerfile_extra) — configs sharing these produce the same image
+                unique_builds: dict[tuple[str, tuple[str, ...]], Any] = {}
                 for cfg in sandboxes:
                     if cfg.inject_swerex:
+                        key = (cfg.image, cfg.dockerfile_extra)
+                        if key not in unique_builds:
+                            unique_builds[key] = cfg
+
+                if unique_builds:
+                    runner_logger.info(
+                        f"Pre-building {len(unique_builds)} unique sandbox image(s)..."
+                    )
+
+                    def _build(cfg: Any) -> None:
                         require_registry = cfg.mode.value == "modal"
-                        runner_logger.info(f"Pre-building sandbox image for {cfg.capabilities}...")
                         get_swerex_image(
                             cfg.image,
                             cfg.container_runtime,
                             cfg.dockerfile_extra,
                             require_registry=require_registry,
                         )
+
+                    with ThreadPoolExecutor(max_workers=len(unique_builds)) as pool:
+                        list(pool.map(_build, unique_builds.values()))
 
                 sandbox_configs_list = [s.to_dict() for s in sandboxes]
 
