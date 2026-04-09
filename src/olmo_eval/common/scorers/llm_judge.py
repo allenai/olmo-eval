@@ -449,7 +449,7 @@ class SafetyScorer(LLMJudgeScorer):
     ) -> float:
         """Score using configured provider or judge_fn."""
         prompt = self.format_judge_prompt(instance, output)
-
+        print(prompt)
         if self.provider_name is not None:
             print("Scoring with ", self.provider_name)
             response = await self._score_with_provider(prompt, context)
