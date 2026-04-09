@@ -238,17 +238,45 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 from olmo_eval.evals.tasks.common import get_sandbox_envs
                 from olmo_eval.harness.sandbox.image import dependencies_to_dockerfile_extra
 
-                for senv in get_sandbox_envs(expanded_tasks):
-                    extra = dependencies_to_dockerfile_extra(senv.dependencies)
+                sandbox_envs = get_sandbox_envs(expanded_tasks)
+                if sandbox_envs:
                     template = self.harness_config.sandboxes[0]
-                    dep_sandbox = replace(
-                        template,
-                        capabilities=senv.capability,
-                        dockerfile_extra=template.dockerfile_extra + extra,
-                        inject_swerex=True,
-                    )
-                    sandboxes.append(dep_sandbox)
-                    runner_logger.info(f"Sandbox env '{senv.name}': {sorted(senv.dependencies)}")
+                    # Split total instances evenly across base + task-specific sandboxes
+                    total_configs = 1 + len(sandbox_envs)
+                    base_count = max(1, template.instances // total_configs)
+                    remainder = template.instances - base_count * total_configs
+                    # Give remainder to the base config
+                    sandboxes[0] = replace(template, instances=base_count + max(0, remainder))
+
+                    for senv in sandbox_envs:
+                        extra = dependencies_to_dockerfile_extra(senv.dependencies)
+                        dep_sandbox = replace(
+                            template,
+                            capabilities=senv.capability,
+                            dockerfile_extra=template.dockerfile_extra + extra,
+                            inject_swerex=True,
+                            instances=base_count,
+                        )
+                        sandboxes.append(dep_sandbox)
+                        runner_logger.info(
+                            f"Sandbox env '{senv.name}' ({base_count} instances): "
+                            f"{sorted(senv.dependencies)}"
+                        )
+
+                # Pre-build sandbox images to avoid parallel build races
+                # in the scoring worker (each executor would otherwise build independently)
+                from olmo_eval.harness.sandbox.image import get_swerex_image
+
+                for cfg in sandboxes:
+                    if cfg.inject_swerex:
+                        require_registry = cfg.mode.value == "modal"
+                        runner_logger.info(f"Pre-building sandbox image for {cfg.capabilities}...")
+                        get_swerex_image(
+                            cfg.image,
+                            cfg.container_runtime,
+                            cfg.dockerfile_extra,
+                            require_registry=require_registry,
+                        )
 
                 sandbox_configs_list = [s.to_dict() for s in sandboxes]
 
