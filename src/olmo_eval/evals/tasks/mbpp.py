@@ -3,7 +3,7 @@
 from collections.abc import Iterator, Sequence
 from typing import Any
 
-from olmo_eval.common.formatters import PPLFormatter
+from olmo_eval.common.formatters import CompletionFormatter, PPLFormatter
 from olmo_eval.common.metrics import BPBMetric, BPBMetricByteAvg, PassAtKMetric
 from olmo_eval.common.scorers import CodeExecutionScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, Response, SamplingParams
@@ -39,12 +39,19 @@ class MBPPBase(Task):
             tests += "\n"
         tests += "\n".join(doc["test_list"])
 
+        # For fewshot: the function body without the signature line (which is
+        # already at the end of `question`).  gold_answer keeps the full code
+        # so that BPB variants are unaffected.
+        code_lines = doc["code"].split("\n", 1)
+        fewshot_body = "\n" + code_lines[1] if len(code_lines) > 1 else ""
+
         return Instance(
             question=question,
             gold_answer=doc["code"],
             metadata={
                 "id": doc["task_id"],
                 "answer_prefix": func_sig,
+                "fewshot_body": fewshot_body,
                 "test": tests,
             },
         )
@@ -252,6 +259,7 @@ register_variant(
     "mbpp",
     "3shot",
     num_fewshot=3,
+    formatter=CompletionFormatter(fewshot_answer_key="fewshot_body"),
 )
 
 register_variant(

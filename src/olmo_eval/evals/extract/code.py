@@ -11,7 +11,11 @@ def _strip_thinking_tags(text: str) -> str:
     """
     # Remove <think>...</think> blocks (including nested content)
     pattern = re.compile(r"<think>.*?</think>\s*", re.DOTALL | re.IGNORECASE)
-    return pattern.sub("", text).strip()
+    result = pattern.sub("", text)
+    # Only strip if tags were actually removed (preserve leading indentation for code)
+    if result != text:
+        result = result.strip()
+    return result
 
 
 def extract_code(text: str, language: str = "python") -> str:
@@ -47,7 +51,9 @@ def extract_code(text: str, language: str = "python") -> str:
     if matches:
         return matches[0]
 
-    # Fall back to full text
+    # Fall back to full text, stripping trailing code fence markers
+    # (stop sequences may be included in the output by the inference provider)
+    text = re.sub(r"\n?```\s*$", "", text)
     return text
 
 
