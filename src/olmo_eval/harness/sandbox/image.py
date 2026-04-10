@@ -123,9 +123,10 @@ RUN apt-get update && \\
     rm -rf /var/lib/apt/lists/*
 ADD {PYTHON_STANDALONE_URL} /tmp/python.tar.gz
 RUN tar xzf /tmp/python.tar.gz -C /root && rm /tmp/python.tar.gz && \\
+    ln -sf /root/python/bin/python3 /root/python/bin/python && \\
     /root/python/bin/pip install --no-cache-dir swe-rex uv
-{extra_lines}
 ENV PATH="/root/python/bin:$PATH"
+{extra_lines}
 """
 
     result = subprocess.run(
