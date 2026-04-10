@@ -13,7 +13,13 @@ from olmo_eval.evals.tasks.humaneval import HumanEval
 
 @register("codex_humaneval")
 class CodexHumanEval(HumanEval):
-    pass
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
+        instance = super().process_doc(doc, index)
+        # Add olmo3-style fewshot answer (with closing ```) for olmo3base variant.
+        # This is harmless for other variants since nothing references this key
+        # unless the formatter's fewshot_answer_key is set to it.
+        instance.metadata["olmo3_fewshot_answer"] = doc["canonical_solution"] + "```"
+        return instance
 
 
 register_variant(
@@ -36,7 +42,10 @@ register_variant(
     "olmo3base",
     num_fewshot=3,
     fewshot_seed=1234,
-    formatter=CompletionFormatter(),
+    formatter=CompletionFormatter(
+        template="```python\n{question}",
+        fewshot_answer_key="olmo3_fewshot_answer",
+    ),
     sampling_params=SamplingParams(
         max_tokens=1024,
         temperature=0.6,
