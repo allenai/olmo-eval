@@ -9,6 +9,7 @@ Dataset: loubnabnl/humaneval_infilling
 """
 
 from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from olmo_eval.common.metrics import PassAtKMetric
@@ -28,6 +29,13 @@ from olmo_eval.evals.tasks.common import Task, register, register_variant
 # The loubnabnl/humaneval_infilling dataset uses a loading script which is no
 # longer supported by datasets>=4.  Load the raw JSONL files directly instead.
 _HF_DATA_BASE = "hf://datasets/loubnabnl/humaneval_infilling/data"
+
+
+@dataclass(frozen=True, slots=True)
+class _FIMCodeScorer(CodeExecutionScorer):
+    """Code execution scorer with 3s timeout matching oe-eval-internal."""
+
+    timeout: float = 3.0
 
 
 @register("codex_humanevalfim_single")
@@ -52,8 +60,8 @@ class CodexHumanEvalFIMSingle(Task):
         stop_sequences=OLMO_FIM.stop_sequences,
     )
     metrics = (
-        PassAtKMetric(k=1, scorer=CodeExecutionScorer),
-        PassAtKMetric(k=10, scorer=CodeExecutionScorer),
+        PassAtKMetric(k=1, scorer=_FIMCodeScorer),
+        PassAtKMetric(k=10, scorer=_FIMCodeScorer),
     )
 
     @property
@@ -128,7 +136,7 @@ class CodexHumanEvalFIMMulti(CodexHumanEvalFIMSingle):
         num_samples=1,
         stop_sequences=OLMO_FIM.stop_sequences,
     )
-    metrics = (PassAtKMetric(k=1, scorer=CodeExecutionScorer),)
+    metrics = (PassAtKMetric(k=1, scorer=_FIMCodeScorer),)
 
 
 @register("codex_humanevalfim_random")
@@ -149,8 +157,8 @@ class CodexHumanEvalFIMRandom(CodexHumanEvalFIMSingle):
         stop_sequences=OLMO_FIM.stop_sequences,
     )
     metrics = (
-        PassAtKMetric(k=1, scorer=CodeExecutionScorer),
-        PassAtKMetric(k=5, scorer=CodeExecutionScorer),
+        PassAtKMetric(k=1, scorer=_FIMCodeScorer),
+        PassAtKMetric(k=5, scorer=_FIMCodeScorer),
     )
 
 
