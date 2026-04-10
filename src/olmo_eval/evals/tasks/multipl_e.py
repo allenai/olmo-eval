@@ -16,7 +16,7 @@ from olmo_eval.common.scorers import MultiplEScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import MULTIPL_E_LANGUAGES, MULTIPL_E_STOP_TOKENS
-from olmo_eval.evals.tasks.common import Task, register, register_variant
+from olmo_eval.evals.tasks.common import SandboxEnv, Task, register, register_variant
 
 
 class MultiplETask(Task):
@@ -180,6 +180,7 @@ def _register_humaneval_task(lang: str) -> None:
                 top_p=0.95,
                 num_samples=20,
             ),
+            "sandbox_env": SandboxEnv("multipl_e"),
             "__module__": __name__,
             "__qualname__": class_name,
         },
@@ -247,6 +248,7 @@ def _register_mbpp_task(lang: str) -> None:
                 top_p=0.95,
                 num_samples=20,
             ),
+            "sandbox_env": SandboxEnv("multipl_e"),
             "__module__": __name__,
             "__qualname__": class_name,
         },
