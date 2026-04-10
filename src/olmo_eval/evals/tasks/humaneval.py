@@ -122,18 +122,37 @@ class HumanEval(Task):
         to the generated code completion as the prompt may provide additional
         library imports needed for the code execution.
 
-        Chat/instruction models often output function body code without the
-        leading indentation expected inside a function. We normalize the
-        indentation to ensure the code is valid when concatenated with the
-        function signature.
+        For completion-style prompts (CompletionFormatter or no formatter),
+        the model output is a raw code continuation — we just strip trailing
+        code fence markers. For chat prompts, we extract code from markdown
+        blocks and normalize indentation.
         """
+        use_extract = isinstance(self.config.formatter, ChatFormatter)
+
         for response in responses:
             for output in response.outputs:
-                code = self.extract_answer(output)
-                if code:
-                    # Ensure code has proper indentation for function body
+                text = output.text
+                if not text:
+                    output.extracted_answer = None
+                    continue
+
+                if use_extract:
+                    # Chat models output code in markdown blocks
+                    code = extract_code(text)
                     code = indent_code(code)
-                    output.extracted_answer = response.instance.metadata["answer_prefix"] + code
+                else:
+                    # Completion models output raw code continuation.
+                    # Truncate at first ``` since the model may generate
+                    # past stop sequences into hallucinated code blocks.
+                    idx = text.find("```")
+                    if idx >= 0:
+                        text = text[:idx]
+                    code = text
+
+                if code and code.strip():
+                    output.extracted_answer = (
+                        response.instance.metadata["answer_prefix"] + code
+                    )
                 else:
                     output.extracted_answer = None
 
