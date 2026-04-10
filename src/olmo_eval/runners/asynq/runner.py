@@ -253,7 +253,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                         dep_sandbox = replace(
                             template,
                             capabilities=senv.capability,
-                            dockerfile_extra=template.dockerfile_extra + extra,
+                            dockerfile_extra=template.dockerfile_extra + extra + senv.dockerfile_extra,
                             inject_swerex=True,
                             instances=base_count,
                         )
