@@ -69,7 +69,7 @@ class MultiplEScorer(ExecutionScorer):
             return 0.0
 
         # Combine generated code with tests
-        full_code = f"{output.extracted_answer}\n\n{test_code}"
+        full_code = f"{output.extracted_answer}\n{test_code}"
 
         result = await self._execute_with_evaluator(execution_env, full_code)
 
