@@ -101,17 +101,22 @@ def inference_worker(
         if provider_kind == "vllm_server" and output_dir:
             log_dir = os.path.join(output_dir, "logs")
 
+        # Only inject vllm-specific kwargs for vllm providers
+        vllm_only_overrides: dict[str, Any] = {}
+        if provider_kind in ("vllm", "vllm_server"):
+            vllm_only_overrides = dict(
+                tensor_parallel_size=len(gpu_ids) if gpu_ids else None,
+                load_format=load_format,
+                model_loader_extra_config=extra_loader_config,
+                enable_auto_tool_choice=enable_auto_tool_choice or None,
+                log_dir=log_dir,
+            )
+
         harness_config = harness_config.with_provider_overrides(
-            tensor_parallel_size=len(gpu_ids)
-            if (gpu_ids and provider_config.requires_gpu)
-            else None,
             max_model_len=max_model_len,
             max_concurrency=max_concurrency,
             tokenizer=tokenizer,
-            load_format=load_format,
-            model_loader_extra_config=extra_loader_config,
-            enable_auto_tool_choice=enable_auto_tool_choice or None,
-            log_dir=log_dir,
+            **vllm_only_overrides,
         )
 
         # Update metrics config with runtime values (output_dir, provider_kind, model_name)
