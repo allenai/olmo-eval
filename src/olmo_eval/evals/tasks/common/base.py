@@ -505,7 +505,7 @@ class Task(ABC):
         # Route to task-specific sandbox if sandbox_env is configured
         sandbox_cap = self.config.sandbox_env.capability if self.config.sandbox_env else None
         if sandbox_cap and execution_env is not None and hasattr(execution_env, "get_executor"):
-            task_executor = execution_env.get_executor(sandbox_cap)  # type: ignore[union-attr]
+            task_executor = execution_env.get_executor(sandbox_cap)  # ty: ignore[call-non-callable]
         else:
             task_executor = execution_env
 
