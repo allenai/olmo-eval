@@ -25,6 +25,10 @@ from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import OLMO_FIM
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 
+# The loubnabnl/humaneval_infilling dataset uses a loading script which is no
+# longer supported by datasets>=4.  Load the raw JSONL files directly instead.
+_HF_DATA_BASE = "hf://datasets/loubnabnl/humaneval_infilling/data"
+
 
 @register("codex_humanevalfim_single")
 class CodexHumanEvalFIMSingle(Task):
@@ -35,8 +39,9 @@ class CodexHumanEvalFIMSingle(Task):
     """
 
     data_source = DataSource(
-        path="loubnabnl/humaneval_infilling",
-        subset="HumanEval-SingleLineInfilling",
+        path="json",
+        data_files=f"{_HF_DATA_BASE}/HumanEval-SingleLineInfilling.jsonl",
+        split="train",
     )
     sampling_params = SamplingParams(
         max_tokens=512,
@@ -56,7 +61,7 @@ class CodexHumanEvalFIMSingle(Task):
         if self._instances_cache is None:
             self._instances_cache = []
             loader = DataLoader()
-            source = self._get_source_for_split("test")
+            source = self._get_source_for_split("train")
             for doc in loader.load(source):
                 self._instances_cache.append(self.process_doc(doc))
         yield from self._instances_cache
@@ -111,8 +116,9 @@ class CodexHumanEvalFIMMulti(CodexHumanEvalFIMSingle):
     """HumanEval FIM with multi-line masking (5.8k rows)."""
 
     data_source = DataSource(
-        path="loubnabnl/humaneval_infilling",
-        subset="HumanEval-MultiLineInfilling",
+        path="json",
+        data_files=f"{_HF_DATA_BASE}/HumanEval-MultiLineInfilling.jsonl",
+        split="train",
     )
     sampling_params = SamplingParams(
         max_tokens=512,
@@ -130,8 +136,9 @@ class CodexHumanEvalFIMRandom(CodexHumanEvalFIMSingle):
     """HumanEval FIM with random-span masking (1.6k rows)."""
 
     data_source = DataSource(
-        path="loubnabnl/humaneval_infilling",
-        subset="HumanEval-RandomSpanInfilling",
+        path="json",
+        data_files=f"{_HF_DATA_BASE}/HumanEval-RandomSpanInfilling.jsonl",
+        split="train",
     )
     sampling_params = SamplingParams(
         max_tokens=512,
