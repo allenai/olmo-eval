@@ -343,6 +343,9 @@ class MBPPOlmo3Base(MBPPBase):
         stop_sequences=OLMO3_MBPP_STOP_SEQUENCES,
     )
 
+    # Assistant prefix matching oe-eval-internal's evalplus variant default.
+    ASSISTANT_PREFIX = "Here is the completed function:\n\n```python\n"
+
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         random_test = doc["test_list"][0] if doc.get("test_list") else ""
         question = (
@@ -368,6 +371,72 @@ class MBPPOlmo3Base(MBPPBase):
                 "test": tests,
             },
         )
+
+    def _build_fewshot(self) -> list[Instance]:
+        """Build few-shot examples matching oe-eval-internal order.
+
+        The legacy hardcoded ``Original:MBPP`` source orders the 10 prompt-split
+        examples starting from task_id=2 (task_id=1 is placed last).  The HF
+        ``prompt`` split is ordered 1..10.  We replicate the legacy order by
+        rotating the first element (task_id=1) to the end and returning the
+        first ``num_fewshot`` examples *without* shuffling.
+        """
+        if self.config.num_fewshot == 0:
+            return []
+
+        from olmo_eval.data import DataLoader
+
+        loader = DataLoader()
+        all_instances: list[Instance] = []
+
+        for split in ["prompt", "train"]:
+            try:
+                source = self._get_source_for_split(split)
+                all_instances = [
+                    inst
+                    for doc in loader.load(source)
+                    if (inst := self.process_doc(doc)) is not None
+                ]
+                if all_instances:
+                    break
+            except Exception:
+                continue
+
+        if not all_instances:
+            return []
+
+        # Rotate so that task_id=1 (HF index 0) goes to the end, matching
+        # the oe-eval-internal hardcoded fewshot source order.
+        if len(all_instances) > 1:
+            all_instances = all_instances[1:] + all_instances[:1]
+
+        return all_instances[: self.config.num_fewshot]
+
+    def format_request(self, instance: Instance) -> LMRequest:
+        """Format an instance into an LM request.
+
+        When a formatter is configured (e.g. PPLFormatter for BPB variants),
+        delegates to that formatter.  Otherwise builds a completion prompt with
+        optional few-shot examples and the assistant prefix, matching
+        oe-eval-internal's fewshot_context behaviour:
+
+        - Few-shot examples: question + gold_answer (no assistant prefix)
+        - Eval example: question + assistant prefix
+        - Separator: ``\\n\\n``
+        """
+        if self.config.formatter is not None:
+            return self.config.formatter.format(instance, self.get_fewshot())
+
+        fewshot = self.get_fewshot()
+        if not fewshot:
+            prompt = instance.question + self.ASSISTANT_PREFIX
+        else:
+            parts: list[str] = []
+            for ex in fewshot:
+                parts.append(ex.question + (ex.gold_answer or ""))
+            parts.append(instance.question + self.ASSISTANT_PREFIX)
+            prompt = "\n\n".join(parts)
+        return LMRequest(request_type=self.request_type, prompt=prompt)
 
 
 register_variant(
@@ -402,6 +471,31 @@ register_variant(
     "bpb",
     formatter=PPLFormatter(leading_space=False),
     metrics=(BPBMetricByteAvg(),),
+)
+
+# Parity variant matching oe-eval-internal's mbpp:3shot::olmo3:n32:v2 exactly.
+# Uses EvalPlus prompt format, 3-shot from "prompt" split in legacy order,
+# max_tokens=512, and pass@k metrics with 32 samples.
+register_variant(
+    "mbpp_olmo3base",
+    "olmo3base",
+    num_fewshot=3,
+    fewshot_seed=1234,
+    sampling_params=SamplingParams(
+        max_tokens=512,
+        temperature=0.6,
+        top_p=0.6,
+        do_sample=True,
+        num_samples=32,
+        stop_sequences=OLMO3_MBPP_STOP_SEQUENCES,
+    ),
+    metrics=(
+        PassAtKMetric(k=1, scorer=CodeExecutionScorer),
+        PassAtKMetric(k=2, scorer=CodeExecutionScorer),
+        PassAtKMetric(k=4, scorer=CodeExecutionScorer),
+        PassAtKMetric(k=8, scorer=CodeExecutionScorer),
+        PassAtKMetric(k=16, scorer=CodeExecutionScorer),
+    ),
 )
 
 register_variant(
