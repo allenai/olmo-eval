@@ -18,7 +18,6 @@ from olmo_eval.common.metrics import BPBMetricByteAvg, PassAtKMetric
 from olmo_eval.common.scorers import CodeExecutionScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, Response, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.constants.code import BIGCODEBENCH_STOP_SEQUENCES
 from olmo_eval.evals.extract import extract_code
 from olmo_eval.evals.tasks.common import SandboxEnv, Task, register, register_variant
 
@@ -74,10 +73,29 @@ class BigCodeBench(Task):
         top_p=0.6,
         do_sample=True,
         num_samples=5,
-        stop_sequences=BIGCODEBENCH_STOP_SEQUENCES,
+        # Match oe-eval-internal stop sequences exactly (no "\n```")
+        stop_sequences=(
+            "<|endoftext|>",
+            "<|endofmask|>",
+            "</s>",
+            "\nif __name__",
+            "\ndef main(",
+            "\nprint(",
+            "\ndef ",
+            "\nclass ",
+            "\nimport ",
+            "\nfrom ",
+            "\nassert ",
+        ),
     )
     # BigCodeBench uses "v0.1.2" as split name (mapped as train on HF)
     fewshot_split: str = "v0.1.2"
+
+    # Instruction prefix from the original BigCodeBench repo's make_raw_chat_prompt()
+    INSTRUCTION_PREFIX = (
+        "Please provide a self-contained Python script that solves the"
+        " following problem in a markdown code block:"
+    )
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -90,7 +108,7 @@ class BigCodeBench(Task):
         yield from self._instances_cache
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
-        prompt = "```\n" + doc["complete_prompt"].strip() + "\n"
+        prompt = self.INSTRUCTION_PREFIX + "\n```\n" + doc["complete_prompt"].strip() + "\n"
         gold = doc["canonical_solution"] + "\n```"
         test_code = doc.get("test", "")
 
@@ -106,7 +124,11 @@ class BigCodeBench(Task):
         )
 
     def _build_fewshot(self) -> list[Instance]:
-        """Sample one extra for per-instance dedup (fewshot == eval split)."""
+        """Sample fewshot examples from the training split.
+
+        Matches oe-eval-internal behavior: sample exactly num_fewshot examples
+        (no over-sampling for dedup) since has_training_docs() is True.
+        """
         import random
 
         if self.config.num_fewshot == 0:
@@ -122,19 +144,15 @@ class BigCodeBench(Task):
             return []
 
         rng = random.Random(self.config.fewshot_seed)
-        k = min(self.config.num_fewshot + 1, len(all_instances))
+        k = min(self.config.num_fewshot, len(all_instances))
         return rng.sample(all_instances, k)
 
     def format_request(self, instance: Instance) -> LMRequest:
         if self.config.formatter is not None:
-            fewshot = self.get_fewshot()
-            instance_id = instance.metadata.get("id")
-            if instance_id is not None:
-                filtered = [ex for ex in fewshot if ex.metadata.get("id") != instance_id]
-            else:
-                filtered = list(fewshot)
-            filtered = filtered[: self.config.num_fewshot]
-            return self.config.formatter.format(instance, filtered)
+            # Match oe-eval-internal: no per-instance dedup when fewshot comes
+            # from training split (fewshot_examples samples exactly k).
+            fewshot = self.get_fewshot()[: self.config.num_fewshot]
+            return self.config.formatter.format(instance, fewshot)
 
         return LMRequest(
             request_type=self.request_type,
