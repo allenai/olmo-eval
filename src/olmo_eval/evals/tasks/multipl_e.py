@@ -15,7 +15,7 @@ from olmo_eval.common.metrics import PassAtKMetric
 from olmo_eval.common.scorers import MultiplEScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.constants.code import MULTIPL_E_LANGUAGES
+from olmo_eval.evals.constants.code import MULTIPL_E_LANGUAGES, MULTIPL_E_STOP_TOKENS
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 
@@ -80,17 +80,24 @@ class MultiplETask(Task):
         return output.text
 
     def get_sampling_params(self, instance: Instance) -> SamplingParams | None:
-        """Get sampling params with instance-specific stop tokens."""
+        """Get sampling params with stop tokens.
+
+        If the variant config explicitly sets stop_sequences (e.g., olmo3base
+        uses hardcoded stops for parity with oe-eval-internal), those are used.
+        Otherwise, per-instance stop_tokens from the dataset are used.
+        """
         from dataclasses import replace
 
         base_params = self.config.sampling_params or SamplingParams()
-        stop_tokens = instance.metadata.get("stop_tokens", [])
 
+        # Config-level stop_sequences take precedence over instance metadata
+        if base_params.stop_sequences:
+            return base_params
+
+        # Fall back to per-instance stop_tokens from the dataset
+        stop_tokens = instance.metadata.get("stop_tokens", [])
         if stop_tokens:
-            # Merge instance stop_tokens with any existing stop_sequences
-            existing = base_params.stop_sequences or ()
-            merged = tuple(stop_tokens) + existing
-            return replace(base_params, stop_sequences=merged)
+            return replace(base_params, stop_sequences=tuple(stop_tokens))
 
         return base_params
 
@@ -156,6 +163,7 @@ def _register_humaneval_task(lang: str) -> None:
     task_name = f"multipl_e_humaneval_{lang}"
     subset_name = f"humaneval-{lang}"
     scorer_cls = _make_scorer_for_language(lang)
+    stop_tokens = MULTIPL_E_STOP_TOKENS[lang]
 
     class_name = f"MultiplETask_humaneval_{lang}"
     task_cls = type(
@@ -205,6 +213,7 @@ def _register_humaneval_task(lang: str) -> None:
             top_p=0.6,
             do_sample=True,
             num_samples=32,
+            stop_sequences=stop_tokens,
         ),
         metrics=(
             PassAtKMetric(k=1, scorer=scorer_cls),
@@ -221,6 +230,7 @@ def _register_mbpp_task(lang: str) -> None:
     task_name = f"multipl_e_mbpp_{lang}"
     subset_name = f"mbpp-{lang}"
     scorer_cls = _make_scorer_for_language(lang)
+    stop_tokens = MULTIPL_E_STOP_TOKENS[lang]
 
     class_name = f"MultiplETask_mbpp_{lang}"
     task_cls = type(
@@ -270,6 +280,7 @@ def _register_mbpp_task(lang: str) -> None:
             top_p=0.6,
             do_sample=True,
             num_samples=32,
+            stop_sequences=stop_tokens,
         ),
         metrics=(
             PassAtKMetric(k=1, scorer=scorer_cls),
