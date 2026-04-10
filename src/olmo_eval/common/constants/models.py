@@ -67,6 +67,11 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             kind=ProviderKind.VLLM,
             model="Qwen/Qwen2.5-7B",
         ),
+        "qwen3-vl-32b-instruct": ProviderConfig(
+            kind=ProviderKind.VLLM,
+            model="Qwen/Qwen3-VL-32B-Instruct",
+            kwargs={"tensor_parallel_size": 2},
+        ),
         "qwen3-coder-30b": ProviderConfig(
             kind=ProviderKind.VLLM_SERVER,
             model="Qwen/Qwen3-Coder-30B-A3B-Instruct",
