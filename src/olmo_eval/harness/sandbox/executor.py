@@ -134,7 +134,10 @@ class SandboxExecutor:
         prefix = f"[{self.name}] " if self.name else ""
 
         # For Modal deployments, patch app lookup during deployment creation
-        # to use unique app names and avoid conflicts between concurrent runs
+        # AND startup to use unique app names and avoid conflicts between
+        # concurrent runs.  The patch must cover both get_deployment() and
+        # deployment.start() because swe-rex calls modal.App.lookup("swe-rex")
+        # in both phases.
         if self.config.mode == SandboxMode.MODAL:
             from unittest.mock import patch
 
@@ -153,14 +156,18 @@ class SandboxExecutor:
 
             with patch.object(modal.App, "lookup", patched_lookup):
                 deployment = self.get_deployment()
+                await _run_with_progress(
+                    deployment.start(),
+                    f"{prefix}Waiting for sandbox runtime",
+                    interval=5.0,
+                )
         else:
             deployment = self.get_deployment()
-
-        await _run_with_progress(
-            deployment.start(),
-            f"{prefix}Waiting for sandbox runtime",
-            interval=5.0,
-        )
+            await _run_with_progress(
+                deployment.start(),
+                f"{prefix}Waiting for sandbox runtime",
+                interval=5.0,
+            )
 
         self._deployment = deployment
         self._runtime = deployment.runtime
