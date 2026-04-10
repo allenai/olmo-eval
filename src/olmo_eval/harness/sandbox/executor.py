@@ -30,7 +30,10 @@ def _get_log_docker_args(log_dir: str, name: str) -> tuple[str, ...]:
     Returns:
         Docker args tuple for json-file logging.
     """
-    sandbox_log_dir = os.path.join(log_dir, "sandboxes", name)
+    # Replace colons with dashes in sandbox name for path safety
+    # (colons conflict with Podman/Docker volume mount syntax)
+    safe_name = name.replace(":", "-")
+    sandbox_log_dir = os.path.join(log_dir, "sandboxes", safe_name)
     os.makedirs(sandbox_log_dir, exist_ok=True)
     log_path = os.path.join(sandbox_log_dir, "container.log")
     return ("--log-driver=json-file", "--log-opt", f"path={log_path}")
@@ -217,7 +220,9 @@ class SandboxExecutor:
                     # Create container-specific subdirectory for system logs
                     # Mount only this container's subdirectory, not parent
                     # Use :Z for SELinux relabeling (safe for single-container access)
-                    container_log_dir = os.path.join(self.config.log_dir, "sandboxes", self.name)
+                    # Replace colons with dashes for path safety (Podman volume mount syntax)
+                    safe_name = self.name.replace(":", "-")
+                    container_log_dir = os.path.join(self.config.log_dir, "sandboxes", safe_name)
                     os.makedirs(container_log_dir, exist_ok=True, mode=0o777)
                     # Ensure writable even if directory already existed
                     os.chmod(container_log_dir, 0o777)
