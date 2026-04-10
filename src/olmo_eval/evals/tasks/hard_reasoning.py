@@ -61,6 +61,22 @@ def _extract_last_complete_json(s: str) -> dict | None:
 
 
 @dataclass(frozen=True, slots=True)
+class HardReasoningParsedScorer(Scorer):
+    """Score 1.0 if the model output was parsed as valid JSON, else 0.0."""
+
+    name: str = "parsed"
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        if output.extracted_answer is None:
+            return 0.0
+        try:
+            json.loads(output.extracted_answer)
+            return 1.0
+        except (json.JSONDecodeError, TypeError):
+            return 0.0
+
+
+@dataclass(frozen=True, slots=True)
 class HardReasoningScorer(Scorer):
     """Score using the np_hard_reasoning check() function."""
 
@@ -100,7 +116,10 @@ class HardReasoningBase(Task):
         temperature=0.0,
         stop_sequences=("\n\n",),
     )
-    metrics = (AccuracyMetric(scorer=HardReasoningScorer),)
+    metrics = (
+        AccuracyMetric(scorer=HardReasoningScorer),
+        AccuracyMetric(name="parse_rate", scorer=HardReasoningParsedScorer),
+    )
 
     @property
     def instances(self) -> Iterator[Instance]:
