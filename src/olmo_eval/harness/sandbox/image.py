@@ -177,4 +177,4 @@ def dependencies_to_dockerfile_extra(dependencies: tuple[str, ...]) -> tuple[str
     if not dependencies:
         return ()
     pkgs = " ".join(shlex.quote(dep) for dep in dependencies)
-    return (f"RUN /root/python/bin/uv pip install --python /root/python/bin/python --system --no-cache {pkgs}",)
+    return (f"RUN /root/python/bin/python -m pip install --no-cache-dir {pkgs}",)
