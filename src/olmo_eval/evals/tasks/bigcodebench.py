@@ -9,6 +9,7 @@ Dataset: bigcode/bigcodebench
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -73,7 +74,11 @@ class BigCodeBench(Task):
         top_p=0.6,
         do_sample=True,
         num_samples=5,
-        # Match oe-eval-internal stop sequences exactly (no "\n```")
+        # Includes "\n```" to cleanly stop at code block boundary.
+        # oe-eval-internal omits this stop but uses tree-sitter sanitize() to
+        # extract valid code from messy continuations.  We use "\n```" to get
+        # equivalent clean code without tree-sitter, since the model generates
+        # the same tokens up to the code-block boundary either way.
         stop_sequences=(
             "<|endoftext|>",
             "<|endofmask|>",
@@ -86,6 +91,7 @@ class BigCodeBench(Task):
             "\nimport ",
             "\nfrom ",
             "\nassert ",
+            "\n```",
         ),
     )
     # BigCodeBench uses "v0.1.2" as split name (mapped as train on HF)
@@ -163,13 +169,23 @@ class BigCodeBench(Task):
         return extract_code(output.text)
 
     def _extract_answers(self, responses: Sequence[Response]) -> None:
+        """Extract code from model outputs, prepending the complete_prompt.
+
+        Matches oe-eval-internal's approach: complete_prompt + continuation.
+        The "\n```" stop sequence ensures the continuation is clean code,
+        but we also strip any trailing markdown fence markers just in case.
+        """
         for response in responses:
             for output in response.outputs:
-                code = self.extract_answer(output)
-                if code:
-                    output.extracted_answer = response.instance.metadata["answer_prefix"] + code
-                else:
+                text = output.text
+                if not text or not text.strip():
                     output.extracted_answer = None
+                    continue
+                # Strip trailing markdown fence (stop sequence may be included)
+                text = re.sub(r"\n?```\s*$", "", text)
+                output.extracted_answer = (
+                    response.instance.metadata["answer_prefix"] + text
+                )
 
 
 register_variant(
