@@ -9,7 +9,7 @@ Dataset: davidheineman/deepseek-leetcode
 import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.metrics import PassAtKMetric
 from olmo_eval.common.scorers import CodeExecutionScorer
@@ -18,12 +18,35 @@ from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import OLMO3_HUMANEVAL_STOP_SEQUENCES
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 
+if TYPE_CHECKING:
+    from olmo_eval.common.execution import ExecutionEnvironment
+
 
 @dataclass(frozen=True, slots=True)
 class _LeetCodeScorer(CodeExecutionScorer):
-    """Code execution scorer with 3s timeout matching oe-eval-internal."""
+    """Code execution scorer matching oe-eval-internal behavior."""
 
     timeout: float = 3.0
+
+    async def ascore(
+        self,
+        instance: Instance,
+        output: LMOutput,
+        execution_env: "ExecutionEnvironment",
+    ) -> float:
+        if output.extracted_answer is None:
+            return 0.0
+        test_code = instance.metadata.get("test", "")
+        if not test_code:
+            return 0.0
+        # Use single newline separator to match oe-eval-internal
+        full_code = f"{output.extracted_answer}\n{test_code}"
+        result = await execution_env.execute_code(
+            full_code,
+            language=self.language,
+            timeout=self.timeout,
+        )
+        return 1.0 if result.success else 0.0
 
 
 @register("deepseek_leetcode")
