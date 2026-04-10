@@ -48,6 +48,11 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             kind=ProviderKind.VLLM,
             model="allenai/Olmo-3-7B-Instruct",
         ),
+        "olmo-3.1-32b-instruct": ProviderConfig(
+            kind=ProviderKind.VLLM,
+            model="allenai/Olmo-3.1-32B-Instruct",
+            kwargs={"tensor_parallel_size": 2},
+        ),
         "olmo-2-7b": ProviderConfig(
             kind=ProviderKind.VLLM,
             model="allenai/OLMo-2-1124-7B",
