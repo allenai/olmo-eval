@@ -106,8 +106,10 @@ class SandboxManager:
         # Create all executors first
         executor_idx = 0
         for config_idx, config in enumerate(self._configs):
-            # Derive type name from capabilities
+            # Derive type name from capabilities, replacing colons to avoid
+            # breaking Docker volume mount syntax (host:container:options)
             type_name = "+".join(sorted(config.capabilities)) or str(config_idx)
+            type_name = type_name.replace(":", "-")
 
             for _ in range(config.instances):
                 idx = type_indices.get(type_name, 0)
