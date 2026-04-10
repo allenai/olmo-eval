@@ -15,7 +15,7 @@ from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 from olmo_eval.inference.utils import run_async
 
 if TYPE_CHECKING:
-    from openai import AsyncOpenAI  # type: ignore[ty:unresolved-import]
+    from openai import AsyncOpenAI
 
     from .vllm_server_utils import VLLMServerProcess
 
@@ -96,7 +96,7 @@ class RemoteTokenizer:
         tokens = self.encode(text)
         result: dict[str, Any] = {"input_ids": tokens}
         if return_tensors == "pt":
-            import torch  # type: ignore[ty:unresolved-import]
+            import torch
 
             result["input_ids"] = torch.tensor([tokens])
         return result
@@ -210,7 +210,8 @@ class VLLMServerProvider(InferenceProvider):
         self._raw_http_client: httpx.AsyncClient | None = None
         self._openai_module: Any = None
         self._tokenizer: Any = None
-        self._server: VLLMServerProcess | None = None  # type: ignore[ty:unresolved-reference]
+        self._server: VLLMServerProcess | None = None
+        self._max_length: int | None = None
 
         if base_url:
             # Connect to existing server
@@ -253,11 +254,37 @@ class VLLMServerProvider(InferenceProvider):
         """Ensure server is stopped on garbage collection."""
         self.close()
 
+    @property
+    def max_length(self) -> int:
+        """Get the maximum model context length from the server."""
+        if self._max_length is None:
+            # Query /v1/models endpoint for max_model_len
+            client = httpx.Client(timeout=30.0)
+            try:
+                resp = client.get(f"{self.base_url}/models")
+                resp.raise_for_status()
+                data = resp.json()
+                for model_info in data.get("data", []):
+                    max_len = model_info.get("max_model_len")
+                    if max_len is not None:
+                        self._max_length = int(max_len)
+                        break
+            finally:
+                client.close()
+            if self._max_length is None:
+                # Fallback to a large default if server doesn't report it
+                self._max_length = 4096
+                logger.warning(
+                    "Could not determine max_model_len from server, defaulting to %d",
+                    self._max_length,
+                )
+        return self._max_length
+
     def _get_or_create_client(self) -> AsyncOpenAI:
         """Get or create the AsyncOpenAI client."""
         if self._client is None:
-            import openai  # type: ignore[ty:unresolved-import]
-            from openai import AsyncOpenAI  # type: ignore[ty:unresolved-import]
+            import openai
+            from openai import AsyncOpenAI
 
             self._openai_module = openai
 
@@ -620,10 +647,13 @@ class VLLMServerProvider(InferenceProvider):
         http_client = self._get_raw_http_client()
 
         outputs = []
-        for continuation in request.continuations or ():
+        cont_prompts = request.continuation_prompts
+        for i, continuation in enumerate(request.continuations or ()):
+            # Use per-continuation prompt when available (e.g. Trinh & Le partial eval)
+            ctx = cont_prompts[i] if cont_prompts else context
             # Use shared utility for proper tokenization (handles BOS, trailing spaces)
             context_enc, continuation_enc = encode_context_and_continuation(
-                tokenizer, context, continuation
+                tokenizer, ctx, continuation
             )
 
             # RemoteTokenizer doesn't have BOS/EOS token IDs, so for empty contexts
@@ -632,8 +662,17 @@ class VLLMServerProvider(InferenceProvider):
             if not context_enc and context == "":
                 context_enc = tokenizer.encode("", add_special_tokens=True)
 
-            context_len = len(context_enc)
+            # Left-truncate to max_length - 1 to match inline vLLM provider behavior.
+            # This ensures long prompts are handled the same way as oe-eval-internal:
+            # the context is left-truncated while preserving the continuation tokens.
+            max_len = self.max_length
             full_tokens = context_enc + continuation_enc
+            if len(full_tokens) > max_len - 1:
+                full_tokens = full_tokens[-(max_len - 1) :]
+                overflow = len(context_enc) + len(continuation_enc) - (max_len - 1)
+                context_len = max(0, len(context_enc) - overflow)
+            else:
+                context_len = len(context_enc)
 
             # Use raw HTTP to get integer-keyed prompt_logprobs from vLLM.
             # The OpenAI SDK's top_logprobs uses string keys (decoded tokens),
@@ -672,6 +711,23 @@ class VLLMServerProvider(InferenceProvider):
 
                 # JSON serializes integer dict keys as strings
                 token_id_str = str(token_id)
+
+                # Check is_greedy BEFORE the lp_obj gate so we catch non-greedy tokens
+                # even when they aren't in the top-k returned by prompt_logprobs.
+                # Keys are string-serialized integers (e.g., "128000"), not decoded tokens,
+                # so no collision between different token IDs.
+                if is_greedy:
+                    max_tid = max(
+                        token_probs.keys(),
+                        key=lambda tid: (
+                            token_probs[tid]["logprob"]
+                            if isinstance(token_probs[tid], dict)
+                            else token_probs[tid]
+                        ),
+                    )
+                    if max_tid != token_id_str:
+                        is_greedy = False
+
                 lp_obj = token_probs.get(token_id_str)
                 if lp_obj is None:
                     continue
@@ -692,21 +748,6 @@ class VLLMServerProvider(InferenceProvider):
                     }
                 )
                 total += logprob_val
-
-                # Check is_greedy using integer token IDs (matching inline vLLM exactly).
-                # Keys are string-serialized integers (e.g., "128000"), not decoded tokens,
-                # so no collision between different token IDs.
-                if is_greedy:
-                    max_tid = max(
-                        token_probs.keys(),
-                        key=lambda tid: (
-                            token_probs[tid]["logprob"]
-                            if isinstance(token_probs[tid], dict)
-                            else token_probs[tid]
-                        ),
-                    )
-                    if max_tid != token_id_str:
-                        is_greedy = False
 
             num_tokens = len(logprob_entries)
             outputs.append(

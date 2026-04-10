@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter
-from olmo_eval.common.metrics import LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric
+from olmo_eval.common.metrics import BPBMetric, LogprobMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -166,10 +166,9 @@ register_variant(
     "hellaswag",
     "olmo3base",
     num_fewshot=5,
-    limit=10_000,
     fewshot_source="olmes_hellaswag_fixed",
-    metrics=(LogprobPerCharMCAccuracyMetric(),),
 )
 register_variant(
     "hellaswag", "xlarge", num_fewshot=5, limit=10_000, fewshot_source="olmes_hellaswag_fixed"
 )
+register_variant("hellaswag", "bpb", metrics=(BPBMetric(),))

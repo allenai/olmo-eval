@@ -80,3 +80,6 @@ Thumbs.db
 # uv
 uv.lock
 logs/
+
+# Eval output
+main/

@@ -16,7 +16,7 @@ import re
 import string
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from olmo_eval.common.formatters import PPLFormatter
 from olmo_eval.common.metrics import RecallMetric
@@ -138,7 +138,7 @@ class RulerTask(Task):
         # Generate instances
         self._instances_cache = []
         for idx, doc in enumerate(self._dataset):  # type: ignore
-            instance = self.process_doc(doc, index=idx)  # type: ignore
+            instance = self.process_doc(cast(dict[str, Any], doc), index=idx)
             if instance is not None:
                 self._instances_cache.append(instance)
                 yield instance

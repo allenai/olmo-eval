@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import PPLFormatter
-from olmo_eval.common.metrics import BPBMetric, CorpusPerplexityMetric
+from olmo_eval.common.metrics import BPBMetricByteAvg, CorpusPerplexityMetric
 from olmo_eval.common.types import (
     Instance,
     LMRequest,
@@ -139,7 +139,7 @@ SHARED_ATTRS: dict = {
 VARIANTS: dict = {
     "bpb": {
         "formatter": PPLFormatter(leading_space=False, always_prepend_separator=True),
-        "metrics": (BPBMetric(),),
+        "metrics": (BPBMetricByteAvg(),),
     },
     "ppl": {
         "formatter": PPLFormatter(leading_space=False, always_prepend_separator=True),

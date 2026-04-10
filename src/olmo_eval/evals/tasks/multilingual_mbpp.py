@@ -14,7 +14,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import PPLFormatter
-from olmo_eval.common.metrics import BPBMetric
+from olmo_eval.common.metrics import BPBMetricByteAvg
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams
 from olmo_eval.data import DataLoader
 from olmo_eval.evals.tasks.common import Task, register_subtasks
@@ -48,7 +48,7 @@ class MultilingualMBPPTask(Task):
     The v2fix version normalizes Windows line endings (\\r\\n -> \\n).
     """
 
-    normalize_line_endings: bool = False  # Set True for v2fix
+    normalize_line_endings: bool = True  # Always normalize for correctness
     language: str = "python"  # Override in subclasses
 
     @property
@@ -115,12 +115,38 @@ class MultilingualMBPPTask(Task):
         Multilingual MBPP uses the same structure as MBPP with a 'prompt' split
         containing examples for few-shot prompting.
         Falls back to 'train' split if 'prompt' is not available.
+
+        Uses shuffle+slice (not sample) to match the legacy oe-eval-internal behavior.
         """
-        return self._build_fewshot_from_source(
-            split="prompt",
-            sample=True,
-            fallback_splits=["train"],
-        )
+        import random
+
+        from olmo_eval.data import DataLoader
+
+        if self.config.num_fewshot == 0:
+            return []
+
+        loader = DataLoader()
+        all_instances: list[Instance] = []
+
+        for split in ["prompt", "train"]:
+            try:
+                source = self._get_source_for_split(split)
+                all_instances = [
+                    inst
+                    for doc in loader.load(source)
+                    if (inst := self.process_doc(doc)) is not None
+                ]
+                if all_instances:
+                    break
+            except Exception:
+                continue
+
+        if not all_instances:
+            return []
+
+        rng = random.Random(self.config.fewshot_seed)
+        rng.shuffle(all_instances)
+        return all_instances[: self.config.num_fewshot]
 
 
 class MultilingualMBPPV2FixTask(MultilingualMBPPTask):
@@ -141,9 +167,10 @@ _SHARED_ATTRS: dict = {
 _VARIANTS: dict = {
     "bpb": {
         "formatter": PPLFormatter(leading_space=False, always_prepend_separator=True),
-        "metrics": (BPBMetric(),),
+        "metrics": (BPBMetricByteAvg(),),
     },
     "3shot": {"num_fewshot": 3},
+    "olmo3base": {"num_fewshot": 3, "fewshot_seed": 1234},
 }
 
 for _base, _prefix in [

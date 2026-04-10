@@ -4,8 +4,19 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceLogprobFormatter
-from olmo_eval.common.metrics import LogprobMCAccuracyMetric
-from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams, Split
+from olmo_eval.common.metrics import (
+    BPBMetric,
+    LogprobMCAccuracyMetric,
+    LogprobPerCharMCAccuracyMetric,
+)
+from olmo_eval.common.types import (
+    Instance,
+    LMOutput,
+    LMRequest,
+    RequestType,
+    SamplingParams,
+    Split,
+)
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, TaskConfig, register, register_variant
 
@@ -105,6 +116,18 @@ def _answer_to_index_and_letter(answer: int | str) -> tuple[int, str]:
     return ord(s) - ord("A"), s
 
 
+def _format_subject(subject: str) -> str:
+    return " ".join(subject.split("_"))
+
+
+def _format_rc(question: str, answer: str | None = None) -> str:
+    """Format a cloze-style prompt for ranked classification."""
+    prompt = f"Question: {question}\nAnswer:"
+    if answer:
+        prompt += f" {answer}"
+    return prompt
+
+
 class MMLUMCTask(Task):
     default_source: str = DEFAULT_MMLU_PATH
     fewshot_split: str = "dev"
@@ -165,8 +188,86 @@ class MMLUMCTask(Task):
         return all_fewshot[:k] if k else all_fewshot
 
 
-def _format_subject(subject: str) -> str:
-    return " ".join(subject.split("_"))
+class MMLURCTask(Task):
+    """MMLU ranked classification (cloze) variant.
+
+    Uses cloze-style prompts ("Question: ...\\nAnswer:") with raw text choices
+    as continuations, scored by character-normalized logprob (acc_per_char).
+    """
+
+    default_source: str = DEFAULT_MMLU_PATH
+    fewshot_split: str = "dev"
+    fewshot_sample: bool = False
+    subject: str = ""
+
+    def __init__(self, config: TaskConfig) -> None:
+        super().__init__(config)
+
+    @property
+    def instances(self) -> Iterator[Instance]:
+        yield from self._load_instances_cached(split="test")
+
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
+        question = doc.get("question", "")
+        choices = list(doc.get("choices", []))
+        if not choices or len(choices) > 5:
+            return None
+        answer = doc.get("answer", 0)
+        try:
+            gold_idx, _letter = _answer_to_index_and_letter(answer)
+        except ValueError:
+            return None
+        if gold_idx >= len(choices):
+            return None
+        return Instance(
+            question=question,
+            gold_answer=choices[gold_idx],
+            choices=tuple(choices),
+            metadata={
+                "id": index,
+                "gold_idx": gold_idx,
+            },
+        )
+
+    def format_request(self, instance: Instance) -> LMRequest:
+        fewshot = self.get_fewshot()
+        subject_text = _format_subject(self.subject) if self.subject else ""
+        description = (
+            f"The following are multiple choice questions (with answers) about {subject_text}.\n\n"
+            if subject_text
+            else ""
+        )
+
+        parts: list[str] = []
+        for ex in fewshot:
+            answer = ex.gold_answer or ""
+            parts.append(_format_rc(ex.question, answer))
+
+        parts.append(_format_rc(instance.question))
+
+        prompt = "\n\n".join(parts)
+        if description:
+            prompt = description + prompt
+
+        continuations = tuple(f" {c}" for c in (instance.choices or ()))
+
+        return LMRequest(
+            request_type=RequestType.LOGLIKELIHOOD,
+            prompt=prompt,
+            continuations=continuations,
+        )
+
+    def extract_answer(self, output: LMOutput) -> Any:
+        return None
+
+    def _build_fewshot(self) -> list[Instance]:
+        all_fewshot = self._build_fewshot_from_source(
+            split=self.fewshot_split,
+            sample=self.fewshot_sample,
+            fallback_splits=[],
+        )
+        k = self.config.num_fewshot
+        return all_fewshot[:k] if k else all_fewshot
 
 
 def _make_formatter(subject: str) -> MultipleChoiceLogprobFormatter:
@@ -186,6 +287,8 @@ def _make_formatter(subject: str) -> MultipleChoiceLogprobFormatter:
 # Register one task per subject (mmlu_abstract_algebra, mmlu_anatomy, ...)
 for _subject in MMLU_SUBJECTS:
     _formatter = _make_formatter(_subject)
+
+    # MC variant (base task)
     _cls = type(
         f"MMLU_{_subject}",
         (MMLUMCTask,),
@@ -202,7 +305,32 @@ for _subject in MMLU_SUBJECTS:
         },
     )
     register(f"mmlu_{_subject}")(_cls)
-    # Register mc and olmo3base variants for spec resolution
     register_variant(f"mmlu_{_subject}", "mc")
     register_variant(f"mmlu_{_subject}", "olmo3base")
     globals()[f"MMLU_{_subject}"] = _cls
+
+    # RC variant (cloze format with acc_per_char)
+    _rc_cls = type(
+        f"MMLU_RC_{_subject}",
+        (MMLURCTask,),
+        {
+            "subject": _subject,
+            "data_source": DataSource(path=DEFAULT_MMLU_PATH, subset=_subject, split="test"),
+            "metrics": (LogprobPerCharMCAccuracyMetric(),),
+            "primary_metric": LogprobPerCharMCAccuracyMetric(),
+            "num_fewshot": 5,
+            "split": Split.TEST,
+            "sampling_params": SamplingParams(max_tokens=1, temperature=0.0),
+            "__module__": __name__,
+            "__qualname__": f"MMLU_RC_{_subject}",
+        },
+    )
+    register(f"mmlu_{_subject}:rc")(_rc_cls)
+    register_variant(f"mmlu_{_subject}:rc", "olmo3base")
+    register_variant(
+        f"mmlu_{_subject}:rc",
+        "bpb",
+        metrics=(BPBMetric(),),
+        primary_metric=BPBMetric(),
+    )
+    globals()[f"MMLU_RC_{_subject}"] = _rc_cls

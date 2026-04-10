@@ -1,0 +1,77 @@
+"""Tests for extract_mcq_answer."""
+
+from olmo_eval.evals.extract.mcq import extract_mcq_answer
+
+
+class TestExtractMcqAnswer:
+    """Tests for the shared MCQ answer extractor."""
+
+    # --- ANSWER: X ---
+
+    def test_answer_colon(self):
+        assert extract_mcq_answer("ANSWER: B") == "B"
+
+    def test_answer_colon_lowercase(self):
+        assert extract_mcq_answer("answer: c") == "C"
+
+    def test_answer_colon_no_space(self):
+        assert extract_mcq_answer("ANSWER:A") == "A"
+
+    def test_answer_colon_with_paren(self):
+        assert extract_mcq_answer("ANSWER: (D)") == "D"
+
+    def test_answer_colon_last_wins(self):
+        assert extract_mcq_answer("ANSWER: A\nActually ANSWER: C") == "C"
+
+    # --- \boxed{X} ---
+
+    def test_boxed_letter(self):
+        assert extract_mcq_answer("$$\\boxed{B}$$") == "B"
+
+    def test_boxed_text(self):
+        assert extract_mcq_answer("$$\\boxed{\\text{A}}$$") == "A"
+
+    def test_boxed_last_wins(self):
+        assert extract_mcq_answer("\\boxed{A}\n\\boxed{D}") == "D"
+
+    # --- (X) ---
+
+    def test_paren_letter(self):
+        assert extract_mcq_answer("**(C) Diabetes**") == "C"
+
+    def test_paren_last_wins(self):
+        assert extract_mcq_answer("(A) is wrong\n**Answer: (D)**") == "D"
+
+    # --- Priority order ---
+
+    def test_answer_preferred_over_boxed(self):
+        assert extract_mcq_answer("\\boxed{A}\nANSWER: B") == "B"
+
+    def test_boxed_preferred_over_paren(self):
+        assert extract_mcq_answer("(A) is likely\n$$\\boxed{C}$$") == "C"
+
+    # --- **X) bold markdown ---
+
+    def test_bold_letter_paren(self):
+        assert extract_mcq_answer("### Final Answer\n\n**D) Intubate**") == "D"
+
+    def test_bold_letter_dot(self):
+        assert extract_mcq_answer("### Final Answer\n\n**C. Staphylococcus aureus**") == "C"
+
+    def test_paren_preferred_over_bold(self):
+        assert extract_mcq_answer("**B) wrong**\n**(C) right**") == "C"
+
+    # --- Answer: must stay on same line ---
+
+    def test_answer_colon_newline_does_not_match_next_word(self):
+        """'Answer:\\n\\nThe ...' must not capture T from 'The'."""
+        text = "### Final Answer:\n\nThe answer is obvious\n\\boxed{D}"
+        assert extract_mcq_answer(text) == "D"
+
+    # --- No match ---
+
+    def test_no_match(self):
+        assert extract_mcq_answer("I think the answer is B") is None
+
+    def test_empty(self):
+        assert extract_mcq_answer("") is None

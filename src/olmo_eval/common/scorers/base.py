@@ -358,7 +358,7 @@ class MathVerifyScorer(Scorer):
 
         # Try using math_verify first (optional dependency)
         try:
-            from math_verify import verify  # type: ignore[ty:unresolved-import]
+            from math_verify import verify
 
             result = verify(gold, pred)
             return 1.0 if result else 0.0

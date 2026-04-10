@@ -24,7 +24,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from olmo_eval.common.formatters import MCQAChatFormatter, MultipleChoiceFormatter, PPLFormatter
-from olmo_eval.common.metrics import AccuracyMetric, BPBMetric, LogprobMCAccuracyMetric, Metric
+from olmo_eval.common.metrics import (
+    AccuracyMetric,
+    BPBMetric,
+    BPBMetricByteAvg,
+    LogprobPerCharMCAccuracyMetric,
+    Metric,
+)
 from olmo_eval.common.scorers import MultipleChoiceScorer, Scorer
 from olmo_eval.common.types import (
     Instance,
@@ -113,14 +119,38 @@ class LabBenchTask(Task):
         cls.sampling_params = _DEFAULT_SAMPLING
         register(name)(cls)
         register_variant(name, "mc", formatter=MultipleChoiceFormatter(), metrics=_DEFAULT_METRICS)
-        register_variant(name, "bpb", formatter=PPLFormatter(), metrics=(BPBMetric(),))
+        register_variant(name, "bpb", formatter=PPLFormatter(), metrics=(BPBMetricByteAvg(),))
         register_variant(
             name,
             "olmo3base",
             formatter=None,
             num_fewshot=3,
-            metrics=(LogprobMCAccuracyMetric(),),
+            fewshot_seed=1234,
+            metrics=(LogprobPerCharMCAccuracyMetric(),),
         )
+        # Register name:bpb as a separate task (like drop:bpb) so that
+        # name:bpb:olmo3base works reliably without needing the :: regime
+        # mechanism. This matches the old oe-eval-internal lab_bench_*:bpb
+        # config: RC format, 3-shot, seed 1234, BPB metric.
+        import sys
+
+        bpb_name = f"{name}:bpb"
+        bpb_cls = type(
+            f"{cls.__name__}BPB",
+            (cls,),
+            {
+                "formatter": None,
+                "metrics": (BPBMetric(),),
+                "primary_metric": BPBMetric(),
+                "num_fewshot": 3,
+                "fewshot_seed": 1234,
+                "__module__": cls.__module__,
+                "__qualname__": f"{cls.__name__}BPB",
+            },
+        )
+        setattr(sys.modules[cls.__module__], f"{cls.__name__}BPB", bpb_cls)
+        register(bpb_name)(bpb_cls)
+        register_variant(bpb_name, "olmo3base")
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -143,19 +173,29 @@ class LabBenchTask(Task):
         if not question or not ideal:
             return None
 
-        # Build choices: ideal + distractors (deduplicate in case ideal appears in distractors)
-        choices = [ideal] + [d for d in distractors if d != ideal]
+        rc_mode = self.config.formatter is None
 
-        # Inject refuse option per the LAB-Bench evaluation protocol
-        choices.append(_REFUSE_CHOICE)
+        if rc_mode:
+            # RC mode (olmo3base): match old oe-eval-internal behavior exactly.
+            # No refuse option, no shuffling, distractors + [ideal] order.
+            choices = list(distractors) + [ideal]
+            gold_idx = len(distractors)
+            refuse_idx = -1
+        else:
+            # Build choices: ideal + distractors (deduplicate in case ideal appears in distractors)
+            choices = [ideal] + [d for d in distractors if d != ideal]
 
-        # Deterministic per-question shuffle
-        rng = random.Random(f"{self.config.seed}:{index}")
-        rng.shuffle(choices)
+            # Inject refuse option per the LAB-Bench evaluation protocol
+            choices.append(_REFUSE_CHOICE)
 
-        gold_idx = choices.index(ideal)
+            # Deterministic per-question shuffle
+            rng = random.Random(f"{self.config.seed}:{index}")
+            rng.shuffle(choices)
+
+            gold_idx = choices.index(ideal)
+            refuse_idx = choices.index(_REFUSE_CHOICE)
+
         gold_letter = chr(ord("A") + gold_idx)
-        refuse_idx = choices.index(_REFUSE_CHOICE)
 
         metadata: dict[str, Any] = {
             "id": doc.get("id", f"lab_bench_{index}"),

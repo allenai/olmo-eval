@@ -135,7 +135,7 @@ def group_info(
                             BeakerWorkloadStatus(task.status).name if task.status else "unknown"
                         )
                         task_list.append({"id": task.id, "name": task.name, "status": task_status})
-                    exp_info["tasks"] = task_list  # type: ignore
+                    exp_info["tasks"] = task_list
                 except Exception:
                     pass
 

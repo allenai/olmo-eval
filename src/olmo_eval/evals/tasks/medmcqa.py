@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter
-from olmo_eval.common.metrics import LogprobMCAccuracyMetric
+from olmo_eval.common.metrics import BPBMetric, LogprobPerCharMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -20,7 +20,7 @@ from olmo_eval.evals.tasks.common.format_helpers import (
 class MedMCQA(Task):
     data_source = DataSource(path="openlifescienceai/medmcqa", split="validation")
     split = Split.VALIDATION
-    metrics = (LogprobMCAccuracyMetric(),)
+    metrics = (LogprobPerCharMCAccuracyMetric(),)
     num_fewshot = 0
     fewshot_split = "train"
     sampling_params = SamplingParams(temperature=0.0)
@@ -40,13 +40,8 @@ class MedMCQA(Task):
             doc.get("opc", ""),
             doc.get("opd", ""),
         ]
-        choices = [c for c in choices if c.strip()]
-        if not choices:
-            return None
 
         gold_idx = int(doc.get("cop", 0))
-        if not (0 <= gold_idx < len(choices)):
-            return None
 
         gold_text = choices[gold_idx]
 
@@ -95,4 +90,5 @@ class MedMCQA(Task):
 
 register_variant("medmcqa", "rc")
 register_variant("medmcqa", "mc", formatter=MultipleChoiceFormatter())
-register_variant("medmcqa", "olmo3base", num_fewshot=5)
+register_variant("medmcqa", "bpb", metrics=(BPBMetric(),))
+register_variant("medmcqa", "olmo3base", num_fewshot=5, fewshot_seed=1234, seed=1234)

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.metrics import LogprobMCAccuracyMetric
+from olmo_eval.common.metrics import BPBMetric, LogprobMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -79,9 +79,18 @@ def _format_rc(source: str, question: str, answer: str | None = None) -> str:
 
 register_variant("qasper_yesno", "rc")
 
+register_variant("qasper_yesno", "bpb", metrics=(BPBMetric(),))
+
 register_variant(
     "qasper_yesno",
     "olmo3base",
+    num_fewshot=5,
+    fewshot_seed=1234,
+)
+
+register_variant(
+    "qasper_yesno",
+    "olmes",
     num_fewshot=5,
     fewshot_seed=1234,
 )

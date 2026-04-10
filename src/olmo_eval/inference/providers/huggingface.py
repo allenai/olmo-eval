@@ -10,12 +10,12 @@ from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 
 if TYPE_CHECKING:
-    import torch  # type: ignore[ty:unresolved-import]
+    import torch
 
 
 def _get_device() -> torch.device:
     """Detect the best available device."""
-    import torch  # type: ignore[ty:unresolved-import]
+    import torch
 
     if torch.cuda.is_available():
         return torch.device("cuda")
@@ -97,7 +97,7 @@ class HuggingFaceProvider(InferenceProvider):
         requests: list[LMRequest],
         sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
-        import torch  # type: ignore[ty:unresolved-import]
+        import torch
 
         params = self._default_sampling_params(sampling_params)
         gen_kwargs = self._build_generate_kwargs(params)
@@ -158,15 +158,17 @@ class HuggingFaceProvider(InferenceProvider):
         self,
         requests: list[LMRequest],
     ) -> list[list[LMOutput]]:
-        import torch  # type: ignore[ty:unresolved-import]
+        import torch
 
         results = []
         for request in requests:
             request_outputs = []
-            for continuation in request.continuations or ():
+            cont_prompts = request.continuation_prompts
+            for i, continuation in enumerate(request.continuations or ()):
+                prompt = cont_prompts[i] if cont_prompts else request.prompt
                 # Use shared utility for BOS handling and trailing space logic
                 context_enc, continuation_enc = encode_context_and_continuation(
-                    self.tokenizer, request.prompt, continuation
+                    self.tokenizer, prompt, continuation
                 )
 
                 # Build full sequence as tensor

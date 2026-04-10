@@ -103,7 +103,7 @@ def collect_install_extras(
     Returns:
         List of pip extras to install.
     """
-    extras: list[str] = []
+    extras: list[str] = ["s3"]
 
     if store:
         extras.append("storage")

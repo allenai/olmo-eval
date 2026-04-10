@@ -65,6 +65,7 @@ beaker = [
 ]
 s3 = [
     "boto3>=1.34.0",
+    "smart_open[s3]>=7.0.0",
 ]
 postgres = [
     "psycopg[binary]>=3.1.0",
@@ -138,7 +139,6 @@ select = [
 "src/olmo_eval/evals/tasks/astabench_sqa.py" = ["E501"]
 # Static fewshot data with long string literals
 "src/olmo_eval/evals/tasks/constants/*" = ["E501"]
-
 [tool.ruff.format]
 docstring-code-format = true
 

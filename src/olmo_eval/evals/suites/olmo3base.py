@@ -1,5 +1,8 @@
 from olmo_eval.evals.suites.biology import _LAB_BENCH_TASKS
 from olmo_eval.evals.suites.registry import make_suite
+from olmo_eval.evals.tasks.basic_skills import BASIC_SKILLS_SUBTASKS
+from olmo_eval.evals.tasks.minerva_math import MATH_SUBSETS
+from olmo_eval.evals.tasks.multilingual_mbpp import MULTILINGUAL_MBPP_LANGUAGES
 
 make_suite(
     "lab_bench:olmo3base",
@@ -14,65 +17,108 @@ make_suite(
 
 
 make_suite(
-    "medmcqa:olmo3base",
+    "medmcqa:rc_mc:olmo3base",
     ("medmcqa:rc:olmo3base", "medmcqa:mc:olmo3base"),
 )
 
 
 make_suite(
-    "medqa_en:olmo3base",
+    "medqa_en:rc_mc:olmo3base",
     ("medqa_en:rc:olmo3base", "medqa_en:mc:olmo3base"),
 )
 
 
 make_suite(
-    "piqa:olmo3base",
+    "piqa:rc_mc:olmo3base",
     ("piqa:rc:olmo3base", "piqa:mc:olmo3base"),
 )
 
 
 make_suite(
-    "csqa:olmo3base",
+    "csqa:rc_mc:olmo3base",
     ("csqa:rc:olmo3base", "csqa:mc:olmo3base"),
 )
 
 
 make_suite(
-    "socialiqa:olmo3base",
+    "socialiqa:rc_mc:olmo3base",
     ("socialiqa:rc:olmo3base", "socialiqa:mc:olmo3base"),
 )
 
 make_suite(
-    "coqa:gen:olmo3base",
+    "coqa:gen_only:olmo3base",
     ("coqa:gen:olmo3base",),
 )
 
 
 make_suite(
-    "hellaswag:olmo3base",
+    "hellaswag:rc_mc:olmo3base",
     ("hellaswag:rc:olmo3base", "hellaswag:mc:olmo3base"),
 )
 
 
 make_suite(
-    "jeopardy:gen:olmo3base",
+    "jeopardy:gen_only:olmo3base",
     ("jeopardy:gen:olmo3base",),
 )
 
 
 make_suite(
-    "qasper_yesno:olmo3base",
+    "qasper_yesno:rc_only:olmo3base",
     ("qasper_yesno:rc:olmo3base",),
 )
 
 
 make_suite(
-    "sciq:olmo3base",
+    "sciq:rc_mc:olmo3base",
     ("sciq:rc:olmo3base", "sciq:mc:olmo3base"),
 )
 
 
 make_suite(
-    "sciriff_yesno:olmo3base",
+    "sciriff_yesno:rc_only:olmo3base",
     ("sciriff_yesno:rc:olmo3base",),
+)
+
+
+make_suite(
+    "squad:rc_mc:olmo3base",
+    ("squad:mc:olmo3base", "squad:rc:olmo3base"),
+)
+
+
+make_suite(
+    "winogrande:rc_mc:olmo3base",
+    ("winogrande:rc:olmo3base", "winogrande:mc:olmo3base"),
+)
+
+
+make_suite(
+    "naturalqs:olmo3base",
+    ("naturalqs:mc:olmo3base", "naturalqs:rc:olmo3base"),
+)
+
+make_suite(
+    "basic_skills:rc:olmo3base",
+    tuple(f"basic_skills_{s}:rc::olmo3base" for s in BASIC_SKILLS_SUBTASKS),
+)
+
+make_suite(
+    "basic_skills:bpb:olmo3base",
+    tuple(f"basic_skills_{s}:bpb::olmo3base" for s in BASIC_SKILLS_SUBTASKS),
+)
+
+make_suite(
+    "minerva_math:bpb:olmo3base",
+    tuple(f"minerva_math_{t}:bpb::olmo3base" for t in MATH_SUBSETS),
+)
+
+make_suite(
+    "mt_mbpp:bpb:olmo3base",
+    tuple(f"mt_mbpp_{lang}:bpb::olmo3base" for lang in MULTILINGUAL_MBPP_LANGUAGES),
+)
+
+make_suite(
+    "mt_mbpp_v2fix:bpb:olmo3base",
+    tuple(f"mt_mbpp_v2fix_{lang}:bpb::olmo3base" for lang in MULTILINGUAL_MBPP_LANGUAGES),
 )

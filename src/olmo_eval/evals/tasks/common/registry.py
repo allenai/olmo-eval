@@ -82,13 +82,24 @@ def register_variant(task_name: str, variant: str, **overrides: Any) -> None:
         **overrides: TaskConfig field overrides for this variant.
 
     Raises:
-        ValueError: If the task is not registered.
+        ValueError: If the task is not registered, or if the resulting task
+            spec collides with a registered suite name.
     """
     if task_name not in _tasks:
         raise ValueError(
             f"Cannot register variant '{variant}' for unknown task '{task_name}'. "
             f"Register the task first using @register()."
         )
+
+    from olmo_eval.evals.suites.registry import suite_exists
+
+    spec = f"{task_name}:{variant}"
+    if suite_exists(spec):
+        raise ValueError(
+            f"Task spec {spec!r} collides with a registered suite name. "
+            f"Rename the suite to avoid ambiguity."
+        )
+
     _variants.setdefault(task_name, {})[variant] = overrides
 
 
@@ -296,8 +307,19 @@ def get_task(spec: str, config_overrides: dict[str, Any] | None = None) -> Task:
         task_name = parts[0]
         variants = parts[1:] if len(parts) > 1 else []
 
-    # Filter empty variants (from :: separators in task specs like "task:rc::regime")
-    variants = [v for v in variants if v]
+    # Separate items before :: (variant-first) from items after :: (regime-first).
+    # For "task:v1::r1", v1 checks variants first, r1 checks regimes first.
+    variant_items: list[str] = []
+    regime_items: list[str] = []
+    hit_separator = False
+    for v in variants:
+        if v == "":
+            hit_separator = True
+            continue
+        if hit_separator:
+            regime_items.append(v)
+        else:
+            variant_items.append(v)
 
     if task_name not in _tasks:
         available = ", ".join(sorted(_tasks.keys()))
@@ -305,22 +327,32 @@ def get_task(spec: str, config_overrides: dict[str, Any] | None = None) -> Task:
 
     config = _configs[task_name]
 
-    # Apply variant/regime overrides in order (check both registries)
-    for variant in variants:
-        # First check variants registry
-        if task_name in _variants and variant in _variants[task_name]:
-            config = replace(config, **_variants[task_name][variant])
-        # Then check regimes registry (regimes are now accessed as variants)
-        elif task_name in _regimes and variant in _regimes[task_name]:
-            config = replace(config, **_regimes[task_name][variant])
+    def _resolve_error(name: str) -> KeyError:
+        available_variants = list(_variants.get(task_name, {}).keys())
+        available_regimes = list(_regimes.get(task_name, {}).keys())
+        avail = sorted(set(available_variants + available_regimes))
+        return KeyError(
+            f"Unknown variant '{name}' for task '{task_name}'. "
+            f"Available: {', '.join(avail) if avail else 'none'}"
+        )
+
+    # Apply variant items (check variants first, then regimes)
+    for v in variant_items:
+        if task_name in _variants and v in _variants[task_name]:
+            config = replace(config, **_variants[task_name][v])
+        elif task_name in _regimes and v in _regimes[task_name]:
+            config = replace(config, **_regimes[task_name][v])
         else:
-            available_variants = list(_variants.get(task_name, {}).keys())
-            available_regimes = list(_regimes.get(task_name, {}).keys())
-            available = sorted(set(available_variants + available_regimes))
-            raise KeyError(
-                f"Unknown variant '{variant}' for task '{task_name}'. "
-                f"Available: {', '.join(available) if available else 'none'}"
-            )
+            raise _resolve_error(v)
+
+    # Apply regime items (check regimes first, then variants)
+    for r in regime_items:
+        if task_name in _regimes and r in _regimes[task_name]:
+            config = replace(config, **_regimes[task_name][r])
+        elif task_name in _variants and r in _variants[task_name]:
+            config = replace(config, **_variants[task_name][r])
+        else:
+            raise _resolve_error(r)
 
     # Apply additional config overrides (highest priority)
     if config_overrides:
@@ -363,16 +395,57 @@ def list_regimes(task_name: str | None = None) -> dict[str, list[str]]:
 
 
 def task_exists(spec: str) -> bool:
-    """Check if a task spec is valid (task exists).
+    """Check if a task spec is valid (task exists and variants are registered).
+
+    Handles task names containing colons (e.g., "naturalqs:mc") by trying
+    progressively shorter prefixes, matching the logic in get_task().
 
     Args:
         spec: Task specification string.
 
     Returns:
-        True if the base task exists, False otherwise.
+        True if the task exists and all variants are valid, False otherwise.
     """
-    task_name, _variants, _overrides = parse_task_spec(spec)
-    return task_name in _tasks
+    parts = spec.split(":")
+    task_name = None
+    variants: list[str] = []
+
+    for i in range(len(parts), 0, -1):
+        candidate = ":".join(parts[:i])
+        if candidate in _tasks:
+            task_name = candidate
+            variants = [v for v in parts[i:] if v]
+            break
+
+    if task_name is None:
+        return False
+
+    # Separate variant-first items (before ::) from regime-first items (after ::)
+    variant_items: list[str] = []
+    regime_items: list[str] = []
+    hit_sep = False
+    for v in variants:
+        if v == "":
+            hit_sep = True
+            continue
+        if hit_sep:
+            regime_items.append(v)
+        else:
+            variant_items.append(v)
+
+    for v in variant_items:
+        has_variant = task_name in _variants and v in _variants[task_name]
+        has_regime = task_name in _regimes and v in _regimes[task_name]
+        if not has_variant and not has_regime:
+            return False
+
+    for r in regime_items:
+        has_regime = task_name in _regimes and r in _regimes[task_name]
+        has_variant = task_name in _variants and r in _variants[task_name]
+        if not has_regime and not has_variant:
+            return False
+
+    return True
 
 
 def clear_registry() -> None:
@@ -421,7 +494,7 @@ def register_subtasks(
                 "sampling_params": SamplingParams(max_tokens=1024),
             },
             variants={
-                "bpb": {"formatter": PPLFormatter(), "metrics": (BPBMetric(),)},
+                "bpb": {"formatter": PPLFormatter(), "metrics": (BPBMetricByteAvg(),)},
                 "3shot": {"num_fewshot": 3},
             },
         )

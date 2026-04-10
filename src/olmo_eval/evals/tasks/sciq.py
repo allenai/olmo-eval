@@ -5,7 +5,11 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter
-from olmo_eval.common.metrics import LogprobMCAccuracyMetric, LogprobPerCharMCAccuracyMetric
+from olmo_eval.common.metrics import (
+    BPBMetric,
+    LogprobMCAccuracyMetric,
+    LogprobPerCharMCAccuracyMetric,
+)
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -52,12 +56,19 @@ class SciQ(Task):
             doc["correct_answer"],
         ]
 
-        rng = random.Random(index)
-        num_choices = len(choices)
-        positions = list(range(num_choices))
-        rng.shuffle(positions)
-        shuffled_choices = [choices[i] for i in positions]
-        gold_idx = positions.index(num_choices - 1)
+        # Only shuffle choices for MC format (matches old oe-eval-internal behavior
+        # where RC keeps fixed order: distractors first, correct answer last)
+        if self.config.formatter is not None:
+            rng = random.Random(index)
+            num_choices = len(choices)
+            positions = list(range(num_choices))
+            rng.shuffle(positions)
+            shuffled_choices = [choices[i] for i in positions]
+            gold_idx = positions.index(num_choices - 1)
+        else:
+            shuffled_choices = choices
+            gold_idx = 3  # correct_answer is always last
+
         gold_text = doc["correct_answer"]
         letter = chr(ord("A") + gold_idx)
 
@@ -132,8 +143,43 @@ register_variant(
     "sciq",
     "olmo3base",
     num_fewshot=5,
-    split=Split.ALL,
-    limit=10_000,
+    split=Split.VALIDATION,
     metrics=(LogprobPerCharMCAccuracyMetric(),),
+    fewshot_seed=1234,
+)
+
+
+@register("sciq:bpb")
+class SciQBPB(SciQ):
+    metrics = (BPBMetric(),)
+
+    def format_request(self, instance: Instance) -> LMRequest:
+        fewshot = self.get_fewshot()
+
+        parts: list[str] = []
+        for ex in fewshot:
+            answer = ex.gold_answer or ex.metadata.get("gold_text", "")
+            parts.append(_format_rc(ex.question, answer))
+
+        parts.append(_format_rc(instance.question))
+        prompt = "\n\n".join(parts)
+
+        # Only compute BPB on the gold answer (matches old suite's compute_gold_bpb=True)
+        gold_idx = instance.metadata.get("gold_idx", 3)
+        choices = instance.choices or ()
+        gold_text = choices[gold_idx] if choices else (instance.gold_answer or "")
+
+        return LMRequest(
+            request_type=RequestType.LOGLIKELIHOOD,
+            prompt=prompt,
+            continuations=(f" {gold_text}",),
+        )
+
+
+register_variant(
+    "sciq:bpb",
+    "olmo3base",
+    num_fewshot=5,
+    split=Split.VALIDATION,
     fewshot_seed=1234,
 )

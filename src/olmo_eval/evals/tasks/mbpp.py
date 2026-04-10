@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import PPLFormatter
-from olmo_eval.common.metrics import BPBMetric, PassAtKMetric
+from olmo_eval.common.metrics import BPBMetric, BPBMetricByteAvg, PassAtKMetric
 from olmo_eval.common.scorers import CodeExecutionScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
@@ -70,12 +70,36 @@ class MBPPBase(Task):
 
         MBPP has a dedicated 'prompt' split with 10 examples for few-shot prompting.
         Falls back to 'train' split if 'prompt' is not available.
+
+        Uses shuffle+slice (not sample) to match the legacy oe-eval-internal behavior.
         """
-        return self._build_fewshot_from_source(
-            split="prompt",
-            sample=True,
-            fallback_splits=["train"],
-        )
+        import random
+
+        if self.config.num_fewshot == 0:
+            return []
+
+        loader = DataLoader()
+        all_instances: list[Instance] = []
+
+        for split in ["prompt", "train"]:
+            try:
+                source = self._get_source_for_split(split)
+                all_instances = [
+                    inst
+                    for doc in loader.load(source)
+                    if (inst := self.process_doc(doc)) is not None
+                ]
+                if all_instances:
+                    break
+            except Exception:
+                continue
+
+        if not all_instances:
+            return []
+
+        rng = random.Random(self.config.fewshot_seed)
+        rng.shuffle(all_instances)
+        return all_instances[: self.config.num_fewshot]
 
 
 @register("mbpp")
@@ -157,6 +181,40 @@ class MBPPPlus(MBPPPlusBase):
     )
 
 
+@register("mbpp:bpb")
+class MBPPBPB(MBPPBase):
+    data_source = DataSource(path="google-research-datasets/mbpp")
+    formatter = PPLFormatter(leading_space=False)
+    metrics = (BPBMetric(),)
+
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
+        question = doc["text"].strip() + "\n```python\n"
+        gold_answer = doc["code"].rstrip("\n").rstrip().replace("\r", "") + "\n```"
+
+        tests = doc.get("test_setup_code", "") or ""
+        if tests:
+            tests += "\n"
+        tests += "\n".join(doc["test_list"])
+
+        return Instance(
+            question=question,
+            gold_answer=gold_answer,
+            metadata={
+                "id": doc["task_id"],
+                "test": tests,
+            },
+        )
+
+
+register_variant(
+    "mbpp:bpb",
+    "olmo3base",
+    num_fewshot=3,
+    limit=500,
+    fewshot_seed=1234,
+)
+
+
 # =============================================================================
 # Variant Registrations
 # =============================================================================
@@ -166,14 +224,14 @@ register_variant(
     "mbpp",
     "bpb",
     formatter=PPLFormatter(leading_space=False),
-    metrics=(BPBMetric(),),
+    metrics=(BPBMetricByteAvg(),),
 )
 
 register_variant(
     "mbpp_plus",
     "bpb",
     formatter=PPLFormatter(leading_space=False),
-    metrics=(BPBMetric(),),
+    metrics=(BPBMetricByteAvg(),),
 )
 
 # 3shot variant - composable with bpb (e.g., mbpp:3shot:bpb)

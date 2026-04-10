@@ -1,14 +1,40 @@
 from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Any
 
 from olmo_eval.common.formatters import CompletionFormatter, PPLFormatter
-from olmo_eval.common.metrics import AccuracyMetric, BPBMetric, PassAtKMetric
+from olmo_eval.common.metrics import AccuracyMetric, BPBMetric, BPBMetricByteAvg, PassAtKMetric
 from olmo_eval.common.scorers import MinervaMathScorer
-from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.extract import MathExtractor
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 from olmo_eval.evals.tasks.constants.minerva_math import MINERVA_MATH_FIXED_FEWSHOT
+
+
+@dataclass(slots=True)
+class _MinervaCompletionFormatter(CompletionFormatter):
+    """CompletionFormatter that omits answer_prefix from the final (test) instance."""
+
+    def format(
+        self,
+        instance: Instance,
+        fewshot: list[Instance] | None = None,
+    ) -> LMRequest:
+        parts: list[str] = []
+        for ex in fewshot or []:
+            example = self.template.format(question=ex.question)
+            if self.fewshot_answer_key and self.fewshot_answer_key in ex.metadata:
+                answer = ex.metadata[self.fewshot_answer_key]
+            else:
+                answer = ex.gold_answer
+            if answer:
+                example += self.answer_prefix + str(answer)
+            parts.append(example)
+        parts.append(self.template.format(question=instance.question))
+        prompt = self.fewshot_separator.join(parts)
+        return LMRequest(request_type=self.request_type, prompt=prompt)
+
 
 MATH_SUBSETS = [
     "algebra",
@@ -205,16 +231,106 @@ for _subset in MATH_SUBSETS:
 
     register_variant(
         _task_name,
+        "olmo3base",
+        fewshot_source="minerva_math_fixed",
+    )
+
+    register_variant(
+        _task_name,
+        "olmo3base_gen",
+        fewshot_source="minerva_math_fixed",
+        formatter=_MinervaCompletionFormatter(
+            template="Problem:\n{question}\n\nSolution:",
+            answer_prefix=" ",
+            fewshot_answer_key="solution_text",
+        ),
+        metrics=(
+            AccuracyMetric(scorer=MinervaMathScorer),
+            PassAtKMetric(k=1, scorer=MinervaMathScorer),
+            PassAtKMetric(k=2, scorer=MinervaMathScorer),
+            PassAtKMetric(k=4, scorer=MinervaMathScorer),
+        ),
+        primary_metric=PassAtKMetric(k=1, scorer=MinervaMathScorer),
+        sampling_params=SamplingParams(
+            max_tokens=1024,
+            temperature=0.6,
+            top_p=0.6,
+            stop_sequences=("Problem:", "\n\n"),
+            num_samples=4,
+        ),
+    )
+
+    register_variant(
+        _task_name,
         "bpb",
         formatter=PPLFormatter(),
-        metrics=(BPBMetric(),),
-        primary_metric=BPBMetric(),
+        metrics=(BPBMetricByteAvg(),),
+        primary_metric=BPBMetricByteAvg(),
+    )
+
+    register_variant(
+        _task_name,
+        "olmes",
+        fewshot_source="minerva_math_fixed",
     )
 
 register_variant(
     "math500",
     "bpb",
     formatter=PPLFormatter(),
-    metrics=(BPBMetric(),),
-    primary_metric=BPBMetric(),
+    metrics=(BPBMetricByteAvg(),),
+    primary_metric=BPBMetricByteAvg(),
 )
+
+
+class MinervaMathBPBTask(MinervaMathTask):
+    formatter = PPLFormatter()
+    metrics = (BPBMetric(),)
+    primary_metric = BPBMetric()
+
+    def format_request(self, instance: Instance) -> LMRequest:
+        fewshot = self.get_fewshot()
+        parts: list[str] = []
+        for ex in fewshot:
+            text = f"Problem:\n{ex.question}\n\nSolution:"
+            solution = ex.metadata.get("solution_text", ex.gold_answer or "")
+            if solution:
+                text += " " + str(solution)
+            parts.append(text)
+        parts.append(f"Problem:\n{instance.question}\n\nSolution:")
+        prompt = "\n\n".join(parts)
+
+        gold_text = instance.metadata.get("solution_text") or instance.gold_answer
+        if gold_text is None:
+            raise ValueError("BPB task requires a gold answer")
+        if not gold_text.startswith(("\n", " ")):
+            gold_text = " " + gold_text
+
+        return LMRequest(
+            request_type=RequestType.LOGLIKELIHOOD,
+            prompt=prompt,
+            continuations=(gold_text,),
+        )
+
+
+for _bpb_subset in MATH_SUBSETS:
+    _bpb_task_name = f"minerva_math_{_bpb_subset}:bpb"
+    _bpb_class_name = f"MinervaMathBPB_{_bpb_subset.title().replace('_', '')}"
+
+    _bpb_cls = type(
+        _bpb_class_name,
+        (MinervaMathBPBTask,),
+        {
+            "__module__": __name__,
+            "__qualname__": _bpb_class_name,
+            "data_source": DataSource(
+                path="EleutherAI/hendrycks_math",
+                subset=_bpb_subset,
+            ),
+        },
+    )
+    globals()[_bpb_class_name] = _bpb_cls
+    register(_bpb_task_name)(_bpb_cls)
+
+    register_variant(_bpb_task_name, "olmo3base", fewshot_source="minerva_math_fixed")
+    register_variant(_bpb_task_name, "olmes", fewshot_source="minerva_math_fixed")

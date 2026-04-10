@@ -75,6 +75,37 @@ class F1Metric(Metric):
         return total / len(responses)
 
 
+def _select_gold_output(response: Response):
+    """Select the gold/correct output from a response.
+
+    For multi-output responses (e.g. multiple choice), uses
+    ``instance.metadata["gold_idx"]`` to pick the correct one,
+    falling back to the first output.  Returns None if the response
+    has no outputs or the selected output has no logprobs / zero bytes.
+    """
+    outputs = response.outputs
+    if not outputs:
+        return None
+
+    if len(outputs) > 1:
+        gold_idx = response.instance.metadata.get("gold_idx")
+        if gold_idx is not None and 0 <= gold_idx < len(outputs):
+            output = outputs[gold_idx]
+        else:
+            output = outputs[0]
+    else:
+        output = outputs[0]
+
+    if output.logprobs is None:
+        return None
+
+    num_bytes = len(output.text.encode("utf-8")) if output.text else 0
+    if num_bytes == 0:
+        return None
+
+    return output
+
+
 @dataclass(frozen=True, slots=True)
 class SQuADF1Metric(Metric):
     """Mean SQuAD-style F1 score: max F1 over all reference answers."""
@@ -121,17 +152,43 @@ class RecallMetric(Metric):
 
 
 @dataclass(frozen=True, slots=True)
-class BPBMetric(Metric):
-    """Aggregate bits-per-byte of the gold/correct completion.
+class BPBMetricInstanceAvg(Metric):
+    """Arithmetic mean of per-instance bits-per-byte.
 
-    Computes BPB by summing total logprobs and total bytes across all responses,
-    then computing: -total_logprobs / (total_bytes * log(2))
+    Each instance's BPB is computed independently via the scorer, then averaged
+    with equal weight regardless of text length.  This matches the aggregation
+    used by oe-eval (simple mean of per-doc ``bits_per_byte_corr``).
+    """
 
-    This byte-weighted approach means longer texts contribute proportionally more
-    to the final metric, matching the standard aggregate BPB calculation.
+    name: str = "bits_per_byte"
+    scorer: type[Scorer] = BitsPerByteScorer
 
-    For tasks with multiple continuations (e.g., multiple choice), this uses
-    the correct continuation via `instance.metadata["gold_idx"]`.
+    def compute(self, responses: Sequence[Response]) -> float:
+        if not responses:
+            return 0.0
+
+        scorer = self.scorer()
+        bpb_values: list[float] = []
+
+        for response in responses:
+            output = _select_gold_output(response)
+            if output is None:
+                continue
+            bpb_values.append(scorer.score(response.instance, output))
+
+        if not bpb_values:
+            return 0.0
+
+        return sum(bpb_values) / len(bpb_values)
+
+
+@dataclass(frozen=True, slots=True)
+class BPBMetricByteAvg(Metric):
+    """Byte-weighted (corpus-level) bits-per-byte.
+
+    Each instance's BPB is computed via the scorer, then weighted by its byte
+    count so that longer texts contribute proportionally more to the result.
+    Equivalent to ``-sum(logprobs) / (sum(bytes) * log(2))`` across the corpus.
     """
 
     name: str = "bits_per_byte"
@@ -146,28 +203,13 @@ class BPBMetric(Metric):
         total_bytes = 0
 
         for response in responses:
-            outputs = response.outputs
-            if not outputs:
-                continue
-
-            # Select gold output
-            if len(outputs) > 1:
-                gold_idx = response.instance.metadata.get("gold_idx")
-                if gold_idx is not None and 0 <= gold_idx < len(outputs):
-                    output = outputs[gold_idx]
-                else:
-                    output = outputs[0]
-            else:
-                output = outputs[0]
-
-            if output.logprobs is None:
+            output = _select_gold_output(response)
+            if output is None:
                 continue
 
             num_bytes = len(output.text.encode("utf-8")) if output.text else 0
             if num_bytes == 0:
                 continue
-
-            # Use scorer for BPB calculation
             bpb = scorer.score(response.instance, output)
             weighted_sum += bpb * num_bytes
             total_bytes += num_bytes
@@ -239,14 +281,22 @@ class PassAtKMetric(Metric):
             return 0.0
 
         scorer_name = self.scorer().name
+        score_key = f"score:{scorer_name}"
 
-        # Group by task ID
+        # Group per-output scores by task ID
         task_results: dict[str, list[float]] = {}
         for r in responses:
             task_id = r.instance.metadata.get("id", "unknown")
             if task_id not in task_results:
                 task_results[task_id] = []
-            task_results[task_id].append(r.scores.get(scorer_name, 0.0))
+            # Use per-output scores stored during scoring (one score per sample)
+            for output in r.outputs:
+                if output.metadata and score_key in output.metadata:
+                    task_results[task_id].append(output.metadata[score_key])
+                else:
+                    # Fallback: single-sample response, use response-level score
+                    task_results[task_id].append(r.scores.get(scorer_name, 0.0))
+                    break
 
         # Compute pass@k for each task
         pass_at_k_values = []
@@ -278,14 +328,22 @@ class PassPowKMetric(Metric):
             return 0.0
 
         scorer_name = self.scorer().name
+        score_key = f"score:{scorer_name}"
 
-        # Group by task ID
+        # Group per-output scores by task ID
         task_results: dict[str, list[float]] = {}
         for r in responses:
             task_id = r.instance.metadata.get("id", "unknown")
             if task_id not in task_results:
                 task_results[task_id] = []
-            task_results[task_id].append(r.scores.get(scorer_name, 0.0))
+            # Use per-output scores stored during scoring (one score per sample)
+            for output in r.outputs:
+                if output.metadata and score_key in output.metadata:
+                    task_results[task_id].append(output.metadata[score_key])
+                else:
+                    # Fallback: single-sample response, use response-level score
+                    task_results[task_id].append(r.scores.get(scorer_name, 0.0))
+                    break
 
         # Compute pass^k for each task
         pass_pow_k_values = []
@@ -324,6 +382,49 @@ class LogprobMCAccuracyMetric(Metric):
 
 
 @dataclass(frozen=True, slots=True)
+class LogprobUncondMCAccuracyMetric(Metric):
+    """Multiple-choice accuracy with unconditional normalization (acc_uncond).
+
+    Expects responses where the first half of outputs are conditioned (full
+    context) and the second half are unconditional (e.g. just "Answer:").
+    The number of actual choices is stored in ``instance.metadata["num_choices"]``.
+
+    For each choice *i*, computes::
+
+        score_i = sum_logprob_conditioned[i] - sum_logprob_unconditional[i]
+
+    Picks the choice with the highest score and checks whether it matches
+    ``instance.metadata["gold_idx"]``.
+
+    This matches the ``acc_uncond`` metric from oe-eval-internal's MCAccuracy.
+    """
+
+    name: str = "accuracy"
+    scorer: type[Scorer] = LogprobScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        if not responses:
+            return 0.0
+        correct = 0
+        for response in responses:
+            gold_idx = response.instance.metadata.get("gold_idx")
+            num_choices = response.instance.metadata.get("num_choices")
+            if gold_idx is None or num_choices is None or not response.outputs:
+                continue
+            outputs = response.outputs
+            cond_outputs = outputs[:num_choices]
+            uncond_outputs = outputs[num_choices:]
+            scores = []
+            for cond, uncond in zip(cond_outputs, uncond_outputs, strict=True):
+                cond_lp = sum(lp["logprob"] for lp in (cond.logprobs or []))
+                uncond_lp = sum(lp["logprob"] for lp in (uncond.logprobs or []))
+                scores.append(cond_lp - uncond_lp)
+            if scores.index(max(scores)) == gold_idx:
+                correct += 1
+        return correct / len(responses)
+
+
+@dataclass(frozen=True, slots=True)
 class LogprobPerCharMCAccuracyMetric(Metric):
     """Multiple-choice accuracy via character-length-normalized logprob argmax.
 
@@ -353,6 +454,39 @@ class LogprobPerCharMCAccuracyMetric(Metric):
                 num_chars = max(len(o.text) if o.text else 0, 1)
                 logprob_per_char.append(total_logprob / num_chars)
             if logprob_per_char.index(max(logprob_per_char)) == gold_idx:
+                correct += 1
+        return correct / len(responses)
+
+
+@dataclass(frozen=True, slots=True)
+class LogprobPerTokenMCAccuracyMetric(Metric):
+    """Multiple-choice accuracy via token-length-normalized logprob argmax.
+
+    For each continuation, divides the total logprob by the number of tokens,
+    then picks the continuation with the highest normalized logprob. Checks
+    whether its index matches ``instance.metadata["gold_idx"]``.
+
+    This matches the ``acc_per_token`` metric from oe-eval-internal's MCAccuracy.
+    """
+
+    name: str = "accuracy"
+    scorer: type[Scorer] = LogprobScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        if not responses:
+            return 0.0
+        scorer = self.scorer()
+        correct = 0
+        for response in responses:
+            gold_idx = response.instance.metadata.get("gold_idx")
+            if gold_idx is None or not response.outputs:
+                continue
+            logprob_per_token = []
+            for o in response.outputs:
+                total_logprob = scorer.score(response.instance, o)
+                num_tokens = max(len(o.logprobs) if o.logprobs else 0, 1)
+                logprob_per_token.append(total_logprob / num_tokens)
+            if logprob_per_token.index(max(logprob_per_token)) == gold_idx:
                 correct += 1
         return correct / len(responses)
 

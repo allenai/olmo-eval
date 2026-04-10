@@ -3,17 +3,18 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.formatters import MultipleChoiceFormatter
-from olmo_eval.common.metrics import LogprobMCAccuracyMetric
+from olmo_eval.common.formatters import MultipleChoiceFormatter, PPLFormatter
+from olmo_eval.common.metrics import (
+    BPBMetric,
+    LogprobMCAccuracyMetric,
+    LogprobPerCharMCAccuracyMetric,
+    LogprobUncondMCAccuracyMetric,
+)
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
-from olmo_eval.evals.tasks.common import Task, register, register_variant
-from olmo_eval.evals.tasks.common.format_helpers import (
-    format_mc as _format_mc,
-)
-from olmo_eval.evals.tasks.common.format_helpers import (
-    format_rc as _format_rc,
-)
+from olmo_eval.evals.tasks.common import Task, register, register_regime, register_variant
+from olmo_eval.evals.tasks.common.format_helpers import format_mc as _format_mc
+from olmo_eval.evals.tasks.common.format_helpers import format_rc as _format_rc
 from olmo_eval.evals.tasks.constants.arc import (
     ARC_CHALLENGE_FIXED_FEWSHOT,
     ARC_EASY_FIXED_FEWSHOT,
@@ -47,6 +48,7 @@ def _process_arc_doc(doc: dict[str, Any], index: int, dataset: str) -> Instance 
             "dataset": dataset,
             "gold_idx": gold_idx,
             "gold_text": gold_text,
+            "num_choices": len(choices),
         },
     )
 
@@ -113,9 +115,40 @@ class _ARCBase(Task):
             )
         return super()._build_fewshot()
 
-    def format_request(self, instance: Instance) -> LMRequest:
+    def _uses_uncond_metric(self) -> bool:
+        """Check if any configured metric requires unconditional normalization."""
+        return any(isinstance(m, LogprobUncondMCAccuracyMetric) for m in self.config.metrics)
+
+    def _is_bpb(self) -> bool:
+        return any(isinstance(m, BPBMetric) for m in self.config.metrics)
+
+    def _format_bpb_request(self, instance: Instance) -> LMRequest:
         fewshot = self.get_fewshot()
-        is_mc = self.config.formatter is not None
+        parts: list[str] = []
+        for ex in fewshot:
+            answer = ex.gold_answer or ex.metadata.get("gold_text", "")
+            parts.append(_format_rc(ex.question, answer))
+        parts.append(_format_rc(instance.question))
+        prompt = "\n\n".join(parts)
+
+        gold_idx = instance.metadata.get("gold_idx", 0)
+        gold_text = (
+            instance.choices[gold_idx]
+            if instance.choices and 0 <= gold_idx < len(instance.choices)
+            else instance.gold_answer
+        )
+        return LMRequest(
+            request_type=RequestType.LOGLIKELIHOOD,
+            prompt=prompt,
+            continuations=(f" {gold_text}",),
+        )
+
+    def format_request(self, instance: Instance) -> LMRequest:
+        if self._is_bpb():
+            return self._format_bpb_request(instance)
+
+        fewshot = self.get_fewshot()
+        is_mc = isinstance(self.config.formatter, MultipleChoiceFormatter)
 
         parts: list[str] = []
         for ex in fewshot:
@@ -136,6 +169,23 @@ class _ARCBase(Task):
             continuations = tuple(f" {c}" for c in (instance.choices or ()))
 
         prompt = "\n\n".join(parts)
+
+        # For unconditional normalization (acc_uncond), generate both conditioned
+        # and unconditional continuations using continuation_prompts.
+        if not is_mc and self._uses_uncond_metric():
+            uncond_prompt = "Answer:"
+            num_choices = len(continuations)
+            # Double continuations: first N conditioned, next N unconditional
+            all_continuations = continuations + continuations
+            # Per-continuation prompts: conditioned use full context, uncond use "Answer:"
+            all_cont_prompts = tuple([prompt] * num_choices + [uncond_prompt] * num_choices)
+            return LMRequest(
+                request_type=RequestType.LOGLIKELIHOOD,
+                prompt=prompt,
+                continuations=all_continuations,
+                continuation_prompts=all_cont_prompts,
+            )
+
         return LMRequest(
             request_type=RequestType.LOGLIKELIHOOD,
             prompt=prompt,
@@ -163,16 +213,47 @@ class ARCChallenge(_ARCBase):
 
 register_variant("arc_easy", "rc")
 register_variant("arc_easy", "mc", formatter=MultipleChoiceFormatter())
+register_variant("arc_easy", "bpb", formatter=PPLFormatter(), metrics=(BPBMetric(),))
 register_variant(
-    "arc_easy", "olmo3base", num_fewshot=5, fewshot_source="olmes_arc_easy_fixed", split=Split.ALL
+    "arc_easy",
+    "olmo3base",
+    num_fewshot=5,
+    fewshot_source="olmes_arc_easy_fixed",
+    split=Split.ALL,
+    metrics=(LogprobPerCharMCAccuracyMetric(),),
 )
+register_regime(
+    "arc_easy",
+    "olmo3base",
+    num_fewshot=5,
+    fewshot_source="olmes_arc_easy_fixed",
+    split=Split.ALL,
+)
+register_variant("arc_easy", "olmes", num_fewshot=5, fewshot_source="olmes_arc_easy_fixed")
+register_variant("arc_easy", "full")
 
 register_variant("arc_challenge", "rc")
 register_variant("arc_challenge", "mc", formatter=MultipleChoiceFormatter())
+register_variant("arc_challenge", "bpb", formatter=PPLFormatter(), metrics=(BPBMetric(),))
 register_variant(
     "arc_challenge",
     "olmo3base",
     num_fewshot=5,
     fewshot_source="olmes_arc_challenge_fixed",
     split=Split.ALL,
+    metrics=(LogprobUncondMCAccuracyMetric(),),
 )
+register_regime(
+    "arc_challenge",
+    "olmo3base",
+    num_fewshot=5,
+    fewshot_source="olmes_arc_challenge_fixed",
+    split=Split.ALL,
+)
+register_variant(
+    "arc_challenge",
+    "olmes",
+    num_fewshot=5,
+    fewshot_source="olmes_arc_challenge_fixed",
+)
+register_variant("arc_challenge", "full")

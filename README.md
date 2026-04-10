@@ -612,7 +612,7 @@ class MMLUPhysics(MMLUTask):
 from olmo_eval.evals.tasks.common import register_variant
 
 # Register after task is defined
-register_variant("my_task", "bpb", formatter=PPLFormatter(), metrics=(BPBMetric(scorer=BitsPerByteScorer),))
+register_variant("my_task", "bpb", formatter=PPLFormatter(), metrics=(BPBMetricByteAvg(scorer=BitsPerByteScorer),))
 ```
 
 **Regimes** are configuration presets (e.g., `:olmes`, `:zero`):

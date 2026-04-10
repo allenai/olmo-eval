@@ -82,7 +82,6 @@ class RunnerResultsMixin:
         from olmo_eval.common.configs import expand_tasks, validate_task_metrics
         from olmo_eval.evals.suites import suite_exists
         from olmo_eval.evals.tasks.common import list_regimes, list_tasks, list_variants
-        from olmo_eval.evals.tasks.common.registry import parse_task_spec
 
         errors: list[str] = []
         available_tasks = set(list_tasks())
@@ -94,9 +93,18 @@ class RunnerResultsMixin:
                 continue
 
             # Parse task_name[:variant1[:variant2...]] format
-            task_name, variants, _overrides = parse_task_spec(spec)
+            # Try progressively shorter prefixes to handle tasks with colons in names
+            parts = spec.split(":")
+            task_name = None
+            variants: list[str] = []
+            for i in range(len(parts), 0, -1):
+                candidate = ":".join(parts[:i])
+                if candidate in available_tasks:
+                    task_name = candidate
+                    variants = [v for v in parts[i:] if v]
+                    break
 
-            if task_name not in available_tasks:
+            if task_name is None:
                 errors.append(f"Unknown task or suite: '{spec}'")
                 continue
 

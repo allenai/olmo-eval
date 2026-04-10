@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter
-from olmo_eval.common.metrics import LogprobMCAccuracyMetric
+from olmo_eval.common.metrics import BPBMetric, LogprobPerCharMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -20,7 +20,7 @@ from olmo_eval.evals.tasks.common.format_helpers import (
 class MedQAEn(Task):
     data_source = DataSource(path="davidheineman/medqa-en", split="test")
     split = Split.TEST
-    metrics = (LogprobMCAccuracyMetric(),)
+    metrics = (LogprobPerCharMCAccuracyMetric(),)
     sampling_params = SamplingParams(temperature=0.0)
     fewshot_split = "train"
 
@@ -90,4 +90,5 @@ class MedQAEn(Task):
 
 register_variant("medqa_en", "rc")
 register_variant("medqa_en", "mc", formatter=MultipleChoiceFormatter())
-register_variant("medqa_en", "olmo3base", num_fewshot=5)
+register_variant("medqa_en", "bpb", metrics=(BPBMetric(),))
+register_variant("medqa_en", "olmo3base", num_fewshot=5, fewshot_seed=1234)

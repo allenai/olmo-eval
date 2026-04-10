@@ -7,12 +7,19 @@ from dataclasses import dataclass
 from itertools import permutations
 from typing import Any
 
-from olmo_eval.common.metrics import AccuracyMetric, F1Metric
+from olmo_eval.common.formatters import MultipleChoiceFormatter, PPLFormatter
+from olmo_eval.common.metrics import (
+    AccuracyMetric,
+    BPBMetric,
+    F1Metric,
+    LogprobMCAccuracyMetric,
+    LogprobPerCharMCAccuracyMetric,
+)
 from olmo_eval.common.scorers import Scorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
-from olmo_eval.evals.tasks.constants.drop import DROP_FIXED_FEWSHOT
+from olmo_eval.evals.tasks.constants.drop import DROP_FIXED_FEWSHOT, DROP_MC_FIXED_FEWSHOT
 
 _ARTICLES_RE = re.compile(r"\b(a|an|the)\b", re.UNICODE)
 
@@ -200,6 +207,23 @@ def _parse_answer(answer: dict[str, Any]) -> tuple[str, ...]:
     )
 
 
+def _format_drop_mc(
+    passage: str, question: str, choices: tuple[str, ...], answer: str | None = None
+) -> str:
+    choices_text = "\n".join(f" {chr(ord('A') + i)}. {c}" for i, c in enumerate(choices))
+    prompt = f"Passage: {passage}\nQuestion: {question}\n{choices_text}\nAnswer:"
+    if answer:
+        prompt += f" {answer}"
+    return prompt
+
+
+def _format_drop_rc(passage: str, question: str, answer: str | None = None) -> str:
+    prompt = f"Passage: {passage}\nQuestion: {question}\nAnswer:"
+    if answer:
+        prompt += f" {answer}"
+    return prompt
+
+
 def _get_answers(doc: dict[str, Any]) -> list[tuple[str, ...]]:
     def _flatten_validated_answers(validated_answers: dict[str, Any]) -> list[dict[str, Any]]:
         valid_answers = []
@@ -246,6 +270,29 @@ class Drop(Task):
         yield from self._load_instances_cached(split="validation")
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
+        is_mc = "passage_original" in doc
+
+        if is_mc:
+            passage = doc["passage_original"].strip()
+            question = doc["question_original"]
+            choices = tuple(doc["choices"]["text"])
+            answer_key = doc["answerKey"]
+            gold_idx = ord(answer_key) - ord("A")
+            gold_text = choices[gold_idx] if 0 <= gold_idx < len(choices) else ""
+
+            return Instance(
+                question=question,
+                choices=choices,
+                gold_answer=answer_key,
+                metadata={
+                    "id": doc.get("id", f"drop_mc_{index}"),
+                    "index": index,
+                    "gold_idx": gold_idx,
+                    "gold_text": gold_text,
+                    "passage": passage,
+                },
+            )
+
         passage = doc["passage"]
         question = doc["question"]
         answers = _get_answers(doc)
@@ -266,7 +313,40 @@ class Drop(Task):
     def _build_fewshot(self) -> list[Instance]:
         if self.config.fewshot_source == "olmes_drop_fixed":
             return self._build_fixed_fewshot()
+        if self.config.fewshot_source == "olmes_drop_mc_fixed":
+            return self._build_mc_fixed_fewshot()
         return super()._build_fewshot()
+
+    def _build_mc_fixed_fewshot(self) -> list[Instance]:
+        instances = []
+        for doc in DROP_MC_FIXED_FEWSHOT:
+            passage = str(doc["passage_original"]).strip()
+            question = str(doc["question_original"])
+            choices_data = doc["choices"]
+            assert isinstance(choices_data, dict)
+            choices = tuple(choices_data["text"])
+            answer_key = str(doc["answerKey"])
+            gold_idx = ord(answer_key) - ord("A")
+            gold_text = choices[gold_idx] if 0 <= gold_idx < len(choices) else ""
+
+            instances.append(
+                Instance(
+                    question=question,
+                    choices=choices,
+                    gold_answer=gold_text,
+                    metadata={
+                        "gold_idx": gold_idx,
+                        "gold_text": gold_text,
+                        "mc_answer": answer_key,
+                        "passage": passage,
+                    },
+                )
+            )
+
+        num = self.config.num_fewshot
+        if num and num < len(instances):
+            instances = instances[:num]
+        return instances
 
     def _build_fixed_fewshot(self) -> list[Instance]:
         instances = []
@@ -289,8 +369,29 @@ class Drop(Task):
 
     def format_request(self, instance: Instance) -> LMRequest:
         fewshot = self.get_fewshot()
+        is_mc = self.config.formatter is not None
 
-        parts: list[str] = []
+        if is_mc:
+            parts: list[str] = []
+            for ex in fewshot:
+                answer = ex.metadata.get("mc_answer", "")
+                passage = ex.metadata.get("passage", "")
+                parts.append(_format_drop_mc(passage, ex.question, ex.choices or (), answer))
+
+            passage = instance.metadata.get("passage", "")
+            parts.append(_format_drop_mc(passage, instance.question, instance.choices or ()))
+
+            continuations = tuple(
+                f" {chr(ord('A') + i)}" for i in range(len(instance.choices or ()))
+            )
+            prompt = "\n\n".join(parts)
+            return LMRequest(
+                request_type=RequestType.LOGLIKELIHOOD,
+                prompt=prompt,
+                continuations=continuations,
+            )
+
+        parts = []
         for ex in fewshot:
             parts.append(ex.question + (ex.gold_answer or ""))
         parts.append(instance.question)
@@ -308,7 +409,126 @@ class Drop(Task):
 register_variant("drop", "gen")
 register_variant(
     "drop",
+    "mc",
+    data_source=DataSource(path="allenai/drop_mc", split="validation"),
+    formatter=MultipleChoiceFormatter(),
+    metrics=(LogprobMCAccuracyMetric(),),
+    primary_metric=LogprobMCAccuracyMetric(),
+)
+register_variant(
+    "drop",
     "olmo3base",
     num_fewshot=5,
     fewshot_source="olmes_drop_fixed",
 )
+
+
+@register("drop:rc")
+class DropRC(Drop):
+    data_source = DataSource(path="allenai/drop_mc", split="validation")
+    split = Split.VALIDATION
+    metrics = (LogprobPerCharMCAccuracyMetric(),)
+    primary_metric = LogprobPerCharMCAccuracyMetric()
+    num_fewshot = 5
+    fewshot_source = "olmes_drop_mc_fixed"
+
+    def format_request(self, instance: Instance) -> LMRequest:
+        fewshot = self.get_fewshot()
+
+        parts: list[str] = []
+        for ex in fewshot:
+            answer = ex.gold_answer or ex.metadata.get("gold_text", "")
+            passage = ex.metadata.get("passage", "")
+            parts.append(_format_drop_rc(passage, ex.question, answer))
+
+        passage = instance.metadata.get("passage", "")
+        parts.append(_format_drop_rc(passage, instance.question))
+        continuations = tuple(f" {c}" for c in (instance.choices or ()))
+
+        prompt = "\n\n".join(parts)
+        return LMRequest(
+            request_type=RequestType.LOGLIKELIHOOD,
+            prompt=prompt,
+            continuations=continuations,
+        )
+
+
+register_variant("drop:rc", "olmo3base")
+
+
+@register("drop:bpb")
+class DropBPB(Drop):
+    data_source = DataSource(path="allenai/drop_mc", split="validation")
+    split = Split.VALIDATION
+    formatter = PPLFormatter()
+    metrics = (BPBMetric(),)
+    primary_metric = BPBMetric()
+    num_fewshot = 5
+    fewshot_source = "olmes_drop_mc_fixed"
+
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
+        passage = doc["passage_original"].strip()
+        question = doc["question_original"]
+        choices = tuple(doc["choices"]["text"])
+        answer_key = doc["answerKey"]
+        gold_idx = ord(answer_key) - ord("A")
+        gold_text = choices[gold_idx] if 0 <= gold_idx < len(choices) else ""
+
+        formatted_question = f"Passage: {passage}\nQuestion: {question}\nAnswer:"
+
+        return Instance(
+            question=formatted_question,
+            choices=choices,
+            gold_answer=" " + gold_text,
+            metadata={
+                "id": doc.get("id", f"drop_mc_{index}"),
+                "index": index,
+                "gold_idx": gold_idx,
+                "gold_text": gold_text,
+                "passage": passage,
+            },
+        )
+
+    def _build_fewshot(self) -> list[Instance]:
+        if self.config.fewshot_source == "olmes_drop_mc_fixed":
+            return self._build_bpb_fixed_fewshot()
+        return super()._build_fewshot()
+
+    def _build_bpb_fixed_fewshot(self) -> list[Instance]:
+        instances = []
+        for doc in DROP_MC_FIXED_FEWSHOT:
+            passage = str(doc["passage_original"]).strip()
+            question = str(doc["question_original"])
+            choices_data = doc["choices"]
+            assert isinstance(choices_data, dict)
+            choices = tuple(choices_data["text"])
+            answer_key = str(doc["answerKey"])
+            gold_idx = ord(answer_key) - ord("A")
+            gold_text = choices[gold_idx] if 0 <= gold_idx < len(choices) else ""
+
+            formatted_question = f"Passage: {passage}\nQuestion: {question}\nAnswer:"
+
+            instances.append(
+                Instance(
+                    question=formatted_question,
+                    choices=choices,
+                    gold_answer=" " + gold_text,
+                    metadata={
+                        "gold_idx": gold_idx,
+                        "gold_text": gold_text,
+                        "passage": passage,
+                    },
+                )
+            )
+
+        num = self.config.num_fewshot
+        if num and num < len(instances):
+            instances = instances[:num]
+        return instances
+
+    def format_request(self, instance: Instance) -> LMRequest:
+        assert self.config.formatter is not None
+        return self.config.formatter.format(instance, self.get_fewshot())
+
+
+register_variant("drop:bpb", "olmo3base")

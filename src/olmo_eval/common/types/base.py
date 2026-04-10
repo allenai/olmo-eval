@@ -138,6 +138,7 @@ class LMRequest:
     messages: tuple[dict[str, Any], ...] = ()
     prompt: str = ""
     continuations: tuple[str, ...] | None = None
+    continuation_prompts: tuple[str, ...] | None = None
     tools: tuple[ToolSchema, ...] | None = None
     system_prompt: str | None = None
 

@@ -73,9 +73,21 @@ def get_model_presets() -> dict[str, ProviderConfig]:
         #         "git+https://github.com/deepseek-ai/DeepGEMM.git@v2.1.1.post3 --no-build-isolation",
         #     ),
         # ),
+        "deepseek-r1-distill-8b": ProviderConfig(
+            kind=ProviderKind.VLLM,
+            model="deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
+            max_model_len=32768,
+        ),
         "mistral-7b": ProviderConfig(
             kind=ProviderKind.VLLM,
             model="mistralai/Mistral-7B-v0.3",
+        ),
+        "o3-mini-2025-01-31-medium": ProviderConfig(
+            kind=ProviderKind.LITELLM,
+            model="openai/o3-mini-2025-01-31",
+            api_base="https://api.openai.com/v1",
+            required_secrets=("OPENAI_API_KEY",),
+            kwargs={"reasoning_effort": "medium", "drop_params": True},
         ),
         "gpt-4o": ProviderConfig(
             kind=ProviderKind.LITELLM,
