@@ -9,11 +9,19 @@ Design rules for the ``science:*`` hierarchy:
 3. Prefer subject-sliced GPQA tasks inside the hierarchy so biology, chemistry,
    and physics live in separate domain suites without also including the
    full-subset GPQA tasks.
+4. Provide an execution-oriented split between judge-free and judge-dependent
+   tasks so large science runs can be staged in two passes.
 
 The legacy ``gpqa`` / ``gpqa:mc`` / ``gpqa:bpb`` suites are retained as
 convenience entry points, but they are intentionally not nested under
 ``science:all`` because they would duplicate the GPQA questions already
 allocated to domain-specific suites.
+
+Execution guidance:
+- Use ``science:nojudge`` for the main science stack when you want to avoid
+  external LLM-as-judge dependencies.
+- Use ``science:judge`` for the judge-dependent science tasks.
+- Use ``science:all`` only when you want both together as a single umbrella.
 """
 
 import olmo_eval.evals.suites.astabench  # noqa: F401 - ensure suite registration
@@ -82,6 +90,8 @@ GPQA_BPB = make_suite(
 #   does not include ``medqa`` because it points at the same benchmark family as
 #   ``medqa_en`` and would double-weight that content.
 # - science:research groups scientific literature / evidence-use tasks.
+# - science:nojudge / science:judge are execution helpers for running the full
+#   science stack in two stages.
 # - science:math groups mathematical reasoning tasks used in science-adjacent
 #   evaluation.
 
@@ -155,15 +165,33 @@ SCIENCE_MATH = make_suite(
     description="Mathematical reasoning for science-oriented model evaluation.",
 )
 
-SCIENCE_ALL = make_suite(
-    "science:all",
+SCIENCE_NOJUDGE = make_suite(
+    "science:nojudge",
     (
         SCIENCE_CORE,
         SCIENCE_BIOLOGY,
         SCIENCE_MEDICINE,
         SCIENCE_PHYSICAL,
-        SCIENCE_RESEARCH,
+        "qasper_yesno",
+        "sciriff_yesno",
         SCIENCE_MATH,
+    ),
+    aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+    description="All current science tasks that do not require external LLM judges.",
+)
+
+SCIENCE_JUDGE = make_suite(
+    "science:judge",
+    (get_suite("astabench"),),
+    aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+    description="Current science tasks that require external LLM-as-judge scoring.",
+)
+
+SCIENCE_ALL = make_suite(
+    "science:all",
+    (
+        SCIENCE_NOJUDGE,
+        SCIENCE_JUDGE,
     ),
     aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
     description="Non-overlapping umbrella suite covering all current science tasks exactly once.",

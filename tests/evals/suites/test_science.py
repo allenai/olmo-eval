@@ -13,6 +13,8 @@ def test_science_suites_are_registered():
         "science:physical",
         "science:research",
         "science:math",
+        "science:nojudge",
+        "science:judge",
         "science:all",
     )
     for name in expected:
@@ -56,3 +58,15 @@ def test_science_research_contains_literature_tasks():
     assert "qasper_yesno" in expanded
     assert "sciriff_yesno" in expanded
     assert "astabench_scholarqa" in expanded
+
+
+def test_science_nojudge_excludes_judge_task():
+    expanded = get_suite("science:nojudge").expand()
+    assert "qasper_yesno" in expanded
+    assert "sciriff_yesno" in expanded
+    assert "astabench_scholarqa" not in expanded
+
+
+def test_science_judge_contains_only_judge_task():
+    expanded = get_suite("science:judge").expand()
+    assert expanded == ("astabench_scholarqa",)
