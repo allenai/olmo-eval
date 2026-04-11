@@ -272,19 +272,43 @@ class SandboxManager:
         command: str,
         timeout: float | None = None,
         capabilities: frozenset[str] | None = None,
+        max_retries: int = 2,
     ) -> ExecutionResult:
         """Execute a command and return structured result.
+
+        Retries on connection errors using a different executor each time via
+        round-robin selection, so transient sandbox failures are tolerated.
 
         Args:
             command: The command to execute.
             timeout: Optional timeout override in seconds.
             capabilities: Optional required capabilities. If None, uses any executor.
+            max_retries: Number of retries on connection errors (default 2, so 3 total attempts).
 
         Returns:
             ExecutionResult with success status, output, and exit code.
         """
-        executor = self.get_executor(capabilities or frozenset())
-        return await executor.execute_command(command, timeout)
+        caps = capabilities or frozenset()
+        last_error: Exception | None = None
+        for attempt in range(max_retries + 1):
+            executor = self.get_executor(caps)
+            try:
+                return await executor.execute_command(command, timeout)
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries:
+                    self._logger.warning(
+                        f"Sandbox execution failed (attempt {attempt + 1}/{max_retries + 1}), "
+                        f"retrying with different executor: {e}"
+                    )
+                    await asyncio.sleep(0.5)
+
+        return ExecutionResult(
+            success=False,
+            output="",
+            exit_code=-1,
+            error=f"All {max_retries + 1} sandbox attempts failed: {last_error}",
+        )
 
     async def execute_code(
         self,
