@@ -83,6 +83,8 @@ class SandboxManager:
         self._round_robin_indices: dict[frozenset[str], int] = {}
         self._bindings: dict[str, ExecutorBinding] = {}
         self._bound_executors: set[int] = set()
+        self._unhealthy_executors: set[int] = set()
+        self._executor_consecutive_failures: dict[int, int] = {}
         self._binding_lock: asyncio.Lock = asyncio.Lock()
         self._binding_counter: int = 0
         self._modal_app_name: str | None = None
@@ -217,7 +219,7 @@ class SandboxManager:
     def get_executor(self, required_capabilities: frozenset[str]) -> SandboxExecutor:
         """Get an executor that supports the required capabilities.
 
-        Uses round-robin selection among matching executors.
+        Uses round-robin selection among matching executors, preferring healthy ones.
 
         Args:
             required_capabilities: Set of capabilities the executor must support.
@@ -240,13 +242,17 @@ class SandboxManager:
                 f"No sandbox supports capabilities {required_capabilities}. Available: {available}"
             )
 
+        # Prefer healthy executors
+        healthy = [(i, e) for i, e in matching if i not in self._unhealthy_executors]
+        pool = healthy if healthy else matching  # fall back to all if none healthy
+
         # Round-robin selection
         key = required_capabilities
         idx = self._round_robin_indices.get(key, 0)
-        selected_idx = idx % len(matching)
+        selected_idx = idx % len(pool)
         self._round_robin_indices[key] = idx + 1
 
-        return matching[selected_idx][1]
+        return pool[selected_idx][1]
 
     async def execute(
         self,
@@ -292,14 +298,24 @@ class SandboxManager:
         last_error: Exception | None = None
         for attempt in range(max_retries + 1):
             executor = self.get_executor(caps)
+            executor_idx = self._executors.index(executor)
             try:
-                return await executor.execute_command(command, timeout)
+                result = await executor.execute_command(command, timeout)
+                # Success - mark executor healthy and reset failure count
+                self._unhealthy_executors.discard(executor_idx)
+                self._executor_consecutive_failures[executor_idx] = 0
+                return result
             except Exception as e:
                 last_error = e
+                # Track consecutive failures per executor
+                fails = self._executor_consecutive_failures.get(executor_idx, 0) + 1
+                self._executor_consecutive_failures[executor_idx] = fails
+                if fails >= 3:
+                    self._unhealthy_executors.add(executor_idx)
                 if attempt < max_retries:
                     self._logger.warning(
-                        f"Sandbox execution failed (attempt {attempt + 1}/{max_retries + 1}), "
-                        f"retrying with different executor: {e}"
+                        f"Sandbox {executor_idx} failed (attempt {attempt + 1}/{max_retries + 1}, "
+                        f"consecutive={fails}), retrying: {e}"
                     )
                     await asyncio.sleep(0.5)
 
