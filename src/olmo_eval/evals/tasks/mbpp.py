@@ -372,18 +372,64 @@ class MBPPOlmo3Base(MBPPBase):
             },
         )
 
-    def _build_fewshot(self) -> list[Instance]:
-        """Build few-shot examples matching oe-eval-internal order.
+    # Legacy fewshot examples from oe-eval-internal's ``Original:MBPP`` source.
+    # The hardcoded source has single-line code (all on one line) and a specific
+    # ordering (task_id=2 first).  The HF ``prompt`` split has multi-line code
+    # with ``\r\n`` endings, which changes the prompt the model sees and breaks
+    # score parity.  We hardcode the legacy data to guarantee identical prompts.
+    _LEGACY_FEWSHOT: tuple[dict[str, Any], ...] = (
+        {
+            "text": "Write a function to find the similar elements from the given two tuple lists.",
+            "code": "def similar_elements(test_tup1, test_tup2): res = tuple(set(test_tup1) & set(test_tup2)) return (res)",
+            "test_list": [
+                "assert similar_elements((3, 4, 5, 6),(5, 7, 4, 10)) == (4, 5)",
+                "assert similar_elements((1, 2, 3, 4),(5, 4, 3, 7)) == (3, 4)",
+                "assert similar_elements((11, 12, 14, 13),(17, 15, 14, 13)) == (13, 14)",
+            ],
+            "task_id": 2,
+            "test_setup_code": "",
+        },
+        {
+            "text": "Write a python function to identify non-prime numbers.",
+            "code": "import math def is_not_prime(n): result = False for i in range(2,int(math.sqrt(n)) + 1): if n % i == 0: result = True return result",
+            "test_list": [
+                "assert is_not_prime(2) == False",
+                "assert is_not_prime(10) == True",
+                "assert is_not_prime(35) == True",
+            ],
+            "task_id": 3,
+            "test_setup_code": "",
+        },
+        {
+            "text": "Write a function to find the largest integers from a given list of numbers using heap queue algorithm.",
+            "code": "import heapq as hq def heap_queue_largest(nums,n): largest_nums = hq.nlargest(n, nums) return largest_nums",
+            "test_list": [
+                "assert heap_queue_largest( [25, 35, 22, 85, 14, 65, 75, 22, 58],3)==[85, 75, 65] ",
+                "assert heap_queue_largest( [25, 35, 22, 85, 14, 65, 75, 22, 58],2)==[85, 75] ",
+                "assert heap_queue_largest( [25, 35, 22, 85, 14, 65, 75, 22, 58],5)==[85, 75, 65, 58, 35]",
+            ],
+            "task_id": 4,
+            "test_setup_code": "",
+        },
+    )
 
-        The legacy hardcoded ``Original:MBPP`` source orders the 10 prompt-split
-        examples starting from task_id=2 (task_id=1 is placed last).  The HF
-        ``prompt`` split is ordered 1..10.  We replicate the legacy order by
-        rotating the first element (task_id=1) to the end and returning the
-        first ``num_fewshot`` examples *without* shuffling.
+    def _build_fewshot(self) -> list[Instance]:
+        """Build few-shot examples matching oe-eval-internal exactly.
+
+        Uses the hardcoded legacy fewshot data (``Original:MBPP`` source) with
+        single-line code to produce identical prompts to oe-eval-internal.
+        Falls back to HF data if more examples are needed than hardcoded.
         """
         if self.config.num_fewshot == 0:
             return []
 
+        # Use hardcoded legacy data when possible
+        if self.config.num_fewshot <= len(self._LEGACY_FEWSHOT):
+            return [
+                self.process_doc(doc) for doc in self._LEGACY_FEWSHOT[: self.config.num_fewshot]
+            ]
+
+        # Fallback for > 3 fewshot: load from HF and strip \r
         from olmo_eval.data import DataLoader
 
         loader = DataLoader()
