@@ -522,6 +522,8 @@ register_variant(
 # Parity variant matching oe-eval-internal's mbpp:3shot::olmo3:n32:v2 exactly.
 # Uses EvalPlus prompt format, 3-shot from "prompt" split in legacy order,
 # max_tokens=512, and pass@k metrics with 32 samples.
+# Timeout=3.0 matches oe-eval-internal's code_eval_local default.
+_olmo3base_scorer = CodeExecutionScorer(timeout=3.0)
 register_variant(
     "mbpp_olmo3base",
     "olmo3base",
@@ -536,11 +538,11 @@ register_variant(
         stop_sequences=OLMO3_MBPP_STOP_SEQUENCES,
     ),
     metrics=(
-        PassAtKMetric(k=1, scorer=CodeExecutionScorer),
-        PassAtKMetric(k=2, scorer=CodeExecutionScorer),
-        PassAtKMetric(k=4, scorer=CodeExecutionScorer),
-        PassAtKMetric(k=8, scorer=CodeExecutionScorer),
-        PassAtKMetric(k=16, scorer=CodeExecutionScorer),
+        PassAtKMetric(k=1, scorer=_olmo3base_scorer),
+        PassAtKMetric(k=2, scorer=_olmo3base_scorer),
+        PassAtKMetric(k=4, scorer=_olmo3base_scorer),
+        PassAtKMetric(k=8, scorer=_olmo3base_scorer),
+        PassAtKMetric(k=16, scorer=_olmo3base_scorer),
     ),
 )
 
