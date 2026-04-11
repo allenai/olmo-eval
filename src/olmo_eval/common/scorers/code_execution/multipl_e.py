@@ -86,7 +86,14 @@ class MultiplEScorer(ExecutionScorer):
         return 1.0 if result.success else 0.0
 
     async def _execute_with_evaluator(self, env: ExecutionEnvironment, code: str) -> EvalResult:
-        """Execute code using the language-specific evaluator."""
+        """Execute code using the language-specific evaluator.
+
+        Retries up to 3 times on transient sandbox errors (e.g., connection
+        timeouts to the Docker container). Non-transient failures like
+        compilation errors or test assertion failures are returned immediately.
+        """
+        import asyncio
+
         try:
             evaluator = get_evaluator(self.language)
         except ValueError as e:
@@ -99,31 +106,39 @@ class MultiplEScorer(ExecutionScorer):
         # Use explicit timeout if set, otherwise use language default
         timeout = self.timeout if self.timeout is not None else evaluator.DEFAULT_TIMEOUT
 
-        # Use a unique temp directory per execution to avoid conflicts with parallel runs
-        tmp_dir = f"/tmp/{uuid.uuid4().hex}"
+        max_retries = 3
+        last_error: Exception | None = None
 
-        # Build the evaluation command
-        cmd = evaluator.build_eval_command(tmp_dir, code)
+        for attempt in range(max_retries):
+            # Use a unique temp directory per execution to avoid conflicts with parallel runs
+            tmp_dir = f"/tmp/{uuid.uuid4().hex}"
 
-        try:
-            exec_result: ExecutionResult = await env.execute_command(cmd, timeout=timeout)
+            # Build the evaluation command
+            cmd = evaluator.build_eval_command(tmp_dir, code)
 
-            # Determine if execution timed out
-            timed_out = (
-                exec_result.error == "timeout"
-                or "timed out" in (exec_result.error or "").lower()
-                or "timed out" in (exec_result.output or "").lower()
-            )
+            try:
+                exec_result: ExecutionResult = await env.execute_command(cmd, timeout=timeout)
 
-            return evaluator.categorize_result(
-                exit_code=exec_result.exit_code,
-                stdout=exec_result.output or "",
-                stderr="",  # Our shell command combines stderr into stdout
-                timed_out=timed_out,
-            )
-        except Exception as e:
-            return EvalResult(
-                status=ExecutionStatus.ERROR,
-                exit_code=-1,
-                stderr=str(e),
-            )
+                # Determine if execution timed out
+                timed_out = (
+                    exec_result.error == "timeout"
+                    or "timed out" in (exec_result.error or "").lower()
+                    or "timed out" in (exec_result.output or "").lower()
+                )
+
+                return evaluator.categorize_result(
+                    exit_code=exec_result.exit_code,
+                    stdout=exec_result.output or "",
+                    stderr="",  # Our shell command combines stderr into stdout
+                    timed_out=timed_out,
+                )
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1.0 * (attempt + 1))
+
+        return EvalResult(
+            status=ExecutionStatus.ERROR,
+            exit_code=-1,
+            stderr=str(last_error),
+        )
