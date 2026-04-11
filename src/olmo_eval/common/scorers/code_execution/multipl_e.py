@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -85,8 +87,15 @@ class MultiplEScorer(ExecutionScorer):
 
         return 1.0 if result.success else 0.0
 
-    async def _execute_with_evaluator(self, env: ExecutionEnvironment, code: str) -> EvalResult:
-        """Execute code using the language-specific evaluator."""
+    async def _execute_with_evaluator(
+        self, env: ExecutionEnvironment, code: str, max_retries: int = 2
+    ) -> EvalResult:
+        """Execute code using the language-specific evaluator.
+
+        Retries on connection errors (e.g., sandbox unreachable) up to max_retries times.
+        """
+        logger = logging.getLogger(__name__)
+
         try:
             evaluator = get_evaluator(self.language)
         except ValueError as e:
@@ -99,31 +108,58 @@ class MultiplEScorer(ExecutionScorer):
         # Use explicit timeout if set, otherwise use language default
         timeout = self.timeout if self.timeout is not None else evaluator.DEFAULT_TIMEOUT
 
-        # Use a unique temp directory per execution to avoid conflicts with parallel runs
-        tmp_dir = f"/tmp/{uuid.uuid4().hex}"
+        last_error: str = ""
+        for attempt in range(max_retries + 1):
+            # Use a unique temp directory per execution to avoid conflicts
+            tmp_dir = f"/tmp/{uuid.uuid4().hex}"
+            cmd = evaluator.build_eval_command(tmp_dir, code)
 
-        # Build the evaluation command
-        cmd = evaluator.build_eval_command(tmp_dir, code)
+            try:
+                exec_result: ExecutionResult = await env.execute_command(cmd, timeout=timeout)
 
-        try:
-            exec_result: ExecutionResult = await env.execute_command(cmd, timeout=timeout)
+                # Check for connection errors in the result (sandbox returned error)
+                if exec_result.error and "connection" in exec_result.error.lower():
+                    last_error = exec_result.error
+                    if attempt < max_retries:
+                        logger.warning(
+                            f"Sandbox connection error (attempt {attempt + 1}/{max_retries + 1}): "
+                            f"{exec_result.error}"
+                        )
+                        await asyncio.sleep(0.5)
+                        continue
 
-            # Determine if execution timed out
-            timed_out = (
-                exec_result.error == "timeout"
-                or "timed out" in (exec_result.error or "").lower()
-                or "timed out" in (exec_result.output or "").lower()
-            )
+                # Determine if execution timed out
+                timed_out = (
+                    exec_result.error == "timeout"
+                    or "timed out" in (exec_result.error or "").lower()
+                    or "timed out" in (exec_result.output or "").lower()
+                )
 
-            return evaluator.categorize_result(
-                exit_code=exec_result.exit_code,
-                stdout=exec_result.output or "",
-                stderr="",  # Our shell command combines stderr into stdout
-                timed_out=timed_out,
-            )
-        except Exception as e:
-            return EvalResult(
-                status=ExecutionStatus.ERROR,
-                exit_code=-1,
-                stderr=str(e),
-            )
+                return evaluator.categorize_result(
+                    exit_code=exec_result.exit_code,
+                    stdout=exec_result.output or "",
+                    stderr="",  # Our shell command combines stderr into stdout
+                    timed_out=timed_out,
+                )
+            except Exception as e:
+                err_str = str(e)
+                # Retry on connection errors
+                if "connection" in err_str.lower() or "timeout" in err_str.lower():
+                    last_error = err_str
+                    if attempt < max_retries:
+                        logger.warning(
+                            f"Sandbox exception (attempt {attempt + 1}/{max_retries + 1}): {e}"
+                        )
+                        await asyncio.sleep(0.5)
+                        continue
+                return EvalResult(
+                    status=ExecutionStatus.ERROR,
+                    exit_code=-1,
+                    stderr=err_str,
+                )
+
+        return EvalResult(
+            status=ExecutionStatus.ERROR,
+            exit_code=-1,
+            stderr=f"All {max_retries + 1} attempts failed: {last_error}",
+        )
