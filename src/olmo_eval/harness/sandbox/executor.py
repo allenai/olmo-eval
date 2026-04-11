@@ -434,8 +434,20 @@ class SandboxExecutor:
                 )
             )
         except Exception as e:
-            # Check for timeout errors (swerex.exceptions.CommandTimeoutError)
-            if "CommandTimeoutError" in type(e).__name__ or "timed out" in str(e).lower():
+            err_str = str(e).lower()
+            type_name = type(e).__name__
+
+            # Connection errors (sandbox unreachable) - should be retried
+            if "connection" in err_str or "ClientConnectorError" in type_name:
+                return ExecutionResult(
+                    success=False,
+                    output="",
+                    exit_code=-1,
+                    error=f"connection_error: {e}",
+                )
+
+            # Command timeout errors (program ran too long) - not retryable
+            if "CommandTimeoutError" in type_name or "timed out" in err_str:
                 return ExecutionResult(
                     success=False,
                     output=f"Command timed out after {effective_timeout}s",
