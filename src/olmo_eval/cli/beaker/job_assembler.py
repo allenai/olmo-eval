@@ -413,13 +413,14 @@ class JobConfigAssembler:
         if harness_provider_package:
             provider_extras: list[str] = []
         else:
-            # Use the resolved provider_kind (which accounts for harness overrides)
-            # rather than re-deriving from model_spec alone. This ensures that
-            # e.g. vllm_server extras (like 'clients') are installed even when
-            # the model's native kind is 'vllm'.
-            provider_extras = get_provider_extras(
-                exp.model_spec, default_kind=provider_kind
-            )
+            provider_extras = get_provider_extras(exp.model_spec)
+            # When the harness overrides the provider kind (e.g. vllm_server),
+            # ensure the corresponding extras are also installed in the main venv.
+            # get_provider_extras only checks the model's native kind, so
+            # vllm_server extras (like 'clients' for the openai SDK) are missed
+            # when the model's native kind is 'vllm'.
+            if provider_kind == "vllm_server" and "clients" not in provider_extras:
+                provider_extras.append("clients")
 
         install_extras = collect_install_extras(
             store=self.config.store,
