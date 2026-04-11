@@ -208,8 +208,10 @@ def _register_humaneval_task(lang: str) -> None:
             num_samples=20,
         ),
     )
-    # Old system (code_eval_multiple) used 10s timeout for Lambda execution
-    olmo3base_scorer_cls = _make_scorer_for_language(lang, timeout=10.0)
+    # Old system (code_eval_multiple) used 10s timeout with dedicated Lambda CPU.
+    # Docker sandboxes share CPU across 6 language tasks, so compiled languages
+    # (C++, Rust, Java) need more time. 30s allows for compilation overhead.
+    olmo3base_scorer_cls = _make_scorer_for_language(lang, timeout=30.0)
     register_variant(
         task_name,
         "olmo3base",
