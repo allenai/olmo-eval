@@ -436,6 +436,15 @@ class SandboxExecutor:
         except Exception as e:
             err_str = str(e).lower()
             type_name = type(e).__name__
+            full_type = f"{type(e).__module__}.{type(e).__name__}"
+            extra_info = getattr(e, "extra_info", {})
+
+            import logging as _logging
+
+            _logging.getLogger(__name__).error(
+                f"SandboxExecutor.execute_command exception: type={full_type}, "
+                f"message={str(e)!r}, extra_info={extra_info}"
+            )
 
             # Connection errors (sandbox unreachable) - should be retried
             if "connection" in err_str or "ClientConnectorError" in type_name:

@@ -143,6 +143,12 @@ class MultiplEScorer(ExecutionScorer):
                 )
             except Exception as e:
                 err_str = str(e)
+                err_type = f"{type(e).__module__}.{type(e).__name__}"
+                extra_info = getattr(e, "extra_info", {})
+                logger.error(
+                    f"Sandbox execution error: type={err_type}, "
+                    f"message={err_str!r}, extra_info={extra_info}"
+                )
                 # Retry on connection errors
                 if "connection" in err_str.lower() or "timeout" in err_str.lower():
                     last_error = err_str
@@ -155,7 +161,7 @@ class MultiplEScorer(ExecutionScorer):
                 return EvalResult(
                     status=ExecutionStatus.ERROR,
                     exit_code=-1,
-                    stderr=err_str,
+                    stderr=f"{err_type}: {err_str}" if err_str else err_type,
                 )
 
         return EvalResult(
