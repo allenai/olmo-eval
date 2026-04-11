@@ -172,16 +172,34 @@ class BigCodeBench(Task):
         """Extract code from model outputs, prepending the complete_prompt.
 
         Matches oe-eval-internal's approach: complete_prompt + continuation.
-        The "\n```" stop sequence ensures the continuation is clean code,
-        but we also strip any trailing markdown fence markers just in case.
+        Stop sequences should truncate output during generation, but as a
+        safety net we also truncate at the first occurrence of any stop
+        sequence that may have been missed (e.g. due to provider limits).
         """
+        # Stop sequences that indicate end of code (skip special tokens)
+        _CODE_STOPS = (
+            "\nif __name__",
+            "\ndef main(",
+            "\nprint(",
+            "\ndef ",
+            "\nclass ",
+            "\nimport ",
+            "\nfrom ",
+            "\nassert ",
+            "\n```",
+        )
         for response in responses:
             for output in response.outputs:
                 text = output.text
                 if not text or not text.strip():
                     output.extracted_answer = None
                     continue
-                # Strip trailing markdown fence (stop sequence may be included)
+                # Truncate at first stop sequence (safety net)
+                for stop in _CODE_STOPS:
+                    idx = text.find(stop)
+                    if idx != -1:
+                        text = text[:idx]
+                # Strip trailing markdown fence if still present
                 text = re.sub(r"\n?```\s*$", "", text)
                 output.extracted_answer = (
                     response.instance.metadata["answer_prefix"] + text
