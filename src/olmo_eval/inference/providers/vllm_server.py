@@ -603,6 +603,22 @@ class VLLMServerProvider(InferenceProvider):
             max_in_flight=self.max_concurrency,
             max_retries=self.max_retries,
         )
+
+        # Log failed requests to help diagnose silent failures
+        failed = sum(1 for r in results if r is None)
+        if failed > 0:
+            logger.error(
+                f"agenerate: {failed}/{len(results)} requests failed after retries"
+            )
+            # Re-try one failed request without catching to log the actual error
+            for i, r in enumerate(results):
+                if r is None:
+                    try:
+                        await self._generate_single_async(requests[i], params)
+                    except Exception:
+                        logger.exception("agenerate sample failure")
+                    break
+
         return [r if r is not None else [] for r in results]
 
     def generate(
