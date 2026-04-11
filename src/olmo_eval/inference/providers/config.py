@@ -89,6 +89,8 @@ class ProviderConfig:
             "tokenizer",
             "max_concurrency",
             "max_model_len",
+            "trust_remote_code",
+            "revision",
         ),
         "litellm": ("base_url", "api_base", "max_concurrency"),
         "hf": ("tokenizer", "trust_remote_code", "dtype"),
