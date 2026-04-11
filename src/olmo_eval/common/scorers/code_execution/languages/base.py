@@ -102,14 +102,14 @@ class BaseLanguageEvaluator:
 
     def build_eval_command(self, tmp_dir: str, code: str) -> str:
         """Build the complete evaluation command."""
-        import shlex
+        import base64
 
         file_path = f"{tmp_dir}/{self.get_filename()}"
-        quoted_code = shlex.quote(code)
+        encoded_code = base64.b64encode(code.encode()).decode()
 
         parts = [
             f"mkdir -p {tmp_dir}",
-            f"echo {quoted_code} > {file_path}",
+            f"echo '{encoded_code}' | base64 -d > {file_path}",
         ]
 
         compile_cmd = self.get_compile_command(tmp_dir, file_path)
