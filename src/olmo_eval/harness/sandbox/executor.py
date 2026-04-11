@@ -456,7 +456,14 @@ class SandboxExecutor:
                 )
 
             # Command timeout errors (program ran too long) - not retryable
-            if "CommandTimeoutError" in type_name or "timed out" in err_str:
+            # Note: swerex raises CommandTimeoutError for command-level timeouts,
+            # but builtins.TimeoutError (with empty message) can also be raised
+            # by the HTTP client when the request to the swerex server times out.
+            if (
+                "CommandTimeoutError" in type_name
+                or "timed out" in err_str
+                or isinstance(e, TimeoutError)
+            ):
                 return ExecutionResult(
                     success=False,
                     output=f"Command timed out after {effective_timeout}s",
