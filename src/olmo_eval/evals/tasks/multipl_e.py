@@ -125,22 +125,25 @@ class MultiplETask(Task):
 _SCORER_CACHE: dict[str, type[MultiplEScorer]] = {}
 
 
-def _make_scorer_for_language(lang: str) -> type[MultiplEScorer]:
+def _make_scorer_for_language(lang: str, timeout: float | None = None) -> type[MultiplEScorer]:
     """Create a scorer class for a specific language.
 
     We need a factory because PassAtKMetric takes a scorer type, not an instance.
     Scorer classes are cached and added to module namespace for pickling support.
     """
-    if lang in _SCORER_CACHE:
-        return _SCORER_CACHE[lang]
+    cache_key = f"{lang}_{timeout}" if timeout is not None else lang
+    if cache_key in _SCORER_CACHE:
+        return _SCORER_CACHE[cache_key]
 
-    # Capture the language value in a local variable for the closure
+    # Capture values in local variables for the closure
     default_lang = lang
-    class_name = f"MultiplEScorer_{lang}"
+    default_timeout = timeout
+    class_name = f"MultiplEScorer_{lang}" if timeout is None else f"MultiplEScorer_{lang}_t{int(timeout)}"
 
     @dataclass(frozen=True, slots=True)
     class LanguageScorer(MultiplEScorer):
         language: str = default_lang
+        timeout: float | None = default_timeout
 
     # Set a unique name for each language scorer
     LanguageScorer.__name__ = class_name
@@ -148,7 +151,7 @@ def _make_scorer_for_language(lang: str) -> type[MultiplEScorer]:
 
     # Make class picklable by adding to module namespace
     globals()[class_name] = LanguageScorer
-    _SCORER_CACHE[lang] = LanguageScorer
+    _SCORER_CACHE[cache_key] = LanguageScorer
 
     return LanguageScorer
 
@@ -205,6 +208,8 @@ def _register_humaneval_task(lang: str) -> None:
             num_samples=20,
         ),
     )
+    # Old system (code_eval_multiple) used 10s timeout for Lambda execution
+    olmo3base_scorer_cls = _make_scorer_for_language(lang, timeout=10.0)
     register_variant(
         task_name,
         "olmo3base",
@@ -217,11 +222,11 @@ def _register_humaneval_task(lang: str) -> None:
             stop_sequences=stop_tokens,
         ),
         metrics=(
-            PassAtKMetric(k=1, scorer=scorer_cls),
-            PassAtKMetric(k=2, scorer=scorer_cls),
-            PassAtKMetric(k=4, scorer=scorer_cls),
-            PassAtKMetric(k=8, scorer=scorer_cls),
-            PassAtKMetric(k=16, scorer=scorer_cls),
+            PassAtKMetric(k=1, scorer=olmo3base_scorer_cls),
+            PassAtKMetric(k=2, scorer=olmo3base_scorer_cls),
+            PassAtKMetric(k=4, scorer=olmo3base_scorer_cls),
+            PassAtKMetric(k=8, scorer=olmo3base_scorer_cls),
+            PassAtKMetric(k=16, scorer=olmo3base_scorer_cls),
         ),
     )
 
