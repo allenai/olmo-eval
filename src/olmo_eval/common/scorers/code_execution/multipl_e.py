@@ -118,7 +118,11 @@ class MultiplEScorer(ExecutionScorer):
                 exec_result: ExecutionResult = await env.execute_command(cmd, timeout=timeout)
 
                 # Check for connection errors in the result (sandbox returned error)
-                if exec_result.error and "connection" in exec_result.error.lower():
+                is_conn_error = exec_result.error and (
+                    "connection" in exec_result.error.lower()
+                    or (exec_result.exit_code == -1 and not exec_result.output and exec_result.error)
+                )
+                if is_conn_error:
                     last_error = exec_result.error
                     if attempt < max_retries:
                         logger.warning(
@@ -127,6 +131,12 @@ class MultiplEScorer(ExecutionScorer):
                         )
                         await asyncio.sleep(0.5)
                         continue
+                    # All retries exhausted - return Error status, not Exception
+                    return EvalResult(
+                        status=ExecutionStatus.ERROR,
+                        exit_code=-1,
+                        stderr=f"Sandbox error after {max_retries + 1} attempts: {last_error}",
+                    )
 
                 # Determine if execution timed out
                 timed_out = (
