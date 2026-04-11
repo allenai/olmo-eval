@@ -215,8 +215,9 @@ class HarnessConfig:
     def merge_provider(self, provider: ProviderConfig) -> HarnessConfig:
         """Merge model info from provider while preserving harness provider settings.
 
-        The harness's provider kind takes precedence if explicitly set (non-default),
-        while model-specific fields come from the new provider.
+        The harness's provider kind always takes precedence (even if it matches
+        the ProviderConfig default), while model-specific fields come from the
+        new provider.
         """
         defaults = ProviderConfig()
         overrides = {
@@ -224,6 +225,9 @@ class HarnessConfig:
             for f in fields(self.provider)
             if getattr(self.provider, f.name) != getattr(defaults, f.name)
         }
+        # Always preserve the harness's provider kind — it determines how the
+        # model is served (e.g. vllm_server for isolated-venv setups).
+        overrides["kind"] = self.provider.kind
         # kwargs should merge, not replace
         if self.provider.kwargs:
             overrides["kwargs"] = {**provider.kwargs, **self.provider.kwargs}
