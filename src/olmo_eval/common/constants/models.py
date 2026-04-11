@@ -53,6 +53,11 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             model="allenai/Olmo-3.1-32B-Instruct",
             kwargs={"tensor_parallel_size": 2},
         ),
+        "olmo-3.1-32b-think": ProviderConfig(
+            kind=ProviderKind.VLLM,
+            model="allenai/Olmo-3.1-32B-Think",
+            kwargs={"tensor_parallel_size": 2},
+        ),
         "olmo-2-7b": ProviderConfig(
             kind=ProviderKind.VLLM,
             model="allenai/OLMo-2-1124-7B",
@@ -70,6 +75,11 @@ def get_model_presets() -> dict[str, ProviderConfig]:
         "qwen3-32b-instruct": ProviderConfig(
             kind=ProviderKind.VLLM,
             model="Qwen/Qwen3-32B-Instruct",
+            kwargs={"tensor_parallel_size": 2},
+        ),
+        "gemma-3-27b-it": ProviderConfig(
+            kind=ProviderKind.VLLM,
+            model="google/gemma-3-27b-it",
             kwargs={"tensor_parallel_size": 2},
         ),
         "qwen3-coder-30b": ProviderConfig(
@@ -91,6 +101,12 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             kind=ProviderKind.VLLM,
             model="deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
             max_model_len=32768,
+        ),
+        "deepseek-r1-distill-qwen-32b": ProviderConfig(
+            kind=ProviderKind.VLLM,
+            model="deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
+            max_model_len=32768,
+            kwargs={"tensor_parallel_size": 2, "enforce_eager": True},
         ),
         "mistral-7b": ProviderConfig(
             kind=ProviderKind.VLLM,
