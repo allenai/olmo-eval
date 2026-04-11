@@ -413,7 +413,13 @@ class JobConfigAssembler:
         if harness_provider_package:
             provider_extras: list[str] = []
         else:
-            provider_extras = get_provider_extras(exp.model_spec)
+            # Use the resolved provider_kind (which accounts for harness overrides)
+            # rather than re-deriving from model_spec alone. This ensures that
+            # e.g. vllm_server extras (like 'clients') are installed even when
+            # the model's native kind is 'vllm'.
+            provider_extras = get_provider_extras(
+                exp.model_spec, default_kind=provider_kind
+            )
 
         install_extras = collect_install_extras(
             store=self.config.store,
