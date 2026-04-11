@@ -1,6 +1,7 @@
 """MBPP code generation task implementations."""
 
 from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from olmo_eval.common.formatters import CompletionFormatter, PPLFormatter
@@ -523,7 +524,15 @@ register_variant(
 # Uses EvalPlus prompt format, 3-shot from "prompt" split in legacy order,
 # max_tokens=512, and pass@k metrics with 32 samples.
 # Timeout=3.0 matches oe-eval-internal's code_eval_local default.
-_olmo3base_scorer = CodeExecutionScorer(timeout=3.0)
+
+
+@dataclass(frozen=True, slots=True)
+class _LegacyCodeExecScorer(CodeExecutionScorer):
+    """CodeExecutionScorer with 3s timeout matching oe-eval-internal."""
+
+    timeout: float = 3.0
+
+
 register_variant(
     "mbpp_olmo3base",
     "olmo3base",
@@ -538,11 +547,11 @@ register_variant(
         stop_sequences=OLMO3_MBPP_STOP_SEQUENCES,
     ),
     metrics=(
-        PassAtKMetric(k=1, scorer=_olmo3base_scorer),
-        PassAtKMetric(k=2, scorer=_olmo3base_scorer),
-        PassAtKMetric(k=4, scorer=_olmo3base_scorer),
-        PassAtKMetric(k=8, scorer=_olmo3base_scorer),
-        PassAtKMetric(k=16, scorer=_olmo3base_scorer),
+        PassAtKMetric(k=1, scorer=_LegacyCodeExecScorer),
+        PassAtKMetric(k=2, scorer=_LegacyCodeExecScorer),
+        PassAtKMetric(k=4, scorer=_LegacyCodeExecScorer),
+        PassAtKMetric(k=8, scorer=_LegacyCodeExecScorer),
+        PassAtKMetric(k=16, scorer=_LegacyCodeExecScorer),
     ),
 )
 
