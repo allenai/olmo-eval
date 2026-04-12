@@ -9,6 +9,7 @@ Dataset: bigcode/bigcodebench
 
 from __future__ import annotations
 
+import ast
 import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
@@ -242,10 +243,89 @@ class BigCodeBench(Task):
     def extract_answer(self, output: LMOutput) -> str | None:
         return extract_code(output.text)
 
+    @staticmethod
+    def _sanitize_code(code: str, entrypoint: str | None = None) -> str:
+        """Sanitize generated code using Python's ast module.
+
+        Matches oe-eval-internal's tree-sitter sanitize() behavior:
+        1. Find the longest syntactically valid prefix
+        2. Extract imports and definitions reachable from entrypoint
+        """
+        code = code.strip()
+        if not code:
+            return code
+
+        lines = code.split("\n")
+        valid_code = None
+        for end in range(len(lines), 0, -1):
+            candidate = "\n".join(lines[:end])
+            try:
+                ast.parse(candidate)
+                valid_code = candidate
+                break
+            except SyntaxError:
+                continue
+
+        if valid_code is None:
+            return code
+
+        if entrypoint is None:
+            return valid_code
+
+        tree = ast.parse(valid_code)
+        import_lines: list[tuple[int, int]] = []
+        definitions: dict[str, tuple[int, int]] = {}
+
+        for node in ast.iter_child_nodes(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                import_lines.append((node.lineno - 1, node.end_lineno - 1))  # type: ignore[arg-type]
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                definitions[node.name] = (node.lineno - 1, node.end_lineno - 1)  # type: ignore[arg-type]
+            elif isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        definitions[target.id] = (node.lineno - 1, node.end_lineno - 1)  # type: ignore[arg-type]
+                        break
+
+        if entrypoint not in definitions:
+            return valid_code
+
+        def _used_names(start: int, end: int) -> set[str]:
+            source = "\n".join(lines[start : end + 1])
+            try:
+                sub_tree = ast.parse(source)
+            except SyntaxError:
+                return set()
+            return {n.id for n in ast.walk(sub_tree) if isinstance(n, ast.Name)}
+
+        reachable: set[str] = set()
+        queue = [entrypoint]
+        while queue:
+            name = queue.pop(0)
+            if name in reachable:
+                continue
+            reachable.add(name)
+            if name in definitions:
+                for used in _used_names(*definitions[name]):
+                    if used in definitions and used not in reachable:
+                        queue.append(used)
+
+        result_lines: list[str] = []
+        for start, end in import_lines:
+            result_lines.extend(lines[start : end + 1])
+        for name in definitions:
+            if name in reachable:
+                start, end = definitions[name]
+                result_lines.extend(lines[start : end + 1])
+
+        return "\n".join(result_lines)
+
     def _extract_answers(self, responses: Sequence[Response]) -> None:
         """Extract code from model outputs, prepending the complete_prompt.
 
-        Matches oe-eval-internal's approach: complete_prompt + continuation.
+        Matches oe-eval-internal's approach:
+        1. complete_prompt + continuation
+        2. sanitize() to extract valid code reachable from entry_point
         Stop sequences should truncate output during generation, but as a
         safety net we also truncate at the first occurrence of any stop
         sequence that may have been missed (e.g. due to provider limits).
@@ -263,6 +343,7 @@ class BigCodeBench(Task):
             "\n```",
         )
         for response in responses:
+            entry_point = response.instance.metadata.get("entry_point", "")
             for output in response.outputs:
                 text = output.text
                 if not text or not text.strip():
@@ -275,8 +356,10 @@ class BigCodeBench(Task):
                         text = text[:idx]
                 # Strip trailing markdown fence if still present
                 text = re.sub(r"\n?```\s*$", "", text)
-                output.extracted_answer = (
-                    response.instance.metadata["answer_prefix"] + text
+                full_code = response.instance.metadata["answer_prefix"] + text
+                # Sanitize: extract valid code reachable from entry_point
+                output.extracted_answer = self._sanitize_code(
+                    full_code, entry_point or None
                 )
 
 
