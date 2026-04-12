@@ -136,6 +136,12 @@ class BigCodeBench(Task):
             "pyfakefs",
             "scikit-image",
             "mechanize",
+            "numba",
+            "dnspython",
+        ),
+        # Pre-download NLTK data used by BCB tests (stopwords, punkt, etc.)
+        dockerfile_extra=(
+            "RUN /root/python/bin/python -c \"import nltk; nltk.download('all', quiet=True)\"",
         ),
     )
     sampling_params = SamplingParams(
@@ -144,11 +150,10 @@ class BigCodeBench(Task):
         top_p=0.6,
         do_sample=True,
         num_samples=5,
-        # Includes "\n```" to cleanly stop at code block boundary.
-        # oe-eval-internal omits this stop but uses tree-sitter sanitize() to
-        # extract valid code from messy continuations.  We use "\n```" to get
-        # equivalent clean code without tree-sitter, since the model generates
-        # the same tokens up to the code-block boundary either way.
+        # Stop sequences match oe-eval-internal's bigcodebench:3shot::olmo3:v2
+        # exactly. We do NOT include "\n```" — the old suite omits it and uses
+        # tree-sitter sanitize() for cleanup instead. Our _extract_answers
+        # strips trailing markdown fences as a safety net.
         stop_sequences=(
             "<|endoftext|>",
             "<|endofmask|>",
@@ -161,7 +166,6 @@ class BigCodeBench(Task):
             "\nimport ",
             "\nfrom ",
             "\nassert ",
-            "\n```",
         ),
     )
     # BigCodeBench uses "v0.1.2" as split name (mapped as train on HF)
