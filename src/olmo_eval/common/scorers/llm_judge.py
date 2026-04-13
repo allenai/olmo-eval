@@ -490,6 +490,7 @@ class SafetyScorer(LLMJudgeScorer):
                 response, instance=instance, judge=self.provider_name
             )
         else:
+            print("Scoring with openai")
             prompt = self.format_judge_prompt(instance, output)
             response = self._score_with_judge_fn(prompt)
             judge_response = self.parse_judge_response(response, instance=instance)

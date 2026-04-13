@@ -417,6 +417,7 @@ class Task(ABC):
                     if scorer_instance.name not in scorers_by_name:
                         scorers_by_name[scorer_instance.name] = scorer_instance
             self._scorers_cache = scorers_by_name
+        print(self._scorers_cache)
         return self._scorers_cache
 
     def _has_async_scorers(self) -> bool:
