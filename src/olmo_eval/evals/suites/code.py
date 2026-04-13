@@ -104,12 +104,12 @@ for _suffix, _desc_suffix in _MULTIPL_E_VARIANTS:
     )
 
 # OLMo3 base variants (pass@k evaluation with 32 samples)
-make_suite(
+_MULTIPL_E_HUMANEVAL_OLMO3BASE = make_suite(
     "multipl_e_humaneval:olmo3base",
     tuple(f"{t}:olmo3base" for t in MULTIPL_E_HUMANEVAL_TASKS),
     description="MULTIPL_E HumanEval (6 languages) OLMo3 base pass@k evaluation",
 )
-make_suite(
+_MULTIPL_E_MBPP_OLMO3BASE = make_suite(
     "multipl_e_mbpp:olmo3base",
     tuple(f"{t}:olmo3base" for t in MULTIPL_E_MBPP_TASKS),
     description="MULTIPL_E MBPP (6 languages) OLMo3 base pass@k evaluation",
@@ -139,8 +139,8 @@ make_suite(
         "deepseek_leetcode::olmo3base",
         "ds1000:3shot::olmo3base",
         "mbpp:3shot::olmo3base",
-        "multipl_e_humaneval:olmo3base",
-        "multipl_e_mbpp:olmo3base",
+        _MULTIPL_E_HUMANEVAL_OLMO3BASE,
+        _MULTIPL_E_MBPP_OLMO3BASE,
     ),
     description="OLMoBase code generation evaluation suite",
 )
