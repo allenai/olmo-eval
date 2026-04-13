@@ -139,6 +139,8 @@ make_suite(
         "deepseek_leetcode::olmo3base",
         "ds1000:3shot::olmo3base",
         "mbpp:3shot::olmo3base",
+        "multipl_e_humaneval:olmo3base",
+        "multipl_e_mbpp:olmo3base",
     ),
     description="OLMoBase code generation evaluation suite",
 )
