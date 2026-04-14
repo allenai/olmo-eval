@@ -243,12 +243,26 @@ def scoring_worker(
             Format: {name: [config_dict, ...]} where each config_dict is a
             serialized ProviderConfig with base_url set.
     """
+    import signal
     import sys
 
     from olmo_eval.common.logging import configure_logging, configure_worker_logging
 
     configure_logging()
     worker_logger = configure_worker_logging(worker_id)
+
+    # Install SIGTERM handler so that process.terminate() from the runner
+    # triggers finally blocks (sandbox teardown) instead of killing immediately.
+    _shutting_down = False
+
+    def _handle_sigterm(signum: int, frame: Any) -> None:
+        nonlocal _shutting_down
+        if _shutting_down:
+            return  # Don't interrupt cleanup with a second SIGTERM
+        worker_logger.info("Received SIGTERM, initiating graceful shutdown...")
+        raise SystemExit(143)
+
+    signal.signal(signal.SIGTERM, _handle_sigterm)
 
     from olmo_eval.common.execution import ScoringContext
     from olmo_eval.common.progress import ProgressLogger
@@ -446,6 +460,9 @@ def scoring_worker(
         # Run the async scoring loop
         asyncio.run(run_scoring_loop())
 
+    except SystemExit:
+        pass  # SIGTERM handler or sys.exit — let finally block handle cleanup
+
     except Exception as e:
         worker_logger.error(f"Scoring worker failed: {e}")
         # Signal fatal error via the scored queue
@@ -460,7 +477,9 @@ def scoring_worker(
         sys.exit(1)
 
     finally:
+        _shutting_down = True
         if sandbox_manager is not None:
+            worker_logger.info("Stopping sandbox manager...")
             try:
                 asyncio.run(sandbox_manager.stop())
             except Exception as e:

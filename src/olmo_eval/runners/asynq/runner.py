@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import multiprocessing as mp
 import random
 import time
@@ -421,8 +422,18 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         finally:
             terminate_workers(workers)
             if scorer_proc and scorer_proc.is_alive():
-                scorer_proc.terminate()
-                scorer_proc.join(timeout=5)
+                # Try graceful shutdown via queue sentinel first
+                with contextlib.suppress(Exception):
+                    scoring_queue.put_nowait(None)
+                scorer_proc.join(timeout=10)
+                if scorer_proc.is_alive():
+                    # SIGTERM — triggers our handler which runs sandbox cleanup
+                    scorer_proc.terminate()
+                    scorer_proc.join(timeout=45)
+                    if scorer_proc.is_alive():
+                        runner_logger.warning("Scoring worker did not exit, sending SIGKILL")
+                        scorer_proc.kill()
+                        scorer_proc.join(timeout=5)
             if inference_manager is not None:
                 inference_manager.shutdown()
             for q in [item_queue, result_queue, scoring_queue, scored_queue]:
