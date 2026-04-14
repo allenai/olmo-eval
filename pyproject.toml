@@ -22,7 +22,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "click~=8.3.1",
+    "click~=8.3.2",
     "datasets>=3.2.0",
     "numpy>=1.20.0",
     "omegaconf~=2.3.0",
