@@ -197,7 +197,8 @@ class BPBMetricByteAvg(Metric):
             return 0.0
 
         scorer = self.scorer()
-        bpb_values: list[float] = []
+        weighted_sum = 0.0
+        total_bytes = 0
 
         for response in responses:
             output = _select_gold_output(response)
@@ -208,12 +209,13 @@ class BPBMetricByteAvg(Metric):
             if num_bytes == 0:
                 continue
             bpb = scorer.score(response.instance, output)
-            bpb_values.append(bpb)
+            weighted_sum += bpb * num_bytes
+            total_bytes += num_bytes
 
-        if not bpb_values:
+        if total_bytes == 0:
             return 0.0
 
-        return sum(bpb_values) / len(bpb_values)
+        return weighted_sum / total_bytes
 
 
 @dataclass(frozen=True, slots=True)
@@ -367,16 +369,13 @@ class LogprobMCAccuracyMetric(Metric):
     def compute(self, responses: Sequence[Response]) -> float:
         if not responses:
             return 0.0
+        scorer = self.scorer()
         correct = 0
         for response in responses:
             gold_idx = response.instance.metadata.get("gold_idx")
             if gold_idx is None or not response.outputs:
                 continue
-            logprob_sums = [
-                sum(lp["logprob"] for lp in (o.logprobs or [])) for o in response.outputs
-            ]
-            if not logprob_sums:
-                continue
+            logprob_sums = [scorer.score(response.instance, o) for o in response.outputs]
             if logprob_sums.index(max(logprob_sums)) == gold_idx:
                 correct += 1
         return correct / len(responses)
@@ -420,8 +419,6 @@ class LogprobUncondMCAccuracyMetric(Metric):
                 cond_lp = sum(lp["logprob"] for lp in (cond.logprobs or []))
                 uncond_lp = sum(lp["logprob"] for lp in (uncond.logprobs or []))
                 scores.append(cond_lp - uncond_lp)
-            if not scores:
-                continue
             if scores.index(max(scores)) == gold_idx:
                 correct += 1
         return correct / len(responses)
@@ -445,6 +442,7 @@ class LogprobPerCharMCAccuracyMetric(Metric):
     def compute(self, responses: Sequence[Response]) -> float:
         if not responses:
             return 0.0
+        scorer = self.scorer()
         correct = 0
         for response in responses:
             gold_idx = response.instance.metadata.get("gold_idx")
@@ -452,11 +450,9 @@ class LogprobPerCharMCAccuracyMetric(Metric):
                 continue
             logprob_per_char = []
             for o in response.outputs:
-                total_logprob = sum(lp["logprob"] for lp in (o.logprobs or []))
+                total_logprob = scorer.score(response.instance, o)
                 num_chars = max(len(o.text) if o.text else 0, 1)
                 logprob_per_char.append(total_logprob / num_chars)
-            if not logprob_per_char:
-                continue
             if logprob_per_char.index(max(logprob_per_char)) == gold_idx:
                 correct += 1
         return correct / len(responses)
@@ -479,6 +475,7 @@ class LogprobPerTokenMCAccuracyMetric(Metric):
     def compute(self, responses: Sequence[Response]) -> float:
         if not responses:
             return 0.0
+        scorer = self.scorer()
         correct = 0
         for response in responses:
             gold_idx = response.instance.metadata.get("gold_idx")
@@ -486,11 +483,9 @@ class LogprobPerTokenMCAccuracyMetric(Metric):
                 continue
             logprob_per_token = []
             for o in response.outputs:
-                total_logprob = sum(lp["logprob"] for lp in (o.logprobs or []))
+                total_logprob = scorer.score(response.instance, o)
                 num_tokens = max(len(o.logprobs) if o.logprobs else 0, 1)
                 logprob_per_token.append(total_logprob / num_tokens)
-            if not logprob_per_token:
-                continue
             if logprob_per_token.index(max(logprob_per_token)) == gold_idx:
                 correct += 1
         return correct / len(responses)

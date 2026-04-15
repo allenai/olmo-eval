@@ -4,7 +4,7 @@ from collections.abc import Iterator, Sequence
 from typing import Any
 
 from olmo_eval.common.formatters import ChatFormatter, CompletionFormatter, PPLFormatter
-from olmo_eval.common.metrics import BPBMetricByteAvg, PassAtKMetric
+from olmo_eval.common.metrics import BPBMetric, PassAtKMetric
 from olmo_eval.common.scorers import CodeExecutionScorer
 from olmo_eval.common.types import (
     Instance,
@@ -156,14 +156,14 @@ register_variant(
     "humaneval",
     "bpb",
     formatter=PPLFormatter(leading_space=True, answer_prefix=" "),
-    metrics=(BPBMetricByteAvg(),),
+    metrics=(BPBMetric(),),
 )
 
 register_variant(
     "humaneval_plus",
     "bpb",
     formatter=PPLFormatter(leading_space=True, answer_prefix=" "),
-    metrics=(BPBMetricByteAvg(),),
+    metrics=(BPBMetric(),),
 )
 
 # 3shot variants - composable with bpb (e.g., humaneval:3shot:bpb)

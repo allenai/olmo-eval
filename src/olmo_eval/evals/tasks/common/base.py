@@ -156,6 +156,7 @@ class TaskConfig:
             "split": self.split.value,
             "primary_metric": serialize_primary_metric(self.get_primary_metric()),
             "sampling_params": asdict(self.sampling_params) if self.sampling_params else None,
+            "max_length": self.max_length,
             "dependencies": self.dependencies,
         }
 

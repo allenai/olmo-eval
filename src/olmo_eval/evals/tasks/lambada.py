@@ -59,6 +59,8 @@ class LAMBADA(Task):
         )
 
 
-register_variant("lambada", "bpb", formatter=PPLFormatter(), metrics=(BPBMetric(),))
+register_variant(
+    "lambada", "bpb", formatter=PPLFormatter(), metrics=(BPBMetric(),), primary_metric=BPBMetric()
+)
 
 register_variant("lambada", "olmo3base")

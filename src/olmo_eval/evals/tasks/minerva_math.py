@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from olmo_eval.common.formatters import CompletionFormatter, PPLFormatter
-from olmo_eval.common.metrics import AccuracyMetric, BPBMetric, BPBMetricByteAvg, PassAtKMetric
+from olmo_eval.common.metrics import AccuracyMetric, BPBMetric, PassAtKMetric
 from olmo_eval.common.scorers import MinervaMathScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
@@ -307,8 +307,8 @@ for _subset in MATH_SUBSETS:
         _task_name,
         "bpb",
         formatter=PPLFormatter(),
-        metrics=(BPBMetricByteAvg(),),
-        primary_metric=BPBMetricByteAvg(),
+        metrics=(BPBMetric(),),
+        primary_metric=BPBMetric(),
     )
 
     register_variant(
@@ -327,8 +327,8 @@ register_variant(
     "math500",
     "bpb",
     formatter=PPLFormatter(),
-    metrics=(BPBMetricByteAvg(),),
-    primary_metric=BPBMetricByteAvg(),
+    metrics=(BPBMetric(),),
+    primary_metric=BPBMetric(),
 )
 
 
