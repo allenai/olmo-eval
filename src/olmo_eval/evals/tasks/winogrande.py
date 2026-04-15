@@ -183,7 +183,6 @@ register_variant(
     "winogrande",
     "olmo3base",
     num_fewshot=5,
-    limit=10_000,
     fewshot_source="olmes_winogrande_fixed",
 )
 register_variant(
