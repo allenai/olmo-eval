@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ast
 import traceback
+import warnings
 from typing import Any
 
 import tree_sitter_python
@@ -30,7 +31,9 @@ ASSIGNMENT_TYPE = "assignment"
 
 def _syntax_check(code: str, verbose: bool = False) -> bool:
     try:
-        ast.parse(code)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)
+            ast.parse(code)
         return True
     except (SyntaxError, MemoryError):
         if verbose:
@@ -99,7 +102,9 @@ def _get_definition_name(node: Node) -> str | None:
 
 
 def _extract_target_code_or_empty(code: str, entrypoint: str | None = None) -> str:
-    code = _code_extract(code.strip())
+    code = code.strip()
+    if not _syntax_check(code):
+        code = _code_extract(code)
     code_bytes = bytes(code, "utf8")
     parser = Parser(Language(tree_sitter_python.language()))
     tree = parser.parse(code_bytes)
