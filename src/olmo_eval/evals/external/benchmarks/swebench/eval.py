@@ -235,11 +235,21 @@ class SWEBenchExternalEval(ExternalEval):
         ]
 
         # The SWE-bench harness uses the Docker Python SDK, which reads DOCKER_HOST.
-        # When using podman, point it at the podman socket so the SDK can find it.
+        # When using podman, start the podman socket service and point DOCKER_HOST at it.
         env = os.environ.copy()
-        if container_runtime == "podman" and "DOCKER_HOST" not in env:
+        if container_runtime == "podman":
             uid = os.getuid()
-            env["DOCKER_HOST"] = f"unix:///run/user/{uid}/podman/podman.sock"
+            socket_path = f"unix:///run/user/{uid}/podman/podman.sock"
+            if "DOCKER_HOST" not in env:
+                env["DOCKER_HOST"] = socket_path
+            # Start the podman socket service if not already running
+            logger.info(f"[{self.name}] Starting podman socket service at {socket_path}")
+            svc_proc = await asyncio.create_subprocess_exec(
+                "podman", "system", "service", "--time=0", socket_path,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await asyncio.sleep(1.0)  # give the socket a moment to be ready
 
         logger.info(f"[{self.name}] Running SWE-bench harness: {shlex.join(cmd)}")
         ok, output = await self._run_subprocess(
