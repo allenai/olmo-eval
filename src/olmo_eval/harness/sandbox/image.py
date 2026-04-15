@@ -124,8 +124,8 @@ RUN apt-get update && \\
 ADD {PYTHON_STANDALONE_URL} /tmp/python.tar.gz
 RUN tar xzf /tmp/python.tar.gz -C /root && rm /tmp/python.tar.gz && \\
     /root/python/bin/pip install --no-cache-dir swe-rex uv
-{extra_lines}
 ENV PATH="/root/python/bin:$PATH"
+{extra_lines}
 """
 
     result = subprocess.run(
@@ -177,6 +177,4 @@ def dependencies_to_dockerfile_extra(dependencies: tuple[str, ...]) -> tuple[str
     if not dependencies:
         return ()
     pkgs = " ".join(shlex.quote(dep) for dep in dependencies)
-    return (
-        f"RUN /root/python/bin/uv pip install --python /root/python/bin/python --no-cache {pkgs}",
-    )
+    return (f"RUN uv pip install --system --no-cache {pkgs}",)
