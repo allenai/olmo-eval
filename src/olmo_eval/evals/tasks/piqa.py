@@ -149,7 +149,8 @@ register_variant(
     "olmo3base",
     num_fewshot=5,
     fewshot_source="olmes_piqa_fixed",
-    split=Split.VALIDATION,
+    split=Split.ALL,
+    limit=10_000,
     metrics=(LogprobPerCharMCAccuracyMetric(),),
 )
 register_regime(
@@ -157,7 +158,8 @@ register_regime(
     "olmo3base",
     num_fewshot=5,
     fewshot_source="olmes_piqa_fixed",
-    split=Split.VALIDATION,
+    split=Split.ALL,
+    limit=10_000,
 )
 
 register_variant(
