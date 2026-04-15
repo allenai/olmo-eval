@@ -748,11 +748,12 @@ class SandboxExecutor:
             )
 
         except Exception as e:
-            self._log(logging.WARNING, f"Code execution failed: {e}")
+            error_msg = str(e) or repr(e)
+            self._log(logging.WARNING, f"Code execution failed: {error_msg}")
             return ExecutionResult(
                 success=False,
                 output="",
-                error=str(e),
+                error=error_msg,
             )
 
     async def _ensure_session(self) -> None:
