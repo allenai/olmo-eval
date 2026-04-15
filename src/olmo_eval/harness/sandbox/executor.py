@@ -374,7 +374,7 @@ class SandboxExecutor:
             try:
                 await self._deployment.stop()
             except Exception as e:
-                self._log(logging.WARNING, f"Failed to stop deployment: {e}")
+                self._log(logging.DEBUG, f"Failed to stop deployment: {e}")
             self._deployment = None
             self._runtime = None
 
@@ -759,7 +759,7 @@ class SandboxExecutor:
 
         except Exception as e:
             error_msg = str(e) or repr(e)
-            self._log(logging.WARNING, f"Code execution failed: {error_msg}")
+            self._log(logging.DEBUG, f"Code execution failed: {error_msg}")
             return ExecutionResult(
                 success=False,
                 output="",

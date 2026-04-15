@@ -9,6 +9,7 @@ Dataset: bigcode/bigcodebench
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -23,6 +24,8 @@ from olmo_eval.evals.tasks.common import SandboxEnv, Task, register, register_va
 
 if TYPE_CHECKING:
     from olmo_eval.common.execution import ExecutionEnvironment
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +61,9 @@ class BigCodeBenchScorer(CodeExecutionScorer):
             language=self.language,
             timeout=self.timeout,
         )
+        if not result.success and result.error:
+            instance_id = instance.metadata.get("id", "?")
+            logger.warning(f"Code execution failed [{instance_id}]: {result.error}")
         return 1.0 if result.success else 0.0
 
 

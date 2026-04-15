@@ -90,23 +90,36 @@ def get_swerex_image(
             return registry_image
         return local_image
 
-    logger.debug(f"Local image {local_image} not found, checking registry...")
+    logger.info(f"Local image {local_image} not found, checking registry...")
 
-    # Try to pull from registry (if configured)
+    # Try to use image from registry (if configured)
     if registry and registry_image:
-        result = subprocess.run(
-            [container_runtime, "pull", registry_image],
-            capture_output=True,
-        )
-        if result.returncode == 0:
-            # Tag locally for consistency
-            subprocess.run(
-                [container_runtime, "tag", registry_image, local_image],
+        if require_registry:
+            # For Modal: just verify the image exists in the registry without pulling.
+            # Modal pulls directly from the registry, so a local copy is unnecessary.
+            result = subprocess.run(
+                [container_runtime, "manifest", "inspect", registry_image],
                 capture_output=True,
             )
-            logger.debug(f"Pulled swerex image from registry: {local_image}")
-            return registry_image if require_registry else local_image
-        logger.debug("Registry pull failed, will build locally")
+            if result.returncode == 0:
+                logger.info(f"Registry image exists: {registry_image}")
+                return registry_image
+            logger.info(f"Registry image {registry_image} not found, will build and push")
+        else:
+            # For Docker/Podman: pull so we have a local copy
+            result = subprocess.run(
+                [container_runtime, "pull", registry_image],
+                capture_output=True,
+            )
+            if result.returncode == 0:
+                subprocess.run(
+                    [container_runtime, "tag", registry_image, local_image],
+                    capture_output=True,
+                )
+                logger.info(f"Pulled swerex image from registry: {registry_image}")
+                return local_image
+            stderr = result.stderr.decode() if result.stderr else "unknown error"
+            logger.warning(f"Registry pull failed for {registry_image}: {stderr}")
 
     # Build the image with Python, swe-rex, curl, git, and uv
     logger.info(f"Building swerex image from {base_image}...")

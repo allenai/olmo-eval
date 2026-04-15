@@ -340,8 +340,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             )
             scorer_proc.start()
 
-            # Wait for workers to initialize
-            runner_logger.info("Waiting for inference workers to initialize...")
+            # Ensure inference workers are ready before dispatching
             wait_for_workers_ready(workers, result_queue, startup_timeout=60.0)
 
             # Now wait for scoring worker (runs in parallel with inference worker init)
