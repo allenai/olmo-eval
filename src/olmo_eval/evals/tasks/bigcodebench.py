@@ -72,17 +72,19 @@ class BigCodeBench(Task):
     """BigCodeBench code completion task (full subset, complete prompt variant)."""
 
     data_source = DataSource(path="bigcode/bigcodebench")
+    # Python deps from the official BigCodeBench requirements-eval.txt:
+    # https://github.com/bigcode-project/bigcodebench/blob/main/Requirements/requirements-eval.txt
     sandbox_env = SandboxEnv(
         "bigcodebench",
         (
-            "bigcodebench[eval]>=0.2",
-            # BigCodeBench tasks test code from many third-party libraries.
-            # The packages below cover all imports used across the 1140 tasks.
             "beautifulsoup4",
             "blake3",
             "chardet",
             "cryptography",
+            "datetime",
             "django",
+            "dnspython",
+            "docxtpl",
             "faker",
             "flask",
             "flask-login",
@@ -95,11 +97,14 @@ class BigCodeBench(Task):
             "geopy",
             "holidays",
             "keras",
+            "Levenshtein",
             "librosa",
             "lxml",
             "matplotlib",
             "mechanize",
             "natsort",
+            "networkx",
+            "numba",
             "nltk",
             "numpy",
             "opencv-python-headless",
@@ -111,12 +116,13 @@ class BigCodeBench(Task):
             "pycryptodome",
             "pyfakefs",
             "pyquery",
+            "pytest",
             "pytesseract",
+            "python-dateutil",
             "python-docx",
-            "python-Levenshtein",
+            "python-http-client",
             "pytz",
             "pyyaml",
-            "regex",
             "requests",
             "requests-mock",
             "rsa",
@@ -124,6 +130,7 @@ class BigCodeBench(Task):
             "scikit-learn",
             "scipy",
             "seaborn",
+            "selenium",
             "sendgrid",
             "shapely",
             "soundfile",
@@ -137,6 +144,7 @@ class BigCodeBench(Task):
             "wordcloud",
             "wordninja",
             "wtforms",
+            "xlrd",
             "xlwt",
             "xmltodict",
         ),
