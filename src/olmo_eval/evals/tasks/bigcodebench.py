@@ -90,7 +90,12 @@ class BigCodeBench(Task):
         yield from self._instances_cache
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
-        prompt = "```\n" + doc["complete_prompt"].strip() + "\n"
+        prompt = (
+            "Please provide a self-contained Python script that solves the "
+            "following problem in a markdown code block:\n```\n"
+            + doc["complete_prompt"].strip()
+            + "\n"
+        )
         gold = doc["canonical_solution"] + "\n```"
         test_code = doc.get("test", "")
 

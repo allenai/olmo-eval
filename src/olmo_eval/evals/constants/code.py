@@ -205,7 +205,6 @@ BIGCODEBENCH_STOP_SEQUENCES: tuple[str, ...] = (
     "\nimport ",
     "\nfrom ",
     "\nassert ",
-    "\n```",
 )
 """Stop sequences for BigCodeBench code completion."""
 
