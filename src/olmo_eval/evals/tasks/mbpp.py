@@ -1,5 +1,3 @@
-"""MBPP code generation task implementations."""
-
 from collections.abc import Iterator
 from typing import Any
 

@@ -1,5 +1,3 @@
-"""Static few-shot examples for Minerva Math."""
-
 # fmt: off
 MINERVA_MATH_FIXED_FEWSHOT = [
     {

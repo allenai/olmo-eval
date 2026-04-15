@@ -1,5 +1,3 @@
-"""Static few-shot examples for CommonsenseQA."""
-
 # fmt: off
 CSQA_FIXED_FEWSHOT = [
     {

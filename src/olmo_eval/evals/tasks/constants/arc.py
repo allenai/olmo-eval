@@ -1,5 +1,3 @@
-"""Static few-shot examples for ARC."""
-
 # fmt: off
 ARC_EASY_FIXED_FEWSHOT = [
     {

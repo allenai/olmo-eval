@@ -1,7 +1,3 @@
-"""Static few-shot examples for SQuAD."""
-
-SQUAD_DESCRIPTION = "The following are reading comprehension questions, where the answer to each question is a segment of text from the corresponding background text."
-
 # fmt: off
 SQUAD_FIXED_FEWSHOT = [
     {

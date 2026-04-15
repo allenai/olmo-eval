@@ -1,5 +1,3 @@
-"""Static few-shot examples for Jeopardy MC."""
-
 # fmt: off
 JEOPARDY_MC_FIXED_FEWSHOT = [
     {

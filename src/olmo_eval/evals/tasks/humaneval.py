@@ -1,5 +1,3 @@
-"""HumanEval code generation task implementations."""
-
 from collections.abc import Iterator, Sequence
 from typing import Any
 
@@ -138,6 +136,13 @@ class HumanEval(Task):
                     output.extracted_answer = None
 
 
+@register("codex_humaneval")
+class CodexHumanEval(HumanEval):
+    """Codex HumanEval task (alias for HumanEval with codex_humaneval name)."""
+
+    pass
+
+
 @register("humaneval_plus")
 class HumanEvalPlus(HumanEval):
     """HumanEval+ task with additional test cases."""
@@ -154,6 +159,13 @@ class HumanEvalPlus(HumanEval):
 # which returns " " + canonical_solution (space before answer)
 register_variant(
     "humaneval",
+    "bpb",
+    formatter=PPLFormatter(leading_space=True, answer_prefix=" "),
+    metrics=(BPBMetricInstanceAvg(),),
+)
+
+register_variant(
+    "codex_humaneval",
     "bpb",
     formatter=PPLFormatter(leading_space=True, answer_prefix=" "),
     metrics=(BPBMetricInstanceAvg(),),
@@ -177,12 +189,22 @@ register_variant(
 )
 
 register_variant(
+    "codex_humaneval",
+    "3shot",
+    num_fewshot=3,
+    fewshot_seed=1234,
+    formatter=CompletionFormatter(),
+)
+
+register_variant(
     "humaneval_plus",
     "3shot",
     num_fewshot=3,
     fewshot_seed=1234,
     formatter=CompletionFormatter(),
 )
+
+register_variant("codex_humaneval", "olmo3base", num_fewshot=3, fewshot_seed=1234)
 
 # Chat variants for instruction-tuned models
 # Use with agent backends: humaneval:chat:pass_at_1

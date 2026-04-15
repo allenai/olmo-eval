@@ -1,5 +1,3 @@
-"""Static few-shot examples for PiQA."""
-
 # fmt: off
 PIQA_FIXED_FEWSHOT = [
     {"goal": "how do you stab something?", "sol1": "stick a sharp object through it.", "sol2": "pin it with a sharp object.", "label": 0},
