@@ -243,17 +243,28 @@ class SWEBenchExternalEval(ExternalEval):
         env = os.environ.copy()
         if container_runtime == "podman":
             uid = os.getuid()
-            socket_path = f"unix:///run/user/{uid}/podman/podman.sock"
+            # Root uses /run/podman/podman.sock; non-root uses XDG path
+            if uid == 0:
+                fs_socket_path = "/run/podman/podman.sock"
+            else:
+                fs_socket_path = f"/run/user/{uid}/podman/podman.sock"
+            socket_uri = f"unix://{fs_socket_path}"
             if "DOCKER_HOST" not in env:
-                env["DOCKER_HOST"] = socket_path
+                env["DOCKER_HOST"] = socket_uri
             # Start the podman socket service if not already running
-            logger.info(f"[{self.name}] Starting podman socket service at {socket_path}")
-            svc_proc = await asyncio.create_subprocess_exec(
-                "podman", "system", "service", "--time=0", socket_path,
+            logger.info(f"[{self.name}] Starting podman socket service at {socket_uri}")
+            await asyncio.create_subprocess_exec(
+                "podman", "system", "service", "--time=0", socket_uri,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )
-            await asyncio.sleep(1.0)  # give the socket a moment to be ready
+            # Poll until the socket file exists (up to 10 seconds)
+            for _ in range(20):
+                if os.path.exists(fs_socket_path):
+                    break
+                await asyncio.sleep(0.5)
+            else:
+                logger.warning(f"[{self.name}] Podman socket not ready after 10s: {fs_socket_path}")
 
         logger.info(f"[{self.name}] Running SWE-bench harness: {shlex.join(cmd)}")
         ok, output = await self._run_subprocess(
