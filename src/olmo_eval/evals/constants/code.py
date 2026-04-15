@@ -175,11 +175,11 @@ MULTILINGUAL_MBPP_TASKS_V2: tuple[str, ...] = (
 # =============================================================================
 
 OLMO3_HUMANEVAL_STOP_SEQUENCES: tuple[str, ...] = (
+    "\n```",
     "\nclass",
     "\nif",
     "\nprint",
     "\n#",
-    "\n```",
     "\n```\n\n",
     "<|eot_id|>",
 )

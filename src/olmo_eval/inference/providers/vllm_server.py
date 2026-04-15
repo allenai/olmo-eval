@@ -423,7 +423,7 @@ class VLLMServerProvider(InferenceProvider):
             if params.top_k is not None:
                 kwargs["extra_body"] = {"top_k": params.top_k}
         if params.stop_sequences:
-            kwargs["stop"] = list(params.stop_sequences)[:4]
+            kwargs["stop"] = list(params.stop_sequences)
 
         response = await client.completions.create(**kwargs)
 
@@ -497,8 +497,7 @@ class VLLMServerProvider(InferenceProvider):
             if params.top_k is not None:
                 extra_body["top_k"] = params.top_k
         if params.stop_sequences:
-            # OpenAI API supports max 4 stop sequences
-            kwargs["stop"] = list(params.stop_sequences)[:4]
+            kwargs["stop"] = list(params.stop_sequences)
         if tools:
             kwargs["tools"] = tools
         # Always request logprobs for metrics computation
