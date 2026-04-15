@@ -23,6 +23,21 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+def _ensure_modal_config_exists() -> None:
+    """Create empty ~/.modal.toml if missing.
+
+    SWE-bench's validate_modal_credentials() checks for this file's existence,
+    but Modal SDK uses MODAL_TOKEN_ID/MODAL_TOKEN_SECRET env vars for auth
+    (which take precedence over the file). We create an empty file to satisfy
+    the validation while keeping credentials in env vars only.
+    """
+    modal_toml = Path.home() / ".modal.toml"
+    if not modal_toml.exists():
+        modal_toml.touch()
+        logger.info("Created empty ~/.modal.toml to satisfy SWE-bench validation")
+
+
 # Maps short aliases to HuggingFace dataset paths used by the SWE-bench harness.
 # mini-swe-agent has its own alias table; we pass aliases through to it directly.
 _DATASET_HF_PATHS = {
@@ -44,6 +59,7 @@ class SWEBenchArgs:
     max_workers_eval: int = 4
     temperature: float = 0.0
     max_turns: int = 30
+    use_modal: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SWEBenchArgs:
@@ -56,6 +72,7 @@ class SWEBenchArgs:
             max_workers_eval=int(data.get("max_workers_eval", 4)),
             temperature=float(data.get("temperature", 0.0)),
             max_turns=int(data.get("max_turns", 30)),
+            use_modal=data.get("use_modal", False) in (True, "true", "True", "1", 1),
         )
 
 
@@ -97,6 +114,7 @@ class SWEBenchExternalEval(ExternalEval):
             "max_workers_eval": ("Parallel workers for the SWE-bench scoring harness", 4),
             "temperature": ("Sampling temperature", 0.0),
             "max_turns": ("Max agent turns per instance", 30),
+            "use_modal": ("Run scoring harness on Modal cloud", False),
         }
 
     async def execute(
@@ -108,6 +126,18 @@ class SWEBenchExternalEval(ExternalEval):
     ) -> ExternalEvalResult:
         start_time = time.time()
         swe_args = SWEBenchArgs.from_dict(args)
+
+        if swe_args.use_modal:
+            missing = []
+            if not os.environ.get("MODAL_TOKEN_ID"):
+                missing.append("MODAL_TOKEN_ID")
+            if not os.environ.get("MODAL_TOKEN_SECRET"):
+                missing.append("MODAL_TOKEN_SECRET")
+            if missing:
+                return self._error_result(
+                    f"Modal credentials missing: {', '.join(missing)}",
+                    start_time,
+                )
 
         tmp_dir = None
         if output_dir is None:
@@ -169,9 +199,9 @@ class SWEBenchExternalEval(ExternalEval):
         container_runtime: str,
     ) -> tuple[bool, str]:
         """Run mini-swe-agent to generate patches. Returns (success, output)."""
-        # For local vLLM servers, use the openai/ litellm prefix with api_base config.
+        # For local vLLM servers, use the hosted_vllm/ litellm prefix with api_base config.
         # For external APIs (OpenAI etc.), pass the model name as-is.
-        litellm_model = f"openai/{model_name}" if is_local else model_name
+        litellm_model = f"hosted_vllm/{model_name}" if is_local else model_name
 
         cmd = [
             sys.executable,
@@ -191,7 +221,7 @@ class SWEBenchExternalEval(ExternalEval):
             "-c",
             "swebench.yaml",
             "-c",
-            f"agent.max_iterations={swe_args.max_turns}",
+            f"agent.step_limit={swe_args.max_turns}",
             "-c",
             f"model.model_kwargs.temperature={swe_args.temperature}",
         ]
@@ -205,10 +235,10 @@ class SWEBenchExternalEval(ExternalEval):
         # mini-swe-agent respects MSWEA_DOCKER_EXECUTABLE to switch container runtimes
         env = os.environ.copy()
         env["MSWEA_DOCKER_EXECUTABLE"] = container_runtime
-        # litellm requires OPENAI_API_KEY even for local vLLM servers; must match
-        # the key the vLLM server was started with (hardcoded as "EMPTY" in vllm_server.py)
-        if is_local and "OPENAI_API_KEY" not in env:
-            env["OPENAI_API_KEY"] = "EMPTY"
+        if is_local:
+            env["HOSTED_VLLM_API_KEY"] = "local"
+            env["HOSTED_VLLM_API_BASE"] = provider_url
+            env["MSWEA_COST_TRACKING"] = "ignore_errors"
 
         logger.info(f"[{self.name}] Running mini-swe-agent: {shlex.join(cmd)}")
         # Reserve 20% of total timeout for the scoring phase
@@ -223,6 +253,9 @@ class SWEBenchExternalEval(ExternalEval):
         container_runtime: str,
     ) -> tuple[bool, str]:
         """Run the SWE-bench evaluation harness to score patches. Returns (success, output)."""
+        if swe_args.use_modal:
+            _ensure_modal_config_exists()
+
         dataset_hf = _DATASET_HF_PATHS.get(swe_args.dataset, swe_args.dataset)
         cmd = [
             sys.executable,
@@ -232,39 +265,18 @@ class SWEBenchExternalEval(ExternalEval):
             dataset_hf,
             "--predictions_path",
             str(preds_path),
-            "--max_workers",
-            str(swe_args.max_workers_eval),
             "--run_id",
             run_id,
+            "--max_workers",
+            str(swe_args.max_workers_eval),
         ]
 
-        # The SWE-bench harness uses the Docker Python SDK, which reads DOCKER_HOST.
-        # When using podman, start the podman socket service and point DOCKER_HOST at it.
         env = os.environ.copy()
-        if container_runtime == "podman":
-            uid = os.getuid()
-            # Root uses /run/podman/podman.sock; non-root uses XDG path
-            if uid == 0:
-                fs_socket_path = "/run/podman/podman.sock"
-            else:
-                fs_socket_path = f"/run/user/{uid}/podman/podman.sock"
-            socket_uri = f"unix://{fs_socket_path}"
-            if "DOCKER_HOST" not in env:
-                env["DOCKER_HOST"] = socket_uri
-            # Start the podman socket service if not already running
-            logger.info(f"[{self.name}] Starting podman socket service at {socket_uri}")
-            await asyncio.create_subprocess_exec(
-                "podman", "system", "service", "--time=0", socket_uri,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            # Poll until the socket file exists (up to 10 seconds)
-            for _ in range(20):
-                if os.path.exists(fs_socket_path):
-                    break
-                await asyncio.sleep(0.5)
-            else:
-                logger.warning(f"[{self.name}] Podman socket not ready after 10s: {fs_socket_path}")
+
+        if swe_args.use_modal:
+            cmd.extend(["--modal", "true"])
+        elif "DOCKER_HOST" not in env:
+            logger.warning("DOCKER_HOST not set. Scoring may fail without podman service or Modal.")
 
         logger.info(f"[{self.name}] Running SWE-bench harness: {shlex.join(cmd)}")
         ok, output = await self._run_subprocess(
