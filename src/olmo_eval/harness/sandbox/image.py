@@ -190,4 +190,4 @@ def dependencies_to_dockerfile_extra(dependencies: tuple[str, ...]) -> tuple[str
     if not dependencies:
         return ()
     pkgs = " ".join(shlex.quote(dep) for dep in dependencies)
-    return (f"RUN uv pip install --system --no-cache {pkgs}",)
+    return (f"RUN PATH=/root/python/bin:$PATH uv pip install --system --no-cache {pkgs}",)
