@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import logging
 import os
 import time
@@ -361,6 +362,15 @@ class SandboxExecutor:
             self._session_created = False
 
         if self._deployment is not None:
+            # Work around swe-rex ModalDeployment.stop() bug: it only calls
+            # sandbox.terminate() when poll() returns non-None (already exited),
+            # so running sandboxes are never terminated.  Force-terminate here.
+            if self.config.mode == SandboxMode.MODAL:
+                sandbox = getattr(self._deployment, "_sandbox", None)
+                if sandbox is not None:
+                    with contextlib.suppress(Exception):
+                        await sandbox.terminate.aio()
+
             try:
                 await self._deployment.stop()
             except Exception as e:
