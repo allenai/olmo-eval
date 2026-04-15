@@ -19,7 +19,6 @@ from olmo_eval.common.scorers import CodeExecutionScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, Response, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import BIGCODEBENCH_STOP_SEQUENCES
-from olmo_eval.evals.extract import extract_code
 from olmo_eval.evals.tasks.common import SandboxEnv, Task, register, register_variant
 
 if TYPE_CHECKING:
@@ -147,14 +146,31 @@ class BigCodeBench(Task):
         )
 
     def extract_answer(self, output: LMOutput) -> str | None:
-        return extract_code(output.text)
+        """Extract function body from model output.
+
+        The model completes a function inside a ``` code block, so the
+        continuation is raw code.  Take everything before the closing ```
+        fence rather than searching for fenced blocks (which would match
+        hallucinated continuations like the instruction prefix).
+        """
+        text = output.text
+        idx = text.find("```")
+        if idx >= 0:
+            return text[:idx]
+        return text
 
     def _extract_answers(self, responses: Sequence[Response]) -> None:
+        from olmo_eval.evals.extract import sanitize_code
+
         for response in responses:
+            entry_point = response.instance.metadata.get("entry_point", "")
             for output in response.outputs:
                 code = self.extract_answer(output)
                 if code:
-                    output.extracted_answer = response.instance.metadata["answer_prefix"] + code
+                    full_code = response.instance.metadata["answer_prefix"] + code
+                    if entry_point:
+                        full_code = sanitize_code(full_code, entrypoint=entry_point)
+                    output.extracted_answer = full_code
                 else:
                     output.extracted_answer = None
 

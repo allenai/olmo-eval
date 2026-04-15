@@ -30,6 +30,8 @@ dependencies = [
     "rich~=14.3.1",
     "sympy>=1.12",
     "textual-plot>=0.10.1",
+    "tree-sitter>=0.24.0",
+    "tree-sitter-python>=0.23.0,<0.25.0",
 ]
 
 [project.urls]
