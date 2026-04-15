@@ -6,7 +6,7 @@ from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter
 from olmo_eval.common.metrics import (
-    BPBMetric,
+    BPBMetricInstanceAvg,
     LogprobMCAccuracyMetric,
     LogprobPerCharMCAccuracyMetric,
 )
@@ -178,7 +178,7 @@ register_variant("jeopardy:rc", "olmo3base")
 
 @register("jeopardy:bpb")
 class JeopardyBPB(JeopardyRC):
-    metrics = (BPBMetric(),)
+    metrics = (BPBMetricInstanceAvg(),)
 
 
 register_variant("jeopardy:bpb", "olmo3base")

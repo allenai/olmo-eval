@@ -5,7 +5,7 @@ from typing import Any
 
 from olmo_eval.common.formatters import PPLFormatter
 from olmo_eval.common.metrics import (
-    BPBMetric,
+    BPBMetricInstanceAvg,
     LogprobMCAccuracyMetric,
     LogprobPerCharMCAccuracyMetric,
 )
@@ -171,8 +171,8 @@ class NaturalQsBPB(_NaturalQsMCBase):
     data_source = DataSource(path="allenai/nq_open_mc", split="validation")
     split = Split.VALIDATION
     formatter = PPLFormatter()
-    metrics = (BPBMetric(),)
-    primary_metric = BPBMetric()
+    metrics = (BPBMetricInstanceAvg(),)
+    primary_metric = BPBMetricInstanceAvg()
     num_fewshot = 5
     fewshot_source = "nq_mc_fixed"
 

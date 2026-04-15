@@ -6,7 +6,7 @@ from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter
 from olmo_eval.common.metrics import (
-    BPBMetric,
+    BPBMetricInstanceAvg,
     LogprobPerCharMCAccuracyMetric,
     LogprobPerTokenMCAccuracyMetric,
 )
@@ -168,6 +168,6 @@ register_variant(
     fewshot_source="olmes_piqa_fixed",
 )
 
-register_variant("piqa", "bpb", metrics=(BPBMetric(),))
+register_variant("piqa", "bpb", metrics=(BPBMetricInstanceAvg(),))
 
 register_variant("piqa", "full", limit=None)

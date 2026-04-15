@@ -5,7 +5,7 @@ from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter, PPLFormatter
 from olmo_eval.common.metrics import (
-    BPBMetric,
+    BPBMetricInstanceAvg,
     LogprobMCAccuracyMetric,
     LogprobPerCharMCAccuracyMetric,
     LogprobUncondMCAccuracyMetric,
@@ -120,7 +120,7 @@ class _ARCBase(Task):
         return any(isinstance(m, LogprobUncondMCAccuracyMetric) for m in self.config.metrics)
 
     def _is_bpb(self) -> bool:
-        return any(isinstance(m, BPBMetric) for m in self.config.metrics)
+        return any(isinstance(m, BPBMetricInstanceAvg) for m in self.config.metrics)
 
     def _format_bpb_request(self, instance: Instance) -> LMRequest:
         fewshot = self.get_fewshot()
@@ -213,7 +213,7 @@ class ARCChallenge(_ARCBase):
 
 register_variant("arc_easy", "rc", metrics=(LogprobPerCharMCAccuracyMetric(),))
 register_variant("arc_easy", "mc", formatter=MultipleChoiceFormatter())
-register_variant("arc_easy", "bpb", formatter=PPLFormatter(), metrics=(BPBMetric(),))
+register_variant("arc_easy", "bpb", formatter=PPLFormatter(), metrics=(BPBMetricInstanceAvg(),))
 register_variant(
     "arc_easy",
     "olmo3base",
@@ -234,7 +234,9 @@ register_variant("arc_easy", "full")
 
 register_variant("arc_challenge", "rc", metrics=(LogprobUncondMCAccuracyMetric(),))
 register_variant("arc_challenge", "mc", formatter=MultipleChoiceFormatter())
-register_variant("arc_challenge", "bpb", formatter=PPLFormatter(), metrics=(BPBMetric(),))
+register_variant(
+    "arc_challenge", "bpb", formatter=PPLFormatter(), metrics=(BPBMetricInstanceAvg(),)
+)
 register_variant(
     "arc_challenge",
     "olmo3base",

@@ -7,7 +7,7 @@ from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter
 from olmo_eval.common.metrics import (
-    BPBMetric,
+    BPBMetricInstanceAvg,
     LogprobMCAccuracyMetric,
     LogprobPerCharMCAccuracyMetric,
 )
@@ -175,4 +175,4 @@ register_variant(
 register_variant(
     "hellaswag", "xlarge", num_fewshot=5, limit=10_000, fewshot_source="olmes_hellaswag_fixed"
 )
-register_variant("hellaswag", "bpb", metrics=(BPBMetric(),))
+register_variant("hellaswag", "bpb", metrics=(BPBMetricInstanceAvg(),))

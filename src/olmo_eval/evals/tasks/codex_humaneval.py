@@ -1,7 +1,7 @@
 """Codex HumanEval task (alias for HumanEval with codex_humaneval name)."""
 
 from olmo_eval.common.formatters import CompletionFormatter, PPLFormatter
-from olmo_eval.common.metrics import BPBMetric
+from olmo_eval.common.metrics import BPBMetricInstanceAvg
 from olmo_eval.evals.tasks.common import register, register_variant
 from olmo_eval.evals.tasks.humaneval import HumanEval
 
@@ -15,7 +15,7 @@ register_variant(
     "codex_humaneval",
     "bpb",
     formatter=PPLFormatter(leading_space=True, answer_prefix=" "),
-    metrics=(BPBMetric(),),
+    metrics=(BPBMetricInstanceAvg(),),
 )
 
 register_variant(

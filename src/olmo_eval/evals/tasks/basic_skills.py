@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import PPLFormatter
-from olmo_eval.common.metrics import BPBMetric, LogprobPerTokenMCAccuracyMetric
+from olmo_eval.common.metrics import BPBMetricInstanceAvg, LogprobPerTokenMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -144,7 +144,7 @@ for _subtask in BASIC_SKILLS_SUBTASKS:
     setattr(sys.modules[__name__], _class_name, _cls)
     register(_task_name)(_cls)
     register_variant(_task_name, "rc")
-    register_variant(_task_name, "bpb", formatter=PPLFormatter(), metrics=(BPBMetric(),))
+    register_variant(_task_name, "bpb", formatter=PPLFormatter(), metrics=(BPBMetricInstanceAvg(),))
     register_variant(
         _task_name,
         "olmo3base",

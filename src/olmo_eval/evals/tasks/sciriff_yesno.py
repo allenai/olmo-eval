@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.metrics import BPBMetric, LogprobMCAccuracyMetric
+from olmo_eval.common.metrics import BPBMetricInstanceAvg, LogprobMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -78,7 +78,7 @@ def _format_rc(source: str, question: str, answer: str | None = None) -> str:
 
 register_variant("sciriff_yesno", "rc")
 
-register_variant("sciriff_yesno", "bpb", metrics=(BPBMetric(),))
+register_variant("sciriff_yesno", "bpb", metrics=(BPBMetricInstanceAvg(),))
 
 register_variant(
     "sciriff_yesno",

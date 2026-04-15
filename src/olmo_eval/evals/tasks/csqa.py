@@ -5,7 +5,7 @@ from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter
 from olmo_eval.common.metrics import (
-    BPBMetric,
+    BPBMetricInstanceAvg,
     LogprobMCAccuracyMetric,
     LogprobUncondMCAccuracyMetric,
 )
@@ -176,7 +176,9 @@ register_variant(
     seed=1234,
     fewshot_source="olmes_csqa_fixed",
 )
-register_variant("csqa", "bpb", metrics=(BPBMetric(),), primary_metric=BPBMetric())
+register_variant(
+    "csqa", "bpb", metrics=(BPBMetricInstanceAvg(),), primary_metric=BPBMetricInstanceAvg()
+)
 register_variant(
     "csqa",
     "olmes",

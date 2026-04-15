@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.metrics import (
-    BPBMetric,
+    BPBMetricInstanceAvg,
     LogprobMCAccuracyMetric,
     LogprobPerCharMCAccuracyMetric,
 )
@@ -128,7 +128,7 @@ register_variant("coqa:rc", "olmo3base")
 
 @register("coqa:bpb")
 class CoqaBPB(CoqaRC):
-    metrics = (BPBMetric(),)
+    metrics = (BPBMetricInstanceAvg(),)
 
 
 register_variant(
