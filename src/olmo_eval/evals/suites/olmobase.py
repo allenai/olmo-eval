@@ -28,19 +28,19 @@ make_suite(
 
 make_suite(
     name="mmlu:stem:mc::olmo3base",
-    tasks=tuple(f"mmlu_{s}:mc:olmo3base" for s in _STEM),
+    tasks=tuple(f"mmlu_{subtask}:mc:olmo3base" for subtask in _STEM),
 )
 make_suite(
     name="mmlu:humanities:mc::olmo3base",
-    tasks=tuple(f"mmlu_{s}:mc:olmo3base" for s in _HUMANITIES),
+    tasks=tuple(f"mmlu_{subtask}:mc:olmo3base" for subtask in _HUMANITIES),
 )
 make_suite(
     name="mmlu:social_sciences:mc::olmo3base",
-    tasks=tuple(f"mmlu_{s}:mc:olmo3base" for s in _SOCIAL_SCIENCES),
+    tasks=tuple(f"mmlu_{subtask}:mc:olmo3base" for subtask in _SOCIAL_SCIENCES),
 )
 make_suite(
     name="mmlu:other:mc::olmo3base",
-    tasks=tuple(f"mmlu_{s}:mc:olmo3base" for s in _OTHER),
+    tasks=tuple(f"mmlu_{subtask}:mc:olmo3base" for subtask in _OTHER),
 )
 make_suite(
     name="mmlu:mc::olmo3base",
@@ -55,19 +55,19 @@ make_suite(
 
 make_suite(
     name="mmlu:stem:rc::olmo3base",
-    tasks=tuple(f"mmlu_{s}:rc:olmo3base" for s in _STEM),
+    tasks=tuple(f"mmlu_{subtask}:rc:olmo3base" for subtask in _STEM),
 )
 make_suite(
     name="mmlu:humanities:rc::olmo3base",
-    tasks=tuple(f"mmlu_{s}:rc:olmo3base" for s in _HUMANITIES),
+    tasks=tuple(f"mmlu_{subtask}:rc:olmo3base" for subtask in _HUMANITIES),
 )
 make_suite(
     name="mmlu:social_sciences:rc::olmo3base",
-    tasks=tuple(f"mmlu_{s}:rc:olmo3base" for s in _SOCIAL_SCIENCES),
+    tasks=tuple(f"mmlu_{subtask}:rc:olmo3base" for subtask in _SOCIAL_SCIENCES),
 )
 make_suite(
     name="mmlu:other:rc::olmo3base",
-    tasks=tuple(f"mmlu_{s}:rc:olmo3base" for s in _OTHER),
+    tasks=tuple(f"mmlu_{subtask}:rc:olmo3base" for subtask in _OTHER),
 )
 make_suite(
     name="mmlu:rc::olmo3base",
@@ -88,11 +88,11 @@ make_suite(
 )
 make_suite(
     name="minerva_math::olmo3base",
-    tasks=tuple(f"minerva_math_{t}::olmo3base" for t in MATH_SUBSETS),
+    tasks=tuple(f"minerva_math_{subtask}::olmo3base" for subtask in MATH_SUBSETS),
 )
 make_suite(
     name="minerva_math:bpb:olmo3base",
-    tasks=tuple(f"minerva_math_{t}:bpb::olmo3base" for t in MATH_SUBSETS),
+    tasks=tuple(f"minerva_math_{subtask}:bpb::olmo3base" for subtask in MATH_SUBSETS),
 )
 
 # -- Basic skills -------------------------------------------------------------
