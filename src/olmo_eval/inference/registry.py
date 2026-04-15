@@ -52,7 +52,9 @@ class ReplicaSet:
         idx = next(self._counter) % len(self._configs)
         if self._providers[idx] is None:
             self._providers[idx] = self._configs[idx].create_provider()
-        return self._providers[idx]
+        provider = self._providers[idx]
+        assert provider is not None
+        return provider
 
     def get_config(self, idx: int = 0) -> ProviderConfig:
         return self._configs[idx]
