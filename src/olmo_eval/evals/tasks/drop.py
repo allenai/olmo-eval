@@ -10,7 +10,7 @@ from typing import Any
 from olmo_eval.common.formatters import MultipleChoiceFormatter, PPLFormatter
 from olmo_eval.common.metrics import (
     AccuracyMetric,
-    BPBMetricInstanceAvg,
+    BPBMetric,
     F1Metric,
     LogprobMCAccuracyMetric,
     LogprobPerCharMCAccuracyMetric,
@@ -311,26 +311,21 @@ class Drop(Task):
         )
 
     def _build_fewshot(self) -> list[Instance]:
-        fewshot_source = self.config.fewshot_source
-        if (
-            fewshot_source == "olmes_drop_mc_fixed"
-            and type(self) is Drop
-            and self.config.formatter is None
-        ):
-            fewshot_source = "olmes_drop_fixed"
-        if fewshot_source == "olmes_drop_fixed":
+        if self.config.fewshot_source == "olmes_drop_fixed":
             return self._build_fixed_fewshot()
-        if fewshot_source == "olmes_drop_mc_fixed":
+        if self.config.fewshot_source == "olmes_drop_mc_fixed":
             return self._build_mc_fixed_fewshot()
         return super()._build_fewshot()
 
     def _build_mc_fixed_fewshot(self) -> list[Instance]:
         instances = []
         for doc in DROP_MC_FIXED_FEWSHOT:
-            passage = doc["passage_original"].strip()
-            question = doc["question_original"]
-            choices = tuple(doc["choices"]["text"])
-            answer_key = doc["answerKey"]
+            passage = str(doc["passage_original"]).strip()
+            question = str(doc["question_original"])
+            choices_data = doc["choices"]
+            assert isinstance(choices_data, dict)
+            choices = tuple(choices_data["text"])
+            answer_key = str(doc["answerKey"])
             gold_idx = ord(answer_key) - ord("A")
             gold_text = choices[gold_idx] if 0 <= gold_idx < len(choices) else ""
 
@@ -394,7 +389,6 @@ class Drop(Task):
                 request_type=RequestType.LOGLIKELIHOOD,
                 prompt=prompt,
                 continuations=continuations,
-                max_length=self.config.max_length,
             )
 
         parts = []
@@ -425,8 +419,7 @@ register_variant(
     "drop",
     "olmo3base",
     num_fewshot=5,
-    fewshot_source="olmes_drop_mc_fixed",
-    max_length=2048,
+    fewshot_source="olmes_drop_fixed",
 )
 
 
@@ -468,8 +461,8 @@ class DropBPB(Drop):
     data_source = DataSource(path="allenai/drop_mc", split="validation")
     split = Split.VALIDATION
     formatter = PPLFormatter()
-    metrics = (BPBMetricInstanceAvg(),)
-    primary_metric = BPBMetricInstanceAvg()
+    metrics = (BPBMetric(),)
+    primary_metric = BPBMetric()
     num_fewshot = 5
     fewshot_source = "olmes_drop_mc_fixed"
 
@@ -504,10 +497,12 @@ class DropBPB(Drop):
     def _build_bpb_fixed_fewshot(self) -> list[Instance]:
         instances = []
         for doc in DROP_MC_FIXED_FEWSHOT:
-            passage = doc["passage_original"].strip()
-            question = doc["question_original"]
-            choices = tuple(doc["choices"]["text"])
-            answer_key = doc["answerKey"]
+            passage = str(doc["passage_original"]).strip()
+            question = str(doc["question_original"])
+            choices_data = doc["choices"]
+            assert isinstance(choices_data, dict)
+            choices = tuple(choices_data["text"])
+            answer_key = str(doc["answerKey"])
             gold_idx = ord(answer_key) - ord("A")
             gold_text = choices[gold_idx] if 0 <= gold_idx < len(choices) else ""
 
