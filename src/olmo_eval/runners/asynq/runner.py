@@ -241,26 +241,34 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
                 sandbox_envs = get_sandbox_envs(expanded_tasks)
                 if sandbox_envs:
+                    from olmo_eval.evals.tasks.common import get_task
+
                     template = self.harness_config.sandboxes[0]
-                    # Split total instances evenly across base + task-specific sandboxes
-                    total_configs = 1 + len(sandbox_envs)
-                    base_count = max(1, template.instances // total_configs)
-                    remainder = template.instances - base_count * total_configs
-                    # Give remainder to the base config
-                    sandboxes[0] = replace(template, instances=base_count + max(0, remainder))
+                    needs_default = any(
+                        get_task(spec).config.sandbox_env is None for spec in expanded_tasks
+                    )
+                    if not needs_default:
+                        sandboxes.pop(0)
+
+                    configs = len(sandboxes) + len(sandbox_envs)
+                    per_config = max(1, template.instances // configs)
+
+                    for i, cfg in enumerate(sandboxes):
+                        sandboxes[i] = replace(cfg, instances=per_config)
 
                     for senv in sandbox_envs:
                         extra = dependencies_to_dockerfile_extra(senv.dependencies)
-                        dep_sandbox = replace(
-                            template,
-                            capabilities=senv.capability,
-                            dockerfile_extra=template.dockerfile_extra + extra,
-                            inject_swerex=True,
-                            instances=base_count,
+                        sandboxes.append(
+                            replace(
+                                template,
+                                capabilities=senv.capability,
+                                dockerfile_extra=template.dockerfile_extra + extra,
+                                inject_swerex=True,
+                                instances=per_config,
+                            )
                         )
-                        sandboxes.append(dep_sandbox)
                         runner_logger.info(
-                            f"Sandbox env '{senv.name}' ({base_count} instances): "
+                            f"Sandbox env '{senv.name}' ({per_config} instances): "
                             f"{sorted(senv.dependencies)}"
                         )
 
