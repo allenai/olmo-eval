@@ -205,6 +205,9 @@ class SWEBenchExternalEval(ExternalEval):
         # mini-swe-agent respects MSWEA_DOCKER_EXECUTABLE to switch container runtimes
         env = os.environ.copy()
         env["MSWEA_DOCKER_EXECUTABLE"] = container_runtime
+        # litellm requires OPENAI_API_KEY even for local vLLM servers; set a dummy value
+        if is_local and "OPENAI_API_KEY" not in env:
+            env["OPENAI_API_KEY"] = "dummy"
 
         logger.info(f"[{self.name}] Running mini-swe-agent: {shlex.join(cmd)}")
         # Reserve 20% of total timeout for the scoring phase
