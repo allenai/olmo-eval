@@ -722,7 +722,7 @@ class SandboxExecutor:
             )
 
         interpreters = {
-            "python": "python",
+            "python": "python3",
             "python3": "python3",
             "bash": "bash",
             "sh": "sh",
