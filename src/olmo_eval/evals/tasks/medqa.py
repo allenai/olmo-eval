@@ -13,7 +13,7 @@ from collections.abc import Iterator, Sequence
 from typing import Any
 
 from olmo_eval.common.formatters import MCQAChatFormatter, MultipleChoiceFormatter, PPLFormatter
-from olmo_eval.common.metrics import AccuracyMetric, BPBMetric
+from olmo_eval.common.metrics import AccuracyMetric, BPBMetricInstanceAvg
 from olmo_eval.common.scorers import MultipleChoiceScorer
 from olmo_eval.common.types import (
     Instance,
@@ -141,4 +141,4 @@ class MedQA(Task):
 
 
 register_variant("medqa", "mc", formatter=MultipleChoiceFormatter(), metrics=_DEFAULT_METRICS)
-register_variant("medqa", "bpb", formatter=PPLFormatter(), metrics=(BPBMetric(),))
+register_variant("medqa", "bpb", formatter=PPLFormatter(), metrics=(BPBMetricInstanceAvg(),))

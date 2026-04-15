@@ -22,7 +22,7 @@ from collections.abc import Iterator, Sequence
 from typing import Any
 
 from olmo_eval.common.formatters import MCQAChatFormatter, MultipleChoiceFormatter, PPLFormatter
-from olmo_eval.common.metrics import AccuracyMetric, BPBMetric
+from olmo_eval.common.metrics import AccuracyMetric, BPBMetricInstanceAvg
 from olmo_eval.common.scorers import MultipleChoiceScorer
 from olmo_eval.common.types import (
     Instance,
@@ -270,7 +270,7 @@ for _subset in _SUBSETS:
     globals()[_cls.__name__] = _cls
     register(_subset)(_cls)
     register_variant(_subset, "mc", formatter=MultipleChoiceFormatter(), metrics=_DEFAULT_METRICS)
-    register_variant(_subset, "bpb", formatter=PPLFormatter(), metrics=(BPBMetric(),))
+    register_variant(_subset, "bpb", formatter=PPLFormatter(), metrics=(BPBMetricInstanceAvg(),))
 
     # Subject-filtered tasks
     for _subject in _SUBJECTS:
@@ -295,4 +295,6 @@ for _subset in _SUBSETS:
         register_variant(
             _task_name, "mc", formatter=MultipleChoiceFormatter(), metrics=_DEFAULT_METRICS
         )
-        register_variant(_task_name, "bpb", formatter=PPLFormatter(), metrics=(BPBMetric(),))
+        register_variant(
+            _task_name, "bpb", formatter=PPLFormatter(), metrics=(BPBMetricInstanceAvg(),)
+        )
