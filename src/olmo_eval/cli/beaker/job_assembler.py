@@ -230,7 +230,6 @@ def assemble_external_eval_job(
     # Environment variables
     env_vars: dict[str, str] = {
         "BEAKER_ALLOW_SUBCONTAINERS": "1",
-        "BEAKER_SKIP_DOCKER_SOCKET": "1",
         "BEAKER_WORKSPACE": workspace,
     }
     # Add infrastructure config for olmo-eval
