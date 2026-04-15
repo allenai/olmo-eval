@@ -134,11 +134,11 @@ make_suite(
 make_suite(
     "olmobase:code",
     (
-        "bigcodebench::olmo3base",
-        "codex_humaneval::olmo3base",
-        "deepseek_leetcode::olmo3base",
-        "ds1000:3shot::olmo3base",
-        "mbpp:3shot::olmo3base",
+        "bigcodebench:olmo3base",
+        "codex_humaneval_olmo3base:3shot:n32",
+        "deepseek_leetcode:olmo3base",
+        "ds1000:3shot:olmo3base",
+        "mbpp:3shot:olmo3base",
         _MULTIPL_E_HUMANEVAL_OLMO3BASE,
         _MULTIPL_E_MBPP_OLMO3BASE,
     ),
@@ -148,9 +148,9 @@ make_suite(
 make_suite(
     "olmobase:code_fim",
     (
-        "codex_humanevalfim_single::olmo3",
-        "codex_humanevalfim_multi::olmo3",
-        "codex_humanevalfim_random::olmo3",
+        "codex_humanevalfim_single:olmo3",
+        "codex_humanevalfim_multi:olmo3",
+        "codex_humanevalfim_random:olmo3",
     ),
     description="OLMoBase FIM code completion evaluation suite",
 )
