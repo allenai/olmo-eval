@@ -219,14 +219,15 @@ register_variant(
     "olmo3base",
     num_fewshot=5,
     fewshot_source="olmes_arc_easy_fixed",
-    split=Split.ALL,
+    split=Split.TEST,
+    metrics=(LogprobPerCharMCAccuracyMetric(),),
 )
 register_regime(
     "arc_easy",
     "olmo3base",
     num_fewshot=5,
     fewshot_source="olmes_arc_easy_fixed",
-    split=Split.ALL,
+    split=Split.TEST,
 )
 register_variant("arc_easy", "olmes", num_fewshot=5, fewshot_source="olmes_arc_easy_fixed")
 register_variant("arc_easy", "full")
@@ -241,11 +242,20 @@ register_variant(
     "olmo3base",
     num_fewshot=5,
     fewshot_source="olmes_arc_challenge_fixed",
-    split=Split.ALL,
+    split=Split.TEST,
+    metrics=(LogprobUncondMCAccuracyMetric(),),
 )
 register_regime(
     "arc_challenge",
     "olmo3base",
+    num_fewshot=5,
+    fewshot_source="olmes_arc_challenge_fixed",
+    split=Split.TEST,
+)
+register_variant(
+    "arc_challenge",
+    "mc_olmo3base",
+    formatter=MultipleChoiceFormatter(),
     num_fewshot=5,
     fewshot_source="olmes_arc_challenge_fixed",
     split=Split.ALL,

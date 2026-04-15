@@ -157,13 +157,20 @@ register_variant(
     "olmo3base",
     num_fewshot=5,
     fewshot_source="olmes_csqa_fixed",
-    data_source=DataSource(path="commonsense_qa", split="validation+train"),
-    limit=10000,
-    seed=1234,
+    data_source=DataSource(path="commonsense_qa", split="validation"),
+    metrics=(LogprobUncondMCAccuracyMetric(),),
 )
 register_regime(
     "csqa",
     "olmo3base",
+    num_fewshot=5,
+    fewshot_source="olmes_csqa_fixed",
+    data_source=DataSource(path="commonsense_qa", split="validation"),
+)
+register_variant(
+    "csqa",
+    "mc_olmo3base",
+    formatter=MultipleChoiceFormatter(),
     num_fewshot=5,
     fewshot_source="olmes_csqa_fixed",
     data_source=DataSource(path="commonsense_qa", split="validation+train"),

@@ -150,6 +150,13 @@ register_variant("socialiqa", "mc", formatter=MultipleChoiceFormatter())
 register_variant(
     "socialiqa",
     "olmo3base",
+    num_fewshot=5,
+    fewshot_source="olmes_socialiqa_fixed",
+)
+register_variant(
+    "socialiqa",
+    "mc_olmo3base",
+    formatter=MultipleChoiceFormatter(),
     data_source=DataSource(
         path="social_i_qa", split="train+validation", revision="refs/convert/parquet"
     ),
