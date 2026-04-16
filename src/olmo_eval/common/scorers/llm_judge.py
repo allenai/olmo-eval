@@ -202,8 +202,15 @@ class LLMJudgeScorer(ContextScorer):
         context: ScoringContext,
         temperature: float = 0.0,
         max_tokens: int = 10,
+        completion: bool = False,
     ) -> str:
-        """Score using configured provider from inference pool."""
+        """Score using configured provider from inference pool.
+
+        Args:
+            completion: If True, send as a raw completion (for prompts that
+                already include chat template tokens).  Otherwise send as a
+                chat message.
+        """
         if self.provider_name is None:
             raise RuntimeError("provider_name is required for provider-based scoring.")
         if context.inference_pool is None:
@@ -212,10 +219,13 @@ class LLMJudgeScorer(ContextScorer):
         from olmo_eval.common.types import LMRequest, RequestType, SamplingParams
 
         provider = context.get_provider(self.provider_name)
-        request = LMRequest(
-            request_type=RequestType.CHAT,
-            messages=({"role": "user", "content": prompt},),
-        )
+        if completion:
+            request = LMRequest(request_type=RequestType.COMPLETION, prompt=prompt)
+        else:
+            request = LMRequest(
+                request_type=RequestType.CHAT,
+                messages=({"role": "user", "content": prompt},),
+            )
         sampling_params = SamplingParams(temperature=temperature, max_tokens=max_tokens)
         results = await provider.agenerate([request], sampling_params)
         return results[0][0].text if results and results[0] else ""
@@ -404,7 +414,7 @@ class SafetyScorer(LLMJudgeScorer):
 
     name: ClassVar[str] = "safety_judge"
     judge_format: str = "standard"
-    persist_judge_response: bool = False
+    persist_judge_response: bool = True
     judge_fn: JudgeFn = field(
         default_factory=lambda: build_openai_judge_fn(
             scorer_name="SafetyJudgeScorer", max_tokens=128
@@ -516,7 +526,12 @@ class SafetyScorer(LLMJudgeScorer):
         prompt = self.format_judge_prompt(instance, output)
 
         if self.provider_name is not None:
-            response = await self._score_with_provider(prompt, context, max_tokens=128)
+            response = await self._score_with_provider(
+                prompt,
+                context,
+                max_tokens=128,
+                completion=self.judge_format == "wildguard",
+            )
         else:
             response = await self._score_with_judge_fn(prompt)
 

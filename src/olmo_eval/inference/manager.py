@@ -18,7 +18,11 @@ logger = logging.getLogger(__name__)
 LOCAL_SERVER_KINDS = frozenset({"vllm_server"})
 
 
-def _create_server(config: ProviderConfig, gpu_ids: list[int] | None = None) -> VLLMServerProcess:
+def _create_server(
+    config: ProviderConfig,
+    gpu_ids: list[int] | None = None,
+    log_dir: str | None = None,
+) -> VLLMServerProcess:
     """Create server process from config."""
     return VLLMServerProcess(
         model_name=config.model,
@@ -28,6 +32,7 @@ def _create_server(config: ProviderConfig, gpu_ids: list[int] | None = None) -> 
         tokenizer=config.tokenizer,
         trust_remote_code=config.trust_remote_code,
         revision=config.revision,
+        log_dir=log_dir,
         **dict(config.kwargs),
     )
 
@@ -62,6 +67,7 @@ class InferenceManager:
 
     configs: dict[str, ProviderConfig] = field(default_factory=dict)
     available_gpu_ids: list[int] = field(default_factory=list)
+    log_dir: str | None = None
 
     _servers: dict[str, ServerInfo] = field(default_factory=dict, init=False)
     _started: bool = field(default=False, init=False)
@@ -104,9 +110,22 @@ class InferenceManager:
 
                     # Pre-allocate GPUs and create all server instances first
                     pending_servers: list[tuple[int, VLLMServerProcess, list[int]]] = []
+                    safe_model = config.model.replace("/", "_").replace("\\", "_")
+
                     for i in range(num_instances):
                         instance_gpus = [gpu_pool.pop(0) for _ in range(tensor_parallel)]
-                        server = _create_server(config=config, gpu_ids=instance_gpus)
+                        # Per-instance log dir: logs/vllm_server_{model}_{idx}/
+                        instance_log_dir = None
+                        if self.log_dir:
+                            import os
+
+                            suffix = f"_{i}" if num_instances > 1 else ""
+                            instance_log_dir = os.path.join(
+                                self.log_dir, f"vllm_server_{safe_model}{suffix}"
+                            )
+                        server = _create_server(
+                            config=config, gpu_ids=instance_gpus, log_dir=instance_log_dir
+                        )
                         pending_servers.append((i, server, instance_gpus))
 
                     # Log using first server's owner

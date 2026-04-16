@@ -222,9 +222,12 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
                 auxiliary_gpus = gpu_plan.get_auxiliary_gpus()
 
+                import os
+
                 inference_manager = InferenceManager(
                     configs=dict(self.harness_config.auxiliary_providers),
                     available_gpu_ids=auxiliary_gpus,
+                    log_dir=os.path.join(self.output_dir, "logs"),
                 )
                 registry_config = inference_manager.start()
                 runner_logger.info(f"Auxiliary providers ready: {list(registry_config.keys())}")

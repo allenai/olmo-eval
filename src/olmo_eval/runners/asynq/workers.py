@@ -96,10 +96,11 @@ def inference_worker(
         has_tools = harness_config.has_tools
         enable_auto_tool_choice = has_tools and provider_kind == "vllm_server"
 
-        # Set log_dir for vllm_server provider to persist server logs (in logs/ subdir)
+        # Set log_dir for vllm_server provider - matches metrics naming convention
         log_dir = None
         if provider_kind == "vllm_server" and output_dir:
-            log_dir = os.path.join(output_dir, "logs")
+            safe_model = model_name.replace("/", "_").replace("\\", "_")
+            log_dir = os.path.join(output_dir, "logs", f"vllm_server_{safe_model}")
 
         # Only inject vllm-specific kwargs for vllm providers
         vllm_only_overrides: dict[str, Any] = {}
