@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import shlex
+import shutil
 import subprocess
 
 from olmo_eval.common.config import get_infra_config
@@ -19,6 +20,31 @@ PYTHON_STANDALONE_URL = (
 
 # Version bump this when changing the Dockerfile to invalidate cached images
 SWEREX_IMAGE_VERSION = "20260304.1"
+
+
+def _remote_image_exists(container_runtime: str, image: str) -> bool:
+    """Check if a remote image exists in a registry.
+
+    Tries container_runtime manifest inspect first, then falls back to
+    skopeo inspect (more reliable with podman + private registries).
+    """
+    result = subprocess.run(
+        [container_runtime, "manifest", "inspect", image],
+        capture_output=True,
+    )
+    if result.returncode == 0:
+        return True
+
+    # Fallback: skopeo is shipped with podman and handles auth better
+    if shutil.which("skopeo"):
+        result = subprocess.run(
+            ["skopeo", "inspect", f"docker://{image}"],
+            capture_output=True,
+        )
+        if result.returncode == 0:
+            return True
+
+    return False
 
 
 def get_swerex_image(
@@ -76,11 +102,7 @@ def get_swerex_image(
         if require_registry:
             assert registry_image is not None  # Guaranteed by earlier check
             # Check if the image already exists in the registry before pushing
-            inspect_result = subprocess.run(
-                [container_runtime, "manifest", "inspect", registry_image],
-                capture_output=True,
-            )
-            if inspect_result.returncode == 0:
+            if _remote_image_exists(container_runtime, registry_image):
                 logger.debug(f"Registry image already exists: {registry_image}")
                 return registry_image
             # Not in registry yet — tag and push
@@ -105,11 +127,7 @@ def get_swerex_image(
         if require_registry:
             # For Modal: just verify the image exists in the registry without pulling.
             # Modal pulls directly from the registry, so a local copy is unnecessary.
-            result = subprocess.run(
-                [container_runtime, "manifest", "inspect", registry_image],
-                capture_output=True,
-            )
-            if result.returncode == 0:
+            if _remote_image_exists(container_runtime, registry_image):
                 logger.info(f"Registry image exists: {registry_image}")
                 return registry_image
             logger.info(f"Registry image {registry_image} not found, will build and push")
