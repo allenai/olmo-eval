@@ -54,6 +54,9 @@ class Capability:
     DEFAULT: frozenset[str] = BASH
 
 
+DEFAULT_MAX_CONCURRENCY = 1
+
+
 @hide_unset()
 @dataclass(frozen=True)
 class SandboxConfig:
@@ -67,7 +70,7 @@ class SandboxConfig:
             Multiple instances enable higher throughput via round-robin.
         max_concurrency: Maximum concurrent operations per executor instance.
             Total concurrent sandbox operations for a capability set is
-            max_concurrency * (number of running instances). Defaults to 8.
+            max_concurrency * (number of running instances).
         min_instances: Minimum instances that must start successfully.
             None (default) means all instances are required. Set to a lower
             value to allow partial failures during startup.
@@ -92,7 +95,7 @@ class SandboxConfig:
     mode: SandboxMode
     capabilities: frozenset[str] = Capability.DEFAULT
     instances: int = 1
-    max_concurrency: int = 8
+    max_concurrency: int = DEFAULT_MAX_CONCURRENCY
     min_instances: int | None = None
     container_runtime: ContainerRuntime = "podman"
     startup_timeout: float = 60.0
@@ -144,7 +147,7 @@ class SandboxConfig:
             mode=SandboxMode(data["mode"]),
             capabilities=frozenset(capabilities) if capabilities else Capability.DEFAULT,
             instances=data.get("instances", 1),
-            max_concurrency=data.get("max_concurrency", 8),
+            max_concurrency=data.get("max_concurrency", DEFAULT_MAX_CONCURRENCY),
             min_instances=data.get("min_instances"),
             container_runtime=data.get("container_runtime", "podman"),
             startup_timeout=data.get("startup_timeout", 60.0),
