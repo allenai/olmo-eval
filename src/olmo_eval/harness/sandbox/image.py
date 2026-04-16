@@ -74,8 +74,16 @@ def get_swerex_image(
     if result.returncode == 0:
         logger.debug(f"Using cached swerex image: {local_image}")
         if require_registry:
-            # Ensure image is pushed to registry for remote access
             assert registry_image is not None  # Guaranteed by earlier check
+            # Check if the image already exists in the registry before pushing
+            inspect_result = subprocess.run(
+                [container_runtime, "manifest", "inspect", registry_image],
+                capture_output=True,
+            )
+            if inspect_result.returncode == 0:
+                logger.debug(f"Registry image already exists: {registry_image}")
+                return registry_image
+            # Not in registry yet — tag and push
             subprocess.run(
                 [container_runtime, "tag", local_image, registry_image],
                 capture_output=True,

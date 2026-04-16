@@ -67,7 +67,7 @@ OLMO3_BASE_EASY_CODE_BPB_SERIALIZED = register(
     Suite(
         name="olmo3:base_easy:code:bpb:serialized",
         tasks=(
-            "serialized:codex_humaneval_3shot_bpb",
+            "serialized:humaneval_3shot_bpb",
             "serialized:mbpp_3shot_bpb",
             _SERIALIZED_MT_MBPP_V2FIX_BPB,
         ),
@@ -128,8 +128,8 @@ make_suite(
 
 # FIM infilling suite
 make_suite(
-    "codex_humanevalfim",
-    ("codex_humanevalfim_single", "codex_humanevalfim_multi", "codex_humanevalfim_random"),
+    "humanevalfim",
+    ("humanevalfim_single", "humanevalfim_multi", "humanevalfim_random"),
     description="HumanEval FIM infilling tasks (single, multi, random)",
 )
 
@@ -142,7 +142,7 @@ register(
         name="olmobase:code",
         tasks=(
             "bigcodebench:olmo3base",
-            "codex_humaneval:olmo3base",
+            "humaneval:olmo3base",
             "deepseek_leetcode:olmo3base",
             "ds1000:olmo3base",
             "mbpp:olmo3base",
@@ -157,9 +157,19 @@ register(
 make_suite(
     "olmobase:code_fim",
     (
-        "codex_humanevalfim_single:olmo3",
-        "codex_humanevalfim_multi:olmo3",
-        "codex_humanevalfim_random:olmo3",
+        "humanevalfim_single:olmo3",
+        "humanevalfim_multi:olmo3",
+        "humanevalfim_random:olmo3",
     ),
     description="OLMoBase FIM code completion evaluation suite",
+)
+
+make_suite(
+    "humanevalfim:olmo3base",
+    (
+        "humanevalfim_single:olmo3base",
+        "humanevalfim_multi:olmo3base",
+        "humanevalfim_random:olmo3base",
+    ),
+    description="HumanEval FIM infilling tasks with OLMo3 base pass@k evaluation",
 )

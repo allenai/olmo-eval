@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.logging import get_logger
+from olmo_eval.common.progress import ProgressLogger
 from olmo_eval.common.types import Response
 from olmo_eval.common.types.trajectory import AgentTrajectory
 from olmo_eval.runners.asynq.monitoring import check_workers_alive
@@ -70,6 +71,11 @@ async def process_results(
     scored_responses: dict[str, dict[int, Response]] = {spec: {} for spec in trackers}
     instances_scored: dict[str, int] = {spec: 0 for spec in trackers}
 
+    # Progress tracking for scoring
+    scoring_progress = ProgressLogger(
+        total=total_instances, desc="Scored", logger=logger, color="cyan"
+    )
+
     # Semaphore to limit concurrent scoring operations
     scoring_semaphore = asyncio.Semaphore(scoring_concurrency)
     in_flight_scoring: set[asyncio.Task[None]] = set()
@@ -119,6 +125,7 @@ async def process_results(
 
         scored_responses[spec][instance_idx] = scored
         instances_scored[spec] += 1
+        scoring_progress.update(1)
         check_task_completion(spec)
 
     def _reap_done_tasks() -> None:
@@ -175,6 +182,7 @@ async def process_results(
                 f"{result_item.error}"
             )
             tracker.add_failure(result_item.instance_idx, result_item.error)
+            scoring_progress.update(1)
             check_task_completion(result_item.task_id)
             continue
 
@@ -225,7 +233,7 @@ async def process_results(
             if spec not in results:
                 check_task_completion(spec)
 
-    logger.info(f"Scoring complete ({total_tasks} tasks, {total_instances} instances)")
+    scoring_progress.close()
     return results
 
 
@@ -261,7 +269,12 @@ def aggregate_results(
     Returns:
         Dict with full results including task metrics, errors, and summary.
     """
+    model_config = provider_config.to_dict() if hasattr(provider_config, "to_dict") else {}
     results_dict: dict[str, Any] = {
+        "model": provider_config.alias or provider_config.model,
+        "model_path": provider_config.model,
+        "provider": str(provider_config.kind),
+        "model_config": model_config,
         "tasks": {},
         "summary": {},
         "errors": [],

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
@@ -540,12 +541,24 @@ class Task(ABC):
         # Apply async scorers (both execution and context) concurrently
         async_scorers_exist = bool(execution_scorers) or bool(context_scorers)
         if async_scorers_exist:
-            semaphore = asyncio.Semaphore(context.scoring_concurrency)
+            # Shared semaphore for sandbox execution — scoped by capability, sized
+            # to max_concurrency * running_instances. Prevents overloading the pool.
+            exec_semaphore: asyncio.Semaphore | contextlib.nullcontext[None] = (
+                contextlib.nullcontext()
+            )
+            if execution_env is not None and hasattr(execution_env, "get_execution_semaphore"):
+                sem = execution_env.get_execution_semaphore(sandbox_cap or frozenset())  # ty: ignore[call-non-callable]
+                if sem is not None:
+                    exec_semaphore = sem
+
+            # Per-call semaphore for context scorers (LLM judges) — they don't
+            # consume sandbox slots so per-call throttling is appropriate.
+            ctx_semaphore = asyncio.Semaphore(context.scoring_concurrency)
 
             async def score_execution(
                 resp_idx: int, scorer: ExecutionScorer, out_idx: int
             ) -> tuple[int, str, int, float]:
-                async with semaphore:
+                async with exec_semaphore:
                     response = responses[resp_idx]
                     output = response.outputs[out_idx]
                     assert task_executor is not None
@@ -555,7 +568,7 @@ class Task(ABC):
             async def score_context(
                 resp_idx: int, scorer: ContextScorer, out_idx: int
             ) -> tuple[int, str, int, float]:
-                async with semaphore:
+                async with ctx_semaphore:
                     response = responses[resp_idx]
                     output = response.outputs[out_idx]
                     score = await scorer.ascore_with_context(response.instance, output, context)
