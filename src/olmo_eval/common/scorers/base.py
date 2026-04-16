@@ -25,6 +25,14 @@ class Scorer(ABC):
     name: ClassVar[str]
     requires_async: ClassVar[bool] = False
 
+    def __call__(self) -> Scorer:
+        """Allow scorer instances to be used where classes are expected.
+
+        When a metric's ``scorer`` field holds an instance instead of a class,
+        calling ``metric.scorer()`` returns the instance itself.
+        """
+        return self
+
     @abstractmethod
     def score(self, instance: Instance, output: LMOutput) -> float:
         """Score a single output against the gold answer."""

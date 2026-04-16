@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -64,6 +64,7 @@ class TaskConfig:
     split: Split = Split.TEST
     primary_metric: MetricName | Metric | None = None
     sampling_params: SamplingParams | None = None
+    answer_extractor: Callable[[str], str] | None = None
 
     #: Runtime dependencies to install for this task (package specs like "pkg==1.0" or git URLs)
     dependencies: list[str] | None = None
@@ -152,6 +153,7 @@ class TaskConfig:
             "split": self.split.value,
             "primary_metric": serialize_primary_metric(self.get_primary_metric()),
             "sampling_params": asdict(self.sampling_params) if self.sampling_params else None,
+            "answer_extractor": getattr(self.answer_extractor, "__name__", None),
             "dependencies": self.dependencies,
         }
 
@@ -240,7 +242,14 @@ class Task(ABC):
         ...
 
     def extract_answer(self, output: LMOutput) -> Any:
-        """Extract the answer from model output."""
+        """Extract the answer from model output.
+
+        If ``config.answer_extractor`` is set, it is called on ``output.text``.
+        Subclasses can override this method directly for task-level defaults;
+        variants can override via the config field.
+        """
+        if self.config.answer_extractor is not None:
+            return self.config.answer_extractor(output.text)
         return output.text
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
@@ -417,7 +426,6 @@ class Task(ABC):
                     if scorer_instance.name not in scorers_by_name:
                         scorers_by_name[scorer_instance.name] = scorer_instance
             self._scorers_cache = scorers_by_name
-        print(self._scorers_cache)
         return self._scorers_cache
 
     def _has_async_scorers(self) -> bool:
@@ -436,7 +444,7 @@ class Task(ABC):
         return self._has_async_cache
 
     def _extract_answers(self, responses: Sequence[Response]) -> None:
-        """Extract answers from outputs. Override for custom extraction logic."""
+        """Extract answers from outputs. Override for complex multi-output logic."""
         for response in responses:
             for output in response.outputs:
                 output.extracted_answer = self.extract_answer(output)

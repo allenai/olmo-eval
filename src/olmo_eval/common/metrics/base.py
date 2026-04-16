@@ -33,7 +33,7 @@ class Metric(ABC):
     """
 
     name: ClassVar[str]
-    scorer: ClassVar[type[Scorer]]
+    scorer: ClassVar[type[Scorer] | Scorer]
 
     @abstractmethod
     def compute(self, responses: Sequence[Response]) -> float:
@@ -42,7 +42,9 @@ class Metric(ABC):
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a dictionary."""
-        return {"type": self.__class__.__name__, "name": self.name, "scorer": self.scorer.__name__}
+        scorer = self.scorer
+        scorer_name = scorer.__name__ if isinstance(scorer, type) else type(scorer).__name__
+        return {"type": self.__class__.__name__, "name": self.name, "scorer": scorer_name}
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,7 +52,7 @@ class AccuracyMetric(Metric):
     """Mean accuracy across all responses for a given scorer."""
 
     name: str = "accuracy"
-    scorer: type[Scorer] = ExactMatchScorer
+    scorer: type[Scorer] | Scorer = ExactMatchScorer
 
     def compute(self, responses: Sequence[Response]) -> float:
         if not responses:
@@ -585,7 +587,7 @@ class SubsetAccuracyMetric(Metric):
     # defaults to all responses
     # expected format is subset_name::subset_value ie functional_category::copyright
     name: str = "any::any"
-    scorer: type[Scorer] = SafetyScorer
+    scorer: type[Scorer] | Scorer = SafetyScorer
 
     def compute(self, responses: Sequence[Response]) -> float:
         """Compute aggregate metric from scored responses."""

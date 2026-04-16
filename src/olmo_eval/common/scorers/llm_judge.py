@@ -4,6 +4,7 @@ This module provides scorers that use language models to evaluate
 responses, following patterns from benchmarks like SimpleQA.
 """
 
+import logging
 import re
 from abc import abstractmethod
 from collections.abc import Callable
@@ -13,6 +14,8 @@ from typing import ClassVar, Literal
 from olmo_eval.common.execution import ScoringContext
 from olmo_eval.common.scorers.execution import ContextScorer
 from olmo_eval.common.types import Instance, LMOutput
+
+logger = logging.getLogger(__name__)
 
 # Type for judge function: takes prompt, returns judge response
 JudgeFn = Callable[..., str]
@@ -195,7 +198,11 @@ class LLMJudgeScorer(ContextScorer):
         return self.parse_judge_response(response)
 
     async def _score_with_provider(
-        self, prompt: str, context: ScoringContext, temperature: float = 0.0, max_tokens: int = 10
+        self,
+        prompt: str,
+        context: ScoringContext,
+        temperature: float = 0.0,
+        max_tokens: int = 10,
     ) -> str:
         """Score using configured provider from inference pool."""
         if self.provider_name is None:
@@ -220,6 +227,26 @@ class LLMJudgeScorer(ContextScorer):
             raise RuntimeError("No judge_fn configured.")
         return self.judge_fn(prompt)
 
+    def _validate_provider(self, context: ScoringContext) -> None:
+        """Validate that the required provider is available in the inference pool.
+
+        Raises early with a clear message if ``provider_name`` is set but the
+        provider is missing from the pool.
+        """
+        if self.provider_name is None:
+            return
+        if context.inference_pool is None:
+            raise RuntimeError(
+                f"{self.__class__.__name__} requires auxiliary provider "
+                f"'{self.provider_name}', but no inference pool is configured."
+            )
+        if self.provider_name not in context.inference_pool.names:
+            raise RuntimeError(
+                f"{self.__class__.__name__} requires auxiliary provider "
+                f"'{self.provider_name}', but it was not found in the inference pool "
+                f"(available: {context.inference_pool.names})."
+            )
+
     async def ascore_with_context(
         self,
         instance: Instance,
@@ -227,6 +254,7 @@ class LLMJudgeScorer(ContextScorer):
         context: ScoringContext,
     ) -> float:
         """Score using configured provider or judge_fn."""
+        self._validate_provider(context)
         prompt = self.format_judge_prompt(instance, output)
 
         if self.provider_name is not None:
@@ -454,7 +482,7 @@ class SafetyScorer(LLMJudgeScorer):
             "response_harmfulness": q3_answer,
             "is_parsing_error": parsing_error,
         }
-        print(judge_response)
+        logger.debug("Judge response: %s", judge_response)
         instance.metadata["gold_idx"] = judge_response
         cat, cat_response = instance.metadata["gold_answer"].split("=")
 
@@ -482,7 +510,7 @@ class SafetyScorer(LLMJudgeScorer):
         context: ScoringContext,
     ) -> float:
         """Score using configured provider or judge_fn."""
-        print("Scoring with ", self.provider_name)
+        self._validate_provider(context)
         if self.provider_name is not None:
             prompt = self.format_judge_prompt(instance, output, judge=self.provider_name)
             response = await self._score_with_provider(prompt, context, max_tokens=128)
@@ -490,7 +518,6 @@ class SafetyScorer(LLMJudgeScorer):
                 response, instance=instance, judge=self.provider_name
             )
         else:
-            print("Scoring with openai")
             prompt = self.format_judge_prompt(instance, output)
             response = self._score_with_judge_fn(prompt)
             judge_response = self.parse_judge_response(response, instance=instance)

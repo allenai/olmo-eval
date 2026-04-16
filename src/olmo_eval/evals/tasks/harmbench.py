@@ -9,13 +9,13 @@ Usage:
 """
 
 import logging
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import ChatFormatter
 from olmo_eval.common.metrics import AccuracyMetric, SubsetAccuracyMetric
 from olmo_eval.common.scorers import SafetyScorer
-from olmo_eval.common.types import Instance, LMRequest, RequestType, Response, SamplingParams
+from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.extract import extract_think_answer
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -30,6 +30,7 @@ class Harmbench(Task):
     data_source = DataSource("allenai/tulu-3-harmbench-eval")
     formatter = ChatFormatter()
     sampling_params = SamplingParams(temperature=0.6, top_p=0.95)
+    answer_extractor = extract_think_answer
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -88,36 +89,49 @@ class Harmbench(Task):
             messages=({"role": "user", "content": instance.question},),
         )
 
-    def _extract_answers(self, responses: Sequence[Response]) -> None:
-        """Extract the answers from model. Reasoning logic from oe-eval"""
-        for response in responses:
-            for output in response.outputs:
-                output.extracted_answer = extract_think_answer(self.extract_answer(output))
+
+_SAFETY_SUBSET_METRICS = (
+    "functional_category::standard",
+    "functional_category::contextual",
+    "functional_category::copyright",
+    "semantic_category::copyright",
+    "semantic_category::misinformation_disinformation",
+    "semantic_category::chemical_biological",
+    "semantic_category::illegal",
+    "semantic_category::harmful",
+    "semantic_category::cybercrime_intrusion",
+    "semantic_category::harassment_bullying",
+)
+
+_JUDGE_SAMPLING = SamplingParams(max_tokens=512, temperature=0.6, top_p=0.95)
+
+
+def _safety_metrics(scorer):
+    """Build the full metric tuple for a safety judge scorer."""
+    return (
+        AccuracyMetric(scorer=scorer),
+        *(SubsetAccuracyMetric(name=name, scorer=scorer) for name in _SAFETY_SUBSET_METRICS),
+    )
 
 
 # =============================================================================
 # Variant Registrations
 # =============================================================================
 
-# Judge variant - uses LLM-as-judge scoring for factual accuracy
+# OpenAI judge variant - uses OpenAI API as the judge
 register_variant(
     "harmbench",
-    "judge",
-    metrics=(
-        AccuracyMetric(scorer=SafetyScorer),
-        SubsetAccuracyMetric(name="functional_category::standard", scorer=SafetyScorer),
-        SubsetAccuracyMetric(name="functional_category::contextual", scorer=SafetyScorer),
-        SubsetAccuracyMetric(name="functional_category::copyright", scorer=SafetyScorer),
-        SubsetAccuracyMetric(name="semantic_category::copyright", scorer=SafetyScorer),
-        SubsetAccuracyMetric(
-            name="semantic_category::misinformation_disinformation", scorer=SafetyScorer
-        ),
-        SubsetAccuracyMetric(name="semantic_category::chemical_biological", scorer=SafetyScorer),
-        SubsetAccuracyMetric(name="semantic_category::illegal", scorer=SafetyScorer),
-        SubsetAccuracyMetric(name="semantic_category::harmful", scorer=SafetyScorer),
-        SubsetAccuracyMetric(name="semantic_category::cybercrime_intrusion", scorer=SafetyScorer),
-        SubsetAccuracyMetric(name="semantic_category::harassment_bullying", scorer=SafetyScorer),
-    ),
+    "openai_judge",
+    metrics=_safety_metrics(SafetyScorer),
     primary_metric=AccuracyMetric(scorer=SafetyScorer),
-    sampling_params=SamplingParams(max_tokens=512, temperature=0.6, top_p=0.95),
+    sampling_params=_JUDGE_SAMPLING,
+)
+
+# Local judge variant - uses a local auxiliary provider (auxiliary_providers.safety_judge)
+register_variant(
+    "harmbench",
+    "local_judge",
+    metrics=_safety_metrics(SafetyScorer(provider_name="safety_judge")),
+    primary_metric=AccuracyMetric(scorer=SafetyScorer(provider_name="safety_judge")),
+    sampling_params=_JUDGE_SAMPLING,
 )
