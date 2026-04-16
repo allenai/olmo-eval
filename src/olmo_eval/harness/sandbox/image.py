@@ -25,26 +25,36 @@ SWEREX_IMAGE_VERSION = "20260304.1"
 def _remote_image_exists(container_runtime: str, image: str) -> bool:
     """Check if a remote image exists in a registry.
 
-    Tries container_runtime manifest inspect first, then falls back to
-    skopeo inspect (more reliable with podman + private registries).
+    Uses multiple methods since podman manifest inspect doesn't always
+    work with private registries and credential helpers.
     """
-    result = subprocess.run(
-        [container_runtime, "manifest", "inspect", image],
-        capture_output=True,
-    )
-    if result.returncode == 0:
-        return True
-
-    # Fallback: skopeo is shipped with podman and handles auth better
+    # skopeo (shipped with podman) supports credential helpers and only
+    # fetches the manifest — no layer downloads.
     if shutil.which("skopeo"):
         result = subprocess.run(
-            ["skopeo", "inspect", f"docker://{image}"],
+            ["skopeo", "inspect", "--raw", f"docker://{image}"],
             capture_output=True,
+            timeout=30,
         )
         if result.returncode == 0:
             return True
 
-    return False
+    # gcloud can check GCP Artifact Registry directly
+    if shutil.which("gcloud") and "pkg.dev" in image:
+        result = subprocess.run(
+            ["gcloud", "artifacts", "docker", "images", "describe", image, "--quiet"],
+            capture_output=True,
+            timeout=30,
+        )
+        if result.returncode == 0:
+            return True
+
+    # Last resort: container runtime manifest inspect
+    result = subprocess.run(
+        [container_runtime, "manifest", "inspect", image],
+        capture_output=True,
+    )
+    return result.returncode == 0
 
 
 def get_swerex_image(
