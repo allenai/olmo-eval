@@ -14,10 +14,10 @@ from __future__ import annotations
 import ast
 import traceback
 import warnings
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import tree_sitter_python
-from tree_sitter import Language, Node, Parser
+if TYPE_CHECKING:
+    from tree_sitter import Node
 
 CLASS_TYPE = "class_definition"
 FUNCTION_TYPE = "function_definition"
@@ -102,6 +102,9 @@ def _get_definition_name(node: Node) -> str | None:
 
 
 def _extract_target_code_or_empty(code: str, entrypoint: str | None = None) -> str:
+    import tree_sitter_python
+    from tree_sitter import Language, Parser
+
     code = code.strip()
     if not _syntax_check(code):
         code = _code_extract(code)
