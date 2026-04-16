@@ -72,13 +72,8 @@ class Tau2Args:
 
     # Execution settings
     max_errors: int | None = None
-    max_retries: int | None = None
     seed: int | None = None
     log_level: str | None = None
-    llm_log_mode: str | None = None
-    verbose: bool = False
-    verbose_logs: bool = False
-    auto_resume: bool = False
     enforce_communication_protocol: bool = False
 
     @classmethod
@@ -103,13 +98,8 @@ class Tau2Args:
             task_ids=task_ids,
             num_tasks=_parse_optional(data, "num_tasks", int),
             max_errors=_parse_optional(data, "max_errors", int),
-            max_retries=_parse_optional(data, "max_retries", int),
             seed=_parse_optional(data, "seed", int),
             log_level=data.get("log_level"),
-            llm_log_mode=data.get("llm_log_mode"),
-            verbose=_parse_bool(data.get("verbose")),
-            verbose_logs=_parse_bool(data.get("verbose_logs")),
-            auto_resume=_parse_bool(data.get("auto_resume")),
             enforce_communication_protocol=_parse_bool(data.get("enforce_communication_protocol")),
         )
 
@@ -176,13 +166,8 @@ class Tau2ExternalEval(SandboxedExternalEval):
             "task_ids": ("Comma-separated task IDs to run", None),
             "num_tasks": ("Number of tasks to run (default: all)", None),
             "max_errors": ("Max consecutive tool errors allowed", None),
-            "max_retries": ("Max retries per LLM call on failure", None),
             "seed": ("Random seed for reproducibility", None),
             "log_level": ("Log level (DEBUG, INFO, WARNING, ERROR)", None),
-            "llm_log_mode": ("LLM logging mode (e.g. 'all') for debugging", None),
-            "verbose": ("Enable verbose output", False),
-            "verbose_logs": ("Enable verbose log output", False),
-            "auto_resume": ("Auto-resume from previous checkpoint", False),
             "enforce_communication_protocol": ("Enforce communication protocol rules", False),
         }
 
@@ -322,20 +307,10 @@ class Tau2ExternalEval(SandboxedExternalEval):
             parts.extend(["--num-tasks", str(tau2_args.num_tasks)])
         if tau2_args.max_errors is not None:
             parts.extend(["--max-errors", str(tau2_args.max_errors)])
-        if tau2_args.max_retries is not None:
-            parts.extend(["--max-retries", str(tau2_args.max_retries)])
         if tau2_args.seed is not None:
             parts.extend(["--seed", str(tau2_args.seed)])
         if tau2_args.log_level:
             parts.extend(["--log-level", shlex.quote(tau2_args.log_level)])
-        if tau2_args.llm_log_mode:
-            parts.extend(["--llm-log-mode", shlex.quote(tau2_args.llm_log_mode)])
-        if tau2_args.verbose:
-            parts.append("--verbose")
-        if tau2_args.verbose_logs:
-            parts.append("--verbose-logs")
-        if tau2_args.auto_resume:
-            parts.append("--auto-resume")
         if tau2_args.enforce_communication_protocol:
             parts.append("--enforce-communication-protocol")
 
