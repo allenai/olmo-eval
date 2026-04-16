@@ -20,7 +20,6 @@ from olmo_eval.harness.config import HarnessConfig, ProviderConfig
 from olmo_eval.runners.asynq.monitoring import (
     terminate_workers,
     wait_for_init_times,
-    wait_for_scorer_ready,
     wait_for_workers_ready,
 )
 from olmo_eval.runners.asynq.preparation import (
@@ -29,7 +28,6 @@ from olmo_eval.runners.asynq.preparation import (
 )
 from olmo_eval.runners.asynq.results import aggregate_results, process_results
 from olmo_eval.runners.asynq.types import QueueItem, TaskTracker
-from olmo_eval.runners.asynq.workers import scoring_worker
 from olmo_eval.runners.common.base import BaseEvalRunner
 from olmo_eval.runners.common.mixins import RunnerResultsMixin
 from olmo_eval.runners.common.models import S3Config
@@ -160,8 +158,6 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         ctx = mp.get_context("spawn")
         item_queue: mp.Queue = ctx.Queue()
         result_queue: mp.Queue = ctx.Queue()
-        scoring_queue: mp.Queue = ctx.Queue()
-        scored_queue: mp.Queue = ctx.Queue()
         total_gpus = self._get_gpu_count()
 
         # Create shared dict for tracking worker init times
@@ -176,7 +172,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
         # Start workers
         workers: list[mp.process.BaseProcess] = []
-        scorer_proc: mp.process.BaseProcess | None = None
+        sandbox_manager = None
         inference_manager = None
 
         try:
@@ -305,9 +301,6 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
                 sandbox_configs_list = [s.to_dict() for s in sandboxes]
 
-            # Create ready event for scoring worker
-            scorer_ready = ctx.Event()
-
             # Determine scoring concurrency
             if self.harness_config.scoring_concurrency:
                 scoring_concurrency = self.harness_config.scoring_concurrency
@@ -324,44 +317,40 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
             runner_logger.info(f"Scoring concurrency: {scoring_concurrency}")
 
-            scorer_id = "scorer-0"  # TODO: support multiple scorers
-            scorer_proc = ctx.Process(
-                target=scoring_worker,
-                args=(
-                    scorer_id,
-                    scoring_queue,
-                    scored_queue,
-                    total_instances,
-                    sandbox_configs_list,
-                    scorer_ready,
-                    scoring_concurrency,
-                    registry_config,
-                ),
+            # Initialize sandbox manager inline (no separate scorer process)
+            sandbox_manager = None
+            if sandbox_configs_list is not None:
+                from olmo_eval.harness.sandbox import SandboxConfig, SandboxManager
+
+                sandbox_configs = [SandboxConfig.from_dict(d) for d in sandbox_configs_list]
+                runner_logger.info(
+                    f"Initializing sandbox manager with {len(sandbox_configs)} config(s)..."
+                )
+                sandbox_manager = SandboxManager(sandbox_configs, owner="scorer")
+                await sandbox_manager.start()
+                runner_logger.info("Sandbox manager ready")
+
+            # Create provider registry for auxiliary providers
+            provider_registry = None
+            if registry_config:
+                from olmo_eval.inference.registry import ProviderRegistry
+
+                provider_registry = ProviderRegistry.from_serialized(registry_config)
+                if provider_registry:
+                    runner_logger.info(
+                        f"Provider registry ready with providers: {provider_registry.names}"
+                    )
+
+            from olmo_eval.common.execution import ScoringContext
+
+            scoring_context = ScoringContext(
+                execution_env=sandbox_manager,
+                scoring_concurrency=scoring_concurrency,
+                inference_pool=provider_registry,
             )
-            scorer_proc.start()
 
             # Ensure inference workers are ready before dispatching
             wait_for_workers_ready(workers, result_queue, startup_timeout=60.0)
-
-            # Now wait for scoring worker (runs in parallel with inference worker init)
-            if sandbox_configs_list is not None:
-                # Compute scorer startup timeout
-                if self.harness_config.scorer_startup_timeout is not None:
-                    scorer_timeout = self.harness_config.scorer_startup_timeout
-                else:
-                    # Derive from max sandbox startup_timeout + buffer
-                    max_startup = max(
-                        cfg.get("startup_timeout", 60.0) for cfg in sandbox_configs_list
-                    )
-                    scorer_timeout = max_startup + 60.0
-
-                runner_logger.info(
-                    f"Waiting for scoring worker to initialize (timeout={scorer_timeout}s)..."
-                )
-                wait_for_scorer_ready(
-                    scorer_proc, scorer_ready, scored_queue, timeout=scorer_timeout
-                )
-                runner_logger.info("Scoring worker ready")
 
             # Wait for workers to report their init times (also checks for crashes)
             provider_init_seconds = wait_for_init_times(
@@ -378,20 +367,12 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             results = await self._process_results(
                 trackers,
                 result_queue,
-                scoring_queue,
-                scored_queue,
                 workers,
-                scorer_proc,
+                scoring_context,
+                scoring_concurrency,
                 len(expanded_tasks),
                 total_instances,
             )
-
-            # Signal scoring worker to shutdown and wait
-            scoring_queue.put(None)
-            scorer_proc.join(timeout=30)
-            if scorer_proc.is_alive():
-                scorer_proc.terminate()
-                scorer_proc.join()
 
             # Wait for all workers
             for worker in workers:
@@ -428,22 +409,13 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             )
         finally:
             terminate_workers(workers)
-            if scorer_proc and scorer_proc.is_alive():
-                # Try graceful shutdown via queue sentinel first
+            if sandbox_manager is not None:
+                runner_logger.info("Stopping sandbox manager...")
                 with contextlib.suppress(Exception):
-                    scoring_queue.put_nowait(None)
-                scorer_proc.join(timeout=10)
-                if scorer_proc.is_alive():
-                    # SIGTERM — triggers our handler which runs sandbox cleanup
-                    scorer_proc.terminate()
-                    scorer_proc.join(timeout=45)
-                    if scorer_proc.is_alive():
-                        runner_logger.warning("Scoring worker did not exit, sending SIGKILL")
-                        scorer_proc.kill()
-                        scorer_proc.join(timeout=5)
+                    await sandbox_manager.stop()
             if inference_manager is not None:
                 inference_manager.shutdown()
-            for q in [item_queue, result_queue, scoring_queue, scored_queue]:
+            for q in [item_queue, result_queue]:
                 q.cancel_join_thread()
             manager.shutdown()
 
@@ -617,21 +589,19 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         self,
         trackers: dict[str, TaskTracker],
         result_queue: mp.Queue,
-        scoring_queue: mp.Queue,
-        scored_queue: mp.Queue,
         workers: list[mp.process.BaseProcess],
-        scorer_proc: mp.process.BaseProcess,
+        scoring_context: Any,
+        scoring_concurrency: int,
         total_tasks: int,
         total_instances: int,
     ) -> dict[str, Any]:
-        """Process results from workers with parallel instance-level scoring."""
+        """Process results from workers with inline async scoring."""
         return await process_results(
             trackers=trackers,
             result_queue=result_queue,
-            scoring_queue=scoring_queue,
-            scored_queue=scored_queue,
             workers=workers,
-            scorer_proc=scorer_proc,
+            scoring_context=scoring_context,
+            scoring_concurrency=scoring_concurrency,
             total_tasks=total_tasks,
             total_instances=total_instances,
             model_name=self.model_name,
