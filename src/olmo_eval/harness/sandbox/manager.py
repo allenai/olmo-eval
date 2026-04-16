@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from olmo_eval.common.execution.environment import ExecutionResult
 from olmo_eval.common.logging import configure_worker_logging
 
-from .config import SandboxConfig, SandboxMode
+from .config import Capability, SandboxConfig, SandboxMode
 from .executor import SandboxExecutor
 
 
@@ -286,12 +286,12 @@ class SandboxManager:
         Args:
             command: The command to execute.
             timeout: Optional timeout override in seconds.
-            capabilities: Optional required capabilities. If None, uses any executor.
+            capabilities: Optional required capabilities. If None, uses default.
 
         Returns:
             The command output.
         """
-        executor = self.get_executor(capabilities or frozenset())
+        executor = self.get_executor(capabilities or Capability.DEFAULT)
         return await executor.execute(command, timeout)
 
     async def execute_command(
@@ -305,12 +305,12 @@ class SandboxManager:
         Args:
             command: The command to execute.
             timeout: Optional timeout override in seconds.
-            capabilities: Optional required capabilities. If None, uses any executor.
+            capabilities: Optional required capabilities. If None, uses default.
 
         Returns:
             ExecutionResult with success status, output, and exit code.
         """
-        executor = self.get_executor(capabilities or frozenset())
+        executor = self.get_executor(capabilities or Capability.DEFAULT)
         return await executor.execute_command(command, timeout)
 
     async def execute_code(
@@ -329,12 +329,12 @@ class SandboxManager:
             code: Source code to execute.
             language: Programming language (default: "python").
             timeout: Optional timeout in seconds.
-            capabilities: Optional required capabilities. If None, uses any executor.
+            capabilities: Optional required capabilities. If None, uses default.
 
         Returns:
             ExecutionResult with success status and output.
         """
-        executor = self.get_executor(capabilities or frozenset())
+        executor = self.get_executor(capabilities or Capability.DEFAULT)
         return await executor.execute_code(code, language, timeout)
 
     async def acquire_binding(

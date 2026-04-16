@@ -547,7 +547,9 @@ class Task(ABC):
                 contextlib.nullcontext()
             )
             if execution_env is not None and hasattr(execution_env, "get_execution_semaphore"):
-                sem = execution_env.get_execution_semaphore(sandbox_cap or frozenset())  # ty: ignore[call-non-callable]
+                from olmo_eval.harness.sandbox.config import Capability
+
+                sem = execution_env.get_execution_semaphore(sandbox_cap or Capability.DEFAULT)  # ty: ignore[call-non-callable]
                 if sem is not None:
                     exec_semaphore = sem
 
