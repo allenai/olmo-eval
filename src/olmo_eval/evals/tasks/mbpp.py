@@ -3,7 +3,7 @@
 from collections.abc import Iterator, Sequence
 from typing import Any
 
-from olmo_eval.common.formatters import PPLFormatter
+from olmo_eval.common.formatters import CompletionFormatter, PPLFormatter
 from olmo_eval.common.metrics import BPBMetric, BPBMetricByteAvg, PassAtKMetric
 from olmo_eval.common.scorers import CodeExecutionScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, Response, SamplingParams
@@ -329,6 +329,7 @@ class MBPPOlmo3Base(MBPPBase):
     data_source = DataSource(path="google-research-datasets/mbpp")
     num_fewshot: int = 3
     fewshot_seed: int = 1234
+    formatter = CompletionFormatter(answer_prefix="")
     sampling_params = SamplingParams(
         max_tokens=1024,
         temperature=0.6,
