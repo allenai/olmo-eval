@@ -42,12 +42,23 @@ register_variant(
 class CodexHumanEvalOlmo3Base(HumanEval):
     """CodexHumanEval with OLMo3 prompt wrapping (```python code block)."""
 
+    num_fewshot: int = 3
+    fewshot_seed: int = 1234
+    formatter = CompletionFormatter(answer_prefix="")
     sampling_params = SamplingParams(
         max_tokens=1024,
         temperature=0.6,
         top_p=0.6,
         do_sample=True,
+        num_samples=32,
         stop_sequences=OLMO3_HUMANEVAL_STOP_SEQUENCES,
+    )
+    metrics = (
+        PassAtKMetric(k=1, scorer=CodeExecutionScorer),
+        PassAtKMetric(k=2, scorer=CodeExecutionScorer),
+        PassAtKMetric(k=4, scorer=CodeExecutionScorer),
+        PassAtKMetric(k=8, scorer=CodeExecutionScorer),
+        PassAtKMetric(k=16, scorer=CodeExecutionScorer),
     )
     fewshot_split: str = "test"
 
@@ -68,32 +79,3 @@ class CodexHumanEvalOlmo3Base(HumanEval):
 
     def extract_answer(self, output: LMOutput) -> str | None:
         return extract_code_before_fence(output.text)
-
-
-register_variant(
-    "codex_humaneval:olmo3base",
-    "3shot",
-    num_fewshot=3,
-    fewshot_seed=1234,
-    formatter=CompletionFormatter(answer_prefix=""),
-)
-
-register_variant(
-    "codex_humaneval:olmo3base",
-    "n32",
-    sampling_params=SamplingParams(
-        max_tokens=1024,
-        temperature=0.6,
-        top_p=0.6,
-        do_sample=True,
-        num_samples=32,
-        stop_sequences=OLMO3_HUMANEVAL_STOP_SEQUENCES,
-    ),
-    metrics=(
-        PassAtKMetric(k=1, scorer=CodeExecutionScorer),
-        PassAtKMetric(k=2, scorer=CodeExecutionScorer),
-        PassAtKMetric(k=4, scorer=CodeExecutionScorer),
-        PassAtKMetric(k=8, scorer=CodeExecutionScorer),
-        PassAtKMetric(k=16, scorer=CodeExecutionScorer),
-    ),
-)

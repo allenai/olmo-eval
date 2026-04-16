@@ -135,10 +135,10 @@ make_suite(
     "olmobase:code",
     (
         "bigcodebench:olmo3base",
-        "codex_humaneval:olmo3base:3shot:n32",
+        "codex_humaneval:olmo3base",
         "deepseek_leetcode:olmo3base",
-        "ds1000:3shot:olmo3base",
-        "mbpp:olmo3base:3shot:n32",
+        "ds1000:olmo3base",
+        "mbpp:olmo3base",
         _MULTIPL_E_HUMANEVAL_OLMO3BASE,
         _MULTIPL_E_MBPP_OLMO3BASE,
     ),

@@ -210,5 +210,8 @@ register_variant(
 register_variant(
     "ds1000",
     "olmo3base",
+    num_fewshot=3,
+    fewshot_seed=1234,
+    formatter=CompletionFormatter(answer_prefix=""),
     metrics=(PassAtKMetric(k=1, scorer=DS1000Scorer),),
 )
