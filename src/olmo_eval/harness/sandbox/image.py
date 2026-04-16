@@ -12,6 +12,10 @@ from olmo_eval.common.config import get_infra_config
 
 logger = logging.getLogger(__name__)
 
+# Cache resolved image names to avoid redundant registry checks/builds
+# when multiple executors share the same config.
+_resolved_images: dict[str, str] = {}
+
 # Python standalone URL for building derived images
 PYTHON_STANDALONE_URL = (
     "https://github.com/indygreg/python-build-standalone/releases/download/"
@@ -66,6 +70,7 @@ def get_swerex_image(
     """Build a derived image with Python and swe-rex pre-installed.
 
     Checks local cache first, then registry (if configured), then builds and pushes.
+    Results are cached by content hash so repeated calls for the same image are free.
 
     Args:
         base_image: The base container image.
@@ -82,6 +87,30 @@ def get_swerex_image(
         ValueError: If require_registry=True but SWEREX_REGISTRY is not set.
         RuntimeError: If image build or push fails.
     """
+    # Deterministic tag from content inputs
+    extra_hash = ":".join(dockerfile_extra) if dockerfile_extra else ""
+    hash_input = f"{base_image}:{PYTHON_STANDALONE_URL}:{SWEREX_IMAGE_VERSION}:{extra_hash}"
+    tag_hash = hashlib.sha256(hash_input.encode()).hexdigest()[:12]
+
+    if tag_hash in _resolved_images:
+        logger.debug(f"Using cached resolution for swerex-{tag_hash}")
+        return _resolved_images[tag_hash]
+
+    result = _resolve_swerex_image(
+        base_image, container_runtime, dockerfile_extra, require_registry, tag_hash
+    )
+    _resolved_images[tag_hash] = result
+    return result
+
+
+def _resolve_swerex_image(
+    base_image: str,
+    container_runtime: str,
+    dockerfile_extra: tuple[str, ...],
+    require_registry: bool,
+    tag_hash: str,
+) -> str:
+    """Core image resolution logic — called once per unique image hash."""
     config = get_infra_config()
     registry = config.swerex_registry
 
@@ -90,11 +119,6 @@ def get_swerex_image(
             "SWEREX_REGISTRY required for Modal deployments with inject_swerex=True. "
             "Set to your registry URL (e.g., 'us-docker.pkg.dev/project/repo')."
         )
-
-    # Create a deterministic tag based on base image, Python URL, version, and extra commands
-    extra_hash = ":".join(dockerfile_extra) if dockerfile_extra else ""
-    hash_input = f"{base_image}:{PYTHON_STANDALONE_URL}:{SWEREX_IMAGE_VERSION}:{extra_hash}"
-    tag_hash = hashlib.sha256(hash_input.encode()).hexdigest()[:12]
 
     # Local image name
     local_image = f"swerex-{tag_hash}:latest"

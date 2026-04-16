@@ -54,7 +54,7 @@ class Capability:
     DEFAULT: frozenset[str] = BASH
 
 
-DEFAULT_MAX_CONCURRENCY = 1
+DEFAULT_MAX_CONCURRENCY = 4
 
 
 @hide_unset()
