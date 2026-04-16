@@ -246,12 +246,53 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                     if not needs_default:
                         sandboxes.pop(0)
 
-                    configs = len(sandboxes) + len(sandbox_envs)
-                    per_config = max(1, template.instances // configs)
+                    # Compute demand (scoring items) per sandbox env
+                    _DEFAULT_ENV = "__default__"
+                    env_demand: dict[str, int] = {}
+                    env_task_count: dict[str, int] = {}
+                    for tracker in trackers.values():
+                        if tracker.task is None:
+                            continue
+                        tcfg = tracker.task.config
+                        num_samples = (
+                            tcfg.sampling_params.num_samples if tcfg.sampling_params else 1
+                        )
+                        scoring_items = tracker.total_instances * num_samples
+                        env_key = tcfg.sandbox_env.name if tcfg.sandbox_env else _DEFAULT_ENV
+                        env_demand[env_key] = env_demand.get(env_key, 0) + scoring_items
+                        env_task_count[env_key] = env_task_count.get(env_key, 0) + 1
 
+                    # Drop default demand if no tasks need it
+                    if not needs_default:
+                        env_demand.pop(_DEFAULT_ENV, None)
+                        env_task_count.pop(_DEFAULT_ENV, None)
+
+                    # Allocate executors proportionally with a floor of 1
+                    total_demand = sum(env_demand.values())
+                    budget = template.instances
+                    allocated: dict[str, int] = {}
+                    if total_demand > 0:
+                        distributable = budget - len(env_demand)
+                        for env_key, demand in env_demand.items():
+                            extra = max(0, round(distributable * demand / total_demand))
+                            allocated[env_key] = 1 + extra
+                        # Correct rounding drift
+                        diff = budget - sum(allocated.values())
+                        if diff != 0:
+                            top = max(env_demand, key=lambda k: env_demand[k])
+                            allocated[top] = max(1, allocated[top] + diff)
+                    else:
+                        # Fallback: equal split when no demand data
+                        configs = len(sandboxes) + len(sandbox_envs)
+                        per_config = max(1, budget // configs)
+                        for env_key in env_demand:
+                            allocated[env_key] = per_config
+
+                    # Apply allocations to default sandbox configs
                     for i, cfg in enumerate(sandboxes):
-                        sandboxes[i] = replace(cfg, instances=per_config)
+                        sandboxes[i] = replace(cfg, instances=allocated.get(_DEFAULT_ENV, 1))
 
+                    # Create sandbox configs for each named env
                     for senv in sandbox_envs:
                         extra = dependencies_to_dockerfile_extra(senv.dependencies)
                         sandboxes.append(
@@ -260,13 +301,45 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                                 capabilities=senv.capability,
                                 dockerfile_extra=template.dockerfile_extra + extra,
                                 inject_swerex=True,
-                                instances=per_config,
+                                instances=allocated.get(senv.name, 1),
                             )
                         )
                         runner_logger.info(
-                            f"Sandbox env '{senv.name}' ({per_config} instances): "
+                            f"Sandbox env '{senv.name}' "
+                            f"({allocated.get(senv.name, 1)} executors, "
+                            f"{env_demand.get(senv.name, 0)} scoring items): "
                             f"{sorted(senv.dependencies)}"
                         )
+                    if needs_default:
+                        runner_logger.info(
+                            f"Sandbox env 'default' "
+                            f"({allocated.get(_DEFAULT_ENV, 1)} executors, "
+                            f"{env_demand.get(_DEFAULT_ENV, 0)} scoring items)"
+                        )
+
+                    # Print sandbox distribution summary
+                    from rich.table import Table
+
+                    dist_table = Table(title="Sandbox Distribution")
+                    dist_table.add_column("Env", style="cyan")
+                    dist_table.add_column("Tasks", justify="right")
+                    dist_table.add_column("Scoring Items", justify="right")
+                    dist_table.add_column("Executors", justify="right")
+                    dist_table.add_column("Share", justify="right")
+
+                    for env_key in sorted(env_demand):
+                        display_name = "default" if env_key == _DEFAULT_ENV else env_key
+                        executors = allocated.get(env_key, 0)
+                        share = f"{executors / budget * 100:.1f}%" if budget > 0 else "0.0%"
+                        dist_table.add_row(
+                            display_name,
+                            str(env_task_count.get(env_key, 0)),
+                            str(env_demand.get(env_key, 0)),
+                            str(executors),
+                            share,
+                        )
+
+                    console.print(dist_table)
 
                 # Pre-build unique sandbox images in parallel to avoid
                 # duplicate builds when multiple executors share the same image
