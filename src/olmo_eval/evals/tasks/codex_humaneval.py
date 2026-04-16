@@ -32,36 +32,13 @@ register_variant(
     formatter=CompletionFormatter(),
 )
 
-register_variant(
-    "codex_humaneval",
-    "olmo3base",
-    num_fewshot=3,
-    fewshot_seed=1234,
-    formatter=CompletionFormatter(),
-    sampling_params=SamplingParams(
-        max_tokens=1024,
-        temperature=0.6,
-        top_p=0.6,
-        do_sample=True,
-        num_samples=32,
-        stop_sequences=OLMO3_HUMANEVAL_STOP_SEQUENCES,
-    ),
-    metrics=(
-        PassAtKMetric(k=1, scorer=CodeExecutionScorer),
-        PassAtKMetric(k=2, scorer=CodeExecutionScorer),
-        PassAtKMetric(k=4, scorer=CodeExecutionScorer),
-        PassAtKMetric(k=8, scorer=CodeExecutionScorer),
-        PassAtKMetric(k=16, scorer=CodeExecutionScorer),
-    ),
-)
-
 
 # =============================================================================
-# OLMo3 v2 Variant (different prompt wrapping)
+# OLMo3 base variant (```python code block prompt wrapping)
 # =============================================================================
 
 
-@register("codex_humaneval_olmo3base")
+@register("codex_humaneval:olmo3base")
 class CodexHumanEvalOlmo3Base(HumanEval):
     """CodexHumanEval with OLMo3 prompt wrapping (```python code block)."""
 
@@ -94,7 +71,7 @@ class CodexHumanEvalOlmo3Base(HumanEval):
 
 
 register_variant(
-    "codex_humaneval_olmo3base",
+    "codex_humaneval:olmo3base",
     "3shot",
     num_fewshot=3,
     fewshot_seed=1234,
@@ -102,7 +79,7 @@ register_variant(
 )
 
 register_variant(
-    "codex_humaneval_olmo3base",
+    "codex_humaneval:olmo3base",
     "n32",
     sampling_params=SamplingParams(
         max_tokens=1024,
