@@ -17,7 +17,7 @@ from olmo_eval.common.metrics import AccuracyMetric, SubsetAccuracyMetric
 from olmo_eval.common.scorers import SafetyScorer
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.extract import extract_think_answer
+from olmo_eval.evals.extract import extract_think_answer, extract_think_answer_only
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 logger = logging.getLogger(__name__)
@@ -140,4 +140,13 @@ register_variant(
     metrics=_safety_metrics(_WG_SCORER),
     primary_metric=AccuracyMetric(scorer=_WG_SCORER),
     sampling_params=_JUDGE_SAMPLING,
+)
+
+register_variant(
+    "harmbench",
+    "wg_judge_thinking",
+    metrics=_safety_metrics(_WG_SCORER),
+    primary_metric=AccuracyMetric(scorer=_WG_SCORER),
+    sampling_params=_JUDGE_SAMPLING,
+    answer_extractor=extract_think_answer_only,
 )
