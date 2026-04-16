@@ -38,7 +38,7 @@ class BigCodeBenchScorer(CodeExecutionScorer):
     defined but never executed, causing all submissions to appear to pass.
     """
 
-    timeout: float = 60.0
+    timeout: float = 20.0
 
     async def ascore(
         self,
