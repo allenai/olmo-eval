@@ -47,6 +47,16 @@ def _parse_override_value(value: str) -> Any:
                 return value
 
 
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Deep merge override into base dict."""
+    for key, value in override.items():
+        if key in base and isinstance(base[key], dict) and isinstance(value, dict):
+            _deep_merge(base[key], value)
+        else:
+            base[key] = value
+    return base
+
+
 def _apply_dotlist_overrides(base_dict: dict[str, Any], overrides: list[str]) -> dict[str, Any]:
     """Apply dotlist overrides to a dictionary, handling list indices.
 
@@ -113,9 +123,15 @@ def _apply_dotlist_overrides(base_dict: dict[str, Any], overrides: list[str]) ->
                     f"Invalid override path '{key_path}': "
                     f"index {idx} out of bounds for list (length {len(target)})"
                 )
-            target[idx] = parsed_value
+            if isinstance(parsed_value, dict) and isinstance(target[idx], dict):
+                _deep_merge(target[idx], parsed_value)
+            else:
+                target[idx] = parsed_value
         elif isinstance(target, dict):
-            target[final_key] = parsed_value
+            if isinstance(parsed_value, dict) and isinstance(target.get(final_key), dict):
+                _deep_merge(target[final_key], parsed_value)
+            else:
+                target[final_key] = parsed_value
         else:
             raise ValueError(
                 f"Invalid override path '{key_path}': "

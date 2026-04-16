@@ -105,47 +105,49 @@ class TestDotlistScalarOverrides:
         assert result == {"a": {"b": {"c": 1}}}
 
 
-# ── JSON object replacement ─────────────────────────────────────────────────
+# ── JSON object deep-merge ──────────────────────────────────────────────────
 
 
-class TestDotlistJsonReplacement:
-    """A JSON dict at a path replaces the target — no deep-merge."""
+class TestDotlistJsonMerge:
+    """A JSON dict at a path deep-merges into the existing target."""
 
-    def test_json_replaces_list_item(self, sandbox_preset):
-        """The core bug-fix scenario: JSON object at a list index replaces."""
-        override = 'sandboxes.0={"mode":"modal","image":"my-image","instances":4}'
+    def test_json_merges_into_list_item(self, sandbox_preset):
+        """JSON object at a list index merges — preset fields survive."""
+        override = 'sandboxes.0={"mode":"modal","instances":64,"registry_auth":{"provider":"gcp"}}'
         result = _apply_dotlist_overrides(sandbox_preset, [override])
         sb = result["sandboxes"][0]
-        assert sb == {"mode": "modal", "image": "my-image", "instances": 4}
-        # Preset-only keys must NOT survive
-        assert "inject_swerex" not in sb
-        assert "startup_timeout" not in sb
-        assert "dockerfile_extra" not in sb
+        # Override fields applied
+        assert sb["mode"] == "modal"
+        assert sb["instances"] == 64
+        assert sb["registry_auth"] == {"provider": "gcp"}
+        # Preset fields survive
+        assert sb["image"] == "volcengine/sandbox-fusion:base-20250609"
+        assert sb["inject_swerex"] is True
+        assert sb["startup_timeout"] == 300.0
 
-    def test_json_replaces_dict_key(self):
+    def test_json_merges_into_dict_key(self):
         base = {"metrics": {"kind": "bpb", "extra": True}}
         result = _apply_dotlist_overrides(base, ['metrics={"kind":"accuracy"}'])
-        assert result["metrics"] == {"kind": "accuracy"}
-        assert "extra" not in result["metrics"]
+        assert result["metrics"]["kind"] == "accuracy"
+        # Unmentioned keys survive from base
+        assert result["metrics"]["extra"] is True
 
-    def test_json_replaces_even_when_keys_overlap(self, sandbox_preset):
-        """Replacement holds even if the JSON carries the same keys as the base."""
-        override = (
-            'sandboxes.0={"mode":"modal","image":"my-image",'
-            '"inject_swerex":false,"startup_timeout":60}'
-        )
+    def test_json_overrides_overlapping_keys(self, sandbox_preset):
+        """Override values win for keys present in both base and override."""
+        override = 'sandboxes.0={"mode":"modal","inject_swerex":false,"startup_timeout":60}'
         result = _apply_dotlist_overrides(sandbox_preset, [override])
         sb = result["sandboxes"][0]
         assert sb["inject_swerex"] is False
         assert sb["startup_timeout"] == 60
-        # Preset keys absent from the JSON are gone
-        assert "instances" not in sb
-        assert "dockerfile_extra" not in sb
+        # Untouched keys survive
+        assert sb["image"] == "volcengine/sandbox-fusion:base-20250609"
+        assert sb["instances"] == 16
 
-    def test_json_empty_dict_replaces(self, sandbox_preset):
-        """An explicit empty dict wipes the target completely."""
+    def test_json_empty_dict_is_noop(self, sandbox_preset):
+        """An empty JSON dict merges nothing — base is unchanged."""
+        original = copy.deepcopy(sandbox_preset)
         result = _apply_dotlist_overrides(sandbox_preset, ["sandboxes.0={}"])
-        assert result["sandboxes"][0] == {}
+        assert result["sandboxes"][0] == original["sandboxes"][0]
 
 
 # ── Non-dict values at list indices ─────────────────────────────────────────
@@ -218,14 +220,17 @@ class TestDotlistMutationBehavior:
         result = _apply_dotlist_overrides(base, ["a=2", "a=3"])
         assert result["a"] == 3
 
-    def test_field_override_after_json_replacement(self, sandbox_preset):
-        """A field-level override after a JSON replacement adds the key."""
+    def test_json_merge_then_field_override(self, sandbox_preset):
+        """A JSON merge followed by a field override composes correctly."""
         result = _apply_dotlist_overrides(
             sandbox_preset,
             [
-                'sandboxes.0={"mode":"modal","image":"img"}',
+                'sandboxes.0={"mode":"modal"}',
                 "sandboxes.0.instances=8",
             ],
         )
         sb = result["sandboxes"][0]
-        assert sb == {"mode": "modal", "image": "img", "instances": 8}
+        assert sb["mode"] == "modal"
+        assert sb["instances"] == 8
+        # Preset fields survive the merge
+        assert sb["image"] == "volcengine/sandbox-fusion:base-20250609"
