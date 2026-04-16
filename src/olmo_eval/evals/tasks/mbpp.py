@@ -329,7 +329,9 @@ class MBPPOlmo3Base(MBPPBase):
     data_source = DataSource(path="google-research-datasets/mbpp")
     num_fewshot: int = 3
     fewshot_seed: int = 1234
-    formatter = CompletionFormatter(answer_prefix="")
+    formatter = CompletionFormatter(
+        answer_prefix="Here is the completed function:\n\n```python\n",
+    )
     sampling_params = SamplingParams(
         max_tokens=1024,
         temperature=0.6,
@@ -364,7 +366,7 @@ class MBPPOlmo3Base(MBPPBase):
 
         return Instance(
             question=question,
-            gold_answer=doc["code"] + "\n",
+            gold_answer=doc["code"] + "\n```",
             metadata={
                 "id": doc["task_id"],
                 "answer_prefix": "",
