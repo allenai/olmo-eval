@@ -9,7 +9,7 @@ from olmo_eval.common.scorers import CodeExecutionScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, Response, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import MBPP_STOP_SEQUENCES, OLMO3_MBPP_STOP_SEQUENCES
-from olmo_eval.evals.extract import extract_code
+from olmo_eval.evals.extract import extract_code, extract_code_before_fence
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 
@@ -360,6 +360,9 @@ class MBPPOlmo3Base(MBPPBase):
                 "test": tests,
             },
         )
+
+    def extract_answer(self, output: LMOutput) -> str | None:
+        return extract_code_before_fence(output.text)
 
 
 register_variant(

@@ -138,7 +138,7 @@ make_suite(
         "codex_humaneval_olmo3base:3shot:n32",
         "deepseek_leetcode:olmo3base",
         "ds1000:3shot:olmo3base",
-        "mbpp:3shot:olmo3base",
+        "mbpp_olmo3base:3shot:n32",
         _MULTIPL_E_HUMANEVAL_OLMO3BASE,
         _MULTIPL_E_MBPP_OLMO3BASE,
     ),

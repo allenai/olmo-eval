@@ -7,6 +7,7 @@ from olmo_eval.common.metrics import BPBMetric, PassAtKMetric
 from olmo_eval.common.scorers import CodeExecutionScorer
 from olmo_eval.common.types import Instance, LMOutput, SamplingParams
 from olmo_eval.evals.constants.code import OLMO3_HUMANEVAL_STOP_SEQUENCES
+from olmo_eval.evals.extract import extract_code_before_fence
 from olmo_eval.evals.tasks.common import register, register_variant
 from olmo_eval.evals.tasks.humaneval import HumanEval
 
@@ -89,18 +90,7 @@ class CodexHumanEvalOlmo3Base(HumanEval):
         )
 
     def extract_answer(self, output: LMOutput) -> str | None:
-        """Extract function body from model output.
-
-        The model completes a function inside a ```python code block, so the
-        continuation is raw code.  Take everything before the closing ```
-        fence rather than searching for fenced blocks (which would match
-        hallucinated continuations when stop sequences fail to fire).
-        """
-        text = output.text
-        idx = text.find("```")
-        if idx >= 0:
-            return text[:idx]
-        return text
+        return extract_code_before_fence(output.text)
 
 
 register_variant(

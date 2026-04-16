@@ -57,6 +57,20 @@ def extract_code(text: str, language: str = "python") -> str:
     return text
 
 
+def extract_code_before_fence(text: str) -> str:
+    """Extract code before the first ``` fence.
+
+    For tasks where the model completes code inside a fenced block, the
+    continuation is raw code followed by a closing ```.  This returns
+    everything before that fence, avoiding the ``extract_code`` regex
+    which can match the wrong block when the model keeps generating.
+    """
+    idx = text.find("```")
+    if idx >= 0:
+        return text[:idx]
+    return text
+
+
 def extract_function_body(text: str, signature: str | None = None) -> str:
     """Extract a function body from code.
 
