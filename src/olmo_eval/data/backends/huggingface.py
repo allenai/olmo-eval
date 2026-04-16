@@ -52,13 +52,33 @@ class HuggingFaceBackend:
         if source.revision is not None:
             kwargs["revision"] = source.revision
 
-        dataset = load_dataset(
-            path,
-            name=source.subset,
-            split=source.split,
-            streaming=streaming,
-            token=token,
-            **kwargs,
-        )
+        try:
+            dataset = load_dataset(
+                path,
+                name=source.subset,
+                split=source.split,
+                streaming=streaming,
+                token=token,
+                **kwargs,
+            )
+        except ValueError as exc:
+            # The datasets library silently falls back to its cache module when
+            # the Hub is unreachable.  If the cache has *some* configs but not
+            # the one we need, the cache builder raises a confusing ValueError.
+            # Retry with force-redownload so the library hits the Hub directly
+            # instead of using the stale/partial cache.
+            if "Couldn't find cache" not in str(exc):
+                raise
+            from datasets import DownloadMode
+
+            dataset = load_dataset(
+                path,
+                name=source.subset,
+                split=source.split,
+                streaming=streaming,
+                token=token,
+                download_mode=DownloadMode.FORCE_REDOWNLOAD,
+                **kwargs,
+            )
 
         yield from dataset
