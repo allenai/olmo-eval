@@ -7,9 +7,9 @@ responses, following patterns from benchmarks like SimpleQA.
 import logging
 import re
 from abc import abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
-from typing import ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
 from olmo_eval.common.execution import ScoringContext
 from olmo_eval.common.scorers.execution import ContextScorer
@@ -17,8 +17,8 @@ from olmo_eval.common.types import Instance, LMOutput
 
 logger = logging.getLogger(__name__)
 
-# Type for judge function: takes prompt, returns judge response
-JudgeFn = Callable[..., str]
+# Type for judge function: async callable that takes a prompt and returns judge response
+JudgeFn = Callable[..., Coroutine[Any, Any, str]]
 
 # Rubric-based judge prompt template
 RUBRIC_JUDGE_PROMPT_TEMPLATE = """\
@@ -96,13 +96,10 @@ def build_openai_judge_fn(
     max_tokens: int = 10,
     temperature: float = 0.0,
 ) -> JudgeFn:
-    """Build a lazy judge function using OpenAI API.
+    """Build a lazy async judge function using OpenAI API.
 
     The returned function validates OPENAI_API_KEY on first call, not at construction.
     This allows scorers to be instantiated before the environment variable is set.
-
-    The function accepts either a plain string prompt (sent as a user message) or
-    can be called with a system_prompt keyword argument for system+user message pairs.
 
     Args:
         model: OpenAI model to use for judging.
@@ -111,11 +108,11 @@ def build_openai_judge_fn(
         temperature: Sampling temperature for the judge.
 
     Returns:
-        A judge function that validates and calls OpenAI.
+        An async judge function that validates and calls OpenAI.
     """
     _client: list = []  # Mutable container for lazy initialization
 
-    def judge(prompt: str, *, system_prompt: str | None = None) -> str:
+    async def judge(prompt: str, *, system_prompt: str | None = None) -> str:
         import os
 
         if not _client:
@@ -126,21 +123,21 @@ def build_openai_judge_fn(
                 )
 
             try:
-                from openai import OpenAI
+                from openai import AsyncOpenAI
             except ImportError:
                 raise ValueError(
                     f"openai package is required for {scorer_name}. "
                     "Install with: pip install openai"
                 ) from None
 
-            _client.append(OpenAI(api_key=api_key))
+            _client.append(AsyncOpenAI(api_key=api_key))
 
         messages: list[dict[str, str]] = []
         if system_prompt is not None:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
-        response = _client[0].chat.completions.create(
+        response = await _client[0].chat.completions.create(
             model=model,
             messages=messages,
             temperature=temperature,
@@ -161,6 +158,11 @@ class LLMJudgeScorer(ContextScorer):
     name: ClassVar[str] = "llm_judge"
     provider_name: str | None = None
     judge_fn: JudgeFn | None = None
+
+    def __post_init__(self) -> None:
+        # Ensure only one scoring path exists on the instance.
+        if self.provider_name is not None:
+            object.__setattr__(self, "judge_fn", None)
 
     @abstractmethod
     def format_judge_prompt(self, instance: Instance, output: LMOutput) -> str:
@@ -188,14 +190,11 @@ class LLMJudgeScorer(ContextScorer):
         ...
 
     def score(self, instance: Instance, output: LMOutput) -> float:
-        """Score using judge_fn (sync). Requires judge_fn to be configured."""
-        if self.provider_name:
-            raise RuntimeError(
-                f"{self.__class__.__name__} with provider_name requires async execution."
-            )
-        prompt = self.format_judge_prompt(instance, output)
-        response = self._score_with_judge_fn(prompt)
-        return self.parse_judge_response(response)
+        """LLM judges require async execution via ascore_with_context."""
+        raise RuntimeError(
+            f"{self.__class__.__name__} requires async execution. "
+            "Use ascore_with_context() instead."
+        )
 
     async def _score_with_provider(
         self,
@@ -221,11 +220,11 @@ class LLMJudgeScorer(ContextScorer):
         results = await provider.agenerate([request], sampling_params)
         return results[0][0].text if results and results[0] else ""
 
-    def _score_with_judge_fn(self, prompt: str) -> str:
+    async def _score_with_judge_fn(self, prompt: str) -> str:
         """Score using configured judge function."""
         if self.judge_fn is None:
             raise RuntimeError("No judge_fn configured.")
-        return self.judge_fn(prompt)
+        return await self.judge_fn(prompt)
 
     def _validate_provider(self, context: ScoringContext) -> None:
         """Validate that the required provider is available in the inference pool.
@@ -260,7 +259,7 @@ class LLMJudgeScorer(ContextScorer):
         if self.provider_name is not None:
             response = await self._score_with_provider(prompt, context)
         else:
-            response = self._score_with_judge_fn(prompt)
+            response = await self._score_with_judge_fn(prompt)
 
         return self.parse_judge_response(response)
 
@@ -488,21 +487,6 @@ class SafetyScorer(LLMJudgeScorer):
 
         return float(judge_response[cat] == cat_response)
 
-    def score(self, instance: Instance, output: LMOutput) -> float:
-        """Score using the judge function.
-
-        Args:
-            instance: The evaluation instance.
-            output: The model output to evaluate.
-
-        Returns:
-            Score from the judge (0.0 to 1.0).
-        """
-        prompt = self.format_judge_prompt(instance, output)
-        response = self.judge_fn(prompt)
-        x = self.parse_judge_response(response, instance=instance)
-        return x
-
     async def ascore_with_context(
         self,
         instance: Instance,
@@ -519,7 +503,7 @@ class SafetyScorer(LLMJudgeScorer):
             )
         else:
             prompt = self.format_judge_prompt(instance, output)
-            response = self._score_with_judge_fn(prompt)
+            response = await self._score_with_judge_fn(prompt)
             judge_response = self.parse_judge_response(response, instance=instance)
 
         return judge_response

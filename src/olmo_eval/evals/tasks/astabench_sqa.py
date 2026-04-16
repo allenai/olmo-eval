@@ -378,7 +378,7 @@ def compute_citation_scores_from_groups(
 
 
 # from astabench citation_eval.py:CitationEval.score_citation_group
-def score_citation_group(
+async def score_citation_group(
     judge_fn: JudgeFn,
     citation_group: str,
     citations: list[dict[str, str]],
@@ -403,7 +403,7 @@ def score_citation_group(
         citation_group,
         "\n\n".join(c["id"] + ": " + c["snippets"] for c in citations),
     )
-    raw = judge_fn(prompt)
+    raw = await judge_fn(prompt)
     parsed = extract_json_from_response(raw)
     if not parsed or "claims" not in parsed:
         n_sentences = len([s for s in re.split(r"(?<=[.!?])\s+", citation_group) if s.strip()])
@@ -611,12 +611,12 @@ class AstaBenchSQA(Task):
         )
 
         for response in responses:
-            scores = self._score_single(response, judge_fn)
+            scores = await self._score_single(response, judge_fn)
             response.scores.update(scores)
 
         return responses
 
-    def _score_single(self, response: Response, judge_fn: JudgeFn) -> dict[str, float]:
+    async def _score_single(self, response: Response, judge_fn: JudgeFn) -> dict[str, float]:
         """Score a single response across all 4 metrics + global_avg."""
         output = response.outputs[0] if response.outputs else None
         if output is None:
@@ -631,13 +631,15 @@ class AstaBenchSQA(Task):
         answer_text = format_report(parsed)
 
         # 1. Ingredient recall
-        ingredient_score = self._score_ingredients(judge_fn, question, answer_text, rubric_config)
+        ingredient_score = await self._score_ingredients(
+            judge_fn, question, answer_text, rubric_config
+        )
 
         # 2. Answer precision
-        precision_score = self._score_precision(judge_fn, question, answer_text)
+        precision_score = await self._score_precision(judge_fn, question, answer_text)
 
         # 3. Citation precision & recall
-        citation_scores = self._score_citations(judge_fn, parsed)
+        citation_scores = await self._score_citations(judge_fn, parsed)
 
         scores = {
             "ingredient_recall": ingredient_score,
@@ -648,7 +650,7 @@ class AstaBenchSQA(Task):
         scores["global_avg"] = sum(scores[k] for k in SQA_METRIC_LABELS) / len(SQA_METRIC_LABELS)
         return scores
 
-    def _score_ingredients(
+    async def _score_ingredients(
         self,
         judge_fn: JudgeFn,
         question: str,
@@ -673,14 +675,14 @@ class AstaBenchSQA(Task):
         user_prompt = (
             f"<question>{question}</question>\n<response>{answer}</response>\nCriteria:\n{criteria}"
         )
-        raw = judge_fn(user_prompt, system_prompt=INGREDIENT_SYSTEM_PROMPT)
+        raw = await judge_fn(user_prompt, system_prompt=INGREDIENT_SYSTEM_PROMPT)
         parsed = extract_json_from_response(raw)
         if not parsed:
             return 0.0
 
         return compute_ingredient_score(parsed, ingredients)
 
-    def _score_precision(
+    async def _score_precision(
         self,
         judge_fn: JudgeFn,
         question: str,
@@ -688,7 +690,7 @@ class AstaBenchSQA(Task):
     ) -> float:
         """Score answer precision. From astabench precision_eval.py:PrecisionEval."""
         prompt = PRECISION_EVAL_PROMPT.format(query=question, answer=answer)
-        raw = judge_fn(prompt)
+        raw = await judge_fn(prompt)
         parsed = extract_json_from_response(raw)
         if not parsed:
             return 1.0  # No irrelevant paragraphs identified = perfect precision
@@ -696,7 +698,7 @@ class AstaBenchSQA(Task):
         score, _ = compute_precision_score(parsed, answer)
         return score
 
-    def _score_citations(
+    async def _score_citations(
         self,
         judge_fn: JudgeFn,
         parsed_response: dict[str, Any],
@@ -740,7 +742,7 @@ class AstaBenchSQA(Task):
                             citations.append({"id": cit_id, "snippets": ""})
 
                 clean_text = clean_sentence(sec_text)
-                result = score_citation_group(judge_fn, clean_text, citations)
+                result = await score_citation_group(judge_fn, clean_text, citations)
                 group_results.append(result)
 
         if not group_results:

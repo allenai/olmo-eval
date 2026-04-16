@@ -1,5 +1,8 @@
 """Tests for olmo_eval.core.llm_judge_scorer module."""
 
+import pytest
+
+from olmo_eval.common.execution import ScoringContext
 from olmo_eval.common.scorers import (
     RubricJudgeScorer,
     SimpleQAJudgeScorer,
@@ -10,10 +13,11 @@ from olmo_eval.common.types import Instance, LMOutput
 class TestSimpleQAJudgeScorer:
     """Tests for SimpleQAJudgeScorer."""
 
-    def test_correct_grade_a(self):
+    @pytest.mark.anyio
+    async def test_correct_grade_a(self):
         """Test parsing grade A (CORRECT)."""
 
-        def mock_judge(prompt: str) -> str:
+        async def mock_judge(prompt: str) -> str:
             return "A"
 
         scorer = SimpleQAJudgeScorer(judge_fn=mock_judge)
@@ -21,13 +25,14 @@ class TestSimpleQAJudgeScorer:
         output = LMOutput(text="4")
         output.extracted_answer = "4"
 
-        score = scorer.score(instance, output)
+        score = await scorer.ascore_with_context(instance, output, ScoringContext())
         assert score == 1.0
 
-    def test_incorrect_grade_b(self):
+    @pytest.mark.anyio
+    async def test_incorrect_grade_b(self):
         """Test parsing grade B (INCORRECT)."""
 
-        def mock_judge(prompt: str) -> str:
+        async def mock_judge(prompt: str) -> str:
             return "B"
 
         scorer = SimpleQAJudgeScorer(judge_fn=mock_judge)
@@ -35,59 +40,63 @@ class TestSimpleQAJudgeScorer:
         output = LMOutput(text="5")
         output.extracted_answer = "5"
 
-        score = scorer.score(instance, output)
+        score = await scorer.ascore_with_context(instance, output, ScoringContext())
         assert score == 0.0
 
-    def test_not_attempted_grade_c(self):
+    @pytest.mark.anyio
+    async def test_not_attempted_grade_c(self):
         """Test parsing grade C (NOT_ATTEMPTED)."""
 
-        def mock_judge(prompt: str) -> str:
+        async def mock_judge(prompt: str) -> str:
             return "C"
 
         scorer = SimpleQAJudgeScorer(judge_fn=mock_judge)
         instance = Instance(question="Complex question", gold_answer="Answer")
         output = LMOutput(text="I don't know")
 
-        score = scorer.score(instance, output)
+        score = await scorer.ascore_with_context(instance, output, ScoringContext())
         assert score == 0.0
 
-    def test_parse_correct_word(self):
+    @pytest.mark.anyio
+    async def test_parse_correct_word(self):
         """Test parsing 'CORRECT' text."""
 
-        def mock_judge(prompt: str) -> str:
+        async def mock_judge(prompt: str) -> str:
             return "The answer is CORRECT."
 
         scorer = SimpleQAJudgeScorer(judge_fn=mock_judge)
         instance = Instance(question="Q", gold_answer="A")
         output = LMOutput(text="A")
 
-        score = scorer.score(instance, output)
+        score = await scorer.ascore_with_context(instance, output, ScoringContext())
         assert score == 1.0
 
-    def test_parse_incorrect_word(self):
+    @pytest.mark.anyio
+    async def test_parse_incorrect_word(self):
         """Test parsing 'INCORRECT' text."""
 
-        def mock_judge(prompt: str) -> str:
+        async def mock_judge(prompt: str) -> str:
             return "The answer is INCORRECT."
 
         scorer = SimpleQAJudgeScorer(judge_fn=mock_judge)
         instance = Instance(question="Q", gold_answer="A")
         output = LMOutput(text="B")
 
-        score = scorer.score(instance, output)
+        score = await scorer.ascore_with_context(instance, output, ScoringContext())
         assert score == 0.0
 
-    def test_parse_not_attempted_text(self):
+    @pytest.mark.anyio
+    async def test_parse_not_attempted_text(self):
         """Test parsing 'NOT_ATTEMPTED' text."""
 
-        def mock_judge(prompt: str) -> str:
+        async def mock_judge(prompt: str) -> str:
             return "NOT_ATTEMPTED"
 
         scorer = SimpleQAJudgeScorer(judge_fn=mock_judge)
         instance = Instance(question="Q", gold_answer="A")
         output = LMOutput(text="?")
 
-        score = scorer.score(instance, output)
+        score = await scorer.ascore_with_context(instance, output, ScoringContext())
         assert score == 0.0
 
     def test_get_grade(self):
@@ -122,36 +131,39 @@ class TestSimpleQAJudgeScorer:
 class TestRubricJudgeScorer:
     """Tests for RubricJudgeScorer."""
 
-    def test_extract_score(self):
+    @pytest.mark.anyio
+    async def test_extract_score(self):
         """Test extracting score from response."""
 
-        def mock_judge(prompt: str) -> str:
+        async def mock_judge(prompt: str) -> str:
             return "The response is good. Score: 8"
 
         scorer = RubricJudgeScorer(judge_fn=mock_judge, max_score=10.0)
         instance = Instance(question="Q", gold_answer="A")
         output = LMOutput(text="Response")
 
-        score = scorer.score(instance, output)
+        score = await scorer.ascore_with_context(instance, output, ScoringContext())
         assert score == 0.8
 
-    def test_extract_decimal_score(self):
+    @pytest.mark.anyio
+    async def test_extract_decimal_score(self):
         """Test extracting decimal score."""
 
-        def mock_judge(prompt: str) -> str:
+        async def mock_judge(prompt: str) -> str:
             return "Score: 7.5"
 
         scorer = RubricJudgeScorer(judge_fn=mock_judge, max_score=10.0)
         instance = Instance(question="Q", gold_answer="A")
         output = LMOutput(text="Response")
 
-        score = scorer.score(instance, output)
+        score = await scorer.ascore_with_context(instance, output, ScoringContext())
         assert score == 0.75
 
-    def test_custom_score_pattern(self):
+    @pytest.mark.anyio
+    async def test_custom_score_pattern(self):
         """Test custom score pattern."""
 
-        def mock_judge(prompt: str) -> str:
+        async def mock_judge(prompt: str) -> str:
             return "Rating: 4/5"
 
         scorer = RubricJudgeScorer(
@@ -162,20 +174,21 @@ class TestRubricJudgeScorer:
         instance = Instance(question="Q", gold_answer="A")
         output = LMOutput(text="Response")
 
-        score = scorer.score(instance, output)
+        score = await scorer.ascore_with_context(instance, output, ScoringContext())
         assert score == 0.8
 
-    def test_no_score_found(self):
+    @pytest.mark.anyio
+    async def test_no_score_found(self):
         """Test when no score is found."""
 
-        def mock_judge(prompt: str) -> str:
+        async def mock_judge(prompt: str) -> str:
             return "Good response with no score"
 
         scorer = RubricJudgeScorer(judge_fn=mock_judge, default_score=5.0, max_score=10.0)
         instance = Instance(question="Q", gold_answer="A")
         output = LMOutput(text="Response")
 
-        score = scorer.score(instance, output)
+        score = await scorer.ascore_with_context(instance, output, ScoringContext())
         assert score == 0.5
 
     def test_get_raw_score(self):
@@ -184,11 +197,12 @@ class TestRubricJudgeScorer:
         raw = scorer.get_raw_score("The Score: 7 is given")
         assert raw == 7.0
 
-    def test_custom_rubric(self):
+    @pytest.mark.anyio
+    async def test_custom_rubric(self):
         """Test with custom rubric."""
         custom_rubric = "Rate 0-5 based on accuracy"
 
-        def mock_judge(prompt: str) -> str:
+        async def mock_judge(prompt: str) -> str:
             assert custom_rubric in prompt
             return "Score: 4"
 
@@ -196,7 +210,7 @@ class TestRubricJudgeScorer:
         instance = Instance(question="Q", gold_answer="A")
         output = LMOutput(text="Response")
 
-        score = scorer.score(instance, output)
+        score = await scorer.ascore_with_context(instance, output, ScoringContext())
         assert score == 0.8
 
     def test_format_prompt(self):
@@ -230,47 +244,52 @@ class TestRubricJudgeScorer:
 class TestLLMJudgeScorerIntegration:
     """Integration tests for LLM judge scorers."""
 
-    def test_simpleqa_full_flow(self):
+    @pytest.mark.anyio
+    async def test_simpleqa_full_flow(self):
         """Test complete SimpleQA evaluation flow."""
         responses = []
 
-        def tracking_judge(prompt: str) -> str:
+        async def tracking_judge(prompt: str) -> str:
             responses.append(prompt)
-            # Check if "AI Assistant's Answer: 4" appears (correct answer)
             if "AI Assistant's Answer: 4" in prompt:
                 return "A"
             return "B"
 
         scorer = SimpleQAJudgeScorer(judge_fn=tracking_judge)
+        ctx = ScoringContext()
 
         # Correct answer
         instance1 = Instance(question="2+2=?", gold_answer="4")
         output1 = LMOutput(text="4")
         output1.extracted_answer = "4"
-        score1 = scorer.score(instance1, output1)
+        score1 = await scorer.ascore_with_context(instance1, output1, ctx)
 
         # Incorrect answer
         instance2 = Instance(question="2+2=?", gold_answer="4")
         output2 = LMOutput(text="5")
         output2.extracted_answer = "5"
-        score2 = scorer.score(instance2, output2)
+        score2 = await scorer.ascore_with_context(instance2, output2, ctx)
 
         assert score1 == 1.0
         assert score2 == 0.0
         assert len(responses) == 2
 
-    def test_rubric_different_scales(self):
+    @pytest.mark.anyio
+    async def test_rubric_different_scales(self):
         """Test rubric scorer with different score scales."""
         scales = [(5.0, 4), (10.0, 8), (100.0, 80)]
+        ctx = ScoringContext()
 
         for max_score, raw_score in scales:
 
-            def make_judge(rs):
-                return lambda p: f"Score: {rs}"
+            async def make_judge(rs):
+                return f"Score: {rs}"
 
-            scorer = RubricJudgeScorer(judge_fn=make_judge(raw_score), max_score=max_score)
+            scorer = RubricJudgeScorer(
+                judge_fn=lambda p, rs=raw_score: make_judge(rs), max_score=max_score
+            )
             instance = Instance(question="Q", gold_answer="A")
             output = LMOutput(text="R")
 
-            score = scorer.score(instance, output)
+            score = await scorer.ascore_with_context(instance, output, ctx)
             assert score == 0.8

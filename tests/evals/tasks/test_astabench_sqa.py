@@ -457,13 +457,14 @@ class TestComputeCitationScoresFromGroups:
 
 
 class TestScoreCitationGroup:
-    def test_no_citations_uses_sentence_count(self):
+    @pytest.mark.anyio
+    async def test_no_citations_uses_sentence_count(self):
         """With no citations, n_extrapolatory should reflect sentence count."""
 
-        def stub_judge(prompt, **kwargs):
+        async def stub_judge(prompt, **kwargs):
             raise AssertionError("should not be called")
 
-        result = score_citation_group(
+        result = await score_citation_group(
             stub_judge,
             "First sentence. Second sentence. Third sentence.",
             [],
@@ -471,13 +472,14 @@ class TestScoreCitationGroup:
         assert result["n_attributable"] == 0
         assert result["n_extrapolatory"] == 3
 
-    def test_invalid_json_fallback_uses_sentence_count(self):
+    @pytest.mark.anyio
+    async def test_invalid_json_fallback_uses_sentence_count(self):
         """When judge returns garbage, fallback should count sentences."""
 
-        def stub_judge(prompt, **kwargs):
+        async def stub_judge(prompt, **kwargs):
             return "this is not json at all"
 
-        result = score_citation_group(
+        result = await score_citation_group(
             stub_judge,
             "Sentence one. Sentence two.",
             [{"id": "[1]", "snippets": "some snippet"}],
@@ -485,7 +487,8 @@ class TestScoreCitationGroup:
         assert result["n_attributable"] == 0
         assert result["n_extrapolatory"] == 2
 
-    def test_valid_judge_response(self):
+    @pytest.mark.anyio
+    async def test_valid_judge_response(self):
         """Normal judge response should produce correct counts."""
         judge_response = json.dumps(
             {
@@ -506,10 +509,10 @@ class TestScoreCitationGroup:
             }
         )
 
-        def stub_judge(prompt, **kwargs):
+        async def stub_judge(prompt, **kwargs):
             return judge_response
 
-        result = score_citation_group(
+        result = await score_citation_group(
             stub_judge,
             "Claim A [1]. Claim B [1].",
             [{"id": "[1]", "snippets": "evidence text"}],
@@ -519,7 +522,8 @@ class TestScoreCitationGroup:
         assert result["supporting_counts"] == [1, 0]
         assert result["non_supporting_counts"] == [0, 1]
 
-    def test_half_credit_title_only(self):
+    @pytest.mark.anyio
+    async def test_half_credit_title_only(self):
         """Citations with only a title should get half credit."""
         judge_response = json.dumps(
             {
@@ -534,10 +538,10 @@ class TestScoreCitationGroup:
             }
         )
 
-        def stub_judge(prompt, **kwargs):
+        async def stub_judge(prompt, **kwargs):
             return judge_response
 
-        result = score_citation_group(
+        result = await score_citation_group(
             stub_judge,
             "Claim A [1].",
             [{"id": "[1]", "snippets": f"{JUST_HAS_A_TITLE}Some Paper"}],
