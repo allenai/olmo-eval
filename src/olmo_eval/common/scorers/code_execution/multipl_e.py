@@ -68,8 +68,8 @@ class MultiplEScorer(ExecutionScorer):
             output.metadata["execution_result"] = {"success": False, "error": "No test code"}
             return 0.0
 
-        # Combine generated code with tests
-        full_code = f"{output.extracted_answer}\n\n{test_code}"
+        # Combine generated code with tests (single newline matches oe-eval-internal)
+        full_code = f"{output.extracted_answer}\n{test_code}"
 
         result = await self._execute_with_evaluator(execution_env, full_code)
 
