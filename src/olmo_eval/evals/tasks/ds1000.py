@@ -67,7 +67,15 @@ class DS1000(Task):
     """DS-1000 data science code generation task."""
 
     data_source = DataSource(path="xlangai/DS-1000")
-    sandbox_env = SandboxEnv("ds1000", ("numpy", "pandas", "matplotlib", "scipy", "scikit-learn"))
+    sandbox_env = SandboxEnv(
+        "ds1000",
+        ("numpy", "pandas", "matplotlib", "scipy", "scikit-learn", "seaborn", "statsmodels", "xgboost", "gensim"),
+        dockerfile_extra=(
+            "RUN /root/python/bin/uv pip install --system --no-cache"
+            " torch --index-url https://download.pytorch.org/whl/cpu",
+            "RUN /root/python/bin/uv pip install --system --no-cache tensorflow-cpu",
+        ),
+    )
     sampling_params = SamplingParams(
         max_tokens=1024,
         temperature=0.6,
