@@ -230,10 +230,13 @@ def _register_humaneval_task(lang: str) -> None:
             num_samples=20,
         ),
     )
-    # olmo3base: match oe-eval-internal with hardcoded stop tokens and 3s timeout
-    # NOTE: oe-eval-internal's CodePassAtK defaults to timeout=3.0 (not 10s).
-    # The 10s default in code_eval_multiple() is overridden by CodePassAtK.__init__.
-    olmo3_scorer_cls = _make_scorer_with_timeout(lang, timeout=3)
+    # olmo3base: match oe-eval-internal with hardcoded stop tokens and language-default timeouts.
+    # NOTE: oe-eval-internal's CodePassAtK passes timeout=3.0 to code_eval_multiple, but the
+    # Lambda's check_correctness() IGNORES the timeout parameter entirely (see app.py line 17:
+    # "# timeout: float = 10.0  # TODO: pipe this through to safe_subprocess.run").
+    # The actual timeouts used are the per-language hardcoded values in safe_subprocess.run()
+    # (default 15s) or subprocess.run() (5s for JS, 15s+5s for Rust).
+    # Using timeout=None here falls back to the language evaluator's DEFAULT_TIMEOUT.
     register_variant(
         task_name,
         "olmo3base",
@@ -246,11 +249,11 @@ def _register_humaneval_task(lang: str) -> None:
             stop_sequences=MULTIPL_E_STOP_TOKENS[lang],
         ),
         metrics=(
-            PassAtKMetric(k=1, scorer=olmo3_scorer_cls),
-            PassAtKMetric(k=2, scorer=olmo3_scorer_cls),
-            PassAtKMetric(k=4, scorer=olmo3_scorer_cls),
-            PassAtKMetric(k=8, scorer=olmo3_scorer_cls),
-            PassAtKMetric(k=16, scorer=olmo3_scorer_cls),
+            PassAtKMetric(k=1, scorer=scorer_cls),
+            PassAtKMetric(k=2, scorer=scorer_cls),
+            PassAtKMetric(k=4, scorer=scorer_cls),
+            PassAtKMetric(k=8, scorer=scorer_cls),
+            PassAtKMetric(k=16, scorer=scorer_cls),
         ),
     )
 
@@ -300,9 +303,8 @@ def _register_mbpp_task(lang: str) -> None:
             num_samples=20,
         ),
     )
-    # olmo3base: match oe-eval-internal with hardcoded stop tokens and 3s timeout
-    # NOTE: oe-eval-internal's CodePassAtK defaults to timeout=3.0 (not 10s).
-    olmo3_scorer_cls = _make_scorer_with_timeout(lang, timeout=3)
+    # olmo3base: match oe-eval-internal with hardcoded stop tokens and language-default timeouts.
+    # See comment in _register_humaneval_task for why timeout=None (language default) is correct.
     register_variant(
         task_name,
         "olmo3base",
@@ -315,11 +317,11 @@ def _register_mbpp_task(lang: str) -> None:
             stop_sequences=MULTIPL_E_STOP_TOKENS[lang],
         ),
         metrics=(
-            PassAtKMetric(k=1, scorer=olmo3_scorer_cls),
-            PassAtKMetric(k=2, scorer=olmo3_scorer_cls),
-            PassAtKMetric(k=4, scorer=olmo3_scorer_cls),
-            PassAtKMetric(k=8, scorer=olmo3_scorer_cls),
-            PassAtKMetric(k=16, scorer=olmo3_scorer_cls),
+            PassAtKMetric(k=1, scorer=scorer_cls),
+            PassAtKMetric(k=2, scorer=scorer_cls),
+            PassAtKMetric(k=4, scorer=scorer_cls),
+            PassAtKMetric(k=8, scorer=scorer_cls),
+            PassAtKMetric(k=16, scorer=scorer_cls),
         ),
     )
 
