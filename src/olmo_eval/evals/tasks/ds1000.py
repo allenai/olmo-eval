@@ -69,11 +69,21 @@ class DS1000(Task):
     data_source = DataSource(path="xlangai/DS-1000")
     sandbox_env = SandboxEnv(
         "ds1000",
-        ("numpy", "pandas", "matplotlib", "scipy", "scikit-learn", "seaborn", "statsmodels", "xgboost", "gensim"),
+        (
+            "numpy==1.26.4",
+            "pandas==1.5.3",
+            "matplotlib==3.8.4",
+            "scipy==1.12.0",
+            "scikit-learn==1.4.0",
+            "seaborn==0.13.2",
+            "statsmodels==0.14.1",
+            "xgboost==2.0.3",
+            "gensim==4.3.2",
+        ),
         dockerfile_extra=(
             "RUN /root/python/bin/uv pip install --system --no-cache"
-            " torch --index-url https://download.pytorch.org/whl/cpu",
-            "RUN /root/python/bin/uv pip install --system --no-cache tensorflow-cpu",
+            " torch==2.2.0+cpu --index-url https://download.pytorch.org/whl/cpu",
+            "RUN /root/python/bin/uv pip install --system --no-cache tensorflow-cpu==2.16.1",
         ),
     )
     sampling_params = SamplingParams(
