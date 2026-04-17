@@ -3,9 +3,8 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.formatters import PPLFormatter
 from olmo_eval.common.metrics import (
-    BPBMetric,
+    BPBMetricInstanceAvg,
     LogprobMCAccuracyMetric,
     LogprobPerCharMCAccuracyMetric,
 )
@@ -129,13 +128,11 @@ register_variant("coqa:rc", "olmo3base")
 
 @register("coqa:bpb")
 class CoqaBPB(CoqaRC):
-    formatter = PPLFormatter()
-    metrics = (BPBMetric(),)
-
-    def format_request(self, instance: Instance) -> LMRequest:
-        if self.config.formatter is not None:
-            return self.config.formatter.format(instance, self.get_fewshot())
-        return super().format_request(instance)
+    metrics = (BPBMetricInstanceAvg(),)
 
 
-register_variant("coqa:bpb", "olmo3base")
+register_variant(
+    "coqa:bpb",
+    "olmo3base",
+    data_source=DataSource(path="allenai/coqa-gen2mc", split="validation"),
+)

@@ -1,5 +1,3 @@
-"""Static few-shot examples for SQuAD MC."""
-
 # fmt: off
 SQUAD_MC_FIXED_FEWSHOT = [
     {

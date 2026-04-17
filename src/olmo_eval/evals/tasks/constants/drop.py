@@ -1,5 +1,3 @@
-"""Static few-shot examples for DROP."""
-
 # fmt: off
 DROP_FIXED_FEWSHOT = [
     {

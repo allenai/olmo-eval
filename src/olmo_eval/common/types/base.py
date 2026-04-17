@@ -141,6 +141,7 @@ class LMRequest:
     continuation_prompts: tuple[str, ...] | None = None
     tools: tuple[ToolSchema, ...] | None = None
     system_prompt: str | None = None
+    max_length: int | None = None
 
 
 @hide_unset()

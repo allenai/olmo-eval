@@ -1,5 +1,3 @@
-"""Static few-shot examples for Natural Questions MC."""
-
 # fmt: off
 NQ_MC_FIXED_FEWSHOT = [
     {

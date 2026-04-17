@@ -160,9 +160,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         result_queue: mp.Queue = ctx.Queue()
         total_gpus = self._get_gpu_count()
 
-        # Create shared dict for tracking worker init times
-        manager = ctx.Manager()
-        init_times = manager.dict()
+        # Queue for workers to report init times (replaces mp.Manager dict to
+        # avoid a long-lived server process that can zombie and hang on shutdown)
+        init_queue: mp.Queue = ctx.Queue()
 
         # Shuffle with seed for deterministic ordering (enables future checkpointing)
         rng = random.Random(self.shuffle_seed)
@@ -210,7 +210,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             provider_manager.add_poison_pills()
 
             # Start workers
-            workers = provider_manager.start(ctx, total_instances, init_times)
+            workers = provider_manager.start(ctx, total_instances, init_queue)
 
             # Start auxiliary inference servers if configured
             registry_config: dict[str, list[dict[str, Any]]] | None = None
@@ -434,7 +434,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
             # Wait for workers to report their init times (also checks for crashes)
             provider_init_seconds = wait_for_init_times(
-                init_times, num_inference_workers, workers=workers, result_queue=result_queue
+                init_queue, num_inference_workers, workers=workers, result_queue=result_queue
             )
 
             # Reset tracker start times now that workers are ready
@@ -495,9 +495,8 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                     await sandbox_manager.stop()
             if inference_manager is not None:
                 inference_manager.shutdown()
-            for q in [item_queue, result_queue]:
+            for q in [item_queue, result_queue, init_queue]:
                 q.cancel_join_thread()
-            manager.shutdown()
 
     def _prepare_tasks(
         self,

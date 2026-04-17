@@ -1,10 +1,8 @@
-"""HumanEval code generation task implementations."""
-
 from collections.abc import Iterator, Sequence
 from typing import Any
 
 from olmo_eval.common.formatters import ChatFormatter, CompletionFormatter, PPLFormatter
-from olmo_eval.common.metrics import BPBMetricByteAvg, PassAtKMetric
+from olmo_eval.common.metrics import BPBMetricInstanceAvg, PassAtKMetric
 from olmo_eval.common.scorers import CodeExecutionScorer
 from olmo_eval.common.types import (
     Instance,
@@ -138,6 +136,13 @@ class HumanEval(Task):
                     output.extracted_answer = None
 
 
+@register("codex_humaneval")
+class CodexHumanEval(HumanEval):
+    """Codex HumanEval task (alias for HumanEval with codex_humaneval name)."""
+
+    pass
+
+
 @register("humaneval_plus")
 class HumanEvalPlus(HumanEval):
     """HumanEval+ task with additional test cases."""
@@ -156,14 +161,21 @@ register_variant(
     "humaneval",
     "bpb",
     formatter=PPLFormatter(leading_space=True, answer_prefix=" "),
-    metrics=(BPBMetricByteAvg(),),
+    metrics=(BPBMetricInstanceAvg(),),
+)
+
+register_variant(
+    "codex_humaneval",
+    "bpb",
+    formatter=PPLFormatter(leading_space=True, answer_prefix=" "),
+    metrics=(BPBMetricInstanceAvg(),),
 )
 
 register_variant(
     "humaneval_plus",
     "bpb",
     formatter=PPLFormatter(leading_space=True, answer_prefix=" "),
-    metrics=(BPBMetricByteAvg(),),
+    metrics=(BPBMetricInstanceAvg(),),
 )
 
 # 3shot variants - composable with bpb (e.g., humaneval:3shot:bpb)
@@ -177,12 +189,22 @@ register_variant(
 )
 
 register_variant(
+    "codex_humaneval",
+    "3shot",
+    num_fewshot=3,
+    fewshot_seed=1234,
+    formatter=CompletionFormatter(),
+)
+
+register_variant(
     "humaneval_plus",
     "3shot",
     num_fewshot=3,
     fewshot_seed=1234,
     formatter=CompletionFormatter(),
 )
+
+register_variant("codex_humaneval", "olmo3base", num_fewshot=3, fewshot_seed=1234)
 
 # Chat variants for instruction-tuned models
 # Use with agent backends: humaneval:chat:pass_at_1

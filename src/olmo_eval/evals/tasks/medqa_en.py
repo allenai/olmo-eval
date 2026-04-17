@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter
-from olmo_eval.common.metrics import BPBMetric, LogprobPerCharMCAccuracyMetric
+from olmo_eval.common.metrics import BPBMetricInstanceAvg, LogprobPerCharMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -90,5 +90,5 @@ class MedQAEn(Task):
 
 register_variant("medqa_en", "rc")
 register_variant("medqa_en", "mc", formatter=MultipleChoiceFormatter())
-register_variant("medqa_en", "bpb", metrics=(BPBMetric(),))
+register_variant("medqa_en", "bpb", metrics=(BPBMetricInstanceAvg(),))
 register_variant("medqa_en", "olmo3base", num_fewshot=5, fewshot_seed=1234)

@@ -4,9 +4,9 @@ import re
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.formatters import MultipleChoiceFormatter, PPLFormatter
+from olmo_eval.common.formatters import MultipleChoiceFormatter
 from olmo_eval.common.metrics import (
-    BPBMetric,
+    BPBMetricInstanceAvg,
     LogprobMCAccuracyMetric,
     LogprobPerCharMCAccuracyMetric,
 )
@@ -177,83 +177,8 @@ register_variant("jeopardy:rc", "olmo3base")
 
 
 @register("jeopardy:bpb")
-class JeopardyBPB(_JeopardyMCBase):
-    data_source = DataSource(path="allenai/jeopardy_mc", split="test")
-    split = Split.TEST
-    formatter = PPLFormatter()
-    metrics = (BPBMetric(),)
-    primary_metric = BPBMetric()
-    fewshot_source = "jeopardy_mc_fixed"
-
-    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
-        context = doc.get("context_original", "")
-        if not context:
-            return None
-
-        choices_data = doc.get("choices", {})
-        choices = choices_data.get("text", [])
-        if not choices:
-            return None
-
-        category, question = _parse_context(context)
-        answer_key = doc.get("answerKey", "")
-        gold_idx = ord(answer_key) - ord("A") if answer_key else 0
-        gold_text = choices[gold_idx] if 0 <= gold_idx < len(choices) else ""
-
-        return Instance(
-            question=f"Category: {category}\nQuestion: {question}\nAnswer:",
-            choices=tuple(choices),
-            gold_answer=" " + gold_text,
-            metadata={
-                "id": doc.get("id", f"jeopardy_mc_{index}"),
-                "index": index,
-                "dataset": "jeopardy_mc",
-                "category": category,
-                "gold_idx": gold_idx,
-                "gold_text": gold_text,
-                "mc_answer": answer_key,
-            },
-        )
-
-    def _build_fewshot(self) -> list[Instance]:
-        if self.config.fewshot_source == self._fewshot_source_name:
-            return self._build_bpb_fixed_fewshot()
-        return super()._build_fewshot()
-
-    def _build_bpb_fixed_fewshot(self) -> list[Instance]:
-        instances = []
-        for doc in JEOPARDY_MC_FIXED_FEWSHOT:
-            context = str(doc["context_original"])
-            category, question = _parse_context(context)
-            choices_data = doc["choices"]
-            assert isinstance(choices_data, dict)
-            choices = tuple(choices_data["text"])
-            answer_key = str(doc["answerKey"])
-            gold_idx = ord(answer_key) - ord("A")
-            gold_text = choices[gold_idx] if 0 <= gold_idx < len(choices) else ""
-
-            instances.append(
-                Instance(
-                    question=f"Category: {category}\nQuestion: {question}\nAnswer:",
-                    choices=choices,
-                    gold_answer=" " + gold_text,
-                    metadata={
-                        "category": category,
-                        "gold_idx": gold_idx,
-                        "gold_text": gold_text,
-                        "mc_answer": answer_key,
-                    },
-                )
-            )
-
-        num = self.config.num_fewshot
-        if num and num < len(instances):
-            instances = instances[:num]
-        return instances
-
-    def format_request(self, instance: Instance) -> LMRequest:
-        assert self.config.formatter is not None
-        return self.config.formatter.format(instance, self.get_fewshot())
+class JeopardyBPB(JeopardyRC):
+    metrics = (BPBMetricInstanceAvg(),)
 
 
 register_variant("jeopardy:bpb", "olmo3base")

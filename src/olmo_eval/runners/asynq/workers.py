@@ -24,7 +24,7 @@ def inference_worker(
     result_queue: mp.Queue,
     harness_config_dict: dict[str, Any],
     total_instances: int,
-    init_times: dict[str, float] | None = None,
+    init_queue: mp.Queue | None = None,
     output_dir: str | None = None,
     num_workers: int = 1,
 ) -> None:
@@ -41,7 +41,7 @@ def inference_worker(
         result_queue: Queue to put ResultItems.
         harness_config_dict: Serialized HarnessConfig.
         total_instances: Total number of instances across all workers.
-        init_times: Optional shared dict for tracking initialization times.
+        init_queue: Optional queue for reporting initialization times.
         output_dir: Output directory for persisting logs (e.g., vLLM server logs).
         num_workers: Number of parallel workers sharing the work.
     """
@@ -96,17 +96,22 @@ def inference_worker(
         if provider_kind == "vllm_server" and output_dir:
             log_dir = os.path.join(output_dir, "logs")
 
+        # Only inject vllm-specific kwargs for vllm providers
+        vllm_only_overrides: dict[str, Any] = {}
+        if provider_kind in ("vllm", "vllm_server"):
+            vllm_only_overrides = dict(
+                tensor_parallel_size=len(gpu_ids) if gpu_ids else None,
+                load_format=load_format,
+                model_loader_extra_config=extra_loader_config,
+                enable_auto_tool_choice=enable_auto_tool_choice or None,
+                log_dir=log_dir,
+            )
+
         harness_config = harness_config.with_provider_overrides(
-            tensor_parallel_size=len(gpu_ids)
-            if (gpu_ids and provider_config.requires_gpu)
-            else None,
             max_model_len=max_model_len,
             max_concurrency=max_concurrency,
             tokenizer=tokenizer,
-            load_format=load_format,
-            model_loader_extra_config=extra_loader_config,
-            enable_auto_tool_choice=enable_auto_tool_choice or None,
-            log_dir=log_dir,
+            **vllm_only_overrides,
         )
 
         # Update metrics config with runtime values (output_dir, provider_kind, model_name)
@@ -136,8 +141,8 @@ def inference_worker(
         init_time = time.time() - init_start
         worker_logger.info(f"Provider ready ({init_time:.1f}s)")
 
-        if init_times is not None:
-            init_times[worker_id] = init_time
+        if init_queue is not None:
+            init_queue.put((worker_id, init_time))
 
         try:
             # Configure agent trace output if using openai_agents backend

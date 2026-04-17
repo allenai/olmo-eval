@@ -185,6 +185,7 @@ def parse_overrides(override_str: str) -> dict[str, Any]:
                 "limit",
                 "fewshot_seed",
                 "seed",
+                "max_length",
                 "max_tokens",
                 "max_model_len",
                 "top_k",
@@ -496,7 +497,7 @@ def register_subtasks(
                 "sampling_params": SamplingParams(max_tokens=1024),
             },
             variants={
-                "bpb": {"formatter": PPLFormatter(), "metrics": (BPBMetricByteAvg(),)},
+                "bpb": {"formatter": PPLFormatter(), "metrics": (BPBMetricInstanceAvg(),)},
                 "3shot": {"num_fewshot": 3},
             },
         )

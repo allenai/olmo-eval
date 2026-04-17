@@ -5,7 +5,7 @@ from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceLogprobFormatter
 from olmo_eval.common.metrics import (
-    BPBMetric,
+    BPBMetricInstanceAvg,
     LogprobMCAccuracyMetric,
     LogprobPerCharMCAccuracyMetric,
 )
@@ -330,7 +330,7 @@ for _subject in MMLU_SUBJECTS:
     register_variant(
         f"mmlu_{_subject}:rc",
         "bpb",
-        metrics=(BPBMetric(),),
-        primary_metric=BPBMetric(),
+        metrics=(BPBMetricInstanceAvg(),),
+        primary_metric=BPBMetricInstanceAvg(),
     )
     globals()[f"MMLU_RC_{_subject}"] = _rc_cls

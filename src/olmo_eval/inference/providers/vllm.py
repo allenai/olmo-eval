@@ -286,13 +286,15 @@ class VLLMProvider(InferenceProvider):
         )
 
         tokenizer = self.llm.get_tokenizer()
-        max_len = self.max_length
+        default_max_len = self.max_length
 
         # Build token sequences for all continuations
         token_inputs: list[list[int]] = []
         request_meta: list[tuple[int, int, int]] = []  # (ctxlen, num_tokens_all, overflow)
 
         for request in requests:
+            # Use per-request max_length if set (e.g., from task config), else provider default.
+            max_len = request.max_length or default_max_len
             continuations = request.continuations or ()
             cont_prompts = request.continuation_prompts
             for i, continuation in enumerate(continuations):

@@ -10,7 +10,7 @@ from typing import Any
 from olmo_eval.common.formatters import MultipleChoiceFormatter, PPLFormatter
 from olmo_eval.common.metrics import (
     AccuracyMetric,
-    BPBMetric,
+    BPBMetricInstanceAvg,
     F1Metric,
     LogprobMCAccuracyMetric,
     LogprobPerCharMCAccuracyMetric,
@@ -461,8 +461,8 @@ class DropBPB(Drop):
     data_source = DataSource(path="allenai/drop_mc", split="validation")
     split = Split.VALIDATION
     formatter = PPLFormatter()
-    metrics = (BPBMetric(),)
-    primary_metric = BPBMetric()
+    metrics = (BPBMetricInstanceAvg(),)
+    primary_metric = BPBMetricInstanceAvg()
     num_fewshot = 5
     fewshot_source = "olmes_drop_mc_fixed"
 

@@ -154,9 +154,8 @@ class RecallMetric(Metric):
 class BPBMetricInstanceAvg(Metric):
     """Arithmetic mean of per-instance bits-per-byte.
 
-    Each instance's BPB is computed independently via the scorer, then averaged
-    with equal weight regardless of text length.  This matches the aggregation
-    used by oe-eval (simple mean of per-doc ``bits_per_byte_corr``).
+    Computes per-instance BPB as: -logprob / (num_bytes * log(2)),
+    then returns the simple (unweighted) mean across all instances.
     """
 
     name: str = "bits_per_byte"
@@ -272,6 +271,7 @@ class PassAtKMetric(Metric):
     scorer: type[Scorer] = field(kw_only=True)
 
     def __post_init__(self) -> None:
+        # Use unique name per k value so metrics don't overwrite each other
         object.__setattr__(self, "name", f"pass_at_{self.k}")
 
     def compute(self, responses: Sequence[Response]) -> float:
@@ -319,6 +319,7 @@ class PassPowKMetric(Metric):
     scorer: type[Scorer] = field(kw_only=True)
 
     def __post_init__(self) -> None:
+        # Use unique name per k value so metrics don't overwrite each other
         object.__setattr__(self, "name", f"pass_pow_{self.k}")
 
     def compute(self, responses: Sequence[Response]) -> float:

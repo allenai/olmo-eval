@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import random
 from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter
-from olmo_eval.common.metrics import BPBMetric, LogprobMCAccuracyMetric
+from olmo_eval.common.metrics import BPBMetricInstanceAvg, LogprobMCAccuracyMetric
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -92,7 +93,7 @@ class Winogrande(Task):
                     index += 1
 
         if self.config.limit and len(instances) > self.config.limit:
-            instances = instances[: self.config.limit]
+            instances = random.Random(1234).sample(instances, self.config.limit)
 
         return instances
 
@@ -192,4 +193,4 @@ register_variant(
     limit=10_000,
     fewshot_source="olmes_winogrande_fixed",
 )
-register_variant("winogrande", "bpb", metrics=(BPBMetric(),))
+register_variant("winogrande", "bpb", metrics=(BPBMetricInstanceAvg(),))

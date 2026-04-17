@@ -6,7 +6,7 @@ from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter
 from olmo_eval.common.metrics import (
-    BPBMetric,
+    BPBMetricInstanceAvg,
     LogprobMCAccuracyMetric,
     LogprobPerCharMCAccuracyMetric,
 )
@@ -151,7 +151,7 @@ register_variant(
 
 @register("sciq:bpb")
 class SciQBPB(SciQ):
-    metrics = (BPBMetric(),)
+    metrics = (BPBMetricInstanceAvg(),)
 
     def format_request(self, instance: Instance) -> LMRequest:
         fewshot = self.get_fewshot()

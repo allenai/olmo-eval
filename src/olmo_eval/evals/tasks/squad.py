@@ -7,7 +7,9 @@ from olmo_eval.common.metrics import SQuADF1Metric
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
-from olmo_eval.evals.tasks.constants.squad import SQUAD_DESCRIPTION, SQUAD_FIXED_FEWSHOT
+from olmo_eval.evals.tasks.constants.squad import SQUAD_FIXED_FEWSHOT
+
+SQUAD_DESCRIPTION = "The following are reading comprehension questions, where the answer to each question is a segment of text from the corresponding background text."
 
 
 def _format_query(title: str, context: str, question: str) -> str:

@@ -80,6 +80,15 @@ async def process_results(
     scoring_semaphore = asyncio.Semaphore(scoring_concurrency)
     in_flight_scoring: set[asyncio.Task[None]] = set()
 
+    # Determine which tasks need the scoring worker (async scorers like sandboxed
+    # code execution). All other tasks are scored inline to avoid mp.Queue overhead.
+    tasks_needing_async_scoring: set[str] = set()
+    for spec, tracker in trackers.items():
+        if tracker.task is not None and tracker.task._has_async_scorers():
+            tasks_needing_async_scoring.add(spec)
+    if tasks_needing_async_scoring:
+        logger.info(f"Tasks using async scoring worker: {tasks_needing_async_scoring}")
+
     def check_task_completion(spec: str) -> None:
         """Check if task is complete and finalize if so."""
         nonlocal tasks_complete

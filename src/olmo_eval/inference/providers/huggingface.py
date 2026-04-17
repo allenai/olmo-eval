@@ -27,6 +27,21 @@ def _get_device() -> torch.device:
 class HuggingFaceProvider(InferenceProvider):
     """Provider using Hugging Face Transformers for local inference."""
 
+    # kwargs that may be passed by the runner but are not valid for HF from_pretrained
+    _IGNORED_KWARGS = frozenset(
+        {
+            "tensor_parallel_size",
+            "gpu_memory_utilization",
+            "attention_backend",
+            "use_tqdm_on_load",
+            "add_bos_token",
+            "max_model_len",
+            "load_format",
+            "model_loader_extra_config",
+            "enable_auto_tool_choice",
+        }
+    )
+
     def __init__(self, model_name: str, tokenizer: str | None = None, **model_kwargs) -> None:
         """Initialize the provider.
 
@@ -42,6 +57,10 @@ class HuggingFaceProvider(InferenceProvider):
                 "transformers is required for HuggingFaceProvider. "
                 "Install with: pip install transformers"
             ) from e
+
+        # Strip kwargs meant for other providers (e.g., vLLM)
+        for key in self._IGNORED_KWARGS:
+            model_kwargs.pop(key, None)
 
         super().__init__(model_name)
         tokenizer_path = tokenizer or model_name
@@ -183,8 +202,8 @@ class HuggingFaceProvider(InferenceProvider):
 
                 logprob_entries = []
                 total = 0.0
-                for i, tok in enumerate(continuation_enc):
-                    lp = log_probs[ctx_len + i - 1, tok].item()
+                for j, tok in enumerate(continuation_enc):
+                    lp = log_probs[ctx_len + j - 1, tok].item()
                     token_str = self.tokenizer.decode(tok, skip_special_tokens=False)
                     logprob_entries.append(
                         {

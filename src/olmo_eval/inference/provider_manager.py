@@ -56,7 +56,7 @@ class ProviderManager:
         self,
         ctx: Any,
         total_instances: int,
-        init_times: Any,
+        init_queue: mp.Queue,
     ) -> list[mp.process.BaseProcess]:
         """Start all provider instances as subprocesses.
 
@@ -68,7 +68,7 @@ class ProviderManager:
         Args:
             ctx: Multiprocessing context (e.g., from mp.get_context("spawn")).
             total_instances: Total number of instances to process.
-            init_times: Shared dict for tracking worker init times.
+            init_queue: Queue for workers to report initialization times.
 
         Returns:
             List of started worker processes.
@@ -93,7 +93,7 @@ class ProviderManager:
                     self._result_queue,
                     harness_config_dict,
                     total_instances,
-                    init_times,
+                    init_queue,
                     self._output_dir,
                     self._num_inference_workers,
                 ),

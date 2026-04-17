@@ -1,5 +1,3 @@
-"""Static few-shot examples for SocialIQA."""
-
 # fmt: off
 SOCIALIQA_FIXED_FEWSHOT = [
     {"context": "Cameron decided to have a barbecue and gathered her friends together.", "question": "How would Others feel as a result?", "answerA": "like attending", "answerB": "like staying home", "answerC": "a good friend to have", "label": "1"},

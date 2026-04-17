@@ -10,11 +10,12 @@ Languages:
 Dataset: allenai/multilingual_mbpp
 """
 
+import random
 from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import PPLFormatter
-from olmo_eval.common.metrics import BPBMetricByteAvg
+from olmo_eval.common.metrics import BPBMetricInstanceAvg
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams
 from olmo_eval.data import DataLoader
 from olmo_eval.evals.tasks.common import Task, register_subtasks
@@ -50,6 +51,10 @@ class MultilingualMBPPTask(Task):
 
     normalize_line_endings: bool = True  # Always normalize for correctness
     language: str = "python"  # Override in subclasses
+
+    def __init__(self, config: Any) -> None:
+        super().__init__(config)
+        self._fewshot_pool: list[Instance] | None = None
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -91,10 +96,48 @@ class MultilingualMBPPTask(Task):
             },
         )
 
+    def _get_fewshot_pool(self) -> list[Instance]:
+        """Load and cache the full pool of fewshot examples from the prompt split."""
+        if self._fewshot_pool is None:
+            loader = DataLoader()
+            for split in ["prompt", "train"]:
+                try:
+                    source = self._get_source_for_split(split)
+                    self._fewshot_pool = [
+                        inst
+                        for doc in loader.load(source)
+                        if (inst := self.process_doc(doc)) is not None
+                    ]
+                    if self._fewshot_pool:
+                        break
+                except Exception:
+                    continue
+            if self._fewshot_pool is None:
+                self._fewshot_pool = []
+        return self._fewshot_pool
+
+    def _get_per_instance_fewshot(self) -> list[Instance]:
+        """Get fewshot examples matching legacy oe-eval behavior.
+
+        The old code (base_task.py build_all_requests) creates a fresh
+        random.Random(fewshot_seed) for EVERY instance, so all instances
+        get the same shuffle and the same fewshot examples.
+        """
+        if self.config.num_fewshot == 0:
+            return []
+
+        # Fresh RNG per instance to match old behavior:
+        # rnd = random.Random(fewshot_seed) is created per doc in build_all_requests
+        rng = random.Random(self.config.fewshot_seed)
+
+        pool = list(self._get_fewshot_pool())  # copy to avoid mutating cache
+        rng.shuffle(pool)
+        return pool[: self.config.num_fewshot]
+
     def format_request(self, instance: Instance) -> LMRequest:
         """Format an instance into an LM request."""
         if self.config.formatter is not None:
-            return self.config.formatter.format(instance, self.get_fewshot())
+            return self.config.formatter.format(instance, self._get_per_instance_fewshot())
 
         return LMRequest(
             request_type=self.request_type,
@@ -167,7 +210,7 @@ _SHARED_ATTRS: dict = {
 _VARIANTS: dict = {
     "bpb": {
         "formatter": PPLFormatter(leading_space=False, always_prepend_separator=True),
-        "metrics": (BPBMetricByteAvg(),),
+        "metrics": (BPBMetricInstanceAvg(),),
     },
     "3shot": {"num_fewshot": 3},
     "olmo3base": {"num_fewshot": 3, "fewshot_seed": 1234},

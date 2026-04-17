@@ -5,7 +5,7 @@ from typing import Any
 
 from olmo_eval.common.formatters import MultipleChoiceFormatter
 from olmo_eval.common.metrics import (
-    BPBMetric,
+    BPBMetricInstanceAvg,
     LogprobMCAccuracyMetric,
     LogprobPerCharMCAccuracyMetric,
 )
@@ -177,7 +177,7 @@ register_variant(
 class SquadBPB(_SquadMCBase):
     data_source = DataSource(path="allenai/squad_mc", split="validation")
     split = Split.VALIDATION
-    metrics = (BPBMetric(),)
+    metrics = (BPBMetricInstanceAvg(),)
     fewshot_source = "squad_mc_fixed"
 
     def format_request(self, instance: Instance) -> LMRequest:
@@ -201,6 +201,7 @@ class SquadBPB(_SquadMCBase):
             request_type=RequestType.LOGLIKELIHOOD,
             prompt=prompt,
             continuations=(f" {gold_text}",),
+            max_length=self.config.max_length,
         )
 
 
@@ -210,4 +211,5 @@ register_variant(
     limit=10_000,
     seed=1234,
     fewshot_source="squad_mc_fixed",
+    max_length=2048,
 )

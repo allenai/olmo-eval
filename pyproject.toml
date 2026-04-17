@@ -22,12 +22,12 @@ classifiers = [
 ]
 
 dependencies = [
-    "click~=8.3.1",
+    "click~=8.3.2",
     "datasets>=3.2.0",
     "numpy>=1.20.0",
     "omegaconf~=2.3.0",
     "prometheus_client>=0.21.0",
-    "rich~=14.3.1",
+    "rich~=14.3.4",
     "sympy>=1.12",
     "textual-plot>=0.10.1",
     "tree-sitter>=0.24.0",
@@ -71,7 +71,7 @@ s3 = [
 ]
 postgres = [
     "psycopg[binary]>=3.1.0",
-    "sqlalchemy>=2.0.46",
+    "sqlalchemy>=2.0.49",
     "alembic>=1.18.1",
 ]
 gpu = [
@@ -139,6 +139,15 @@ select = [
 "src/olmo_eval/common/constants/models.py" = ["E501"]
 # Verbatim prompt templates from asta-bench reference implementation
 "src/olmo_eval/evals/tasks/astabench_sqa.py" = ["E501"]
+# Embedded fewshot data with long string literals
+"src/olmo_eval/evals/tasks/arc.py" = ["E501"]
+"src/olmo_eval/evals/tasks/csqa.py" = ["E501"]
+"src/olmo_eval/evals/tasks/drop.py" = ["E501"]
+"src/olmo_eval/evals/tasks/hellaswag.py" = ["E501"]
+"src/olmo_eval/evals/tasks/jeopardy.py" = ["E501"]
+"src/olmo_eval/evals/tasks/piqa.py" = ["E501"]
+"src/olmo_eval/evals/tasks/socialiqa.py" = ["E501"]
+"src/olmo_eval/evals/tasks/squad.py" = ["E501"]
 # Static fewshot data with long string literals
 "src/olmo_eval/evals/tasks/constants/*" = ["E501"]
 [tool.ruff.format]

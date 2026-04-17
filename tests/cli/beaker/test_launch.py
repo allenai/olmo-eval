@@ -201,12 +201,12 @@ class TestTaskExpansionInExperimentSummary:
         """Test that expanded tasks are used to lookup task configs."""
         from olmo_eval.common.configs import expand_tasks
 
-        # Verify that minerva_math_olmo3 expands to multiple tasks
-        expanded = expand_tasks(["minerva_math_olmo3"])
+        # Verify that minerva_math:olmo3base expands to multiple tasks
+        expanded = expand_tasks(["minerva_math:olmo3base"])
         assert len(expanded) > 1
 
         # The expanded tasks should have different names than the input
-        assert "minerva_math_olmo3" not in expanded
+        assert "minerva_math:olmo3base" not in expanded
         # But should contain minerva_math variants
         assert any("minerva_math" in t for t in expanded)
 
@@ -223,8 +223,8 @@ class TestTaskExpansionInExperimentSummary:
             name="test",
             model_spec="allenai/test-model",
             priority="normal",
-            tasks=["minerva_math_olmo3"],  # Unexpanded suite name
-            original_task_specs=["minerva_math_olmo3"],
+            tasks=["minerva_math:olmo3base"],  # Unexpanded suite name
+            original_task_specs=["minerva_math:olmo3base"],
             total_expanded_tasks=7,
             num_gpus=1,
         )
@@ -233,7 +233,7 @@ class TestTaskExpansionInExperimentSummary:
         mock_job_config = MagicMock()
 
         # Get the actual expanded task names
-        expanded = expand_tasks(["minerva_math_olmo3"])
+        expanded = expand_tasks(["minerva_math:olmo3base"])
 
         # Create task_configs_by_spec keyed by EXPANDED task names
         # (This simulates how _get_task_configs works)
@@ -269,7 +269,7 @@ class TestTaskExpansionInExperimentSummary:
         from olmo_eval.common.configs import expand_tasks
 
         # The suite name
-        suite_spec = "minerva_math_olmo3"
+        suite_spec = "minerva_math:olmo3base"
 
         # The expanded tasks have different names
         expanded = expand_tasks([suite_spec])

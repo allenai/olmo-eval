@@ -1,5 +1,3 @@
-"""Static few-shot examples for HellaSwag."""
-
 # fmt: off
 HELLASWAG_FIXED_FEWSHOT = [
     {

@@ -43,7 +43,8 @@ def expand_tasks(tasks: list[str]) -> list[str]:
     """
     from olmo_eval.evals.suites import get_suite, suite_exists
 
-    result = []
+    seen: set[str] = set()
+    result: list[str] = []
     for t in tasks:
         # Parse out priority suffix (e.g., "suite@high" -> "suite", "high")
         priority_suffix = ""
@@ -57,9 +58,14 @@ def expand_tasks(tasks: list[str]) -> list[str]:
             suite = get_suite(base_spec)
             # Propagate priority to each expanded task
             for expanded_task in suite.expand():
-                result.append(f"{expanded_task}{priority_suffix}")
+                full = f"{expanded_task}{priority_suffix}"
+                if full not in seen:
+                    seen.add(full)
+                    result.append(full)
         else:
-            result.append(t)
+            if t not in seen:
+                seen.add(t)
+                result.append(t)
     return result
 
 

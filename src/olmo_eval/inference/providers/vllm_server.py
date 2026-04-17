@@ -415,9 +415,9 @@ class VLLMServerProvider(InferenceProvider):
             "logprobs": 1,  # Request logprobs for metrics
         }
 
-        # Handle do_sample=False (greedy decoding)
+        # Always send temperature explicitly to avoid server defaults (OpenAI API defaults to 1.0)
+        kwargs["temperature"] = params.temperature
         if params.do_sample and params.temperature > 0:
-            kwargs["temperature"] = params.temperature
             if params.top_p is not None:
                 kwargs["top_p"] = params.top_p
             if params.top_k is not None:
@@ -488,10 +488,10 @@ class VLLMServerProvider(InferenceProvider):
             "max_tokens": params.max_tokens,
         }
 
-        # Handle do_sample=False (greedy decoding)
+        # Always send temperature explicitly to avoid server defaults (OpenAI API defaults to 1.0)
+        kwargs["temperature"] = params.temperature
         extra_body: dict[str, Any] = {}
         if params.do_sample and params.temperature > 0:
-            kwargs["temperature"] = params.temperature
             if params.top_p is not None:
                 kwargs["top_p"] = params.top_p
             if params.top_k is not None:
@@ -665,7 +665,8 @@ class VLLMServerProvider(InferenceProvider):
             # Left-truncate to max_length - 1 to match inline vLLM provider behavior.
             # This ensures long prompts are handled the same way as oe-eval-internal:
             # the context is left-truncated while preserving the continuation tokens.
-            max_len = self.max_length
+            # Use per-request max_length if set (e.g., from task config), else provider default.
+            max_len = request.max_length or self.max_length
             full_tokens = context_enc + continuation_enc
             if len(full_tokens) > max_len - 1:
                 full_tokens = full_tokens[-(max_len - 1) :]

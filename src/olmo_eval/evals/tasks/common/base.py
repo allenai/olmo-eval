@@ -83,6 +83,10 @@ class TaskConfig:
     primary_metric: MetricName | Metric | None = None
     sampling_params: SamplingParams | None = None
 
+    #: Maximum prompt length in tokens for loglikelihood truncation (matches oe-eval max_length).
+    #: When set, prompts exceeding this length are left-truncated before scoring.
+    max_length: int | None = None
+
     #: Runtime dependencies to install for this task (package specs like "pkg==1.0" or git URLs)
     dependencies: list[str] | None = None
 
@@ -173,6 +177,7 @@ class TaskConfig:
             "split": self.split.value,
             "primary_metric": serialize_primary_metric(self.get_primary_metric()),
             "sampling_params": asdict(self.sampling_params) if self.sampling_params else None,
+            "max_length": self.max_length,
             "dependencies": self.dependencies,
         }
 

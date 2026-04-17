@@ -26,8 +26,7 @@ from typing import Any
 from olmo_eval.common.formatters import MCQAChatFormatter, MultipleChoiceFormatter, PPLFormatter
 from olmo_eval.common.metrics import (
     AccuracyMetric,
-    BPBMetric,
-    BPBMetricByteAvg,
+    BPBMetricInstanceAvg,
     LogprobPerCharMCAccuracyMetric,
     Metric,
 )
@@ -119,7 +118,7 @@ class LabBenchTask(Task):
         cls.sampling_params = _DEFAULT_SAMPLING
         register(name)(cls)
         register_variant(name, "mc", formatter=MultipleChoiceFormatter(), metrics=_DEFAULT_METRICS)
-        register_variant(name, "bpb", formatter=PPLFormatter(), metrics=(BPBMetricByteAvg(),))
+        register_variant(name, "bpb", formatter=PPLFormatter(), metrics=(BPBMetricInstanceAvg(),))
         register_variant(
             name,
             "olmo3base",
@@ -140,8 +139,8 @@ class LabBenchTask(Task):
             (cls,),
             {
                 "formatter": None,
-                "metrics": (BPBMetric(),),
-                "primary_metric": BPBMetric(),
+                "metrics": (BPBMetricInstanceAvg(),),
+                "primary_metric": BPBMetricInstanceAvg(),
                 "num_fewshot": 3,
                 "fewshot_seed": 1234,
                 "__module__": cls.__module__,
