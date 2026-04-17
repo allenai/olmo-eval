@@ -359,5 +359,13 @@ class HumanEvalOlmo3Base(HumanEval):
             },
         )
 
-    def extract_answer(self, output: LMOutput) -> str | None:
-        return extract_code_before_fence(output.text)
+    def _extract_answers(self, responses: Sequence[Response]) -> None:
+        """Use raw continuation like the old oe-eval-internal system.
+
+        The old system does ``doc["prompt"] + continuation`` with no code
+        extraction or indentation normalisation, so we replicate that here.
+        """
+        for response in responses:
+            for output in response.outputs:
+                raw = output.text or ""
+                output.extracted_answer = response.instance.metadata["answer_prefix"] + raw
