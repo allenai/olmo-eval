@@ -53,6 +53,9 @@ agents = [
     "openai-agents~=0.7.0",
     "httpx~=0.28.1",
 ]
+analysis = [
+    "matplotlib>=3.7.0",
+]
 openhands = [
     "openhands-ai~=1.4.0",
 ]
