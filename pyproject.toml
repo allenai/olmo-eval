@@ -55,6 +55,7 @@ agents = [
 ]
 analysis = [
     "matplotlib>=3.7.0",
+    "seaborn>=0.13.0",
 ]
 openhands = [
     "openhands-ai~=1.4.0",

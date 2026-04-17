@@ -28,6 +28,13 @@ from olmo_eval.cli.utils import console
     help="Model name prefix(es) to compare.",
 )
 @click.option(
+    "--model-hash",
+    "-M",
+    "model_hashes",
+    multiple=True,
+    help="Model hash prefix(es) to compare.",
+)
+@click.option(
     "--experiment-group",
     "-G",
     "experiment_groups",
@@ -38,8 +45,15 @@ from olmo_eval.cli.utils import console
     "--task",
     "-t",
     "task_name",
-    required=True,
-    help="Task name to compare on.",
+    default=None,
+    help="Task name to compare on (provide --task or --task-hash).",
+)
+@click.option(
+    "--task-hash",
+    "-T",
+    "task_hash",
+    default=None,
+    help="Task hash prefix to filter by (provide --task or --task-hash).",
 )
 @click.option(
     "--metric",
@@ -73,8 +87,10 @@ from olmo_eval.cli.utils import console
 def pairwise(
     experiment_ids: tuple[str, ...],
     model_names: tuple[str, ...],
+    model_hashes: tuple[str, ...],
     experiment_groups: tuple[str, ...],
-    task_name: str,
+    task_name: str | None,
+    task_hash: str | None,
     metric: str | None,
     margin: float,
     output_path: str | None,
@@ -100,10 +116,13 @@ def pairwise(
 
         olmo-eval results pairwise -G my-benchmark -t mmlu -o comparison.png
     """
-    if not any([experiment_ids, model_names, experiment_groups]):
+    if not any([experiment_ids, model_names, model_hashes, experiment_groups]):
         raise click.UsageError(
-            "At least one filter is required: --experiment, --model, or --experiment-group"
+            "At least one filter is required: "
+            "--experiment, --model, --model-hash, or --experiment-group"
         )
+    if not task_name and not task_hash:
+        raise click.UsageError("Provide --task or --task-hash to scope the comparison.")
 
     from olmo_eval.analysis.pairwise import compute_pairwise
 
@@ -118,6 +137,8 @@ def pairwise(
                     margin=margin,
                     experiment_ids=list(experiment_ids) or None,
                     model_names=list(model_names) or None,
+                    model_hashes=list(model_hashes) or None,
+                    task_hash=task_hash,
                     experiment_groups=list(experiment_groups) or None,
                 )
         finally:
@@ -128,7 +149,7 @@ def pairwise(
     elif output_format == "csv":
         _output_csv(result)
     else:
-        _output_plot(result, task_name, output_path)
+        _output_plot(result, output_path)
 
 
 def _output_json(result: Any) -> None:
@@ -185,7 +206,7 @@ def _output_csv(result: Any) -> None:
         writer.writerow(row)
 
 
-def _output_plot(result: Any, task_name: str, output_path: str | None) -> None:
+def _output_plot(result: Any, output_path: str | None) -> None:
     """Render the pairwise matrix plot."""
     try:
         from olmo_eval.analysis.pairwise_plot import plot_pairwise_matrix
@@ -196,11 +217,11 @@ def _output_plot(result: Any, task_name: str, output_path: str | None) -> None:
         )
         raise SystemExit(1) from None
 
-    title = f"{task_name} — {result.metric}"
+    title = f"{result.task_name} — {result.metric}"
     plot_pairwise_matrix(result, title=title, save_path=output_path)
     if output_path:
         console.print(f"[green]Saved plot to {output_path}[/green]")
     else:
-        import matplotlib.pyplot as plt  # type: ignore[ty:unresolved-import]
+        import matplotlib.pyplot as plt
 
         plt.show()
