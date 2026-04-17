@@ -31,14 +31,17 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class BigCodeBenchScorer(CodeExecutionScorer):
-    """Scorer for BigCodeBench that invokes unittest after test class definition.
+    """Scorer for BigCodeBench matching the original BCB execution harness.
 
-    BigCodeBench test code defines unittest.TestCase classes but does not
-    invoke the test runner. Without unittest.main(), the test classes are
-    defined but never executed, causing all submissions to appear to pass.
+    Replicates the old oe-eval-internal execution pattern:
+    - Calibration: prepends code_prompt + pass stub before solution
+    - Module-based execution: runs code in a __test__ module via exec()
+    - TestLoader: explicitly loads TestCases class and runs via suite.run()
+    - Pass condition: no failures AND no errors in test_result
+    - Environment: sets TZ=UTC, OMP_NUM_THREADS=1, TF_CPP_MIN_LOG_LEVEL=3
     """
 
-    timeout: float = 3.0
+    timeout: float = 121.0
 
     async def ascore(
         self,
@@ -53,9 +56,18 @@ class BigCodeBenchScorer(CodeExecutionScorer):
         if not test_code:
             return 0.0
 
-        full_code = (
-            f"{output.extracted_answer}\n\n{test_code}\n\nimport unittest\nunittest.main()\n"
-        )
+        solution = output.extracted_answer
+        code_prompt = instance.metadata.get("code_prompt", "")
+
+        # Calibration: prepend code_prompt + pass stub (matches old BCB Lambda)
+        if code_prompt:
+            solution = code_prompt + "\n    pass\n" + solution
+
+        # Build a script that replicates the old unsafe_execute pattern:
+        # - exec code+test in a __test__ module
+        # - use TestLoader to load TestCases class
+        # - run suite and check failures+errors
+        full_code = _build_bcb_execution_script(solution, test_code)
 
         result = await execution_env.execute_code(
             full_code,
@@ -66,6 +78,53 @@ class BigCodeBenchScorer(CodeExecutionScorer):
             instance_id = instance.metadata.get("id", "?")
             logger.warning(f"Code execution failed [{instance_id}]: {result.error}")
         return 1.0 if result.success else 0.0
+
+
+def _build_bcb_execution_script(solution: str, test_code: str) -> str:
+    """Build a Python script replicating the old BCB execution harness.
+
+    The old system (bcb_execution/execution.py unsafe_execute):
+    1. Sets environment variables (TZ, OMP_NUM_THREADS, TF_CPP_MIN_LOG_LEVEL)
+    2. Creates a __test__ module with builtins, sys, os
+    3. exec(code + test) in the module
+    4. Loads TestCases via unittest.TestLoader
+    5. Runs suite via suite.run(test_result)
+    6. Passes only if no failures AND no errors
+    """
+    return (
+        "import types, sys, os, builtins, unittest, io, contextlib\n"
+        "os.environ['TZ'] = 'UTC'\n"
+        "os.environ['OMP_NUM_THREADS'] = '1'\n"
+        "os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'\n"
+        "os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'\n"
+        "module_name = '__test__'\n"
+        "new_module = types.ModuleType(module_name)\n"
+        "new_module.__dict__.update({\n"
+        "    '__builtins__': builtins,\n"
+        "    '__file__': f'{module_name}.py',\n"
+        "    '__package__': None,\n"
+        "    '__doc__': None,\n"
+        "    'sys': sys,\n"
+        "    'os': os,\n"
+        "    'environ': os.environ,\n"
+        "})\n"
+        f"_code = {solution!r}\n"
+        f"_test = {test_code!r}\n"
+        "full_code = _code + '\\n' + _test\n"
+        "stream = io.StringIO()\n"
+        "with contextlib.redirect_stdout(stream), contextlib.redirect_stderr(stream):\n"
+        "    exec(compile(full_code, f'{module_name}.py', 'exec'), new_module.__dict__)\n"
+        "sys.modules[module_name] = new_module\n"
+        "TestCases = getattr(new_module, 'TestCases')\n"
+        "loader = unittest.TestLoader()\n"
+        "suite = loader.loadTestsFromTestCase(TestCases)\n"
+        "test_result = unittest.TestResult()\n"
+        "with contextlib.redirect_stdout(stream), contextlib.redirect_stderr(stream):\n"
+        "    suite.run(test_result)\n"
+        "if test_result.failures or test_result.errors:\n"
+        "    sys.exit(1)\n"
+        "sys.exit(0)\n"
+    )
 
 
 @register("bigcodebench")
@@ -188,6 +247,7 @@ class BigCodeBench(Task):
                 "id": doc.get("task_id", str(index)),
                 "entry_point": doc.get("entry_point", ""),
                 "answer_prefix": doc["complete_prompt"],
+                "code_prompt": doc.get("code_prompt", ""),
                 "test": test_code,
             },
         )
