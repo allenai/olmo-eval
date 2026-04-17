@@ -43,7 +43,8 @@ def build_single_model_metrics(
     """
     # Use full harness_config if available, otherwise build from model_config
     if "harness_config" in results:
-        config_dict = results["harness_config"]
+        hc = results["harness_config"]
+        config_dict = hc.to_dict() if hasattr(hc, "to_dict") else dict(hc) if not isinstance(hc, dict) else hc
     else:
         # Fallback to legacy model_config format
         model_cfg = results.get("model_config", {})
