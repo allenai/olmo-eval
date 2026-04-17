@@ -270,6 +270,8 @@ def aggregate_results(
         Dict with full results including task metrics, errors, and summary.
     """
     model_config = provider_config.to_dict() if hasattr(provider_config, "to_dict") else {}
+    if attention_backend:
+        model_config["attention_backend"] = attention_backend
     results_dict: dict[str, Any] = {
         "model": provider_config.alias or provider_config.model,
         "model_path": provider_config.model,
@@ -280,6 +282,8 @@ def aggregate_results(
         "errors": [],
         "timestamp": datetime.now().isoformat(),
     }
+    if harness_config is not None:
+        results_dict["harness_config"] = harness_config
 
     # Process each task result
     for spec, task_result in results.items():
@@ -293,6 +297,8 @@ def aggregate_results(
             task_data["num_instances"] = task_result.num_instances
             task_data["duration_seconds"] = task_result.duration_seconds
             task_data["primary_metric"] = task_result.primary_metric
+            if task_result.predictions:
+                task_data["predictions"] = task_result.predictions
 
             # Get the primary metric for the summary
             if task_result.primary_metric and task_result.metrics:
