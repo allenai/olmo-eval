@@ -15,7 +15,7 @@ from olmo_eval.common.metrics import PassAtKMetric
 from olmo_eval.common.scorers import MultiplEScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.constants.code import MULTIPL_E_LANGUAGES
+from olmo_eval.evals.constants.code import MULTIPL_E_LANGUAGES, MULTIPL_E_STOP_TOKENS
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 
@@ -84,13 +84,16 @@ class MultiplETask(Task):
         from dataclasses import replace
 
         base_params = self.config.sampling_params or SamplingParams()
-        stop_tokens = instance.metadata.get("stop_tokens", [])
 
+        # If config already has explicit stop_sequences, use those only
+        # (matches oe-eval-internal behavior where hardcoded stop tokens override per-doc)
+        if base_params.stop_sequences:
+            return base_params
+
+        # Otherwise, use per-document stop_tokens from the dataset
+        stop_tokens = instance.metadata.get("stop_tokens", [])
         if stop_tokens:
-            # Merge instance stop_tokens with any existing stop_sequences
-            existing = base_params.stop_sequences or ()
-            merged = tuple(stop_tokens) + existing
-            return replace(base_params, stop_sequences=merged)
+            return replace(base_params, stop_sequences=tuple(stop_tokens))
 
         return base_params
 
@@ -146,6 +149,37 @@ def _make_scorer_for_language(lang: str) -> type[MultiplEScorer]:
     return LanguageScorer
 
 
+# Separate cache for timeout-specific scorer classes
+_TIMED_SCORER_CACHE: dict[tuple[str, float], type[MultiplEScorer]] = {}
+
+
+def _make_scorer_with_timeout(lang: str, timeout: float) -> type[MultiplEScorer]:
+    """Create a scorer class with an explicit timeout for a specific language.
+
+    Used by olmo3base variant to match oe-eval-internal's uniform 10s timeout.
+    """
+    cache_key = (lang, timeout)
+    if cache_key in _TIMED_SCORER_CACHE:
+        return _TIMED_SCORER_CACHE[cache_key]
+
+    default_lang = lang
+    default_timeout = timeout
+    class_name = f"MultiplEScorer_{lang}_t{int(timeout)}"
+
+    @dataclass(frozen=True, slots=True)
+    class TimedScorer(MultiplEScorer):
+        language: str = default_lang
+        timeout: float | None = default_timeout
+
+    TimedScorer.__name__ = class_name
+    TimedScorer.__qualname__ = class_name
+
+    globals()[class_name] = TimedScorer
+    _TIMED_SCORER_CACHE[cache_key] = TimedScorer
+
+    return TimedScorer
+
+
 # =============================================================================
 # Task Registration
 # =============================================================================
@@ -196,6 +230,8 @@ def _register_humaneval_task(lang: str) -> None:
             num_samples=20,
         ),
     )
+    # olmo3base: match oe-eval-internal with hardcoded stop tokens and 10s timeout
+    olmo3_scorer_cls = _make_scorer_with_timeout(lang, timeout=10)
     register_variant(
         task_name,
         "olmo3base",
@@ -205,13 +241,14 @@ def _register_humaneval_task(lang: str) -> None:
             top_p=0.6,
             do_sample=True,
             num_samples=32,
+            stop_sequences=MULTIPL_E_STOP_TOKENS[lang],
         ),
         metrics=(
-            PassAtKMetric(k=1, scorer=scorer_cls),
-            PassAtKMetric(k=2, scorer=scorer_cls),
-            PassAtKMetric(k=4, scorer=scorer_cls),
-            PassAtKMetric(k=8, scorer=scorer_cls),
-            PassAtKMetric(k=16, scorer=scorer_cls),
+            PassAtKMetric(k=1, scorer=olmo3_scorer_cls),
+            PassAtKMetric(k=2, scorer=olmo3_scorer_cls),
+            PassAtKMetric(k=4, scorer=olmo3_scorer_cls),
+            PassAtKMetric(k=8, scorer=olmo3_scorer_cls),
+            PassAtKMetric(k=16, scorer=olmo3_scorer_cls),
         ),
     )
 
@@ -261,6 +298,8 @@ def _register_mbpp_task(lang: str) -> None:
             num_samples=20,
         ),
     )
+    # olmo3base: match oe-eval-internal with hardcoded stop tokens and 10s timeout
+    olmo3_scorer_cls = _make_scorer_with_timeout(lang, timeout=10)
     register_variant(
         task_name,
         "olmo3base",
@@ -270,13 +309,14 @@ def _register_mbpp_task(lang: str) -> None:
             top_p=0.6,
             do_sample=True,
             num_samples=32,
+            stop_sequences=MULTIPL_E_STOP_TOKENS[lang],
         ),
         metrics=(
-            PassAtKMetric(k=1, scorer=scorer_cls),
-            PassAtKMetric(k=2, scorer=scorer_cls),
-            PassAtKMetric(k=4, scorer=scorer_cls),
-            PassAtKMetric(k=8, scorer=scorer_cls),
-            PassAtKMetric(k=16, scorer=scorer_cls),
+            PassAtKMetric(k=1, scorer=olmo3_scorer_cls),
+            PassAtKMetric(k=2, scorer=olmo3_scorer_cls),
+            PassAtKMetric(k=4, scorer=olmo3_scorer_cls),
+            PassAtKMetric(k=8, scorer=olmo3_scorer_cls),
+            PassAtKMetric(k=16, scorer=olmo3_scorer_cls),
         ),
     )
 

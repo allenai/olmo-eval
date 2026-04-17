@@ -219,6 +219,16 @@ DS1000_STOP_SEQUENCES: tuple[str, ...] = (
 MULTIPL_E_LANGUAGES: tuple[str, ...] = ("cpp", "java", "js", "php", "rs", "sh")
 """MULTIPL_E supported languages (subset with code execution support)."""
 
+MULTIPL_E_STOP_TOKENS: dict[str, tuple[str, ...]] = {
+    "cpp": ("\n}",),
+    "java": ("\n }\n", "}\n}", "}\n\n"),
+    "js": ("\nfunction ", "\n/*", "\n//", "\nconsole.log"),
+    "php": ("\nfunction", "\n?>", "\n//", "\n#"),
+    "rs": ("\n}",),
+    "sh": ("\n}",),
+}
+"""MULTIPL_E stop tokens per language, matching oe-eval-internal hardcoded values."""
+
 MULTIPL_E_HUMANEVAL_TASKS: tuple[str, ...] = tuple(
     f"multipl_e_humaneval_{lang}" for lang in MULTIPL_E_LANGUAGES
 )
