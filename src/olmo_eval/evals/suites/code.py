@@ -157,9 +157,9 @@ register(
 make_suite(
     "olmobase:code_fim",
     (
-        "humanevalfim_single:olmo3",
-        "humanevalfim_multi:olmo3",
-        "humanevalfim_random:olmo3",
+        "humanevalfim_single:olmo3base",
+        "humanevalfim_multi:olmo3base",
+        "humanevalfim_random:olmo3base",
     ),
     description="OLMoBase FIM code completion evaluation suite",
 )
