@@ -292,7 +292,9 @@ def aggregate_results(
         "timestamp": datetime.now().isoformat(),
     }
     if harness_config is not None:
-        results_dict["harness_config"] = harness_config
+        results_dict["harness_config"] = (
+            harness_config.to_dict() if hasattr(harness_config, "to_dict") else harness_config
+        )
 
     # Process each task result
     for spec, task_result in results.items():
