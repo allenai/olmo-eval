@@ -19,7 +19,7 @@ class JavaEvaluator(BaseLanguageEvaluator):
 
     filename: str = "Problem.java"
     compile_cmd: str | None = "cd {d} && javac -encoding UTF8 -cp '/runtime/java/*' Problem.java"
-    run_cmd: str = "cd {d} && java -ea -cp '/runtime/java/*:.' Problem"
+    run_cmd: str = "cd {d} && JAVA_TOOL_OPTIONS='-ea' java -ea -cp '/runtime/java/*:.' Problem 2>&1"
 
     def _is_syntax_error(self, exit_code: int, stdout: str, stderr: str) -> bool:
         # javac outputs "error:" for compilation errors
