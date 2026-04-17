@@ -269,7 +269,14 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
                     # Allocate executors proportionally with a floor of 1
                     total_demand = sum(env_demand.values())
+                    min_budget = len(env_demand)
                     budget = template.instances
+                    if budget < min_budget:
+                        logger.warning(
+                            f"Sandbox budget ({budget}) is less than the number of "
+                            f"environments ({min_budget}); clamping to {min_budget}"
+                        )
+                        budget = min_budget
                     allocated: dict[str, int] = {}
                     if total_demand > 0:
                         distributable = budget - len(env_demand)
