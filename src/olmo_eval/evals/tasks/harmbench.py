@@ -103,7 +103,7 @@ _SAFETY_SUBSET_METRICS = (
     "semantic_category::harassment_bullying",
 )
 
-_JUDGE_SAMPLING = SamplingParams(max_tokens=16384, temperature=0.7, top_p=0.95)
+_JUDGE_SAMPLING = SamplingParams(max_tokens=32768, temperature=0.7, top_p=0.95)
 
 
 def _safety_metrics(scorer):
