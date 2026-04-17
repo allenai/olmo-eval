@@ -6,7 +6,7 @@ from typing import Any
 from olmo_eval.common.formatters import CompletionFormatter, PPLFormatter
 from olmo_eval.common.metrics import BPBMetricByteAvg, BPBMetricInstanceAvg, PassAtKMetric
 from olmo_eval.common.scorers import CodeExecutionScorer
-from olmo_eval.common.types import Instance, LMOutput, LMRequest, Response, SamplingParams
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import MBPP_STOP_SEQUENCES, OLMO3_MBPP_STOP_SEQUENCES
 from olmo_eval.evals.extract import extract_code, extract_code_before_fence
@@ -324,16 +324,23 @@ class MBPPOlmo3Base(MBPPBase):
     """MBPP with EvalPlus-style prompt format for OLMo3 base evaluation.
 
     Wraps the problem in an instruction + markdown code block with a sample test case.
+    Matches the old oe-eval-internal ``mbpp:3shot::olmo3:n32:v2`` configuration:
+    - Fewshot examples use ``question + code + "\\n"`` (no answer prefix).
+    - The answer prefix ``Here is the completed function:\\n\\n```python\\n`` is
+      appended only to the final (target) prompt.
+    - Fewshot examples are taken in dataset order (no shuffle).
     """
 
     data_source = DataSource(path="google-research-datasets/mbpp")
     num_fewshot: int = 3
     fewshot_seed: int = 1234
+    # We override format_request so the formatter is unused for this task, but
+    # keep it for the bpb variant which overrides it via register_variant.
     formatter = CompletionFormatter(
         answer_prefix="Here is the completed function:\n\n```python\n",
     )
     sampling_params = SamplingParams(
-        max_tokens=1024,
+        max_tokens=512,
         temperature=0.6,
         top_p=0.6,
         do_sample=True,
@@ -347,6 +354,8 @@ class MBPPOlmo3Base(MBPPBase):
         PassAtKMetric(k=8, scorer=CodeExecutionScorer),
         PassAtKMetric(k=16, scorer=CodeExecutionScorer),
     )
+
+    _ANSWER_PREFIX = "Here is the completed function:\n\n```python\n"
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         random_test = doc["test_list"][0] if doc.get("test_list") else ""
@@ -371,8 +380,61 @@ class MBPPOlmo3Base(MBPPBase):
                 "id": doc["task_id"],
                 "answer_prefix": "",
                 "test": tests,
+                "code": doc["code"],
             },
         )
+
+    def format_request(self, instance: Instance) -> LMRequest:
+        """Build prompt matching old oe-eval-internal format.
+
+        Fewshot examples: ``question + code + "\\n"`` (no answer prefix).
+        Target: ``question + answer_prefix``.
+        Separator between parts: ``"\\n\\n"``.
+        """
+        fewshot = self.get_fewshot()
+        parts: list[str] = []
+        for ex in fewshot:
+            # Old format: question + code + "\n" (no answer prefix in examples)
+            parts.append(ex.question + ex.metadata["code"] + "\n")
+        # Target gets the answer prefix
+        parts.append(instance.question + self._ANSWER_PREFIX)
+        prompt = "\n\n".join(parts)
+        return LMRequest(request_type=RequestType.COMPLETION, prompt=prompt)
+
+    def _build_fewshot(self) -> list[Instance]:
+        """Build few-shot examples from the prompt split WITHOUT shuffling.
+
+        Takes the first N examples in the old oe-eval-internal hardcoded order.
+        The HF dataset orders by task_id [1,2,3,...,10] but the old hardcoded
+        list used order [2,3,4,...,10,1] (min_cost last). Rotate to match.
+        """
+        if self.config.num_fewshot == 0:
+            return []
+
+        loader = DataLoader()
+        all_instances: list[Instance] = []
+
+        for split in ["prompt", "train"]:
+            try:
+                source = self._get_source_for_split(split)
+                all_instances = [
+                    inst
+                    for doc in loader.load(source)
+                    if (inst := self.process_doc(doc)) is not None
+                ]
+                if all_instances:
+                    break
+            except Exception:
+                continue
+
+        if not all_instances:
+            return []
+
+        # Rotate: old hardcoded order has task_id=1 (min_cost) at end, not start
+        if len(all_instances) > 1:
+            all_instances = all_instances[1:] + all_instances[:1]
+
+        return all_instances[: self.config.num_fewshot]
 
     def extract_answer(self, output: LMOutput) -> str | None:
         return extract_code_before_fence(output.text)
