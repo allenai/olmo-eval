@@ -107,6 +107,10 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             model="deepseek-ai/DeepSeek-R1-0528-Qwen3-8B",
             max_model_len=32768,
         ),
+        "gpt-oss-20b": ProviderConfig(
+            kind=ProviderKind.VLLM,
+            model="openai/gpt-oss-20b",
+        ),
         "deepseek-r1-distill-qwen-32b": ProviderConfig(
             kind=ProviderKind.VLLM,
             model="deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
