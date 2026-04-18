@@ -102,6 +102,11 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             model="deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
             max_model_len=32768,
         ),
+        "deepseek-r1-0528-qwen3-8b": ProviderConfig(
+            kind=ProviderKind.VLLM,
+            model="deepseek-ai/DeepSeek-R1-0528-Qwen3-8B",
+            max_model_len=32768,
+        ),
         "deepseek-r1-distill-qwen-32b": ProviderConfig(
             kind=ProviderKind.VLLM,
             model="deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
