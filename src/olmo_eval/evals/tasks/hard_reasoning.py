@@ -20,7 +20,7 @@ from typing import Any
 from olmo_eval.common.formatters import ChatFormatter
 from olmo_eval.common.metrics import AccuracyMetric
 from olmo_eval.common.scorers import Scorer
-from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 HARD_REASONING_TASKS: tuple[str, ...] = (
@@ -124,7 +124,7 @@ class HardReasoningBase(Task):
     @property
     def instances(self) -> Iterator[Instance]:
         if self._instances_cache is None:
-            self._instances_cache = list(self._load_hard_reasoning_split("test"))
+            self._instances_cache = list(self._load_hard_reasoning_split(self.config.split))
         yield from self._instances_cache
 
     def _load_hard_reasoning_split(self, split: str) -> Iterator[Instance]:
@@ -209,6 +209,11 @@ for _subset in HARD_REASONING_TASKS:
         "chat",
         formatter=ChatFormatter(),
         sampling_params=SamplingParams(max_tokens=32768, temperature=0.0),
+    )
+    register_variant(
+        _task_name,
+        "dev",
+        split=Split.VALIDATION,
     )
 
 
