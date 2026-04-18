@@ -107,12 +107,14 @@ class SandboxManager:
         # Create all executors first
         executor_idx = 0
         for config_idx, config in enumerate(self._configs):
-            # Derive type name from capabilities
+            # Derive type name from capabilities, replacing ':' to avoid
+            # breaking podman volume mount paths (host:container separator)
             type_name = "+".join(sorted(config.capabilities)) or str(config_idx)
+            safe_type_name = type_name.replace(":", "_")
 
             for _ in range(config.instances):
                 idx = type_indices.get(type_name, 0)
-                name = f"sb-{type_name}-{self._owner}-{idx}"
+                name = f"sb-{safe_type_name}-{self._owner}-{idx}"
                 type_indices[type_name] = idx + 1
 
                 executor = SandboxExecutor(config, name=name, modal_app_name=self._modal_app_name)
