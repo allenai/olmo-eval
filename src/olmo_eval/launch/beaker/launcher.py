@@ -831,6 +831,16 @@ class BeakerLauncher:
             self._print_dry_run_config(config, clusters)
 
         # Launch the experiment (or show spec if dry_run)
+        # Resolve GitHub token secret: prefer user-specific secret if it exists
+        gh_token_secret = "GITHUB_TOKEN"
+        user_gh_secret = f"{self.beaker.user_name}_GITHUB_TOKEN"
+        try:
+            self.beaker.secret.get(user_gh_secret, workspace=config.workspace)
+            gh_token_secret = user_gh_secret
+            log.info(f"Using user-specific GitHub token: {user_gh_secret}")
+        except Exception:
+            pass
+
         workload = launch_experiment(
             args=config.command,
             name=config.name,
@@ -859,6 +869,7 @@ class BeakerLauncher:
                 99999999 if config.follow else 0
             ),  # only way to follow the experiment without canceling
             yes=True,  # Skip confirmation prompts
+            gh_token_secret=gh_token_secret,
         )
 
         if dry_run:
