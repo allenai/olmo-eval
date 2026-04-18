@@ -394,10 +394,8 @@ class MBPPOlmo3Base(MBPPBase):
             + "\n```\n"
         )
 
-        tests = doc.get("test_setup_code", "") or ""
-        if tests:
-            tests += "\n"
-        tests += "\n".join(doc["test_list"])
+        # Match old oe-eval-internal: only use test_list, no test_setup_code
+        tests = "\n".join(doc["test_list"])
 
         return Instance(
             question=question,
