@@ -69,7 +69,7 @@ class DS1000Scorer(CodeExecutionScorer):
 
         encoded = base64.b64encode(full_code.encode()).decode()
         wrapper = (
-            "import base64, contextlib, io, os, tempfile\n"
+            "import base64, contextlib, io, os, sys, tempfile\n"
             "class _WO(io.StringIO):\n"
             "    def read(self, *a, **k): raise IOError\n"
             "    def readline(self, *a, **k): raise IOError\n"
@@ -85,8 +85,10 @@ class DS1000Scorer(CodeExecutionScorer):
             "        _s = _WO()\n"
             "        with contextlib.redirect_stdout(_s), contextlib.redirect_stderr(_s), _RI(_s):\n"
             "            exec(_code, {})\n"
-            "    finally:\n"
+            "    except BaseException:\n"
             "        os.chdir(_cwd)\n"
+            "        sys.exit(1)\n"
+            "    os.chdir(_cwd)\n"
         )
 
         result = await execution_env.execute_code(
