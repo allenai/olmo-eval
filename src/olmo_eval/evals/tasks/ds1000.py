@@ -33,12 +33,6 @@ class DS1000Scorer(CodeExecutionScorer):
     and extracted_answer contains just the generated code, DS-1000 assembles
     the complete test program (code_context + model continuation) into
     extracted_answer. metadata["test"] is intentionally empty.
-
-    Execution matches the original DS-1000 harness: each test runs in a fresh
-    temp directory with stdout/stderr/stdin swallowed, using exec() rather
-    than python3 -c. This prevents concurrent tests from interfering via
-    shared filesystem and matches the I/O behavior of the reference
-    implementation.
     """
 
     timeout: float = 120.0
@@ -60,39 +54,8 @@ class DS1000Scorer(CodeExecutionScorer):
             # (assembled by _extract_answers from code_context + continuation)
             full_code = output.extracted_answer
 
-        # Wrap in exec()-based runner matching old DS-1000 execution harness:
-        # - Fresh temp directory (prevents concurrent file interference)
-        # - Swallowed I/O (matches reference implementation behavior)
-        # - exec() with empty globals (matches reference scoping)
-        # Reference: https://github.com/xlang-ai/DS-1000/blob/main/execution.py
-        import base64
-
-        encoded = base64.b64encode(full_code.encode()).decode()
-        wrapper = (
-            "import base64, contextlib, io, os, sys, tempfile\n"
-            "class _WO(io.StringIO):\n"
-            "    def read(self, *a, **k): raise IOError\n"
-            "    def readline(self, *a, **k): raise IOError\n"
-            "    def readlines(self, *a, **k): raise IOError\n"
-            "    def readable(self, *a, **k): return False\n"
-            "class _RI(contextlib._RedirectStream):\n"
-            "    _stream = 'stdin'\n"
-            f'_code = base64.b64decode("{encoded}").decode()\n'
-            "with tempfile.TemporaryDirectory() as _td:\n"
-            "    _cwd = os.getcwd()\n"
-            "    os.chdir(_td)\n"
-            "    try:\n"
-            "        _s = _WO()\n"
-            "        with contextlib.redirect_stdout(_s), contextlib.redirect_stderr(_s), _RI(_s):\n"
-            "            exec(_code, {})\n"
-            "    except BaseException:\n"
-            "        os.chdir(_cwd)\n"
-            "        sys.exit(1)\n"
-            "    os.chdir(_cwd)\n"
-        )
-
         result = await execution_env.execute_code(
-            wrapper,
+            full_code,
             language=self.language,
             timeout=self.timeout,
         )
