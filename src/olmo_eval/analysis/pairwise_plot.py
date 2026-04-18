@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 import numpy as np
 
-from olmo_eval.analysis.pairwise import PairwiseResult, get_win_rate
+from olmo_eval.analysis.pairwise import PairwiseResult, get_se, get_win_rate
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
@@ -15,17 +16,35 @@ if TYPE_CHECKING:
 _BG = "#2b2b2b"
 _TEXT_LIGHT = "#e0e0e0"
 _TEXT_DIM = "#999999"
+_DIVIDER = "#444444"
+_DIAGONAL = "#3a3a3a"
 
-# Discrete colormap: green (winning) -> beige (tie) -> coral (losing)
-_CMAP_COLORS = ["#d47853", "#d4cfc4", "#8cc5a9", "#4a9a7e"]
-_CMAP_BOUNDS = [0.0, 0.40, 0.50, 0.60, 1.01]
+# Summary-stat tier colors.
+_TIER_GOOD = "#5aa380"
+_TIER_OK = "#e2b05a"
+_TIER_BAD = "#c85d3b"
+_TIER_NEUTRAL = _TEXT_LIGHT
 
-_LEGEND_ITEMS = [
-    ("#4a9a7e", "wins > 60%"),
-    ("#8cc5a9", "wins 50\u201360%"),
-    ("#d4cfc4", "near tie"),
-    ("#d47853", "loses < 40%"),
+# Continuous gradient: deep red (row loses badly) -> beige (tie) -> deep green
+# (row wins decisively). Stops are (position, hex); position is the win-rate
+# value the colour is anchored to, in [0, 1].
+_CMAP_STOPS: list[tuple[float, str]] = [
+    (0.00, "#8f2f18"),
+    (0.20, "#c85d3b"),
+    (0.40, "#e2a48c"),
+    (0.50, "#d4cfc4"),
+    (0.60, "#a8d1bb"),
+    (0.80, "#5aa380"),
+    (1.00, "#1f6b4f"),
 ]
+
+# Layout constants (inches)
+_FOOTER_HEIGHT = 2.00
+_RIGHT_PAD = 0.35
+_LEFT_PAD = 0.35
+_TITLE_PAD = 0.55
+# Minimum width reserved for the footer (legend + 4 summary columns)
+_MIN_FOOTER_WIDTH = 6.0
 
 
 def build_win_rate_matrix(result: PairwiseResult) -> np.ndarray:
@@ -39,6 +58,34 @@ def build_win_rate_matrix(result: PairwiseResult) -> np.ndarray:
     return matrix
 
 
+def build_se_matrix(result: PairwiseResult) -> np.ndarray:
+    """Build an NxN matrix of win-rate standard errors. Diagonal = NaN."""
+    n = len(result.models)
+    matrix = np.full((n, n), np.nan)
+    for i in range(n):
+        for j in range(n):
+            if i != j:
+                matrix[i][j] = get_se(result.pairs, i, j)
+    return matrix
+
+
+def _scale_for_n(n: int) -> tuple[float, int, int, int]:
+    """Pick cell size and font sizes based on the number of models."""
+    if n <= 6:
+        return 0.90, 9, 9, 13
+    if n <= 10:
+        return 0.72, 8, 8, 12
+    if n <= 14:
+        return 0.60, 7, 7, 11
+    if n <= 20:
+        return 0.50, 6, 7, 11
+    return max(0.42, 10.0 / n), 5, 6, 10
+
+
+def _max_line_chars(labels: list[str]) -> int:
+    return max(len(line) for label in labels for line in label.split("\n"))
+
+
 def plot_pairwise_matrix(
     result: PairwiseResult,
     title: str | None = None,
@@ -47,22 +94,64 @@ def plot_pairwise_matrix(
     """Render the pairwise win-rate matrix as a heatmap."""
     import matplotlib.colors as mcolors
     import matplotlib.pyplot as plt
-    import seaborn as sns
     from matplotlib.lines import Line2D
+    from matplotlib.patches import FancyBboxPatch
 
     n = len(result.models)
     matrix = build_win_rate_matrix(result)
-    labels = [m.label.replace("\n", " ") for m in result.models]
+    se_matrix = build_se_matrix(result)
+    # Keep newlines in labels so the y-axis uses vertical space (shorter lines).
+    labels = [m.label for m in result.models]
 
-    # --- Build discrete colormap ---
-    cmap = mcolors.ListedColormap(_CMAP_COLORS)
-    norm = mcolors.BoundaryNorm(_CMAP_BOUNDS, cmap.N)
+    # Per-model overall wins/losses — used for both sorting and the summary.
+    wins: dict[int, int] = {i: 0 for i in range(n)}
+    losses: dict[int, int] = {i: 0 for i in range(n)}
+    for p in result.pairs:
+        wins[p.index_a] += p.wins_a
+        losses[p.index_a] += p.wins_b
+        wins[p.index_b] += p.wins_b
+        losses[p.index_b] += p.wins_a
 
-    # --- Figure with dark background ---
-    cell_size = 1.2
-    bottom_margin = 2.2
-    fig_w = max(cell_size * n + 3, 7)
-    fig_h = cell_size * n + 3 + bottom_margin
+    def _overall_wr(i: int) -> float:
+        total = wins[i] + losses[i]
+        return wins[i] / total if total > 0 else 0.5
+
+    # Sort so the highest-winning model is top-left.
+    order = sorted(range(n), key=_overall_wr, reverse=True)
+    matrix = matrix[order][:, order]
+    se_matrix = se_matrix[order][:, order]
+    labels = [labels[i] for i in order]
+
+    cell_size, annot_font, label_font, title_font = _scale_for_n(n)
+
+    # Estimate label extent in inches.  Conservative per-character width at
+    # matplotlib's default 100 DPI; this is used only for margin computation.
+    char_w = label_font * 0.008
+    max_chars = _max_line_chars(labels)
+    label_w = max_chars * char_w
+    # Rotated 45° x-labels project label_w * sin(45°) onto the vertical axis.
+    rotated_projection = label_w * math.sin(math.radians(45))
+
+    heatmap_in = cell_size * n
+    left_in = max(label_w + _LEFT_PAD, 1.1)
+    # Last column's rotated label overhangs to the right; reserve room for it.
+    right_in = max(rotated_projection, _RIGHT_PAD)
+    top_in = rotated_projection + _TITLE_PAD + (0.35 if title else 0.0)
+    footer_in = _FOOTER_HEIGHT
+
+    # Footer needs a minimum width for legend + stat columns to read cleanly,
+    # independent of how narrow the heatmap is.
+    footer_width_in = max(heatmap_in, _MIN_FOOTER_WIDTH)
+    fig_w = max(left_in + heatmap_in + right_in, left_in + footer_width_in + _RIGHT_PAD)
+    fig_h = top_in + heatmap_in + footer_in
+
+    # Continuous colormap built from position-anchored stops.
+    positions = [p for p, _ in _CMAP_STOPS]
+    colors = [c for _, c in _CMAP_STOPS]
+    cmap = mcolors.LinearSegmentedColormap.from_list(
+        "pairwise", list(zip(positions, colors, strict=True))
+    )
+    norm = mcolors.Normalize(vmin=0.0, vmax=1.0)
 
     with plt.rc_context(
         {
@@ -74,150 +163,296 @@ def plot_pairwise_matrix(
             "ytick.color": _TEXT_LIGHT,
         }
     ):
-        fig, ax = plt.subplots(figsize=(fig_w, fig_h))
-        fig.subplots_adjust(bottom=bottom_margin / fig_h, top=0.88)
-
-        # --- Heatmap via seaborn ---
-        sns.heatmap(
-            matrix,
-            ax=ax,
-            cmap=cmap,
-            norm=norm,
-            annot=True,
-            fmt=".0%",
-            annot_kws={"fontsize": 13, "fontweight": "bold"},
-            linewidths=4,
-            linecolor=_BG,
-            square=True,
-            cbar=False,
-            xticklabels=labels,
-            yticklabels=labels,
-            mask=np.isnan(matrix),
+        fig = plt.figure(figsize=(fig_w, fig_h))
+        ax = fig.add_axes(
+            (
+                left_in / fig_w,
+                footer_in / fig_h,
+                heatmap_in / fig_w,
+                heatmap_in / fig_h,
+            )
         )
 
-        # Style diagonal cells
+        # --- N×N axis setup ---
+        ax.set_xlim(0, n)
+        ax.set_ylim(n, 0)  # inverted so row 0 is at top
+        ax.set_aspect("equal")
+        ax.set_facecolor(_BG)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+        # --- Draw cells as rounded boxes ---
+        gap = 0.06  # fraction of cell used as gap between neighbors
+        inset = gap / 2
+        side = 1.0 - gap
+        rounding = side * 0.18
+
         for i in range(n):
-            ax.add_patch(plt.Rectangle((i, i), 1, 1, fill=True, color="#3a3a3a", zorder=2))
+            for j in range(n):
+                val = matrix[i, j]
+                if i == j or np.isnan(val):
+                    color = _DIAGONAL
+                    annotate = False
+                else:
+                    color = cmap(norm(val))
+                    annotate = True
 
-        # Fix annotation colors based on cell value
-        for text in ax.texts:
-            try:
-                val = float(text.get_text().rstrip("%")) / 100
-            except ValueError:
-                continue
-            text.set_color("#ffffff" if val >= 0.60 or val < 0.40 else _BG)
+                ax.add_patch(
+                    FancyBboxPatch(
+                        (j + inset, i + inset),
+                        side,
+                        side,
+                        boxstyle=f"round,pad=0,rounding_size={rounding}",
+                        facecolor=color,
+                        edgecolor="none",
+                        linewidth=0,
+                        zorder=2,
+                    )
+                )
 
-        # --- Axis labels ---
-        ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=9)
-        ax.set_yticklabels(labels, rotation=0, fontsize=9)
+                if annotate:
+                    # White text on saturated ends, dark on the beige tie band.
+                    text_color = "#ffffff" if abs(val - 0.5) > 0.14 else _BG
+                    se_val = se_matrix[i, j]
+                    se_font = max(7, int(annot_font * 0.80))
+                    ax.text(
+                        j + 0.5,
+                        i + 0.38,
+                        f"{val:.1%}",
+                        ha="center",
+                        va="center",
+                        fontsize=annot_font,
+                        fontweight="bold",
+                        color=text_color,
+                        zorder=3,
+                    )
+                    if not np.isnan(se_val):
+                        ax.text(
+                            j + 0.5,
+                            i + 0.68,
+                            f"({se_val:.1%})",
+                            ha="center",
+                            va="center",
+                            fontsize=se_font,
+                            color=text_color,
+                            zorder=3,
+                        )
+
+        # --- Tick labels ---
+        ax.set_xticks([i + 0.5 for i in range(n)])
+        ax.set_yticks([i + 0.5 for i in range(n)])
+        ax.set_xticklabels(
+            labels, rotation=45, ha="left", rotation_mode="anchor", fontsize=label_font
+        )
+        ax.set_yticklabels(labels, rotation=0, fontsize=label_font)
         ax.xaxis.tick_top()
         ax.xaxis.set_label_position("top")
-        ax.tick_params(length=0)
+        ax.tick_params(length=0, pad=4)
 
-        # --- Title ---
         if title:
-            fig.suptitle(title, fontsize=12, fontweight="bold", color=_TEXT_LIGHT)
-
-        # --- Bottom section (figure coordinates) ---
-        # Legend
-        legend_y = (bottom_margin - 0.3) / fig_h
-        n_items = len(_LEGEND_ITEMS)
-        legend_w = 0.8
-        seg = legend_w / n_items
-        x0 = (1 - legend_w) / 2
-        for idx, (color, desc) in enumerate(_LEGEND_ITEMS):
-            lx = x0 + idx * seg
-            fig.patches.append(
-                plt.Rectangle(
-                    (lx, legend_y),
-                    0.015,
-                    0.012,
-                    facecolor=color,
-                    edgecolor="none",
-                    transform=fig.transFigure,
-                    zorder=5,
-                )
-            )
+            title_y = 1 - 0.22 / fig_h
             fig.text(
-                lx + 0.022,
-                legend_y + 0.006,
-                desc,
+                0.5,
+                title_y,
+                title,
+                fontsize=title_font,
+                fontweight="bold",
+                color=_TEXT_LIGHT,
+                ha="center",
+                va="top",
+            )
+
+        # --- Footer: laid out in inches from figure bottom, aligned to heatmap ---
+        # Footer spans at least _MIN_FOOTER_WIDTH so labels don't overlap for small N.
+        heatmap_left_frac = left_in / fig_w
+        heatmap_width_frac = footer_width_in / fig_w
+
+        def _y(inches_from_bottom: float) -> float:
+            return inches_from_bottom / fig_h
+
+        # Footer stack (y inches from figure bottom)
+        legend_header_in = 1.82
+        legend_bar_top_in = 1.66
+        legend_bar_bottom_in = 1.52
+        legend_tick_in = 1.42
+        upper_divider_in = 1.22
+        summary_label_in = 1.00
+        stat_head_in = 0.68
+        stat_value_in = 0.34
+
+        # --- Gradient legend bar ---
+        bar_width_in = min(footer_width_in * 0.55, 4.5)
+        bar_left_in = left_in + (footer_width_in - bar_width_in) / 2
+        bar_left_frac = bar_left_in / fig_w
+        bar_width_frac = bar_width_in / fig_w
+        bar_height_frac = (legend_bar_top_in - legend_bar_bottom_in) / fig_h
+
+        cax = fig.add_axes(
+            (bar_left_frac, _y(legend_bar_bottom_in), bar_width_frac, bar_height_frac)
+        )
+        cax.imshow(
+            np.linspace(0, 1, 256)[np.newaxis, :],
+            aspect="auto",
+            cmap=cmap,
+            norm=norm,
+            extent=(0.0, 1.0, 0.0, 1.0),
+        )
+        cax.set_xticks([])
+        cax.set_yticks([])
+        for spine in cax.spines.values():
+            spine.set_visible(False)
+
+        # Header above bar
+        fig.text(
+            bar_left_frac + bar_width_frac / 2,
+            _y(legend_header_in),
+            "WIN RATE",
+            fontsize=8,
+            fontweight="bold",
+            color=_TEXT_DIM,
+            ha="center",
+            va="center",
+        )
+
+        # Tick labels under bar
+        for frac, label, ha in (
+            (0.0, "0% — row loses", "left"),
+            (0.5, "50% — tie", "center"),
+            (1.0, "100% — row wins", "right"),
+        ):
+            fig.text(
+                bar_left_frac + frac * bar_width_frac,
+                _y(legend_tick_in),
+                label,
                 fontsize=7,
                 color=_TEXT_DIM,
+                ha=ha,
                 va="center",
             )
 
-        # Divider
-        div_y = legend_y - 0.03
+        # --- Divider above SUMMARY ---
         fig.add_artist(
             Line2D(
-                [x0, x0 + legend_w],
-                [div_y, div_y],
+                [heatmap_left_frac, heatmap_left_frac + heatmap_width_frac],
+                [_y(upper_divider_in), _y(upper_divider_in)],
                 transform=fig.transFigure,
-                color="#444444",
-                linewidth=0.5,
+                color=_DIVIDER,
+                linewidth=0.6,
             )
         )
 
-        # Summary stats
-        n_pairs = n * (n - 1) // 2
-        total_ties = sum(p.ties for p in result.pairs)
-        total_contested = sum(p.wins_a + p.wins_b for p in result.pairs)
-        total = total_ties + total_contested
-        avg_tie = total_ties / total if total > 0 else 0.0
-
-        wins: dict[int, int] = {i: 0 for i in range(n)}
-        losses: dict[int, int] = {i: 0 for i in range(n)}
-        for p in result.pairs:
-            wins[p.index_a] += p.wins_a
-            losses[p.index_a] += p.wins_b
-            wins[p.index_b] += p.wins_b
-            losses[p.index_b] += p.wins_a
-        best_i = max(
-            range(n),
-            key=lambda i: wins[i] / (wins[i] + losses[i]) if (wins[i] + losses[i]) > 0 else 0.5,
-        )
-        best_wr = (
-            wins[best_i] / (wins[best_i] + losses[best_i])
-            if (wins[best_i] + losses[best_i]) > 0
-            else 0.5
-        )
-
-        summary_y = div_y - 0.02
+        # --- SUMMARY heading ---
         fig.text(
-            x0,
-            summary_y,
+            heatmap_left_frac,
+            _y(summary_label_in),
             "SUMMARY",
             fontsize=8,
             fontweight="bold",
             color=_TEXT_DIM,
-            va="top",
+            va="center",
         )
 
-        stats = [
-            ("total pairs", str(n_pairs)),
-            ("instances / pair", str(result.instance_count)),
-            ("avg tie rate", f"{avg_tie:.0%}"),
-            ("top model wins", f"{best_wr:.0%}"),
+        # --- Summary stats ---
+        from olmo_eval.analysis.eval_power import (
+            minimum_detectable_effect,
+            required_sample_size,
+        )
+
+        # Median paired-difference variance across pairs — representative omega^2
+        # for the eval-sizing stats below.
+        pair_vars = sorted(p.var_paired_diff for p in result.pairs)
+        median_var = pair_vars[len(pair_vars) // 2] if pair_vars else 0.0
+        shared_n = result.instance_count
+
+        # MDE at the matrix's shared-instance count.
+        mde: float | None
+        if shared_n > 0 and median_var > 0:
+            mde = minimum_detectable_effect(n=shared_n, omega2=median_var, alpha=0.05, power=0.80)
+            mde_str = f"{mde:.1%}"
+        else:
+            mde = None
+            mde_str = "—"
+
+        # Sample size needed to resolve a 3-percentage-point gap.
+        n_for_3pp: int | None
+        if median_var > 0:
+            n_for_3pp = required_sample_size(mde=0.03, omega2=median_var)
+            n_for_3pp_str = f"{n_for_3pp:,}"
+        else:
+            n_for_3pp = None
+            n_for_3pp_str = "—"
+
+        # Effective sample size per pair:
+        #     n_eff = n_shared × (σ_A² + σ_B²) / Var(d)
+        # High ratio means pairing compresses uncertainty; near 1× means
+        # comparisons inherit the full unpaired noise.
+        n_eff_values: list[int] = []
+        for p in result.pairs:
+            if p.var_paired_diff > 0 and p.var_marginal_sum > 0:
+                n_eff_values.append(round(shared_n * p.var_marginal_sum / p.var_paired_diff))
+        n_eff_values.sort()
+        median_n_eff: int | None = n_eff_values[len(n_eff_values) // 2] if n_eff_values else None
+        median_n_eff_str = f"{median_n_eff:,}" if median_n_eff is not None else "—"
+
+        # Tier helpers — good / ok / bad thresholds.
+        def _tier_mde(v: float | None) -> str:
+            if v is None:
+                return _TIER_NEUTRAL
+            if v <= 0.03:
+                return _TIER_GOOD
+            if v <= 0.10:
+                return _TIER_OK
+            return _TIER_BAD
+
+        def _tier_shared_n(v: int) -> str:
+            if v >= 500:
+                return _TIER_GOOD
+            if v >= 100:
+                return _TIER_OK
+            return _TIER_BAD
+
+        def _tier_n_for_target(required: int | None, baseline: int) -> str:
+            if required is None or baseline <= 0:
+                return _TIER_NEUTRAL
+            ratio = required / baseline
+            if ratio <= 1.0:
+                return _TIER_GOOD
+            if ratio <= 3.0:
+                return _TIER_OK
+            return _TIER_BAD
+
+        def _tier_n_eff(eff: int | None, baseline: int) -> str:
+            if eff is None or baseline <= 0:
+                return _TIER_NEUTRAL
+            ratio = eff / baseline
+            if ratio >= 2.0:
+                return _TIER_GOOD
+            if ratio >= 1.2:
+                return _TIER_OK
+            return _TIER_BAD
+
+        stats: list[tuple[str, str, str]] = [
+            ("n for 3pp MDE", n_for_3pp_str, _tier_n_for_target(n_for_3pp, shared_n)),
+            ("median n_eff", median_n_eff_str, _tier_n_eff(median_n_eff, shared_n)),
+            ("shared n / pair", str(shared_n), _tier_shared_n(shared_n)),
+            ("MDE @ 80% power", mde_str, _tier_mde(mde)),
         ]
-        col_w = legend_w / len(stats)
-        head_y = summary_y - 0.035
-        val_y = head_y - 0.025
-        for idx, (heading, value) in enumerate(stats):
-            cx = x0 + idx * col_w
-            fig.text(cx, head_y, heading, fontsize=7, color=_TEXT_DIM, va="top")
+        col_w = heatmap_width_frac / len(stats)
+        for idx, (heading, value, value_color) in enumerate(stats):
+            cx = heatmap_left_frac + idx * col_w
+            fig.text(cx, _y(stat_head_in), heading, fontsize=8, color=_TEXT_DIM, va="center")
             fig.text(
                 cx,
-                val_y,
+                _y(stat_value_in),
                 value,
-                fontsize=16,
+                fontsize=13,
                 fontweight="bold",
-                color=_TEXT_LIGHT,
-                va="top",
+                color=value_color,
+                va="center",
             )
 
     if save_path:
-        fig.savefig(save_path, dpi=150, bbox_inches="tight", facecolor=_BG)
+        fig.savefig(save_path, dpi=150, facecolor=_BG)
         plt.close(fig)
 
     return fig

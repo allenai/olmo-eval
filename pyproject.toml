@@ -54,8 +54,9 @@ agents = [
     "httpx~=0.28.1",
 ]
 analysis = [
-    "matplotlib>=3.7.0",
-    "seaborn>=0.13.0",
+    "matplotlib~=3.10.8",
+    "seaborn~=0.13.2",
+    "scipy~=1.17.1",
 ]
 openhands = [
     "openhands-ai~=1.4.0",

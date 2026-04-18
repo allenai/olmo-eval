@@ -56,6 +56,13 @@ from olmo_eval.cli.utils import console
     help="Task hash prefix to filter by (provide --task or --task-hash).",
 )
 @click.option(
+    "--suite",
+    "-S",
+    "suite_name",
+    default=None,
+    help="Suite name (e.g. olmobase:math) — pools instances across all suite tasks.",
+)
+@click.option(
     "--metric",
     "metric",
     default=None,
@@ -91,6 +98,7 @@ def pairwise(
     experiment_groups: tuple[str, ...],
     task_name: str | None,
     task_hash: str | None,
+    suite_name: str | None,
     metric: str | None,
     margin: float,
     output_path: str | None,
@@ -121,8 +129,11 @@ def pairwise(
             "At least one filter is required: "
             "--experiment, --model, --model-hash, or --experiment-group"
         )
-    if not task_name and not task_hash:
-        raise click.UsageError("Provide --task or --task-hash to scope the comparison.")
+    scope_count = sum(bool(x) for x in (task_name, task_hash, suite_name))
+    if scope_count != 1:
+        raise click.UsageError(
+            "Provide exactly one of --task, --task-hash, or --suite to scope the comparison."
+        )
 
     from olmo_eval.analysis.pairwise import compute_pairwise
 
@@ -130,17 +141,22 @@ def pairwise(
         db = get_database_session(db_host, db_port, db_name, db_user, db_password)
         try:
             with db.session() as session:
-                result = compute_pairwise(
-                    session=session,
-                    task_name=task_name,
-                    metric=metric,
-                    margin=margin,
-                    experiment_ids=list(experiment_ids) or None,
-                    model_names=list(model_names) or None,
-                    model_hashes=list(model_hashes) or None,
-                    task_hash=task_hash,
-                    experiment_groups=list(experiment_groups) or None,
-                )
+                try:
+                    result = compute_pairwise(
+                        session=session,
+                        task_name=task_name,
+                        metric=metric,
+                        margin=margin,
+                        experiment_ids=list(experiment_ids) or None,
+                        model_names=list(model_names) or None,
+                        model_hashes=list(model_hashes) or None,
+                        task_hash=task_hash,
+                        experiment_groups=list(experiment_groups) or None,
+                        suite_name=suite_name,
+                    )
+                except ValueError as e:
+                    console.print(f"[red]Error:[/red] {e}")
+                    raise SystemExit(1) from None
         finally:
             db.dispose()
 
@@ -159,6 +175,8 @@ def _output_json(result: Any) -> None:
     n = len(result.models)
     data: dict[str, Any] = {
         "task_name": result.task_name,
+        "suite_name": result.suite_name,
+        "task_names": list(result.task_names),
         "metric": result.metric,
         "margin": result.margin,
         "instance_count": result.instance_count,
@@ -217,7 +235,10 @@ def _output_plot(result: Any, output_path: str | None) -> None:
         )
         raise SystemExit(1) from None
 
-    title = f"{result.task_name} — {result.metric}"
+    if result.suite_name:
+        title = f"{result.suite_name} ({len(result.task_names)} tasks) — {result.metric}"
+    else:
+        title = f"{result.task_name} — {result.metric}"
     plot_pairwise_matrix(result, title=title, save_path=output_path)
     if output_path:
         console.print(f"[green]Saved plot to {output_path}[/green]")
