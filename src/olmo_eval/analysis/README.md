@@ -4,18 +4,18 @@ Head-to-head win rates between N models on a shared task (or suite of tasks),
 with per-cell standard errors (SE) and matrix-wide validity stats in the
 footer. Every acronym here is defined in the [Glossary](#glossary) below.
 
-All examples below come from:
+The primary example below pools instances across a suite:
 
 ```
 olmo-eval results pairwise \
   -G olmo-eval-sandboxfusion \
-  -t humaneval:3shot:pass_at_1 \
-  --metric pass_at_1:code_exec
+  -S multipl_e:pass_at_1
 ```
 
-7 models, 164 shared HumanEval instances, binary pass/fail per question.
+4 models, 6 MultiPL-E language tasks pooled, **2,313 shared instances** per
+pair, binary pass/fail per question.
 
-![Pairwise heatmap for HumanEval 3-shot pass@1](pairwise_heatmap_example.png)
+![Pairwise heatmap for MultiPL-E pass@1 suite](pairwise_heatmap_suite_example.png)
 
 ## Reading a cell — `win_rate (SE)`
 
@@ -24,8 +24,9 @@ Each non-diagonal cell shows model A vs model B on **contested** instances
 win rate):
 
 ```
-  Qwen3-8B vs Olmo-3-7B:   57.6% (6.5%)
-  Qwen3-8B vs Apertus-8B:  82.5% (4.8%)
+  Qwen3-8B vs Marin-8B:              83.6% (1.6%)
+  Qwen3-8B vs Olmo-3-7B (db6ff1f7):  71.0% (2.4%)
+  Olmo-3-7B (db6ff1f7) vs Olmo-3-7B (ec190248):  51.1% (5.2%)
 ```
 
 - `win_rate = wins_a / (wins_a + wins_b)` — fraction of contested questions A won.
@@ -34,10 +35,13 @@ win rate):
 
 **Rough 95% confidence interval (CI): `win_rate ± 2·SE`.**
 
-- `57.6% (6.5%)` → roughly 44.6% – 70.6%. Crosses 50%, so we **cannot** rule
-  out a tie between Qwen3 and Olmo-3 from this eval alone.
-- `82.5% (4.8%)` → roughly 72.9% – 92.1%. Clearly above 50% → Qwen3 beats
-  Apertus decisively.
+- `83.6% (1.6%)` → roughly 80.4% – 86.8%. Far above 50% → Qwen3 beats Marin
+  decisively across languages.
+- `71.0% (2.4%)` → roughly 66.2% – 75.8%. Clearly above 50% → Qwen3 is a
+  solid win over this Olmo-3 run.
+- `51.1% (5.2%)` → roughly 40.7% – 61.5%. Crosses 50%, so we **cannot**
+  distinguish these two runs from a tie — and that's correct: they're the
+  *same model* ingested under two slightly different model names.
 
 **Comparing two cells:** a difference between two win rates is meaningful if
 it exceeds roughly `2·sqrt(SE1² + SE2²)`.
@@ -48,34 +52,35 @@ low-tie pair, even though the headline number looks more decisive.
 
 ## Reading the footer
 
-The footer shows matrix-wide validity stats. From the HumanEval example:
+The footer shows matrix-wide validity stats. From the MultiPL-E example:
 
 ```
 n for 3pp MDE    median n_eff    shared n / pair    MDE @ 80% power
-    2,182            218              164                10.9%
+    1,418          6,806              2,313              2.3%
 ```
+
+Every tier is green here — the matrix is in "read it head-on" territory.
 
 ### `shared n / pair`
 Number of instances every model answered. Your raw sample size for every pair.
-HumanEval has 164 questions.
+MultiPL-E pooled across 6 languages gives 2,313 questions per pair.
 
 ### `MDE @ 80% power`
 Minimum Detectable Effect (MDE) — the smallest true win-rate gap the matrix
 can reliably resolve at significance level α=0.05 and 80% statistical power,
 given its `shared n` and the observed between-model variance.
 
-- **10.9%** means: only pairs where the true gap is ≥ 10.9 percentage points
-  (pp) will come out statistically significant. The 57.6% Qwen-vs-Olmo cell
-  (7.6pp above tie) is **below** this threshold — don't claim a winner.
+- **2.3%** means: any pair with a true gap of at least 2.3 percentage points
+  (pp) will come out statistically significant. Every non-diagonal cell in
+  this matrix has `|win_rate − 50%| ≫ 2.3%`, so every comparison is
+  trustworthy.
 - Tiers: good ≤ 3pp, ok ≤ 10pp, bad > 10pp.
 
 ### `n for 3pp MDE`
 How many shared instances you'd need to pull the MDE down to 3pp.
 
-- **2,182** means: if you want to reliably resolve 3pp gaps on this task, you
-  need ~2,182 shared instances — about 13× HumanEval's 164. Practically,
-  that's unachievable on HumanEval alone, which is why code evals are often
-  pooled into suites (e.g. HumanEval + HumanEval+ + MBPP).
+- **1,418** is **below** the current `shared n` of 2,313, so the matrix is
+  already past the 3pp-resolution threshold — the MDE has headroom.
 - Tiers relative to current `shared n`: good ≤ 1×, ok ≤ 3×, bad > 3×.
 
 ### `median n_eff`
@@ -87,10 +92,57 @@ correlation between models.
   across pairs.
 - `n_eff > shared n` means models disagree on which questions are hard, so
   pairing is buying precision. `n_eff ≈ shared n` means pairing adds little.
-- **218 vs 164** on HumanEval: pairing is helping a bit (218/164 ≈ 1.3×), but
-  not dramatically — HumanEval questions are somewhat model-specific in
-  difficulty.
+- **6,806 vs 2,313** on MultiPL-E: pairing is buying a 2.9× precision gain —
+  models disagree meaningfully on per-question difficulty across languages,
+  so the paired design extracts a lot more signal than an unpaired comparison
+  would.
 - Tiers: good ≥ 2× shared n, ok ≥ 1.2×, bad < 1.2×.
+
+## Why pool across a suite?
+
+Running the same models on just `humaneval:3shot:pass_at_1` alone gives the
+following matrix:
+
+![Pairwise heatmap for HumanEval 3-shot pass@1 alone](pairwise_heatmap_example.png)
+
+```
+n for 3pp MDE    median n_eff    shared n / pair    MDE @ 80% power
+    2,182            218              164               10.9%
+```
+
+Same models, same code-eval task family — but **everything collapses**:
+
+| Footer stat      | HumanEval alone | MultiPL-E suite |
+| ---------------- | --------------: | --------------: |
+| shared n / pair  |             164 |           2,313 |
+| MDE @ 80% power  |      10.9% (🔴) |       2.3% (🟢) |
+| median n_eff     |             218 |           6,806 |
+| n for 3pp MDE    |           2,182 |   1,418 (within reach) |
+
+**Concrete example of what this costs you.** Qwen3 vs Olmo-3 on HumanEval
+alone reads `57.6% (6.5%)` → 95% CI `[44.6%, 70.6%]`, which crosses 50% —
+you can't claim Qwen is better. On MultiPL-E the same comparison reads
+`71.0% (2.4%)` → 95% CI `[66.2%, 75.8%]` — decisively Qwen.
+
+**Why it works.** A single 164-instance task leaves the MDE far above the
+gaps you actually care about (1-10pp), so most matrix cells are in noise
+territory. Pooling across related tasks pushes the `shared n` up linearly
+and the MDE down as `1/√n` — and because `n_eff / shared n` often improves
+too (MultiPL-E: ~2.9×, HumanEval alone: ~1.3×), the effective precision
+gain is more than the raw sample-size ratio would suggest.
+
+**How to do it.** Use `-S <suite>` instead of `-t <task>`. Browse registered
+suites and their coverage in your group with:
+
+```
+olmo-eval results suites -G <your-group>
+olmo-eval results group <your-group>
+```
+
+**What to pool.** Pool tasks that measure the same underlying capability
+(e.g. code generation across languages, math across subjects). Don't pool
+unrelated tasks — a suite mixing math and dialogue will pool noise and
+muddle the interpretation.
 
 ## How cell SE and footer stats differ
 
@@ -99,20 +151,21 @@ correlation between models.
 - **Footer MDE** is matrix-wide. It uses the paired-difference variance
   pooled across pairs on the full `shared n` (ties included). It tells you
   "how precise are most comparisons in this matrix on average?"
-- A pair with many ties (like Qwen vs Olmo: 126 ties out of 164) has a wide
-  cell SE even if the footer MDE looks decent — because that pair's contested
-  `n` is only 38. Always check the cell SE before quoting the gap.
+- A pair with many ties has a wide cell SE even if the footer MDE looks
+  decent — because that pair's contested `n` is small. Always check the
+  cell SE before quoting the gap.
 
 ## Rules of thumb
 
-1. **MDE red** (> 10pp): only trust cells where `win_rate ± 2·SE` is far from 50%.
+1. **MDE red** (> 10pp): only trust cells where `win_rate ± 2·SE` is far
+   from 50%. Consider pooling to a suite before drawing conclusions.
 2. **MDE yellow** (3–10pp): most small- to medium-sized gaps are suggestive
    but not conclusive; lean on the per-cell SE.
 3. **MDE green** (≤ 3pp): you can read the matrix head-on; most cells are
    trustworthy.
-4. **Scaling up:** halving the MDE requires ~4× more instances. If the number
-   in `n for 3pp MDE` is too big to run per-task, try `--suite` to pool
-   instances across a related task group.
+4. **Scaling up:** halving the MDE requires ~4× more instances. If the
+   number in `n for 3pp MDE` is too big to run per-task, try `--suite` to
+   pool instances across a related task group.
 5. **Ignore cell differences smaller than `2·sqrt(SE_a² + SE_b²)`** when
    comparing two non-diagonal cells in the matrix.
 
@@ -166,6 +219,9 @@ correlation between models.
 - **z-test** — two-sample hypothesis test that uses the normal approximation
   from the CLT to decide whether an observed difference is larger than
   chance. The pairwise MDE is derived from the z-test formula.
+- **Suite** — a registered group of related tasks (e.g. `multipl_e:pass_at_1`
+  covers 6 language variants). Passing `-S <suite>` pools instances across
+  its tasks so the MDE is computed on the larger combined sample.
 
 ## See also
 
