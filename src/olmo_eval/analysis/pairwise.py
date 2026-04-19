@@ -192,8 +192,15 @@ def compute_pairwise(
     shared instances.
 
     Provide exactly one of ``task_name``, ``task_hash``, or ``suite_name`` to
-    scope the comparison. In suite mode, instances from every task in the suite
-    are pooled into a single paired comparison keyed by (task_hash, native_id).
+    scope the comparison.
+
+    Instances are keyed by ``(task_name, native_id)`` — the logical identity of
+    a question. Two ``TaskResult`` rows with the same ``task_name`` but
+    different ``task_hash`` (e.g. re-runs under different harness configs)
+    refer to the same underlying question set, so their instance scores pool
+    correctly. Suite mode pools across every task the suite resolves to;
+    ``task_hash`` mode requires the prefix to match a single ``task_name``
+    (otherwise rejected to avoid inadvertent cross-task pooling).
 
     Args:
         session: Active SQLAlchemy Session.
@@ -204,7 +211,8 @@ def compute_pairwise(
         experiment_ids: Filter by experiment ID strings.
         model_names: Filter by model name prefixes.
         model_hashes: Filter by model hash prefixes.
-        task_hash: Task hash prefix to filter by.
+        task_hash: Task hash prefix. Must resolve to TaskResults sharing a
+            single task_name.
         experiment_groups: Filter by experiment group prefixes.
         suite_name: Name of a registered suite (e.g. ``olmobase:math``).
             Pools instances across every task the suite resolves to.
@@ -213,8 +221,9 @@ def compute_pairwise(
         PairwiseResult with model metadata and pairwise stats.
 
     Raises:
-        ValueError: If fewer than 2 experiments match, or if the task / suite is
-            not found in any matched experiment.
+        ValueError: If fewer than 2 experiments match, if the task / suite is
+            not found in any matched experiment, or if a ``task_hash`` prefix
+            matches multiple distinct task names.
     """
     from sqlalchemy import select
 
@@ -378,6 +387,19 @@ def compute_pairwise(
         task_hash_to_metric[tr.task_hash] = resolved_metric
         task_hash_to_name[tr.task_hash] = tr.task_name
 
+    # A task_hash prefix can expand to multiple hashes; that's fine when they
+    # share a task_name (same logical question set, different configs), but
+    # rejected when it spans multiple task_names — use --task or --suite for
+    # intentional pooling.
+    if task_hash:
+        distinct_names = sorted(set(task_hash_to_name.values()))
+        if len(distinct_names) > 1:
+            raise ValueError(
+                f"--task-hash prefix '{task_hash}' matches {len(distinct_names)} "
+                f"distinct task names: {distinct_names}. Use a longer prefix, "
+                "pass --task for a single task, or --suite to pool intentionally."
+            )
+
     unique_task_hashes = set(task_hash_to_metric.keys())
     # Representative display metric: concrete value if unique across tasks,
     # otherwise the sentinel "per-task primary" for the summary title.
@@ -457,6 +479,25 @@ def compute_pairwise(
     shared_ids = id_sets[0]
     for s in id_sets[1:]:
         shared_ids = shared_ids & s
+
+    if not shared_ids:
+        per_model = sorted(
+            ((models[i].label.replace("\n", " "), len(id_sets[i])) for i in range(len(active))),
+            key=lambda t: t[1],
+        )
+        breakdown = "\n  ".join(f"{lbl}: {n} instances" for lbl, n in per_model)
+        hint = (
+            "\nIn suite mode this usually means models ran disjoint subsets "
+            "of the suite's tasks — scope to a narrower suite or a single "
+            "task that every model covered."
+            if suite_name
+            else ""
+        )
+        raise ValueError(
+            f"No shared instances across the {len(active)} active model(s) "
+            f"for '{scope_label}'. Per-model instance counts:\n  {breakdown}"
+            f"{hint}"
+        )
 
     # --- Compute pairs and return ---
     pairs = _compute_pairs(scores_by_idx, len(active), shared_ids, margin)

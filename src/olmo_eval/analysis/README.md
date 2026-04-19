@@ -68,7 +68,8 @@ MultiPL-E pooled across 6 languages gives 2,313 questions per pair.
 ### `MDE @ 80% power`
 Minimum Detectable Effect (MDE) — the smallest true win-rate gap the matrix
 can reliably resolve at significance level α=0.05 and 80% statistical power,
-given its `shared n` and the observed between-model variance.
+given its `shared n` and the **median** per-pair paired-difference variance
+(used as a representative `ω²` so one outlier pair can't skew the summary).
 
 - **2.3%** means: any pair with a true gap of at least 2.3 percentage points
   (pp) will come out statistically significant. Every non-diagonal cell in
@@ -163,9 +164,12 @@ improving signal — and can actually hurt `n_eff` by driving `Var(d)` up.
 
 - **Per-cell SE** is pair-specific and uses that pair's contested-only `n`.
   It tells you "how precise is *this* comparison?"
-- **Footer MDE** is matrix-wide. It uses the paired-difference variance
-  pooled across pairs on the full `shared n` (ties included). It tells you
-  "how precise are most comparisons in this matrix on average?"
+- **Footer MDE** is matrix-wide. It takes the **median** of per-pair
+  paired-difference variances `Var(d)` as a representative `ω²` and plugs
+  it into the MDE formula at the full `shared n`. "Median" rather than
+  "pooled" so a single outlier pair (e.g. one with near-zero variance)
+  can't distort the summary. It tells you "how precise is a typical
+  comparison in this matrix?"
 - A pair with many ties has a wide cell SE even if the footer MDE looks
   decent — because that pair's contested `n` is small. Always check the
   cell SE before quoting the gap.
@@ -211,7 +215,8 @@ improving signal — and can actually hurt `n_eff` by driving `Var(d)` up.
   of the time.
 - **MDE (Minimum Detectable Effect)** — the smallest true win-rate gap that
   will come out significant at the given α and power. Matrix-wide MDE uses
-  the *paired-difference* variance pooled across pairs.
+  the *median* of per-pair paired-difference variances as a representative
+  `ω²` (robust to outlier pairs), plugged in at the full `shared n`.
 - **Paired comparison** — both models answer the same shared questions, so
   per-question luck cancels in `d_i = score_a_i − score_b_i`. Shrinks the
   variance whenever models agree on what's easy vs hard.
