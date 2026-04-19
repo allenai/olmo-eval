@@ -196,6 +196,8 @@ allowed-unresolved-imports = [
     "openai.**",
     "smart_open.**",
     "google.cloud.**",
+    "matplotlib.**",
+    "scipy.**",
 ]
 
 [tool.gantry]

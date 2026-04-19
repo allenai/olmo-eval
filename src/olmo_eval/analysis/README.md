@@ -98,51 +98,66 @@ correlation between models.
   would.
 - Tiers: good ≥ 2× shared n, ok ≥ 1.2×, bad < 1.2×.
 
-## Why pool across a suite?
+## Why pool up to the parent suite?
 
-Running the same models on just `humaneval:3shot:pass_at_1` alone gives the
-following matrix:
+`multipl_e:pass_at_1` is a hierarchical suite — under the hood it aggregates
+several sub-suites (HumanEval variants, MBPP variants, and translations of
+each into other languages). You can scope the pairwise to any level of the
+hierarchy. Here's the same models scoped to just the HumanEval-family
+sub-suite:
 
-![Pairwise heatmap for HumanEval 3-shot pass@1 alone](pairwise_heatmap_example.png)
+```
+olmo-eval results pairwise \
+  -G olmo-eval-sandboxfusion \
+  -S multipl_e_humaneval:pass_at_1
+```
+
+![Pairwise heatmap for the HumanEval sub-suite](pairwise_heatmap_example.png)
 
 ```
 n for 3pp MDE    median n_eff    shared n / pair    MDE @ 80% power
-    2,182            218              164               10.9%
+    2,376          1,061              955               4.7%
 ```
 
-Same models, same code-eval task family — but **everything collapses**:
+The sub-suite is a strict subset of the parent's instances, so its stats
+collapse compared to the top-level suite:
 
-| Footer stat      | HumanEval alone | MultiPL-E suite |
-| ---------------- | --------------: | --------------: |
-| shared n / pair  |             164 |           2,313 |
-| MDE @ 80% power  |      10.9% (🔴) |       2.3% (🟢) |
-| median n_eff     |             218 |           6,806 |
-| n for 3pp MDE    |           2,182 |   1,418 (within reach) |
+| Footer stat      | Sub-suite (HumanEval family) | Parent suite (MultiPL-E) |
+| ---------------- | ---------------------------: | -----------------------: |
+| shared n / pair  |                          955 |                    2,313 |
+| MDE @ 80% power  |                    4.7% (🟡) |                2.3% (🟢) |
+| median n_eff     |                 1,061 (🔴)   |               6,806 (🟢) |
+| n for 3pp MDE    |      2,376 (🟡, above n)     | 1,418 (🟢, within reach) |
 
-**Concrete example of what this costs you.** Qwen3 vs Olmo-3 on HumanEval
-alone reads `57.6% (6.5%)` → 95% CI `[44.6%, 70.6%]`, which crosses 50% —
-you can't claim Qwen is better. On MultiPL-E the same comparison reads
-`71.0% (2.4%)` → 95% CI `[66.2%, 75.8%]` — decisively Qwen.
+**Two things to notice:**
 
-**Why it works.** A single 164-instance task leaves the MDE far above the
-gaps you actually care about (1-10pp), so most matrix cells are in noise
-territory. Pooling across related tasks pushes the `shared n` up linearly
-and the MDE down as `1/√n` — and because `n_eff / shared n` often improves
-too (MultiPL-E: ~2.9×, HumanEval alone: ~1.3×), the effective precision
-gain is more than the raw sample-size ratio would suggest.
+1. **MDE is yellow, not red.** The sub-suite can resolve ~5pp gaps, so the
+   decisive cells in its matrix (16.8%, 83.2%, 95.4%, etc.) are still
+   trustworthy. But a hypothetical 3pp gap between two similar models would
+   vanish in the noise.
+2. **`n_eff` is *below* `shared n`.** `1,061 < 955` is fine but the ratio
+   is close to 1 — the paired design is not buying meaningful precision at
+   this level. That happens when models disagree on per-question difficulty
+   across the sub-suite's tasks, so `Var(d)` is close to `σ_A² + σ_B²`.
+   Scoping up to the parent suite fixes this dramatically: `n_eff / shared n`
+   jumps from ≈1.1× (sub-suite) to ≈2.9× (parent suite) because the extra
+   tasks give the paired structure something to work with.
 
-**How to do it.** Use `-S <suite>` instead of `-t <task>`. Browse registered
-suites and their coverage in your group with:
+**Takeaway.** The finer-grained the slice, the noisier the matrix. Prefer
+the highest-level suite that still measures the capability you care about.
+The parent suite is always at least as informative as any of its children
+(same model comparisons, strictly more instances, usually better `n_eff`).
+
+**How to explore the hierarchy:**
 
 ```
-olmo-eval results suites -G <your-group>
-olmo-eval results group <your-group>
+olmo-eval results suites -G <your-group>   # suites with DB coverage
+olmo-eval results group <your-group>       # models + tasks + suites
 ```
 
-**What to pool.** Pool tasks that measure the same underlying capability
-(e.g. code generation across languages, math across subjects). Don't pool
-unrelated tasks — a suite mixing math and dialogue will pool noise and
-muddle the interpretation.
+**What NOT to pool.** Resist the urge to pool tasks that measure different
+capabilities (e.g. math + dialogue). That inflates `shared n` without
+improving signal — and can actually hurt `n_eff` by driving `Var(d)` up.
 
 ## How cell SE and footer stats differ
 

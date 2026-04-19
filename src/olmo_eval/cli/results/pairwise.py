@@ -137,7 +137,7 @@ def pairwise(
 
     from olmo_eval.analysis.pairwise import compute_pairwise
 
-    with console.status("[bold blue]Computing pairwise comparison..."):
+    with console.status("[bold blue]Computing pairwise results..."):
         db = get_database_session(db_host, db_port, db_name, db_user, db_password)
         try:
             with db.session() as session:
