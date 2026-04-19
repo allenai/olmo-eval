@@ -16,6 +16,9 @@ class RsEvaluator(BaseLanguageEvaluator):
     LANG_EXT: ClassVar[str] = "rs"
     LANG_ID: ClassVar[str] = "rs"
     DEFAULT_TIMEOUT: ClassVar[float] = 15.0
+    # Old system: subprocess.run(timeout=15) for compile, subprocess.run(timeout=5) for run
+    COMPILE_TIMEOUT: ClassVar[float] = 15.0
+    RUN_TIMEOUT: ClassVar[float] = 5.0
 
     filename: str = "code.rs"
     compile_cmd: str | None = "rustc -o {d}/a.out {f}"

@@ -38,6 +38,12 @@ class LanguageEvaluator(Protocol):
     LANG_EXT: ClassVar[str]  # File extension, e.g., "cpp"
     LANG_ID: ClassVar[str]  # Language identifier, e.g., "cpp"
     DEFAULT_TIMEOUT: ClassVar[float]
+    COMPILE_TIMEOUT: ClassVar[float]
+    RUN_TIMEOUT: ClassVar[float]
+
+    def get_total_timeout(self) -> float:
+        """Get total timeout for the full command chain."""
+        ...
 
     def build_eval_command(self, tmp_dir: str, code: str) -> str:
         """Build the shell command to evaluate code.
@@ -80,6 +86,11 @@ class BaseLanguageEvaluator:
     LANG_EXT: ClassVar[str] = ""
     LANG_ID: ClassVar[str] = ""
     DEFAULT_TIMEOUT: ClassVar[float] = 10.0
+    # Per-step timeouts matching oe-eval-internal's safe_subprocess.run defaults.
+    # The old system runs compile and run as separate subprocess calls, each with
+    # its own timeout. We use the `timeout` shell command to replicate this.
+    COMPILE_TIMEOUT: ClassVar[float] = 15.0
+    RUN_TIMEOUT: ClassVar[float] = 15.0
 
     # Subclasses can override these
     filename: str = field(default="", repr=False)
@@ -100,8 +111,18 @@ class BaseLanguageEvaluator:
         """Get the run command."""
         return self.run_cmd.format(d=tmp_dir, f=file_path)
 
+    def get_total_timeout(self) -> float:
+        """Get total timeout for the full command chain (compile + run + buffer)."""
+        if self.compile_cmd:
+            return self.COMPILE_TIMEOUT + self.RUN_TIMEOUT + 5.0
+        return self.RUN_TIMEOUT + 5.0
+
     def build_eval_command(self, tmp_dir: str, code: str) -> str:
-        """Build the complete evaluation command."""
+        """Build the complete evaluation command.
+
+        Each step (compile, run) is wrapped with the `timeout` shell command
+        to match oe-eval-internal's per-step timeout behavior.
+        """
         import shlex
 
         file_path = f"{tmp_dir}/{self.get_filename()}"
@@ -114,9 +135,10 @@ class BaseLanguageEvaluator:
 
         compile_cmd = self.get_compile_command(tmp_dir, file_path)
         if compile_cmd:
-            parts.append(compile_cmd)
+            parts.append(f"timeout {int(self.COMPILE_TIMEOUT)} {compile_cmd}")
 
-        parts.append(self.get_run_command(tmp_dir, file_path))
+        run_cmd = self.get_run_command(tmp_dir, file_path)
+        parts.append(f"timeout {int(self.RUN_TIMEOUT)} {run_cmd}")
 
         return " && ".join(parts)
 

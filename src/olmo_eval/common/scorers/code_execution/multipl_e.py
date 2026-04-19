@@ -96,8 +96,10 @@ class MultiplEScorer(ExecutionScorer):
                 stderr=str(e),
             )
 
-        # Use explicit timeout if set, otherwise use language default
-        timeout = self.timeout if self.timeout is not None else evaluator.DEFAULT_TIMEOUT
+        # Use explicit timeout if set, otherwise use total timeout (compile + run + buffer).
+        # Per-step timeouts are enforced by the `timeout` command in the shell (see
+        # build_eval_command), so this outer timeout is a safety net.
+        timeout = self.timeout if self.timeout is not None else evaluator.get_total_timeout()
 
         # Use a unique temp directory per execution to avoid conflicts with parallel runs
         tmp_dir = f"/tmp/{uuid.uuid4().hex}"
@@ -108,9 +110,11 @@ class MultiplEScorer(ExecutionScorer):
         try:
             exec_result: ExecutionResult = await env.execute_command(cmd, timeout=timeout)
 
-            # Determine if execution timed out
+            # Determine if execution timed out — either at the execution-env level
+            # or via the `timeout` shell command (exit code 124)
             timed_out = (
                 exec_result.error == "timeout"
+                or exec_result.exit_code == 124  # `timeout` command exit code
                 or "timed out" in (exec_result.error or "").lower()
                 or "timed out" in (exec_result.output or "").lower()
             )

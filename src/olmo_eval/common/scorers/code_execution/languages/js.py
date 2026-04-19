@@ -16,6 +16,8 @@ class JsEvaluator(BaseLanguageEvaluator):
     LANG_EXT: ClassVar[str] = "js"
     LANG_ID: ClassVar[str] = "js"
     DEFAULT_TIMEOUT: ClassVar[float] = 5.0
+    # Old system: subprocess.run(timeout=5) for node execution
+    RUN_TIMEOUT: ClassVar[float] = 5.0
 
     filename: str = "code.js"
     compile_cmd: str | None = None
