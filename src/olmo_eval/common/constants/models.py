@@ -44,6 +44,20 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             revision="stage2-step47684",
             kwargs={"gpu_memory_utilization": 0.7, "add_bos_token": False},
         ),
+        "olmo-3-7b-instruct": ProviderConfig(
+            kind=ProviderKind.VLLM,
+            model="allenai/Olmo-3-7B-Instruct",
+        ),
+        "olmo-3.1-32b-instruct": ProviderConfig(
+            kind=ProviderKind.VLLM,
+            model="allenai/Olmo-3.1-32B-Instruct",
+            kwargs={"tensor_parallel_size": 2},
+        ),
+        "olmo-3.1-32b-think": ProviderConfig(
+            kind=ProviderKind.VLLM,
+            model="allenai/Olmo-3.1-32B-Think",
+            kwargs={"tensor_parallel_size": 2},
+        ),
         "olmo-2-7b": ProviderConfig(
             kind=ProviderKind.VLLM,
             model="allenai/OLMo-2-1124-7B",
@@ -57,6 +71,16 @@ def get_model_presets() -> dict[str, ProviderConfig]:
         "qwen2.5-7b": ProviderConfig(
             kind=ProviderKind.VLLM,
             model="Qwen/Qwen2.5-7B",
+        ),
+        "qwen3-32b": ProviderConfig(
+            kind=ProviderKind.VLLM,
+            model="Qwen/Qwen3-32B",
+            kwargs={"tensor_parallel_size": 2},
+        ),
+        "gemma-3-27b-it": ProviderConfig(
+            kind=ProviderKind.VLLM,
+            model="google/gemma-3-27b-it",
+            kwargs={"tensor_parallel_size": 2},
         ),
         "qwen3-coder-30b": ProviderConfig(
             kind=ProviderKind.VLLM_SERVER,
@@ -77,6 +101,21 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             kind=ProviderKind.VLLM,
             model="deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
             max_model_len=32768,
+        ),
+        "deepseek-r1-0528-qwen3-8b": ProviderConfig(
+            kind=ProviderKind.VLLM,
+            model="deepseek-ai/DeepSeek-R1-0528-Qwen3-8B",
+            max_model_len=32768,
+        ),
+        "gpt-oss-20b": ProviderConfig(
+            kind=ProviderKind.VLLM,
+            model="openai/gpt-oss-20b",
+        ),
+        "deepseek-r1-distill-qwen-32b": ProviderConfig(
+            kind=ProviderKind.VLLM,
+            model="deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
+            max_model_len=32768,
+            kwargs={"tensor_parallel_size": 2, "enforce_eager": True},
         ),
         "mistral-7b": ProviderConfig(
             kind=ProviderKind.VLLM,

@@ -75,6 +75,9 @@ postgres = [
 gpu = [
     "nvidia-ml-py>=12.560",
 ]
+hard-reasoning = [
+    "np-hard-reasoning @ git+https://github.com/allenai/np-hard-reasoning.git@fa8bbb2a5554e34a7ce051b71e9357e44dbabd0f",
+]
 clients = [
     "openai~=2.21.0",
 ]
