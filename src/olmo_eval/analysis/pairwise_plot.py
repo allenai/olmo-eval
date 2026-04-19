@@ -274,14 +274,12 @@ def plot_pairwise_matrix(
         cbar = fig.colorbar(scalar_mappable, cax=cax, orientation="vertical")
         cbar.set_ticks([0.0, 0.5, 1.0])
         cbar.set_ticklabels(["0%", "50%", "100%"])
-        cbar.outline.set_visible(False)
         cbar.ax.set_facecolor(_BG)
+        cbar.ax.set_frame_on(False)
         cbar.ax.set_title("WIN RATE", fontsize=8, fontweight="bold", color=_TEXT_DIM, pad=8)
         cbar.ax.yaxis.set_ticks_position("right")
         cbar.ax.yaxis.set_label_position("right")
         cbar.ax.tick_params(length=0, pad=4, labelsize=7, colors=_TEXT_DIM)
-        for tick in cbar.ax.get_yticklabels():
-            tick.set_ha("left")
         for spine in cbar.ax.spines.values():
             spine.set_visible(False)
 
