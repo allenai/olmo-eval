@@ -55,15 +55,35 @@ low-tie pair, even though the headline number looks more decisive.
 The footer shows matrix-wide validity stats. From the MultiPL-E example:
 
 ```
-n for 3pp MDE    median n_eff    shared n / pair    MDE @ 80% power
-    1,418          6,806              2,313              2.3%
+shared n    median contested    pairing gain    MDE @ 80%
+ 2,313           17%              2.9x            2.3%
 ```
 
-Every tier is green here — the matrix is in "read it head-on" territory.
+Even though only **17%** of the shared questions are contested, the matrix still
+lands in "read it head-on" territory because pairing is buying a lot of
+precision and the matrix-wide MDE is small.
 
-### `shared n / pair`
+### `shared n`
 Number of instances every model answered. Your raw sample size for every pair.
 MultiPL-E pooled across 6 languages gives 2,313 questions per pair.
+
+### `median contested`
+Median fraction of shared questions that actually turn into head-to-head signal
+after ties are removed:
+
+- For each pair, `contested = wins_a + wins_b`.
+- The footer reports the median `contested / shared n` across pairs.
+- **17%** here means most shared questions are ties, so the per-cell SE is
+  driven by a much smaller count than `shared n`.
+
+### `pairing gain`
+Median precision lift from the paired design:
+
+- `pairing gain = median(n_eff / shared n)`.
+- `n_eff = n × (σ_A² + σ_B²) / Var(d)` per pair; the footer compresses this to
+  a single ratio.
+- **2.9×** means the paired design is worth almost three times as many
+  independent samples as an unpaired comparison would be.
 
 ### `MDE @ 80% power`
 Minimum Detectable Effect (MDE) — the smallest true win-rate gap the matrix
@@ -76,28 +96,6 @@ given its `shared n` and the **median** per-pair paired-difference variance
   this matrix has `|win_rate − 50%| ≫ 2.3%`, so every comparison is
   trustworthy.
 - Tiers: good ≤ 3pp, ok ≤ 10pp, bad > 10pp.
-
-### `n for 3pp MDE`
-How many shared instances you'd need to pull the MDE down to 3pp.
-
-- **1,418** is **below** the current `shared n` of 2,313, so the matrix is
-  already past the 3pp-resolution threshold — the MDE has headroom.
-- Tiers relative to current `shared n`: good ≤ 1×, ok ≤ 3×, bad > 3×.
-
-### `median n_eff`
-Effective sample size (n_eff) under the paired design — how many independent
-samples the paired comparison is worth after accounting for question-level
-correlation between models.
-
-- `n_eff = n × (σ_A² + σ_B²) / Var(d)` per pair; the footer shows the median
-  across pairs.
-- `n_eff > shared n` means models disagree on which questions are hard, so
-  pairing is buying precision. `n_eff ≈ shared n` means pairing adds little.
-- **6,806 vs 2,313** on MultiPL-E: pairing is buying a 2.9× precision gain —
-  models disagree meaningfully on per-question difficulty across languages,
-  so the paired design extracts a lot more signal than an unpaired comparison
-  would.
-- Tiers: good ≥ 2× shared n, ok ≥ 1.2×, bad < 1.2×.
 
 ## Why pool up to the parent suite?
 
@@ -116,8 +114,8 @@ olmo-eval results pairwise \
 ![Pairwise heatmap for the HumanEval sub-suite](pairwise_heatmap_example.png)
 
 ```
-n for 3pp MDE    median n_eff    shared n / pair    MDE @ 80% power
-    2,376          1,061              955               4.7%
+shared n    median contested    pairing gain    MDE @ 80%
+   955           46%              1.1x            4.7%
 ```
 
 The sub-suite is a strict subset of the parent's instances, so its stats
@@ -125,10 +123,10 @@ collapse compared to the top-level suite:
 
 | Footer stat      | Sub-suite (HumanEval family) | Parent suite (MultiPL-E) |
 | ---------------- | ---------------------------: | -----------------------: |
-| shared n / pair  |                          955 |                    2,313 |
+| shared n         |                          955 |                    2,313 |
+| median contested |                          46% |                      17% |
+| pairing gain     |                         1.1× |                     2.9× |
 | MDE @ 80% power  |                    4.7% (🟡) |                2.3% (🟢) |
-| median n_eff     |                 1,061 (🔴)   |               6,806 (🟢) |
-| n for 3pp MDE    |      2,376 (🟡, above n)     | 1,418 (🟢, within reach) |
 
 **Two things to notice:**
 
@@ -136,18 +134,18 @@ collapse compared to the top-level suite:
    decisive cells in its matrix (16.8%, 83.2%, 95.4%, etc.) are still
    trustworthy. But a hypothetical 3pp gap between two similar models would
    vanish in the noise.
-2. **`n_eff` is *below* `shared n`.** `1,061 < 955` is fine but the ratio
-   is close to 1 — the paired design is not buying meaningful precision at
-   this level. That happens when models disagree on per-question difficulty
-   across the sub-suite's tasks, so `Var(d)` is close to `σ_A² + σ_B²`.
-   Scoping up to the parent suite fixes this dramatically: `n_eff / shared n`
-   jumps from ≈1.1× (sub-suite) to ≈2.9× (parent suite) because the extra
-   tasks give the paired structure something to work with.
+2. **The contested rate goes up but the pairing gain collapses.** The
+   HumanEval-family slice has more head-to-head signal per shared question
+   (**46%** contested vs **17%** in the parent suite), but the paired design is
+   only worth **1.1×** extra precision instead of **2.9×**. Scoping up to the
+   parent suite recovers that covariance structure across tasks, so the
+   matrix-wide MDE drops sharply even though the contested fraction is lower.
 
 **Takeaway.** The finer-grained the slice, the noisier the matrix. Prefer
 the highest-level suite that still measures the capability you care about.
 The parent suite is always at least as informative as any of its children
-(same model comparisons, strictly more instances, usually better `n_eff`).
+(same model comparisons, strictly more instances, usually better pairing gain
+and lower MDE).
 
 **How to explore the hierarchy:**
 
@@ -158,7 +156,7 @@ olmo-eval results group <your-group>       # models + tasks + suites
 
 **What NOT to pool.** Resist the urge to pool tasks that measure different
 capabilities (e.g. math + dialogue). That inflates `shared n` without
-improving signal — and can actually hurt `n_eff` by driving `Var(d)` up.
+improving signal — and can actually hurt pairing gain by driving `Var(d)` up.
 
 ## How cell SE and footer stats differ
 
@@ -170,9 +168,11 @@ improving signal — and can actually hurt `n_eff` by driving `Var(d)` up.
   "pooled" so a single outlier pair (e.g. one with near-zero variance)
   can't distort the summary. It tells you "how precise is a typical
   comparison in this matrix?"
-- A pair with many ties has a wide cell SE even if the footer MDE looks
-  decent — because that pair's contested `n` is small. Always check the
-  cell SE before quoting the gap.
+- **Median contested** tells you how much of the shared sample usually survives
+  the tie filter. Low contested rates are a warning sign for wide cell SEs.
+- **Pairing gain** tells you how much the paired design is helping overall. A
+  matrix can have a healthy contested rate but still gain little from pairing
+  if the models rise and fall together on the same questions.
 
 ## Rules of thumb
 
@@ -182,10 +182,12 @@ improving signal — and can actually hurt `n_eff` by driving `Var(d)` up.
    but not conclusive; lean on the per-cell SE.
 3. **MDE green** (≤ 3pp): you can read the matrix head-on; most cells are
    trustworthy.
-4. **Scaling up:** halving the MDE requires ~4× more instances. If the
-   number in `n for 3pp MDE` is too big to run per-task, try `--suite` to
-   pool instances across a related task group.
-5. **Ignore cell differences smaller than `2·sqrt(SE_a² + SE_b²)`** when
+4. **Low contested rate means wide cell SE.** If the footer says `median
+   contested` is small, expect many cells to be tie-dominated even when
+   `shared n` looks large.
+5. **Pairing gain near 1× means pairing adds little.** In that regime, you are
+   mostly living off raw sample size; pooling to a parent suite often helps.
+6. **Ignore cell differences smaller than `2·sqrt(SE_a² + SE_b²)`** when
    comparing two non-diagonal cells in the matrix.
 
 ## Glossary
@@ -217,6 +219,9 @@ improving signal — and can actually hurt `n_eff` by driving `Var(d)` up.
   will come out significant at the given α and power. Matrix-wide MDE uses
   the *median* of per-pair paired-difference variances as a representative
   `ω²` (robust to outlier pairs), plugged in at the full `shared n`.
+- **Median contested** — the median of `(wins_a + wins_b) / shared n` across
+  pairs. Tells you how much of the shared sample usually survives after ties
+  are removed.
 - **Paired comparison** — both models answer the same shared questions, so
   per-question luck cancels in `d_i = score_a_i − score_b_i`. Shrinks the
   variance whenever models agree on what's easy vs hard.
@@ -231,9 +236,8 @@ improving signal — and can actually hurt `n_eff` by driving `Var(d)` up.
   number of independent samples the paired comparison is worth. Higher than
   `shared n` means pairing is buying precision; close to `shared n` means
   models disagree on which questions are hard.
-- **Required n (n for target MDE)** — from `MDE ∝ 1/√n`, the instance count
-  needed to hit a desired MDE at fixed α and power. The footer reports the
-  number for a 3pp target.
+- **Pairing gain** — `median(n_eff / shared n)` across pairs. A compact way to
+  express how much precision the paired design is buying overall.
 - **pp (percentage point)** — absolute difference between two percentages.
   A move from 52% to 55% is a 3pp gap, not a 3% gap.
 - **z-test** — two-sample hypothesis test that uses the normal approximation

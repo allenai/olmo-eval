@@ -10,6 +10,7 @@ import numpy as np
 from olmo_eval.analysis.pairwise import PairwiseResult, get_se, get_win_rate
 
 if TYPE_CHECKING:
+    from matplotlib.colors import ColorType
     from matplotlib.figure import Figure
 
 _BG = "#2b2b2b"
@@ -34,7 +35,7 @@ _CMAP_STOPS: list[tuple[float, str]] = [
     (1.00, "#1f6b4f"),
 ]
 
-_FOOTER_HEIGHT = 1.55
+_FOOTER_HEIGHT = 1.58
 _RIGHT_PAD = 0.35
 _LEFT_PAD = 0.35
 _TITLE_PAD = 0.55
@@ -46,6 +47,9 @@ _LEGEND_LABEL_GAP = 0.08
 _LEGEND_LABEL_WIDTH = 0.45
 _LEGEND_HEIGHT_FRACTION = 0.62
 _LEGEND_MIN_HEIGHT = 1.20
+_NONSIG_BLEND = 0.55
+_NONSIG_BORDER_WIDTH = 0.8
+_SIGNIFICANCE_Z = 2.0
 
 
 def build_win_rate_matrix(result: PairwiseResult) -> np.ndarray:
@@ -168,6 +172,25 @@ def plot_pairwise_matrix(
         inset = gap / 2
         side = 1.0 - gap
         rounding = side * 0.18
+        neutral_rgba = mcolors.to_rgba(cmap(norm(0.5)))
+        nonsig_edge_rgba = mcolors.to_rgba(_TEXT_DIM, alpha=0.55)
+
+        def _is_nonsignificant(win_rate: float, se: float) -> bool:
+            return abs(win_rate - 0.5) <= _SIGNIFICANCE_Z * se
+
+        def _blend_with_neutral(color: ColorType) -> tuple[float, float, float, float]:
+            r, g, b, a = mcolors.to_rgba(color)
+            return (
+                (1.0 - _NONSIG_BLEND) * r + _NONSIG_BLEND * neutral_rgba[0],
+                (1.0 - _NONSIG_BLEND) * g + _NONSIG_BLEND * neutral_rgba[1],
+                (1.0 - _NONSIG_BLEND) * b + _NONSIG_BLEND * neutral_rgba[2],
+                (1.0 - _NONSIG_BLEND) * a + _NONSIG_BLEND * neutral_rgba[3],
+            )
+
+        def _text_color_for_fill(fill_color: ColorType) -> str:
+            r, g, b = mcolors.to_rgb(fill_color)
+            luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+            return _BG if luminance >= 0.66 else _TEXT_LIGHT
 
         for i in range(n):
             for j in range(n):
@@ -175,8 +198,18 @@ def plot_pairwise_matrix(
                 if i == j or np.isnan(val):
                     color = _DIAGONAL
                     annotate = False
+                    se_val = np.nan
+                    edgecolor = "none"
+                    linewidth = 0.0
                 else:
+                    se_val = se_matrix[i, j]
                     color = cmap(norm(val))
+                    edgecolor = "none"
+                    linewidth = 0.0
+                    if not np.isnan(se_val) and _is_nonsignificant(val, se_val):
+                        color = _blend_with_neutral(color)
+                        edgecolor = nonsig_edge_rgba
+                        linewidth = _NONSIG_BORDER_WIDTH
                     annotate = True
 
                 ax.add_patch(
@@ -186,15 +219,14 @@ def plot_pairwise_matrix(
                         side,
                         boxstyle=f"round,pad=0,rounding_size={rounding}",
                         facecolor=color,
-                        edgecolor="none",
-                        linewidth=0,
+                        edgecolor=edgecolor,
+                        linewidth=linewidth,
                         zorder=2,
                     )
                 )
 
                 if annotate:
-                    text_color = "#ffffff" if abs(val - 0.5) > 0.14 else _BG
-                    se_val = se_matrix[i, j]
+                    text_color = _text_color_for_fill(color)
                     se_font = max(7, int(annot_font * 0.80))
                     ax.text(
                         j + 0.5,
@@ -250,10 +282,10 @@ def plot_pairwise_matrix(
         def _y(inches_from_bottom: float) -> float:
             return inches_from_bottom / fig_h
 
-        upper_divider_in = 1.24
-        summary_label_in = 0.94
+        upper_divider_in = 1.26
+        summary_label_in = 0.95
         stat_head_in = 0.60
-        stat_value_in = 0.24
+        stat_value_in = 0.22
 
         legend_height_in = min(
             max(heatmap_in * _LEGEND_HEIGHT_FRACTION, _LEGEND_MIN_HEIGHT),
@@ -304,10 +336,7 @@ def plot_pairwise_matrix(
             va="center",
         )
 
-        from olmo_eval.analysis.eval_power import (
-            minimum_detectable_effect,
-            required_sample_size,
-        )
+        from olmo_eval.analysis.eval_power import minimum_detectable_effect
 
         # Use the median pair variance as a single matrix-wide summary term.
         pair_vars = sorted(p.var_paired_diff for p in result.pairs)
@@ -322,14 +351,6 @@ def plot_pairwise_matrix(
             mde = None
             mde_str = "—"
 
-        n_for_3pp: int | None
-        if median_var > 0:
-            n_for_3pp = required_sample_size(mde=0.03, omega2=median_var)
-            n_for_3pp_str = f"{n_for_3pp:,}"
-        else:
-            n_for_3pp = None
-            n_for_3pp_str = "—"
-
         # n_eff = n_shared * (sigma_A^2 + sigma_B^2) / Var(d)
         n_eff_values: list[int] = []
         for p in result.pairs:
@@ -337,7 +358,21 @@ def plot_pairwise_matrix(
                 n_eff_values.append(round(shared_n * p.var_marginal_sum / p.var_paired_diff))
         n_eff_values.sort()
         median_n_eff: int | None = n_eff_values[len(n_eff_values) // 2] if n_eff_values else None
-        median_n_eff_str = f"{median_n_eff:,}" if median_n_eff is not None else "—"
+        pairing_gain: float | None = (
+            median_n_eff / shared_n if median_n_eff is not None and shared_n > 0 else None
+        )
+        pairing_gain_str = f"{pairing_gain:.1f}x" if pairing_gain is not None else "—"
+
+        contested_values = sorted(p.wins_a + p.wins_b for p in result.pairs)
+        median_contested: int | None = (
+            contested_values[len(contested_values) // 2] if contested_values else None
+        )
+        median_contested_rate: float | None = (
+            median_contested / shared_n if median_contested is not None and shared_n > 0 else None
+        )
+        median_contested_str = (
+            f"{median_contested_rate:.0%}" if median_contested_rate is not None else "—"
+        )
 
         def _tier_mde(v: float | None) -> str:
             if v is None:
@@ -355,20 +390,9 @@ def plot_pairwise_matrix(
                 return _TIER_OK
             return _TIER_BAD
 
-        def _tier_n_for_target(required: int | None, baseline: int) -> str:
-            if required is None or baseline <= 0:
+        def _tier_pairing_gain(ratio: float | None) -> str:
+            if ratio is None:
                 return _TIER_NEUTRAL
-            ratio = required / baseline
-            if ratio <= 1.0:
-                return _TIER_GOOD
-            if ratio <= 3.0:
-                return _TIER_OK
-            return _TIER_BAD
-
-        def _tier_n_eff(eff: int | None, baseline: int) -> str:
-            if eff is None or baseline <= 0:
-                return _TIER_NEUTRAL
-            ratio = eff / baseline
             if ratio >= 2.0:
                 return _TIER_GOOD
             if ratio >= 1.2:
@@ -376,10 +400,10 @@ def plot_pairwise_matrix(
             return _TIER_BAD
 
         stats: list[tuple[str, str, str]] = [
-            ("n for 3pp MDE", n_for_3pp_str, _tier_n_for_target(n_for_3pp, shared_n)),
-            ("median n_eff", median_n_eff_str, _tier_n_eff(median_n_eff, shared_n)),
-            ("shared n / pair", str(shared_n), _tier_shared_n(shared_n)),
-            ("MDE @ 80% power", mde_str, _tier_mde(mde)),
+            ("shared n", f"{shared_n:,}", _tier_shared_n(shared_n)),
+            ("median contested", median_contested_str, _TEXT_LIGHT),
+            ("pairing gain", pairing_gain_str, _tier_pairing_gain(pairing_gain)),
+            ("MDE @ 80%", mde_str, _tier_mde(mde)),
         ]
         col_w = footer_width_frac / len(stats)
         for idx, (heading, value, value_color) in enumerate(stats):
