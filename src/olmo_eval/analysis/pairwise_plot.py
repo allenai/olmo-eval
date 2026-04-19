@@ -100,27 +100,9 @@ def plot_pairwise_matrix(
     n = len(result.models)
     matrix = build_win_rate_matrix(result)
     se_matrix = build_se_matrix(result)
-    # Keep newlines in labels so the y-axis uses vertical space (shorter lines).
+    # Models are already ordered by overall win rate (top-winning first) inside
+    # compute_pairwise, so every output format agrees on ordering.
     labels = [m.label for m in result.models]
-
-    # Per-model overall wins/losses — used for both sorting and the summary.
-    wins: dict[int, int] = {i: 0 for i in range(n)}
-    losses: dict[int, int] = {i: 0 for i in range(n)}
-    for p in result.pairs:
-        wins[p.index_a] += p.wins_a
-        losses[p.index_a] += p.wins_b
-        wins[p.index_b] += p.wins_b
-        losses[p.index_b] += p.wins_a
-
-    def _overall_wr(i: int) -> float:
-        total = wins[i] + losses[i]
-        return wins[i] / total if total > 0 else 0.5
-
-    # Sort so the highest-winning model is top-left.
-    order = sorted(range(n), key=_overall_wr, reverse=True)
-    matrix = matrix[order][:, order]
-    se_matrix = se_matrix[order][:, order]
-    labels = [labels[i] for i in order]
 
     cell_size, annot_font, label_font, title_font = _scale_for_n(n)
 

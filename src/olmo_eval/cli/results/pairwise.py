@@ -196,11 +196,24 @@ def pairwise(
         _output_plot(result, output_path)
 
 
+def _short_label(meta: Any) -> str:
+    """Single-line display label suitable for matrix keys / CSV cells."""
+    hash_short = (meta.model_hash or "")[:8]
+    if meta.model_name and hash_short:
+        return f"{meta.model_name} ({hash_short})"
+    return meta.label.replace("\n", " ")
+
+
 def _output_json(result: Any, output_path: str | None) -> None:
-    """Serialize PairwiseResult to JSON — to ``output_path`` if set, else stdout."""
+    """Serialize PairwiseResult to JSON — analysis-friendly schema.
+
+    Writes to ``output_path`` if set, else stdout.
+    """
     from olmo_eval.analysis.pairwise import get_win_rate
 
     n = len(result.models)
+    labels = [_short_label(m) for m in result.models]
+
     data: dict[str, Any] = {
         "task_name": result.task_name,
         "suite_name": result.suite_name,
@@ -208,23 +221,37 @@ def _output_json(result: Any, output_path: str | None) -> None:
         "metric": result.metric,
         "margin": result.margin,
         "instance_count": result.instance_count,
-        "models": [{"label": m.label} for m in result.models],
+        "n_experiments_matched": result.n_experiments_matched,
+        "n_experiments_dropped": result.n_experiments_dropped,
+        "models": [
+            {
+                "label": labels[i],
+                "model_name": m.model_name,
+                "model_hash": m.model_hash,
+                "timestamp": m.timestamp,
+            }
+            for i, m in enumerate(result.models)
+        ],
         "pairs": [
             {
-                "model_a": result.models[p.index_a].label,
-                "model_b": result.models[p.index_b].label,
+                "model_a": labels[p.index_a],
+                "model_b": labels[p.index_b],
+                "index_a": p.index_a,
+                "index_b": p.index_b,
                 "wins_a": p.wins_a,
                 "wins_b": p.wins_b,
                 "ties": p.ties,
+                "n_contested": p.wins_a + p.wins_b,
                 "win_rate_a": p.win_rate_a,
                 "win_rate_b": p.win_rate_b,
+                "se": p.se,
+                "var_paired_diff": p.var_paired_diff,
+                "var_marginal_sum": p.var_marginal_sum,
             }
             for p in result.pairs
         ],
         "matrix": {
-            result.models[i].label: {
-                result.models[j].label: get_win_rate(result.pairs, i, j) for j in range(n) if j != i
-            }
+            labels[i]: {labels[j]: get_win_rate(result.pairs, i, j) for j in range(n) if j != i}
             for i in range(n)
         },
     }
@@ -239,25 +266,48 @@ def _output_json(result: Any, output_path: str | None) -> None:
 
 
 def _output_csv(result: Any, output_path: str | None) -> None:
-    """Output NxN win-rate matrix as CSV — to ``output_path`` if set, else stdout."""
+    """Output pairwise stats as a long-format CSV (one row per pair).
+
+    Columns: model_a, model_b, wins_a, wins_b, ties, n_contested, win_rate_a,
+    win_rate_b, se, var_paired_diff, var_marginal_sum. Writes to
+    ``output_path`` if set, else stdout.
+    """
     import csv
 
-    from olmo_eval.analysis.pairwise import get_win_rate
-
-    n = len(result.models)
-    labels = [m.label for m in result.models]
+    labels = [_short_label(m) for m in result.models]
 
     def _write_rows(writer: Any) -> None:
-        writer.writerow([""] + labels)
-        for i in range(n):
-            row = [labels[i]]
-            for j in range(n):
-                if i == j:
-                    row.append("-")
-                else:
-                    wr = get_win_rate(result.pairs, i, j)
-                    row.append(f"{wr:.4f}")
-            writer.writerow(row)
+        writer.writerow(
+            [
+                "model_a",
+                "model_b",
+                "wins_a",
+                "wins_b",
+                "ties",
+                "n_contested",
+                "win_rate_a",
+                "win_rate_b",
+                "se",
+                "var_paired_diff",
+                "var_marginal_sum",
+            ]
+        )
+        for p in result.pairs:
+            writer.writerow(
+                [
+                    labels[p.index_a],
+                    labels[p.index_b],
+                    p.wins_a,
+                    p.wins_b,
+                    p.ties,
+                    p.wins_a + p.wins_b,
+                    f"{p.win_rate_a:.6f}",
+                    f"{p.win_rate_b:.6f}",
+                    f"{p.se:.6f}",
+                    f"{p.var_paired_diff:.6f}",
+                    f"{p.var_marginal_sum:.6f}",
+                ]
+            )
 
     if output_path:
         with open(output_path, "w", newline="") as f:

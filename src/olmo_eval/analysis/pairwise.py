@@ -18,9 +18,17 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class ModelMeta:
-    """Metadata for a model in the pairwise comparison."""
+    """Metadata for a model in the pairwise comparison.
+
+    ``label`` is a display-oriented string (may include newlines for plot
+    rendering). ``model_name``, ``model_hash``, and ``timestamp`` are the
+    stable identifiers downstream consumers should key on.
+    """
 
     label: str
+    model_name: str = ""
+    model_hash: str = ""
+    timestamp: str | None = None
 
 
 @dataclass(frozen=True)
@@ -354,14 +362,25 @@ def compute_pairwise(
 
     n_dropped = n_matched - len(selected)
 
-    ordered: list[tuple[int, str]] = []
+    ordered: list[tuple[int, ModelMeta]] = []
     for exp in selected:
+        ts_iso = exp.timestamp.isoformat() if exp.timestamp is not None else None
         if keep_all:
-            ts = exp.timestamp.strftime("%Y-%m-%d")
-            label = f"{exp.model_name}\n({exp.model_hash[:8]} @ {ts})"
+            ts_short = exp.timestamp.strftime("%Y-%m-%d")
+            label = f"{exp.model_name}\n({exp.model_hash[:8]} @ {ts_short})"
         else:
             label = f"{exp.model_name}\n({exp.model_hash[:8]})"
-        ordered.append((exp.id, label))
+        ordered.append(
+            (
+                exp.id,
+                ModelMeta(
+                    label=label,
+                    model_name=exp.model_name,
+                    model_hash=exp.model_hash,
+                    timestamp=ts_iso,
+                ),
+            )
+        )
 
     if len(ordered) < 2:
         detail = "after deduping by (model_name, model_hash)" if not keep_all else "matched"
@@ -470,10 +489,10 @@ def compute_pairwise(
 
     # --- Drop experiments that have no instance scores (e.g. instances not
     # stored for that run) so they don't zero-out the shared intersection. ---
-    active: list[tuple[int, str]] = []
-    for pk, label in ordered:
+    active: list[tuple[int, ModelMeta]] = []
+    for pk, meta in ordered:
         if scores_by_pk[pk]:
-            active.append((pk, label))
+            active.append((pk, meta))
 
     if len(active) < 2:
         # Build diagnostic info to help identify the root cause.
@@ -489,7 +508,7 @@ def compute_pairwise(
         )
 
     # --- Rebuild index mapping for the active set ---
-    models = [ModelMeta(label=label) for _, label in active]
+    models = [meta for _, meta in active]
     scores_by_idx: dict[int, dict[tuple[str, str], float]] = {}
     for idx, (pk, _) in enumerate(active):
         scores_by_idx[idx] = scores_by_pk[pk]
@@ -519,8 +538,12 @@ def compute_pairwise(
             f"{hint}"
         )
 
-    # --- Compute pairs and return ---
+    # --- Compute pairs ---
     pairs = _compute_pairs(scores_by_idx, len(active), shared_ids, margin)
+
+    # --- Sort models by overall win rate (top-winning first) and remap pair
+    # indices to match, so every output format (plot / JSON / CSV) agrees. ---
+    models, pairs = _order_by_overall_win_rate(models, pairs)
 
     contributing_task_names = tuple(sorted({tn for tn, _ in shared_ids}))
     result_task_name = suite_name or task_results[0].task_name
@@ -537,3 +560,56 @@ def compute_pairwise(
         n_experiments_matched=n_matched,
         n_experiments_dropped=n_dropped,
     )
+
+
+def _order_by_overall_win_rate(
+    models: list[ModelMeta], pairs: list[PairStats]
+) -> tuple[list[ModelMeta], list[PairStats]]:
+    """Sort models by overall win rate descending; remap pair indices to match."""
+    n = len(models)
+    wins: dict[int, int] = {i: 0 for i in range(n)}
+    losses: dict[int, int] = {i: 0 for i in range(n)}
+    for p in pairs:
+        wins[p.index_a] += p.wins_a
+        losses[p.index_a] += p.wins_b
+        wins[p.index_b] += p.wins_b
+        losses[p.index_b] += p.wins_a
+
+    def _wr(i: int) -> float:
+        total = wins[i] + losses[i]
+        return wins[i] / total if total > 0 else 0.5
+
+    order = sorted(range(n), key=_wr, reverse=True)
+    old_to_new = {old: new for new, old in enumerate(order)}
+
+    reordered_models = [models[old] for old in order]
+
+    reordered_pairs: list[PairStats] = []
+    for p in pairs:
+        new_a = old_to_new[p.index_a]
+        new_b = old_to_new[p.index_b]
+        if new_a <= new_b:
+            reordered_pairs.append(
+                PairStats(
+                    index_a=new_a,
+                    index_b=new_b,
+                    wins_a=p.wins_a,
+                    wins_b=p.wins_b,
+                    ties=p.ties,
+                    var_paired_diff=p.var_paired_diff,
+                    var_marginal_sum=p.var_marginal_sum,
+                )
+            )
+        else:
+            reordered_pairs.append(
+                PairStats(
+                    index_a=new_b,
+                    index_b=new_a,
+                    wins_a=p.wins_b,
+                    wins_b=p.wins_a,
+                    ties=p.ties,
+                    var_paired_diff=p.var_paired_diff,
+                    var_marginal_sum=p.var_marginal_sum,
+                )
+            )
+    return reordered_models, reordered_pairs
