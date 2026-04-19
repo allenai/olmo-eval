@@ -243,7 +243,7 @@ class TestPairwiseResult:
 
 
 class TestComputePairsCompoundKeys:
-    """Suite-mode pools instances across tasks using (task_hash, native_id) keys."""
+    """Suite-mode pools instances across tasks using (task_name, native_id) keys."""
 
     def test_pools_across_tasks(self) -> None:
         # Two tasks, 3 instances each. Model 0 always wins on task_1,

@@ -118,9 +118,9 @@ def _compute_pairs(
     """Compute pairwise win/loss/tie stats from pre-fetched scores.
 
     Args:
-        scores_by_idx: Mapping of model index -> {(task_hash, native_id): score}.
+        scores_by_idx: Mapping of model index -> {(task_name, native_id): score}.
         n: Number of models.
-        shared_ids: Set of (task_hash, native_id) keys present in all experiments.
+        shared_ids: Set of (task_name, native_id) keys present in all experiments.
         margin: Tie threshold — scores within this margin are ties.
 
     Returns:
@@ -412,7 +412,8 @@ def compute_pairwise(
         if exp_pk not in scores_by_pk:
             continue
         row_metric = task_hash_to_metric.get(th)
-        if row_metric is None:
+        row_task_name = task_hash_to_name.get(th)
+        if row_metric is None or row_task_name is None:
             continue
         instance_metric_key = row_metric
         parsed = parse_metric_key(row_metric)
@@ -423,7 +424,7 @@ def compute_pairwise(
         if score is None:
             score = extract_score_from_metrics(instance_metrics, row_metric)
         if score is not None:
-            scores_by_pk[exp_pk][(th, native_id)] = score
+            scores_by_pk[exp_pk][(row_task_name, native_id)] = score
 
     # --- Drop experiments that have no instance scores (e.g. instances not
     # stored for that run) so they don't zero-out the shared intersection. ---
@@ -460,7 +461,7 @@ def compute_pairwise(
     # --- Compute pairs and return ---
     pairs = _compute_pairs(scores_by_idx, len(active), shared_ids, margin)
 
-    contributing_task_names = tuple(sorted({task_hash_to_name[th] for th, _ in shared_ids}))
+    contributing_task_names = tuple(sorted({tn for tn, _ in shared_ids}))
     result_task_name = suite_name or task_results[0].task_name
 
     return PairwiseResult(
