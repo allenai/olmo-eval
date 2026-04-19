@@ -210,7 +210,7 @@ def pairwise(
     dropped = result.n_experiments_dropped
     if keep_all:
         console.print(
-            f"[dim]Compared all {len(result.models)} experiments (-- all; no dedupe).[/dim]"
+            f"[dim]Compared all {len(result.models)} experiments (--all; no dedupe).[/dim]"
         )
     elif dropped:
         console.print(
