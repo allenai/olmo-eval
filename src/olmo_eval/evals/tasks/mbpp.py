@@ -18,9 +18,13 @@ _logger = __import__("logging").getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class _CodeExecScorer3s(CodeExecutionScorer):
-    """CodeExecutionScorer with 3s timeout and \\n separator matching old oe-eval-internal."""
+    """CodeExecutionScorer with \\n separator matching old oe-eval-internal.
 
-    timeout: float = 3.0
+    Uses 20s timeout (default) since Docker sandbox overhead makes the old 3s
+    local-execution timeout too tight.
+    """
+
+    timeout: float = 20.0
 
     async def ascore(self, instance, output, execution_env):  # type: ignore[override]
         if output.extracted_answer is None:
