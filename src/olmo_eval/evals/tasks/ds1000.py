@@ -183,14 +183,36 @@ class DS1000(Task):
     def extract_answer(self, output: LMOutput) -> str | None:
         return output.text
 
+    # Wrapper that reproduces the old oe-eval-internal Lambda execution
+    # pattern: tempdir + swallowed I/O + exec() with empty globals.
+    # Any exception (including BaseException) causes a non-zero exit.
+    _EXEC_WRAPPER = """\
+import contextlib, io, os, sys, tempfile
+
+class _WriteOnlyStringIO(io.StringIO):
+    def read(self, *a, **k): raise IOError
+    def readline(self, *a, **k): raise IOError
+    def readlines(self, *a, **k): raise IOError
+    def readable(self, *a, **k): return False
+
+class _RedirectStdin(contextlib._RedirectStream):
+    _stream = "stdin"
+
+_td = tempfile.mkdtemp()
+os.chdir(_td)
+_stream = _WriteOnlyStringIO()
+with contextlib.redirect_stdout(_stream):
+    with contextlib.redirect_stderr(_stream):
+        with _RedirectStdin(_stream):
+            exec(compile(_TEST_CODE, "<test>", "exec"), {})
+"""
+
     def _extract_answers(self, responses: Sequence[Response]) -> None:
         """Assemble test program from code_context and model continuation.
 
-        Each test program is wrapped in a fresh temp directory to match
-        the old oe-eval-internal Lambda execution pattern, which runs
-        each test in its own tempdir via create_tempdir(). This prevents
-        concurrent tests from interfering via shared filesystem (e.g.
-        matplotlib savefig, pandas to_csv).
+        Wraps each test in the old oe-eval-internal Lambda execution pattern:
+        tempdir isolation, swallowed I/O, and exec() with empty globals.
+        This ensures identical pass/fail behavior to the old system.
         """
         for response in responses:
             code_context = response.instance.metadata.get("code_context", "")
@@ -199,16 +221,16 @@ class DS1000(Task):
                 if continuation and code_context:
                     # DS-1000 test harness format:
                     # code_context defines test_execution() and optionally test_string()
-                    test_program = (
-                        # Match old Lambda: run in a fresh temp directory
-                        "import os as _os, tempfile as _tempfile\n"
-                        "_td = _tempfile.mkdtemp()\n"
-                        "_os.chdir(_td)\n"
-                        + code_context
+                    inner_code = (
+                        code_context
                         + "\n"
                         + f"code = {repr(continuation)}\n"
                         + "test_execution(code)\n"
                         + ("test_string(code)\n" if "test_string(" in code_context else "\n")
+                    )
+                    test_program = (
+                        f"_TEST_CODE = {repr(inner_code)}\n"
+                        + self._EXEC_WRAPPER
                     )
                     output.extracted_answer = test_program
                 else:
