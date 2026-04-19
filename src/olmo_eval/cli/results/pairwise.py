@@ -161,15 +161,15 @@ def pairwise(
             db.dispose()
 
     if output_format == "json":
-        _output_json(result)
+        _output_json(result, output_path)
     elif output_format == "csv":
-        _output_csv(result)
+        _output_csv(result, output_path)
     else:
         _output_plot(result, output_path)
 
 
-def _output_json(result: Any) -> None:
-    """Serialize PairwiseResult to JSON on stdout."""
+def _output_json(result: Any, output_path: str | None) -> None:
+    """Serialize PairwiseResult to JSON — to ``output_path`` if set, else stdout."""
     from olmo_eval.analysis.pairwise import get_win_rate
 
     n = len(result.models)
@@ -200,28 +200,43 @@ def _output_json(result: Any) -> None:
             for i in range(n)
         },
     }
-    print(json.dumps(data, indent=2))
+    payload = json.dumps(data, indent=2)
+    if output_path:
+        with open(output_path, "w") as f:
+            f.write(payload)
+            f.write("\n")
+        console.print(f"[green]Saved JSON to {output_path}[/green]")
+    else:
+        print(payload)
 
 
-def _output_csv(result: Any) -> None:
-    """Output NxN win-rate matrix as CSV on stdout."""
+def _output_csv(result: Any, output_path: str | None) -> None:
+    """Output NxN win-rate matrix as CSV — to ``output_path`` if set, else stdout."""
     import csv
 
     from olmo_eval.analysis.pairwise import get_win_rate
 
     n = len(result.models)
-    writer = csv.writer(sys.stdout)
     labels = [m.label for m in result.models]
-    writer.writerow([""] + labels)
-    for i in range(n):
-        row = [labels[i]]
-        for j in range(n):
-            if i == j:
-                row.append("-")
-            else:
-                wr = get_win_rate(result.pairs, i, j)
-                row.append(f"{wr:.4f}")
-        writer.writerow(row)
+
+    def _write_rows(writer: Any) -> None:
+        writer.writerow([""] + labels)
+        for i in range(n):
+            row = [labels[i]]
+            for j in range(n):
+                if i == j:
+                    row.append("-")
+                else:
+                    wr = get_win_rate(result.pairs, i, j)
+                    row.append(f"{wr:.4f}")
+            writer.writerow(row)
+
+    if output_path:
+        with open(output_path, "w", newline="") as f:
+            _write_rows(csv.writer(f))
+        console.print(f"[green]Saved CSV to {output_path}[/green]")
+    else:
+        _write_rows(csv.writer(sys.stdout))
 
 
 def _output_plot(result: Any, output_path: str | None) -> None:
