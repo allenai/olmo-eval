@@ -1,4 +1,4 @@
-"""CLI commands for discovering suites and experiment groups in the DB."""
+"""Discovery commands for results data."""
 
 from __future__ import annotations
 
@@ -72,17 +72,7 @@ def suites(
     db_user: str,
     db_password: str,
 ) -> None:
-    """List registered suites and how much of each has results in the DB.
-
-    Applies the same experiment/model/group selectors as ``results pairwise`` so
-    you can discover which suites are fully covered by a given run.
-
-    Examples:
-
-        olmo-eval results suites -G my-benchmark
-
-        olmo-eval results suites -m llama3 -m qwen2.5 --filter math
-    """
+    """List suite coverage within the selected experiment scope."""
     from sqlalchemy import distinct, or_, select
 
     from olmo_eval.evals.suites.registry import get_suite, list_suites
@@ -188,14 +178,7 @@ def groups(
     db_user: str,
     db_password: str,
 ) -> None:
-    """List experiment groups in the DB with summary counts.
-
-    Examples:
-
-        olmo-eval results groups
-
-        olmo-eval results groups --filter llama3
-    """
+    """List experiment groups with summary counts."""
     from sqlalchemy import distinct, func, select
 
     from olmo_eval.storage.backends.postgres.models import Experiment, TaskResult
@@ -223,7 +206,6 @@ def groups(
                     console.print("[dim]No experiment groups matched.[/dim]")
                     return
 
-                # Separate query for distinct task count per group.
                 task_counts_stmt = (
                     select(
                         Experiment.experiment_group,
@@ -284,12 +266,7 @@ def group(
     db_user: str,
     db_password: str,
 ) -> None:
-    """Show the models, tasks, and covered suites for a single experiment group.
-
-    Example:
-
-        olmo-eval results group my-benchmark
-    """
+    """Show models, tasks, and suite coverage for one experiment group."""
     from sqlalchemy import distinct, func, select
 
     from olmo_eval.evals.suites.registry import get_suite, list_suites

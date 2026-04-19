@@ -15,13 +15,10 @@ from olmo_eval.analysis.eval_power import (
 
 class TestRequiredSampleSize:
     def test_paper_worked_example(self) -> None:
-        # omega^2 = 1/9, sigma^2 = 0, mde = 0.03, alpha = 0.05, power = 0.80
-        # gives n = 969 (Miller 2024, Section 5 worked example).
         n = required_sample_size(mde=0.03, omega2=1 / 9)
         assert n == 969
 
     def test_monotone_in_mde(self) -> None:
-        # Smaller MDE -> more samples.
         n_small = required_sample_size(mde=0.01, omega2=1 / 9)
         n_large = required_sample_size(mde=0.05, omega2=1 / 9)
         assert n_small > n_large
@@ -32,7 +29,6 @@ class TestRequiredSampleSize:
         assert n_high > n_low
 
     def test_resamples_reduce_n(self) -> None:
-        # More resamples shrink the sampling-noise terms, reducing required n.
         n_k1 = required_sample_size(mde=0.05, omega2=0.1, sigma2_a=0.2, sigma2_b=0.2, k_a=1, k_b=1)
         n_k10 = required_sample_size(
             mde=0.05, omega2=0.1, sigma2_a=0.2, sigma2_b=0.2, k_a=10, k_b=10
@@ -62,28 +58,22 @@ class TestRequiredSampleSize:
 
 class TestMinimumDetectableEffect:
     def test_paper_mde_k1(self) -> None:
-        # n=198, omega^2=1/9, sigma^2_A=sigma^2_B=1/6, K=1 -> MDE ~ 0.132
         mde = minimum_detectable_effect(
             n=198, omega2=1 / 9, sigma2_a=1 / 6, sigma2_b=1 / 6, k_a=1, k_b=1
         )
         assert mde == pytest.approx(0.132, abs=1e-3)
 
     def test_paper_mde_k10(self) -> None:
-        # Same but with K=10 -> MDE ~ 0.075
         mde = minimum_detectable_effect(
             n=198, omega2=1 / 9, sigma2_a=1 / 6, sigma2_b=1 / 6, k_a=10, k_b=10
         )
         assert mde == pytest.approx(0.075, abs=1e-3)
 
     def test_round_trip(self) -> None:
-        # required_sample_size(mde) -> n, then MDE at that n is within
-        # ceiling tolerance of the original MDE.
         orig = 0.05
         n = required_sample_size(mde=orig, omega2=0.2, sigma2_a=0.1, sigma2_b=0.1)
         recovered = minimum_detectable_effect(n=n, omega2=0.2, sigma2_a=0.1, sigma2_b=0.1)
-        # Recovered MDE is <= original (since ceil rounds up n).
         assert recovered <= orig
-        # And is close (ceiling effect is at most 1 sample worth).
         assert recovered == pytest.approx(orig, rel=0.01)
 
     def test_validates_n(self) -> None:
@@ -105,7 +95,6 @@ class TestEstimateVarianceComponents:
         assert vc["omega2"] == pytest.approx(vc["var_paired_diff"])
 
     def test_binary_flag_yields_zero_on_bernoulli(self) -> None:
-        # For strictly 0/1 observations, s*(1-s) == 0, so sigma^2 estimate is 0.
         a = np.array([1, 0, 1, 0, 1, 0], dtype=float)
         b = np.array([0, 1, 1, 0, 0, 1], dtype=float)
         vc = estimate_variance_components(a, b, binary=True)
@@ -113,7 +102,6 @@ class TestEstimateVarianceComponents:
         assert vc["sigma2_b"] == 0.0
 
     def test_binary_flag_on_fractional_scores(self) -> None:
-        # Fractional scores in [0, 1] give nonzero mean(s*(1-s)).
         a = np.array([0.8, 0.6, 0.5, 0.3])
         b = np.array([0.4, 0.5, 0.5, 0.2])
         vc = estimate_variance_components(a, b, binary=True)
@@ -121,8 +109,6 @@ class TestEstimateVarianceComponents:
         assert vc["sigma2_b"] == pytest.approx(float(np.mean(b * (1 - b))))
 
     def test_omega2_floored_at_zero(self) -> None:
-        # Perfectly correlated -> var(d) ~ 0; omega2 floored when sigma terms
-        # would otherwise push the estimate negative.
         a = np.array([1, 1, 0, 0, 1, 0, 1, 1], dtype=float)
         b = a.copy()
         vc = estimate_variance_components(a, b, binary=True)
@@ -130,15 +116,11 @@ class TestEstimateVarianceComponents:
         assert vc["omega2"] == 0.0
 
     def test_clustered_equals_iid_when_each_cluster_is_singleton(self) -> None:
-        # If every cluster has exactly one question, the cluster-robust
-        # estimator reduces to the IID sample variance (up to the (n-1) vs n
-        # Bessel correction — we use plain /n here, matching the paper's Eq 8
-        # definition). So both should be in the same ballpark, and should
-        # definitely both be nonzero and positive.
+        # The clustered path uses /n, so compare scale rather than exact equality.
         rng = np.random.default_rng(42)
         a = rng.uniform(size=20)
         b = rng.uniform(size=20)
-        cluster_ids = np.arange(20)  # one per cluster
+        cluster_ids = np.arange(20)
         vc_cluster = estimate_variance_components(a, b, cluster_ids=cluster_ids)
         vc_plain = estimate_variance_components(a, b)
         assert vc_cluster["n_clusters"] == 20
@@ -146,9 +128,6 @@ class TestEstimateVarianceComponents:
         assert vc_plain["var_paired_diff"] > 0
 
     def test_clustered_inflates_variance_with_correlated_within_cluster(self) -> None:
-        # If within-cluster differences are highly correlated, the clustered
-        # estimator should be larger than the IID sample variance.
-        # Construct d where cluster 0 all has d=+0.5 and cluster 1 all has d=-0.5.
         a = np.array([0.8, 0.8, 0.8, 0.8, 0.2, 0.2, 0.2, 0.2])
         b = np.array([0.3, 0.3, 0.3, 0.3, 0.7, 0.7, 0.7, 0.7])
         cluster_ids = np.array([0, 0, 0, 0, 1, 1, 1, 1])

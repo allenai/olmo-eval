@@ -1,4 +1,4 @@
-"""CLI command for pairwise model comparison."""
+"""CLI entrypoint for pairwise model comparison."""
 
 from __future__ import annotations
 
@@ -120,12 +120,10 @@ def pairwise(
     db_user: str,
     db_password: str,
 ) -> None:
-    """Compute pairwise win/loss/tie comparison between models.
+    """Compare 2+ experiments on one task or suite.
 
-    Compare instance-level scores across 2+ experiments on a single task or
-    a registered suite. --task uses EXACT task-name matching (full
-    variant/regime, e.g. 'humaneval:3shot:pass_at_1'); use --suite to pool
-    related tasks, or 'results query' to browse matching names.
+    ``--task`` uses exact task-name matching. Use ``results query`` to browse
+    names and ``--suite`` to pool related tasks.
 
     Requires the [analysis] extra for plot output: pip install olmo-eval-internal[analysis]
 
@@ -133,7 +131,7 @@ def pairwise(
 
         olmo-eval results pairwise -G my-benchmark -t humaneval:3shot:pass_at_1
 
-        olmo-eval results pairwise -m llama3 -m qwen2.5 -t gsm8k:olmo3base
+        olmo-eval results pairwise -m model-a -m model-b -t gsm8k:olmo3base
 
         olmo-eval results pairwise -G my-benchmark -S multipl_e:pass_at_1
 
@@ -203,7 +201,7 @@ def pairwise(
 
 
 def _short_label(meta: Any) -> str:
-    """Single-line display label suitable for matrix keys / CSV cells."""
+    """Collapse a model label to one line for text outputs."""
     hash_short = (meta.model_hash or "")[:8]
     if meta.model_name and hash_short:
         return f"{meta.model_name} ({hash_short})"
@@ -211,10 +209,7 @@ def _short_label(meta: Any) -> str:
 
 
 def _output_json(result: Any, output_path: str | None) -> None:
-    """Serialize PairwiseResult to JSON — analysis-friendly schema.
-
-    Writes to ``output_path`` if set, else stdout.
-    """
+    """Write the pairwise result as JSON."""
     from olmo_eval.analysis.pairwise import get_win_rate
 
     n = len(result.models)
@@ -272,12 +267,7 @@ def _output_json(result: Any, output_path: str | None) -> None:
 
 
 def _output_csv(result: Any, output_path: str | None) -> None:
-    """Output pairwise stats as a long-format CSV (one row per pair).
-
-    Columns: model_a, model_b, wins_a, wins_b, ties, n_contested, win_rate_a,
-    win_rate_b, se, var_paired_diff, var_marginal_sum. Writes to
-    ``output_path`` if set, else stdout.
-    """
+    """Write one CSV row per pair."""
     import csv
 
     labels = [_short_label(m) for m in result.models]

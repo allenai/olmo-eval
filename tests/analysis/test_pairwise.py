@@ -27,7 +27,6 @@ class TestPairStats:
 
     def test_win_rate_excludes_ties(self) -> None:
         p = PairStats(index_a=0, index_b=1, wins_a=6, wins_b=4, ties=90)
-        # win_rate is computed from contested instances only
         assert p.win_rate_a == pytest.approx(0.6)
 
     def test_all_ties_returns_half(self) -> None:
@@ -40,12 +39,10 @@ class TestPairStats:
         assert p.win_rate_a == 0.5
 
     def test_se_even_split(self) -> None:
-        # 50/50 with n=100: SE = sqrt(0.5*0.5 / 99)
         p = PairStats(index_a=0, index_b=1, wins_a=50, wins_b=50, ties=0)
         assert p.se == pytest.approx(math.sqrt(0.25 / 99), abs=1e-9)
 
     def test_se_skewed(self) -> None:
-        # 7/10 with n=10: SE = sqrt(0.7*0.3 / 9)
         p = PairStats(index_a=0, index_b=1, wins_a=7, wins_b=3, ties=0)
         assert p.se == pytest.approx(math.sqrt(0.21 / 9), abs=1e-9)
 
@@ -62,13 +59,11 @@ class TestPairStats:
         assert p.se == 0.0
 
     def test_se_ignores_ties(self) -> None:
-        # Only contested n drives SE; adding ties must not change it.
         without_ties = PairStats(index_a=0, index_b=1, wins_a=50, wins_b=50, ties=0)
         with_ties = PairStats(index_a=0, index_b=1, wins_a=50, wins_b=50, ties=50)
         assert with_ties.se == pytest.approx(without_ties.se, abs=1e-12)
 
     def test_se_symmetric_in_p(self) -> None:
-        # var(x) == var(1-x) for binary scores, so SE(p) == SE(1-p).
         hi = PairStats(index_a=0, index_b=1, wins_a=80, wins_b=20, ties=0)
         lo = PairStats(index_a=0, index_b=1, wins_a=20, wins_b=80, ties=0)
         assert hi.se == pytest.approx(lo.se, abs=1e-12)
@@ -85,7 +80,6 @@ class TestGetSe:
         assert get_se(self.pairs, 0, 1) == pytest.approx(math.sqrt(0.25 / 99))
 
     def test_reverse_lookup_same(self) -> None:
-        # SE is symmetric in orientation.
         assert get_se(self.pairs, 1, 0) == get_se(self.pairs, 0, 1)
 
     def test_missing_pair_returns_zero(self) -> None:
@@ -145,10 +139,9 @@ class TestComputePairs:
             1: {"a": 0.50, "b": 0.50, "c": 0.10},
         }
         shared = {"a", "b", "c"}
-        # margin=0.05 means a-b differences of 0.01 are ties
         pairs = _compute_pairs(scores, 2, shared, margin=0.05)
-        assert pairs[0].ties == 2  # a (diff=0.01) and b (diff=0.01)
-        assert pairs[0].wins_a == 1  # c (diff=0.70)
+        assert pairs[0].ties == 2
+        assert pairs[0].wins_a == 1
 
     def test_three_models(self) -> None:
         scores = {
@@ -158,7 +151,6 @@ class TestComputePairs:
         }
         shared = {"x", "y"}
         pairs = _compute_pairs(scores, 3, shared, margin=0.0)
-        # 3 pairs: (0,1), (0,2), (1,2)
         assert len(pairs) == 3
 
     def test_empty_shared_set(self) -> None:
@@ -183,14 +175,12 @@ class TestComputePairs:
         assert pairs[0].wins_a == 1
 
     def test_skips_none_scores(self) -> None:
-        # native_id "b" is in shared set but missing from scores_by_idx[0]
         scores: dict[int, dict[str, float]] = {
             0: {"a": 1.0},
             1: {"a": 0.0, "b": 0.5},
         }
         shared = {"a", "b"}
         pairs = _compute_pairs(scores, 2, shared, margin=0.0)
-        # "b" skipped because idx=0 doesn't have it
         assert pairs[0].wins_a == 1
         assert pairs[0].wins_b == 0
         assert pairs[0].ties == 0
@@ -243,11 +233,9 @@ class TestPairwiseResult:
 
 
 class TestComputePairsCompoundKeys:
-    """Suite-mode pools instances across tasks using (task_name, native_id) keys."""
+    """Compound keys keep identical native IDs in different tasks distinct."""
 
     def test_pools_across_tasks(self) -> None:
-        # Two tasks, 3 instances each. Model 0 always wins on task_1,
-        # model 1 always wins on task_2.
         scores = {
             0: {
                 ("task_1", "q1"): 1.0,
@@ -273,12 +261,11 @@ class TestComputePairsCompoundKeys:
         assert pairs[0].ties == 0
 
     def test_same_native_id_different_tasks_not_collapsed(self) -> None:
-        # Instance "q1" exists under two tasks — must not be deduped.
         scores = {
             0: {("task_1", "q1"): 1.0, ("task_2", "q1"): 1.0},
             1: {("task_1", "q1"): 0.0, ("task_2", "q1"): 0.0},
         }
         shared = {("task_1", "q1"), ("task_2", "q1")}
         pairs = _compute_pairs(scores, 2, shared, margin=0.0)
-        assert pairs[0].wins_a == 2  # both (task_hash, q1) rows counted
+        assert pairs[0].wins_a == 2
         assert pairs[0].wins_b == 0

@@ -1,4 +1,4 @@
-"""CLI commands for querying and displaying evaluation results."""
+"""Results CLI commands."""
 
 import click
 
@@ -13,7 +13,6 @@ def results() -> None:
     pass
 
 
-# Register subcommands
 results.add_command(query)
 results.add_command(pairwise)
 results.add_command(suites)

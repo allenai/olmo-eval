@@ -1,9 +1,4 @@
-"""Power analysis for LLM evaluation experiments.
-
-Provides required-sample-size and minimum-detectable-effect helpers under the
-CLT, with optional cluster-adjusted variance for grouped questions.
-Methodology follows Miller, "Adding Error Bars to Evals" (arXiv:2411.00640).
-"""
+"""CLT-based power helpers for paired evaluation scores."""
 
 from __future__ import annotations
 
@@ -49,22 +44,9 @@ def required_sample_size(
     alpha: float = 0.05,
     power: float = 0.80,
 ) -> int:
-    """Paired questions needed to detect an effect of size ``mde``.
+    """Return the paired sample size needed to detect ``mde``.
 
-        n = (z_{alpha/2} + z_beta)^2 * (omega^2 + sigma_A^2/K_A + sigma_B^2/K_B) / delta^2
-
-    Args:
-        mde: minimum detectable effect (absolute score difference), e.g. 0.03.
-        omega2: variance of question-level paired conditional means.
-        sigma2_a: mean conditional variance for model A.
-        sigma2_b: mean conditional variance for model B.
-        k_a: answer resamples per question for model A.
-        k_b: answer resamples per question for model B.
-        alpha: two-sided significance level.
-        power: target statistical power (1 - beta).
-
-    Returns:
-        Ceiling of the required sample size, as an int.
+    n = (z_{alpha/2} + z_beta)^2 * (omega^2 + sigma_A^2/K_A + sigma_B^2/K_B) / delta^2
     """
     _validate_alpha_power(alpha, power)
     _validate_k(k_a, k_b)
@@ -87,11 +69,9 @@ def minimum_detectable_effect(
     alpha: float = 0.05,
     power: float = 0.80,
 ) -> float:
-    """Smallest absolute score difference detectable at ``n`` paired questions.
+    """Return the smallest detectable effect at ``n`` paired questions.
 
-        delta = (z_{alpha/2} + z_beta) * sqrt((omega^2 + sigma_A^2/K_A + sigma_B^2/K_B) / n)
-
-    Arguments match :func:`required_sample_size` except ``n`` replaces ``mde``.
+    delta = (z_{alpha/2} + z_beta) * sqrt((omega^2 + sigma_A^2/K_A + sigma_B^2/K_B) / n)
     """
     _validate_alpha_power(alpha, power)
     _validate_k(k_a, k_b)
@@ -112,25 +92,10 @@ def estimate_variance_components(
     k_b: int = 1,
     binary: bool = False,
 ) -> dict[str, Any]:
-    """Estimate variance parameters needed by the power helpers.
+    """Estimate the variance terms used by the power helpers.
 
-    Args:
-        score_a: per-question scores for model A (length n).
-        score_b: per-question scores for model B (length n).
-        cluster_ids: optional per-question cluster labels. When provided, the
-            variance of paired differences is computed with a cluster-robust
-            estimator to account for within-cluster correlation.
-        k_a: resamples per question for model A (used to back out omega^2).
-        k_b: resamples per question for model B.
-        binary: if True, estimate conditional variances as ``mean(s*(1-s))``
-            per model. Appropriate for fractional scores bounded on [0, 1];
-            yields 0 for strictly-binary observations. If False,
-            ``sigma_A^2 = sigma_B^2 = 0`` (next-token-probability convention).
-
-    Returns:
-        dict with keys ``omega2``, ``sigma2_a``, ``sigma2_b``,
-        ``var_paired_diff`` (per-question), ``correlation``, ``n``,
-        ``n_clusters``.
+    If ``cluster_ids`` is set, use a cluster-robust paired-difference variance.
+    If ``binary`` is set, estimate conditional variance as ``mean(s * (1 - s))``.
     """
     _validate_k(k_a, k_b)
 
@@ -146,7 +111,6 @@ def estimate_variance_components(
 
     d = a - b
 
-    # Per-question variance of the paired difference.
     n_clusters: int | None = None
     if cluster_ids is not None:
         cluster_arr = np.asarray(cluster_ids)
@@ -158,8 +122,7 @@ def estimate_variance_components(
         cluster_sum_sq = 0.0
         for c in unique:
             cluster_sum_sq += float(d_demean[cluster_arr == c].sum()) ** 2
-        # Cluster-robust estimator of Var(mean(d)); multiply by n to express
-        # as an effective per-question variance for the power formulas.
+        # Scale Var(mean(d)) back to a per-question term.
         var_paired_diff = cluster_sum_sq / n
     else:
         var_paired_diff = float(np.var(d, ddof=1))
@@ -196,7 +159,7 @@ def power_summary(
     alpha: float = 0.05,
     power: float = 0.80,
 ) -> str:
-    """Human-readable variance components + required-n / MDE tables."""
+    """Format the estimated variance terms and sizing tables."""
     vc = estimate_variance_components(
         score_a,
         score_b,
