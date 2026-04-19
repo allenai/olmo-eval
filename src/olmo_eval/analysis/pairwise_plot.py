@@ -34,12 +34,18 @@ _CMAP_STOPS: list[tuple[float, str]] = [
     (1.00, "#1f6b4f"),
 ]
 
-_FOOTER_HEIGHT = 2.00
+_FOOTER_HEIGHT = 1.55
 _RIGHT_PAD = 0.35
 _LEFT_PAD = 0.35
 _TITLE_PAD = 0.55
 # Keep the footer readable when the matrix is narrow.
 _MIN_FOOTER_WIDTH = 6.0
+_LEGEND_GAP = 0.28
+_LEGEND_BAR_WIDTH = 0.26
+_LEGEND_LABEL_GAP = 0.08
+_LEGEND_LABEL_WIDTH = 0.45
+_LEGEND_HEIGHT_FRACTION = 0.62
+_LEGEND_MIN_HEIGHT = 1.20
 
 
 def build_win_rate_matrix(result: PairwiseResult) -> np.ndarray:
@@ -105,15 +111,20 @@ def plot_pairwise_matrix(
     label_w = max_chars * char_w
     # Reserve vertical space for rotated x-labels.
     rotated_projection = label_w * math.sin(math.radians(45))
+    legend_right_in = (
+        _LEGEND_GAP + _LEGEND_BAR_WIDTH + _LEGEND_LABEL_GAP + _LEGEND_LABEL_WIDTH + _RIGHT_PAD
+    )
 
     heatmap_in = cell_size * n
     left_in = max(label_w + _LEFT_PAD, 1.1)
-    right_in = max(rotated_projection, _RIGHT_PAD)
+    right_in = max(rotated_projection, legend_right_in, _RIGHT_PAD)
     top_in = rotated_projection + _TITLE_PAD + (0.35 if title else 0.0)
     footer_in = _FOOTER_HEIGHT
 
+    plot_section_width_in = left_in + heatmap_in + right_in
     footer_width_in = max(heatmap_in, _MIN_FOOTER_WIDTH)
-    fig_w = max(left_in + heatmap_in + right_in, left_in + footer_width_in + _RIGHT_PAD)
+    footer_section_width_in = footer_width_in + _LEFT_PAD + _RIGHT_PAD
+    fig_w = max(plot_section_width_in, footer_section_width_in)
     fig_h = top_in + heatmap_in + footer_in
 
     positions = [p for p, _ in _CMAP_STOPS]
@@ -134,9 +145,12 @@ def plot_pairwise_matrix(
         }
     ):
         fig = plt.figure(figsize=(fig_w, fig_h))
+        # Center the matrix/legend panel and the footer independently.
+        plot_section_left_in = (fig_w - plot_section_width_in) / 2
+        heatmap_left_in = plot_section_left_in + left_in
         ax = fig.add_axes(
             (
-                left_in / fig_w,
+                heatmap_left_in / fig_w,
                 footer_in / fig_h,
                 heatmap_in / fig_w,
                 heatmap_in / fig_h,
@@ -228,71 +242,52 @@ def plot_pairwise_matrix(
                 va="top",
             )
 
-        heatmap_left_frac = left_in / fig_w
-        heatmap_width_frac = footer_width_in / fig_w
+        footer_left_in = (fig_w - footer_width_in) / 2
+        footer_left_frac = footer_left_in / fig_w
+        footer_width_frac = footer_width_in / fig_w
+        footer_center_frac = (footer_left_in + footer_width_in / 2) / fig_w
 
         def _y(inches_from_bottom: float) -> float:
             return inches_from_bottom / fig_h
 
-        legend_header_in = 1.82
-        legend_bar_top_in = 1.66
-        legend_bar_bottom_in = 1.52
-        legend_tick_in = 1.42
-        upper_divider_in = 1.22
-        summary_label_in = 1.00
-        stat_head_in = 0.68
-        stat_value_in = 0.34
+        upper_divider_in = 1.24
+        summary_label_in = 0.94
+        stat_head_in = 0.60
+        stat_value_in = 0.24
 
-        bar_width_in = min(footer_width_in * 0.55, 4.5)
-        bar_left_in = left_in + (footer_width_in - bar_width_in) / 2
-        bar_left_frac = bar_left_in / fig_w
-        bar_width_frac = bar_width_in / fig_w
-        bar_height_frac = (legend_bar_top_in - legend_bar_bottom_in) / fig_h
-
+        legend_height_in = min(
+            max(heatmap_in * _LEGEND_HEIGHT_FRACTION, _LEGEND_MIN_HEIGHT),
+            max(heatmap_in - 0.35, _LEGEND_MIN_HEIGHT),
+        )
+        legend_bottom_in = footer_in + (heatmap_in - legend_height_in) / 2
+        legend_left_in = heatmap_left_in + heatmap_in + _LEGEND_GAP
         cax = fig.add_axes(
-            (bar_left_frac, _y(legend_bar_bottom_in), bar_width_frac, bar_height_frac)
-        )
-        cax.imshow(
-            np.linspace(0, 1, 256)[np.newaxis, :],
-            aspect="auto",
-            cmap=cmap,
-            norm=norm,
-            extent=(0.0, 1.0, 0.0, 1.0),
-        )
-        cax.set_xticks([])
-        cax.set_yticks([])
-        for spine in cax.spines.values():
-            spine.set_visible(False)
-
-        fig.text(
-            bar_left_frac + bar_width_frac / 2,
-            _y(legend_header_in),
-            "WIN RATE",
-            fontsize=8,
-            fontweight="bold",
-            color=_TEXT_DIM,
-            ha="center",
-            va="center",
-        )
-
-        for frac, label, ha in (
-            (0.0, "0% — row loses", "left"),
-            (0.5, "50% — tie", "center"),
-            (1.0, "100% — row wins", "right"),
-        ):
-            fig.text(
-                bar_left_frac + frac * bar_width_frac,
-                _y(legend_tick_in),
-                label,
-                fontsize=7,
-                color=_TEXT_DIM,
-                ha=ha,
-                va="center",
+            (
+                legend_left_in / fig_w,
+                _y(legend_bottom_in),
+                _LEGEND_BAR_WIDTH / fig_w,
+                legend_height_in / fig_h,
             )
+        )
+        scalar_mappable = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
+        scalar_mappable.set_array([])
+        cbar = fig.colorbar(scalar_mappable, cax=cax, orientation="vertical")
+        cbar.set_ticks([0.0, 0.5, 1.0])
+        cbar.set_ticklabels(["0%", "50%", "100%"])
+        cbar.outline.set_visible(False)
+        cbar.ax.set_facecolor(_BG)
+        cbar.ax.set_title("WIN RATE", fontsize=8, fontweight="bold", color=_TEXT_DIM, pad=8)
+        cbar.ax.yaxis.set_ticks_position("right")
+        cbar.ax.yaxis.set_label_position("right")
+        cbar.ax.tick_params(length=0, pad=4, labelsize=7, colors=_TEXT_DIM)
+        for tick in cbar.ax.get_yticklabels():
+            tick.set_ha("left")
+        for spine in cbar.ax.spines.values():
+            spine.set_visible(False)
 
         fig.add_artist(
             Line2D(
-                [heatmap_left_frac, heatmap_left_frac + heatmap_width_frac],
+                [footer_left_frac, footer_left_frac + footer_width_frac],
                 [_y(upper_divider_in), _y(upper_divider_in)],
                 transform=fig.transFigure,
                 color=_DIVIDER,
@@ -301,12 +296,13 @@ def plot_pairwise_matrix(
         )
 
         fig.text(
-            heatmap_left_frac,
+            footer_center_frac,
             _y(summary_label_in),
             "SUMMARY",
             fontsize=8,
             fontweight="bold",
             color=_TEXT_DIM,
+            ha="center",
             va="center",
         )
 
@@ -387,10 +383,12 @@ def plot_pairwise_matrix(
             ("shared n / pair", str(shared_n), _tier_shared_n(shared_n)),
             ("MDE @ 80% power", mde_str, _tier_mde(mde)),
         ]
-        col_w = heatmap_width_frac / len(stats)
+        col_w = footer_width_frac / len(stats)
         for idx, (heading, value, value_color) in enumerate(stats):
-            cx = heatmap_left_frac + idx * col_w
-            fig.text(cx, _y(stat_head_in), heading, fontsize=8, color=_TEXT_DIM, va="center")
+            cx = footer_left_frac + (idx + 0.5) * col_w
+            fig.text(
+                cx, _y(stat_head_in), heading, fontsize=8, color=_TEXT_DIM, ha="center", va="center"
+            )
             fig.text(
                 cx,
                 _y(stat_value_in),
@@ -398,6 +396,7 @@ def plot_pairwise_matrix(
                 fontsize=13,
                 fontweight="bold",
                 color=value_color,
+                ha="center",
                 va="center",
             )
 

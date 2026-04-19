@@ -115,7 +115,8 @@ dev = [
     "ruff>=0.14.0",
     "ty>=0.0.10",
     "pre-commit>=4.0.0",
-    "olmo-eval-internal[storage]",
+    # Unit tests import analysis helpers directly, so dev installs need these extras too.
+    "olmo-eval-internal[storage,analysis]",
     "jinja2>=3.1.6",
     "google-api-core>=2.0.0",
 ]
