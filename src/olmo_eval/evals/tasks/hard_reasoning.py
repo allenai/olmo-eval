@@ -150,10 +150,10 @@ class HardReasoningBase(Task):
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         return Instance(
-            question=doc["problem"]["prompt"],
+            question=doc["prompt"],
             metadata={
                 "id": doc.get("id", index),
-                "scenario_data": doc["problem"],
+                "scenario_data": doc["instance"],
                 "subset": self.subset,
             },
         )
