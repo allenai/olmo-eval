@@ -96,7 +96,7 @@ across different tasks don't collide.
 | `--metric METRIC`     | none    | Metric in `metric:scorer` format. Defaults to each task's `primary_metric`.              |
 | `--margin FLOAT`      | `0.0`   | Tie threshold for continuous scores. Scores within `margin` of each other count as tied. |
 | `-o, --output PATH`   | stdout  | Save plot / JSON / CSV to a file.                                                        |
-| `-f, --format FMT`    | `plot`  | One of `plot`, `json`, `csv`.                                                            |
+| `-f, --format FMT`    | `plot`  | One of `plot`, `json`, `csv`. `plot` requires the `[analysis]` extra.                    |
 | `--all`               | off     | Keep every matched experiment as its own row (default: dedupe by model+hash to most recent). |
 
 By default matched experiments are deduped to one row per

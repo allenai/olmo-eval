@@ -82,7 +82,7 @@ from olmo_eval.cli.utils import console
     "output_path",
     default=None,
     type=click.Path(),
-    help="Save plot to file (e.g., matrix.png).",
+    help="Save plot / JSON / CSV to a file.",
 )
 @click.option(
     "--format",
@@ -90,7 +90,7 @@ from olmo_eval.cli.utils import console
     "output_format",
     type=click.Choice(["plot", "json", "csv"]),
     default="plot",
-    help="Output format (default: plot).",
+    help="Output format (default: plot — requires the [analysis] extra).",
 )
 @click.option(
     "--all",
