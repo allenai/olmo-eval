@@ -35,6 +35,18 @@ from olmo_eval.cli.utils import console
     help="Model hash prefix(es) to compare.",
 )
 @click.option(
+    "--exclude-model",
+    "exclude_model_names",
+    multiple=True,
+    help="Model name prefix(es) to exclude from the comparison.",
+)
+@click.option(
+    "--exclude-model-hash",
+    "exclude_model_hashes",
+    multiple=True,
+    help="Model hash prefix(es) to exclude from the comparison.",
+)
+@click.option(
     "--experiment-group",
     "-G",
     "experiment_groups",
@@ -56,6 +68,18 @@ from olmo_eval.cli.utils import console
     "task_hash",
     default=None,
     help="Task hash prefix to filter by. Must resolve to a single task name.",
+)
+@click.option(
+    "--exclude-task",
+    "exclude_task_names",
+    multiple=True,
+    help="Exact task name(s) to exclude from the scoped comparison.",
+)
+@click.option(
+    "--exclude-task-hash",
+    "exclude_task_hashes",
+    multiple=True,
+    help="Task hash prefix(es) to exclude from the scoped comparison.",
 )
 @click.option(
     "--suite",
@@ -105,9 +129,13 @@ def pairwise(
     experiment_ids: tuple[str, ...],
     model_names: tuple[str, ...],
     model_hashes: tuple[str, ...],
+    exclude_model_names: tuple[str, ...],
+    exclude_model_hashes: tuple[str, ...],
     experiment_groups: tuple[str, ...],
     task_name: str | None,
     task_hash: str | None,
+    exclude_task_names: tuple[str, ...],
+    exclude_task_hashes: tuple[str, ...],
     suite_name: str | None,
     metric: str | None,
     margin: float,
@@ -163,7 +191,11 @@ def pairwise(
                         experiment_ids=list(experiment_ids) or None,
                         model_names=list(model_names) or None,
                         model_hashes=list(model_hashes) or None,
+                        exclude_model_names=list(exclude_model_names) or None,
+                        exclude_model_hashes=list(exclude_model_hashes) or None,
                         task_hash=task_hash,
+                        exclude_task_names=list(exclude_task_names) or None,
+                        exclude_task_hashes=list(exclude_task_hashes) or None,
                         experiment_groups=list(experiment_groups) or None,
                         suite_name=suite_name,
                         keep_all=keep_all,

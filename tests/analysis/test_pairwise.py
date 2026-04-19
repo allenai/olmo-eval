@@ -11,6 +11,11 @@ from olmo_eval.analysis.pairwise import (
     PairStats,
     PairwiseResult,
     _compute_pairs,
+    _filter_suite_task_names,
+    _is_excluded_experiment,
+    _is_excluded_task,
+    _matches_exact,
+    _matches_prefix,
     get_se,
     get_win_rate,
 )
@@ -107,6 +112,60 @@ class TestGetWinRate:
         wr_ab = get_win_rate(self.pairs, 0, 2)
         wr_ba = get_win_rate(self.pairs, 2, 0)
         assert wr_ab + wr_ba == pytest.approx(1.0)
+
+
+class TestExcludeHelpers:
+    def test_matches_prefix(self) -> None:
+        assert _matches_prefix("llama3.1-8b", ["llama", "qwen"]) is True
+        assert _matches_prefix("llama3.1-8b", ["qwen"]) is False
+        assert _matches_prefix(None, ["llama"]) is False
+
+    def test_matches_exact(self) -> None:
+        assert _matches_exact("gsm8k:olmo3base", ["gsm8k:olmo3base"]) is True
+        assert _matches_exact("gsm8k:olmo3base", ["gsm8k"]) is False
+        assert _matches_exact(None, ["gsm8k:olmo3base"]) is False
+
+    def test_is_excluded_experiment_uses_prefix_matching(self) -> None:
+        assert _is_excluded_experiment(
+            model_name="llama3.1-8b",
+            model_hash="abc12345deadbeef",
+            exclude_model_names=["llama"],
+        )
+        assert _is_excluded_experiment(
+            model_name="qwen2.5-7b",
+            model_hash="abc12345deadbeef",
+            exclude_model_hashes=["abc12345"],
+        )
+        assert not _is_excluded_experiment(
+            model_name="qwen2.5-7b",
+            model_hash="fff99999deadbeef",
+            exclude_model_names=["llama"],
+            exclude_model_hashes=["abc12345"],
+        )
+
+    def test_is_excluded_task_uses_exact_name_and_hash_prefix(self) -> None:
+        assert _is_excluded_task(
+            task_name="humaneval:3shot:pass_at_1",
+            task_hash="abc12345deadbeef",
+            exclude_task_names=["humaneval:3shot:pass_at_1"],
+        )
+        assert _is_excluded_task(
+            task_name="humaneval:3shot:pass_at_1",
+            task_hash="abc12345deadbeef",
+            exclude_task_hashes=["abc12345"],
+        )
+        assert not _is_excluded_task(
+            task_name="humaneval:3shot:pass_at_1",
+            task_hash="abc12345deadbeef",
+            exclude_task_names=["humaneval"],
+            exclude_task_hashes=["fff99999"],
+        )
+
+    def test_filter_suite_task_names_preserves_order(self) -> None:
+        assert _filter_suite_task_names(
+            ("task_a", "task_b", "task_c"),
+            exclude_task_names=["task_b"],
+        ) == ("task_a", "task_c")
 
 
 class TestComputePairs:

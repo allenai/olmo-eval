@@ -154,6 +154,10 @@ olmo-eval results suites -G <your-group>   # suites with DB coverage
 olmo-eval results group <your-group>       # models + tasks + suites
 ```
 
+If you want to trim a matrix without changing the underlying experiment group,
+the pairwise CLI also supports `--exclude-task`, `--exclude-task-hash`,
+`--exclude-model`, and `--exclude-model-hash`.
+
 **What NOT to pool.** Resist the urge to pool tasks that measure different
 capabilities (e.g. math + dialogue). That inflates `shared n` without
 improving signal — and can actually hurt pairing gain by driving `Var(d)` up.

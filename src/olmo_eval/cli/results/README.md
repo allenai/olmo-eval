@@ -93,6 +93,10 @@ across different tasks don't collide.
 
 | Flag                  | Default | Use                                                                                      |
 | --------------------- | ------- | ---------------------------------------------------------------------------------------- |
+| `--exclude-model PFX` | none    | Drop model rows whose names start with any supplied prefix.                              |
+| `--exclude-model-hash PFX` | none | Drop model rows whose hashes start with any supplied prefix.                           |
+| `--exclude-task TASK` | none    | Drop exact task names from the scoped comparison (useful with `--suite`).                |
+| `--exclude-task-hash PFX` | none | Drop task rows whose hashes start with any supplied prefix.                            |
 | `--metric METRIC`     | none    | Metric in `metric:scorer` format. Defaults to each task's `primary_metric`.              |
 | `--margin FLOAT`      | `0.0`   | Tie threshold for continuous scores. Scores within `margin` of each other count as tied. |
 | `-o, --output PATH`   | stdout  | Save plot / JSON / CSV to a file.                                                        |
@@ -130,6 +134,16 @@ Compare two specific models on a task hash:
 
 ```
 olmo-eval results pairwise -m llama3.1-8b -m qwen2.5-7b -T abc12345
+```
+
+Exclude one noisy suite member and a stale model family from the matrix:
+
+```
+olmo-eval results pairwise \
+  -G my-benchmark \
+  -S multipl_e:pass_at_1 \
+  --exclude-task mbpp_plus:pass_at_1 \
+  --exclude-model old-baseline-
 ```
 
 ### Errors you might see

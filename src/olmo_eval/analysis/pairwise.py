@@ -86,6 +86,56 @@ def get_se(pairs: list[PairStats], row: int, col: int) -> float:
     return 0.0
 
 
+def _matches_prefix(value: str | None, prefixes: list[str] | None) -> bool:
+    """Return True when value starts with any configured prefix."""
+    return (
+        value is not None
+        and prefixes is not None
+        and any(value.startswith(prefix) for prefix in prefixes)
+    )
+
+
+def _matches_exact(value: str | None, values: list[str] | None) -> bool:
+    """Return True when value exactly matches one of the configured values."""
+    return value is not None and values is not None and value in values
+
+
+def _is_excluded_experiment(
+    model_name: str | None,
+    model_hash: str | None,
+    exclude_model_names: list[str] | None = None,
+    exclude_model_hashes: list[str] | None = None,
+) -> bool:
+    """Return True when an experiment should be dropped from pairwise analysis."""
+    return _matches_prefix(model_name, exclude_model_names) or _matches_prefix(
+        model_hash, exclude_model_hashes
+    )
+
+
+def _is_excluded_task(
+    task_name: str | None,
+    task_hash: str | None,
+    exclude_task_names: list[str] | None = None,
+    exclude_task_hashes: list[str] | None = None,
+) -> bool:
+    """Return True when a task row should be excluded from pairwise analysis."""
+    return _matches_exact(task_name, exclude_task_names) or _matches_prefix(
+        task_hash, exclude_task_hashes
+    )
+
+
+def _filter_suite_task_names(
+    task_names: tuple[str, ...],
+    exclude_task_names: list[str] | None = None,
+) -> tuple[str, ...]:
+    """Remove excluded exact task names while preserving suite expansion order."""
+    if not exclude_task_names:
+        return task_names
+
+    excluded = set(exclude_task_names)
+    return tuple(task_name for task_name in task_names if task_name not in excluded)
+
+
 def _compute_pairs(
     scores_by_idx: dict[int, dict[tuple[str, str], float]],
     n: int,
@@ -148,7 +198,11 @@ def compute_pairwise(
     experiment_ids: list[str] | None = None,
     model_names: list[str] | None = None,
     model_hashes: list[str] | None = None,
+    exclude_model_names: list[str] | None = None,
+    exclude_model_hashes: list[str] | None = None,
     task_hash: str | None = None,
+    exclude_task_names: list[str] | None = None,
+    exclude_task_hashes: list[str] | None = None,
     experiment_groups: list[str] | None = None,
     suite_name: str | None = None,
     keep_all: bool = False,
@@ -174,6 +228,21 @@ def compute_pairwise(
             "Provide exactly one of task_name, task_hash, or suite_name to scope the comparison"
         )
 
+    if task_name and _matches_exact(task_name, exclude_task_names):
+        raise ValueError(
+            f"Task '{task_name}' was excluded by --exclude-task. "
+            "Remove the exclusion or choose a different scope."
+        )
+    if (
+        task_hash
+        and exclude_task_hashes
+        and any(task_hash.startswith(excluded_hash) for excluded_hash in exclude_task_hashes)
+    ):
+        raise ValueError(
+            f"Task hash prefix '{task_hash}' was excluded by --exclude-task-hash. "
+            "Remove the exclusion or choose a different scope."
+        )
+
     suite_task_names: tuple[str, ...] = ()
     if suite_name:
         from olmo_eval.evals.suites.registry import (
@@ -187,8 +256,12 @@ def compute_pairwise(
             hint_str = f" Did you mean: {', '.join(hints)}?" if hints else ""
             raise ValueError(f"Suite '{suite_name}' not found.{hint_str}")
         suite_task_names = get_suite(suite_name).expand()
+        suite_task_names = _filter_suite_task_names(suite_task_names, exclude_task_names)
         if not suite_task_names:
-            raise ValueError(f"Suite '{suite_name}' resolved to zero tasks")
+            raise ValueError(
+                f"Suite '{suite_name}' resolved to zero tasks after applying --exclude-task "
+                f"filters: {sorted(set(exclude_task_names or []))}"
+            )
 
     task_names_filter: list[str] | None
     if suite_name:
@@ -207,6 +280,16 @@ def compute_pairwise(
         task_hashes=[task_hash] if task_hash else None,
         experiment_groups=experiment_groups,
     )
+    eval_results = [
+        r
+        for r in eval_results
+        if not _is_excluded_experiment(
+            model_name=r.model_name,
+            model_hash=r.model_hash,
+            exclude_model_names=exclude_model_names,
+            exclude_model_hashes=exclude_model_hashes,
+        )
+    ]
 
     if len(eval_results) < 2:
         scope_bits: list[str] = []
@@ -216,6 +299,10 @@ def compute_pairwise(
             scope_bits.append(f"models={model_names}")
         if model_hashes:
             scope_bits.append(f"hashes={model_hashes}")
+        if exclude_model_names:
+            scope_bits.append(f"exclude_models={exclude_model_names}")
+        if exclude_model_hashes:
+            scope_bits.append(f"exclude_hashes={exclude_model_hashes}")
         if experiment_ids:
             scope_bits.append(f"experiments={experiment_ids}")
         if suite_name:
@@ -224,6 +311,10 @@ def compute_pairwise(
             scope_bits.append(f"task={task_name!r}")
         elif task_hash:
             scope_bits.append(f"task_hash={task_hash!r}")
+        if exclude_task_names:
+            scope_bits.append(f"exclude_tasks={exclude_task_names}")
+        if exclude_task_hashes:
+            scope_bits.append(f"exclude_task_hashes={exclude_task_hashes}")
         scope_str = ", ".join(scope_bits) if scope_bits else "(no filters)"
         hint = ""
         if experiment_groups:
@@ -263,6 +354,16 @@ def compute_pairwise(
         exp = exp_lookup.get((r.experiment_id, r.model_hash))
         if exp is not None:
             candidate_experiments.append(exp)
+    candidate_experiments = [
+        exp
+        for exp in candidate_experiments
+        if not _is_excluded_experiment(
+            model_name=exp.model_name,
+            model_hash=exp.model_hash,
+            exclude_model_names=exclude_model_names,
+            exclude_model_hashes=exclude_model_hashes,
+        )
+    ]
 
     n_matched = len(candidate_experiments)
 
@@ -316,6 +417,16 @@ def compute_pairwise(
     elif task_hash:
         tr_stmt = tr_stmt.where(TaskResult.task_hash.startswith(task_hash))
     task_results = session.execute(tr_stmt).scalars().all()
+    task_results = [
+        tr
+        for tr in task_results
+        if not _is_excluded_task(
+            task_name=tr.task_name,
+            task_hash=tr.task_hash,
+            exclude_task_names=exclude_task_names,
+            exclude_task_hashes=exclude_task_hashes,
+        )
+    ]
 
     scope_label = suite_name or task_name or task_hash or ""
     if not task_results:
@@ -343,7 +454,9 @@ def compute_pairwise(
                 " to see which suites have coverage in this group."
             )
         raise ValueError(
-            f"No task results found for '{scope_label}' in the matched experiments.{hint}"
+            f"No task results found for '{scope_label}' in the matched experiments"
+            f"{' after applying exclusions' if exclude_task_names or exclude_task_hashes else ''}."
+            f"{hint}"
         )
 
     task_hash_to_metric: dict[str, str] = {}
