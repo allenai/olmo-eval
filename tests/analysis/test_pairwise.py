@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import math
+from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
 from olmo_eval.analysis.pairwise import (
     ModelMeta,
     PairStats,
     PairwiseResult,
+    _build_experiment_refetch_stmt,
     _compute_pairs,
     _filter_suite_task_names,
     _is_excluded_experiment,
@@ -19,6 +22,7 @@ from olmo_eval.analysis.pairwise import (
     get_se,
     get_win_rate,
 )
+from olmo_eval.common.types.base import EvalResult
 
 
 class TestPairStats:
@@ -328,3 +332,45 @@ class TestComputePairsCompoundKeys:
         pairs = _compute_pairs(scores, 2, shared, margin=0.0)
         assert pairs[0].wins_a == 2
         assert pairs[0].wins_b == 0
+
+
+class TestBuildExperimentRefetchStmt:
+    @staticmethod
+    def _eval_result(experiment_id: str, model_hash: str | None) -> EvalResult:
+        return EvalResult(
+            experiment_id=experiment_id,
+            model_name=f"model-{experiment_id}",
+            backend_name="backend",
+            timestamp=datetime(2026, 4, 19, tzinfo=UTC),
+            model_hash=model_hash,
+        )
+
+    def test_uses_exact_deduped_experiment_hash_pairs(self) -> None:
+        stmt = _build_experiment_refetch_stmt(
+            [
+                self._eval_result("exp2", "hashB"),
+                self._eval_result("exp1", "hashA"),
+                self._eval_result("exp2", "hashB"),
+                self._eval_result("exp0", None),
+            ]
+        )
+
+        assert stmt is not None
+        compiled = stmt.compile(dialect=postgresql.dialect())
+        sql = str(compiled)
+
+        assert "(experiments.experiment_id, experiments.model_hash) IN" in sql
+        assert "experiments.experiment_id IN" not in sql
+        assert "experiments.model_hash IN" not in sql
+        assert len(compiled.params) == 1
+        assert list(compiled.params.values()) == [[("exp1", "hashA"), ("exp2", "hashB")]]
+
+    def test_returns_none_when_no_non_null_model_hashes_exist(self) -> None:
+        stmt = _build_experiment_refetch_stmt(
+            [
+                self._eval_result("exp0", None),
+                self._eval_result("exp1", None),
+            ]
+        )
+
+        assert stmt is None

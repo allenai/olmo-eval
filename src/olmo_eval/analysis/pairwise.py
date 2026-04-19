@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
+    from olmo_eval.common.types.base import EvalResult
+
 
 @dataclass(frozen=True)
 class ModelMeta:
@@ -190,6 +192,26 @@ def _compute_pairs(
     return results
 
 
+def _build_experiment_refetch_stmt(eval_results: list[EvalResult]):
+    """Build the exact-pair re-fetch statement for matched experiments."""
+    from sqlalchemy import select, tuple_
+
+    from olmo_eval.storage.backends.postgres.models import Experiment
+
+    exact_pairs = sorted(
+        {
+            (result.experiment_id, result.model_hash)
+            for result in eval_results
+            if result.model_hash is not None
+        }
+    )
+    if not exact_pairs:
+        return None
+    return select(Experiment).where(
+        tuple_(Experiment.experiment_id, Experiment.model_hash).in_(exact_pairs)
+    )
+
+
 def compute_pairwise(
     session: Session,
     task_name: str | None = None,
@@ -328,18 +350,8 @@ def compute_pairwise(
         )
 
     # Repo queries do not carry experiment PKs, so re-fetch the matching rows.
-    experiment_id_list = [r.experiment_id for r in eval_results]
-    model_hash_list = [r.model_hash for r in eval_results if r.model_hash is not None]
-    experiments = (
-        session.execute(
-            select(Experiment).where(
-                Experiment.experiment_id.in_(experiment_id_list),
-                Experiment.model_hash.in_(model_hash_list),
-            )
-        )
-        .scalars()
-        .all()
-    )
+    refetch_stmt = _build_experiment_refetch_stmt(eval_results)
+    experiments = session.execute(refetch_stmt).scalars().all() if refetch_stmt is not None else []
 
     exp_lookup: dict[tuple[str, str], Experiment] = {}
     for exp in experiments:
