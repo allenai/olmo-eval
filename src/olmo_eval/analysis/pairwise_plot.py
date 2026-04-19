@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
 
-from olmo_eval.analysis.pairwise import PairwiseResult, get_se, get_win_rate
+from olmo_eval.analysis.pairwise import PairwiseResult
 
 if TYPE_CHECKING:
     from matplotlib.colors import ColorType
@@ -52,25 +52,53 @@ _NONSIG_BORDER_WIDTH = 0.8
 _SIGNIFICANCE_Z = 2.0
 
 
-def build_win_rate_matrix(result: PairwiseResult) -> np.ndarray:
+class _PairCell(NamedTuple):
+    win_rate: float
+    se: float
+
+
+type PairCellLookup = dict[tuple[int, int], _PairCell]
+
+
+def _build_pair_cell_lookup(result: PairwiseResult) -> PairCellLookup:
+    """Index every ordered matrix cell by its pairwise win rate and standard error."""
+    pair_lookup: PairCellLookup = {}
+    for pair in result.pairs:
+        se = pair.se
+        pair_lookup[(pair.index_a, pair.index_b)] = _PairCell(win_rate=pair.win_rate_a, se=se)
+        pair_lookup[(pair.index_b, pair.index_a)] = _PairCell(win_rate=pair.win_rate_b, se=se)
+    return pair_lookup
+
+
+def build_win_rate_matrix(
+    result: PairwiseResult,
+    *,
+    pair_lookup: PairCellLookup | None = None,
+) -> np.ndarray:
     """Return the NxN win-rate matrix with NaN on the diagonal."""
     n = len(result.models)
-    matrix = np.full((n, n), np.nan)
-    for i in range(n):
-        for j in range(n):
-            if i != j:
-                matrix[i][j] = get_win_rate(result.pairs, i, j)
+    matrix = np.full((n, n), 0.5)
+    np.fill_diagonal(matrix, np.nan)
+    if pair_lookup is None:
+        pair_lookup = _build_pair_cell_lookup(result)
+    for (row, col), pair_cell in pair_lookup.items():
+        matrix[row, col] = pair_cell.win_rate
     return matrix
 
 
-def build_se_matrix(result: PairwiseResult) -> np.ndarray:
+def build_se_matrix(
+    result: PairwiseResult,
+    *,
+    pair_lookup: PairCellLookup | None = None,
+) -> np.ndarray:
     """Return the NxN standard-error matrix with NaN on the diagonal."""
     n = len(result.models)
-    matrix = np.full((n, n), np.nan)
-    for i in range(n):
-        for j in range(n):
-            if i != j:
-                matrix[i][j] = get_se(result.pairs, i, j)
+    matrix = np.zeros((n, n))
+    np.fill_diagonal(matrix, np.nan)
+    if pair_lookup is None:
+        pair_lookup = _build_pair_cell_lookup(result)
+    for (row, col), pair_cell in pair_lookup.items():
+        matrix[row, col] = pair_cell.se
     return matrix
 
 
@@ -103,8 +131,9 @@ def plot_pairwise_matrix(
     from matplotlib.patches import FancyBboxPatch
 
     n = len(result.models)
-    matrix = build_win_rate_matrix(result)
-    se_matrix = build_se_matrix(result)
+    pair_lookup = _build_pair_cell_lookup(result)
+    matrix = build_win_rate_matrix(result, pair_lookup=pair_lookup)
+    se_matrix = build_se_matrix(result, pair_lookup=pair_lookup)
     # The result is already row-sorted; keep every output format aligned.
     labels = [m.label for m in result.models]
 
