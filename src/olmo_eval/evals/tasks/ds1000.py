@@ -184,7 +184,14 @@ class DS1000(Task):
         return output.text
 
     def _extract_answers(self, responses: Sequence[Response]) -> None:
-        """Assemble test program from code_context and model continuation."""
+        """Assemble test program from code_context and model continuation.
+
+        Each test program is wrapped in a fresh temp directory to match
+        the old oe-eval-internal Lambda execution pattern, which runs
+        each test in its own tempdir via create_tempdir(). This prevents
+        concurrent tests from interfering via shared filesystem (e.g.
+        matplotlib savefig, pandas to_csv).
+        """
         for response in responses:
             code_context = response.instance.metadata.get("code_context", "")
             for output in response.outputs:
@@ -193,7 +200,11 @@ class DS1000(Task):
                     # DS-1000 test harness format:
                     # code_context defines test_execution() and optionally test_string()
                     test_program = (
-                        code_context
+                        # Match old Lambda: run in a fresh temp directory
+                        "import os as _os, tempfile as _tempfile\n"
+                        "_td = _tempfile.mkdtemp()\n"
+                        "_os.chdir(_td)\n"
+                        + code_context
                         + "\n"
                         + f"code = {repr(continuation)}\n"
                         + "test_execution(code)\n"
