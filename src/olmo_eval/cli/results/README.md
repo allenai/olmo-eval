@@ -82,8 +82,8 @@ Exactly one of these is required:
 
 | Flag                       | Use                                                                             |
 | -------------------------- | ------------------------------------------------------------------------------- |
-| `-t, --task TASK_NAME`     | Single task by name (e.g. `mmlu_anatomy:rc:olmo3base`).                         |
-| `-T, --task-hash PREFIX`   | Single task by hash prefix.                                                     |
+| `-t, --task TASK_NAME`     | **Exact** task name (full variant/regime, e.g. `humaneval:3shot:pass_at_1`). Unlike `results query -t` this does not prefix-match — use `results query` to browse matching names, or `--suite` to pool. |
+| `-T, --task-hash PREFIX`   | Single task by hash prefix. Must resolve to one `task_name`.                    |
 | `-S, --suite SUITE_NAME`   | Registered suite — pools instances across every task the suite resolves to.    |
 
 Suite mode keys instances by `(task_name, native_id)` so identical native IDs
@@ -123,7 +123,7 @@ olmo-eval results pairwise -G olmo-eval-sandboxfusion -S multipl_e:pass_at_1
 Export a JSON win-rate matrix for downstream analysis:
 
 ```
-olmo-eval results pairwise -G my-benchmark -t mmlu -f json -o matrix.json
+olmo-eval results pairwise -G my-benchmark -S multipl_e:pass_at_1 -f json -o matrix.json
 ```
 
 Compare two specific models on a task hash:

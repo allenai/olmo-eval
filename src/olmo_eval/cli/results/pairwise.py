@@ -46,14 +46,16 @@ from olmo_eval.cli.utils import console
     "-t",
     "task_name",
     default=None,
-    help="Task name to compare on (provide --task or --task-hash).",
+    help="Exact task name to compare on — full variant/regime, e.g. "
+    "'humaneval:3shot:pass_at_1'. For prefix/fuzzy lookup use 'results query'; "
+    "for grouping use --suite.",
 )
 @click.option(
     "--task-hash",
     "-T",
     "task_hash",
     default=None,
-    help="Task hash prefix to filter by (provide --task or --task-hash).",
+    help="Task hash prefix to filter by. Must resolve to a single task name.",
 )
 @click.option(
     "--suite",
@@ -120,18 +122,22 @@ def pairwise(
 ) -> None:
     """Compute pairwise win/loss/tie comparison between models.
 
-    Compare instance-level scores across 2+ experiments on a single task.
+    Compare instance-level scores across 2+ experiments on a single task or
+    a registered suite. --task uses EXACT task-name matching (full
+    variant/regime, e.g. 'humaneval:3shot:pass_at_1'); use --suite to pool
+    related tasks, or 'results query' to browse matching names.
+
     Requires the [analysis] extra for plot output: pip install olmo-eval-internal[analysis]
 
     Examples:
 
-        olmo-eval results pairwise -G my-benchmark -t mmlu
+        olmo-eval results pairwise -G my-benchmark -t humaneval:3shot:pass_at_1
 
-        olmo-eval results pairwise -m llama3 -m qwen2.5 -t gsm8k
+        olmo-eval results pairwise -m llama3 -m qwen2.5 -t gsm8k:olmo3base
 
-        olmo-eval results pairwise -e exp_abc -e exp_def -t mmlu -f json
+        olmo-eval results pairwise -G my-benchmark -S multipl_e:pass_at_1
 
-        olmo-eval results pairwise -G my-benchmark -t mmlu -o comparison.png
+        olmo-eval results pairwise -G my-benchmark -S multipl_e:pass_at_1 -o matrix.png
     """
     if not any([experiment_ids, model_names, model_hashes, experiment_groups]):
         raise click.UsageError(

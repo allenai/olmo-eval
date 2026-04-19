@@ -404,6 +404,23 @@ def compute_pairwise(
     scope_label = suite_name or task_name or task_hash or ""
     if not task_results:
         hint = ""
+        if task_name:
+            candidates = (
+                session.execute(
+                    select(TaskResult.task_name)
+                    .where(TaskResult.experiment_pk.in_(pks))
+                    .where(TaskResult.task_name.ilike(f"%{task_name}%"))
+                    .distinct()
+                    .limit(10)
+                )
+                .scalars()
+                .all()
+            )
+            if candidates:
+                hint = (
+                    "\n--task uses exact matching. Similar task names in "
+                    f"scope: {sorted(candidates)}"
+                )
         if suite_name and experiment_groups:
             hint = (
                 f"\nTry: olmo-eval results suites -G {experiment_groups[0]}"
