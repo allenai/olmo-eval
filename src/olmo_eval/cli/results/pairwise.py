@@ -90,6 +90,14 @@ from olmo_eval.cli.utils import console
     default="plot",
     help="Output format (default: plot).",
 )
+@click.option(
+    "--all",
+    "keep_all",
+    is_flag=True,
+    default=False,
+    help="Include every matched experiment as its own row (default: dedupe "
+    "to the most recent per model+hash).",
+)
 @db_options
 def pairwise(
     experiment_ids: tuple[str, ...],
@@ -103,6 +111,7 @@ def pairwise(
     margin: float,
     output_path: str | None,
     output_format: str,
+    keep_all: bool,
     db_host: str,
     db_port: int,
     db_name: str,
@@ -153,12 +162,31 @@ def pairwise(
                         task_hash=task_hash,
                         experiment_groups=list(experiment_groups) or None,
                         suite_name=suite_name,
+                        keep_all=keep_all,
                     )
                 except ValueError as e:
                     console.print(f"[red]Error:[/red] {e}")
                     raise SystemExit(1) from None
         finally:
             db.dispose()
+
+    matched = result.n_experiments_matched
+    dropped = result.n_experiments_dropped
+    if keep_all:
+        console.print(
+            f"[dim]Compared all {len(result.models)} experiments (-- all; no dedupe).[/dim]"
+        )
+    elif dropped:
+        console.print(
+            f"[dim]Compared {len(result.models)} unique model(s) from "
+            f"{matched} matched experiments "
+            f"({dropped} re-run(s) dropped; pass --all to keep them).[/dim]"
+        )
+    else:
+        console.print(
+            f"[dim]Compared {len(result.models)} model(s) from "
+            f"{matched} matched experiment(s).[/dim]"
+        )
 
     if output_format == "json":
         _output_json(result, output_path)

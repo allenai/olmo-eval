@@ -97,6 +97,14 @@ across different tasks don't collide.
 | `--margin FLOAT`      | `0.0`   | Tie threshold for continuous scores. Scores within `margin` of each other count as tied. |
 | `-o, --output PATH`   | stdout  | Save plot / JSON / CSV to a file.                                                        |
 | `-f, --format FMT`    | `plot`  | One of `plot`, `json`, `csv`.                                                            |
+| `--all`               | off     | Keep every matched experiment as its own row (default: dedupe by model+hash to most recent). |
+
+By default matched experiments are deduped to one row per
+`(model_name, model_hash)`, keeping the most recent by timestamp. The CLI
+prints a line summarizing how many were kept vs. dropped. Pass `--all` to
+keep every re-run as a distinct row in the matrix (labels include the
+timestamp for disambiguation) — useful for comparing historical re-runs
+of the same model.
 
 ### Common workflows
 

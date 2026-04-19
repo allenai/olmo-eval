@@ -89,6 +89,8 @@ class PairwiseResult:
     pairs: list[PairStats]
     suite_name: str | None = None
     task_names: tuple[str, ...] = ()
+    n_experiments_matched: int = 0
+    n_experiments_dropped: int = 0
 
 
 def get_win_rate(pairs: list[PairStats], row: int, col: int) -> float:
@@ -184,6 +186,7 @@ def compute_pairwise(
     task_hash: str | None = None,
     experiment_groups: list[str] | None = None,
     suite_name: str | None = None,
+    keep_all: bool = False,
 ) -> PairwiseResult:
     """Compute pairwise win/loss/tie comparison across experiments.
 
@@ -216,6 +219,10 @@ def compute_pairwise(
         experiment_groups: Filter by experiment group prefixes.
         suite_name: Name of a registered suite (e.g. ``olmobase:math``).
             Pools instances across every task the suite resolves to.
+        keep_all: If False (default), dedupe matched experiments by
+            (model_name, model_hash) keeping the most recent by timestamp.
+            If True, every matched experiment becomes its own row (labels
+            include a timestamp to disambiguate re-runs).
 
     Returns:
         PairwiseResult with model metadata and pairwise stats.
@@ -324,29 +331,42 @@ def compute_pairwise(
         if key not in exp_lookup:
             exp_lookup[key] = exp
 
-    # Dedupe by (model_name, model_hash), keeping the most recent experiment.
-    # Re-runs of the same model/hash under different experiment_ids would
-    # otherwise produce duplicate rows in the matrix.
-    chosen: dict[tuple[str, str], Experiment] = {}
+    candidate_experiments: list[Experiment] = []
     for r in eval_results:
         if r.model_hash is None:
             continue
         exp = exp_lookup.get((r.experiment_id, r.model_hash))
-        if exp is None:
-            continue
-        key = (exp.model_name, exp.model_hash)
-        existing = chosen.get(key)
-        if existing is None or exp.timestamp > existing.timestamp:
-            chosen[key] = exp
+        if exp is not None:
+            candidate_experiments.append(exp)
+
+    n_matched = len(candidate_experiments)
+
+    if keep_all:
+        selected = sorted(candidate_experiments, key=lambda e: e.timestamp, reverse=True)
+    else:
+        chosen: dict[tuple[str, str], Experiment] = {}
+        for exp in candidate_experiments:
+            key = (exp.model_name, exp.model_hash)
+            existing = chosen.get(key)
+            if existing is None or exp.timestamp > existing.timestamp:
+                chosen[key] = exp
+        selected = list(chosen.values())
+
+    n_dropped = n_matched - len(selected)
 
     ordered: list[tuple[int, str]] = []
-    for exp in chosen.values():
-        label = f"{exp.model_name}\n({exp.model_hash[:8]})"
+    for exp in selected:
+        if keep_all:
+            ts = exp.timestamp.strftime("%Y-%m-%d")
+            label = f"{exp.model_name}\n({exp.model_hash[:8]} @ {ts})"
+        else:
+            label = f"{exp.model_name}\n({exp.model_hash[:8]})"
         ordered.append((exp.id, label))
 
     if len(ordered) < 2:
+        detail = "after deduping by (model_name, model_hash)" if not keep_all else "matched"
         raise ValueError(
-            f"Only {len(ordered)} unique model(s) after deduping by (model_name, model_hash) — "
+            f"Only {len(ordered)} unique model(s) {detail} — "
             "need at least 2. Broaden the filters to include more models."
         )
 
@@ -514,4 +534,6 @@ def compute_pairwise(
         pairs=pairs,
         suite_name=suite_name,
         task_names=contributing_task_names,
+        n_experiments_matched=n_matched,
+        n_experiments_dropped=n_dropped,
     )
