@@ -41,7 +41,7 @@ class BigCodeBenchScorer(CodeExecutionScorer):
     - Environment: sets TZ=UTC, OMP_NUM_THREADS=1, TF_CPP_MIN_LOG_LEVEL=3
     """
 
-    timeout: float = 121.0
+    timeout: float = 3.0
 
     async def ascore(
         self,
