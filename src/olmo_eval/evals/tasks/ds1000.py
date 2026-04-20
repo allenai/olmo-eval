@@ -62,6 +62,18 @@ class DS1000Scorer(CodeExecutionScorer):
         return 1.0 if result.success else 0.0
 
 
+_PY310_URL = (
+    "https://github.com/indygreg/python-build-standalone/releases/download/"
+    "20240107/cpython-3.10.13+20240107-x86_64-unknown-linux-gnu-install_only.tar.gz"
+)
+
+_DS1000_DEPS = (
+    "numpy==1.26.4 pandas==1.5.3 matplotlib==3.8.4 scipy==1.12.0"
+    " scikit-learn==1.4.0 seaborn==0.13.2 statsmodels==0.14.1"
+    " xgboost==2.0.3 gensim==4.3.2"
+)
+
+
 @register("ds1000")
 class DS1000(Task):
     """DS-1000 data science code generation task."""
@@ -81,9 +93,18 @@ class DS1000(Task):
             "gensim==4.3.2",
         ),
         dockerfile_extra=(
-            "RUN /root/python/bin/uv pip install --system --no-cache"
+            # Install Python 3.10 to match old oe-eval-internal Lambda environment.
+            # swe-rex runs on Python 3.11 (/root/python/bin); test code runs on 3.10.
+            f"ADD {_PY310_URL} /tmp/python310.tar.gz",
+            "RUN tar xzf /tmp/python310.tar.gz -C /root/python310"
+            " --strip-components=0 && rm /tmp/python310.tar.gz",
+            "RUN /root/python310/python/bin/pip install --no-cache-dir uv",
+            f"RUN /root/python310/python/bin/python -m uv pip install --system --no-cache"
+            f" {_DS1000_DEPS}",
+            "RUN /root/python310/python/bin/python -m uv pip install --system --no-cache"
             " torch==2.2.0+cpu --index-url https://download.pytorch.org/whl/cpu",
-            "RUN /root/python/bin/uv pip install --system --no-cache tensorflow-cpu==2.16.1",
+            "RUN /root/python310/python/bin/python -m uv pip install --system --no-cache"
+            " tensorflow-cpu==2.16.1",
         ),
     )
     sampling_params = SamplingParams(
@@ -185,8 +206,13 @@ class DS1000(Task):
 
     # Wrapper that reproduces the old oe-eval-internal Lambda execution
     # pattern: tempdir + swallowed I/O + exec() with empty globals.
-    # Any exception (including BaseException) causes a non-zero exit.
+    # Delegates to Python 3.10 (/root/python310/python/bin/python3) to match
+    # the old Lambda (public.ecr.aws/lambda/python:3.10).
+    # The outer python3 (3.11, swe-rex) writes the inner code to a temp file
+    # and invokes Python 3.10 to execute it.
     _EXEC_WRAPPER = """\
+import subprocess, sys, tempfile, os
+_inner = '''
 import contextlib, io, os, sys, tempfile
 
 class _WriteOnlyStringIO(io.StringIO):
@@ -205,6 +231,19 @@ with contextlib.redirect_stdout(_stream):
     with contextlib.redirect_stderr(_stream):
         with _RedirectStdin(_stream):
             exec(compile(_TEST_CODE, "<test>", "exec"), {})
+'''
+_py310 = "/root/python310/python/bin/python3"
+if not os.path.exists(_py310):
+    _py310 = "python3"  # fallback for local testing
+_f = tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False)
+_f.write(f"_TEST_CODE = {repr(_TEST_CODE)}\\n")
+_f.write(_inner)
+_f.close()
+try:
+    _r = subprocess.run([_py310, _f.name], timeout=115)
+    sys.exit(_r.returncode)
+finally:
+    os.unlink(_f.name)
 """
 
     def _extract_answers(self, responses: Sequence[Response]) -> None:
