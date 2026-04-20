@@ -118,11 +118,7 @@ class BaseLanguageEvaluator:
         return self.RUN_TIMEOUT + 5.0
 
     def build_eval_command(self, tmp_dir: str, code: str) -> str:
-        """Build the complete evaluation command.
-
-        Each step (compile, run) is wrapped with the `timeout` shell command
-        to match oe-eval-internal's per-step timeout behavior.
-        """
+        """Build the complete evaluation command."""
         import shlex
 
         file_path = f"{tmp_dir}/{self.get_filename()}"

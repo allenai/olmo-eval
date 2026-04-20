@@ -14,33 +14,14 @@ from olmo_eval.common.types import (
 )
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import HUMANEVAL_STOP_SEQUENCES, OLMO3_HUMANEVAL_STOP_SEQUENCES
-from olmo_eval.evals.extract import extract_code, extract_code_before_fence, indent_code
+from olmo_eval.evals.extract import extract_code, indent_code
 from olmo_eval.evals.tasks.common import Task, register, register_variant
-
-_logger = __import__("logging").getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
 class _CodeExecScorer3s(CodeExecutionScorer):
-    """CodeExecutionScorer with 3s timeout and \\n separator matching old oe-eval-internal."""
-
     timeout: float = 3.0
-
-    async def ascore(self, instance, output, execution_env):  # type: ignore[override]
-        if output.extracted_answer is None:
-            return 0.0
-        test_code = instance.metadata.get("test", "")
-        if not test_code:
-            return 0.0
-        # Old system used single \n separator: completion + "\n" + test
-        full_code = f"{output.extracted_answer}\n{test_code}"
-        result = await execution_env.execute_code(
-            full_code, language=self.language, timeout=self.timeout,
-        )
-        if not result.success and result.error:
-            instance_id = instance.metadata.get("id", "?")
-            _logger.warning(f"Code execution failed [{instance_id}]: {result.error}")
-        return 1.0 if result.success else 0.0
+    separator: str = "\n"
 
 
 @register("humaneval")

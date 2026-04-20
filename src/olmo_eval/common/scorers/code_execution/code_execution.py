@@ -36,6 +36,7 @@ class CodeExecutionScorer(ExecutionScorer):
     name: str = "code_exec"
     timeout: float = 20.0
     language: str = "python"
+    separator: str = "\n\n"
 
     async def ascore(
         self,
@@ -60,8 +61,7 @@ class CodeExecutionScorer(ExecutionScorer):
         if not test_code:
             return 0.0
 
-        # Combine generated code with tests
-        full_code = f"{output.extracted_answer}\n\n{test_code}"
+        full_code = f"{output.extracted_answer}{self.separator}{test_code}"
 
         result = await execution_env.execute_code(
             full_code,
