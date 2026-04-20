@@ -61,6 +61,10 @@ class LaunchConfig:
     # Allows overriding default {username}_{ENV_VAR} pattern
     secret_env_overrides: dict[str, str] = field(default_factory=dict)
 
+    # User-supplied plain env vars forwarded/set on the job via --env/-e.
+    # These win over infra and store defaults.
+    env_vars: dict[str, str] = field(default_factory=dict)
+
 
 class LaunchConfigLoader:
     """Loads and merges configuration from YAML file and CLI arguments."""
@@ -207,6 +211,7 @@ class LaunchConfigLoader:
             harness_overrides=self.cli_args.get("harness_overrides", []),
             uv_cache_dir=self.cli_args.get("uv_cache_dir"),
             secret_env_overrides=self.cli_args.get("secret_env_overrides", {}),
+            env_vars=self.cli_args.get("env_vars", {}),
         )
 
     def _validate_required(
@@ -237,19 +242,21 @@ class LaunchConfigLoader:
         """Generate experiment name from model and task specs.
 
         Format:
-        - 1-2 tasks: {model}-{task1}-{task2}
-        - 3+ tasks: {model}-{task1}-and-{N}-more
+        - Single model, 1-2 tasks: {model}-{task1}-{task2}
+        - Single model, 3+ tasks: {model}-{task1}-and-{N}-more
+        - Multi-model: {tasks_part} only (each model name is appended per-experiment)
         """
         from olmo_eval.launch import get_model_short_name, sanitize_beaker_name
-
-        # Use first model for the name (multi-model runs append model name later)
-        model_name = get_model_short_name(model_specs[0]) if model_specs else "eval"
 
         if len(task_specs) <= 2:
             tasks_part = "-".join(task_specs)
         else:
             tasks_part = f"{task_specs[0]}-and-{len(task_specs) - 1}-more"
 
+        if len(model_specs) > 1:
+            return sanitize_beaker_name(tasks_part)
+
+        model_name = get_model_short_name(model_specs[0]) if model_specs else "eval"
         return sanitize_beaker_name(f"{model_name}-{tasks_part}")
 
     def _detect_gpu_requirement(
