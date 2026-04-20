@@ -110,7 +110,7 @@ dev = [
     "pytest>=9.0.0",
     "pytest-cov>=6.0.0",
     "ruff>=0.14.0",
-    "ty==0.0.29",
+    "ty==0.0.32",
     "pre-commit>=4.0.0",
     "olmo-eval-internal[storage]",
     "jinja2>=3.1.6",
