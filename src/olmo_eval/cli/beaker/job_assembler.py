@@ -156,6 +156,7 @@ def assemble_external_eval_job(
     retries: int | None = None,
     provider_kind: str | None = None,
     base_url: str | None = None,
+    user_env_vars: dict[str, str] | None = None,
 ) -> Any:
     """Assemble a BeakerJobConfig for running external evaluations.
 
@@ -273,6 +274,10 @@ def assemble_external_eval_job(
         from olmo_eval.launch.beaker.secrets import get_store_env_defaults
 
         env_vars.update(get_store_env_defaults())
+
+    # User-supplied env vars win over everything above
+    if user_env_vars:
+        env_vars.update(user_env_vars)
 
     # Collect backend names from external evals
     # Check eval_args for backend override, otherwise use eval's default
@@ -504,6 +509,9 @@ class JobConfigAssembler:
                     job_env_vars["MODAL_GCP_SECRET_NAME"] = secret_name
                     setup_modal_gcp_secret = True
                     log.info(f"Modal GCP secret setup enabled: {secret_name}")
+
+        # User-supplied env vars win over everything above
+        job_env_vars.update(self.config.env_vars)
 
         # Collect task dependencies and provider dependencies separately
         task_packages = self._extract_task_dependencies(exp.tasks, exp.task_overrides) or None
