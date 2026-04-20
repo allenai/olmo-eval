@@ -96,8 +96,8 @@ class DS1000(Task):
             # Install Python 3.10 to match old oe-eval-internal Lambda environment.
             # swe-rex runs on Python 3.11 (/root/python/bin); test code runs on 3.10.
             f"ADD {_PY310_URL} /tmp/python310.tar.gz",
-            "RUN tar xzf /tmp/python310.tar.gz -C /root/python310"
-            " --strip-components=0 && rm /tmp/python310.tar.gz",
+            "RUN mkdir -p /root/python310 && tar xzf /tmp/python310.tar.gz -C /root/python310"
+            " && rm /tmp/python310.tar.gz",
             "RUN /root/python310/python/bin/pip install --no-cache-dir uv",
             f"RUN /root/python310/python/bin/python -m uv pip install --system --no-cache"
             f" {_DS1000_DEPS}",
