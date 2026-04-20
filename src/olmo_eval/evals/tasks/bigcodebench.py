@@ -297,7 +297,10 @@ class BigCodeBench(Task):
         for response in responses:
             entry_point = response.instance.metadata.get("entry_point", "")
             for output in response.outputs:
-                code = self.extract_answer(output)
+                # Use raw text directly (no extract_code_before_fence) to match
+                # old oe-eval-internal behavior, which prepends complete_prompt
+                # to the raw continuation and sanitizes.
+                code = output.text
                 if code:
                     full_code = response.instance.metadata["answer_prefix"] + code
                     if entry_point:
