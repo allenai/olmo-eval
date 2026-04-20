@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from olmo_eval.common.execution.environment import ExecutionResult
 from olmo_eval.common.logging import configure_worker_logging
 
-from .config import SandboxConfig, SandboxMode
+from .config import Capability, SandboxConfig, SandboxMode
 from .executor import SandboxExecutor
 
 
@@ -81,6 +81,7 @@ class SandboxManager:
         self._logger = configure_worker_logging("sb-manager")
         self._executors: list[SandboxExecutor] = []
         self._round_robin_indices: dict[frozenset[str], int] = {}
+        self._execution_semaphores: dict[frozenset[str], asyncio.Semaphore] = {}
         self._bindings: dict[str, ExecutorBinding] = {}
         self._bound_executors: set[int] = set()
         self._binding_lock: asyncio.Lock = asyncio.Lock()
@@ -178,6 +179,21 @@ class SandboxManager:
         # Keep only successfully started executors
         self._executors = [e for successes in config_successes.values() for e in successes]
 
+        # Build per-capability execution semaphores from running executors
+        cap_counts: dict[frozenset[str], int] = {}
+        cap_mc: dict[frozenset[str], int] = {}
+        for e in self._executors:
+            cap = e.config.capabilities
+            cap_counts[cap] = cap_counts.get(cap, 0) + 1
+            cap_mc[cap] = e.config.max_concurrency
+        for cap, count in cap_counts.items():
+            limit = cap_mc[cap] * count
+            self._execution_semaphores[cap] = asyncio.Semaphore(limit)
+            self._logger.info(
+                f"Execution semaphore for {sorted(cap)}: "
+                f"{limit} ({cap_mc[cap]} x {count} instances)"
+            )
+
         elapsed = time.time() - start_time
         total_attempted = sum(c.instances for c in self._configs)
         self._logger.info(
@@ -246,6 +262,19 @@ class SandboxManager:
 
         return matching[selected_idx][1]
 
+    def get_execution_semaphore(
+        self, required_capabilities: frozenset[str]
+    ) -> asyncio.Semaphore | None:
+        """Get the execution semaphore for the given capabilities.
+
+        Returns a shared semaphore sized to max_concurrency * running_instances
+        for the matching capability set. Returns None if no match.
+        """
+        for cap, sem in self._execution_semaphores.items():
+            if required_capabilities <= cap:
+                return sem
+        return None
+
     async def execute(
         self,
         command: str,
@@ -257,12 +286,12 @@ class SandboxManager:
         Args:
             command: The command to execute.
             timeout: Optional timeout override in seconds.
-            capabilities: Optional required capabilities. If None, uses any executor.
+            capabilities: Optional required capabilities. If None, uses default.
 
         Returns:
             The command output.
         """
-        executor = self.get_executor(capabilities or frozenset())
+        executor = self.get_executor(capabilities or Capability.DEFAULT)
         return await executor.execute(command, timeout)
 
     async def execute_command(
@@ -276,12 +305,12 @@ class SandboxManager:
         Args:
             command: The command to execute.
             timeout: Optional timeout override in seconds.
-            capabilities: Optional required capabilities. If None, uses any executor.
+            capabilities: Optional required capabilities. If None, uses default.
 
         Returns:
             ExecutionResult with success status, output, and exit code.
         """
-        executor = self.get_executor(capabilities or frozenset())
+        executor = self.get_executor(capabilities or Capability.DEFAULT)
         return await executor.execute_command(command, timeout)
 
     async def execute_code(
@@ -289,6 +318,7 @@ class SandboxManager:
         code: str,
         language: str = "python",
         timeout: float | None = None,
+        capabilities: frozenset[str] | None = None,
     ) -> ExecutionResult:
         """Execute code in the specified language.
 
@@ -299,11 +329,12 @@ class SandboxManager:
             code: Source code to execute.
             language: Programming language (default: "python").
             timeout: Optional timeout in seconds.
+            capabilities: Optional required capabilities. If None, uses default.
 
         Returns:
             ExecutionResult with success status and output.
         """
-        executor = self.get_executor(frozenset())
+        executor = self.get_executor(capabilities or Capability.DEFAULT)
         return await executor.execute_code(code, language, timeout)
 
     async def acquire_binding(

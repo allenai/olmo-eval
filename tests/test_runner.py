@@ -241,6 +241,105 @@ class TestSuiteAggregations:
             # Clean up
             del _REGISTRY["_test_aoa"]
 
+    def test_collapsed_tasks_in_log_summary(self, capsys):
+        """Test that child suite tasks are collapsed in log_summary display.
+
+        When a parent suite uses AVERAGE_OF_AVERAGES and a child suite uses
+        AVERAGE, the child's individual tasks should not appear as separate
+        rows — only the sub-suite average row should be shown.
+        """
+        from olmo_eval.evals.suites.registry import (
+            _REGISTRY,
+            AggregationStrategy,
+            Suite,
+        )
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+        from olmo_eval.runners.processing.metrics import log_summary
+
+        nested_suite = Suite(
+            name="_test_nested_display",
+            tasks=("task_a", "task_b", "task_c"),
+            aggregation=AggregationStrategy.AVERAGE,
+        )
+        aoa_suite = Suite(
+            name="_test_aoa_display",
+            tasks=("task_standalone", nested_suite),
+            aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+        )
+        _REGISTRY["_test_aoa_display"] = aoa_suite
+
+        try:
+            task_results = {
+                "task_standalone": {"metrics": {"pass_at_1": {"code_exec": 0.8}}},
+                "task_a": {"metrics": {"pass_at_1": {"code_exec": 0.4}}},
+                "task_b": {"metrics": {"pass_at_1": {"code_exec": 0.5}}},
+                "task_c": {"metrics": {"pass_at_1": {"code_exec": 0.6}}},
+            }
+
+            suite_aggs = compute_suite_aggregations(["_test_aoa_display"], task_results)
+            results = {"tasks": task_results, "suites": suite_aggs}
+
+            log_summary(results)
+            captured = capsys.readouterr().out
+
+            # Standalone task should appear
+            assert "task_standalone" in captured
+            # Nested suite average should appear
+            assert "_test_nested_display" in captured
+            # Parent suite should appear
+            assert "_test_aoa_display" in captured
+            # Individual nested tasks should NOT appear (collapsed into sub-suite)
+            assert "task_a" not in captured
+            assert "task_b" not in captured
+            assert "task_c" not in captured
+        finally:
+            del _REGISTRY["_test_aoa_display"]
+
+    def test_non_averaged_child_suite_not_collapsed(self):
+        """Test that DISPLAY_ONLY child suites do not collapse their tasks."""
+        from olmo_eval.evals.suites.registry import (
+            _REGISTRY,
+            AggregationStrategy,
+            Suite,
+        )
+        from olmo_eval.runners.processing.aggregation import compute_suite_aggregations
+
+        nested_suite = Suite(
+            name="_test_nested_display_only",
+            tasks=("task_x", "task_y"),
+            aggregation=AggregationStrategy.DISPLAY_ONLY,
+        )
+        aoa_suite = Suite(
+            name="_test_aoa_no_collapse",
+            tasks=("task_z", nested_suite),
+            aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+        )
+        _REGISTRY["_test_aoa_no_collapse"] = aoa_suite
+
+        try:
+            task_results = {
+                "task_z": {"metrics": {"acc": {"em": 0.9}}},
+                "task_x": {"metrics": {"acc": {"em": 0.3}}},
+                "task_y": {"metrics": {"acc": {"em": 0.7}}},
+            }
+
+            suite_aggs = compute_suite_aggregations(["_test_aoa_no_collapse"], task_results)
+
+            # DISPLAY_ONLY child should have parent_suite but aggregation != "average"
+            nested_data = suite_aggs.get("_test_nested_display_only", {})
+            assert nested_data.get("parent_suite") == "_test_aoa_no_collapse"
+            assert nested_data.get("aggregation") == "display_only"
+
+            # The collapse logic only applies to aggregation=="average" children,
+            # so DISPLAY_ONLY tasks should NOT be collapsed
+            collapsed: set[str] = set()
+            for suite_data in suite_aggs.values():
+                if suite_data.get("parent_suite") and suite_data.get("aggregation") == "average":
+                    collapsed.update(suite_data.get("tasks", []))
+            assert collapsed == set()
+        finally:
+            del _REGISTRY["_test_aoa_no_collapse"]
+
 
 class TestGetPrimaryMetric:
     """Tests for get_primary_metric function.

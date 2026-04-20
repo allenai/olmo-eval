@@ -293,15 +293,32 @@ def log_summary(results: dict[str, Any], multi_model: bool = False) -> None:
         else:
             table.add_row(name, "[green]Success[/green]", metric_name, "-")
 
+    def _get_collapsed_tasks(suites: dict[str, Any]) -> set[str]:
+        """Identify tasks collapsed into a sub-suite average.
+
+        When a parent suite uses AVERAGE_OF_AVERAGES and a child suite uses
+        AVERAGE, the child's individual tasks are represented by the sub-suite
+        row and should not appear separately.
+        """
+        collapsed: set[str] = set()
+        for suite_data in suites.values():
+            if suite_data.get("parent_suite") and suite_data.get("aggregation") == "average":
+                collapsed.update(suite_data.get("tasks", []))
+        return collapsed
+
     if multi_model:
         for model_name, model_data in results.get("models", {}).items():
+            collapsed = _get_collapsed_tasks(model_data.get("suites", {}))
             for task_name, task_data in model_data.get("tasks", {}).items():
-                add_task_row(f"{model_name}:{task_name}", task_data)
+                if task_name not in collapsed:
+                    add_task_row(f"{model_name}:{task_name}", task_data)
             for suite_name, suite_data in model_data.get("suites", {}).items():
                 add_task_row(f"{model_name}:{suite_name}", suite_data)
     else:
+        collapsed = _get_collapsed_tasks(results.get("suites", {}))
         for task_name, task_data in results["tasks"].items():
-            add_task_row(task_name, task_data)
+            if task_name not in collapsed:
+                add_task_row(task_name, task_data)
         for suite_name, suite_data in results.get("suites", {}).items():
             add_task_row(suite_name, suite_data)
 

@@ -3,23 +3,20 @@
 from __future__ import annotations
 
 import asyncio
-import pickle
 import queue
 import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.logging import get_logger
+from olmo_eval.common.progress import ProgressLogger
 from olmo_eval.common.types import Response
 from olmo_eval.common.types.trajectory import AgentTrajectory
 from olmo_eval.runners.asynq.monitoring import check_workers_alive
 from olmo_eval.runners.asynq.preparation import compute_task_metrics, finalize_task
 from olmo_eval.runners.asynq.types import (
-    SCORER_FATAL,
     WORKER_FATAL,
     ResultItem,
-    ScoredResponse,
-    ScoringItem,
     TaskTracker,
 )
 from olmo_eval.runners.common.types import TaskResult
@@ -29,35 +26,35 @@ from olmo_eval.runners.processing.utils import compute_task_hash
 if TYPE_CHECKING:
     import multiprocessing as mp
 
+    from olmo_eval.common.execution import ScoringContext
+    from olmo_eval.evals.tasks.common import Task
+
 logger = get_logger(__name__)
 
 
 async def process_results(
     trackers: dict[str, TaskTracker],
     result_queue: mp.Queue,
-    scoring_queue: mp.Queue,
-    scored_queue: mp.Queue,
     workers: list[mp.process.BaseProcess],
-    scorer_proc: mp.process.BaseProcess,
+    scoring_context: ScoringContext,
+    scoring_concurrency: int,
     total_tasks: int,
     total_instances: int,
     model_name: str,
     save_predictions: bool,
     write_predictions_fn: Any,
 ) -> dict[str, TaskResult]:
-    """Process results from workers with parallel instance-level scoring.
+    """Process results from workers with inline async scoring.
 
-    As each instance result comes in, it's immediately sent to the scoring worker.
-    Scored responses are collected and metrics are computed when all instances
-    for a task are scored.
+    As each instance result comes in, it's scored directly in this event loop
+    using asyncio tasks, eliminating cross-process serialization.
 
     Args:
         trackers: Task trackers keyed by spec.
         result_queue: Queue receiving results from inference workers.
-        scoring_queue: Queue to send items for scoring.
-        scored_queue: Queue receiving scored responses.
         workers: List of inference worker processes.
-        scorer_proc: The scoring worker process.
+        scoring_context: Scoring context with execution environment.
+        scoring_concurrency: Maximum concurrent scoring operations.
         total_tasks: Total number of tasks.
         total_instances: Total number of instances across all tasks.
         model_name: Model name for reporting.
@@ -72,12 +69,16 @@ async def process_results(
 
     # Track scored responses per task: spec -> {idx: scored_response}
     scored_responses: dict[str, dict[int, Response]] = {spec: {} for spec in trackers}
-    instances_sent: dict[str, int] = {spec: 0 for spec in trackers}
     instances_scored: dict[str, int] = {spec: 0 for spec in trackers}
 
-    # Track which tasks have been sent to the scoring worker so we only
-    # pickle the full Task object once per spec (the dominant serialization cost).
-    tasks_sent_to_scorer: set[str] = set()
+    # Progress tracking for scoring
+    scoring_progress = ProgressLogger(
+        total=total_instances, desc="Scored", logger=logger, color="cyan"
+    )
+
+    # Semaphore to limit concurrent scoring operations
+    scoring_semaphore = asyncio.Semaphore(scoring_concurrency)
+    in_flight_scoring: set[asyncio.Task[None]] = set()
 
     # Determine which tasks need the scoring worker (async scorers like sandboxed
     # code execution). All other tasks are scored inline to avoid mp.Queue overhead.
@@ -116,25 +117,34 @@ async def process_results(
                     model_name, task_result.spec, task_result.predictions, task_hash
                 )
 
-    def handle_scored_response(scored: ScoredResponse) -> None:
-        """Process a scored response and check if task is complete."""
-        assert scored.scored is not None, "scored.scored should not be None for valid responses"
-        scored_responses[scored.spec][scored.instance_idx] = scored.scored
-        instances_scored[scored.spec] += 1
-        check_task_completion(scored.spec)
-
-    def drain_scored_queue() -> None:
-        """Non-blocking drain of scored responses."""
-        while True:
+    async def score_and_store(
+        spec: str,
+        instance_idx: int,
+        response: Response,
+        task: Task,
+    ) -> None:
+        """Score a single response and store the result."""
+        async with scoring_semaphore:
             try:
-                scored: ScoredResponse = scored_queue.get_nowait()
-                # Check for fatal scorer error
-                if scored.spec == SCORER_FATAL:
-                    logger.error(f"FATAL: Scoring worker crashed! {scored.error}")
-                    raise RuntimeError(f"Scoring worker crashed: {scored.error}")
-                handle_scored_response(scored)
-            except queue.Empty:
-                break
+                scored_list = await task.score_responses([response], context=scoring_context)
+                scored = scored_list[0] if scored_list else response
+            except Exception as e:
+                logger.warning(f"Failed to score {spec}[{instance_idx}]: {e}")
+                scored = response
+
+        scored_responses[spec][instance_idx] = scored
+        instances_scored[spec] += 1
+        scoring_progress.update(1)
+        check_task_completion(spec)
+
+    def _reap_done_tasks() -> None:
+        """Remove completed scoring tasks from in_flight set."""
+        done = {t for t in in_flight_scoring if t.done()}
+        for t in done:
+            in_flight_scoring.discard(t)
+            # Surface any unexpected exceptions
+            if t.exception() is not None:
+                logger.error(f"Scoring task failed unexpectedly: {t.exception()}")
 
     # Pre-add error tasks to results (these don't need scoring)
     for spec, tracker in trackers.items():
@@ -148,10 +158,9 @@ async def process_results(
     last_health_check = time.time()
     health_check_interval = 5.0
 
-    # Collect instance results and send each to scoring immediately
+    # Collect instance results and score each inline
     while pending_instances > 0:
-        # Check for scored responses (non-blocking)
-        drain_scored_queue()
+        _reap_done_tasks()
 
         try:
             result_item: ResultItem = await asyncio.get_event_loop().run_in_executor(
@@ -182,6 +191,7 @@ async def process_results(
                 f"{result_item.error}"
             )
             tracker.add_failure(result_item.instance_idx, result_item.error)
+            scoring_progress.update(1)
             check_task_completion(result_item.task_id)
             continue
 
@@ -192,7 +202,7 @@ async def process_results(
                 f"{result_item.task_id}: {result_item.error}"
             )
 
-        # Build response and send to scoring immediately
+        # Build response
         trajectory = None
         if result_item.outputs:
             meta = result_item.outputs[0].metadata or {}
@@ -209,59 +219,30 @@ async def process_results(
             trajectory=trajectory,
         )
 
-        # Send to scoring worker immediately.
-        # Include the Task only on the first item per spec so the scoring
-        # worker can cache it; subsequent items skip the expensive Task pickle.
+        # Score inline as an async task
         assert tracker.task is not None
-        include_task = result_item.task_id not in tasks_sent_to_scorer
-        scoring_item = ScoringItem(
-            spec=result_item.task_id,
-            instance_idx=result_item.instance_idx,
-            response=response,
-            task=tracker.task if include_task else None,
-        )
-        if include_task:
-            # Validate pickling on the first item (which carries the Task).
-            # queue.put uses a background thread that silently swallows
-            # pickling errors, causing the job to stall.
-            try:
-                pickle.dumps(scoring_item)
-            except (pickle.PicklingError, TypeError, AttributeError) as e:
-                task_id = result_item.task_id
-                idx = result_item.instance_idx
-                logger.error(f"Failed to pickle scoring item for {task_id}[{idx}]: {e}")
-                tracker.add_failure(result_item.instance_idx, f"Pickling failed: {e}")
-                check_task_completion(result_item.task_id)
-                continue
-            tasks_sent_to_scorer.add(result_item.task_id)
-        scoring_queue.put(scoring_item)
-        instances_sent[result_item.task_id] += 1
-
-    # Wait for remaining scoring to complete
-    while tasks_complete < total_tasks:
-        try:
-            scored: ScoredResponse = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: scored_queue.get(timeout=1.0)
+        scoring_task = asyncio.create_task(
+            score_and_store(
+                spec=result_item.task_id,
+                instance_idx=result_item.instance_idx,
+                response=response,
+                task=tracker.task,
             )
-            # Check for fatal scorer error
-            if scored.spec == SCORER_FATAL:
-                logger.error(f"FATAL: Scoring worker crashed! {scored.error}")
-                raise RuntimeError(f"Scoring worker crashed: {scored.error}")
-            handle_scored_response(scored)
-        except queue.Empty:
-            # Check if scorer died while we're still waiting for results
-            if not scorer_proc.is_alive():
-                total_sent = sum(instances_sent.values())
-                total_scored = sum(instances_scored.values())
-                missing = total_sent - total_scored
-                raise RuntimeError(
-                    f"Scoring worker exited while {missing} items still pending. "
-                    f"Sent {total_sent}, scored {total_scored}. "
-                    f"Items may have been lost due to queue errors (check logs)."
-                ) from None
-            continue
+        )
+        in_flight_scoring.add(scoring_task)
 
-    logger.info(f"Scoring complete ({total_tasks} tasks, {total_instances} instances)")
+    # Wait for all in-flight scoring to complete
+    if in_flight_scoring:
+        await asyncio.gather(*in_flight_scoring, return_exceptions=True)
+
+    # Final check — all tasks should be complete
+    if tasks_complete < total_tasks:
+        # Some tasks may have had all instances fail during inference
+        for spec in trackers:
+            if spec not in results:
+                check_task_completion(spec)
+
+    scoring_progress.close()
     return results
 
 
@@ -287,63 +268,69 @@ def aggregate_results(
     """Aggregate results and prepare final output.
 
     Args:
-        results: Task results keyed by spec.
-        expanded_tasks: List of expanded task specs.
-        task_specs: Original task specs (may include suites).
+        results: Dict mapping task spec to TaskResult.
+        expanded_tasks: List of all expanded task specs.
+        task_specs: Original task specs (may include suite names).
         provider_config: Provider configuration.
-        attention_backend: Attention backend used.
-        harness_config: Optional HarnessConfig for full config serialization.
+        attention_backend: Attention backend name.
+        harness_config: Optional harness configuration.
 
     Returns:
-        Results dictionary ready for serialization.
+        Dict with full results including task metrics, errors, and summary.
     """
-    from olmo_eval.runners.io.formatting import get_model_display_name
-
-    errors = [(spec, r) for spec, r in results.items() if r.error]
-    if errors:
-        logger.error(f"{len(errors)} tasks failed")
-        for spec, error_result in errors:
-            logger.error(f"  {spec}: {error_result.error}")
-
-    provider_str = str(provider_config.kind)
-    display_model_name = get_model_display_name(provider_config.model, provider_config.alias)
-
+    model_config = provider_config.to_dict() if hasattr(provider_config, "to_dict") else {}
+    if attention_backend:
+        model_config["attention_backend"] = attention_backend
     results_dict: dict[str, Any] = {
-        "timestamp": datetime.now().isoformat(),
-        "model": display_model_name,
+        "model": provider_config.alias or provider_config.model,
         "model_path": provider_config.model,
-        "provider": provider_str,
+        "provider": str(provider_config.kind),
+        "model_config": model_config,
         "tasks": {},
+        "summary": {},
         "errors": [],
+        "timestamp": datetime.now().isoformat(),
     }
-
-    for spec in expanded_tasks:
-        if spec in results:
-            task_result = results[spec]
-            if task_result.error:
-                results_dict["errors"].append({"spec": spec, "error": task_result.error})
-            else:
-                task_data = task_result.to_dict(include_predictions=True)
-                task_hash = compute_task_hash(task_result.config)
-                if task_hash:
-                    task_data["task_hash"] = task_hash
-                results_dict["tasks"][spec] = task_data
-
-    model_config_dict = provider_config.to_dict()
-    model_config_dict["attention_backend"] = attention_backend
-    results_dict["model_config"] = model_config_dict
-
     if harness_config is not None:
-        results_dict["harness_config"] = harness_config.to_dict()
+        results_dict["harness_config"] = (
+            harness_config.to_dict() if hasattr(harness_config, "to_dict") else harness_config
+        )
 
+    # Process each task result
+    for spec, task_result in results.items():
+        task_data: dict[str, Any] = {}
+
+        if task_result.error:
+            task_data["error"] = task_result.error
+            results_dict["errors"].append({"task": spec, "error": task_result.error})
+        else:
+            task_data["metrics"] = task_result.metrics
+            task_data["num_instances"] = task_result.num_instances
+            task_data["duration_seconds"] = task_result.duration_seconds
+            task_data["primary_metric"] = task_result.primary_metric
+            if task_result.predictions:
+                task_data["predictions"] = task_result.predictions
+
+            # Get the primary metric for the summary
+            if task_result.primary_metric and task_result.metrics:
+                from olmo_eval.runners.processing.utils import get_primary_metric
+
+                primary = get_primary_metric(task_result.metrics, task_result.primary_metric)
+                if primary:
+                    results_dict["summary"][spec] = {
+                        "metric": primary[0],
+                        "score": primary[1],
+                    }
+
+        task_data["config"] = task_result.config
+        task_data["task_hash"] = (
+            compute_task_hash(task_result.config) if task_result.config else None
+        )
+        results_dict["tasks"][spec] = task_data
+
+    # Compute suite aggregations
     suite_aggs = compute_suite_aggregations(task_specs, results_dict["tasks"])
     if suite_aggs:
         results_dict["suites"] = suite_aggs
 
     return results_dict
-
-
-__all__ = [
-    "process_results",
-    "aggregate_results",
-]

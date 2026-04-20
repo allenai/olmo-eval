@@ -1,11 +1,18 @@
 """Tests for olmo_eval.tasks.base module."""
 
+from __future__ import annotations
+
+import asyncio
 from collections.abc import Iterator
+from dataclasses import dataclass
+from typing import ClassVar
 
 import pytest
 
-from olmo_eval.common.metrics import AccuracyMetric
+from olmo_eval.common.execution.environment import ExecutionResult, ScoringContext
+from olmo_eval.common.metrics import AccuracyMetric, PassAtKMetric
 from olmo_eval.common.scorers import ExactMatchScorer
+from olmo_eval.common.scorers.execution import ExecutionScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response, Split
 from olmo_eval.evals.tasks.common import Task, TaskConfig
 
@@ -269,3 +276,174 @@ class TestTaskMetrics:
         assert "accuracy" in metrics
         assert "exact_match" in metrics["accuracy"]
         assert metrics["accuracy"]["exact_match"] == 0.0
+
+
+# ── Helpers for execution concurrency tests ─────────────────────────────────
+
+
+@dataclass(frozen=True)
+class _ConcurrencyTracker:
+    """Track peak concurrent calls (mutable internals, frozen wrapper)."""
+
+    _current: list[int]  # [current_count] — single-element list for mutability
+    _peak: list[int]  # [peak_count]
+    _lock: asyncio.Lock
+
+    @staticmethod
+    def create() -> _ConcurrencyTracker:
+        return _ConcurrencyTracker(_current=[0], _peak=[0], _lock=asyncio.Lock())
+
+    async def enter(self) -> None:
+        async with self._lock:
+            self._current[0] += 1
+            if self._current[0] > self._peak[0]:
+                self._peak[0] = self._current[0]
+
+    async def exit(self) -> None:
+        async with self._lock:
+            self._current[0] -= 1
+
+    @property
+    def peak(self) -> int:
+        return self._peak[0]
+
+
+@dataclass(frozen=True, slots=True)
+class _MockExecutionScorer(ExecutionScorer):
+    """ExecutionScorer that tracks concurrency and returns a fixed score."""
+
+    name: str = "mock_exec"
+    tracker: _ConcurrencyTracker | None = None
+    requires_async: ClassVar[bool] = True
+
+    async def ascore(self, instance, output, execution_env) -> float:
+        if self.tracker:
+            await self.tracker.enter()
+        try:
+            await asyncio.sleep(0.01)  # force overlap
+            return 1.0
+        finally:
+            if self.tracker:
+                await self.tracker.exit()
+
+
+class _MockExecutionEnv:
+    """Minimal mock that satisfies the ExecutionEnvironment protocol + semaphore."""
+
+    def __init__(self, semaphore: asyncio.Semaphore | None = None) -> None:
+        self._semaphore = semaphore
+
+    @property
+    def is_running(self) -> bool:
+        return True
+
+    async def execute(self, command: str, timeout: float | None = None) -> str:
+        return ""
+
+    async def execute_command(self, command: str, timeout: float | None = None):
+        return ExecutionResult(success=True)
+
+    async def execute_code(self, code: str, language: str = "python", timeout: float | None = None):
+        return ExecutionResult(success=True)
+
+    def get_executor(self, required_capabilities):
+        return self
+
+    def get_execution_semaphore(self, required_capabilities):
+        return self._semaphore
+
+
+def _make_responses(n_responses: int, n_outputs: int) -> list[Response]:
+    """Create test responses with the given shape."""
+    responses = []
+    for i in range(n_responses):
+        inst = Instance(question=f"Q{i}", gold_answer="A")
+        outputs = [LMOutput(text=f"out{j}") for j in range(n_outputs)]
+        req = LMRequest(request_type=RequestType.COMPLETION, prompt=f"Q{i}")
+        responses.append(Response(instance=inst, request=req, outputs=outputs))
+    return responses
+
+
+# ── Execution concurrency tests ─────────────────────────────────────────────
+
+
+@pytest.mark.anyio
+class TestExecutionConcurrency:
+    """Tests that the shared execution semaphore properly bounds concurrency."""
+
+    async def test_shared_semaphore_bounds_concurrency(self):
+        """Peak concurrent sandbox calls must not exceed the semaphore limit."""
+        tracker = _ConcurrencyTracker.create()
+        semaphore_limit = 2
+        env = _MockExecutionEnv(semaphore=asyncio.Semaphore(semaphore_limit))
+
+        scorer = _MockExecutionScorer(tracker=tracker)
+        metric = PassAtKMetric(k=1, scorer=lambda: scorer)
+        config = TaskConfig(name="test", data_source="test/dataset", metrics=(metric,))
+        task = ConcreteTask(config)
+
+        # 3 responses x 8 outputs = 24 scoring coroutines
+        responses = _make_responses(n_responses=3, n_outputs=8)
+        context = ScoringContext(execution_env=env, scoring_concurrency=100)
+
+        await task.score_responses(responses, context=context)
+
+        assert tracker.peak <= semaphore_limit
+        # Verify all outputs were scored
+        for resp in responses:
+            for output in resp.outputs:
+                assert output.metadata is not None
+                assert "score:mock_exec" in output.metadata
+
+    async def test_no_semaphore_still_works(self):
+        """When execution env has no get_execution_semaphore, scoring completes."""
+        tracker = _ConcurrencyTracker.create()
+        env = _MockExecutionEnv(semaphore=None)
+
+        scorer = _MockExecutionScorer(tracker=tracker)
+        metric = PassAtKMetric(k=1, scorer=lambda: scorer)
+        config = TaskConfig(name="test", data_source="test/dataset", metrics=(metric,))
+        task = ConcreteTask(config)
+
+        responses = _make_responses(n_responses=2, n_outputs=4)
+        context = ScoringContext(execution_env=env, scoring_concurrency=100)
+
+        await task.score_responses(responses, context=context)
+
+        # All outputs scored — concurrency was unbounded
+        for resp in responses:
+            for output in resp.outputs:
+                assert output.metadata is not None
+                assert "score:mock_exec" in output.metadata
+        assert tracker.peak > 0
+
+    async def test_env_without_get_execution_semaphore(self):
+        """Execution env that lacks get_execution_semaphore method still works."""
+
+        class _BareEnv:
+            """Env without semaphore support."""
+
+            is_running = True
+
+            async def execute(self, command, timeout=None):
+                return ""
+
+            async def execute_command(self, command, timeout=None):
+                return ExecutionResult(success=True)
+
+            async def execute_code(self, code, language="python", timeout=None):
+                return ExecutionResult(success=True)
+
+        env = _BareEnv()
+        scorer = _MockExecutionScorer()
+        metric = PassAtKMetric(k=1, scorer=lambda: scorer)
+        config = TaskConfig(name="test", data_source="test/dataset", metrics=(metric,))
+        task = ConcreteTask(config)
+
+        responses = _make_responses(n_responses=1, n_outputs=2)
+        context = ScoringContext(execution_env=env, scoring_concurrency=10)
+
+        await task.score_responses(responses, context=context)
+
+        for resp in responses:
+            assert "mock_exec" in resp.scores

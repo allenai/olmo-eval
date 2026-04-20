@@ -1,13 +1,15 @@
-from collections.abc import Iterator
+"""MBPP code generation task implementations."""
+
+from collections.abc import Iterator, Sequence
 from typing import Any
 
-from olmo_eval.common.formatters import PPLFormatter
-from olmo_eval.common.metrics import BPBMetricInstanceAvg, PassAtKMetric
+from olmo_eval.common.formatters import CompletionFormatter, PPLFormatter
+from olmo_eval.common.metrics import BPBMetricByteAvg, BPBMetricInstanceAvg, PassAtKMetric
 from olmo_eval.common.scorers import CodeExecutionScorer
-from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, Response, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.constants.code import MBPP_STOP_SEQUENCES
-from olmo_eval.evals.extract import extract_code
+from olmo_eval.evals.constants.code import MBPP_STOP_SEQUENCES, OLMO3_MBPP_STOP_SEQUENCES
+from olmo_eval.evals.extract import extract_code, extract_code_before_fence
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 
@@ -28,7 +30,8 @@ class MBPPBase(Task):
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         # Build prompt from text and function signature
-        question = doc["text"].strip() + "\n" + doc["code"].split(":")[0] + ":"
+        func_sig = doc["code"].split(":")[0] + ":"
+        question = doc["text"].strip() + "\n" + func_sig
 
         # Build test code
         tests = doc.get("test_setup_code", "") or ""
@@ -41,7 +44,7 @@ class MBPPBase(Task):
             gold_answer=doc["code"],
             metadata={
                 "id": doc["task_id"],
-                "answer_prefix": question,
+                "answer_prefix": func_sig,
                 "test": tests,
             },
         )
@@ -58,10 +61,22 @@ class MBPPBase(Task):
 
     def extract_answer(self, output: LMOutput) -> str | None:
         """Extract code from model output."""
-        code = extract_code(output.text)
-        if code and "answer_prefix" in (output.metadata or {}):
-            return output.metadata["answer_prefix"] + code
-        return code
+        return extract_code(output.text)
+
+    def _extract_answers(self, responses: Sequence[Response]) -> None:
+        """Extract code and prepend the function signature.
+
+        The answer_prefix contains the function signature (e.g. ``def func(x):``).
+        Prepending it ensures the generated body is wrapped in a valid function
+        definition so that test assertions can call the function.
+        """
+        for response in responses:
+            for output in response.outputs:
+                code = self.extract_answer(output)
+                if code:
+                    output.extracted_answer = response.instance.metadata["answer_prefix"] + code
+                else:
+                    output.extracted_answer = None
 
     def _build_fewshot(self) -> list[Instance]:
         """Build few-shot examples from the prompt split.
@@ -296,4 +311,76 @@ register_variant(
         num_samples=10,
         stop_sequences=MBPP_STOP_SEQUENCES,
     ),
+)
+
+
+# =============================================================================
+# EvalPlus Variant (different prompt format)
+# =============================================================================
+
+
+@register("mbpp:olmo3base")
+class MBPPOlmo3Base(MBPPBase):
+    """MBPP with EvalPlus-style prompt format for OLMo3 base evaluation.
+
+    Wraps the problem in an instruction + markdown code block with a sample test case.
+    """
+
+    data_source = DataSource(path="google-research-datasets/mbpp")
+    num_fewshot: int = 3
+    fewshot_seed: int = 1234
+    formatter = CompletionFormatter(
+        answer_prefix="Here is the completed function:\n\n```python\n",
+    )
+    sampling_params = SamplingParams(
+        max_tokens=1024,
+        temperature=0.6,
+        top_p=0.6,
+        do_sample=True,
+        num_samples=32,
+        stop_sequences=OLMO3_MBPP_STOP_SEQUENCES,
+    )
+    metrics = (
+        PassAtKMetric(k=1, scorer=CodeExecutionScorer),
+        PassAtKMetric(k=2, scorer=CodeExecutionScorer),
+        PassAtKMetric(k=4, scorer=CodeExecutionScorer),
+        PassAtKMetric(k=8, scorer=CodeExecutionScorer),
+        PassAtKMetric(k=16, scorer=CodeExecutionScorer),
+    )
+
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
+        random_test = doc["test_list"][0] if doc.get("test_list") else ""
+        question = (
+            "Please provide a self-contained Python script that solves the "
+            "following problem in a markdown code block:\n```\n"
+            + doc["text"].strip()
+            + "\n"
+            + random_test
+            + "\n```\n"
+        )
+
+        tests = doc.get("test_setup_code", "") or ""
+        if tests:
+            tests += "\n"
+        tests += "\n".join(doc["test_list"])
+
+        return Instance(
+            question=question,
+            gold_answer=doc["code"] + "\n```",
+            metadata={
+                "id": doc["task_id"],
+                "answer_prefix": "",
+                "test": tests,
+            },
+        )
+
+    def extract_answer(self, output: LMOutput) -> str | None:
+        return extract_code_before_fence(output.text)
+
+
+register_variant(
+    "mbpp:olmo3base",
+    "bpb",
+    formatter=PPLFormatter(leading_space=False),
+    metrics=(BPBMetricByteAvg(),),
 )

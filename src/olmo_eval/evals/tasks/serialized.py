@@ -95,10 +95,10 @@ class SerializedTask(Task):
 
 _BPB_METRICS = (BPBMetricInstanceAvg(),)
 
-# codex_humaneval:3shot:bpb::none
+# humaneval:3shot:bpb::none
 register_variant(
     "serialized",
-    "codex_humaneval_3shot_bpb",
+    "humaneval_3shot_bpb",
     data_source=DataSource(path=f"{_S3_BASE}/codex_humaneval_3shot_bpb__none.jsonl"),
     metrics=_BPB_METRICS,
 )

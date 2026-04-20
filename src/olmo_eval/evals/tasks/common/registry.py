@@ -10,11 +10,13 @@ Examples:
     - "mbpp:3shot:bpb:none" - task with stacked variants and regime
 """
 
+from __future__ import annotations
+
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Any, TypeVar
 
-from .base import Task, TaskConfig
+from .base import SandboxEnv, Task, TaskConfig
 
 T = TypeVar("T", bound=type[Task])
 
@@ -559,3 +561,27 @@ def get_task_dependencies(specs: list[str]) -> list[str]:
             all_deps.extend(task.config.dependencies)
     # Dedupe preserving order
     return list(dict.fromkeys(all_deps))
+
+
+def get_sandbox_envs(specs: list[str]) -> list[SandboxEnv]:
+    """Collect unique sandbox environments from task specs.
+
+    Returns:
+        Deduplicated list of SandboxEnv objects (by name).
+
+    Raises:
+        ValueError: If two tasks declare the same sandbox_env name with different deps.
+    """
+    envs: dict[str, SandboxEnv] = {}
+    for spec in specs:
+        task = get_task(spec)
+        senv = task.config.sandbox_env
+        if senv is None:
+            continue
+        if senv.name in envs and envs[senv.name] != senv:
+            raise ValueError(
+                f"Conflicting sandbox_env for '{senv.name}': "
+                f"{envs[senv.name].dependencies} vs {senv.dependencies}"
+            )
+        envs[senv.name] = senv
+    return list(envs.values())

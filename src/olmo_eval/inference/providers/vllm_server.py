@@ -210,7 +210,7 @@ class VLLMServerProvider(InferenceProvider):
         self._raw_http_client: httpx.AsyncClient | None = None
         self._openai_module: Any = None
         self._tokenizer: Any = None
-        self._server: VLLMServerProcess | None = None
+        self._server: VLLMServerProcess | None = None  # type: ignore[possibly-unresolved-reference]
         self._max_length: int | None = None
 
         if base_url:
@@ -278,6 +278,7 @@ class VLLMServerProvider(InferenceProvider):
                     "Could not determine max_model_len from server, defaulting to %d",
                     self._max_length,
                 )
+        assert self._max_length is not None
         return self._max_length
 
     def _get_or_create_client(self) -> AsyncOpenAI:
@@ -422,7 +423,7 @@ class VLLMServerProvider(InferenceProvider):
             if params.top_k is not None:
                 kwargs["extra_body"] = {"top_k": params.top_k}
         if params.stop_sequences:
-            kwargs["stop"] = list(params.stop_sequences)[:4]
+            kwargs["stop"] = list(params.stop_sequences)
 
         response = await client.completions.create(**kwargs)
 
@@ -496,8 +497,7 @@ class VLLMServerProvider(InferenceProvider):
             if params.top_k is not None:
                 extra_body["top_k"] = params.top_k
         if params.stop_sequences:
-            # OpenAI API supports max 4 stop sequences
-            kwargs["stop"] = list(params.stop_sequences)[:4]
+            kwargs["stop"] = list(params.stop_sequences)
         if tools:
             kwargs["tools"] = tools
         # Always request logprobs for metrics computation

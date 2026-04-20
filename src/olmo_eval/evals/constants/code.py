@@ -174,6 +174,48 @@ MULTILINGUAL_MBPP_TASKS_V2: tuple[str, ...] = (
 # MULTIPL_E Tasks
 # =============================================================================
 
+OLMO3_HUMANEVAL_STOP_SEQUENCES: tuple[str, ...] = (
+    "\n```",
+    "\nclass",
+    "\nif",
+    "\nprint",
+    "\n#",
+    "\n```\n\n",
+    "<|eot_id|>",
+)
+"""OLMo3 v2 stop sequences for HumanEval and DeepSeek LeetCode (omits \\ndef)."""
+
+OLMO3_MBPP_STOP_SEQUENCES: tuple[str, ...] = (
+    "```",
+    '\n"""',
+    "\nassert",
+    "\n#",
+)
+"""OLMo3 v2 stop sequences for MBPP EvalPlus variant."""
+
+BIGCODEBENCH_STOP_SEQUENCES: tuple[str, ...] = (
+    "<|endoftext|>",
+    "<|endofmask|>",
+    "</s>",
+    "\nif __name__",
+    "\ndef main(",
+    "\nprint(",
+    "\ndef ",
+    "\nclass ",
+    "\nimport ",
+    "\nfrom ",
+    "\nassert ",
+)
+"""Stop sequences for BigCodeBench code completion."""
+
+DS1000_STOP_SEQUENCES: tuple[str, ...] = (
+    "</code>",
+    "# SOLUTION END",
+    "```",
+)
+"""Stop sequences for DS-1000 data science code generation."""
+
+
 MULTIPL_E_LANGUAGES: tuple[str, ...] = ("cpp", "java", "js", "php", "rs", "sh")
 """MULTIPL_E supported languages (subset with code execution support)."""
 

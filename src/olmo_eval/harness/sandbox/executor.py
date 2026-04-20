@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import logging
 import os
 import time
@@ -134,7 +135,10 @@ class SandboxExecutor:
         prefix = f"[{self.name}] " if self.name else ""
 
         # For Modal deployments, patch app lookup during deployment creation
-        # to use unique app names and avoid conflicts between concurrent runs
+        # AND startup to use unique app names and avoid conflicts between
+        # concurrent runs.  The patch must cover both get_deployment() and
+        # deployment.start() because swe-rex calls modal.App.lookup("swe-rex")
+        # in both phases.
         if self.config.mode == SandboxMode.MODAL:
             from unittest.mock import patch
 
@@ -153,14 +157,18 @@ class SandboxExecutor:
 
             with patch.object(modal.App, "lookup", patched_lookup):
                 deployment = self.get_deployment()
+                await _run_with_progress(
+                    deployment.start(),
+                    f"{prefix}Waiting for sandbox runtime",
+                    interval=5.0,
+                )
         else:
             deployment = self.get_deployment()
-
-        await _run_with_progress(
-            deployment.start(),
-            f"{prefix}Waiting for sandbox runtime",
-            interval=5.0,
-        )
+            await _run_with_progress(
+                deployment.start(),
+                f"{prefix}Waiting for sandbox runtime",
+                interval=5.0,
+            )
 
         self._deployment = deployment
         self._runtime = deployment.runtime
@@ -354,10 +362,19 @@ class SandboxExecutor:
             self._session_created = False
 
         if self._deployment is not None:
+            # Work around swe-rex ModalDeployment.stop() bug: it only calls
+            # sandbox.terminate() when poll() returns non-None (already exited),
+            # so running sandboxes are never terminated.  Force-terminate here.
+            if self.config.mode == SandboxMode.MODAL:
+                sandbox = getattr(self._deployment, "_sandbox", None)
+                if sandbox is not None:
+                    with contextlib.suppress(Exception):
+                        await sandbox.terminate.aio()
+
             try:
                 await self._deployment.stop()
             except Exception as e:
-                self._log(logging.WARNING, f"Failed to stop deployment: {e}")
+                self._log(logging.DEBUG, f"Failed to stop deployment: {e}")
             self._deployment = None
             self._runtime = None
 
@@ -705,7 +722,7 @@ class SandboxExecutor:
             )
 
         interpreters = {
-            "python": "python",
+            "python": "python3",
             "python3": "python3",
             "bash": "bash",
             "sh": "sh",
@@ -741,11 +758,12 @@ class SandboxExecutor:
             )
 
         except Exception as e:
-            self._log(logging.WARNING, f"Code execution failed: {e}")
+            error_msg = str(e) or repr(e)
+            self._log(logging.DEBUG, f"Code execution failed: {error_msg}")
             return ExecutionResult(
                 success=False,
                 output="",
-                error=str(e),
+                error=error_msg,
             )
 
     async def _ensure_session(self) -> None:
