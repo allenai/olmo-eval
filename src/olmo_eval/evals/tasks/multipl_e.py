@@ -149,37 +149,6 @@ def _make_scorer_for_language(lang: str) -> type[MultiplEScorer]:
     return LanguageScorer
 
 
-# Separate cache for timeout-specific scorer classes
-_TIMED_SCORER_CACHE: dict[tuple[str, float], type[MultiplEScorer]] = {}
-
-
-def _make_scorer_with_timeout(lang: str, timeout: float) -> type[MultiplEScorer]:
-    """Create a scorer class with an explicit timeout for a specific language.
-
-    Used by olmo3base variant to match oe-eval-internal's uniform 10s timeout.
-    """
-    cache_key = (lang, timeout)
-    if cache_key in _TIMED_SCORER_CACHE:
-        return _TIMED_SCORER_CACHE[cache_key]
-
-    default_lang = lang
-    default_timeout = timeout
-    class_name = f"MultiplEScorer_{lang}_t{int(timeout)}"
-
-    @dataclass(frozen=True, slots=True)
-    class TimedScorer(MultiplEScorer):
-        language: str = default_lang
-        timeout: float | None = default_timeout
-
-    TimedScorer.__name__ = class_name
-    TimedScorer.__qualname__ = class_name
-
-    globals()[class_name] = TimedScorer
-    _TIMED_SCORER_CACHE[cache_key] = TimedScorer
-
-    return TimedScorer
-
-
 # =============================================================================
 # Task Registration
 # =============================================================================
