@@ -23,7 +23,7 @@ from olmo_eval.evals.tasks.constants.mbpp import MBPP_FEWSHOT_SOURCES
 
 
 @dataclass(frozen=True, slots=True)
-class _CodeExecScorer3s(CodeExecutionScorer):
+class CodeExecutionScorer3s(CodeExecutionScorer):
     separator: str = "\n"
 
 
@@ -362,11 +362,11 @@ class MBPPOlmo3Base(MBPPBase):
         stop_sequences=OLMO3_MBPP_STOP_SEQUENCES,
     )
     metrics = (
-        PassAtKMetric(k=1, scorer=_CodeExecScorer3s),
-        PassAtKMetric(k=2, scorer=_CodeExecScorer3s),
-        PassAtKMetric(k=4, scorer=_CodeExecScorer3s),
-        PassAtKMetric(k=8, scorer=_CodeExecScorer3s),
-        PassAtKMetric(k=16, scorer=_CodeExecScorer3s),
+        PassAtKMetric(k=1, scorer=CodeExecutionScorer3s),
+        PassAtKMetric(k=2, scorer=CodeExecutionScorer3s),
+        PassAtKMetric(k=4, scorer=CodeExecutionScorer3s),
+        PassAtKMetric(k=8, scorer=CodeExecutionScorer3s),
+        PassAtKMetric(k=16, scorer=CodeExecutionScorer3s),
     )
 
     _ANSWER_PREFIX = "Here is the completed function:\n\n```python\n"

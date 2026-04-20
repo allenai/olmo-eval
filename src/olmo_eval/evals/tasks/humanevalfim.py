@@ -28,7 +28,7 @@ from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 
 @dataclass(frozen=True, slots=True)
-class _CodeExecScorer3s(CodeExecutionScorer):
+class CodeExecutionScorer3s(CodeExecutionScorer):
     timeout: float = 3.0
     separator: str = "\n"
 
@@ -159,8 +159,8 @@ register_variant("humanevalfim_multi", "olmo3")
 register_variant("humanevalfim_random", "olmo3")
 
 _OLMO3BASE_FIM_METRICS = (
-    PassAtKMetric(k=1, scorer=_CodeExecScorer3s),
-    PassAtKMetric(k=10, scorer=_CodeExecScorer3s),
+    PassAtKMetric(k=1, scorer=CodeExecutionScorer3s),
+    PassAtKMetric(k=10, scorer=CodeExecutionScorer3s),
 )
 
 register_variant(

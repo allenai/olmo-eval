@@ -20,7 +20,7 @@ from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 
 @dataclass(frozen=True, slots=True)
-class _CodeExecScorer3s(CodeExecutionScorer):
+class CodeExecutionScorer3s(CodeExecutionScorer):
     timeout: float = 3.0
     separator: str = "\n"
 
@@ -39,11 +39,11 @@ class DeepSeekLeetCode(Task):
         stop_sequences=OLMO3_HUMANEVAL_STOP_SEQUENCES,
     )
     metrics = (
-        PassAtKMetric(k=1, scorer=_CodeExecScorer3s),
-        PassAtKMetric(k=2, scorer=_CodeExecScorer3s),
-        PassAtKMetric(k=4, scorer=_CodeExecScorer3s),
-        PassAtKMetric(k=8, scorer=_CodeExecScorer3s),
-        PassAtKMetric(k=16, scorer=_CodeExecScorer3s),
+        PassAtKMetric(k=1, scorer=CodeExecutionScorer3s),
+        PassAtKMetric(k=2, scorer=CodeExecutionScorer3s),
+        PassAtKMetric(k=4, scorer=CodeExecutionScorer3s),
+        PassAtKMetric(k=8, scorer=CodeExecutionScorer3s),
+        PassAtKMetric(k=16, scorer=CodeExecutionScorer3s),
     )
 
     @property

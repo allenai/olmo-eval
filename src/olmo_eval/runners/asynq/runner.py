@@ -306,7 +306,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                             replace(
                                 template,
                                 capabilities=senv.capability,
-                                dockerfile_extra=template.dockerfile_extra + extra + senv.dockerfile_extra,
+                                dockerfile_extra=(
+                                    template.dockerfile_extra + extra + senv.dockerfile_extra
+                                ),
                                 inject_swerex=True,
                                 instances=allocated.get(senv.name, 1),
                             )
