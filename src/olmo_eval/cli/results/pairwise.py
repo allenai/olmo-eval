@@ -124,6 +124,13 @@ from olmo_eval.cli.utils import console
     help="Include every matched experiment as its own row (default: dedupe "
     "to the most recent per model+hash).",
 )
+@click.option(
+    "--require-full-coverage/--no-require-full-coverage",
+    "require_full_coverage",
+    default=True,
+    help="Drop models that lack full coverage of the suite's tasks "
+    "(suite scope only; default: enabled).",
+)
 @db_options
 def pairwise(
     experiment_ids: tuple[str, ...],
@@ -142,6 +149,7 @@ def pairwise(
     output_path: str | None,
     output_format: str,
     keep_all: bool,
+    require_full_coverage: bool,
     db_host: str,
     db_port: int,
     db_name: str,
@@ -199,12 +207,40 @@ def pairwise(
                         experiment_groups=list(experiment_groups) or None,
                         suite_name=suite_name,
                         keep_all=keep_all,
+                        require_full_coverage=require_full_coverage,
                     )
                 except ValueError as e:
                     console.print(f"[red]Error:[/red] {e}")
                     raise SystemExit(1) from None
         finally:
             db.dispose()
+
+    if result.filtered_models:
+        from rich.table import Table
+
+        console.print(
+            f"[yellow]Filtered {len(result.filtered_models)} model(s) "
+            "lacking full suite coverage:[/yellow]"
+        )
+        table = Table(show_lines=True)
+        table.add_column("Model", style="cyan", no_wrap=False)
+        table.add_column("Hash", style="dim")
+        table.add_column("Missing tasks", justify="right")
+        table.add_column("Short instances", justify="right")
+        table.add_column("Gaps")
+        for fm in result.filtered_models:
+            gaps: list[str] = [f"- {t} (missing)" for t in fm.missing_tasks]
+            gaps.extend(
+                f"- {t} ({have}/{expected})" for t, have, expected in fm.instance_shortfalls
+            )
+            table.add_row(
+                fm.model_name,
+                (fm.model_hash or "")[:8],
+                str(len(fm.missing_tasks)),
+                str(len(fm.instance_shortfalls)),
+                "\n".join(gaps),
+            )
+        console.print(table)
 
     matched = result.n_experiments_matched
     dropped = result.n_experiments_dropped

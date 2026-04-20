@@ -54,6 +54,16 @@ class PairStats:
         return math.sqrt(sample_var / n)
 
 
+@dataclass(frozen=True)
+class FilteredModel:
+    """One model dropped for lacking full suite coverage."""
+
+    model_name: str
+    model_hash: str
+    missing_tasks: tuple[str, ...] = ()
+    instance_shortfalls: tuple[tuple[str, int, int], ...] = ()
+
+
 @dataclass
 class PairwiseResult:
     """Pairwise comparison output for one task or suite scope."""
@@ -68,6 +78,7 @@ class PairwiseResult:
     task_names: tuple[str, ...] = ()
     n_experiments_matched: int = 0
     n_experiments_dropped: int = 0
+    filtered_models: tuple[FilteredModel, ...] = ()
 
 
 def get_win_rate(pairs: list[PairStats], row: int, col: int) -> float:
@@ -228,6 +239,7 @@ def compute_pairwise(
     experiment_groups: list[str] | None = None,
     suite_name: str | None = None,
     keep_all: bool = False,
+    require_full_coverage: bool = True,
 ) -> PairwiseResult:
     """Compute pairwise stats across the matched experiments.
 
@@ -382,15 +394,58 @@ def compute_pairwise(
     if keep_all:
         selected = sorted(candidate_experiments, key=lambda e: e.timestamp, reverse=True)
     else:
-        chosen: dict[tuple[str, str], Experiment] = {}
+        chosen: dict[str, Experiment] = {}
         for exp in candidate_experiments:
-            key = (exp.model_name, exp.model_hash)
-            existing = chosen.get(key)
+            existing = chosen.get(exp.model_hash)
             if existing is None or exp.timestamp > existing.timestamp:
-                chosen[key] = exp
+                chosen[exp.model_hash] = exp
         selected = list(chosen.values())
 
     n_dropped = n_matched - len(selected)
+
+    filtered_models: list[FilteredModel] = []
+    if require_full_coverage and suite_name:
+        expected_tasks = set(suite_task_names)
+        selected_pks = [exp.id for exp in selected]
+        coverage_rows = session.execute(
+            select(
+                TaskResult.experiment_pk,
+                TaskResult.task_name,
+                TaskResult.num_instances,
+            )
+            .where(TaskResult.experiment_pk.in_(selected_pks))
+            .where(TaskResult.task_name.in_(suite_task_names))
+        ).all()
+
+        per_pk_tasks: dict[int, dict[str, int]] = {}
+        max_instances_per_task: dict[str, int] = {}
+        for pk, tname, ninst in coverage_rows:
+            ninst_val = ninst or 0
+            per_pk_tasks.setdefault(pk, {})[tname] = ninst_val
+            if ninst_val > max_instances_per_task.get(tname, 0):
+                max_instances_per_task[tname] = ninst_val
+
+        kept: list[Experiment] = []
+        for exp in selected:
+            have = per_pk_tasks.get(exp.id, {})
+            missing = tuple(sorted(expected_tasks - have.keys()))
+            shortfalls = tuple(
+                (t, have[t], max_instances_per_task.get(t, 0))
+                for t in sorted(have.keys())
+                if max_instances_per_task.get(t, 0) > have[t]
+            )
+            if missing or shortfalls:
+                filtered_models.append(
+                    FilteredModel(
+                        model_name=exp.model_name,
+                        model_hash=exp.model_hash,
+                        missing_tasks=missing,
+                        instance_shortfalls=shortfalls,
+                    )
+                )
+            else:
+                kept.append(exp)
+        selected = kept
 
     ordered: list[tuple[int, ModelMeta]] = []
     for exp in selected:
@@ -413,7 +468,15 @@ def compute_pairwise(
         )
 
     if len(ordered) < 2:
-        detail = "after deduping by (model_name, model_hash)" if not keep_all else "matched"
+        if filtered_models:
+            detail = (
+                f"after --require-full-coverage dropped {len(filtered_models)} "
+                "partial-coverage model(s)"
+            )
+        elif not keep_all:
+            detail = "after deduping by model_hash"
+        else:
+            detail = "matched"
         raise ValueError(
             f"Only {len(ordered)} unique model(s) {detail} — "
             "need at least 2. Broaden the filters to include more models."
@@ -595,6 +658,7 @@ def compute_pairwise(
         task_names=contributing_task_names,
         n_experiments_matched=n_matched,
         n_experiments_dropped=n_dropped,
+        filtered_models=tuple(filtered_models),
     )
 
 

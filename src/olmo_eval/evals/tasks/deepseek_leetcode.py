@@ -96,4 +96,10 @@ class DeepSeekLeetCode(Task):
                     output.extracted_answer = None
 
 
-register_variant("deepseek_leetcode", "olmo3base", num_fewshot=3, fewshot_seed=1234)
+register_variant(
+    "deepseek_leetcode",
+    "olmo3base",
+    num_fewshot=3,
+    fewshot_seed=1234,
+    primary_metric=PassAtKMetric(k=1, scorer=CodeExecutionScorer),
+)

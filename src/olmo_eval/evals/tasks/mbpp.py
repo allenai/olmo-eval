@@ -347,6 +347,7 @@ class MBPPOlmo3Base(MBPPBase):
         PassAtKMetric(k=8, scorer=CodeExecutionScorer),
         PassAtKMetric(k=16, scorer=CodeExecutionScorer),
     )
+    primary_metric = PassAtKMetric(k=1, scorer=CodeExecutionScorer)
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         random_test = doc["test_list"][0] if doc.get("test_list") else ""

@@ -213,6 +213,7 @@ def _register_humaneval_task(lang: str) -> None:
             PassAtKMetric(k=8, scorer=scorer_cls),
             PassAtKMetric(k=16, scorer=scorer_cls),
         ),
+        primary_metric=PassAtKMetric(k=1, scorer=scorer_cls),
     )
 
 
@@ -278,6 +279,7 @@ def _register_mbpp_task(lang: str) -> None:
             PassAtKMetric(k=8, scorer=scorer_cls),
             PassAtKMetric(k=16, scorer=scorer_cls),
         ),
+        primary_metric=PassAtKMetric(k=1, scorer=scorer_cls),
     )
 
 
