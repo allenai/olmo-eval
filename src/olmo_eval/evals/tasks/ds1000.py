@@ -267,10 +267,7 @@ finally:
                         + "test_execution(code)\n"
                         + ("test_string(code)\n" if "test_string(" in code_context else "\n")
                     )
-                    test_program = (
-                        f"_TEST_CODE = {repr(inner_code)}\n"
-                        + self._EXEC_WRAPPER
-                    )
+                    test_program = f"_TEST_CODE = {repr(inner_code)}\n" + self._EXEC_WRAPPER
                     output.extracted_answer = test_program
                 else:
                     output.extracted_answer = None
