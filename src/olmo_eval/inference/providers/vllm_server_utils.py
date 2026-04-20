@@ -424,7 +424,7 @@ class VLLMServerProcess:
         if self.log_dir:
             import pathlib
 
-            log_path = pathlib.Path(self.log_dir) / "vllm_server.log"
+            log_path = pathlib.Path(self.log_dir) / f"vllm_server_{self.port}.log"
             log_path.parent.mkdir(parents=True, exist_ok=True)
             self._log_file = open(log_path, "w")  # noqa: SIM115
             self._process = subprocess.Popen(
@@ -470,7 +470,7 @@ class VLLMServerProcess:
                 with suppress(Exception):
                     import pathlib
 
-                    log_path = pathlib.Path(self.log_dir) / "vllm_server.log"
+                    log_path = pathlib.Path(self.log_dir) / f"vllm_server_{self.port}.log"
                     if log_path.exists():
                         process_output = log_path.read_text(errors="replace")
 
@@ -487,7 +487,7 @@ class VLLMServerProcess:
                 error_msg += f". Error: {last_error}"
             if process_output:
                 # Include a truncated version of the output in the exception
-                max_output_len = 2000
+                max_output_len = 20000
                 if len(process_output) > max_output_len:
                     truncated_output = "...[truncated]...\n" + process_output[-max_output_len:]
                 else:
