@@ -69,7 +69,6 @@ def inference_worker(
         max_concurrency = provider_config.max_concurrency or harness_config.max_concurrency
         provider_kwargs = dict(provider_config.kwargs) if provider_config.kwargs else {}
 
-        attention_backend = provider_kwargs.get("attention_backend")
         load_format = provider_kwargs.get("load_format")
         extra_loader_config = provider_kwargs.get("model_loader_extra_config")
 
@@ -84,9 +83,6 @@ def inference_worker(
             worker_logger.info(f"  GPUs: {gpu_ids}")
 
         init_start = time.time()
-
-        if attention_backend:
-            os.environ["VLLM_ATTENTION_BACKEND"] = attention_backend
 
         has_tools = harness_config.has_tools
         enable_auto_tool_choice = has_tools and provider_kind == "vllm_server"
