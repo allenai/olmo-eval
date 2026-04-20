@@ -99,11 +99,11 @@ class DS1000(Task):
             "RUN mkdir -p /root/python310 && tar xzf /tmp/python310.tar.gz -C /root/python310"
             " && rm /tmp/python310.tar.gz",
             "RUN /root/python310/python/bin/pip install --no-cache-dir uv",
-            f"RUN /root/python310/python/bin/python -m uv pip install --system --no-cache"
+            f"RUN /root/python310/python/bin/python3 -m uv pip install --system --no-cache"
             f" {_DS1000_DEPS}",
-            "RUN /root/python310/python/bin/python -m uv pip install --system --no-cache"
+            "RUN /root/python310/python/bin/python3 -m uv pip install --system --no-cache"
             " torch==2.2.0+cpu --index-url https://download.pytorch.org/whl/cpu",
-            "RUN /root/python310/python/bin/python -m uv pip install --system --no-cache"
+            "RUN /root/python310/python/bin/python3 -m uv pip install --system --no-cache"
             " tensorflow-cpu==2.16.1",
         ),
     )
