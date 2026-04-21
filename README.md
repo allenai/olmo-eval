@@ -27,9 +27,9 @@ uv python install 3.12
 uv sync
 
 # Browse a few suites
-uv run olmo-eval suite-info mmlu
-uv run olmo-eval suite-info gpqa
-uv run olmo-eval suite-info olmobase:code
+uv run olmo-eval suite inspect mmlu
+uv run olmo-eval suite inspect gpqa
+uv run olmo-eval suite inspect olmobase:code
 
 # Preview a run without loading a model
 uv run olmo-eval run -m mock -t gsm8k --dry-run

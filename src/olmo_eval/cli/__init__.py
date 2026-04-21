@@ -19,6 +19,7 @@ from olmo_eval.cli.metrics import metrics
 from olmo_eval.cli.results import results
 from olmo_eval.cli.run import run
 from olmo_eval.cli.run_external import run_external
+from olmo_eval.cli.suite import suite
 from olmo_eval.cli.task import task
 from olmo_eval.cli.utils import console
 from olmo_eval.common.constants import get_model_presets
@@ -38,6 +39,7 @@ main.add_command(beaker)
 main.add_command(results)
 main.add_command(metrics)
 main.add_command(task)
+main.add_command(suite)
 main.add_command(run_external)
 
 
@@ -275,45 +277,6 @@ def external_evals(filter: str) -> None:
             )
         )
         console.print()
-
-
-@main.command(name="suite-info")
-@click.argument("suite_name")
-def suite_info(suite_name: str) -> None:
-    """Show tasks and variants in a suite.
-
-    SUITE_NAME is the name of the suite to inspect.
-
-    Example: olmo-eval suite-info mmlu
-    """
-    try:
-        suite = get_suite(suite_name)
-    except KeyError:
-        console.print(f"[red]Error:[/red] Suite '{suite_name}' not found")
-        console.print(f"\n[dim]Available suites: {', '.join(list_suites())}[/dim]")
-        raise SystemExit(1) from None
-
-    console.print(f"\n[bold cyan]Suite:[/bold cyan] {suite.name}")
-    if suite.description:
-        console.print(f"[dim]{suite.description}[/dim]")
-    console.print(f"[bold]Aggregation:[/bold] {suite.aggregation.value}")
-    console.print()
-
-    table = Table(title=f"Tasks in '{suite_name}'")
-    table.add_column("#", style="dim", justify="right")
-    table.add_column("Task", style="cyan")
-    table.add_column("Variant", style="yellow")
-
-    for idx, task_spec in enumerate(suite.expanded_tasks, 1):
-        if ":" in task_spec:
-            task_name, variant = task_spec.split(":", 1)
-        else:
-            task_name = task_spec
-            variant = "(default)"
-        table.add_row(str(idx), task_name, variant)
-
-    console.print(table)
-    console.print(f"\n[dim]Total: {len(suite.expanded_tasks)} tasks[/dim]")
 
 
 if __name__ == "__main__":
