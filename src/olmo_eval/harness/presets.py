@@ -190,6 +190,48 @@ class HarnessPresets:
         )
 
     @lazy
+    def scicode(name: str) -> HarnessConfig:
+        """Preset for the SciCode benchmark.
+
+        Provides a Python sandbox pre-loaded with numpy, scipy, sympy, and h5py,
+        and volume-mounts the SciCode numeric reference file from weka to
+        /workspace/scicode_test_data.h5 (the path SciCodeExecutionScorer expects).
+
+        Requires the cluster to have weka mounted and
+        /weka/oe-eval-default/scicode/test_data.h5 to be populated.
+        """
+        from .sandbox import Capability, SandboxConfig, SandboxMode
+
+        return HarnessConfig(
+            name=name,
+            provider=ProviderConfig(kind=ProviderKind.VLLM_SERVER),
+            metrics=MetricsConfig(),
+            scoring_concurrency=4,
+            batching=BatchConfig.batched(),
+            sandboxes=(
+                SandboxConfig(
+                    capabilities=frozenset(Capability.PYTHON),
+                    instances=4,
+                    image="ghcr.io/astral-sh/uv:python3.12-bookworm-slim",
+                    mode=SandboxMode.DOCKER,
+                    startup_timeout=300.0,
+                    command_timeout=300.0,
+                    log_dir=_get_logs_dir(),
+                    inject_swerex=True,
+                    dockerfile_extra=(
+                        "RUN uv pip install --system --no-cache numpy scipy sympy h5py",
+                    ),
+                    volumes=(
+                        (
+                            "/weka/oe-eval-default/scicode/test_data.h5",
+                            "/workspace/scicode_test_data.h5",
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+    @lazy
     def codex_completion(name: str) -> HarnessConfig:
         """Code completion agent with sandbox for testing and web search."""
         from .sandbox import SandboxConfig, SandboxMode
