@@ -72,8 +72,8 @@ class TestGetTasksShortName:
         assert get_tasks_short_name(["arc:mc"]) == "arc"
 
     def test_single_task_with_stacked_variant(self):
-        """Test single task strips a variant suffix."""
-        assert get_tasks_short_name(["arc_easy:mc"]) == "arc"
+        """Test single task strips stacked variant suffixes."""
+        assert get_tasks_short_name(["arc_easy:mc:full"]) == "arc"
 
     def test_two_tasks(self):
         """Test two tasks joined with underscore."""
