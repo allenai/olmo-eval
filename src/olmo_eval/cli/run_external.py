@@ -194,7 +194,7 @@ def run_external(
         olmo-eval run-external -m my-model -e tau2_bench -O ./results
 
         # Run multiple evaluations
-        olmo-eval run-external -m my-model -e tau2_bench -e other_bench
+        olmo-eval run-external -m my-model -e tau2_bench -e asta_bench
     """
     from olmo_eval.common.logging import configure_logging
 

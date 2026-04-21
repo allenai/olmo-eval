@@ -80,7 +80,7 @@ class MyTask(Task):
 from olmo_eval.evals.tasks.common import register_regime
 
 register_regime("my_task", "olmes", num_fewshot=5, fewshot_seed=42)
-# Usage: olmo-eval run -m model -t my_task:olmes
+# Built-in example: uv run olmo-eval run -m llama3.1-8b -t arc_easy:olmes
 ```
 
 **Runtime Dependencies** allow tasks to specify packages installed at job startup:
@@ -218,13 +218,13 @@ A **Harness** configures a model provider with specific capabilities like tools,
 
 ```bash
 # Run task without tools or a scaffold (baseline)
-olmo-eval run -m llama3.1-8b -t simpleqa
+uv run olmo-eval run -m llama3.1-8b -t simpleqa:judge
 
 # Run task with search tools via harness preset
-olmo-eval run -m llama3.1-8b -t simpleqa --harness dr_tulu
+uv run olmo-eval run -m llama3.1-8b -t simpleqa:judge --harness dr_tulu
 
 # Use a custom harness config file
-olmo-eval run -m llama3.1-8b -t simpleqa --harness-config ./my_harness.yaml
+uv run olmo-eval run -m llama3.1-8b -t simpleqa:judge --harness-config ./my_harness.yaml
 ```
 
 #### HarnessConfig
@@ -278,7 +278,7 @@ Scaffolds define how the Harness executes multi-turn requests with tool calling.
 
 ```bash
 # List available scaffolds
-olmo-eval scaffolds
+uv run olmo-eval scaffolds
 ```
 
 **When to use a scaffold:**
@@ -328,28 +328,36 @@ config = HarnessConfig(
 
 ```bash
 # Plot metrics from database (requires at least one filter)
-olmo-eval metrics plot -G my-benchmark-group
-olmo-eval metrics plot -m OLMo-3 --metric throughput
+uv run olmo-eval metrics plot -G my-benchmark-group
+uv run olmo-eval metrics plot -m OLMo-3 --metric throughput
 
 # Show statistics table without interactive plots
-olmo-eval metrics plot -e experiment_123 --stats-only
+uv run olmo-eval metrics plot -e experiment_123 --stats-only
 ```
 
 When using the `db` reporter, metrics are stored in a PostgreSQL database (default name: `olmo_eval_metrics`). You must configure your own database connection using the `OLMO_EVAL_DB_*` environment variables (see [Database Configuration](#database-configuration)).
 
 #### Auxiliary Providers and Local Judge Models
 
-Some tasks use LLM-as-judge scoring, where a separate model evaluates responses. The `auxiliary_providers` configuration lets you specify additional inference providers for scoring/judging. By convention, tasks that need a judge model look for a provider named `judge`.
+Some tasks or custom scorers use LLM-as-judge scoring, where a separate model evaluates responses. The `auxiliary_providers` configuration lets you specify additional inference providers for scoring or judging. Harness overrides must come immediately after `--harness`, while task overrides like `limit=...` must come after `-t`.
 
-**Local example with `olmo-eval run`:**
+**Local example with `uv run olmo-eval run`:**
 
 ```bash
-olmo-eval run -m Qwen/Qwen3-8B -t simpleqa:judge \
-    --harness dr_tulu \
+uv run olmo-eval run \
+    --harness default \
+    -o provider.max_model_len=16384 \
+    -o provider.num_instances=1 \
+    -o 'metrics.reporters=[file]' \
+    -o 'metrics.collect_gpu=true' \
+    -o 'provider.kwargs.timeout=300' \
     -o auxiliary_providers.judge.kind=vllm_server \
     -o auxiliary_providers.judge.model=Qwen/Qwen3-8B \
     -o auxiliary_providers.judge.num_instances=1 \
-    -o scoring_concurrency=8
+    -o scoring_concurrency=4 \
+    -m Qwen/Qwen3-8B \
+    -t simpleqa:judge \
+    -o limit=10
 ```
 
 **Key configuration options:**
@@ -405,7 +413,7 @@ required_secrets:
 ```
 
 ```bash
-olmo-eval run -m llama3.1-8b -t simpleqa --harness-config my_harness.yaml
+uv run olmo-eval run -m llama3.1-8b -t simpleqa:judge --harness-config my_harness.yaml
 ```
 
 #### Programmatic Usage
@@ -616,7 +624,7 @@ register_regime("my_task", "olmes", num_fewshot=5, fewshot_seed=1234)
 register_regime("my_task", "3shot", num_fewshot=3)
 ```
 
-Usage: `olmo-eval run -t my_task:bpb:3shot`
+Usage: `uv run olmo-eval run -m llama3.1-8b -t humaneval:3shot:bpb`
 
 ## Tool-Augmented Evaluation
 
@@ -628,10 +636,10 @@ The **Harness** is the preferred way to add tools to evaluations. It separates t
 
 ```bash
 # Baseline evaluation (no tools)
-olmo-eval run -m llama3.1-8b -t simpleqa
+uv run olmo-eval run -m llama3.1-8b -t simpleqa:judge
 
 # Same task with search tools
-olmo-eval run -m llama3.1-8b -t simpleqa --harness dr_tulu
+uv run olmo-eval run -m llama3.1-8b -t simpleqa:judge --harness dr_tulu
 ```
 
 See the [Harness](#harness) section above for full documentation on:
@@ -647,19 +655,19 @@ Evaluation results are stored in PostgreSQL and can be queried via the CLI.
 
 ```bash
 # Query by experiment ID
-olmo-eval results query --experiment exp_001
+uv run olmo-eval results query --experiment exp_001
 
 # Query by model
-olmo-eval results query --model llama3.1-8b
+uv run olmo-eval results query --model llama3.1-8b
 
 # Query by task (shows comparison matrix)
-olmo-eval results query --task mmlu --task gsm8k
+uv run olmo-eval results query --task mmlu --task gsm8k
 
 # Query by experiment group
-olmo-eval results query -G my-benchmark-group --format json
+uv run olmo-eval results query -G my-benchmark-group --format json
 
 # Combine filters
-olmo-eval results query --model llama3.1-8b --task mmlu --format json
+uv run olmo-eval results query --model llama3.1-8b --task mmlu --format json
 ```
 
 ### Instance-Level Predictions
@@ -668,13 +676,13 @@ Include `--instances` to retrieve instance-level predictions:
 
 ```bash
 # Get instances for an experiment
-olmo-eval results query --experiment exp_001 --task mmlu --instances --format json
+uv run olmo-eval results query --experiment exp_001 --task mmlu --instances --format json
 
 # Paginate through large result sets using keyset pagination
-olmo-eval results query --task mmlu --instances --limit 1000 --format json
+uv run olmo-eval results query --task mmlu --instances --limit 1000 --format json
 
 # Get next page using last_id from previous response
-olmo-eval results query --task mmlu --instances --limit 1000 --after-id 1000 --format json
+uv run olmo-eval results query --task mmlu --instances --limit 1000 --after-id 1000 --format json
 ```
 
 JSON output includes pagination metadata:
@@ -727,41 +735,41 @@ This requires AWS credentials configured (via `~/.aws/credentials` or environmen
 
 ```bash
 # Basic evaluation
-olmo-eval run -m llama3.1-8b -t mmlu -t gsm8k -t arc
+uv run olmo-eval run -m llama3.1-8b -t mmlu -t gsm8k -t arc_easy
 
 # Large models with multi-GPU tensor parallelism
-olmo-eval run -m llama3.1-70b -t mmlu --num-gpus 4
+uv run olmo-eval run -m llama3.1-70b -t mmlu --num-gpus 4
 
 # Tool-augmented evaluation with harness
-olmo-eval run -m llama3.1-8b -t simpleqa --harness dr_tulu
+uv run olmo-eval run -m llama3.1-8b -t simpleqa:judge --harness dr_tulu
 ```
 
 ## Debugging and Inspection
 
 olmo-eval provides tools for inspecting tasks, requests, and responses at various stages of evaluation.
 
-### Task Inspection (`olmo-eval task inspect`)
+### Task Inspection (`uv run olmo-eval task inspect`)
 
 Inspect task instances without running evaluation:
 
 ```bash
 # View raw instance data
-olmo-eval task inspect arc_easy
+uv run olmo-eval task inspect arc_easy
 
 # View multiple instances
-olmo-eval task inspect arc_easy -n 5 --skip 10
+uv run olmo-eval task inspect arc_easy -n 5 --skip 10
 
 # View the LM request that will be sent to the model
-olmo-eval task inspect mmlu:olmes --request
+uv run olmo-eval task inspect arc_easy:olmes --request
 
 # View formatted prompt with chat template applied
-olmo-eval task inspect humaneval -T meta-llama/Llama-3.1-8B-Instruct --formatted
+uv run olmo-eval task inspect humaneval -T meta-llama/Llama-3.1-8B-Instruct --formatted
 
 # View tokenized representation
-olmo-eval task inspect humaneval -T meta-llama/Llama-3.1-8B-Instruct --tokens
+uv run olmo-eval task inspect humaneval -T meta-llama/Llama-3.1-8B-Instruct --tokens
 
 # Export as JSON for programmatic use
-olmo-eval task inspect arc_easy --json
+uv run olmo-eval task inspect arc_easy --json
 ```
 
 | Option | Description |
@@ -780,20 +788,20 @@ olmo-eval task inspect arc_easy --json
 
 ### Runtime Inspection Flags
 
-Inspect data during evaluation runs with `olmo-eval run`:
+Inspect data during evaluation runs with `uv run olmo-eval run`:
 
 ```bash
 # Enable all inspection flags at once
-olmo-eval run -m llama3.1-8b -t mmlu --inspect
+uv run olmo-eval run -m llama3.1-8b -t mmlu --inspect
 
 # Or use individual flags for specific inspection
-olmo-eval run -m llama3.1-8b -t mmlu --inspect-instance --inspect-request
+uv run olmo-eval run -m llama3.1-8b -t mmlu --inspect-instance --inspect-request
 
 # Inspect the response after model generation
-olmo-eval run -m llama3.1-8b -t mmlu --inspect-response
+uv run olmo-eval run -m llama3.1-8b -t mmlu --inspect-response
 
 # Combine multiple inspection flags
-olmo-eval run -m llama3.1-8b -t mmlu \
+uv run olmo-eval run -m llama3.1-8b -t mmlu \
     --inspect-instance \
     --inspect-request \
     --inspect-response
@@ -814,15 +822,20 @@ Use the `mock` provider to test inspection tools without loading a real model:
 
 ```bash
 # Quick inspection without vLLM or PyTorch
-olmo-eval run -m mock -t humaneval:3shot:bpb --inspect-request
+uv run olmo-eval run -m mock -t humaneval:3shot:bpb --inspect-request
 
 # Dry run with mock to preview configuration
-olmo-eval run -m mock -t mmlu --dry-run
+uv run olmo-eval run -m mock -t mmlu --dry-run
 ```
 
 ## External Evals
 
 External evals are standalone evaluations that run outside the normal task pipeline.
+Use them when a benchmark already comes with its own harness, verifier, or environment
+and does not fit cleanly into the usual task formatter/scorer flow. They are a good fit
+for agent-style benchmarks like `terminal_bench_2`, `tau2_bench`, and `asta_bench`
+that need sandbox orchestration, benchmark-specific setup, or end-to-end execution
+against an external repo or runner.
 
 ### Defining an External Eval
 
@@ -873,10 +886,10 @@ register_external_eval(MyBenchmarkExternalEval())
 
 ```bash
 # List available external evals
-olmo-eval external-evals
+uv run olmo-eval external-evals
 
-# Run an external eval
-olmo-eval run-external -e my_benchmark --model llama3.1-8b -A subset=test
+# Run a built-in external eval
+uv run olmo-eval run-external -e tau2_bench --model llama3.1-8b -a domain=airline -a num_tasks=1
 ```
 
 ### ExternalEvalResult
@@ -992,72 +1005,92 @@ Launch an evaluation job:
 
 ```bash
 # Basic evaluation
-olmo-eval beaker launch -n "eval-llama3-mmlu" -m llama3.1-8b -t mmlu
+uv run olmo-eval beaker launch -n "eval-llama3-mmlu" -m llama3.1-8b -t mmlu \
+    --cluster h100 \
+    -w "ai2/olmo-eval-debug" \
+    -B "ai2/oe-base"
 
 # Multiple tasks
-olmo-eval beaker launch -n "eval-llama3-suite" \
+uv run olmo-eval beaker launch -n "eval-llama3-suite" \
     -m llama3.1-8b \
-    -t mmlu -t gsm8k -t hellaswag
+    -t mmlu -t gsm8k -t hellaswag \
+    --cluster h100 \
+    -w "ai2/olmo-eval-debug" \
+    -B "ai2/oe-base"
 
 # Large model with multiple GPUs
-olmo-eval beaker launch \
+uv run olmo-eval beaker launch \
     --name "eval-70b-full" \
     --model meta-llama/Llama-3.1-70B-Instruct \
-    --task mmlu --task gsm8k --task arc \
+    --task mmlu --task gsm8k --task arc_easy \
     --cluster h100 \
+    --workspace "ai2/olmo-eval-debug" \
+    --budget "ai2/oe-base" \
     --gpus 4 \
     --timeout 48h
 
 # Preview the Beaker spec without launching
-olmo-eval beaker launch -n "test" -m llama3.1-8b -t arc_easy --dry-run
+uv run olmo-eval beaker launch -n "test" -m llama3.1-8b -t arc_easy \
+    --cluster h100 \
+    -w "ai2/olmo-eval-debug" \
+    -B "ai2/oe-base" \
+    --dry-run
 
 # With a harness preset for tool-augmented evaluation
-olmo-eval beaker launch -n "eval-with-tools" \
+uv run olmo-eval beaker launch -n "eval-with-tools" \
     -m llama3.1-8b \
-    -t simpleqa \
+    -t simpleqa:judge \
     --harness dr_tulu \
-    --cluster h100
+    --cluster h100 \
+    -w "ai2/olmo-eval-debug" \
+    -B "ai2/oe-base"
 
 # With inspection flags for debugging
-olmo-eval beaker launch -n "debug-eval" \
+uv run olmo-eval beaker launch -n "debug-eval" \
     -m llama3.1-8b \
     -t mmlu -o limit=10 \
     --inspect-request \
     --inspect-response \
-    --cluster h100
+    --cluster h100 \
+    -w "ai2/olmo-eval-debug" \
+    -B "ai2/oe-base"
 
 # Run external evaluations
-olmo-eval beaker launch -n "external-eval" \
-    -E my_benchmark \
+uv run olmo-eval beaker launch -n "external-eval" \
+    -E tau2_bench \
     -m llama3.1-8b \
-    -A subset=test \
-    --cluster h100
+    -A domain=airline \
+    -A num_tasks=1 \
+    --cluster h100 \
+    -w "ai2/olmo-eval-debug" \
+    -B "ai2/oe-base"
 ```
 
 ### Advanced Usage
 
 #### Local Judge Models
 
-For tasks that use LLM-as-judge scoring (like `simpleqa:judge`), you can run a local judge model alongside the main model. Allocate enough GPUs to run both models (e.g., 6 GPUs total: 4 for the main model, 2 for the judge).
+For tasks or custom scorers that use a named auxiliary judge provider, you can run a local judge model alongside the main model. Put harness overrides immediately after `--harness`, then put task overrides after `-t`.
 
 ```bash
-olmo-eval beaker launch \
-    --harness dr_tulu \
-    -o provider.max_model_len=16384 -o provider.num_instances=4 \
+uv run olmo-eval beaker launch \
+    --harness default \
+    -o provider.max_model_len=16384 \
+    -o provider.num_instances=1 \
     -o 'metrics.reporters=[file]' \
-    -o "metrics.collect_gpu=true" \
+    -o 'metrics.collect_gpu=true' \
     -o 'provider.kwargs.timeout=300' \
     -o auxiliary_providers.judge.kind=vllm_server \
     -o auxiliary_providers.judge.model=Qwen/Qwen3-8B \
-    -o auxiliary_providers.judge.num_instances=2 \
-    -o scoring_concurrency=8 \
+    -o auxiliary_providers.judge.num_instances=1 \
+    -o scoring_concurrency=4 \
     -m Qwen/Qwen3-8B \
     -t "simpleqa:judge@urgent" \
-    -o limit=100 \
+    -o limit=10 \
     -w "ai2/olmo-eval-debug" \
     -B "ai2/oe-base" \
     --cluster h100 \
-    --gpus 6 \
+    --inspect \
     --group olmo-eval-local-judge-2 -y
 ```
 
@@ -1068,18 +1101,24 @@ Tasks with different priorities will be launched as separate Beaker experiments:
 
 ```bash
 # Mixed priorities - creates separate experiments per priority level
-olmo-eval beaker launch -n "eval-suite" -m llama3.1-8b \
+uv run olmo-eval beaker launch -n "eval-suite" -m llama3.1-8b \
     -t "mmlu@high" \
     -t "gsm8k@normal" \
-    -t "arc@low"
+    -t "arc_easy@low" \
+    --cluster h100 \
+    -w "ai2/olmo-eval-debug" \
+    -B "ai2/oe-base"
 
 # Creates 3 experiments:
 #   eval-suite-high:   runs mmlu at high priority
 #   eval-suite-normal: runs gsm8k at normal priority
-#   eval-suite-low:    runs arc at low priority
+#   eval-suite-low:    runs arc_easy at low priority
 
 # With task regimes (@ comes after regime)
-olmo-eval beaker launch -n "eval" -m llama3.1-8b -t "mmlu:olmes@high"
+uv run olmo-eval beaker launch -n "eval" -m llama3.1-8b -t "arc_easy:olmes@high" \
+    --cluster h100 \
+    -w "ai2/olmo-eval-debug" \
+    -B "ai2/oe-base"
 
 # Tasks without @priority use the config file priority (default: normal)
 ```
@@ -1090,51 +1129,54 @@ Groups logically organize experiments for management and result retrieval:
 
 ```bash
 # Launch with grouping
-olmo-eval beaker launch -n "benchmark-v1" --group "benchmark-2024" \
+uv run olmo-eval beaker launch -n "benchmark-v1" --group "benchmark-2024" \
     -m llama3.1-8b -m olmo-2-7b \
-    -t mmlu -t gsm8k -t hellaswag
+    -t mmlu -t gsm8k -t hellaswag \
+    --cluster h100 \
+    -w "ai2/olmo-eval-debug" \
+    -B "ai2/oe-base"
 
 # Creates experiment and adds it to "benchmark-2024" group
 
 # Check group status and results
-olmo-eval beaker group info benchmark-2024
+uv run olmo-eval beaker group info benchmark-2024
 
 # Show detailed task info
-olmo-eval beaker group info benchmark-2024 --verbose
+uv run olmo-eval beaker group info benchmark-2024 --verbose
 
 # Wait for completion and export as CSV
-olmo-eval beaker group info benchmark-2024 --wait --format csv > results.csv
+uv run olmo-eval beaker group info benchmark-2024 --wait --format csv > results.csv
 
 # Export as JSON
-olmo-eval beaker group info benchmark-2024 --format json
+uv run olmo-eval beaker group info benchmark-2024 --format json
 
 # Watch experiment logs
-olmo-eval beaker watch -e <experiment-id>
+uv run olmo-eval beaker watch -e <experiment-id>
 
 # Cancel all experiments in a group
-olmo-eval beaker group cancel benchmark-2024
+uv run olmo-eval beaker group cancel benchmark-2024
 
 # List groups in a workspace
-olmo-eval beaker group list -w <workspace>
+uv run olmo-eval beaker group list -w <workspace>
 ```
 
 ### Inference Provider Configuration
 
 Docker images do NOT include inference providers (vllm, transformers, litellm) by default.
-Each model must specify its provider, which is installed at job startup.
+Each model must resolve to a provider configuration, either from a built-in model preset or from harness overrides.
 
 **Via config file (recommended):**
 
 ```yaml
 name: eval-mixed-providers
 models:
-  - name_or_path: llama3.1-8b
-    provider: vllm
-  - name_or_path: gpt-4o
-    provider: litellm
+  - llama3.1-8b
+  - gpt-4o
 tasks:
   - mmlu
 cluster: h100
+workspace: ai2/olmo-eval-debug
+budget: ai2/oe-base
 ```
 
 ### CLI Options
@@ -1145,8 +1187,8 @@ cluster: h100
 | `--name` | `-n` | auto | Experiment name (auto-generated from model/tasks if not provided) |
 | `--model` | `-m` | required | Model name or HuggingFace path (can specify multiple) |
 | `--task` | `-t` | required | Task name with optional `@priority` suffix (can specify multiple) |
-| `--harness` | `-H` | `default` | Harness preset name |
-| `--override` | `-o` | none | Override for preceding `-m` or `-t` or `-H` (can specify multiple) |
+| `--harness` | `-H` | none | Harness preset name |
+| `--override` | `-o` | none | Override for preceding `-t` or `-H` (can specify multiple) |
 | `--cluster` | `-c` | required | Cluster alias (`h100`, `a100`, `aus`) or full name |
 | `--gpus` | `-G` | auto | Number of GPUs (defaults to 1 for GPU providers, 0 otherwise) |
 | `--max-gpus-per-node` | | `8` | Maximum GPUs per node (tasks split if exceeded) |
@@ -1158,7 +1200,6 @@ cluster: h100
 | `--budget` | `-B` | required | Beaker budget |
 | `--image` | `-I` | default | Custom Beaker image |
 | `--group` | `-g` | auto | Add experiments to Beaker group(s) (auto-generated if not specified) |
-| `--harness` | `-H` | none | Harness preset name |
 | `--external-eval` | `-E` | none | External evaluation name(s) to run instead of tasks |
 | `--eval-arg` | `-A` | none | Arguments for external evals (`key=value`) |
 | `--provider-kwarg` | `-K` | none | Provider kwargs for external evals (`key=value`) |
@@ -1177,10 +1218,13 @@ Use the `-o/--override` flag to apply configuration overrides to the preceding `
 
 ```bash
 # Task overrides (apply to the preceding -t)
-olmo-eval beaker launch -n "eval" \
+uv run olmo-eval beaker launch -n "eval" \
     -m llama3.1-8b \
     -t mmlu -o limit=100 -o num_fewshot=5 \
-    -t gsm8k -o limit=50
+    -t gsm8k -o limit=50 \
+    --cluster h100 \
+    -w "ai2/olmo-eval-debug" \
+    -B "ai2/oe-base"
 ```
 
 The `-o` flag uses OmegaConf dotlist syntax, supporting:
@@ -1206,13 +1250,21 @@ Use `--secret-env` to override this with a custom Beaker secret name:
 
 ```bash
 # Use a team-shared secret instead of your personal secret
-olmo-eval beaker launch -n "eval" -m gpt-4o -t mmlu \
-    --secret-env team-openai-key:OPENAI_API_KEY
+uv run olmo-eval beaker launch -n "eval" -m gpt-4o -t mmlu \
+    --secret-env team-openai-key:OPENAI_API_KEY \
+    --cluster h100 \
+    -w "ai2/olmo-eval-debug" \
+    -B "ai2/oe-base"
 
 # Multiple secret overrides
-olmo-eval beaker launch -n "eval" -m gpt-4o -t simpleqa \
+uv run olmo-eval beaker launch -n "eval" -m gpt-4o -t simpleqa:judge \
+    --harness dr_tulu \
     --secret-env team-openai-key:OPENAI_API_KEY \
-    --secret-env shared-serper-key:SERPER_API_KEY
+    --secret-env shared-serper-key:SERPER_API_KEY \
+    --secret-env shared-s2-key:S2_API_KEY \
+    --cluster h100 \
+    -w "ai2/olmo-eval-debug" \
+    -B "ai2/oe-base"
 ```
 
 Format: `BEAKER_SECRET_NAME:ENV_VAR_NAME`
@@ -1232,8 +1284,7 @@ CLI arguments override values from the config file.
 ```yaml
 name: eval-llama3-core
 models:
-  - name_or_path: llama3.1-8b
-    provider: vllm
+  - llama3.1-8b
 tasks:
   - mmlu
   - gsm8k
@@ -1241,6 +1292,8 @@ tasks:
   - arc_challenge
 
 cluster: h100
+workspace: ai2/olmo-eval-debug
+budget: ai2/oe-base
 gpus: 1
 priority: normal
 timeout: 24h
@@ -1250,13 +1303,13 @@ timeout: 24h
 
 ```bash
 # Run from config file
-olmo-eval beaker launch -f eval_config.yaml --dry-run
+uv run olmo-eval beaker launch -f eval_config.yaml --dry-run
 
 # Override specific values
-olmo-eval beaker launch -f eval_config.yaml --gpus 4
+uv run olmo-eval beaker launch -f eval_config.yaml --gpus 4
 
 # Add additional models via CLI
-olmo-eval beaker launch -f eval_config.yaml -m olmo-2-7b
+uv run olmo-eval beaker launch -f eval_config.yaml -m olmo-2-7b
 ```
 
 **Multi-model comparison config**:
@@ -1264,17 +1317,16 @@ olmo-eval beaker launch -f eval_config.yaml -m olmo-2-7b
 ```yaml
 name: eval-model-comparison
 models:
-  - name_or_path: llama3.1-8b
-    provider: vllm
-  - name_or_path: olmo-2-7b
-    provider: vllm
-  - name_or_path: mistral-7b
-    provider: vllm
+  - llama3.1-8b
+  - olmo-2-7b
+  - mistral-7b
 tasks:
   - mmlu
   - gsm8k
   - hellaswag
 cluster: h100
+workspace: ai2/olmo-eval-debug
+budget: ai2/oe-base
 gpus: 1
 ```
 
@@ -1286,10 +1338,8 @@ Tasks with different priorities create separate Beaker experiments:
 ```yaml
 name: eval-prioritized
 models:
-  - name_or_path: llama3.1-8b
-    provider: vllm
-  - name_or_path: olmo-2-7b
-    provider: vllm
+  - llama3.1-8b
+  - olmo-2-7b
 tasks:
   # High priority - run first
   - mmlu@high
@@ -1299,8 +1349,10 @@ tasks:
   - arc_challenge@normal
   # Low priority - run when resources available
   - winogrande@low
-  - truthfulqa@low
+  - arc_easy@low
 cluster: h100
+workspace: ai2/olmo-eval-debug
+budget: ai2/oe-base
 gpus: 1
 timeout: 24h
 ```
@@ -1310,7 +1362,7 @@ This creates **3 experiments** (one per priority level, with both models in each
 ```
 eval-prioritized-high:   models=[llama3.1-8b, olmo-2-7b], tasks=[mmlu, gsm8k]
 eval-prioritized-normal: models=[llama3.1-8b, olmo-2-7b], tasks=[hellaswag, arc_challenge]
-eval-prioritized-low:    models=[llama3.1-8b, olmo-2-7b], tasks=[winogrande, truthfulqa]
+eval-prioritized-low:    models=[llama3.1-8b, olmo-2-7b], tasks=[winogrande, arc_easy]
 ```
 
 **Large model config**:
@@ -1318,14 +1370,15 @@ eval-prioritized-low:    models=[llama3.1-8b, olmo-2-7b], tasks=[winogrande, tru
 ```yaml
 name: eval-70b-full
 models:
-  - name_or_path: meta-llama/Llama-3.1-70B-Instruct
-    provider: vllm
-    gpus: 4
+  - meta-llama/Llama-3.1-70B-Instruct
 tasks:
   - mmlu
   - gsm8k
   - hellaswag
 cluster: h100
+workspace: ai2/olmo-eval-debug
+budget: ai2/oe-base
+gpus: 4
 priority: high
 preemptible: false
 timeout: 48h
@@ -1337,8 +1390,8 @@ description: "Full evaluation suite for Llama 70B"
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | no | Experiment name (auto-generated if not provided) |
-| `models` | list | yes | List of ModelConfig objects (each must have `name_or_path` and `provider`) |
+| `name` | string | yes | Experiment name |
+| `models` | list | yes | List of model names or presets |
 | `tasks` | list | yes | List of task specs (with optional `@priority`) |
 | `cluster` | string | yes | Cluster alias or full name |
 | `gpus` | int | no | Default GPUs per model instance (auto-detected based on provider) |
@@ -1350,9 +1403,8 @@ description: "Full evaluation suite for Llama 70B"
 | `workspace` | string | yes | Beaker workspace |
 | `budget` | string | yes | Beaker budget |
 | `beaker_image` | string | no | Container image to use (config-only) |
+| `description` | string | no | Optional Beaker description |
 | `groups` | list | no | Beaker groups to add experiments to |
-| `harness` | string | no | Harness preset name |
-| `description` | string | no | Experiment description (config-only) |
 
 See `examples/beaker/configs/` for more configuration examples.
 
@@ -1360,7 +1412,7 @@ See `examples/beaker/configs/` for more configuration examples.
 
 ```bash
 # List available cluster aliases
-olmo-eval beaker clusters
+uv run olmo-eval beaker clusters
 ```
 
 ### Programmatic API
@@ -1370,7 +1422,7 @@ from olmo_eval.launch import BeakerJobConfig, BeakerLauncher
 
 config = BeakerJobConfig(
     name="eval-llama3-mmlu",
-    command=["olmo-eval", "run", "-m", "llama3.1-8b", "-t", "mmlu"],
+    command=["uv", "run", "olmo-eval", "run", "-m", "llama3.1-8b", "-t", "mmlu"],
     cluster="h100",
     num_gpus=1,
 )
@@ -1384,7 +1436,7 @@ print(f"Launched: {launcher.beaker.experiment.url(experiment)}")
 
 Docker images provide the runtime environment (Python, PyTorch, CUDA) but do NOT include:
 - **Source code** - Gantry mounts your git repository at runtime
-- **Inference providers** - Installed at job startup based on each model's `provider` config
+- **Inference providers** - Installed at job startup from each model's resolved provider config
 
 This approach allows you to:
 - Use any git commit without rebuilding images
@@ -1439,20 +1491,25 @@ The image does NOT contain:
 
 ### Installing Inference Providers at Runtime
 
-Inference providers are NOT baked into images. They are installed at job startup based on each model's `provider` configuration:
+Inference providers are NOT baked into images. They are installed at job startup from the resolved provider configuration for each model:
 
 ```yaml
 # In config file
 models:
-  - name_or_path: llama3.1-8b
-    provider: vllm  # Installs vllm at job startup
-  - name_or_path: gpt-4o
-    provider: litellm  # Installs litellm at job startup
+  - llama3.1-8b
+  - gpt-4o
 ```
 
 ```bash
-# Or via CLI override flag
-olmo-eval beaker launch -n "eval" -m llama3.1-8b -o provider.kind=vllm -t mmlu
+# Or force the provider kind via a harness override
+uv run olmo-eval beaker launch -n "eval" \
+    --harness default \
+    -o provider.kind=vllm_server \
+    -m llama3.1-8b \
+    -t mmlu \
+    --cluster h100 \
+    -w "ai2/olmo-eval-debug" \
+    -B "ai2/oe-base"
 
 # Manual installation inside container
 uv pip install -e '.[vllm]'  # includes vllm[runai]
@@ -1466,13 +1523,19 @@ You can also add or override dependencies via the CLI:
 
 ```bash
 # Add dependencies to a task via -o flag
-olmo-eval beaker launch -n "eval" -m llama3.1-8b \
-    -t code_eval -o 'dependencies=["code-sandbox==1.0", "git+https://github.com/user/repo@v2.0"]'
+uv run olmo-eval beaker launch -n "eval" -m llama3.1-8b \
+    -t humaneval:3shot:bpb -o 'dependencies=["code-sandbox==1.0", "git+https://github.com/user/repo@v2.0"]' \
+    --cluster h100 \
+    -w "ai2/olmo-eval-debug" \
+    -B "ai2/oe-base"
 
 # Dependencies from multiple tasks are merged
-olmo-eval beaker launch -n "eval" -m llama3.1-8b \
-    -t task_a -o 'dependencies=["pkg1"]' \
-    -t task_b -o 'dependencies=["pkg2"]'
+uv run olmo-eval beaker launch -n "eval" -m llama3.1-8b \
+    -t humaneval:3shot:bpb -o 'dependencies=["pkg1"]' \
+    -t mbpp:3shot:bpb -o 'dependencies=["pkg2"]' \
+    --cluster h100 \
+    -w "ai2/olmo-eval-debug" \
+    -B "ai2/oe-base"
 ```
 
 ## Development
