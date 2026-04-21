@@ -173,12 +173,19 @@ class TestBuildBcbExecutionScript:
         )
 
         assert "os.environ['TZ'] = 'UTC'" in script
+        assert "time.tzset()" in script
         assert "os.environ['OMP_NUM_THREADS'] = '1'" in script
         assert "os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'" in script
         assert "loader = unittest.TestLoader()" in script
         assert "suite.run(test_result)" in script
         assert "TestCases = getattr(new_module, 'TestCases')" in script
-        assert "resource.setrlimit" not in script
+        # reliability_guard ported from bigcodebench/eval/utils.py
+        assert "resource.setrlimit(resource.RLIMIT_AS" in script
+        assert "resource.setrlimit(resource.RLIMIT_DATA" in script
+        assert "resource.setrlimit(resource.RLIMIT_STACK" in script
+        assert "faulthandler.disable()" in script
+        assert "builtins.exit = None" in script
+        assert "builtins.quit = None" in script
         assert "socket" not in script
 
 
