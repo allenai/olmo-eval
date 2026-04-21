@@ -52,7 +52,7 @@ class TestHarnessPresets:
         assert "semantic_scholar_snippet_search" in config.tool_names
         assert "serper_google_webpage_search" in config.tool_names
         assert config.system_prompt is not None
-        assert config.backend == "openai_agents"
+        assert config.scaffold == "openai_agents"
 
     def test_get_unknown_preset(self):
         """Test getting an unknown preset raises error."""

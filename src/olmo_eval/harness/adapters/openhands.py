@@ -15,7 +15,7 @@ Usage:
         deployment = DockerDeployment(image="python:3.11")
         await deployment.start()
 
-        # Create agent with sandbox backend
+        # Create agent with sandbox runtime
         llm = LLM(model="anthropic/claude-sonnet-4-20250514", api_key="...")
         agent = create_sandbox_agent(llm, deployment.runtime)
 

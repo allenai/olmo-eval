@@ -53,7 +53,7 @@ class TerminalBenchArgs:
     oracle: bool = False
     sandbox_mode: str = "docker"
     enable_compaction: bool = True
-    backend: str = "openai_agents"
+    scaffold: str = "openai_agents"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TerminalBenchArgs:
@@ -69,7 +69,7 @@ class TerminalBenchArgs:
             oracle=data.get("oracle", False) in (True, "true", "True", "1"),
             sandbox_mode=data.get("sandbox_mode", "docker"),
             enable_compaction=data.get("enable_compaction", True) in (True, "true", "True", "1", 1),
-            backend=data.get("backend", "openai_agents"),
+            scaffold=data.get("scaffold", "openai_agents"),
         )
 
 
@@ -114,11 +114,11 @@ class TerminalBenchExternalEval(ExternalEval):
             "max_turns": ("Max agent turns per task", 50),
             "oracle": ("Run solve.sh instead of LLM agent", False),
             "sandbox_mode": ("Sandbox mode: docker, modal", "docker"),
-            "backend": ("Backend to use for agent execution", "openai_agents"),
+            "scaffold": ("Scaffold to use for agent execution", "openai_agents"),
         }
 
     @property
-    def backend(self) -> str | None:
+    def scaffold(self) -> str | None:
         return "openai_agents"
 
     async def execute(
@@ -142,10 +142,10 @@ class TerminalBenchExternalEval(ExternalEval):
         start_time = time.time()
         tb_args = TerminalBenchArgs.from_dict(args)
 
-        # Validate backend early to fail fast before spinning up sandboxes
-        from olmo_eval.harness.backends import validate_backend
+        # Validate scaffold early to fail fast before spinning up sandboxes
+        from olmo_eval.harness.scaffolds import validate_scaffold
 
-        validate_backend(tb_args.backend)
+        validate_scaffold(tb_args.scaffold)
 
         # Load tasks
         loader = TerminalBenchLoader()
@@ -175,7 +175,7 @@ class TerminalBenchExternalEval(ExternalEval):
                     oracle_mode=tb_args.oracle,
                     sandbox_mode=tb_args.sandbox_mode,
                     enable_compaction=tb_args.enable_compaction,
-                    backend_name=tb_args.backend,
+                    scaffold_name=tb_args.scaffold,
                 )
 
         results = await asyncio.gather(*[run_task(t) for t in tasks], return_exceptions=True)
@@ -259,7 +259,7 @@ class TerminalBenchExternalEval(ExternalEval):
         oracle_mode: bool,
         sandbox_mode: str,
         enable_compaction: bool = True,
-        backend_name: str = "openai_agents",
+        scaffold_name: str = "openai_agents",
     ) -> TaskResult:
         """Execute a single Terminal-Bench task.
 
@@ -315,7 +315,7 @@ class TerminalBenchExternalEval(ExternalEval):
                 trajectory, completion_reason = await self._run_oracle(sandbox_manager, task)
             else:
                 trajectory, completion_reason = await self._run_agent(
-                    sandbox_manager, task, provider, max_turns, enable_compaction, backend_name
+                    sandbox_manager, task, provider, max_turns, enable_compaction, scaffold_name
                 )
 
             agent_duration = time.time() - task_start
@@ -389,7 +389,7 @@ class TerminalBenchExternalEval(ExternalEval):
         provider: InferenceProvider,
         max_turns: int,
         enable_compaction: bool = True,
-        backend_name: str = "openai_agents",
+        scaffold_name: str = "openai_agents",
     ) -> tuple[AgentTrajectory, str]:
         """Run the LLM agent.
 
@@ -399,26 +399,27 @@ class TerminalBenchExternalEval(ExternalEval):
             provider: Inference provider for LLM calls.
             max_turns: Maximum turns.
             enable_compaction: Enable context compaction for long conversations.
-            backend_name: Name of the backend to use.
+            scaffold_name: Name of the scaffold to use.
 
         Returns:
             Tuple of (trajectory, completion_reason).
         """
-        from olmo_eval.harness.backends import get_backend, validate_backend
         from olmo_eval.harness.config import HarnessConfig
+        from olmo_eval.harness.scaffolds import get_scaffold, validate_scaffold
         from olmo_eval.harness.tools import get_tools
 
-        validate_backend(backend_name)
+        validate_scaffold(scaffold_name)
         tools = get_tools(("execute_bash_session", "submit"))
         harness_config = HarnessConfig(
             name=f"terminal_bench_{task.task_id}",
             tools=tools,
             system_prompt=SYSTEM_PROMPT,
             max_turns=max_turns,
+            scaffold=scaffold_name,
         )
 
-        backend = get_backend(backend_name)
-        backend.set_sandbox_manager(sandbox_manager)
+        scaffold = get_scaffold(scaffold_name)
+        scaffold.set_sandbox_manager(sandbox_manager)
 
         request = LMRequest(
             request_type=RequestType.CHAT,
@@ -426,14 +427,14 @@ class TerminalBenchExternalEval(ExternalEval):
         )
 
         run_config = {
-            "backend": backend.name,
+            "scaffold": scaffold.name,
             "task_id": task.task_id,
             "max_turns": max_turns,
             "enable_compaction": enable_compaction,
             "tools": [t.name for t in tools],
         }
         logger.info(f"Starting agent: {run_config}")
-        harness_result = await backend.run(
+        harness_result = await scaffold.run(
             provider,
             harness_config,
             request,

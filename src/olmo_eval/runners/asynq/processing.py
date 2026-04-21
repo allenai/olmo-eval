@@ -253,10 +253,10 @@ async def process_items(
     chat_items: list[QueueItem] = []
     batchable_items: list[QueueItem] = []
 
-    has_backend = bool(harness.config.backend)
+    has_scaffold = bool(harness.config.scaffold)
 
     for item in items:
-        if item.request.request_type == RequestType.CHAT and has_backend:
+        if item.request.request_type == RequestType.CHAT and has_scaffold:
             chat_items.append(item)
         else:
             batchable_items.append(item)

@@ -125,11 +125,11 @@ def inference_worker(
         # Force provider creation to catch import errors early
         _ = harness.provider
 
-        # Validate backend requirements early to fail fast
-        if harness_config.backend:
-            from olmo_eval.harness.backends import validate_backend
+        # Validate scaffold requirements early to fail fast
+        if harness_config.scaffold:
+            from olmo_eval.harness.scaffolds import validate_scaffold
 
-            validate_backend(harness_config.backend)
+            validate_scaffold(harness_config.scaffold)
 
         # Initialize metrics reporters early to establish database connections
         harness.initialize_reporters()
@@ -141,15 +141,15 @@ def inference_worker(
             init_queue.put((worker_id, init_time))
 
         try:
-            # Configure agent trace output if using openai_agents backend
-            if harness_config.backend == "openai_agents" and output_dir:
-                from olmo_eval.harness.backends.tracing import configure_trace_output
+            # Configure agent trace output if using the openai_agents scaffold
+            if harness_config.scaffold == "openai_agents" and output_dir:
+                from olmo_eval.harness.scaffolds.tracing import configure_trace_output
 
                 configure_trace_output(output_dir)
 
-            # Initialize backend resources (e.g., sandbox manager) before processing
-            if harness_config.backend:
-                asyncio.run(harness.backend.initialize(harness_config))
+            # Initialize scaffold resources (e.g., sandbox manager) before processing
+            if harness_config.scaffold:
+                asyncio.run(harness.scaffold.initialize(harness_config))
 
             # Get batching strategy from config
             from olmo_eval.runners.asynq.batching import BatchConfig, get_strategy

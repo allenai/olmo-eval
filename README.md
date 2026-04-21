@@ -38,24 +38,6 @@ uv run olmo-eval run -m mock -t gsm8k --dry-run
 uv run olmo-eval run -m mock -t humaneval:3shot:bpb --dry-run
 ```
 
-### Local Workflow
-
-```bash
-# Install hooks once
-uv run pre-commit install
-
-# Inspect available tasks and suites
-uv run olmo-eval tasks
-uv run olmo-eval suites
-uv run olmo-eval task inspect arc_easy
-
-# Run local checks
-uv run ruff check src/ tests/
-uv run ruff format --check src/ tests/
-uv run ty check src/ alembic/
-uv run pytest tests/ --ignore=tests/integration -v
-```
-
 ### Optional Extras
 
 | Workflow | Command |
@@ -63,9 +45,6 @@ uv run pytest tests/ --ignore=tests/integration -v
 | Beaker launches | `uv sync --extra beaker` |
 | Agent tasks | `uv sync --extra agents` |
 | Explicit parity with the old full setup path | `uv sync --extra beaker --extra storage` |
-
-The repo-maintained helper scripts still exist for convenience, but the primary
-workflow is the direct `uv` command set above.
 
 ## Key Concepts
 
@@ -231,14 +210,14 @@ presets = get_model_presets()
 
 ### Harness
 
-A **Harness** configures a model provider with specific capabilities like tools, system prompts, and backends. It wraps an inference provider and injects configuration into requests, enabling tool-augmented evaluation or multi-turn execution.
+A **Harness** configures a model provider with specific capabilities like tools, system prompts, and scaffolds. It wraps an inference provider and injects configuration into requests, enabling tool-augmented evaluation or multi-turn execution.
 
 **Key concept**: Any task can be run with or without tools—that's determined by the Harness configuration, not the task definition. This allows comparing baseline vs tool-augmented performance on the same task.
 
 #### Using Harness via CLI
 
 ```bash
-# Run task without tools or backend (baseline)
+# Run task without tools or a scaffold (baseline)
 olmo-eval run -m llama3.1-8b -t simpleqa
 
 # Run task with search tools via harness preset
@@ -271,7 +250,7 @@ config = HarnessConfig(
     system_prompt="You are a helpful assistant with search tools.",
     max_turns=10,
     max_concurrency=8,
-    backend="openai_agents",
+    scaffold="openai_agents",
     required_secrets=("S2_API_KEY", "SERPER_API_KEY"),
 )
 ```
@@ -283,47 +262,47 @@ config = HarnessConfig(
 | `tools` | `tuple[Tool \| str, ...]` | `()` | Tool instances or registered tool names |
 | `system_prompt` | `str \| None` | `None` | System prompt to inject |
 | `tool_choice` | `str` | `"auto"` | Tool selection mode (`auto`, `none`, `required`) |
-| `backend` | `str \| None` | `None` | Execution backend (e.g., `openai_agents`) |
+| `scaffold` | `str \| None` | `None` | Execution scaffold (e.g., `openai_agents`) |
 | `max_turns` | `int \| None` | `None` | Max turns for multi-turn execution |
 | `max_concurrency` | `int \| None` | `None` | Concurrent executions |
 | `scoring_concurrency` | `int \| None` | `None` | Max concurrent scoring operations |
 | `sandboxes` | `tuple[SandboxConfig, ...]` | `()` | Sandbox configurations for isolated tool execution |
-| `backend_kwargs` | `dict[str, Any]` | `{}` | Backend-specific options (e.g., `enable_compaction`) |
+| `scaffold_kwargs` | `dict[str, Any]` | `{}` | Scaffold-specific options (e.g., `enable_compaction`) |
 | `metrics` | `MetricsConfig \| None` | `None` | Inference metrics collection config |
 | `batching` | `BatchConfig \| None` | `None` | Batching strategy configuration |
 | `required_secrets` | `tuple[str, ...]` | `()` | Required environment variables |
 
-#### Backends
+#### Scaffolds
 
-Backends define how the Harness executes multi-turn requests with tool calling. The backend handles the agentic loop: calling the model, executing tools, and feeding results back.
+Scaffolds define how the Harness executes multi-turn requests with tool calling. A scaffold handles the agentic loop: calling the model, executing tools, and feeding results back.
 
 ```bash
-# List available backends
-olmo-eval backends
+# List available scaffolds
+olmo-eval scaffolds
 ```
 
-**When to use a backend:**
-- For multi-turn execution with `harness.run()`, you must specify a backend
-- For single-turn generation with `harness.generate()`, no backend is needed
+**When to use a scaffold:**
+- For multi-turn execution with `harness.run()`, you must specify a scaffold
+- For single-turn generation with `harness.generate()`, no scaffold is needed
 
 ```python
-# Multi-turn execution requires a backend
+# Multi-turn execution requires a scaffold
 config = HarnessConfig(
     name="my_agent",
     provider=ProviderConfig(model="gpt-4o", kind="litellm"),
     tools=(semantic_scholar_search, serper_web_search),
-    backend="openai_agents",  # Required for run()
+    scaffold="openai_agents",  # Required for run()
 )
 harness = Harness(config)
-result = await harness.run(request)  # Uses the backend
+result = await harness.run(request)  # Uses the scaffold
 
-# Single-turn generation works without a backend
+# Single-turn generation works without a scaffold
 config = HarnessConfig(
     name="simple",
     provider=ProviderConfig(model="gpt-4o", kind="litellm"),
 )
 harness = Harness(config)
-outputs = harness.generate(requests)  # No backend needed
+outputs = harness.generate(requests)  # No scaffold needed
 ```
 
 #### Inference Metrics
@@ -450,7 +429,7 @@ config = HarnessConfig(
     provider=ProviderConfig(model="gpt-4o", kind="litellm"),
     tools=(semantic_scholar_search, serper_web_search),
     system_prompt="You are a helpful assistant.",
-    backend="openai_agents",
+    scaffold="openai_agents",
 )
 harness = Harness(config)
 

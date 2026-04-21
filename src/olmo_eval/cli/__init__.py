@@ -24,8 +24,6 @@ from olmo_eval.cli.utils import console
 from olmo_eval.common.constants import get_model_presets
 from olmo_eval.evals.suites import get_suite, list_suites
 from olmo_eval.evals.tasks.common import list_regimes, list_tasks, list_variants
-from olmo_eval.harness.backends import BACKEND_REGISTRY
-from olmo_eval.harness.presets import get_harness_preset, list_harness_presets
 
 
 @click.group()
@@ -140,6 +138,8 @@ def harnesses(filter: str) -> None:
     from rich.panel import Panel
     from rich.pretty import Pretty
 
+    from olmo_eval.harness.presets import get_harness_preset, list_harness_presets
+
     preset_names = list_harness_presets()
     if not preset_names:
         console.print("[dim]No harness presets registered.[/dim]")
@@ -162,13 +162,15 @@ def harnesses(filter: str) -> None:
 
 @main.command()
 @click.option("--filter", "-f", default="", help="Filter by name substring")
-def backends(filter: str) -> None:
-    """List available harness backends."""
-    table = Table(title="Harness Backends")
-    table.add_column("Backend", style="cyan")
+def scaffolds(filter: str) -> None:
+    """List available harness scaffolds."""
+    from olmo_eval.harness.scaffolds import SCAFFOLD_REGISTRY
+
+    table = Table(title="Harness Scaffolds")
+    table.add_column("Scaffold", style="cyan")
     table.add_column("Required Extra", style="yellow")
 
-    for name, cls in sorted(BACKEND_REGISTRY.items()):
+    for name, cls in sorted(SCAFFOLD_REGISTRY.items()):
         if filter.lower() in name.lower():
             extras = ", ".join(cls.required_extras) if cls.required_extras else "-"
             table.add_row(name, extras)
@@ -223,9 +225,9 @@ def external_evals(filter: str) -> None:
         # Description
         details.add_row("Description", eval_instance.description)
 
-        # Backend (if specified)
-        if eval_instance.backend:
-            details.add_row("Backend", f"[magenta]{eval_instance.backend}[/magenta]")
+        # Scaffold (if specified)
+        if eval_instance.scaffold:
+            details.add_row("Scaffold", f"[magenta]{eval_instance.scaffold}[/magenta]")
 
         # Sandbox info (only for sandboxed evals)
         if isinstance(eval_instance, SandboxedExternalEval):

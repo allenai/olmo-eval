@@ -61,8 +61,8 @@ class ExternalEval(ABC):
         return {}
 
     @property
-    def backend(self) -> str | None:
-        """Backend name used by this evaluation, if any."""
+    def scaffold(self) -> str | None:
+        """Scaffold name used by this evaluation, if any."""
         return None
 
     @abstractmethod

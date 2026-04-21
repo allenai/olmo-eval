@@ -45,7 +45,7 @@ class TestHarnessConfig:
         assert config.tool_choice == "auto"
         assert config.max_turns is None
         assert config.max_concurrency is None
-        assert config.backend is None
+        assert config.scaffold is None
 
     def test_config_with_tools(self, sample_tool):
         """Test HarnessConfig with tool names."""
@@ -84,12 +84,18 @@ class TestHarnessConfig:
             tool_choice="required",
             max_turns=5,
             max_concurrency=4,
-            backend="openai_agents",
+            scaffold="openai_agents",
+            scaffold_kwargs={"enable_compaction": False},
             required_secrets=("API_KEY",),
         )
 
         d = config.to_dict()
         restored = HarnessConfig.from_dict(d)
+
+        assert "scaffold" in d
+        assert "backend" not in d
+        assert "scaffold_kwargs" in d
+        assert "backend_kwargs" not in d
 
         assert restored.name == config.name
         assert restored.tool_names == config.tool_names
@@ -97,7 +103,8 @@ class TestHarnessConfig:
         assert restored.tool_choice == config.tool_choice
         assert restored.max_turns == config.max_turns
         assert restored.max_concurrency == config.max_concurrency
-        assert restored.backend == config.backend
+        assert restored.scaffold == config.scaffold
+        assert restored.scaffold_kwargs == config.scaffold_kwargs
         assert restored.required_secrets == config.required_secrets
 
     def test_config_immutable(self):
@@ -203,7 +210,7 @@ class TestHarnessConfigFactory:
             tool_choice="none",
             max_turns=15,
             max_concurrency=16,
-            backend="openai_agents",
+            scaffold="openai_agents",
             required_secrets=["SECRET"],
         )
 
@@ -212,5 +219,5 @@ class TestHarnessConfigFactory:
         assert config.tool_choice == "none"
         assert config.max_turns == 15
         assert config.max_concurrency == 16
-        assert config.backend == "openai_agents"
+        assert config.scaffold == "openai_agents"
         assert config.required_secrets == ("SECRET",)

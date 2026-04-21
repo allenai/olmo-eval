@@ -206,10 +206,10 @@ class TestHarnessRun:
     """Tests for Harness.run() multi-turn execution."""
 
     @pytest.mark.anyio
-    async def test_harness_run_no_backend_raises(self, mock_provider_config):
-        """Test run raises error when no backend is configured."""
+    async def test_harness_run_no_scaffold_raises(self, mock_provider_config):
+        """Test run raises error when no scaffold is configured."""
         config = HarnessConfig(
-            name="no_backend",
+            name="no_scaffold",
             provider=mock_provider_config,
         )
         harness = Harness(config)
@@ -219,5 +219,5 @@ class TestHarnessRun:
             messages=({"role": "user", "content": "Hello"},),
         )
 
-        with pytest.raises(RuntimeError, match="No backend configured"):
+        with pytest.raises(RuntimeError, match="No scaffold configured"):
             await harness.run(request)
