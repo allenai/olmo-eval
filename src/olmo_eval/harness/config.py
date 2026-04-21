@@ -43,6 +43,7 @@ class HarnessConfig:
     max_concurrency: int | None = None
     scoring_concurrency: int | None = None
     sandboxes: tuple[SandboxConfig, ...] = ()
+    sandbox_pool_instances: int | None = None
     backend_kwargs: dict[str, Any] = field(default_factory=dict)
     metrics: MetricsConfig | None = None
     batching: BatchConfig | None = None
@@ -141,6 +142,8 @@ class HarnessConfig:
             d["scoring_concurrency"] = self.scoring_concurrency
         if self.sandboxes:
             d["sandboxes"] = [s.to_dict() for s in self.sandboxes]
+        if self.sandbox_pool_instances is not None:
+            d["sandbox_pool_instances"] = self.sandbox_pool_instances
         if self.backend_kwargs:
             d["backend_kwargs"] = self.backend_kwargs
         if self.metrics is not None:
@@ -194,6 +197,7 @@ class HarnessConfig:
             max_concurrency=data.get("max_concurrency"),
             scoring_concurrency=data.get("scoring_concurrency"),
             sandboxes=sandboxes,
+            sandbox_pool_instances=data.get("sandbox_pool_instances"),
             backend_kwargs=data.get("backend_kwargs", {}),
             metrics=metrics,
             batching=batching,
@@ -274,6 +278,7 @@ def harness_config(
     max_concurrency: int | None = None,
     scoring_concurrency: int | None = None,
     sandboxes: Sequence[SandboxConfig] = (),
+    sandbox_pool_instances: int | None = None,
     backend_kwargs: dict[str, Any] | None = None,
     metrics: MetricsConfig | None = None,
     batching: BatchConfig | None = None,
@@ -294,6 +299,7 @@ def harness_config(
         max_concurrency: Maximum concurrent tool executions for agent backends.
         scoring_concurrency: Maximum concurrent scoring operations (default 8).
         sandboxes: Sandbox configurations for isolated tool execution.
+        sandbox_pool_instances: Shared executor budget for auto-allocated sandboxes.
         backend_kwargs: Backend-specific kwargs (e.g., enable_compaction for openai_agents).
         metrics: Metrics collection configuration (None = no metrics).
         batching: Batching strategy configuration (None = sequential).
@@ -316,6 +322,7 @@ def harness_config(
         max_concurrency=max_concurrency,
         scoring_concurrency=scoring_concurrency,
         sandboxes=tuple(sandboxes),
+        sandbox_pool_instances=sandbox_pool_instances,
         backend_kwargs=backend_kwargs or {},
         metrics=metrics,
         batching=batching,

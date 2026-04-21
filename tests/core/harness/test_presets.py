@@ -113,6 +113,7 @@ class TestHarnessPresets:
 
         assert bigcodebench_sandbox.image == "bigcodebench/bigcodebench-gradio:latest"
         assert bigcodebench_sandbox.dockerfile_extra == ()
+        assert bigcodebench_sandbox.instances is None
 
 
 class TestSearchTools:

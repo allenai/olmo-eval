@@ -121,7 +121,6 @@ class HarnessPresets:
             metrics=MetricsConfig(),
             sandboxes=(
                 SandboxConfig(
-                    instances=1,
                     image="volcengine/sandbox-fusion:base-20250609",
                     mode=SandboxMode.DOCKER,
                     startup_timeout=300.0,
@@ -133,7 +132,6 @@ class HarnessPresets:
                     ),
                 ),
                 SandboxConfig(
-                    instances=1,
                     image="bigcodebench/bigcodebench-gradio:latest",
                     mode=SandboxMode.DOCKER,
                     capabilities=frozenset({"sandbox:bigcodebench"}),

@@ -9,6 +9,7 @@ import pytest
 
 from olmo_eval.harness import clear_registry, register_tool
 from olmo_eval.harness.config import HarnessConfig, harness_config
+from olmo_eval.harness.sandbox import SandboxConfig, SandboxMode
 from olmo_eval.harness.tools import tool
 
 
@@ -86,6 +87,13 @@ class TestHarnessConfig:
             max_concurrency=4,
             backend="openai_agents",
             required_secrets=("API_KEY",),
+            sandbox_pool_instances=32,
+            sandboxes=(
+                SandboxConfig(
+                    image="python:3.12",
+                    mode=SandboxMode.DOCKER,
+                ),
+            ),
         )
 
         d = config.to_dict()
@@ -99,6 +107,9 @@ class TestHarnessConfig:
         assert restored.max_concurrency == config.max_concurrency
         assert restored.backend == config.backend
         assert restored.required_secrets == config.required_secrets
+        assert restored.sandbox_pool_instances == 32
+        assert len(restored.sandboxes) == 1
+        assert restored.sandboxes[0].instances is None
 
     def test_config_immutable(self):
         """Test that HarnessConfig is frozen (immutable)."""

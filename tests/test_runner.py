@@ -5,8 +5,12 @@ import pytest
 # Import to ensure tasks and suites are registered
 import olmo_eval.evals  # noqa: F401
 import olmo_eval.evals.tasks  # noqa: F401
+from olmo_eval.evals.tasks.common import get_task
 from olmo_eval.harness.config import HarnessConfig, ProviderConfig
+from olmo_eval.harness.sandbox import SandboxConfig, SandboxMode
 from olmo_eval.runners import AsyncEvalRunner, ValidationError
+from olmo_eval.runners.asynq.runner import _DEFAULT_SANDBOX_ENV, _plan_sandbox_configs
+from olmo_eval.runners.asynq.types import TaskTracker
 
 
 def make_harness_config(model_name: str = "llama3.1-8b") -> HarnessConfig:
@@ -116,6 +120,173 @@ class TestAsyncEvalRunnerValidation:
         )
         with pytest.raises(ValidationError):
             runner.validate()
+
+
+class TestNamedSandboxPlanning:
+    """Tests for named sandbox allocation in AsyncEvalRunner."""
+
+    @staticmethod
+    def make_codex_universal_like_sandboxes(
+        *,
+        default_instances: int | None = None,
+        bigcodebench_instances: int | None = None,
+    ) -> tuple[SandboxConfig, SandboxConfig]:
+        return (
+            SandboxConfig(
+                instances=default_instances,
+                image="default-sandbox:latest",
+                mode=SandboxMode.DOCKER,
+                inject_swerex=True,
+            ),
+            SandboxConfig(
+                instances=bigcodebench_instances,
+                image="bigcodebench-sandbox:latest",
+                mode=SandboxMode.DOCKER,
+                capabilities=frozenset({"sandbox:bigcodebench"}),
+                inject_swerex=True,
+            ),
+        )
+
+    def test_named_sandbox_uses_matching_preset_capacity(self):
+        """Named preset sandboxes should contribute their own executor budget."""
+        trackers = {
+            "bigcodebench:olmo3base": TaskTracker(
+                model_name="test-model",
+                spec="bigcodebench:olmo3base",
+                task=get_task("bigcodebench:olmo3base"),
+                total_instances=2,
+            )
+        }
+
+        plan = _plan_sandbox_configs(
+            self.make_codex_universal_like_sandboxes(bigcodebench_instances=64),
+            ["bigcodebench:olmo3base"],
+            trackers,
+            sandbox_pool_instances=None,
+        )
+
+        assert plan is not None
+        assert plan.budget == 64
+        assert plan.allocated == {"bigcodebench": 64}
+        assert len(plan.sandboxes) == 1
+        assert plan.sandboxes[0].capabilities == frozenset({"sandbox:bigcodebench"})
+        assert plan.sandboxes[0].instances == 64
+
+    def test_dynamic_named_sandbox_uses_global_pool(self):
+        """Dynamically declared sandbox envs should draw from the shared sandbox pool."""
+        trackers = {
+            "ds1000:olmo3base": TaskTracker(
+                model_name="test-model",
+                spec="ds1000:olmo3base",
+                task=get_task("ds1000:olmo3base"),
+                total_instances=1,
+            )
+        }
+
+        plan = _plan_sandbox_configs(
+            self.make_codex_universal_like_sandboxes(),
+            ["ds1000:olmo3base"],
+            trackers,
+            sandbox_pool_instances=8,
+        )
+
+        assert plan is not None
+        assert plan.budget == 8
+        assert plan.allocated == {"ds1000": 8}
+        assert len(plan.sandboxes) == 1
+        assert plan.sandboxes[0].capabilities == frozenset({"sandbox:ds1000"})
+        assert plan.sandboxes[0].instances == 8
+
+    def test_default_and_named_envs_share_global_pool_when_auto_allocated(self):
+        """Auto-managed sandboxes should share the global pool proportionally."""
+        trackers = {
+            "humaneval:bpb": TaskTracker(
+                model_name="test-model",
+                spec="humaneval:bpb",
+                task=get_task("humaneval:bpb"),
+                total_instances=3,
+            ),
+            "bigcodebench:olmo3base": TaskTracker(
+                model_name="test-model",
+                spec="bigcodebench:olmo3base",
+                task=get_task("bigcodebench:olmo3base"),
+                total_instances=2,
+            ),
+        }
+
+        plan = _plan_sandbox_configs(
+            self.make_codex_universal_like_sandboxes(),
+            ["humaneval:bpb", "bigcodebench:olmo3base"],
+            trackers,
+            sandbox_pool_instances=64,
+        )
+
+        assert plan is not None
+        assert plan.budget == 64
+        assert plan.allocated[_DEFAULT_SANDBOX_ENV] + plan.allocated["bigcodebench"] == 64
+        assert plan.allocated[_DEFAULT_SANDBOX_ENV] == 15
+        assert plan.allocated["bigcodebench"] == 49
+
+    def test_default_and_named_envs_add_explicit_instances_on_top_of_pool(self):
+        """Explicit sandbox counts should be preserved alongside the shared pool."""
+        trackers = {
+            "humaneval:bpb": TaskTracker(
+                model_name="test-model",
+                spec="humaneval:bpb",
+                task=get_task("humaneval:bpb"),
+                total_instances=3,
+            ),
+            "bigcodebench:olmo3base": TaskTracker(
+                model_name="test-model",
+                spec="bigcodebench:olmo3base",
+                task=get_task("bigcodebench:olmo3base"),
+                total_instances=2,
+            ),
+        }
+
+        plan = _plan_sandbox_configs(
+            self.make_codex_universal_like_sandboxes(
+                default_instances=5,
+                bigcodebench_instances=None,
+            ),
+            ["humaneval:bpb", "bigcodebench:olmo3base"],
+            trackers,
+            sandbox_pool_instances=64,
+        )
+
+        assert plan is not None
+        assert plan.budget == 69
+        assert plan.allocated[_DEFAULT_SANDBOX_ENV] == 5
+        assert plan.allocated["bigcodebench"] == 64
+        assert {cfg.capabilities for cfg in plan.sandboxes} == {
+            frozenset({"bash"}),
+            frozenset({"sandbox:bigcodebench"}),
+        }
+
+    def test_default_sandbox_defaults_to_one_executor_when_unset(self):
+        """Default-only execution should materialize one executor when no pool is set."""
+        trackers = {
+            "humaneval:bpb": TaskTracker(
+                model_name="test-model",
+                spec="humaneval:bpb",
+                task=get_task("humaneval:bpb"),
+                total_instances=1,
+            ),
+        }
+
+        plan = _plan_sandbox_configs(
+            self.make_codex_universal_like_sandboxes(),
+            ["humaneval:bpb"],
+            trackers,
+            sandbox_pool_instances=None,
+        )
+
+        assert plan is not None
+        assert plan.budget == 1
+        assert plan.allocated == {_DEFAULT_SANDBOX_ENV: 1}
+        assert len(plan.sandboxes) == 1
+        assert plan.sandboxes[0].capabilities == frozenset({"bash"})
+        assert plan.sandboxes[0].instances == 1
 
 
 class TestSuiteAggregations:
