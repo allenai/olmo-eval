@@ -269,11 +269,11 @@ class TestFormatTasks:
     def test_format_tasks_basic(self):
         """Test basic task formatting."""
         categories = ("cat1", "cat2", "cat3")
-        template = "{}:mc:olmes"
+        template = "{}:mc:full"
 
         result = format_tasks(categories, template)
 
-        assert result == ("cat1:mc:olmes", "cat2:mc:olmes", "cat3:mc:olmes")
+        assert result == ("cat1:mc:full", "cat2:mc:full", "cat3:mc:full")
 
     def test_format_tasks_complex_template(self):
         """Test formatting with more complex template."""

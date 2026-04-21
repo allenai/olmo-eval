@@ -23,7 +23,7 @@ from olmo_eval.cli.task import task
 from olmo_eval.cli.utils import console
 from olmo_eval.common.constants import get_model_presets
 from olmo_eval.evals.suites import get_suite, list_suites
-from olmo_eval.evals.tasks.common import list_regimes, list_tasks, list_variants
+from olmo_eval.evals.tasks.common import list_tasks, list_variants
 
 
 @click.group()
@@ -47,7 +47,6 @@ def tasks(filter: str) -> None:
     """List all available tasks in the registry."""
     task_names = list_tasks()
     variants = list_variants()
-    regimes = list_regimes()
 
     if not task_names:
         console.print("[dim]No tasks registered.[/dim]")
@@ -56,15 +55,12 @@ def tasks(filter: str) -> None:
     table = Table(title="Available Tasks")
     table.add_column("Task", style="cyan")
     table.add_column("Variants", style="green")
-    table.add_column("Regimes", style="dim")
 
     for name in task_names:
         if filter.lower() in name.lower():
             task_variants = variants.get(name, [])
-            task_regimes = regimes.get(name, [])
             variant_str = ", ".join(task_variants) if task_variants else "-"
-            regime_str = ", ".join(task_regimes) if task_regimes else "-"
-            table.add_row(name, variant_str, regime_str)
+            table.add_row(name, variant_str)
 
     console.print(table)
 
@@ -284,7 +280,7 @@ def external_evals(filter: str) -> None:
 @main.command(name="suite-info")
 @click.argument("suite_name")
 def suite_info(suite_name: str) -> None:
-    """Show tasks and regimes in a suite.
+    """Show tasks and variants in a suite.
 
     SUITE_NAME is the name of the suite to inspect.
 
@@ -306,7 +302,7 @@ def suite_info(suite_name: str) -> None:
     table = Table(title=f"Tasks in '{suite_name}'")
     table.add_column("#", style="dim", justify="right")
     table.add_column("Task", style="cyan")
-    table.add_column("Regime", style="yellow")
+    table.add_column("Variant", style="yellow")
 
     for idx, task_spec in enumerate(suite.expanded_tasks, 1):
         if ":" in task_spec:

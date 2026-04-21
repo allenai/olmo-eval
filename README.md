@@ -74,13 +74,13 @@ class MyTask(Task):
     ...
 ```
 
-**Regimes** are named presets that override task settings (e.g., few-shot count):
+**Variants** can also act as named evaluation presets (for example, few-shot settings):
 
 ```python
-from olmo_eval.evals.tasks.common import register_regime
+from olmo_eval.evals.tasks.common import register_variant
 
-register_regime("my_task", "olmes", num_fewshot=5, fewshot_seed=42)
-# Built-in example: uv run olmo-eval run -m llama3.1-8b -t arc_easy:olmes
+register_variant("my_task", "3shot", num_fewshot=3, fewshot_seed=42)
+# Built-in example: uv run olmo-eval run -m llama3.1-8b -t humaneval:3shot:bpb
 ```
 
 **Runtime Dependencies** allow tasks to specify packages installed at job startup:
@@ -102,7 +102,7 @@ from olmo_eval.evals.suites import Suite, register
 
 register(Suite(
     name="my_suite",
-    tasks=("task_a:olmes", "task_b:olmes", "task_c:olmes"),
+    tasks=("task_a:3shot", "task_b:3shot", "task_c:3shot"),
 ))
 ```
 
@@ -606,7 +606,7 @@ class MMLUPhysics(MMLUTask):
     data_source = DataSource(path="cais/mmlu", subset="high_school_physics", split="test")
 ```
 
-### Adding Variants and Regimes
+### Adding Variants
 
 **Variants** modify how a task is formatted/scored (e.g., `:mc`, `:bpb`):
 ```python
@@ -616,12 +616,12 @@ from olmo_eval.evals.tasks.common import register_variant
 register_variant("my_task", "bpb", formatter=PPLFormatter(), metrics=(BPBMetricByteAvg(scorer=BitsPerByteScorer),))
 ```
 
-**Regimes** are configuration presets (e.g., `:olmes`, `:zero`):
+**Variants** can also encode configuration presets (e.g., `:3shot`, `:zero`):
 ```python
-from olmo_eval.evals.tasks.common import register_regime
+from olmo_eval.evals.tasks.common import register_variant
 
-register_regime("my_task", "olmes", num_fewshot=5, fewshot_seed=1234)
-register_regime("my_task", "3shot", num_fewshot=3)
+register_variant("my_task", "3shot", num_fewshot=3, fewshot_seed=1234)
+register_variant("my_task", "zero", num_fewshot=0)
 ```
 
 Usage: `uv run olmo-eval run -m llama3.1-8b -t humaneval:3shot:bpb`
@@ -760,7 +760,7 @@ uv run olmo-eval task inspect arc_easy
 uv run olmo-eval task inspect arc_easy -n 5 --skip 10
 
 # View the LM request that will be sent to the model
-uv run olmo-eval task inspect arc_easy:olmes --request
+uv run olmo-eval task inspect arc_easy:mc --request
 
 # View formatted prompt with chat template applied
 uv run olmo-eval task inspect humaneval -T meta-llama/Llama-3.1-8B-Instruct --formatted
@@ -1114,8 +1114,8 @@ uv run olmo-eval beaker launch -n "eval-suite" -m llama3.1-8b \
 #   eval-suite-normal: runs gsm8k at normal priority
 #   eval-suite-low:    runs arc_easy at low priority
 
-# With task regimes (@ comes after regime)
-uv run olmo-eval beaker launch -n "eval" -m llama3.1-8b -t "arc_easy:olmes@high" \
+# With task variants (@ comes after the task spec)
+uv run olmo-eval beaker launch -n "eval" -m llama3.1-8b -t "arc_easy:mc@high" \
     --cluster h100 \
     -w "ai2/olmo-eval-debug" \
     -B "ai2/oe-base"

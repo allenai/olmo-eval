@@ -74,16 +74,13 @@ class TestAsyncEvalRunnerValidation:
         with pytest.raises(ValidationError, match="Unknown task or suite"):
             runner.validate()
 
-    def test_validate_invalid_regime_raises(self):
-        """Test validation fails for unknown variant/regime.
-
-        Note: Regimes are now accessed as variants using single colon syntax.
-        """
+    def test_validate_invalid_variant_raises(self):
+        """Test validation fails for an unknown variant."""
         runner = AsyncEvalRunner(
             harness_config=make_harness_config(),
-            task_specs=["humaneval:nonexistent_regime"],
+            task_specs=["humaneval:nonexistent_variant"],
         )
-        with pytest.raises(ValidationError, match="Unknown variant/regime"):
+        with pytest.raises(ValidationError, match="Unknown variant"):
             runner.validate()
 
     def test_validate_collects_multiple_errors(self):
