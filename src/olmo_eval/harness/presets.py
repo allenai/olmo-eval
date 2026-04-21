@@ -121,7 +121,7 @@ class HarnessPresets:
             metrics=MetricsConfig(),
             sandboxes=(
                 SandboxConfig(
-                    instances=16,
+                    instances=1,
                     image="volcengine/sandbox-fusion:base-20250609",
                     mode=SandboxMode.DOCKER,
                     startup_timeout=300.0,
@@ -130,6 +130,21 @@ class HarnessPresets:
                     dockerfile_extra=(
                         "RUN mkdir -p /runtime/java",
                         "RUN curl -L -o /runtime/java/javatuples-1.2.jar https://repo1.maven.org/maven2/org/javatuples/javatuples/1.2/javatuples-1.2.jar",
+                    ),
+                ),
+                SandboxConfig(
+                    instances=1,
+                    image="python:3.10-slim",
+                    mode=SandboxMode.DOCKER,
+                    capabilities=frozenset({"sandbox:bigcodebench"}),
+                    startup_timeout=300.0,
+                    log_dir=_get_logs_dir(),
+                    inject_swerex=True,
+                    dockerfile_extra=(
+                        "RUN apt-get update && apt-get install -y --no-install-recommends "
+                        "git g++ python3-tk zip unzip procps r-base libgdal-dev "
+                        "libfreetype6-dev libpng-dev pkg-config python3-dev python3-matplotlib "
+                        "&& rm -rf /var/lib/apt/lists/*",
                     ),
                 ),
             ),

@@ -243,8 +243,12 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                     needs_default = any(
                         get_task(spec).config.sandbox_env is None for spec in expanded_tasks
                     )
-                    if not needs_default:
-                        sandboxes.pop(0)
+                    used_caps = {senv.capability for senv in sandbox_envs}
+                    sandboxes = [
+                        cfg
+                        for i, cfg in enumerate(sandboxes)
+                        if (i == 0 and needs_default) or (i != 0 and cfg.capabilities in used_caps)
+                    ]
 
                     # Compute demand (scoring items) per sandbox env
                     _DEFAULT_ENV = "__default__"
@@ -295,24 +299,47 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                         for env_key in env_demand:
                             allocated[env_key] = per_config
 
-                    # Apply allocations to default sandbox configs
-                    for i, cfg in enumerate(sandboxes):
-                        sandboxes[i] = replace(cfg, instances=allocated.get(_DEFAULT_ENV, 1))
+                    # Apply default allocation to the default-capability sandbox only.
+                    # Other preset-declared sandboxes keep their own instance count
+                    # until a matching SandboxEnv is processed below.
+                    if needs_default and sandboxes:
+                        sandboxes[0] = replace(
+                            sandboxes[0], instances=allocated.get(_DEFAULT_ENV, 1)
+                        )
 
-                    # Create sandbox configs for each named env
+                    # Create sandbox configs for each named env, preferring a
+                    # preset-declared sandbox whose capabilities already match.
                     for senv in sandbox_envs:
                         extra = dependencies_to_dockerfile_extra(senv.dependencies)
-                        sandboxes.append(
-                            replace(
-                                template,
-                                capabilities=senv.capability,
-                                dockerfile_extra=(
-                                    template.dockerfile_extra + extra + senv.dockerfile_extra
-                                ),
-                                inject_swerex=True,
-                                instances=allocated.get(senv.name, 1),
-                            )
+                        match_idx = next(
+                            (
+                                i
+                                for i, cfg in enumerate(sandboxes)
+                                if cfg.capabilities == senv.capability
+                            ),
+                            None,
                         )
+                        if match_idx is not None:
+                            matched = sandboxes[match_idx]
+                            sandboxes[match_idx] = replace(
+                                matched,
+                                dockerfile_extra=(
+                                    matched.dockerfile_extra + extra + senv.dockerfile_extra
+                                ),
+                                instances=allocated.get(senv.name, matched.instances),
+                            )
+                        else:
+                            sandboxes.append(
+                                replace(
+                                    template,
+                                    capabilities=senv.capability,
+                                    dockerfile_extra=(
+                                        template.dockerfile_extra + extra + senv.dockerfile_extra
+                                    ),
+                                    inject_swerex=True,
+                                    instances=allocated.get(senv.name, 1),
+                                )
+                            )
                         runner_logger.info(
                             f"Sandbox env '{senv.name}' "
                             f"({allocated.get(senv.name, 1)} executors, "
