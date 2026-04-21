@@ -10,6 +10,7 @@ Dataset: bigcode/bigcodebench
 from __future__ import annotations
 
 import logging
+import shlex
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -27,6 +28,91 @@ if TYPE_CHECKING:
     from olmo_eval.common.execution import ExecutionEnvironment
 
 logger = logging.getLogger(__name__)
+
+_BCB_VIRTUAL_MEMORY_LIMIT_KB = 30 * 1024 * 1024
+_BCB_DATA_LIMIT_KB = 30 * 1024 * 1024
+_BCB_STACK_LIMIT_KB = 10 * 1024
+_BIGCODEBENCH_EVAL_DEPS = (
+    "beautifulsoup4==4.8.2",
+    "blake3==0.4.1",
+    "chardet==5.2.0",
+    "cryptography==38.0.0",
+    "datetime==5.5",
+    "django==4.2.7",
+    "dnspython==2.6.1",
+    "docxtpl==0.11.5",
+    "faker==20.1.0",
+    "flask==3.0.3",
+    "flask-login==0.6.3",
+    "flask-mail==0.9.1",
+    "flask-restful==0.3.10",
+    "flask-wtf==1.2.1",
+    "folium==0.16.0",
+    "gensim==4.3.2",
+    "geopandas==0.13.2",
+    "geopy==2.4.1",
+    "holidays==0.29",
+    "keras==2.11.0",
+    "Levenshtein==0.25.0",
+    "librosa==0.10.1",
+    "lxml==4.9.3",
+    "matplotlib==3.7.0",
+    "mechanize==0.4.9",
+    "natsort==7.1.1",
+    "networkx==2.6.3",
+    "numba==0.55.0",
+    "nltk==3.8",
+    "numpy==1.21.2",
+    "opencv-python-headless==4.9.0.80",
+    "openpyxl==3.1.2",
+    "pandas==2.0.3",
+    "pillow==10.3.0",
+    "prettytable==3.10.0",
+    "psutil==5.9.5",
+    "pycryptodome==3.14.1",
+    "pyfakefs==5.4.1",
+    "pyquery==1.4.3",
+    "pytest==8.2.0",
+    "pytesseract==0.3.10",
+    "python-dateutil==2.9.0",
+    "python-docx==1.1.0",
+    "python-http-client==3.3.7",
+    "python-Levenshtein-wheels",
+    "pytz==2023.3.post1",
+    "pyyaml==6.0.1",
+    "requests==2.31.0",
+    "requests-mock==1.11.0",
+    "rsa==4.9",
+    "scikit-image==0.18.0",
+    "scikit-learn==1.3.1",
+    "scipy==1.7.2",
+    "seaborn==0.13.2",
+    "selenium==4.15",
+    "sendgrid==6.11.0",
+    "shapely==2.0.4",
+    "soundfile==0.12.1",
+    "statsmodels==0.14.0",
+    "sympy==1.12",
+    "tensorflow==2.11.0",
+    "textblob==0.18.0",
+    "texttable==1.7.0",
+    "werkzeug==3.0.1",
+    "wikipedia==1.4.0",
+    "wordcloud==1.9.3",
+    "wordninja==2.0.0",
+    "wtforms==3.1.2",
+    "xlrd==2.0.1",
+    "xlwt==1.3.0",
+    "xmltodict==0.13.0",
+)
+
+
+def _build_bigcodebench_dependency_install() -> tuple[str, ...]:
+    """Install BCB deps into the task runtime's Python 3.10 environment."""
+    pkgs = " ".join(shlex.quote(dep) for dep in _BIGCODEBENCH_EVAL_DEPS)
+    return (
+        f"RUN /root/python/bin/uv pip install --python /usr/local/bin/python3 --no-cache {pkgs}",
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,10 +155,14 @@ class BigCodeBenchScorer(CodeExecutionScorer):
         # - run suite and check failures+errors
         full_code = _build_bcb_execution_script(solution, test_code)
 
-        result = await execution_env.execute_code(
+        result = await self.execute_python_script(
+            execution_env,
             full_code,
-            language=self.language,
             timeout=self.timeout,
+            python_executable="/usr/local/bin/python3",
+            virtual_memory_limit_kb=_BCB_VIRTUAL_MEMORY_LIMIT_KB,
+            data_limit_kb=_BCB_DATA_LIMIT_KB,
+            stack_limit_kb=_BCB_STACK_LIMIT_KB,
         )
         if not result.success and result.error:
             instance_id = instance.metadata.get("id", "?")
@@ -134,81 +224,12 @@ class BigCodeBench(Task):
     data_source = DataSource(path="bigcode/bigcodebench")
     # Python deps from the official BigCodeBench requirements-eval.txt:
     # https://github.com/bigcode-project/bigcodebench/blob/main/Requirements/requirements-eval.txt
+    # Install them into /usr/local/bin/python3 to match the execution path used
+    # by BigCodeBenchScorer instead of the injected swe-rex Python 3.11 runtime.
     sandbox_env = SandboxEnv(
         "bigcodebench",
-        (
-            "beautifulsoup4==4.8.2",
-            "blake3==0.4.1",
-            "chardet==5.2.0",
-            "cryptography==38.0.0",
-            "datetime==5.5",
-            "django==4.2.7",
-            "dnspython==2.6.1",
-            "docxtpl==0.11.5",
-            "faker==20.1.0",
-            "flask==3.0.3",
-            "flask-login==0.6.3",
-            "flask-mail==0.9.1",
-            "flask-restful==0.3.10",
-            "flask-wtf==1.2.1",
-            "folium==0.16.0",
-            "gensim==4.3.2",
-            "geopandas==0.13.2",
-            "geopy==2.4.1",
-            "holidays==0.29",
-            "keras==2.11.0",
-            "Levenshtein==0.25.0",
-            "librosa==0.10.1",
-            "lxml==4.9.3",
-            "matplotlib==3.7.0",
-            "mechanize==0.4.9",
-            "natsort==7.1.1",
-            "networkx==2.6.3",
-            "numba==0.55.0",
-            "nltk==3.8",
-            "numpy==1.21.2",
-            "opencv-python-headless==4.9.0.80",
-            "openpyxl==3.1.2",
-            "pandas==2.0.3",
-            "pillow==10.3.0",
-            "prettytable==3.10.0",
-            "psutil==5.9.5",
-            "pycryptodome==3.14.1",
-            "pyfakefs==5.4.1",
-            "pyquery==1.4.3",
-            "pytest==8.2.0",
-            "pytesseract==0.3.10",
-            "python-dateutil==2.9.0",
-            "python-docx==1.1.0",
-            "python-http-client==3.3.7",
-            "python-Levenshtein-wheels",
-            "pytz==2023.3.post1",
-            "pyyaml==6.0.1",
-            "requests==2.31.0",
-            "requests-mock==1.11.0",
-            "rsa==4.9",
-            "scikit-image==0.18.0",
-            "scikit-learn==1.3.1",
-            "scipy==1.7.2",
-            "seaborn==0.13.2",
-            "selenium==4.15",
-            "sendgrid==6.11.0",
-            "shapely==2.0.4",
-            "soundfile==0.12.1",
-            "statsmodels==0.14.0",
-            "sympy==1.12",
-            "tensorflow==2.11.0",
-            "textblob==0.18.0",
-            "texttable==1.7.0",
-            "werkzeug==3.0.1",
-            "wikipedia==1.4.0",
-            "wordcloud==1.9.3",
-            "wordninja==2.0.0",
-            "wtforms==3.1.2",
-            "xlrd==2.0.1",
-            "xlwt==1.3.0",
-            "xmltodict==0.13.0",
-        ),
+        (),
+        dockerfile_extra=_build_bigcodebench_dependency_install(),
     )
     sampling_params = SamplingParams(
         max_tokens=1280,
