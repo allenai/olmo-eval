@@ -286,7 +286,7 @@ def suite_info(suite_name: str) -> None:
 
     SUITE_NAME is the name of the suite to inspect.
 
-    Example: olmo-eval suite-info core
+    Example: olmo-eval suite-info mmlu
     """
     try:
         suite = get_suite(suite_name)

@@ -11,47 +11,61 @@ Evaluation toolkit for OLMo and other language models.
 
 ## Quick Start
 
+To get started, sync the repo with `uv`, browse the available tasks and suites,
+and preview a run with the built-in `mock` provider.
+
+### Run Your First Eval
+
 ```bash
-# Development setup (includes pre-commit hooks)
-make setup
+# Install uv if not already installed
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Full setup with beaker + storage (for launching jobs and fetching results)
-make setup-all
+# Install Python 3.12 if your machine does not already have it
+uv python install 3.12
 
-# Or with specific extras
-make setup EXTRAS=beaker
+# Sync the project environment
+uv sync
 
-# For agent tasks
-make setup EXTRAS=agents
+# Browse a few suites
+uv run olmo-eval suite-info mmlu
+uv run olmo-eval suite-info gpqa
+uv run olmo-eval suite-info olmobase:code
 
-# List available commands
-olmo-eval --help
+# Preview a run without loading a model
+uv run olmo-eval run -m mock -t gsm8k --dry-run
 
-# List model presets
-olmo-eval models
-
-# List task suites
-olmo-eval suites
-
-# Show tasks in a specific suite
-olmo-eval suite-info core
-
-# List tasks and their regimes
-olmo-eval tasks
-
-# List harness presets
-olmo-eval harnesses
-
-# List external evaluations
-olmo-eval external-evals
-
-# Run evaluation (dry run)
-olmo-eval run -m llama3.1-8b -t humaneval:3shot --dry-run
-
-# Run evaluation with limit
-olmo-eval run -m olmo-2-7b -t humaneval:bpb -o limit=100
-
+# Preview another run with a different task spec
+uv run olmo-eval run -m mock -t humaneval:3shot:bpb --dry-run
 ```
+
+### Local Workflow
+
+```bash
+# Install hooks once
+uv run pre-commit install
+
+# Inspect available tasks and suites
+uv run olmo-eval tasks
+uv run olmo-eval suites
+uv run olmo-eval task inspect arc_easy
+
+# Run local checks
+uv run ruff check src/ tests/
+uv run ruff format --check src/ tests/
+uv run ty check src/ alembic/
+uv run pytest tests/ --ignore=tests/integration -v
+```
+
+### Optional Extras
+
+| Workflow | Command |
+|----------|---------|
+| Beaker launches | `uv sync --extra beaker` |
+| Agent tasks | `uv sync --extra agents` |
+| Explicit parity with the old full setup path | `uv sync --extra beaker --extra storage` |
+
+The repo-maintained helper scripts still exist for convenience, but the primary
+workflow is the direct `uv` command set above.
 
 ## Key Concepts
 
@@ -990,7 +1004,7 @@ olmo-eval includes built-in support for launching evaluation jobs on [Beaker](ht
 Install with the Beaker extra:
 
 ```bash
-make setup EXTRAS=beaker
+uv sync --extra beaker
 ```
 
 ### CLI Usage
@@ -1485,12 +1499,21 @@ olmo-eval beaker launch -n "eval" -m llama3.1-8b \
 ## Development
 
 ```bash
-# Setup (installs dev dependencies and pre-commit hooks)
-make setup
+# Install hooks
+uv run pre-commit install
 
-# Run linter
-make lint
+# Run linter and formatter checks
+uv run ruff check src/ tests/
+uv run ruff format --check src/ tests/
 
-# Run tests
-make test
+# Run type checks and unit tests
+uv run ty check src/ alembic/
+uv run pytest tests/ --ignore=tests/integration -v
+```
+
+Optional repo helpers:
+
+```bash
+./scripts/fix.sh
+./scripts/verify.sh
 ```
