@@ -134,18 +134,12 @@ class HarnessPresets:
                 ),
                 SandboxConfig(
                     instances=1,
-                    image="python:3.10-slim",
+                    image="bigcodebench/bigcodebench-gradio:latest",
                     mode=SandboxMode.DOCKER,
                     capabilities=frozenset({"sandbox:bigcodebench"}),
                     startup_timeout=300.0,
                     log_dir=_get_logs_dir(),
                     inject_swerex=True,
-                    dockerfile_extra=(
-                        "RUN apt-get update && apt-get install -y --no-install-recommends "
-                        "git g++ python3-tk zip unzip procps r-base libgdal-dev "
-                        "libfreetype6-dev libpng-dev pkg-config python3-dev python3-matplotlib "
-                        "&& rm -rf /var/lib/apt/lists/*",
-                    ),
                 ),
             ),
         )

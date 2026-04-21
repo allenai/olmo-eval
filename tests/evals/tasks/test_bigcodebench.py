@@ -183,12 +183,6 @@ class TestBuildBcbExecutionScript:
 
 
 class TestBigCodeBenchSandboxEnv:
-    def test_sandbox_installs_dependencies_into_python310(self) -> None:
+    def test_sandbox_uses_preset_provided_environment(self) -> None:
         assert BigCodeBench.sandbox_env.dependencies == ()
-        assert len(BigCodeBench.sandbox_env.dockerfile_extra) == 1
-
-        install_cmd = BigCodeBench.sandbox_env.dockerfile_extra[0]
-        assert "/root/python/bin/uv pip install" in install_cmd
-        assert "--python /usr/local/bin/python3" in install_cmd
-        assert "numpy==1.21.2" in install_cmd
-        assert "opencv-python-headless==4.9.0.80" in install_cmd
+        assert BigCodeBench.sandbox_env.dockerfile_extra == ()
