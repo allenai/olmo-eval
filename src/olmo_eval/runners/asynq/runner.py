@@ -183,18 +183,18 @@ def _plan_sandbox_configs(
             )
             env_to_index[senv.name] = len(sandboxes) - 1
 
-    explicit_allocations = {
-        env_key: sandboxes[idx].instances
-        for env_key, idx in env_to_index.items()
-        if sandboxes[idx].instances is not None
-    }
+    explicit_allocations: dict[str, int] = {}
+    for env_key, idx in env_to_index.items():
+        instances = sandboxes[idx].instances
+        if instances is not None:
+            explicit_allocations[env_key] = instances
     auto_env_keys = [env_key for env_key in env_to_index if env_key not in explicit_allocations]
     auto_allocations = _allocate_auto_sandbox_instances(
         auto_env_keys,
         env_demand,
         sandbox_pool_instances,
     )
-    allocated = {env_key: count for env_key, count in explicit_allocations.items()}
+    allocated: dict[str, int] = dict(explicit_allocations)
     allocated.update(auto_allocations)
 
     materialized_sandboxes = list(sandboxes)

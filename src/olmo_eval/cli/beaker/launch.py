@@ -848,7 +848,7 @@ def _build_experiment_summary(
 ) -> ExperimentSummary:
     """Build experiment summary for display."""
     from olmo_eval.common.configs import expand_tasks
-    from olmo_eval.runners import AsyncEvalRunner
+    from olmo_eval.runners.asynq.runner import AsyncEvalRunner
 
     # Expand task specs to match keys in task_configs_by_spec
     expanded_tasks = expand_tasks(exp.tasks)
