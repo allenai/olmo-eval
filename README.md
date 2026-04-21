@@ -38,26 +38,18 @@ uv run olmo-eval run -m mock -t gsm8k --dry-run
 uv run olmo-eval run -m mock -t humaneval:3shot:bpb --dry-run
 ```
 
-### Optional Extras
-
-| Workflow | Command |
-|----------|---------|
-| Beaker launches | `uv sync --extra beaker` |
-| Agent tasks | `uv sync --extra agents` |
-| Explicit parity with the old full setup path | `uv sync --extra beaker --extra storage` |
-
 ## Key Concepts
 
 The evaluation framework is built around these core abstractions:
 
 | Abstraction | Description |
 |-------------|-------------|
-| **Task** | Defines a single evaluation (data loading, formatting, scoring) |
-| **Suite** | Groups tasks and/or nested suites with aggregation |
-| **Harness** | A model provider configured with specific capabilities |
-| **Formatter** | Converts instances into LM requests |
-| **Scorer** | Scores individual instance/output pairs |
-| **Metric** | Aggregates scores into final metrics |
+| **Task** | Benchmark specification defining dataset slice, request construction, and scoring logic |
+| **Suite** | Benchmark collection that composes tasks and/or nested suites and defines result aggregation |
+| **Harness** | Execution runtime around the inference provider, tools, scaffolds, and runtime behavior |
+| **Formatter** | Prompt renderer from an instance and few-shot context to an LM request |
+| **Scorer** | Per-example evaluator from model output to raw score or judgment |
+| **Metric** | Dataset-level aggregator over per-example scores |
 
 ### Tasks
 
@@ -210,7 +202,7 @@ presets = get_model_presets()
 
 ### Harness
 
-A **Harness** configures a model provider with specific capabilities like tools, system prompts, and scaffolds. It wraps an inference provider and injects configuration into requests, enabling tool-augmented evaluation or multi-turn execution.
+A **Harness** is the runtime orchestration layer for an evaluation run. It combines the primary inference provider with execution policy such as system prompts, tools, auxiliary providers, sandboxing, metrics collection, and an optional scaffold for multi-turn control. This lets the same task run in plain, tool-using, or scaffolded modes without changing the task definition.
 
 **Key concept**: Any task can be run with or without tools—that's determined by the Harness configuration, not the task definition. This allows comparing baseline vs tool-augmented performance on the same task.
 
@@ -453,8 +445,6 @@ This section explains how to create new evaluation tasks.
 
 ### Quick Start: Minimal Task Example
 
-Here's a complete, minimal task implementation:
-
 ```python
 """Example: Minimal task implementation."""
 from collections.abc import Iterator
@@ -630,8 +620,6 @@ Usage: `uv run olmo-eval run -m llama3.1-8b -t humaneval:3shot:bpb`
 
 olmo-eval supports evaluating models with tool use through the **Harness** abstraction. This enables comparing baseline model performance against tool-augmented performance on the same tasks.
 
-### Recommended Approach: Harness
-
 The **Harness** is the preferred way to add tools to evaluations. It separates tool configuration from task definition, allowing any task to be run with or without tools:
 
 ```bash
@@ -649,7 +637,7 @@ See the [Harness](#harness) section above for full documentation on:
 
 ## Querying Results
 
-Evaluation results are stored in PostgreSQL and can be queried via the CLI.
+Evaluation results can be stored in PostgreSQL and queried via the CLI.
 
 ### Basic Queries
 

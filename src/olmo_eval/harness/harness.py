@@ -1,7 +1,8 @@
-"""Harness: A model provider configured with specific capabilities.
+"""Harness: runtime orchestration layer for an evaluation run.
 
-The Harness wraps an InferenceProvider and applies configuration to all requests.
-It provides both single-turn (generate) and multi-turn (run) interfaces.
+The Harness combines the primary inference provider with runtime behavior such as
+tools, system prompts, auxiliary providers, metrics collection, and optional
+scaffolds.
 """
 
 from __future__ import annotations
@@ -19,11 +20,13 @@ if TYPE_CHECKING:
 
 
 class Harness:
-    """A model provider configured with specific capabilities.
+    """Runtime orchestration layer for an evaluation run.
 
-    The Harness wraps an InferenceProvider and applies
-    configuration to the requests. It provides both single-turn (generate/agenerate)
-    and multi-turn (run) interfaces.
+    The Harness combines the primary inference provider with execution policy
+    such as system prompts, tools, auxiliary providers, sandboxing, metrics
+    collection, and an optional scaffold for multi-turn control. This lets the
+    same task run in plain, tool-using, or scaffolded modes without changing
+    the task definition.
 
     For multi-turn execution with run(), a scaffold must be configured.
     """
