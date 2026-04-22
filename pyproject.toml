@@ -137,6 +137,8 @@ select = [
 "src/olmo_eval/common/constants/models.py" = ["E501"]
 # Verbatim prompt templates from asta-bench reference implementation
 "src/olmo_eval/evals/tasks/astabench_sqa.py" = ["E501"]
+# Verbatim prompt templates from SciCode reference implementation
+"src/olmo_eval/evals/tasks/scicode.py" = ["E501"]
 # Embedded fewshot data with long string literals
 "src/olmo_eval/evals/tasks/arc.py" = ["E501"]
 "src/olmo_eval/evals/tasks/csqa.py" = ["E501"]

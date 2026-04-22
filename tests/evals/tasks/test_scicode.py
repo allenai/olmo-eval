@@ -70,22 +70,42 @@ class TestInstances(unittest.TestCase):
 
 
 class TestPromptBuilding(unittest.TestCase):
-    def test_prompt_includes_every_step(self) -> None:
+    def test_first_step_prompt_contains_only_first_step(self) -> None:
         task = get_task("scicode:validation")
         instance = next(iter(task.instances))
-        for step in instance.metadata["sub_steps"]:
-            self.assertIn(step["step_number"], instance.question)
-            self.assertIn(step["function_header"].split("\n", 1)[0], instance.question)
+        sub_steps = instance.metadata["sub_steps"]
+        first_idx = instance.metadata["first_step_idx"]
+        first_step = sub_steps[first_idx]
+        self.assertIn(first_step["function_header"].split("\n", 1)[0], instance.question)
+        for later in sub_steps[first_idx + 1 :]:
+            self.assertNotIn(later["function_header"].split("\n", 1)[0], instance.question)
+
+    def test_step_prompt_includes_previous_code(self) -> None:
+        task = get_task("scicode:validation")
+        instance = next(iter(task.instances))
+        sub_steps = instance.metadata["sub_steps"]
+        if len(sub_steps) < 2:
+            self.skipTest("need at least two sub-steps")
+        doc = {
+            "sub_steps": sub_steps,
+            "required_dependencies": instance.metadata["required_dependencies"],
+        }
+        previous = [None] * len(sub_steps)
+        previous[0] = "def first_step_placeholder():\n    return 42"
+        prompt = scicode_mod._build_step_prompt(
+            doc, step_idx=1, previous_llm_code=previous, with_background=False
+        )
+        self.assertIn("def first_step_placeholder()", prompt)
+        self.assertIn(sub_steps[1]["function_header"].split("\n", 1)[0], prompt)
 
     def test_with_background_includes_backgrounds(self) -> None:
         task = get_task("scicode_with_background:validation")
         instance = next(iter(task.instances))
-        backgrounds = [
-            (s.get("step_background") or "").strip() for s in instance.metadata["sub_steps"]
-        ]
-        non_empty = [b for b in backgrounds if b]
-        if non_empty:
-            self.assertIn(non_empty[0].splitlines()[0], instance.question)
+        sub_steps = instance.metadata["sub_steps"]
+        first_idx = instance.metadata["first_step_idx"]
+        first_bg = (sub_steps[first_idx].get("step_background") or "").strip()
+        if first_bg:
+            self.assertIn(first_bg.splitlines()[0], instance.question)
 
 
 class TestCodeExtraction(unittest.TestCase):
@@ -118,6 +138,75 @@ class TestScorerScriptAssembly(unittest.TestCase):
         self.assertIn("process_hdf5_to_tuple('77.1', 1, '/tmp/x.h5')", script)
         self.assertIn("target = targets[0]", script)
         self.assertIn("assert wrap(1.0, 5.0) == target", script)
+
+
+class TestCascade(unittest.IsolatedAsyncioTestCase):
+    async def test_cascade_accumulates_previous_code(self) -> None:
+        from olmo_eval.common.execution.environment import ScoringContext
+        from olmo_eval.common.types import (
+            Instance,
+            LMOutput,
+            LMRequest,
+            RequestType,
+            Response,
+            SamplingParams,
+        )
+
+        class _FakeProvider:
+            def __init__(self) -> None:
+                self.seen_prompts: list[str] = []
+                self.counter = 0
+
+            async def agenerate(
+                self, requests: list, sampling_params: SamplingParams | None = None
+            ):
+                self.seen_prompts.append(requests[0].prompt)
+                self.counter += 1
+                code = f"def step_{self.counter + 1}():\n    return {self.counter + 1}"
+                return [[LMOutput(text=f"```python\n{code}\n```")]]
+
+        class _FakePool:
+            def __init__(self, provider) -> None:
+                self._provider = provider
+
+            def get(self, name: str):
+                return self._provider
+
+            @property
+            def names(self) -> list[str]:
+                return ["fake"]
+
+        task = get_task("scicode:validation")
+        real_instance = next(iter(task.instances))
+        sub_steps = real_instance.metadata["sub_steps"][:3]
+        metadata = dict(real_instance.metadata)
+        metadata["sub_steps"] = sub_steps
+        metadata["first_step_idx"] = 0
+        metadata["total_steps"] = sum(1 for s in sub_steps if not s.get("_hardcoded"))
+        instance = Instance(question="ignored", metadata=metadata)
+
+        first_code = "def step_1():\n    return 1"
+        output = LMOutput(text=f"```python\n{first_code}\n```")
+        response = Response(
+            instance=instance,
+            request=LMRequest(request_type=RequestType.COMPLETION, prompt=""),
+            outputs=[output],
+        )
+
+        provider = _FakeProvider()
+        ctx = ScoringContext(execution_env=None, inference_pool=_FakePool(provider))
+
+        task._apply_scorers_async = _noop_scorers  # type: ignore[assignment]
+        await task.score_responses([response], context=ctx)
+
+        self.assertIn("def step_1()", output.extracted_answer)
+        self.assertIn("def step_2()", output.extracted_answer)
+        self.assertEqual(len(provider.seen_prompts), len(sub_steps) - 1)
+        self.assertIn("def step_1()", provider.seen_prompts[0])
+
+
+async def _noop_scorers(responses, context):  # type: ignore[no-untyped-def]
+    return None
 
 
 class TestMetrics(unittest.TestCase):
