@@ -51,6 +51,7 @@ from olmo_eval.common.types import (
     Instance,
     LMOutput,
     LMRequest,
+    RequestType,
     Response,
     SamplingParams,
     Split,
@@ -531,7 +532,10 @@ class SciCode(Task):
     def format_request(self, instance: Instance) -> LMRequest:
         if self.config.formatter is not None:
             return self.config.formatter.format(instance, [])
-        return LMRequest(request_type=self.request_type, prompt=instance.question)
+        return LMRequest(
+            request_type=RequestType.CHAT,
+            messages=({"role": "user", "content": instance.question},),
+        )
 
     def extract_answer(self, output: LMOutput) -> str | None:
         code = extract_code(output.text)
@@ -587,7 +591,10 @@ class SciCode(Task):
                 if provider is None:
                     assert context is not None
                     provider = context.get_provider(provider_name)
-                request = LMRequest(request_type=self.request_type, prompt=prompt)
+                request = LMRequest(
+                    request_type=RequestType.CHAT,
+                    messages=({"role": "user", "content": prompt},),
+                )
                 results = await provider.agenerate([request], self.config.sampling_params)
                 text = results[0][0].text if results and results[0] else ""
                 code = _extract_step_code(text)

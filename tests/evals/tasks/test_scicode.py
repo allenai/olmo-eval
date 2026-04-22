@@ -160,7 +160,11 @@ class TestCascade(unittest.IsolatedAsyncioTestCase):
             async def agenerate(
                 self, requests: list, sampling_params: SamplingParams | None = None
             ):
-                self.seen_prompts.append(requests[0].prompt)
+                req = requests[0]
+                if req.messages:
+                    self.seen_prompts.append(req.messages[0]["content"])
+                else:
+                    self.seen_prompts.append(req.prompt)
                 self.counter += 1
                 code = f"def step_{self.counter + 1}():\n    return {self.counter + 1}"
                 return [[LMOutput(text=f"```python\n{code}\n```")]]
