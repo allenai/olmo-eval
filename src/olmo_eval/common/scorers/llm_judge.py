@@ -422,14 +422,14 @@ class SafetyScorer(LLMJudgeScorer):
             return WILDGUARD_INPUT_FORMAT.format(
                 prompt=instance.question,
                 response=output.text
-                if output.extracted_answer is None
+                if not output.extracted_answer
                 else output.extracted_answer,
             )
 
         return SAFETY_INPUT_FORMAT.format(
             question=instance.question,
             model_answer=output.text
-            if output.extracted_answer is None
+            if not output.extracted_answer
             else output.extracted_answer,
         )
 
