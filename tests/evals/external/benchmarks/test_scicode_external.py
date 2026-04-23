@@ -76,11 +76,24 @@ class TestPrompts(unittest.TestCase):
         self.assertNotIn("import", code)
         self.assertIn("def foo()", code)
 
-    def test_hardcoded_for_problem(self) -> None:
-        self.assertIn(5, scicode_prompts.hardcoded_for_problem("13"))
-        self.assertIn(0, scicode_prompts.hardcoded_for_problem("62"))
-        self.assertIn(2, scicode_prompts.hardcoded_for_problem("76"))
-        self.assertEqual(scicode_prompts.hardcoded_for_problem("1"), {})
+    def test_extract_step_code_returns_last_python_block(self) -> None:
+        text = (
+            "Here is some scratch work:\n"
+            "```python\ndef scratch():\n    return 0\n```\n"
+            "And the final answer:\n"
+            "```python\ndef final():\n    return 1\n```\n"
+        )
+        code = scicode_prompts.extract_step_code(text)
+        self.assertIn("def final()", code)
+        self.assertNotIn("def scratch()", code)
+
+    def test_extract_step_code_falls_back_to_generic_fence(self) -> None:
+        text = "```\ndef bar():\n    return 2\n```"
+        code = scicode_prompts.extract_step_code(text)
+        self.assertIn("def bar()", code)
+
+    def test_extract_step_code_empty_input(self) -> None:
+        self.assertEqual(scicode_prompts.extract_step_code(""), "")
 
 
 class TestVerifierScript(unittest.TestCase):
@@ -179,14 +192,6 @@ class TestRunProblemCascade(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.total_scorable, 2)
         self.assertEqual(result.passed, 1)
         self.assertNotIn(0, result.step_codes)
-
-
-class TestRegistration(unittest.TestCase):
-    def test_scicode_is_registered(self) -> None:
-        from olmo_eval.evals.external.registry import get_external_eval
-
-        evaluator = get_external_eval("scicode")
-        self.assertEqual(evaluator.name, "scicode")
 
 
 if __name__ == "__main__":
