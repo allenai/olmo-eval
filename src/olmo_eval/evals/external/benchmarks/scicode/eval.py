@@ -56,6 +56,10 @@ class SciCodeArgs:
         problem_ids = data.get("problem_ids")
         if isinstance(problem_ids, str):
             problem_ids = [p.strip() for p in problem_ids.split(",") if p.strip()]
+        elif isinstance(problem_ids, (int, float)):
+            problem_ids = [str(problem_ids)]
+        elif isinstance(problem_ids, list):
+            problem_ids = [str(p) for p in problem_ids]
         return cls(
             split=data.get("split", "test"),
             problem_ids=problem_ids,
@@ -283,8 +287,19 @@ class SciCodeExternalEval(ExternalEval):
                 messages=({"role": "user", "content": prompt},),
             )
             results = await provider.agenerate([request], sampling_params)
-            text = results[0][0].text if results and results[0] else ""
+            if not results or not results[0]:
+                logger.warning(
+                    f"SciCode {problem.problem_id} step {idx}: provider returned no output"
+                )
+                text = ""
+            else:
+                text = results[0][0].text
             code = scicode_prompts.extract_step_code(text)
+            if text and not code:
+                logger.warning(
+                    f"SciCode {problem.problem_id} step {idx}: extracted empty code "
+                    f"from {len(text)}-char response (first 200: {text[:200]!r})"
+                )
             step_texts[idx] = text
             step_codes[idx] = code
             previous_llm_code[idx] = code
