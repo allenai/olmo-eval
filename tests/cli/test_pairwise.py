@@ -277,6 +277,58 @@ def test_timed_value_cache_reuses_fresh_entries_and_expires_stale_ones() -> None
     assert calls["count"] == 2
 
 
+def test_serialize_viewer_export_supports_csv_and_json() -> None:
+    pairwise_server = importlib.import_module("olmo_eval.cli.results.pairwise_server")
+
+    filename, content_type, body = pairwise_server._serialize_viewer_export(
+        kind="instance-results",
+        format_name="csv",
+        base_name="my-group-my-scope",
+        metadata={"group_name": "my-group"},
+        rows=[
+            {
+                "model_display_rank": 1,
+                "model_label": "model-a",
+                "model_name": "model-a",
+                "model_hash": "abc12345",
+                "timestamp": "2026-04-20T00:00:00+00:00",
+                "task_name": "gsm8k:olmo3base",
+                "native_id": "doc-1",
+                "task_metric_key": "accuracy:exact_match",
+                "raw_score": 1.0,
+                "comparison_score": 1.0,
+                "score_display_format": "percentage",
+                "score_unit": "proportion",
+                "score_higher_is_better": True,
+            }
+        ],
+    )
+
+    assert filename == "my-group-my-scope-instance-results.csv"
+    assert content_type == "text/csv; charset=utf-8"
+    assert body.decode("utf-8").startswith(
+        "model_display_rank,model_label,model_name,model_hash,timestamp,"
+    )
+
+    filename, content_type, body = pairwise_server._serialize_viewer_export(
+        kind="stored-files",
+        format_name="json",
+        base_name="my-group-my-scope",
+        metadata={"group_name": "my-group"},
+        rows=[
+            {
+                "model_display_rank": 1,
+                "task_name": "gsm8k:olmo3base",
+                "predictions_file": "s3://bucket/predictions.jsonl",
+            }
+        ],
+    )
+
+    assert filename == "my-group-my-scope-stored-files.json"
+    assert content_type == "application/json; charset=utf-8"
+    assert '"predictions_file": "s3://bucket/predictions.jsonl"' in body.decode("utf-8")
+
+
 def test_render_pairwise_browser_page_uses_dimming_only_loading_state() -> None:
     """The browser page should dim during scope changes without a separate status pill."""
     pairwise_server = importlib.import_module("olmo_eval.cli.results.pairwise_server")
@@ -484,12 +536,27 @@ def test_render_pairwise_browser_page_uses_dimming_only_loading_state() -> None:
     assert "${downloadSvg()} export" in html
     assert 'data-action="export-pairwise-csv"' in html
     assert 'data-action="export-pairwise-json"' in html
+    assert 'data-action="export-pairwise-instance-results"' in html
+    assert 'data-action="export-pairwise-stored-files"' in html
+    assert 'data-action="export-pairwise-all"' in html
     assert ">data<" in html
+    assert ">paired comparisons<" in html
+    assert ">paired test summary<" in html
+    assert ">instance results<" in html
+    assert ">stored files<" in html
+    assert ">all viewer data<" in html
     assert ">csv<" in html
     assert ">json<" in html
     assert "pairwise csv" not in html
     assert "pairwise json" not in html
     assert "pairwise data" not in html
+    assert 'new URL("/export", window.location.origin)' in html
+    assert 'function pairwiseViewerExportUrl(kind, format = "csv")' in html
+    assert "function exportPairwiseInstanceResults()" in html
+    assert "function exportPairwiseStoredFiles()" in html
+    assert "async function exportPairwiseAll()" in html
+    assert 'fetchViewerExportJson("instance-results")' in html
+    assert 'fetchViewerExportJson("stored-files")' in html
     assert '"selected_scope_key":"suite::olmobase:math"' in html
     assert '"task_ids":["gsm8k:olmo3base","minerva_math_algebra:olmo3base"]' in html
     assert "toggle-row-checkbox" not in html

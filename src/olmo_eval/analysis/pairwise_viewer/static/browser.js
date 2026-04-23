@@ -1529,12 +1529,32 @@
                 <div class="tt-menu-head"><span>data</span></div>
                 <div class="tt-menu-body">
                   <button type="button" class="tt-menu-action" data-action="export-pairwise-csv">
-                    <span class="tt-menu-name">csv</span>
-                    <span class="tt-menu-n">pairs</span>
+                    <span class="tt-menu-name">paired comparisons</span>
+                    <span class="tt-menu-n">csv</span>
                   </button>
                   <button type="button" class="tt-menu-action" data-action="export-pairwise-json">
-                    <span class="tt-menu-name">json</span>
-                    <span class="tt-menu-n">matrix</span>
+                    <span class="tt-menu-name">paired test summary</span>
+                    <span class="tt-menu-n">json</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="tt-menu-action"
+                    data-action="export-pairwise-instance-results"
+                  >
+                    <span class="tt-menu-name">instance results</span>
+                    <span class="tt-menu-n">csv</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="tt-menu-action"
+                    data-action="export-pairwise-stored-files"
+                  >
+                    <span class="tt-menu-name">stored files</span>
+                    <span class="tt-menu-n">csv</span>
+                  </button>
+                  <button type="button" class="tt-menu-action" data-action="export-pairwise-all">
+                    <span class="tt-menu-name">all viewer data</span>
+                    <span class="tt-menu-n">json</span>
                   </button>
                 </div>
               </div>
@@ -1825,6 +1845,48 @@
         return groupKey === scopeKey ? groupKey : `${groupKey}-${scopeKey}`;
       }
 
+      function modelExportRef(model) {
+        return String((model?.model_hash || "") + "|" + (model?.timestamp || ""));
+      }
+
+      function pairwiseExportModels(pairwiseData) {
+        if (!pairwiseData) return [];
+        const order = currentPairwiseExportOrder(pairwiseData);
+        return order.map((modelIndex) => pairwiseData.models[modelIndex]).filter(Boolean);
+      }
+
+      function pairwiseViewerExportUrl(kind, format = "csv") {
+        const pairwiseData = pageData.pairwise_data;
+        const url = new URL("/export", window.location.origin);
+        url.searchParams.set("kind", kind);
+        url.searchParams.set("format", format);
+        const groupName = currentGroupName();
+        if (groupName) url.searchParams.set("group", groupName);
+        if (pageData.selected_scope_key) url.searchParams.set("scope", pageData.selected_scope_key);
+        if (pageData.selected_metric) url.searchParams.set("metric", pageData.selected_metric);
+        pairwiseExportModels(pairwiseData).forEach((model) => {
+          url.searchParams.append("model_ref", modelExportRef(model));
+        });
+        return url;
+      }
+
+      function triggerDownload(url) {
+        const link = document.createElement("a");
+        link.href = url.toString();
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+
+      async function fetchViewerExportJson(kind) {
+        const response = await fetch(pairwiseViewerExportUrl(kind, "json"));
+        if (!response.ok) {
+          const message = (await response.text()).trim();
+          throw new Error(message || "The viewer export failed.");
+        }
+        return response.json();
+      }
+
       function currentPairwiseExportOrder(pairwiseData) {
         if (!pairwiseData) return [];
         const filtered = filteredPairwiseModelIndices(pairwiseData).indices;
@@ -2092,6 +2154,37 @@
         );
       }
 
+      function exportPairwiseInstanceResults() {
+        triggerDownload(pairwiseViewerExportUrl("instance-results", "csv"));
+      }
+
+      function exportPairwiseStoredFiles() {
+        triggerDownload(pairwiseViewerExportUrl("stored-files", "csv"));
+      }
+
+      async function exportPairwiseAll() {
+        const pairwiseData = pageData.pairwise_data;
+        if (!pairwiseData) return;
+        try {
+          const [instanceResults, storedFiles] = await Promise.all([
+            fetchViewerExportJson("instance-results"),
+            fetchViewerExportJson("stored-files"),
+          ]);
+          const payload = {
+            paired_test: buildPairwiseExportPayload(pairwiseData),
+            instance_results: instanceResults,
+            stored_files: storedFiles,
+          };
+          downloadText(
+            pairwiseExportBase(pairwiseData) + "-all.json",
+            JSON.stringify(payload, null, 2) + "\\n",
+            "application/json;charset=utf-8"
+          );
+        } catch (error) {
+          window.alert(error instanceof Error ? error.message : "The viewer export failed.");
+        }
+      }
+
       scopeForm?.addEventListener("submit", (event) => {
         event.preventDefault();
         submitScopeForm();
@@ -2347,6 +2440,21 @@
         if (action === "export-pairwise-json") {
           target.closest("details")?.removeAttribute("open");
           exportPairwiseJson();
+          return;
+        }
+        if (action === "export-pairwise-instance-results") {
+          target.closest("details")?.removeAttribute("open");
+          exportPairwiseInstanceResults();
+          return;
+        }
+        if (action === "export-pairwise-stored-files") {
+          target.closest("details")?.removeAttribute("open");
+          exportPairwiseStoredFiles();
+          return;
+        }
+        if (action === "export-pairwise-all") {
+          target.closest("details")?.removeAttribute("open");
+          void exportPairwiseAll();
         }
       });
 

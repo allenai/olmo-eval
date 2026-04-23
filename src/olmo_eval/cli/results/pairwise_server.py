@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import csv
 import html
+import io
 import json
+import re
 from collections import Counter
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,6 +21,8 @@ from sqlalchemy.orm import load_only, noload
 
 from olmo_eval.analysis.pairwise import (
     PairwiseEligibilityError,
+    _build_pairwise_score_sql_expr,
+    _comparison_score,
     compute_pairwise,
     get_task_metric_profile,
 )
@@ -923,6 +928,455 @@ def _pick_metric_for_scope(
     return requested_metric if requested_metric in valid_metrics else None
 
 
+def _slugify_export_part(value: str | None, fallback: str = "export") -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", str(value or "").strip().lower()).strip("-")
+    return slug or fallback
+
+
+def _viewer_export_base_name(group_name: str, scope_label: str) -> str:
+    group_key = _slugify_export_part(group_name, "results")
+    scope_key = _slugify_export_part(scope_label, "paired-test")
+    return group_key if group_key == scope_key else f"{group_key}-{scope_key}"
+
+
+def _result_model_export_ref(model_hash: str | None, timestamp: str | None) -> str:
+    return f"{str(model_hash or '')}|{str(timestamp or '')}"
+
+
+def _write_csv_bytes(rows: list[dict[str, Any]], fieldnames: list[str]) -> bytes:
+    stream = io.StringIO()
+    writer = csv.DictWriter(stream, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(
+            {
+                fieldname: "" if row.get(fieldname) is None else row.get(fieldname)
+                for fieldname in fieldnames
+            }
+        )
+    return stream.getvalue().encode("utf-8")
+
+
+def _resolve_export_group(
+    session: Session,
+    *,
+    requested_group: str | None,
+    require_full_coverage: bool,
+) -> tuple[str, dict[str, Any]]:
+    groups = _list_groups(session)
+    if not requested_group:
+        raise ValueError("Missing group for viewer export.")
+
+    if not any(group["name"] == requested_group for group in groups):
+        raise ValueError(f"Unknown group '{requested_group}' for viewer export.")
+
+    return (
+        requested_group,
+        _build_group_browser_data(
+            session,
+            requested_group,
+            require_full_coverage=require_full_coverage,
+        ),
+    )
+
+
+def _resolve_export_scope_and_metric(
+    *,
+    group_data: dict[str, Any],
+    requested_scope: str | None,
+    requested_metric: str | None,
+) -> tuple[str, str, str, str | None]:
+    if not requested_scope:
+        raise ValueError("Missing scope for viewer export.")
+
+    scope_option = _selected_scope_option(group_data, requested_scope)
+    if scope_option is None:
+        raise ValueError(f"Unknown scope '{requested_scope}' for viewer export.")
+
+    scope_kind, scope_value = _parse_scope_key(requested_scope)
+    if scope_kind is None or scope_value is None:
+        raise ValueError(f"Invalid scope '{requested_scope}' for viewer export.")
+
+    selected_metric = _pick_metric_for_scope(group_data, requested_scope, requested_metric)
+    if requested_metric and selected_metric != requested_metric:
+        raise ValueError(
+            f"Metric '{requested_metric}' is not available for scope '{requested_scope}'."
+        )
+
+    return requested_scope, scope_kind, scope_value, selected_metric
+
+
+def _resolve_compared_experiments_for_result(
+    session: Session,
+    *,
+    group_name: str,
+    result: Any,
+) -> list[dict[str, Any]]:
+    from olmo_eval.storage.backends.postgres.models import Experiment
+
+    compared_hashes = sorted(
+        {model.model_hash for model in result.models if getattr(model, "model_hash", None)}
+    )
+    if not compared_hashes:
+        return []
+
+    experiment_rows = session.execute(
+        select(
+            Experiment.id,
+            Experiment.model_name,
+            Experiment.model_hash,
+            Experiment.timestamp,
+            Experiment.s3_location,
+        )
+        .where(Experiment.experiment_group == group_name)
+        .where(Experiment.model_hash.in_(compared_hashes))
+    ).all()
+
+    rows_by_ref: dict[str, list[dict[str, Any]]] = {}
+    for row in experiment_rows:
+        timestamp = row.timestamp.isoformat() if row.timestamp is not None else None
+        rows_by_ref.setdefault(
+            _result_model_export_ref(row.model_hash, timestamp),
+            [],
+        ).append(
+            {
+                "experiment_pk": int(row.id),
+                "model_name": str(row.model_name or ""),
+                "model_hash": str(row.model_hash or ""),
+                "timestamp": timestamp,
+                "results_root": row.s3_location,
+            }
+        )
+
+    compared: list[dict[str, Any]] = []
+    for display_rank, model in enumerate(result.models, start=1):
+        ref = _result_model_export_ref(model.model_hash, model.timestamp)
+        candidates = list(rows_by_ref.get(ref, []))
+        selected = next(
+            (
+                candidate
+                for candidate in candidates
+                if candidate["model_name"] == getattr(model, "model_name", "")
+            ),
+            candidates[0] if candidates else None,
+        )
+        if selected is None:
+            raise ValueError(
+                f"Could not resolve the compared run for '{model.label.replace(chr(10), ' ')}'."
+            )
+        compared.append(
+            {
+                **selected,
+                "display_rank": display_rank,
+                "display_label": model.label.replace("\n", " "),
+                "export_ref": ref,
+            }
+        )
+
+    return compared
+
+
+def _order_compared_experiments(
+    compared_experiments: list[dict[str, Any]],
+    requested_model_refs: list[str],
+) -> list[dict[str, Any]]:
+    if not requested_model_refs:
+        return compared_experiments
+
+    by_ref = {str(experiment["export_ref"]): experiment for experiment in compared_experiments}
+    ordered = [by_ref[ref] for ref in requested_model_refs if ref in by_ref]
+    if not ordered:
+        return compared_experiments
+
+    return [
+        {
+            **experiment,
+            "display_rank": display_rank,
+        }
+        for display_rank, experiment in enumerate(ordered, start=1)
+    ]
+
+
+def _load_compared_scope_task_rows(
+    session: Session,
+    *,
+    compared_experiments: list[dict[str, Any]],
+    result: Any,
+) -> list[dict[str, Any]]:
+    from olmo_eval.storage.backends.postgres.models import TaskResult
+
+    experiment_ids = [int(experiment["experiment_pk"]) for experiment in compared_experiments]
+    task_names = list(result.task_names or ((result.task_name,) if result.task_name else ()))
+    if not experiment_ids or not task_names:
+        return []
+
+    task_rows = session.execute(
+        select(
+            TaskResult.experiment_pk,
+            TaskResult.task_name,
+            TaskResult.task_hash,
+            TaskResult.num_instances,
+            TaskResult.primary_metric,
+            TaskResult.s3_metrics_key,
+            TaskResult.s3_predictions_key,
+            TaskResult.s3_requests_key,
+        )
+        .where(TaskResult.experiment_pk.in_(experiment_ids))
+        .where(TaskResult.task_name.in_(task_names))
+    ).all()
+
+    return [
+        {
+            "experiment_pk": int(row.experiment_pk),
+            "task_name": str(row.task_name or ""),
+            "task_hash": str(row.task_hash or ""),
+            "num_instances": row.num_instances,
+            "primary_metric": row.primary_metric,
+            "task_metrics_file": row.s3_metrics_key,
+            "predictions_file": row.s3_predictions_key,
+            "requests_file": row.s3_requests_key,
+        }
+        for row in task_rows
+    ]
+
+
+def _build_instance_results_export_data(
+    session: Session,
+    *,
+    group_name: str,
+    result: Any,
+    compared_experiments: list[dict[str, Any]],
+    task_rows: list[dict[str, Any]],
+    selected_metric: str | None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    from olmo_eval.storage.backends.postgres.models import InstancePrediction
+
+    experiment_ids = [int(experiment["experiment_pk"]) for experiment in compared_experiments]
+    task_hash_to_metric: dict[str, str] = {}
+    task_hash_to_name: dict[str, str] = {}
+    task_metric_by_name: dict[str, str] = {}
+    task_profile_by_hash: dict[str, Any] = {}
+
+    for row in task_rows:
+        task_hash = str(row["task_hash"])
+        task_name = str(row["task_name"])
+        metric_key = selected_metric or str(row.get("primary_metric") or "")
+        if not metric_key:
+            continue
+        task_hash_to_metric[task_hash] = metric_key
+        task_hash_to_name[task_hash] = task_name
+        task_metric_by_name.setdefault(task_name, metric_key)
+        task_profile_by_hash[task_hash] = get_task_metric_profile(task_name, metric_key)
+
+    score_expr = _build_pairwise_score_sql_expr(task_hash_to_metric, task_profile_by_hash)
+    if not experiment_ids or score_expr is None:
+        metadata = {
+            "group_name": group_name,
+            "scope_name": result.suite_name or result.task_name,
+            "scope_kind": "suite" if result.suite_name else "task",
+            "metric_name": result.metric,
+            "compared_model_count": len(compared_experiments),
+            "shared_instance_count": 0,
+            "row_count": 0,
+            "score_display_format": result.score_display_format,
+            "score_unit": result.score_unit,
+            "score_higher_is_better": result.higher_is_better,
+        }
+        return metadata, []
+
+    score_rows = session.execute(
+        select(
+            InstancePrediction.experiment_pk,
+            InstancePrediction.native_id,
+            InstancePrediction.task_hash,
+            score_expr,
+        )
+        .where(InstancePrediction.experiment_pk.in_(experiment_ids))
+        .where(InstancePrediction.task_hash.in_(list(task_hash_to_metric)))
+    ).all()
+
+    raw_scores_by_pk = {experiment_id: {} for experiment_id in experiment_ids}
+    comparison_scores_by_pk = {experiment_id: {} for experiment_id in experiment_ids}
+
+    for experiment_pk, native_id, task_hash, raw_score in score_rows:
+        if raw_score is None:
+            continue
+        task_name = task_hash_to_name.get(str(task_hash))
+        if not task_name:
+            continue
+        key = (task_name, str(native_id))
+        raw_scores_by_pk[int(experiment_pk)][key] = float(raw_score)
+        comparison_scores_by_pk[int(experiment_pk)][key] = _comparison_score(
+            float(raw_score),
+            task_profile_by_hash.get(str(task_hash)),
+        )
+
+    shared_ids: set[tuple[str, str]] = set(
+        comparison_scores_by_pk.get(experiment_ids[0], {}).keys()
+    )
+    for experiment_id in experiment_ids[1:]:
+        shared_ids &= set(comparison_scores_by_pk.get(experiment_id, {}).keys())
+
+    rows: list[dict[str, Any]] = []
+    for task_name, native_id in sorted(shared_ids):
+        metric_key = task_metric_by_name.get(task_name)
+        profile = get_task_metric_profile(task_name, metric_key) if metric_key else None
+        for experiment in compared_experiments:
+            experiment_id = int(experiment["experiment_pk"])
+            key = (task_name, native_id)
+            rows.append(
+                {
+                    "model_display_rank": int(experiment["display_rank"]),
+                    "model_label": str(experiment["display_label"]),
+                    "model_name": str(experiment["model_name"]),
+                    "model_hash": str(experiment["model_hash"]),
+                    "timestamp": experiment["timestamp"],
+                    "task_name": task_name,
+                    "native_id": native_id,
+                    "task_metric_key": metric_key,
+                    "raw_score": raw_scores_by_pk[experiment_id].get(key),
+                    "comparison_score": comparison_scores_by_pk[experiment_id].get(key),
+                    "score_display_format": (
+                        profile.display_format
+                        if profile is not None
+                        else result.score_display_format
+                    ),
+                    "score_unit": profile.unit if profile is not None else result.score_unit,
+                    "score_higher_is_better": (
+                        profile.higher_is_better if profile is not None else result.higher_is_better
+                    ),
+                }
+            )
+
+    metadata = {
+        "group_name": group_name,
+        "scope_name": result.suite_name or result.task_name,
+        "scope_kind": "suite" if result.suite_name else "task",
+        "metric_name": result.metric,
+        "compared_model_count": len(compared_experiments),
+        "shared_instance_count": len(shared_ids),
+        "row_count": len(rows),
+        "score_display_format": result.score_display_format,
+        "score_unit": result.score_unit,
+        "score_higher_is_better": result.higher_is_better,
+    }
+    return metadata, rows
+
+
+def _build_stored_files_export_data(
+    *,
+    group_name: str,
+    result: Any,
+    compared_experiments: list[dict[str, Any]],
+    task_rows: list[dict[str, Any]],
+    selected_metric: str | None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    experiment_by_pk = {
+        int(experiment["experiment_pk"]): experiment for experiment in compared_experiments
+    }
+    rows: list[dict[str, Any]] = []
+    for task_row in sorted(
+        task_rows,
+        key=lambda row: (
+            int(experiment_by_pk.get(int(row["experiment_pk"]), {}).get("display_rank", 0)),
+            str(row["task_name"]),
+        ),
+    ):
+        experiment = experiment_by_pk.get(int(task_row["experiment_pk"]))
+        if experiment is None:
+            continue
+        rows.append(
+            {
+                "model_display_rank": int(experiment["display_rank"]),
+                "model_label": str(experiment["display_label"]),
+                "model_name": str(experiment["model_name"]),
+                "model_hash": str(experiment["model_hash"]),
+                "timestamp": experiment["timestamp"],
+                "task_name": str(task_row["task_name"]),
+                "task_hash": str(task_row["task_hash"]),
+                "task_metric_key": selected_metric or task_row.get("primary_metric"),
+                "num_instances": task_row.get("num_instances"),
+                "predictions_file": task_row.get("predictions_file"),
+                "requests_file": task_row.get("requests_file"),
+                "task_metrics_file": task_row.get("task_metrics_file"),
+                "run_results_root": experiment.get("results_root"),
+            }
+        )
+
+    metadata = {
+        "group_name": group_name,
+        "scope_name": result.suite_name or result.task_name,
+        "scope_kind": "suite" if result.suite_name else "task",
+        "metric_name": result.metric,
+        "compared_model_count": len(compared_experiments),
+        "task_count": len({str(row["task_name"]) for row in task_rows}),
+        "row_count": len(rows),
+    }
+    return metadata, rows
+
+
+def _serialize_viewer_export(
+    *,
+    kind: str,
+    format_name: str,
+    base_name: str,
+    metadata: dict[str, Any],
+    rows: list[dict[str, Any]],
+) -> tuple[str, str, bytes]:
+    if kind == "instance-results":
+        suffix = "instance-results"
+        csv_fields = [
+            "model_display_rank",
+            "model_label",
+            "model_name",
+            "model_hash",
+            "timestamp",
+            "task_name",
+            "native_id",
+            "task_metric_key",
+            "raw_score",
+            "comparison_score",
+            "score_display_format",
+            "score_unit",
+            "score_higher_is_better",
+        ]
+    elif kind == "stored-files":
+        suffix = "stored-files"
+        csv_fields = [
+            "model_display_rank",
+            "model_label",
+            "model_name",
+            "model_hash",
+            "timestamp",
+            "task_name",
+            "task_hash",
+            "task_metric_key",
+            "num_instances",
+            "predictions_file",
+            "requests_file",
+            "task_metrics_file",
+            "run_results_root",
+        ]
+    else:
+        raise ValueError(f"Unsupported viewer export kind '{kind}'.")
+
+    payload = {"metadata": metadata, "rows": rows}
+    filename_base = f"{base_name}-{suffix}"
+    if format_name == "json":
+        return (
+            f"{filename_base}.json",
+            "application/json; charset=utf-8",
+            (json.dumps(payload, indent=2) + "\n").encode("utf-8"),
+        )
+    if format_name == "csv":
+        return (
+            f"{filename_base}.csv",
+            "text/csv; charset=utf-8",
+            _write_csv_bytes(rows, csv_fields),
+        )
+    raise ValueError(f"Unsupported viewer export format '{format_name}'.")
+
+
 def _render_metric_control(
     *,
     scope_option: dict[str, Any] | None,
@@ -1445,18 +1899,147 @@ def serve_pairwise_browser(
     )
 
     class PairwiseBrowserHandler(BaseHTTPRequestHandler):
+        def _send_bytes(
+            self,
+            *,
+            body: bytes,
+            status: int = 200,
+            content_type: str,
+            filename: str | None = None,
+        ) -> None:
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            if filename:
+                self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            self.end_headers()
+            self.wfile.write(body)
+
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
             if parsed.path == "/favicon.ico":
                 self.send_response(204)
                 self.end_headers()
                 return
+
+            params = parse_qs(parsed.query)
+            if parsed.path == "/export":
+                requested_group = params.get("group", [""])[0] or None
+                requested_scope = params.get("scope", [""])[0] or None
+                requested_metric = params.get("metric", [""])[0] or None
+                requested_kind = params.get("kind", [""])[0] or None
+                requested_format = params.get("format", ["csv"])[0] or "csv"
+                requested_model_refs = [
+                    ref for ref in params.get("model_ref", []) if isinstance(ref, str) and ref
+                ]
+
+                if requested_kind not in {"instance-results", "stored-files"}:
+                    self._send_bytes(
+                        status=400,
+                        body=b"Unsupported export kind.\n",
+                        content_type="text/plain; charset=utf-8",
+                    )
+                    return
+
+                if requested_format not in {"csv", "json"}:
+                    self._send_bytes(
+                        status=400,
+                        body=b"Unsupported export format.\n",
+                        content_type="text/plain; charset=utf-8",
+                    )
+                    return
+
+                try:
+                    with db.session() as session:
+                        selected_group, group_data = _resolve_export_group(
+                            session,
+                            requested_group=requested_group,
+                            require_full_coverage=require_full_coverage,
+                        )
+                        _, scope_kind, scope_value, selected_metric = (
+                            _resolve_export_scope_and_metric(
+                                group_data=group_data,
+                                requested_scope=requested_scope,
+                                requested_metric=requested_metric,
+                            )
+                        )
+                        result = compute_pairwise(
+                            session=session,
+                            task_name=scope_value if scope_kind == "task" else None,
+                            suite_name=scope_value if scope_kind == "suite" else None,
+                            margin=margin,
+                            experiment_groups=[selected_group],
+                            metric=selected_metric,
+                            keep_all=keep_all,
+                            require_full_coverage=require_full_coverage,
+                        )
+                        compared_experiments = _order_compared_experiments(
+                            _resolve_compared_experiments_for_result(
+                                session,
+                                group_name=selected_group,
+                                result=result,
+                            ),
+                            requested_model_refs,
+                        )
+                        task_rows = _load_compared_scope_task_rows(
+                            session,
+                            compared_experiments=compared_experiments,
+                            result=result,
+                        )
+                        if requested_kind == "instance-results":
+                            metadata, rows = _build_instance_results_export_data(
+                                session,
+                                group_name=selected_group,
+                                result=result,
+                                compared_experiments=compared_experiments,
+                                task_rows=task_rows,
+                                selected_metric=selected_metric,
+                            )
+                        else:
+                            metadata, rows = _build_stored_files_export_data(
+                                group_name=selected_group,
+                                result=result,
+                                compared_experiments=compared_experiments,
+                                task_rows=task_rows,
+                                selected_metric=selected_metric,
+                            )
+                        filename, content_type, body = _serialize_viewer_export(
+                            kind=requested_kind,
+                            format_name=requested_format,
+                            base_name=_viewer_export_base_name(
+                                selected_group,
+                                result.suite_name or result.task_name,
+                            ),
+                            metadata=metadata,
+                            rows=rows,
+                        )
+                except PairwiseEligibilityError as error:
+                    self._send_bytes(
+                        status=409,
+                        body=(str(error) + "\n").encode("utf-8"),
+                        content_type="text/plain; charset=utf-8",
+                    )
+                    return
+                except ValueError as error:
+                    self._send_bytes(
+                        status=400,
+                        body=(str(error) + "\n").encode("utf-8"),
+                        content_type="text/plain; charset=utf-8",
+                    )
+                    return
+
+                self._send_bytes(
+                    body=body,
+                    content_type=content_type,
+                    filename=filename,
+                )
+                return
+
             if parsed.path not in {"", "/"}:
                 self.send_response(404)
                 self.end_headers()
                 return
 
-            params = parse_qs(parsed.query)
             requested_group = params.get("group", [initial_group or ""])[0] or None
             requested_scope = params.get("scope", [initial_scope_key or ""])[0] or None
             requested_metric = params.get("metric", [""])[0] or None
@@ -1533,11 +2116,7 @@ def serve_pairwise_browser(
                 pairwise_error_details=pairwise_error_details,
             )
             encoded = page.encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(encoded)))
-            self.end_headers()
-            self.wfile.write(encoded)
+            self._send_bytes(body=encoded, content_type="text/html; charset=utf-8")
 
         def log_message(self, format: str, *args: Any) -> None:
             return
