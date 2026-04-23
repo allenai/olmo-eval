@@ -14,8 +14,8 @@ def extract_think_answer(text: str) -> str:
     return answer
 
 
-# Based on the same extraction logic; returns an empty string if no answer is found
-def extract_think_answer_only(text: str) -> str:
+# Based on the same extraction logic; returns None if no </think> tags are found
+def extract_think_answer_only(text: str) -> str | None:
     # Deepseek-R1 style reasoning/answer extraction, assuming pattern is
     # <think>REASONING</think><answer>ANSWER</answer> with some flexibility
     # (mostly split on </think>, then remove other tags)
@@ -25,5 +25,5 @@ def extract_think_answer_only(text: str) -> str:
         answer = re.sub("(?ms)^\\s*<answer>\\s*", "", answer)
         answer = re.sub("(?ms)</answer>\\s*$", "", answer)
     else:
-        answer = ""
+        return None
     return answer
