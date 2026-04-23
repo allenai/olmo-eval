@@ -314,7 +314,12 @@ class ExperimentRepository:
             noload(Experiment.task_results),
             noload(Experiment.instance_predictions),
         )
-        return self.session.execute(stmt).scalars().all()
+        experiments: list[Experiment] = []
+        for experiment in self.session.execute(stmt).scalars().all():
+            if not isinstance(experiment, Experiment):
+                raise TypeError(f"Expected Experiment row, got {type(experiment)!r}")
+            experiments.append(experiment)
+        return experiments
 
     @staticmethod
     def _to_eval_result(experiment: Experiment) -> EvalResult:

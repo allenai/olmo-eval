@@ -285,22 +285,19 @@ def _format_experiment_label(
 
 
 def _serialize_experiment_debug(exp: Any, *, keep_all: bool) -> dict[str, Any]:
+    timestamp = getattr(exp, "timestamp", None)
     return {
         "label": _format_experiment_label(
             getattr(exp, "model_name", None),
             getattr(exp, "model_hash", None),
-            getattr(exp, "timestamp", None),
+            timestamp,
             keep_all=keep_all,
         ),
         "model_name": getattr(exp, "model_name", "") or "",
         "model_hash": getattr(exp, "model_hash", "") or "",
         "model_hash_short": (getattr(exp, "model_hash", "") or "")[:8],
-        "timestamp": (
-            getattr(exp, "timestamp", None).isoformat()
-            if getattr(exp, "timestamp", None) is not None
-            else None
-        ),
-        "timestamp_label": _timestamp_label(getattr(exp, "timestamp", None)),
+        "timestamp": timestamp.isoformat() if timestamp is not None else None,
+        "timestamp_label": _timestamp_label(timestamp),
         "experiment_id": getattr(exp, "experiment_id", None),
         "experiment_group": getattr(exp, "experiment_group", None),
     }
@@ -462,9 +459,10 @@ def _extract_cost_from_task_metrics(metrics: object) -> float | None:
     """Extract a task-level cost from heterogeneous metrics payloads."""
     if not isinstance(metrics, dict):
         return None
+    metric_values = {key: value for key, value in metrics.items() if isinstance(key, str)}
     for key in ("overall_cost", "total_cost", "cost"):
-        if key in metrics:
-            return _sum_numeric_leaves(metrics[key])
+        if key in metric_values:
+            return _sum_numeric_leaves(metric_values[key])
     return None
 
 
@@ -1325,14 +1323,13 @@ def compute_pairwise(
         )
         for contributing_task_name in contributing_task_names
     )
-    contributing_profiles = [
-        task_profile_by_hash[task_hash]
-        for task_hash, task_name in task_hash_to_name.items()
-        if (
-            task_name in contributing_task_name_set
-            and task_profile_by_hash.get(task_hash) is not None
-        )
-    ]
+    contributing_profiles: list[MetricProfile] = []
+    for task_hash, task_name in task_hash_to_name.items():
+        if task_name not in contributing_task_name_set:
+            continue
+        profile = task_profile_by_hash.get(task_hash)
+        if profile is not None:
+            contributing_profiles.append(profile)
     units = {profile.unit for profile in contributing_profiles}
     display_formats = {profile.display_format for profile in contributing_profiles}
     directions = {profile.higher_is_better for profile in contributing_profiles}

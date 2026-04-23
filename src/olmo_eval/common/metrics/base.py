@@ -219,6 +219,10 @@ class BPBMetricInstanceAvg(Metric):
 
         return sum(bpb_values) / len(bpb_values)
 
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        # Keep BPB handling conservative: pairwise should read the exact stored metric key.
+        return False
+
     def pairwise_higher_is_better(self) -> bool:
         return False
 
@@ -261,7 +265,9 @@ class BPBMetricByteAvg(Metric):
         return weighted_sum / total_bytes
 
     def supports_pairwise_scorer_fallback(self) -> bool:
-        return self.k == 1
+        # Byte-weighted BPB is a corpus aggregate, so scorer-level per-instance values
+        # are not equivalent to the stored task metric.
+        return False
 
     def pairwise_higher_is_better(self) -> bool:
         return False

@@ -7,7 +7,7 @@ from typing import NamedTuple
 
 import numpy as np
 
-from olmo_eval.analysis.pairwise import ModelMeta, PairwiseResult
+from olmo_eval.analysis.pairwise import ModelMeta, PairwiseResult, get_task_metric_profile
 
 
 class _PairCell(NamedTuple):
@@ -163,6 +163,22 @@ def _is_nonsignificant(win_rate: float, se: float) -> bool:
     return abs(win_rate - 0.5) <= _SIGNIFICANCE_Z * se
 
 
+def _score_order_key(score: float, *, higher_is_better: bool) -> float:
+    return score if higher_is_better else -score
+
+
+def _task_higher_is_better_flags(result: PairwiseResult) -> list[bool]:
+    default = True if result.higher_is_better is None else result.higher_is_better
+    flags: list[bool] = []
+    for task_idx, task_name in enumerate(result.task_names):
+        metric_key = (
+            result.task_metric_keys[task_idx] if task_idx < len(result.task_metric_keys) else None
+        )
+        profile = get_task_metric_profile(task_name, metric_key) if metric_key else None
+        flags.append(profile.higher_is_better if profile is not None else default)
+    return flags
+
+
 def _build_overall_win_rate_vector(result: PairwiseResult) -> np.ndarray:
     n = len(result.models)
     wins = np.zeros(n, dtype=float)
@@ -217,6 +233,7 @@ def build_row_metrics(result: PairwiseResult) -> list[RowMetrics]:
     overall_win_rates = _build_overall_win_rate_vector(result)
     ratings = _build_bradley_terry_rating_vector(result)
     task_labels = _build_task_label_lookup(result.task_names)
+    task_higher_is_better = _task_higher_is_better_flags(result)
     dominance = np.zeros(len(result.models), dtype=int)
     for pair in result.pairs:
         if _is_nonsignificant(pair.win_rate_a, pair.se):
@@ -232,21 +249,43 @@ def build_row_metrics(result: PairwiseResult) -> list[RowMetrics]:
     for idx in range(len(result.models)):
         task_scores = result.model_task_scores[idx] if idx < len(result.model_task_scores) else ()
         scored_tasks = [
-            (task_name, score)
-            for task_name, score in zip(result.task_names, task_scores, strict=False)
+            (task_idx, task_name, score)
+            for task_idx, (task_name, score) in enumerate(
+                zip(result.task_names, task_scores, strict=False)
+            )
             if score is not None
         ]
-        best_task = max(scored_tasks, key=lambda item: item[1]) if scored_tasks else None
-        worst_task = min(scored_tasks, key=lambda item: item[1]) if scored_tasks else None
+        best_task = (
+            max(
+                scored_tasks,
+                key=lambda item: _score_order_key(
+                    item[2],
+                    higher_is_better=task_higher_is_better[item[0]],
+                ),
+            )
+            if scored_tasks
+            else None
+        )
+        worst_task = (
+            min(
+                scored_tasks,
+                key=lambda item: _score_order_key(
+                    item[2],
+                    higher_is_better=task_higher_is_better[item[0]],
+                ),
+            )
+            if scored_tasks
+            else None
+        )
         row_metrics.append(
             RowMetrics(
                 rating=ratings[idx],
                 dominance=int(dominance[idx]),
                 avg_win_rate=overall_win_rates[idx],
-                best_task_label=task_labels.get(best_task[0]) if best_task else None,
-                best_task_score=best_task[1] if best_task else None,
-                worst_task_label=task_labels.get(worst_task[0]) if worst_task else None,
-                worst_task_score=worst_task[1] if worst_task else None,
+                best_task_label=task_labels.get(best_task[1]) if best_task else None,
+                best_task_score=best_task[2] if best_task else None,
+                worst_task_label=task_labels.get(worst_task[1]) if worst_task else None,
+                worst_task_score=worst_task[2] if worst_task else None,
             )
         )
     return row_metrics
@@ -254,14 +293,18 @@ def build_row_metrics(result: PairwiseResult) -> list[RowMetrics]:
 
 def build_task_metrics(result: PairwiseResult) -> list[TaskMetrics]:
     model_labels = [_format_model_table_label(model) for model in result.models]
+    task_higher_is_better = _task_higher_is_better_flags(result)
 
     task_metrics: list[TaskMetrics] = []
     for task_idx, task_name in enumerate(result.task_names):
-        scored_models = [
-            (model_labels[model_idx], task_scores[task_idx])
-            for model_idx, task_scores in enumerate(result.model_task_scores)
-            if task_idx < len(task_scores) and task_scores[task_idx] is not None
-        ]
+        scored_models: list[tuple[str, float]] = []
+        for model_idx, task_scores in enumerate(result.model_task_scores):
+            if task_idx >= len(task_scores):
+                continue
+            score = task_scores[task_idx]
+            if score is None:
+                continue
+            scored_models.append((model_labels[model_idx], float(score)))
         if not scored_models:
             task_metrics.append(
                 TaskMetrics(
@@ -277,8 +320,17 @@ def build_task_metrics(result: PairwiseResult) -> list[TaskMetrics]:
             continue
 
         scores = [score for _, score in scored_models]
-        best_model = max(scored_models, key=lambda item: item[1])
-        worst_model = min(scored_models, key=lambda item: item[1])
+        higher_is_better = (
+            task_higher_is_better[task_idx] if task_idx < len(task_higher_is_better) else True
+        )
+        best_model = max(
+            scored_models,
+            key=lambda item: _score_order_key(item[1], higher_is_better=higher_is_better),
+        )
+        worst_model = min(
+            scored_models,
+            key=lambda item: _score_order_key(item[1], higher_is_better=higher_is_better),
+        )
         task_metrics.append(
             TaskMetrics(
                 task_label=task_name,

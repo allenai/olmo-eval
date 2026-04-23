@@ -553,7 +553,7 @@ def _build_group_browser_data(
         ).where(Experiment.experiment_group == group_name)
     ).one()
 
-    task_rows = [
+    task_rows: list[dict[str, Any]] = [
         {
             "name": task_name,
             "models": int(model_count or 0),
@@ -574,7 +574,7 @@ def _build_group_browser_data(
     present_tasks = {row["name"] for row in task_rows}
     results_table = _build_results_table(session, group_name)
     latest_models = list(results_table.get("models", []))
-    task_column_by_id = {
+    task_column_by_id: dict[str, dict[str, Any]] = {
         str(column["id"]): column for column in results_table.get("task_columns", [])
     }
     suite_rows: list[dict[str, Any]] = []
@@ -628,16 +628,14 @@ def _build_group_browser_data(
     )
 
     for task_row in task_rows:
-        latest_model_count = int(task_column_by_id.get(task_row["name"], {}).get("model_count", 0))
+        task_name = str(task_row["name"])
+        task_column = task_column_by_id.get(task_name) or {}
+        latest_model_count = int(task_column.get("model_count", 0))
         task_row["latest_models"] = latest_model_count
-        task_row["metric_options"] = list(
-            task_column_by_id.get(task_row["name"], {}).get("metric_options", []),
-        )
-        task_row["default_metric"] = str(
-            task_column_by_id.get(task_row["name"], {}).get("metric") or ""
-        )
+        task_row["metric_options"] = list(task_column.get("metric_options", []))
+        task_row["default_metric"] = str(task_column.get("metric") or "")
         task_row["availability"] = _task_scope_availability(
-            task_name=str(task_row["name"]),
+            task_name=task_name,
             group_model_count=int(task_row["models"]),
             latest_model_count=latest_model_count,
         )
@@ -649,7 +647,7 @@ def _build_group_browser_data(
         )
     )
 
-    scope_options = [
+    scope_options: list[dict[str, Any]] = [
         {
             "key": _make_scope_key("suite", suite_row["name"]),
             "kind": "suite",

@@ -26,6 +26,7 @@ from olmo_eval.analysis.pairwise import (
     get_task_metric_profile,
     get_win_rate,
 )
+from olmo_eval.analysis.pairwise_metrics import build_row_metrics, build_task_metrics
 from olmo_eval.analysis.pairwise_viewer_payload import build_pairwise_viewer_payload
 from olmo_eval.common.metrics import PassPowKMetric
 from olmo_eval.common.scorers import CodeExecutionScorer
@@ -344,6 +345,15 @@ class TestPairwiseInstanceScoreExtraction:
     def test_bpb_metrics_resolve_as_raw_lower_is_better(self) -> None:
         profile = get_task_metric_profile("humaneval:bpb", "bits_per_byte:bits_per_byte")
         assert profile is not None
+        assert profile.supports_scorer_fallback is False
+        assert profile.display_format == "raw"
+        assert profile.higher_is_better is False
+        assert profile.unit == "bits_per_byte"
+
+    def test_byte_weighted_bpb_metrics_resolve_without_crashing(self) -> None:
+        profile = get_task_metric_profile("ds1000:bpb", "bits_per_byte:bits_per_byte")
+        assert profile is not None
+        assert profile.supports_scorer_fallback is False
         assert profile.display_format == "raw"
         assert profile.higher_is_better is False
         assert profile.unit == "bits_per_byte"
@@ -500,6 +510,44 @@ class TestPairwiseResult:
         assert payload["meta"]["score_unit"] == "bits_per_byte"
         assert payload["meta"]["higher_is_better"] is False
         assert payload["matrix"]["score_diff"][0][1] == pytest.approx(-0.16)
+
+    def test_lower_is_better_summaries_pick_smallest_scores_as_best(self) -> None:
+        result = PairwiseResult(
+            task_name="code:bpb",
+            metric="bits_per_byte:bits_per_byte",
+            margin=0.0,
+            instance_count=50,
+            models=[
+                ModelMeta(label="model-a\n(aaa11111)", model_name="model-a", model_hash="aaa11111"),
+                ModelMeta(label="model-b\n(bbb22222)", model_name="model-b", model_hash="bbb22222"),
+            ],
+            pairs=[],
+            task_names=("ds1000:bpb", "bigcodebench:bpb"),
+            task_metric_keys=("bits_per_byte:bits_per_byte", "bits_per_byte:bits_per_byte"),
+            model_task_scores=((0.90, 0.20), (0.30, 0.40)),
+            score_display_format="raw",
+            score_unit="bits_per_byte",
+            higher_is_better=False,
+        )
+
+        row_metrics = build_row_metrics(result)
+        task_metrics = build_task_metrics(result)
+        payload = build_pairwise_viewer_payload(result)
+
+        assert row_metrics[0].best_task_label == "bigcodebench"
+        assert row_metrics[0].best_task_score == pytest.approx(0.20)
+        assert row_metrics[0].worst_task_label == "ds1000"
+        assert row_metrics[0].worst_task_score == pytest.approx(0.90)
+
+        assert task_metrics[0].best_model_label == "model-b (bbb22222)"
+        assert task_metrics[0].best_model_score == pytest.approx(0.30)
+        assert task_metrics[0].worst_model_label == "model-a (aaa11111)"
+        assert task_metrics[0].worst_model_score == pytest.approx(0.90)
+
+        assert payload["models"][0]["best_task_score"] == pytest.approx(0.20)
+        assert payload["models"][0]["worst_task_score"] == pytest.approx(0.90)
+        assert payload["task_stats"][0]["best_model_score"] == pytest.approx(0.30)
+        assert payload["task_stats"][0]["worst_model_score"] == pytest.approx(0.90)
 
 
 class TestComputePairsCompoundKeys:
