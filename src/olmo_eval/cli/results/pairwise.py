@@ -1,4 +1,4 @@
-"""CLI entrypoint for pairwise model comparison."""
+"""CLI entrypoint for the results viewer and pairwise data exports."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from olmo_eval.cli.results.options import db_options, get_database_session
 from olmo_eval.cli.utils import console
 
 
-@click.command()
+@click.command(name="viewer")
 @click.option(
     "--experiment",
     "-e",
@@ -106,15 +106,26 @@ from olmo_eval.cli.utils import console
     "output_path",
     default=None,
     type=click.Path(),
-    help="Save plot / JSON / CSV to a file.",
+    help="Save JSON / CSV to a file. Viewer mode does not use --output.",
 )
 @click.option(
     "--format",
     "-f",
     "output_format",
-    type=click.Choice(["plot", "json", "csv"]),
-    default="plot",
-    help="Output format (default: plot — requires the [analysis] extra).",
+    type=click.Choice(["html", "json", "csv"]),
+    default="html",
+    help="Mode (default: local results viewer; json/csv dump viewer data).",
+)
+@click.option(
+    "--host",
+    default="127.0.0.1",
+    help="Bind address for viewer mode (default: 127.0.0.1).",
+)
+@click.option(
+    "--port",
+    default=8765,
+    type=int,
+    help="Listen port for viewer mode (default: 8765).",
 )
 @click.option(
     "--all",
@@ -132,7 +143,117 @@ from olmo_eval.cli.utils import console
     "(suite scope only; default: enabled).",
 )
 @db_options
-def pairwise(
+def viewer(
+    experiment_ids: tuple[str, ...],
+    model_names: tuple[str, ...],
+    model_hashes: tuple[str, ...],
+    exclude_model_names: tuple[str, ...],
+    exclude_model_hashes: tuple[str, ...],
+    experiment_groups: tuple[str, ...],
+    task_name: str | None,
+    task_hash: str | None,
+    exclude_task_names: tuple[str, ...],
+    exclude_task_hashes: tuple[str, ...],
+    suite_name: str | None,
+    metric: str | None,
+    margin: float,
+    output_path: str | None,
+    output_format: str,
+    host: str,
+    port: int,
+    keep_all: bool,
+    require_full_coverage: bool,
+    db_host: str,
+    db_port: int,
+    db_name: str,
+    db_user: str,
+    db_password: str,
+) -> None:
+    """Launch the results viewer or dump viewer data as JSON / CSV.
+
+    Examples:
+
+        olmo-eval results viewer
+
+        olmo-eval results viewer -G my-benchmark -S multipl_e:pass_at_1
+
+        olmo-eval results viewer -G my-benchmark -S multipl_e:pass_at_1 \\
+            --format json -o matrix.json
+
+        olmo-eval results viewer -m model-a -m model-b -t gsm8k:olmo3base --format csv
+    """
+    if output_format == "html":
+        if output_path is not None:
+            raise click.UsageError("--output is not supported when launching the results viewer.")
+        if experiment_ids or model_names or model_hashes:
+            raise click.UsageError(
+                "The results viewer starts from experiment-group discovery. "
+                "Use --experiment-group to open a specific group, or switch to "
+                "--format json/csv for direct filtered dumps."
+            )
+        if task_hash is not None:
+            raise click.UsageError(
+                "The results viewer does not support --task-hash. "
+                "Use --task or --suite to open a specific view."
+            )
+        if exclude_model_names or exclude_model_hashes or exclude_task_names or exclude_task_hashes:
+            raise click.UsageError(
+                "The results viewer does not take exclude flags. "
+                "Use the in-browser filters to narrow what you see."
+            )
+        if len(experiment_groups) > 1:
+            raise click.UsageError(
+                "The results viewer accepts at most one --experiment-group seed value."
+            )
+        scope_count = sum(bool(x) for x in (task_name, suite_name))
+        if scope_count > 1:
+            raise click.UsageError(
+                "Provide at most one of --task or --suite to open the initial viewer state."
+            )
+        _serve_html_browser(
+            db_host=db_host,
+            db_port=db_port,
+            db_name=db_name,
+            db_user=db_user,
+            db_password=db_password,
+            host=host,
+            port=port,
+            initial_group=experiment_groups[0] if experiment_groups else None,
+            initial_scope_key=_initial_scope_key(task_name=task_name, suite_name=suite_name),
+            margin=margin,
+            keep_all=keep_all,
+            require_full_coverage=require_full_coverage,
+        )
+        return
+
+    _run_pairwise_dump(
+        experiment_ids=experiment_ids,
+        model_names=model_names,
+        model_hashes=model_hashes,
+        exclude_model_names=exclude_model_names,
+        exclude_model_hashes=exclude_model_hashes,
+        experiment_groups=experiment_groups,
+        task_name=task_name,
+        task_hash=task_hash,
+        exclude_task_names=exclude_task_names,
+        exclude_task_hashes=exclude_task_hashes,
+        suite_name=suite_name,
+        metric=metric,
+        margin=margin,
+        output_path=output_path,
+        output_format=output_format,
+        keep_all=keep_all,
+        require_full_coverage=require_full_coverage,
+        db_host=db_host,
+        db_port=db_port,
+        db_name=db_name,
+        db_user=db_user,
+        db_password=db_password,
+    )
+
+
+def _run_pairwise_dump(
+    *,
     experiment_ids: tuple[str, ...],
     model_names: tuple[str, ...],
     model_hashes: tuple[str, ...],
@@ -156,32 +277,16 @@ def pairwise(
     db_user: str,
     db_password: str,
 ) -> None:
-    """Compare 2+ experiments on one task or suite.
-
-    ``--task`` uses exact task-name matching. Use ``results query`` to browse
-    names and ``--suite`` to pool related tasks.
-
-    Requires the [analysis] extra for plot output: pip install olmo-eval-internal[analysis]
-
-    Examples:
-
-        olmo-eval results pairwise -G my-benchmark -t humaneval:3shot:pass_at_1
-
-        olmo-eval results pairwise -m model-a -m model-b -t gsm8k:olmo3base
-
-        olmo-eval results pairwise -G my-benchmark -S multipl_e:pass_at_1
-
-        olmo-eval results pairwise -G my-benchmark -S multipl_e:pass_at_1 -o matrix.png
-    """
+    """Compute pairwise data and dump it as JSON or CSV."""
     if not any([experiment_ids, model_names, model_hashes, experiment_groups]):
         raise click.UsageError(
-            "At least one filter is required: "
+            "At least one filter is required for dumps: "
             "--experiment, --model, --model-hash, or --experiment-group"
         )
     scope_count = sum(bool(x) for x in (task_name, task_hash, suite_name))
     if scope_count != 1:
         raise click.UsageError(
-            "Provide exactly one of --task, --task-hash, or --suite to scope the comparison."
+            "Provide exactly one of --task, --task-hash, or --suite to scope the dump."
         )
 
     from olmo_eval.analysis.pairwise import compute_pairwise
@@ -262,10 +367,8 @@ def pairwise(
 
     if output_format == "json":
         _output_json(result, output_path)
-    elif output_format == "csv":
-        _output_csv(result, output_path)
     else:
-        _output_plot(result, output_path)
+        _output_csv(result, output_path)
 
 
 def _short_label(meta: Any) -> str:
@@ -284,42 +387,72 @@ def _output_json(result: Any, output_path: str | None) -> None:
     labels = [_short_label(m) for m in result.models]
 
     data: dict[str, Any] = {
-        "task_name": result.task_name,
-        "suite_name": result.suite_name,
-        "task_names": list(result.task_names),
-        "metric": result.metric,
-        "margin": result.margin,
-        "instance_count": result.instance_count,
-        "n_experiments_matched": result.n_experiments_matched,
-        "n_experiments_dropped": result.n_experiments_dropped,
+        "metadata": {
+            "scope_name": result.task_name,
+            "scope_kind": "suite" if result.suite_name else "task",
+            "suite_name": result.suite_name,
+            "contributing_task_names": list(result.task_names),
+            "metric_name": result.metric,
+            "tie_margin": result.margin,
+            "shared_instance_count": result.instance_count,
+            "score_display_format": result.score_display_format,
+            "score_unit": result.score_unit,
+            "score_higher_is_better": result.higher_is_better,
+            "matched_experiment_count": result.n_experiments_matched,
+            "dropped_experiment_count": result.n_experiments_dropped,
+        },
         "models": [
             {
-                "label": labels[i],
+                "model_index": i,
+                "display_label": labels[i],
                 "model_name": m.model_name,
                 "model_hash": m.model_hash,
                 "timestamp": m.timestamp,
+                "total_cost": result.model_costs[i] if i < len(result.model_costs) else None,
+                "shared_instance_mean_score": (
+                    result.model_shared_scores[i] if i < len(result.model_shared_scores) else None
+                ),
+                "task_metric_keys_by_task_name": {
+                    task_name: (
+                        result.task_metric_keys[task_idx]
+                        if task_idx < len(result.task_metric_keys)
+                        else None
+                    )
+                    for task_idx, task_name in enumerate(result.task_names)
+                },
+                "task_scores_by_task_name": {
+                    task_name: (
+                        result.model_task_scores[i][task_idx]
+                        if i < len(result.model_task_scores)
+                        and task_idx < len(result.model_task_scores[i])
+                        else None
+                    )
+                    for task_idx, task_name in enumerate(result.task_names)
+                },
             }
             for i, m in enumerate(result.models)
         ],
-        "pairs": [
+        "pairwise_comparisons": [
             {
-                "model_a": labels[p.index_a],
-                "model_b": labels[p.index_b],
-                "index_a": p.index_a,
-                "index_b": p.index_b,
-                "wins_a": p.wins_a,
-                "wins_b": p.wins_b,
-                "ties": p.ties,
-                "n_contested": p.wins_a + p.wins_b,
-                "win_rate_a": p.win_rate_a,
-                "win_rate_b": p.win_rate_b,
-                "se": p.se,
-                "var_paired_diff": p.var_paired_diff,
-                "var_marginal_sum": p.var_marginal_sum,
+                "model_a_index": p.index_a,
+                "model_b_index": p.index_b,
+                "model_a_label": labels[p.index_a],
+                "model_b_label": labels[p.index_b],
+                "wins_model_a": p.wins_a,
+                "wins_model_b": p.wins_b,
+                "tie_count": p.ties,
+                "contested_instance_count": p.wins_a + p.wins_b,
+                "win_rate_model_a": p.win_rate_a,
+                "win_rate_model_b": p.win_rate_b,
+                "win_rate_standard_error": p.se,
+                "probability_model_a_beats_model_b": p.prob_a_gt_b,
+                "p_value": p.p_value,
+                "paired_difference_variance": p.var_paired_diff,
+                "marginal_sum_variance": p.var_marginal_sum,
             }
             for p in result.pairs
         ],
-        "matrix": {
+        "win_rate_matrix_by_model_label": {
             labels[i]: {labels[j]: get_win_rate(result.pairs, i, j) for j in range(n) if j != i}
             for i in range(n)
         },
@@ -381,25 +514,49 @@ def _output_csv(result: Any, output_path: str | None) -> None:
         _write_rows(csv.writer(sys.stdout))
 
 
-def _output_plot(result: Any, output_path: str | None) -> None:
-    """Render the pairwise matrix plot."""
+def _initial_scope_key(*, task_name: str | None, suite_name: str | None) -> str | None:
+    """Translate optional CLI seed flags into the browser's scope-key format."""
+    if suite_name:
+        return f"suite::{suite_name}"
+    if task_name:
+        return f"task::{task_name}"
+    return None
+
+
+def _serve_html_browser(
+    *,
+    db_host: str,
+    db_port: int,
+    db_name: str,
+    db_user: str,
+    db_password: str,
+    host: str,
+    port: int,
+    initial_group: str | None,
+    initial_scope_key: str | None,
+    margin: float,
+    keep_all: bool,
+    require_full_coverage: bool,
+) -> None:
+    """Start the local results viewer server for interactive exploration."""
+    from olmo_eval.cli.results.pairwise_server import serve_pairwise_browser
+
+    db = get_database_session(db_host, db_port, db_name, db_user, db_password)
+    url = f"http://{host}:{port}"
+    console.print(f"[green]Starting results viewer at {url}[/green]")
+    console.print("[dim]Press Ctrl+C to stop the viewer.[/dim]")
     try:
-        from olmo_eval.analysis.pairwise_plot import plot_pairwise_matrix
-    except ImportError:
-        console.print(
-            "[red]Error:[/red] matplotlib is required for plot output. "
-            "Install with: pip install olmo-eval-internal[analysis]"
+        serve_pairwise_browser(
+            db=db,
+            host=host,
+            port=port,
+            initial_group=initial_group,
+            initial_scope_key=initial_scope_key,
+            margin=margin,
+            keep_all=keep_all,
+            require_full_coverage=require_full_coverage,
         )
-        raise SystemExit(1) from None
-
-    if result.suite_name:
-        title = f"{result.suite_name} ({len(result.task_names)} tasks) — {result.metric}"
-    else:
-        title = f"{result.task_name} — {result.metric}"
-    plot_pairwise_matrix(result, title=title, save_path=output_path)
-    if output_path:
-        console.print(f"[green]Saved plot to {output_path}[/green]")
-    else:
-        import matplotlib.pyplot as plt
-
-        plt.show()
+    except KeyboardInterrupt:
+        console.print("\n[dim]Results viewer stopped.[/dim]")
+    finally:
+        db.dispose()

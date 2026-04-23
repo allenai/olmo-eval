@@ -110,6 +110,9 @@ conflicts = [
     ],
 ]
 
+[tool.setuptools.package-data]
+"olmo_eval.analysis.pairwise_viewer" = ["static/*.css", "static/*.js", "templates/*.html"]
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.0",

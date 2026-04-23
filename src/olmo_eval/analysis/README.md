@@ -1,260 +1,274 @@
-# Pairwise analysis — how to read the heatmap
+# Pairwise Analysis in the Results Viewer
 
-Head-to-head win rates between N models on a shared task (or suite of tasks),
-with per-cell standard errors (SE) and matrix-wide validity stats in the
-footer. Every acronym here is defined in the [Glossary](#glossary) below.
+`olmo-eval results viewer` is built around a paired comparison. The question is
+not just "which run has the higher aggregate metric?" It is "on the shared
+evaluation set, which run is better, what is the effect size, and how strong is
+the statistical evidence?"
 
-The primary example below pools instances across a suite:
+That distinction matters because aggregate scores can move for two reasons: the
+models differ, or the evaluated instance sets differ. The paired analysis
+removes the second source of variance by restricting every comparison to the
+shared set of evaluated instances.
 
-```
-olmo-eval results pairwise \
-  -G olmo-eval-sandboxfusion \
-  -S multipl_e:pass_at_1
-```
+The screenshots in this README use a focused subset of models to keep the
+examples readable.
 
-4 models, 6 MultiPL-E language tasks pooled, **2,313 shared instances** per
-pair, binary pass/fail per question.
+![Paired test view in the results viewer](examples/results-viewer/paired-test.png)
 
-![Pairwise heatmap for MultiPL-E pass@1 suite](pairwise_heatmap_suite_example.png)
+## Why Use a Paired Comparison
 
-## Reading a cell — `win_rate (SE)`
+For a pair of runs `A` and `B`, the viewer aligns their scores question by
+question and works with the per-instance difference
 
-Each non-diagonal cell shows model A vs model B on **contested** instances
-(ties — questions where both models got the same score — are excluded from the
-win rate):
-
-```
-  Qwen3-8B vs Marin-8B:              83.6% (1.6%)
-  Qwen3-8B vs Olmo-3-7B (db6ff1f7):  71.0% (2.4%)
-  Olmo-3-7B (db6ff1f7) vs Olmo-3-7B (ec190248):  51.1% (5.2%)
+```text
+d_i = score(A, i) - score(B, i)
 ```
 
-- `win_rate = wins_a / (wins_a + wins_b)` — fraction of contested questions A won.
-- `SE = sqrt(p(1-p) / (n-1))` — standard error of that rate via the Central
-  Limit Theorem (CLT), where `n` is the contested count.
+This is better than comparing unrelated aggregate means because shared instance
+difficulty cancels out. If both models find the same examples easy and the same
+examples hard, the covariance term is positive, so the variance of the paired
+difference shrinks:
 
-**Rough 95% confidence interval (CI): `win_rate ± 2·SE`.**
-
-- `83.6% (1.6%)` → roughly 80.4% – 86.8%. Far above 50% → Qwen3 beats Marin
-  decisively across languages.
-- `71.0% (2.4%)` → roughly 66.2% – 75.8%. Clearly above 50% → Qwen3 is a
-  solid win over this Olmo-3 run.
-- `51.1% (5.2%)` → roughly 40.7% – 61.5%. Crosses 50%, so we **cannot**
-  distinguish these two runs from a tie — and that's correct: they're the
-  *same model* ingested under two slightly different model names.
-
-**Comparing two cells:** a difference between two win rates is meaningful if
-it exceeds roughly `2·sqrt(SE1² + SE2²)`.
-
-Lots of ties shrinks the contested `n` and inflates SE — so a cell with
-`62.3% (8.1%)` on a high-tie pair is less precise than `58.0% (4.5%)` on a
-low-tie pair, even though the headline number looks more decisive.
-
-## Reading the footer
-
-The footer shows matrix-wide validity stats. From the MultiPL-E example:
-
-```
-shared n    median contested    pairing gain    MDE @ 80%
- 2,313           17%              2.9x            2.3%
+```text
+Var(d_i) = Var(A_i) + Var(B_i) - 2 Cov(A_i, B_i)
 ```
 
-Even though only **17%** of the shared questions are contested, the matrix still
-lands in "read it head-on" territory because pairing is buying a lot of
-precision and the matrix-wide MDE is small.
+That lower variance is the main benefit of pairing. It gives tighter uncertainty
+estimates, smaller minimum detectable effects, and higher statistical power for
+the same amount of evaluation data.
 
-### `shared n`
-Number of instances every model answered. Your raw sample size for every pair.
-MultiPL-E pooled across 6 languages gives 2,313 questions per pair.
+In practice, the paired test is most useful when:
 
-### `median contested`
-Median fraction of shared questions that actually turn into head-to-head signal
-after ties are removed:
+- the same models were run on the same tasks and instances
+- you care about head-to-head comparisons, not just raw scores
+- you are running ablations under fixed compute or token budgets, where effect
+  sizes are often small and you want to know whether those deltas are actually
+  resolved
+- you are comparing a coherent suite where pooling more shared instances is valid
 
-- For each pair, `contested = wins_a + wins_b`.
-- The footer reports the median `contested / shared n` across pairs.
-- **17%** here means most shared questions are ties, so the per-cell SE is
-  driven by a much smaller count than `shared n`.
+## What the Viewer Shows
 
-### `pairing gain`
-Median precision lift from the paired design:
+The viewer has two complementary surfaces:
 
-- `pairing gain = median(n_eff / shared n)`.
-- `n_eff = n × (σ_A² + σ_B²) / Var(d)` per pair; the footer compresses this to
-  a single ratio.
-- **2.9×** means the paired design is worth almost three times as many
-  independent samples as an unpaired comparison would be.
+- `paired test`: matched-pairs evidence from shared-instance comparisons
+- `results`: absolute task-level scores for the current evaluation scope
 
-### `MDE @ 80% power`
-Minimum Detectable Effect (MDE) — the smallest true win-rate gap the matrix
-can reliably resolve at significance level α=0.05 and 80% statistical power,
-given its `shared n` and the **median** per-pair paired-difference variance
-(used as a representative `ω²` so one outlier pair can't skew the summary).
+Each heatmap cell shows `Δ (row - col)` on the shared slice. For percentage-like
+metrics, `Δ` is shown in percentage points. The color direction shows who is
+ahead. The color intensity shows how strongly that pair is resolved at the
+current `α`. The detailed statistics live in the tooltip.
 
-- **2.3%** means: any pair with a true gap of at least 2.3 percentage points
-  (pp) will come out statistically significant. Every non-diagonal cell in
-  this matrix has `|win_rate − 50%| ≫ 2.3%`, so every comparison is
-  trustworthy.
-- Tiers: good ≤ 3pp, ok ≤ 10pp, bad > 10pp.
+The results table is not another hypothesis test. It is the underlying score
+surface that explains where the pairwise differences come from.
 
-## Why pool up to the parent suite?
+## The Math Behind One Cell
 
-`multipl_e:pass_at_1` is a hierarchical suite — under the hood it aggregates
-several sub-suites (HumanEval variants, MBPP variants, and translations of
-each into other languages). You can scope the pairwise to any level of the
-hierarchy. Here's the same models scoped to just the HumanEval-family
-sub-suite:
+For each compared pair of runs, the analysis starts from the shared instance
+set:
 
-```
-olmo-eval results pairwise \
-  -G olmo-eval-sandboxfusion \
-  -S multipl_e_humaneval:pass_at_1
+```text
+n_shared = number of instances answered by both runs
 ```
 
-![Pairwise heatmap for the HumanEval sub-suite](pairwise_heatmap_example.png)
+For each shared instance, it computes
 
-```
-shared n    median contested    pairing gain    MDE @ 80%
-   955           46%              1.1x            4.7%
-```
-
-The sub-suite is a strict subset of the parent's instances, so its stats
-collapse compared to the top-level suite:
-
-| Footer stat      | Sub-suite (HumanEval family) | Parent suite (MultiPL-E) |
-| ---------------- | ---------------------------: | -----------------------: |
-| shared n         |                          955 |                    2,313 |
-| median contested |                          46% |                      17% |
-| pairing gain     |                         1.1× |                     2.9× |
-| MDE @ 80% power  |                    4.7% (🟡) |                2.3% (🟢) |
-
-**Two things to notice:**
-
-1. **MDE is yellow, not red.** The sub-suite can resolve ~5pp gaps, so the
-   decisive cells in its matrix (16.8%, 83.2%, 95.4%, etc.) are still
-   trustworthy. But a hypothetical 3pp gap between two similar models would
-   vanish in the noise.
-2. **The contested rate goes up but the pairing gain collapses.** The
-   HumanEval-family slice has more head-to-head signal per shared question
-   (**46%** contested vs **17%** in the parent suite), but the paired design is
-   only worth **1.1×** extra precision instead of **2.9×**. Scoping up to the
-   parent suite recovers that covariance structure across tasks, so the
-   matrix-wide MDE drops sharply even though the contested fraction is lower.
-
-**Takeaway.** The finer-grained the slice, the noisier the matrix. Prefer
-the highest-level suite that still measures the capability you care about.
-The parent suite is always at least as informative as any of its children
-(same model comparisons, strictly more instances, usually better pairing gain
-and lower MDE).
-
-**How to explore the hierarchy:**
-
-```
-olmo-eval results suites -G <your-group>   # suites with DB coverage
-olmo-eval results group <your-group>       # models + tasks + suites
+```text
+d_i = score(A, i) - score(B, i)
 ```
 
-If you want to trim a matrix without changing the underlying experiment group,
-the pairwise CLI also supports `--exclude-task`, `--exclude-task-hash`,
-`--exclude-model`, and `--exclude-model-hash`.
+and then classifies the instance as:
 
-**What NOT to pool.** Resist the urge to pool tasks that measure different
-capabilities (e.g. math + dialogue). That inflates `shared n` without
-improving signal — and can actually hurt pairing gain by driving `Var(d)` up.
+```text
+A win   if d_i > margin
+B win   if d_i < -margin
+tie     if |d_i| <= margin
+```
 
-## How cell SE and footer stats differ
+where `margin` is the tie threshold and defaults to `0`.
 
-- **Per-cell SE** is pair-specific and uses that pair's contested-only `n`.
-  It tells you "how precise is *this* comparison?"
-- **Footer MDE** is matrix-wide. It takes the **median** of per-pair
-  paired-difference variances `Var(d)` as a representative `ω²` and plugs
-  it into the MDE formula at the full `shared n`. "Median" rather than
-  "pooled" so a single outlier pair (e.g. one with near-zero variance)
-  can't distort the summary. It tells you "how precise is a typical
-  comparison in this matrix?"
-- **Median contested** tells you how much of the shared sample usually survives
-  the tie filter. Low contested rates are a warning sign for wide cell SEs.
-- **Pairing gain** tells you how much the paired design is helping overall. A
-  matrix can have a healthy contested rate but still gain little from pairing
-  if the models rise and fall together on the same questions.
+From that shared paired sample, the viewer reports two related summaries:
 
-## Rules of thumb
+### 1. Effect Size on the Shared Evaluation Slice
 
-1. **MDE red** (> 10pp): only trust cells where `win_rate ± 2·SE` is far
-   from 50%. Consider pooling to a suite before drawing conclusions.
-2. **MDE yellow** (3–10pp): most small- to medium-sized gaps are suggestive
-   but not conclusive; lean on the per-cell SE.
-3. **MDE green** (≤ 3pp): you can read the matrix head-on; most cells are
-   trustworthy.
-4. **Low contested rate means wide cell SE.** If the footer says `median
-   contested` is small, expect many cells to be tie-dominated even when
-   `shared n` looks large.
-5. **Pairing gain near 1× means pairing adds little.** In that regime, you are
-   mostly living off raw sample size; pooling to a parent suite often helps.
-6. **Ignore cell differences smaller than `2·sqrt(SE_a² + SE_b²)`** when
-   comparing two non-diagonal cells in the matrix.
+The cell label is the score gap on the shared slice:
 
-## Glossary
+```text
+Δ = mean(d_i)
+```
 
-- **Win rate** — fraction of contested instances (ties excluded) on which
-  model A outscored model B. `wins_a / (wins_a + wins_b)`.
-- **Contested instance** — a shared question where the two models got
-  *different* scores. Ties are excluded from the numerator and denominator
-  of the win rate.
-- **Tie** — a shared question where both models got the same score (within
-  `--margin`, which defaults to 0). For binary 0/1 scoring ties are common
-  since both models either solve it or neither does.
-- **Shared instance** — an instance every model in the matrix has a score
-  for. The pairwise comparison runs only on this intersection.
-- **SE (standard error)** — the standard deviation of a statistic's sampling
-  distribution. Shrinks as `1/√n`. Roughly, the true value is within `±2·SE`
-  of the observed value ~95% of the time (CLT-based CI).
-- **CLT (Central Limit Theorem)** — lets us treat the sample mean of enough
-  independent observations as approximately normal, so we can use `SE` to
-  form CIs and run z-tests without bootstrapping.
-- **CI (confidence interval)** — `estimate ± 2·SE` is the approximate 95% CI.
-  If the CI crosses 50%, we can't distinguish the pair from a tie.
-- **α (significance level)** — false-positive rate. The pairwise tool uses
-  α=0.05: a 5% chance of declaring a difference when none exists.
-- **Power (1−β)** — probability of detecting a real gap of a given size. The
-  tool uses 80%: when a true gap equals the MDE, we expect to find it ~80%
-  of the time.
-- **MDE (Minimum Detectable Effect)** — the smallest true win-rate gap that
-  will come out significant at the given α and power. Matrix-wide MDE uses
-  the *median* of per-pair paired-difference variances as a representative
-  `ω²` (robust to outlier pairs), plugged in at the full `shared n`.
-- **Median contested** — the median of `(wins_a + wins_b) / shared n` across
-  pairs. Tells you how much of the shared sample usually survives after ties
-  are removed.
-- **Paired comparison** — both models answer the same shared questions, so
-  per-question luck cancels in `d_i = score_a_i − score_b_i`. Shrinks the
-  variance whenever models agree on what's easy vs hard.
-- **Var(d) (paired-difference variance)** — sample variance of `d_i` across
-  shared instances. Drives the paired MDE and `n_eff`.
-- **σ² (marginal variance)** — per-model sample variance of scores across
-  the same instances. `σ_A² + σ_B²` is what the unpaired MDE would use.
-- **ω² (omega squared)** — between-question variance of the paired
-  conditional means (Miller 2024 Eq. 8). In practice `Var(d) ≈ ω²` when
-  each model produces one score per question.
-- **n_eff (effective sample size)** — `n × (σ_A² + σ_B²) / Var(d)`. The
-  number of independent samples the paired comparison is worth. Higher than
-  `shared n` means pairing is buying precision; close to `shared n` means
-  models disagree on which questions are hard.
-- **Pairing gain** — `median(n_eff / shared n)` across pairs. A compact way to
-  express how much precision the paired design is buying overall.
-- **pp (percentage point)** — absolute difference between two percentages.
-  A move from 52% to 55% is a 3pp gap, not a 3% gap.
-- **z-test** — two-sample hypothesis test that uses the normal approximation
-  from the CLT to decide whether an observed difference is larger than
-  chance. The pairwise MDE is derived from the z-test formula.
-- **Suite** — a registered group of related tasks (e.g. `multipl_e:pass_at_1`
-  covers 6 language variants). Passing `-S <suite>` pools instances across
-  its tasks so the MDE is computed on the larger combined sample.
+For standard mean-based metrics such as accuracy, this is the same as the
+difference between the two runs' average scores over the shared instances.
 
-## See also
+Interpret `Δ` as the size of the head-to-head gap, not as the strength of the
+evidence. A small but stable difference and a larger but noisy difference are
+both possible.
 
-- `eval_power.py` — Central Limit Theorem (CLT) helpers
-  (`required_sample_size`, `minimum_detectable_effect`,
-  `estimate_variance_components`).
-- Miller, "Adding Error Bars to Evals" (arXiv:2411.00640) — methodology and
-  worked examples.
+### 2. A Matched-Pairs Win Test
+
+The tooltip also reports a sign-based paired test built from wins and losses:
+
+```text
+n_contested = wins_A + wins_B
+p_hat       = wins_A / n_contested
+```
+
+Ties are excluded from the win-rate denominator. This is intentional. The test
+asks: among the contested instances, how often did the row model win?
+
+The viewer then uses a normal approximation to the matched-pairs sign test:
+
+```text
+SE(p_hat) = sqrt((n_contested / (n_contested - 1)) * p_hat * (1 - p_hat) / n_contested)
+z         = (p_hat - 0.5) / SE(p_hat)
+p_value   = 2 * (1 - Φ(|z|)) = erfc(|z| / sqrt(2))
+P(A > B)  ≈ Φ(z)
+```
+
+where `Φ` is the standard normal CDF.
+
+This produces the tooltip quantities:
+
+- `wins / losses / ties`
+- `win rate`
+- `SE`
+- `p-value`
+- `P(row > col)`
+
+The cell itself stays compact for scanning; the full statistical summary lives
+in the tooltip.
+
+![Tooltip for one paired comparison](examples/results-viewer/paired-test-tooltip.png)
+
+## Matrix-Wide Precision: What `MDE80` Means
+
+`MDE80` is the legend-level precision summary. It is not the p-value for one
+cell. It answers a different question:
+
+> for a typical model pair in this matrix, how small a true effect could this
+> evaluation scope detect with 80% power at the current `α`?
+
+The power helper uses:
+
+```text
+MDE80 = (z_(1-α/2) + z_(0.80)) *
+        sqrt((ω² + σ_A² / K_A + σ_B² / K_B) / n_shared)
+```
+
+In the paired setting, the important term is the paired-difference variance.
+For each compared pair we estimate:
+
+```text
+Var(d_i)
+```
+
+The viewer then uses the median paired variance across compared pairs as a
+robust matrix-level estimate of noise before plugging it into the MDE formula.
+
+Use `MDE80` as a readability check:
+
+- lower `MDE80` means the matrix can resolve smaller true gaps
+- higher `MDE80` means only larger effects are likely to separate cleanly
+- `MDE80` is matrix-wide, so it is best used as context for the whole scope
+
+A useful mental model is:
+
+- `Δ` tells you the size of this pair's gap
+- `p-value` tells you how decisively this pair separates
+- `MDE80` tells you how well resolved the matrix is likely to be
+
+## Interpretation Notes
+
+![Results table for the same scope](examples/results-viewer/results-table.png)
+
+The results tab answers a different question: "what were the underlying task
+scores on this evaluation scope?" Use it to:
+
+- inspect absolute task scores
+- find tasks that explain a pairwise advantage
+- check whether a model's paired wins come from broad consistency or one or two
+  large task swings
+
+A few details matter:
+
+- in suite scope, each visible task column is one task inside the suite
+- `avg` is the mean across the currently visible task columns
+- in single-task scope, the viewer hides `avg` because it would duplicate the
+  only visible task
+
+Use the results table to understand where the paired result comes from. Use the
+paired test to judge whether the head-to-head difference is actually resolved.
+
+### Scope and Power
+
+If a parent benchmark suite still measures the capability you care about, it is
+usually the best place to run the paired analysis. More shared instances
+usually lower the matrix MDE and make the head-to-head comparison easier to
+resolve.
+
+Do not pool unrelated capabilities just to inflate `N`. More instances only
+help when the scope is still semantically coherent.
+
+### Small Deltas Need a Sharp Matrix
+
+A `+0.8 pp` cell in a matrix with `MDE80 = 8 pp` is usually not actionable. A
+`+0.8 pp` cell in a matrix with `MDE80 = 1 pp` is worth taking seriously.
+
+`MDE80` is not a hard cutoff for any one cell, but it is a very good guide to
+whether the current scope can resolve the kind of effect you care about.
+
+### Evidence vs. Effect Size
+
+Color intensity reflects statistical evidence, not effect magnitude. Two cells
+can have similar `Δ` but very different intensity if one pair is much noisier.
+
+The most useful tooltip fields are:
+
+- `N`: how many shared instances the pair is based on
+- `Δ (row - col)`: the effect size on the shared slice
+- `wins / losses / ties`: how much of the comparison is actually contested
+- `p-value`: whether the contested win rate is resolved at the current `α`
+
+### Ties and Contested Sample Size
+
+When many instances are ties, `N` can be large while `n_contested` stays small.
+That makes the contested win-rate test noisy.
+
+This is why the tooltip shows both shared `N` and `wins / losses / ties`. A
+pair with a large `N` but mostly ties may still provide weak evidence.
+
+### Relative vs. Absolute Performance
+
+These can disagree:
+
+- one model to have a slightly higher average score on the scope
+- but another model to win more contested head-to-head instances
+
+That is not a contradiction. Magnitude and frequency are different summaries of
+the same paired sample, and the viewer keeps both on purpose.
+
+## Open and Export
+
+Open the interactive viewer with:
+
+```bash
+olmo-eval results viewer -G <group> -S <suite>
+```
+
+Use a task instead of a suite when you want one exact scope:
+
+```bash
+olmo-eval results viewer -G <group> -t <task>
+```
+
+Dump the same viewer payload as JSON or CSV with:
+
+```bash
+olmo-eval results viewer -G <group> -S <suite> --format json
+olmo-eval results viewer -G <group> -S <suite> --format csv
+```
+
+## See Also
+
+- `pairwise.py` — pair construction, contested win-rate statistics, and shared-slice alignment
+- `eval_power.py` — power and minimum detectable effect helpers
+- Miller, "Adding Error Bars to Evals" (arXiv:2411.00640) — the general CLT and power framework behind these summaries

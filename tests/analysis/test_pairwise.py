@@ -8,24 +8,34 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy.dialects import postgresql
 
+from olmo_eval.analysis.eval_power import minimum_detectable_effect
 from olmo_eval.analysis.pairwise import (
     ModelMeta,
     PairStats,
     PairwiseResult,
     _build_experiment_refetch_stmt,
     _compute_pairs,
+    _extract_pairwise_instance_score,
     _filter_suite_task_names,
     _is_excluded_experiment,
     _is_excluded_task,
     _matches_exact,
     _matches_prefix,
     get_se,
+    get_task_metric_profile,
     get_win_rate,
 )
+from olmo_eval.analysis.pairwise_html import build_pairwise_html_payload, render_pairwise_html
+from olmo_eval.common.metrics import PassPowKMetric
+from olmo_eval.common.scorers import CodeExecutionScorer
 from olmo_eval.common.types.base import EvalResult
 
 
 class TestPairStats:
+    def test_n_contested_excludes_ties(self) -> None:
+        p = PairStats(index_a=0, index_b=1, wins_a=7, wins_b=3, ties=90)
+        assert p.n_contested == 10
+
     def test_win_rate_a_basic(self) -> None:
         p = PairStats(index_a=0, index_b=1, wins_a=7, wins_b=3, ties=0)
         assert p.win_rate_a == pytest.approx(0.7)
@@ -76,6 +86,26 @@ class TestPairStats:
         hi = PairStats(index_a=0, index_b=1, wins_a=80, wins_b=20, ties=0)
         lo = PairStats(index_a=0, index_b=1, wins_a=20, wins_b=80, ties=0)
         assert hi.se == pytest.approx(lo.se, abs=1e-12)
+
+    def test_prob_a_gt_b_even_split_is_half(self) -> None:
+        p = PairStats(index_a=0, index_b=1, wins_a=50, wins_b=50, ties=0)
+        assert p.prob_a_gt_b == pytest.approx(0.5)
+
+    def test_prob_a_gt_b_uses_same_normal_approximation_as_se(self) -> None:
+        p = PairStats(index_a=0, index_b=1, wins_a=14, wins_b=6, ties=0)
+        z = (p.win_rate_a - 0.5) / p.se
+        expected = 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+        assert p.prob_a_gt_b == pytest.approx(expected)
+
+    def test_prob_a_gt_b_degenerate_cases_fall_back_to_extremes_or_half(self) -> None:
+        assert PairStats(index_a=0, index_b=1, wins_a=0, wins_b=0, ties=0).prob_a_gt_b == 0.5
+        assert PairStats(index_a=0, index_b=1, wins_a=1, wins_b=0, ties=0).prob_a_gt_b == 1.0
+        assert PairStats(index_a=0, index_b=1, wins_a=0, wins_b=1, ties=0).prob_a_gt_b == 0.0
+
+    def test_p_value_keeps_tail_precision_for_strong_pairs(self) -> None:
+        p = PairStats(index_a=0, index_b=1, wins_a=90, wins_b=10, ties=0)
+        assert p.prob_a_gt_b == 1.0
+        assert 0.0 < p.p_value < 1e-20
 
 
 class TestGetSe:
@@ -249,6 +279,81 @@ class TestComputePairs:
         assert pairs[0].ties == 0
 
 
+class TestPairwiseInstanceScoreExtraction:
+    def test_pass_at_1_metrics_can_fall_back_to_underlying_scorer_channel(self) -> None:
+        profile = get_task_metric_profile("humaneval:pass_at_1", "pass_at_1:code_exec")
+        assert profile is not None
+        assert profile.supports_scorer_fallback is True
+        assert profile.display_format == "percentage"
+        assert profile.higher_is_better is True
+        assert _extract_pairwise_instance_score(
+            task_name="humaneval:pass_at_1",
+            metric_key="pass_at_1:code_exec",
+            instance_metrics={"code_exec": {"code_exec": 1.0}},
+        ) == pytest.approx(1.0)
+
+    def test_pass_at_k_metrics_above_one_stay_blocked_without_exact_metric_key(self) -> None:
+        profile = get_task_metric_profile("humaneval:pass_at_10", "pass_at_10:code_exec")
+        assert profile is not None
+        assert profile.supports_scorer_fallback is False
+        assert (
+            _extract_pairwise_instance_score(
+                task_name="humaneval:pass_at_10",
+                metric_key="pass_at_10:code_exec",
+                instance_metrics={"code_exec": {"code_exec": 1.0}},
+            )
+            is None
+        )
+
+    def test_mc_accuracy_metrics_do_not_fall_back_to_raw_logprob_scores(self) -> None:
+        profile = get_task_metric_profile("basic_skills_coding:rc::olmo3base", "accuracy:logprob")
+        assert profile is not None
+        assert profile.supports_scorer_fallback is False
+        assert (
+            _extract_pairwise_instance_score(
+                task_name="basic_skills_coding:rc::olmo3base",
+                metric_key="accuracy:logprob",
+                instance_metrics={"logprob": {"logprob": -196.8}},
+            )
+            is None
+        )
+
+    def test_mc_accuracy_metrics_still_use_exact_metric_key_when_present(self) -> None:
+        assert _extract_pairwise_instance_score(
+            task_name="basic_skills_coding:rc::olmo3base",
+            metric_key="accuracy:logprob",
+            instance_metrics={
+                "accuracy": {"logprob": 1.0},
+                "logprob": {"logprob": -196.8},
+            },
+        ) == pytest.approx(1.0)
+
+    def test_simple_mean_metrics_can_still_use_scorer_channel(self) -> None:
+        profile = get_task_metric_profile("gsm8k:olmo3base", "accuracy:exact_match")
+        assert profile is not None
+        assert profile.supports_scorer_fallback is True
+        assert profile.display_format == "percentage"
+        assert profile.higher_is_better is True
+        assert _extract_pairwise_instance_score(
+            task_name="gsm8k:olmo3base",
+            metric_key="accuracy:exact_match",
+            instance_metrics={"exact_match": {"exact_match": 1.0}},
+        ) == pytest.approx(1.0)
+
+    def test_bpb_metrics_resolve_as_raw_lower_is_better(self) -> None:
+        profile = get_task_metric_profile("humaneval:bpb", "bits_per_byte:bits_per_byte")
+        assert profile is not None
+        assert profile.display_format == "raw"
+        assert profile.higher_is_better is False
+        assert profile.unit == "bits_per_byte"
+
+    def test_pass_pow_k_only_allows_scorer_fallback_for_k_equals_one(self) -> None:
+        k1_metric = PassPowKMetric(scorer=CodeExecutionScorer, k=1)
+        k2_metric = PassPowKMetric(scorer=CodeExecutionScorer, k=2)
+        assert k1_metric.supports_pairwise_scorer_fallback() is True
+        assert k2_metric.supports_pairwise_scorer_fallback() is False
+
+
 class TestPairwiseResult:
     def test_result_fields(self) -> None:
         result = PairwiseResult(
@@ -279,6 +384,7 @@ class TestPairwiseResult:
         )
         assert result.suite_name is None
         assert result.task_names == ()
+        assert result.model_task_scores == ()
 
     def test_suite_fields_populated(self) -> None:
         result = PairwiseResult(
@@ -293,6 +399,167 @@ class TestPairwiseResult:
         )
         assert result.suite_name == "olmobase:math"
         assert len(result.task_names) == 2
+
+    def test_html_payload_uses_direct_p_values_instead_of_rounded_probabilities(self) -> None:
+        result = PairwiseResult(
+            task_name="olmobase:math",
+            metric="accuracy:exact_match",
+            margin=0.0,
+            instance_count=100,
+            models=[
+                ModelMeta(label="model-a\n(abc12345)", model_name="model-a", model_hash="abc12345"),
+                ModelMeta(label="model-b\n(def67890)", model_name="model-b", model_hash="def67890"),
+            ],
+            pairs=[PairStats(index_a=0, index_b=1, wins_a=90, wins_b=10, ties=0)],
+            model_shared_scores=(0.9, 0.1),
+        )
+
+        payload = build_pairwise_html_payload(result)
+        probability = payload["matrix"]["probability"][0][1]
+        p_value = payload["matrix"]["p_value"][0][1]
+
+        assert probability == 1.0
+        assert p_value is not None
+        assert 0.0 < p_value < 1e-20
+
+    def test_html_payload_includes_matrix_mde80_reference(self) -> None:
+        result = PairwiseResult(
+            task_name="olmobase:math",
+            metric="accuracy:exact_match",
+            margin=0.0,
+            instance_count=100,
+            models=[
+                ModelMeta(label="model-a\n(abc12345)", model_name="model-a", model_hash="abc12345"),
+                ModelMeta(label="model-b\n(def67890)", model_name="model-b", model_hash="def67890"),
+            ],
+            pairs=[
+                PairStats(
+                    index_a=0,
+                    index_b=1,
+                    wins_a=60,
+                    wins_b=40,
+                    ties=0,
+                    var_paired_diff=0.04,
+                )
+            ],
+            model_shared_scores=(0.6, 0.4),
+        )
+
+        payload = build_pairwise_html_payload(result)
+
+        expected = minimum_detectable_effect(
+            n=100,
+            omega2=0.04,
+            alpha=0.05,
+            power=0.80,
+        )
+        assert payload["meta"]["mde80"] == pytest.approx(expected)
+        assert payload["meta"]["mde80_by_alpha"]["0.05"] == pytest.approx(expected)
+
+    def test_html_payload_marks_raw_lower_is_better_metrics(self) -> None:
+        result = PairwiseResult(
+            task_name="humaneval:bpb",
+            metric="bits_per_byte:bits_per_byte",
+            margin=0.0,
+            instance_count=100,
+            models=[
+                ModelMeta(label="model-a\n(abc12345)", model_name="model-a", model_hash="abc12345"),
+                ModelMeta(label="model-b\n(def67890)", model_name="model-b", model_hash="def67890"),
+            ],
+            pairs=[PairStats(index_a=0, index_b=1, wins_a=60, wins_b=40, ties=0)],
+            model_shared_scores=(0.41, 0.57),
+            score_display_format="raw",
+            score_unit="bits_per_byte",
+            higher_is_better=False,
+        )
+
+        payload = build_pairwise_html_payload(result)
+
+        assert payload["meta"]["score_display_format"] == "raw"
+        assert payload["meta"]["score_unit"] == "bits_per_byte"
+        assert payload["meta"]["higher_is_better"] is False
+        assert payload["matrix"]["score_diff"][0][1] == pytest.approx(-0.16)
+
+    def test_render_pairwise_html_formats_tiny_p_scale_values_with_scientific_notation(
+        self,
+    ) -> None:
+        result = PairwiseResult(
+            task_name="olmobase:math",
+            metric="accuracy:exact_match",
+            margin=0.0,
+            instance_count=100,
+            models=[
+                ModelMeta(label="model-a\n(abc12345)", model_name="model-a", model_hash="abc12345"),
+                ModelMeta(label="model-b\n(def67890)", model_name="model-b", model_hash="def67890"),
+            ],
+            pairs=[PairStats(index_a=0, index_b=1, wins_a=90, wins_b=10, ties=0)],
+            model_shared_scores=(0.9, 0.1),
+        )
+
+        html = render_pairwise_html(result)
+
+        assert html.index('data-view="matrix"') < html.index('data-view="table"')
+        assert html.index(
+            'class="th-avg sortable ${sortState.key === "avg" ? "active" : ""}"'
+        ) < html.index('class="th-task sortable ${sortState.key === column.id ? "active" : ""}"')
+        assert "function showAverageColumn(columns)" in html
+        assert "const header = showAverage" in html
+        assert "task ${sortArrow(column.id)}" not in html
+        assert "function sortSvg() {" in html
+        assert 'class="sort-glyph ${stateClass}"' in html
+        assert 'class="th-task sortable ${sortState.key === column.id ? "active" : ""}"' in html
+        assert 'data-action="table-sort"' in html
+        assert "visible mean" not in html
+        assert 'title="mean across visible task columns"' in html
+        assert "olmo-eval" in html
+        assert "Results viewer" in html
+        assert "pairwise comparison" not in html
+        assert '<span class="legend-title legend-title-alpha">α</span>' in html
+        assert ".legend-title-alpha {" in html
+        assert "text-transform: none;" in html
+        assert (
+            html.index('<span class="legend-title">intensity</span>')
+            < html.index("${alphaLegend()}")
+            < html.index('<span class="legend-title">MDE80</span>')
+        )
+        assert 'renderSelect("suite / task", scopeLabel)' in html
+        assert 'renderSelect("scoring", metricLabel)' in html
+        assert "--app-gutter: clamp(18px, 3vw, 42px);" in html
+        assert "--app-max: 1880px;" in html
+        assert "max-width: min(100%, var(--app-max));" in html
+        assert "margin-inline: auto;" in html
+        assert "padding-inline: var(--app-gutter);" in html
+        assert "width: auto;" in html
+        assert "min-width: max-content;" in html
+        assert ".results-table th.th-task:last-child," in html
+        assert "search model names..." in html
+        assert "left: calc(var(--table-idx-w) + var(--table-name-w));" in html
+        assert "align-items: flex-end;" in html
+        assert "min-height: 18px;" in html
+        assert 'class="th-inline"' in html
+        assert "function sortSvg() {" in html
+        assert 'class="sort-glyph ${stateClass}"' in html
+        assert "overflow-wrap: anywhere;" in html
+        assert "function cellSignalLevel" in html
+        assert "function matrixMde(meta, alpha)" in html
+        assert 'return `<span class="cell-signal sig-${level}" aria-hidden="true"></span>`;' in html
+        assert ".cell-signal.sig-3 {" in html
+        assert ".cell-signal-bar" not in html
+        assert "alpha: 0.05," in html
+        assert 'loadState("alpha", "0.05")' not in html
+        assert 'storageBase + "alpha"' not in html
+        assert "col-hdr-idx" not in html
+        assert 'class="matrix-hdr-hide row-hdr-hide"' in html
+        assert 'class="matrix-hdr-hide col-hdr-hide"' in html
+        assert "background: currentColor;" in html
+        assert 'const fg = lightness < 0.72 ? "var(--c-paper)" : "var(--c-ink-70)";' in html
+        assert "fmtCellMeta" not in html
+        assert "sigStars" not in html
+        assert "value < 1e-4" in html
+        assert 'toExponential(0).replace("e+", "e")' in html
+        assert 'toLocaleString("en-US"' in html
+        assert "MDE80" in html
+        assert "legend-metric-value" in html
 
 
 class TestComputePairsCompoundKeys:

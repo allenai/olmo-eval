@@ -1,7 +1,7 @@
 # `olmo-eval results` — CLI guide
 
 Subcommands for inspecting evaluations in the results DB, discovering what
-you have, and comparing models pairwise.
+you have, launching the local results viewer, and exporting pairwise stats.
 
 | Command                    | Purpose                                                                                 |
 | -------------------------- | --------------------------------------------------------------------------------------- |
@@ -9,7 +9,7 @@ you have, and comparing models pairwise.
 | `groups`                   | List experiment groups in the DB with summary counts.                                   |
 | `group`                    | Drill into one experiment group — its models, tasks, and covered suites.                |
 | `suites`                   | List registered suites and how many of their tasks have results in the filtered scope.  |
-| `pairwise` **(experimental)** | Render a head-to-head win-rate matrix for 2+ models on a task or suite.              |
+| `viewer` **(experimental)** | Launch the local DB-backed results viewer, or dump pairwise data as JSON / CSV. |
 
 Each command accepts `--db-host`, `--db-port`, `--db-name`, `--db-user`,
 `--db-password` (or the matching `OLMO_EVAL_DB_*` env vars). Auth falls back
@@ -24,7 +24,7 @@ discovery.
 
 ## `groups`, `group`, `suites`
 
-Discovery helpers that share `pairwise`'s filters. See `--help` on each
+Discovery helpers that complement the viewer workflow. See `--help` on each
 command for the exact flags.
 
 - `results groups` — one row per experiment_group with counts (experiments,
@@ -49,22 +49,72 @@ olmo-eval results group my-benchmark
 olmo-eval results suites -G my-benchmark
 ```
 
-## `pairwise` *(experimental)*
+## `viewer` *(experimental)*
 
 > **Experimental.** Interface, output format, and summary statistics may
 > change. Numbers are statistically sound but have not been thoroughly
 > validated on every task family — treat the matrix as directional unless
-> the footer MDE is green and the per-cell SEs support your specific claim.
+> MDE80 is small and the per-cell saturation / SE support your
+> specific claim.
 
-Pairwise model comparison on instance-level scores. Emits a plot by default,
-or JSON/CSV for programmatic use. Statistical interpretation of the output
-lives in [`../../analysis/README.md`](../../analysis/README.md) — cell SE,
-footer MDE, `n_eff`, and when to pool across a suite.
+`results viewer` is the single entrypoint for pairwise analysis.
 
-### Filters (who to compare)
+- Default mode launches the local DB-backed web UI so you can discover groups,
+  choose a suite or task, inspect the paired-test heatmap, and switch into the
+  per-task results table.
+- `--format json` or `--format csv` dumps the same underlying pairwise
+  comparison data from the CLI.
 
-Combine one or more of the following to pick the experiments that go into
-the matrix. All filters are ANDed; within a flag, multiple values are ORed.
+Statistical interpretation of the matrix lives in
+[`../../analysis/README.md`](../../analysis/README.md).
+
+### Browser mode
+
+Browser mode is the default (`--format html`). Use these optional flags to open
+the viewer on a specific group or scope:
+
+| Flag                       | Use |
+| -------------------------- | --- |
+| `-G, --experiment-group GROUP` | Experiment group prefix to open initially. |
+| `-t, --task TASK_NAME`     | Exact task name to open initially. |
+| `-S, --suite SUITE_NAME`   | Suite name to open initially. |
+| `--host HOST`              | Bind address for the viewer (default `127.0.0.1`). |
+| `--port PORT`              | Listen port for the viewer (default `8765`). |
+| `--margin FLOAT`           | Tie threshold for continuous metrics in the paired test. |
+| `--all`                    | Keep every matched experiment as its own row instead of deduping by model+hash. |
+| `--require-full-coverage/--no-require-full-coverage` | Control suite-mode full-coverage filtering. |
+
+Browser-mode constraints:
+
+- The viewer starts from experiment-group discovery rather than direct
+  model/experiment filters.
+- Seed filters are limited to one `--experiment-group` plus at most one of
+  `--task` or `--suite`.
+- `--task-hash`, the exclude flags, and `--output` are not supported in browser mode.
+
+Start from discovery:
+
+```
+olmo-eval results viewer
+olmo-eval results viewer -G my-benchmark
+olmo-eval results viewer -G my-benchmark -S multipl_e:pass_at_1
+```
+
+Open a specific task:
+
+```
+olmo-eval results viewer -G my-benchmark -t humaneval:3shot:pass_at_1
+```
+
+### Dump mode
+
+Use `--format json` or `--format csv` when you want the pairwise data without
+the browser.
+
+#### Filters (who to compare)
+
+Combine one or more of the following to pick the experiments that go into the
+matrix. All filters are ANDed; within a flag, multiple values are ORed.
 
 | Flag                            | Use                                             |
 | ------------------------------- | ----------------------------------------------- |
@@ -76,7 +126,7 @@ the matrix. All filters are ANDed; within a flag, multiple values are ORed.
 At least one filter is required. Within the matched experiments, the tool
 keeps one row per `(model_name, model_hash)` — the most recent by timestamp.
 
-### Scope (what to compare them on)
+#### Scope (what to compare them on)
 
 Exactly one of these is required:
 
@@ -89,7 +139,7 @@ Exactly one of these is required:
 Suite mode keys instances by `(task_name, native_id)` so identical native IDs
 across different tasks don't collide.
 
-### Other options
+#### Other dump options
 
 | Flag                  | Default | Use                                                                                      |
 | --------------------- | ------- | ---------------------------------------------------------------------------------------- |
@@ -99,8 +149,8 @@ across different tasks don't collide.
 | `--exclude-task-hash PFX` | none | Drop task rows whose hashes start with any supplied prefix.                            |
 | `--metric METRIC`     | none    | Metric in `metric:scorer` format. Defaults to each task's `primary_metric`.              |
 | `--margin FLOAT`      | `0.0`   | Tie threshold for continuous scores. Scores within `margin` of each other count as tied. |
-| `-o, --output PATH`   | stdout  | Save plot / JSON / CSV to a file.                                                        |
-| `-f, --format FMT`    | `plot`  | One of `plot`, `json`, `csv`. `plot` requires the `[analysis]` extra.                    |
+| `-o, --output PATH`   | stdout  | Save JSON / CSV to a file.                                                               |
+| `-f, --format FMT`    | `html`  | One of `html`, `json`, `csv`. Use `json`/`csv` for dumps.                                |
 | `--all`               | off     | Keep every matched experiment as its own row (default: dedupe by model+hash to most recent). |
 
 By default matched experiments are deduped to one row per
@@ -110,40 +160,29 @@ keep every re-run as a distinct row in the matrix (labels include the
 timestamp for disambiguation) — useful for comparing historical re-runs
 of the same model.
 
-### Common workflows
-
-Compare all models in a group on one task:
-
-```
-olmo-eval results pairwise -G my-benchmark -t humaneval:3shot:pass_at_1
-```
-
-Pool a code-eval suite for tighter error bars (see the analysis README for why):
-
-```
-olmo-eval results pairwise -G olmo-eval-sandboxfusion -S multipl_e:pass_at_1
-```
+#### Dump workflows
 
 Export a JSON win-rate matrix for downstream analysis:
 
 ```
-olmo-eval results pairwise -G my-benchmark -S multipl_e:pass_at_1 -f json -o matrix.json
+olmo-eval results viewer -G my-benchmark -S multipl_e:pass_at_1 --format json -o matrix.json
 ```
 
-Compare two specific models on a task hash:
+Export a CSV for two specific models on a task hash:
 
 ```
-olmo-eval results pairwise -m llama3.1-8b -m qwen2.5-7b -T abc12345
+olmo-eval results viewer -m llama3.1-8b -m qwen2.5-7b -T abc12345 --format csv
 ```
 
-Exclude one noisy suite member and a stale model family from the matrix:
+Exclude one noisy suite member and a stale model family from the dump:
 
 ```
-olmo-eval results pairwise \
+olmo-eval results viewer \
   -G my-benchmark \
   -S multipl_e:pass_at_1 \
   --exclude-task mbpp_plus:pass_at_1 \
-  --exclude-model old-baseline-
+  --exclude-model old-baseline- \
+  --format json
 ```
 
 ### Errors you might see

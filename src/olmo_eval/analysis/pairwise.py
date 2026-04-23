@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from functools import cache
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -35,9 +36,13 @@ class PairStats:
     var_marginal_sum: float = 0.0
 
     @property
+    def n_contested(self) -> int:
+        """Return the number of shared instances that were not tied."""
+        return self.wins_a + self.wins_b
+
+    @property
     def win_rate_a(self) -> float:
-        contested = self.wins_a + self.wins_b
-        return self.wins_a / contested if contested > 0 else 0.5
+        return self.wins_a / self.n_contested if self.n_contested > 0 else 0.5
 
     @property
     def win_rate_b(self) -> float:
@@ -46,12 +51,36 @@ class PairStats:
     @property
     def se(self) -> float:
         """Return the CLT standard error of the contested win rate."""
-        n = self.wins_a + self.wins_b
+        n = self.n_contested
         if n <= 1:
             return 0.0
         p = self.wins_a / n
         sample_var = n / (n - 1) * p * (1 - p)
         return math.sqrt(sample_var / n)
+
+    @property
+    def prob_a_gt_b(self) -> float:
+        """Approximate ``P(A > B)`` under the same normal approximation as the SE."""
+        se = self.se
+        win_rate = self.win_rate_a
+        if se <= 0:
+            if win_rate > 0.5:
+                return 1.0
+            if win_rate < 0.5:
+                return 0.0
+            return 0.5
+        z = (win_rate - 0.5) / se
+        return 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+
+    @property
+    def p_value(self) -> float:
+        """Return the two-sided p-value for the same normal approximation."""
+        se = self.se
+        win_rate = self.win_rate_a
+        if se <= 0:
+            return 1.0 if win_rate == 0.5 else 0.0
+        z = abs(win_rate - 0.5) / se
+        return math.erfc(z / math.sqrt(2.0))
 
 
 @dataclass(frozen=True)
@@ -62,6 +91,16 @@ class FilteredModel:
     model_hash: str
     missing_tasks: tuple[str, ...] = ()
     instance_shortfalls: tuple[tuple[str, int, int], ...] = ()
+
+
+@dataclass(frozen=True)
+class MetricProfile:
+    """Resolved pairwise semantics for one task metric."""
+
+    supports_scorer_fallback: bool
+    higher_is_better: bool
+    display_format: str
+    unit: str
 
 
 @dataclass
@@ -79,6 +118,13 @@ class PairwiseResult:
     n_experiments_matched: int = 0
     n_experiments_dropped: int = 0
     filtered_models: tuple[FilteredModel, ...] = ()
+    model_costs: tuple[float | None, ...] = ()
+    task_metric_keys: tuple[str | None, ...] = ()
+    model_task_scores: tuple[tuple[float | None, ...], ...] = ()
+    model_shared_scores: tuple[float | None, ...] = ()
+    score_display_format: str = "percentage"
+    score_unit: str | None = "proportion"
+    higher_is_better: bool | None = True
 
 
 def get_win_rate(pairs: list[PairStats], row: int, col: int) -> float:
@@ -157,11 +203,18 @@ def _compute_pairs(
 ) -> list[PairStats]:
     """Aggregate win/loss/tie counts and variances from aligned scores."""
 
-    def _sample_var(xs: list[float]) -> float:
-        if len(xs) < 2:
+    def _sample_var_from_sums(count: int, total: float, total_sq: float) -> float:
+        if count < 2:
             return 0.0
-        m = sum(xs) / len(xs)
-        return sum((x - m) ** 2 for x in xs) / (len(xs) - 1)
+        centered_sum_sq = total_sq - (total * total) / count
+        if centered_sum_sq <= 0:
+            return 0.0
+        return centered_sum_sq / (count - 1)
+
+    ordered_shared_ids = tuple(shared_ids)
+    aligned_scores = [
+        tuple(scores_by_idx.get(idx, {}).get(key) for key in ordered_shared_ids) for idx in range(n)
+    ]
 
     results: list[PairStats] = []
     for i in range(n):
@@ -169,26 +222,41 @@ def _compute_pairs(
             wins_a = 0
             wins_b = 0
             ties = 0
-            diffs: list[float] = []
-            scores_a_list: list[float] = []
-            scores_b_list: list[float] = []
-            for key in shared_ids:
-                score_a = scores_by_idx[i].get(key)
-                score_b = scores_by_idx[j].get(key)
+            compared = 0
+            diff_total = 0.0
+            diff_total_sq = 0.0
+            score_a_total = 0.0
+            score_a_total_sq = 0.0
+            score_b_total = 0.0
+            score_b_total_sq = 0.0
+
+            for score_a, score_b in zip(aligned_scores[i], aligned_scores[j], strict=False):
                 if score_a is None or score_b is None:
                     continue
                 diff = score_a - score_b
-                diffs.append(diff)
-                scores_a_list.append(score_a)
-                scores_b_list.append(score_b)
+                compared += 1
+                diff_total += diff
+                diff_total_sq += diff * diff
+                score_a_total += score_a
+                score_a_total_sq += score_a * score_a
+                score_b_total += score_b
+                score_b_total_sq += score_b * score_b
                 if abs(diff) <= margin:
                     ties += 1
                 elif diff > 0:
                     wins_a += 1
                 else:
                     wins_b += 1
-            var_d = _sample_var(diffs)
-            var_marginal = _sample_var(scores_a_list) + _sample_var(scores_b_list)
+            var_d = _sample_var_from_sums(compared, diff_total, diff_total_sq)
+            var_marginal = _sample_var_from_sums(
+                compared,
+                score_a_total,
+                score_a_total_sq,
+            ) + _sample_var_from_sums(
+                compared,
+                score_b_total,
+                score_b_total_sq,
+            )
             results.append(
                 PairStats(
                     index_a=i,
@@ -201,6 +269,182 @@ def _compute_pairs(
                 )
             )
     return results
+
+
+def _sum_numeric_leaves(value: Any) -> float | None:
+    """Return the sum of numeric leaves under ``value`` or None when absent."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, dict):
+        total = 0.0
+        found = False
+        for nested in value.values():
+            nested_total = _sum_numeric_leaves(nested)
+            if nested_total is not None:
+                total += nested_total
+                found = True
+        return total if found else None
+    if isinstance(value, list | tuple):
+        total = 0.0
+        found = False
+        for nested in value:
+            nested_total = _sum_numeric_leaves(nested)
+            if nested_total is not None:
+                total += nested_total
+                found = True
+        return total if found else None
+    return None
+
+
+def _extract_cost_from_task_metrics(metrics: object) -> float | None:
+    """Extract a task-level cost from heterogeneous metrics payloads."""
+    if not isinstance(metrics, dict):
+        return None
+    for key in ("overall_cost", "total_cost", "cost"):
+        if key in metrics:
+            return _sum_numeric_leaves(metrics[key])
+    return None
+
+
+@cache
+def _get_task_metric_profile(task_name: str, metric_key: str) -> MetricProfile | None:
+    """Resolve pairwise semantics for one task metric."""
+    from olmo_eval.runners.processing.utils import parse_metric_key
+
+    parsed = parse_metric_key(metric_key)
+    if parsed is None:
+        return None
+    metric_name, scorer_name = parsed
+
+    try:
+        import olmo_eval.evals.tasks  # noqa: F401  # ensure task registration side effects
+        from olmo_eval.evals.tasks.common.registry import get_task
+    except Exception:
+        return None
+
+    try:
+        task = get_task(task_name)
+    except Exception:
+        return None
+
+    for candidate in task.config.metrics:
+        try:
+            candidate_scorer = candidate.scorer().name
+        except Exception:
+            continue
+        if candidate.name == metric_name and candidate_scorer == scorer_name:
+            return MetricProfile(
+                supports_scorer_fallback=candidate.supports_pairwise_scorer_fallback(),
+                higher_is_better=candidate.pairwise_higher_is_better(),
+                display_format=candidate.pairwise_display_format(),
+                unit=candidate.pairwise_unit(),
+            )
+
+    primary_metric = task.config.get_primary_metric()
+    if primary_metric is None:
+        return None
+
+    try:
+        primary_scorer = primary_metric.scorer().name
+    except Exception:
+        return None
+
+    if primary_metric.name == metric_name and primary_scorer == scorer_name:
+        return MetricProfile(
+            supports_scorer_fallback=primary_metric.supports_pairwise_scorer_fallback(),
+            higher_is_better=primary_metric.pairwise_higher_is_better(),
+            display_format=primary_metric.pairwise_display_format(),
+            unit=primary_metric.pairwise_unit(),
+        )
+
+    return None
+
+
+def _extract_pairwise_instance_score(
+    *,
+    task_name: str,
+    metric_key: str,
+    instance_metrics: dict[str, dict[str, float]],
+) -> float | None:
+    """Extract the per-instance score that matches pairwise math for one task.
+
+    We always prefer an exact metric key when it exists. Only metrics whose task-level
+    value is literally an average of per-instance scorer outputs may fall back to the
+    stored scorer channel (``scorer:scorer``).
+    """
+    from olmo_eval.runners.processing.utils import extract_score_from_metrics, parse_metric_key
+
+    score = extract_score_from_metrics(instance_metrics, metric_key)
+    if score is not None:
+        return score
+
+    profile = _get_task_metric_profile(task_name, metric_key)
+    if profile is not None and not profile.supports_scorer_fallback:
+        return None
+
+    parsed = parse_metric_key(metric_key)
+    if parsed is None:
+        return None
+    scorer = parsed[1]
+    return extract_score_from_metrics(instance_metrics, f"{scorer}:{scorer}")
+
+
+def _comparison_score(raw_score: float, profile: MetricProfile | None) -> float:
+    """Map a raw task score to a higher-is-better comparison scalar."""
+    if profile is None or profile.higher_is_better:
+        return raw_score
+    return -raw_score
+
+
+def _build_pairwise_score_sql_expr(
+    task_hash_to_metric: dict[str, str],
+    task_profile_by_hash: dict[str, MetricProfile | None],
+):
+    """Build a SQL expression that extracts the pairwise score per task hash."""
+    from sqlalchemy import Float, case, cast, func
+
+    from olmo_eval.runners.processing.utils import parse_metric_key
+    from olmo_eval.storage.backends.postgres.models import InstancePrediction
+
+    grouped_hashes: dict[tuple[str, str, bool], list[str]] = {}
+    for task_hash, metric_key in sorted(task_hash_to_metric.items()):
+        parsed = parse_metric_key(metric_key)
+        if parsed is None:
+            continue
+        metric_name, scorer_name = parsed
+        profile = task_profile_by_hash.get(task_hash)
+        supports_fallback = profile.supports_scorer_fallback if profile is not None else True
+        grouped_hashes.setdefault((metric_name, scorer_name, supports_fallback), []).append(
+            task_hash
+        )
+
+    if not grouped_hashes:
+        return None
+
+    cases: list[tuple[Any, Any]] = []
+    for (metric_name, scorer_name, supports_fallback), task_hashes in grouped_hashes.items():
+        exact_expr = cast(
+            InstancePrediction.instance_metrics[metric_name][scorer_name].astext,
+            Float,
+        )
+        if supports_fallback:
+            scorer_expr = cast(
+                InstancePrediction.instance_metrics[scorer_name][scorer_name].astext,
+                Float,
+            )
+            value_expr = func.coalesce(exact_expr, scorer_expr)
+        else:
+            value_expr = exact_expr
+        cases.append((InstancePrediction.task_hash.in_(task_hashes), value_expr))
+
+    return case(*cases, else_=None).label("score")
+
+
+def get_task_metric_profile(task_name: str, metric_key: str) -> MetricProfile | None:
+    """Public wrapper for resolving pairwise metric semantics."""
+    return _get_task_metric_profile(task_name, metric_key)
 
 
 def _build_experiment_refetch_stmt(eval_results: list[EvalResult]):
@@ -249,11 +493,7 @@ def compute_pairwise(
     from sqlalchemy import select
 
     from olmo_eval.runners.processing.utils import extract_score_from_metrics
-    from olmo_eval.storage.backends.postgres.models import (
-        Experiment,
-        InstancePrediction,
-        TaskResult,
-    )
+    from olmo_eval.storage.backends.postgres.models import InstancePrediction, TaskResult
     from olmo_eval.storage.backends.postgres.repository import ExperimentRepository
 
     scope_count = sum(bool(x) for x in (task_name, task_hash, suite_name))
@@ -306,7 +546,7 @@ def compute_pairwise(
         task_names_filter = None
 
     repo = ExperimentRepository(session)
-    eval_results = repo.query(
+    candidate_experiments = repo.query_rows(
         experiment_ids=experiment_ids,
         model_names=model_names,
         model_hashes=model_hashes,
@@ -314,18 +554,18 @@ def compute_pairwise(
         task_hashes=[task_hash] if task_hash else None,
         experiment_groups=experiment_groups,
     )
-    eval_results = [
-        r
-        for r in eval_results
+    candidate_experiments = [
+        exp
+        for exp in candidate_experiments
         if not _is_excluded_experiment(
-            model_name=r.model_name,
-            model_hash=r.model_hash,
+            model_name=exp.model_name,
+            model_hash=exp.model_hash,
             exclude_model_names=exclude_model_names,
             exclude_model_hashes=exclude_model_hashes,
         )
     ]
 
-    if len(eval_results) < 2:
+    if len(candidate_experiments) < 2:
         scope_bits: list[str] = []
         if experiment_groups:
             scope_bits.append(f"groups={experiment_groups}")
@@ -357,44 +597,17 @@ def compute_pairwise(
                 " to inspect the group's models and suite coverage."
             )
         raise ValueError(
-            f"Only {len(eval_results)} experiment(s) matched the filters — need at least 2."
+            f"Only {len(candidate_experiments)} experiment(s) matched the filters — "
+            "need at least 2."
             f"\n  filters: {scope_str}{hint}"
         )
-
-    # Repo queries do not carry experiment PKs, so re-fetch the matching rows.
-    refetch_stmt = _build_experiment_refetch_stmt(eval_results)
-    experiments = session.execute(refetch_stmt).scalars().all() if refetch_stmt is not None else []
-
-    exp_lookup: dict[tuple[str, str], Experiment] = {}
-    for exp in experiments:
-        key = (exp.experiment_id, exp.model_hash)
-        if key not in exp_lookup:
-            exp_lookup[key] = exp
-
-    candidate_experiments: list[Experiment] = []
-    for r in eval_results:
-        if r.model_hash is None:
-            continue
-        exp = exp_lookup.get((r.experiment_id, r.model_hash))
-        if exp is not None:
-            candidate_experiments.append(exp)
-    candidate_experiments = [
-        exp
-        for exp in candidate_experiments
-        if not _is_excluded_experiment(
-            model_name=exp.model_name,
-            model_hash=exp.model_hash,
-            exclude_model_names=exclude_model_names,
-            exclude_model_hashes=exclude_model_hashes,
-        )
-    ]
 
     n_matched = len(candidate_experiments)
 
     if keep_all:
         selected = sorted(candidate_experiments, key=lambda e: e.timestamp, reverse=True)
     else:
-        chosen: dict[str, Experiment] = {}
+        chosen: dict[str, Any] = {}
         for exp in candidate_experiments:
             existing = chosen.get(exp.model_hash)
             if existing is None or exp.timestamp > existing.timestamp:
@@ -425,7 +638,7 @@ def compute_pairwise(
             if ninst_val > max_instances_per_task.get(tname, 0):
                 max_instances_per_task[tname] = ninst_val
 
-        kept: list[Experiment] = []
+        kept: list[Any] = []
         for exp in selected:
             have = per_pk_tasks.get(exp.id, {})
             missing = tuple(sorted(expected_tasks - have.keys()))
@@ -484,27 +697,33 @@ def compute_pairwise(
 
     pks = [pk for pk, _ in ordered]
 
-    tr_stmt = select(TaskResult).where(TaskResult.experiment_pk.in_(pks))
+    tr_stmt = select(
+        TaskResult.experiment_pk,
+        TaskResult.task_name,
+        TaskResult.task_hash,
+        TaskResult.metrics,
+        TaskResult.primary_metric,
+    ).where(TaskResult.experiment_pk.in_(pks))
     if suite_name:
         tr_stmt = tr_stmt.where(TaskResult.task_name.in_(suite_task_names))
     elif task_name:
         tr_stmt = tr_stmt.where(TaskResult.task_name == task_name)
     elif task_hash:
         tr_stmt = tr_stmt.where(TaskResult.task_hash.startswith(task_hash))
-    task_results = session.execute(tr_stmt).scalars().all()
-    task_results = [
-        tr
-        for tr in task_results
+    task_rows = session.execute(tr_stmt).all()
+    task_rows = [
+        row
+        for row in task_rows
         if not _is_excluded_task(
-            task_name=tr.task_name,
-            task_hash=tr.task_hash,
+            task_name=row.task_name,
+            task_hash=row.task_hash,
             exclude_task_names=exclude_task_names,
             exclude_task_hashes=exclude_task_hashes,
         )
     ]
 
     scope_label = suite_name or task_name or task_hash or ""
-    if not task_results:
+    if not task_rows:
         hint = ""
         if task_name:
             candidates = (
@@ -536,14 +755,15 @@ def compute_pairwise(
 
     task_hash_to_metric: dict[str, str] = {}
     task_hash_to_name: dict[str, str] = {}
-    for tr in task_results:
-        resolved_metric = metric if metric else tr.primary_metric
+    for task_row in task_rows:
+        resolved_metric = metric if metric else task_row.primary_metric
         if not resolved_metric:
             raise ValueError(
-                f"No primary_metric set for task '{tr.task_name}' — specify --metric explicitly"
+                f"No primary_metric set for task '{task_row.task_name}' — "
+                "specify --metric explicitly"
             )
-        task_hash_to_metric[tr.task_hash] = resolved_metric
-        task_hash_to_name[tr.task_hash] = tr.task_name
+        task_hash_to_metric[task_row.task_hash] = resolved_metric
+        task_hash_to_name[task_row.task_hash] = task_row.task_name
 
     if task_hash:
         distinct_names = sorted(set(task_hash_to_name.values()))
@@ -559,63 +779,109 @@ def compute_pairwise(
     display_metric = (
         next(iter(distinct_metrics)) if len(distinct_metrics) == 1 else "per-task primary"
     )
-
-    rows = session.execute(
-        select(
-            InstancePrediction.experiment_pk,
-            InstancePrediction.native_id,
-            InstancePrediction.task_hash,
-            InstancePrediction.instance_metrics,
-        ).where(
-            InstancePrediction.experiment_pk.in_(pks),
-            InstancePrediction.task_hash.in_(unique_task_hashes),
+    task_profile_by_hash = {
+        task_hash: _get_task_metric_profile(
+            task_hash_to_name[task_hash],
+            task_hash_to_metric[task_hash],
         )
-    ).all()
+        for task_hash in unique_task_hashes
+    }
+    score_expr = _build_pairwise_score_sql_expr(task_hash_to_metric, task_profile_by_hash)
+    rows = (
+        session.execute(
+            select(
+                InstancePrediction.experiment_pk,
+                InstancePrediction.native_id,
+                InstancePrediction.task_hash,
+                score_expr,
+            ).where(
+                InstancePrediction.experiment_pk.in_(pks),
+                InstancePrediction.task_hash.in_(unique_task_hashes),
+            )
+        ).all()
+        if score_expr is not None
+        else []
+    )
 
-    # Instance metrics may be stored under either metric:scorer or scorer:scorer.
-    from olmo_eval.runners.processing.utils import parse_metric_key
-
-    scores_by_pk: dict[int, dict[tuple[str, str], float]] = {pk: {} for pk in pks}
-    for exp_pk, native_id, th, instance_metrics in rows:
-        if exp_pk not in scores_by_pk:
+    raw_scores_by_pk: dict[int, dict[tuple[str, str], float]] = {pk: {} for pk in pks}
+    comparison_scores_by_pk: dict[int, dict[tuple[str, str], float]] = {pk: {} for pk in pks}
+    task_score_by_pk: dict[int, dict[str, float]] = {pk: {} for pk in pks}
+    for task_row in task_rows:
+        if task_row.experiment_pk not in task_score_by_pk:
             continue
-        row_metric = task_hash_to_metric.get(th)
+        task_metric = task_hash_to_metric.get(task_row.task_hash)
+        if task_metric is None:
+            continue
+        task_score = extract_score_from_metrics(task_row.metrics, task_metric)
+        if task_score is not None:
+            task_score_by_pk[task_row.experiment_pk][task_row.task_name] = task_score
+
+    for exp_pk, native_id, th, raw_score in rows:
+        if exp_pk not in raw_scores_by_pk or exp_pk not in comparison_scores_by_pk:
+            continue
         row_task_name = task_hash_to_name.get(th)
-        if row_metric is None or row_task_name is None:
+        if raw_score is None or row_task_name is None:
             continue
-        instance_metric_key = row_metric
-        parsed = parse_metric_key(row_metric)
-        if parsed:
-            scorer = parsed[1]
-            instance_metric_key = f"{scorer}:{scorer}"
-        score = extract_score_from_metrics(instance_metrics, instance_metric_key)
-        if score is None:
-            score = extract_score_from_metrics(instance_metrics, row_metric)
-        if score is not None:
-            scores_by_pk[exp_pk][(row_task_name, native_id)] = score
+        key = (row_task_name, native_id)
+        raw_scores_by_pk[exp_pk][key] = raw_score
+        comparison_scores_by_pk[exp_pk][key] = _comparison_score(
+            raw_score,
+            task_profile_by_hash.get(th),
+        )
 
     # Ignore runs with no extractable instance scores.
     active: list[tuple[int, ModelMeta]] = []
     for pk, meta in ordered:
-        if scores_by_pk[pk]:
+        if comparison_scores_by_pk[pk]:
             active.append((pk, meta))
 
     if len(active) < 2:
         instance_row_count = len(rows)
-        scored_count = sum(1 for pk in pks if scores_by_pk[pk])
+        scored_count = sum(1 for pk in pks if comparison_scores_by_pk[pk])
         sample_metrics = ""
         if rows:
-            sample_metrics = f", sample instance_metrics keys: {list(rows[0][3].keys())}"
+            sample_instance_metrics = session.execute(
+                select(InstancePrediction.instance_metrics)
+                .where(
+                    InstancePrediction.experiment_pk.in_(pks),
+                    InstancePrediction.task_hash.in_(unique_task_hashes),
+                )
+                .limit(1)
+            ).scalar_one_or_none()
+            if isinstance(sample_instance_metrics, dict):
+                sample_metrics = (
+                    f", sample instance_metrics keys: {list(sample_instance_metrics.keys())}"
+                )
+        unsupported_metrics = sorted(
+            {
+                f"{task_hash_to_name[task_hash]} ({task_hash_to_metric[task_hash]})"
+                for task_hash in unique_task_hashes
+                if (profile := task_profile_by_hash.get(task_hash)) is not None
+                and not profile.supports_scorer_fallback
+            }
+        )
+        unsupported_note = ""
+        if unsupported_metrics:
+            preview = ", ".join(unsupported_metrics[:4])
+            if len(unsupported_metrics) > 4:
+                preview = f"{preview}, +{len(unsupported_metrics) - 4} more"
+            unsupported_note = (
+                "\nThese tasks use derived or weighted aggregate metrics whose scorer-level "
+                "instance values are not valid pairwise scores. Pairwise is only available "
+                "when per-instance storage includes the exact metric key. "
+                f"Affected tasks: {preview}"
+            )
         raise ValueError(
             f"Only {scored_count} of {len(ordered)} experiment(s) have extractable "
             f"instance scores for '{scope_label}' using metric='{display_metric}' "
             f"(fetched {instance_row_count} instance rows from DB{sample_metrics})"
+            f"{unsupported_note}"
         )
 
     models = [meta for _, meta in active]
     scores_by_idx: dict[int, dict[tuple[str, str], float]] = {}
     for idx, (pk, _) in enumerate(active):
-        scores_by_idx[idx] = scores_by_pk[pk]
+        scores_by_idx[idx] = comparison_scores_by_pk[pk]
 
     id_sets = [set(scores.keys()) for scores in scores_by_idx.values()]
     shared_ids = id_sets[0]
@@ -641,11 +907,89 @@ def compute_pairwise(
             f"{hint}"
         )
 
-    pairs = _compute_pairs(scores_by_idx, len(active), shared_ids, margin)
-    models, pairs = _order_by_overall_win_rate(models, pairs)
-
     contributing_task_names = tuple(sorted({tn for tn, _ in shared_ids}))
-    result_task_name = suite_name or task_results[0].task_name
+    contributing_task_name_set = set(contributing_task_names)
+
+    per_pk_task_counts: dict[int, int] = {}
+    per_pk_cost_counts: dict[int, int] = {}
+    per_pk_cost_totals: dict[int, float] = {}
+    for task_row in task_rows:
+        if (
+            task_row.experiment_pk not in pks
+            or task_row.task_name not in contributing_task_name_set
+        ):
+            continue
+        per_pk_task_counts[task_row.experiment_pk] = (
+            per_pk_task_counts.get(task_row.experiment_pk, 0) + 1
+        )
+        cost = _extract_cost_from_task_metrics(task_row.metrics)
+        if cost is None:
+            continue
+        per_pk_cost_counts[task_row.experiment_pk] = (
+            per_pk_cost_counts.get(task_row.experiment_pk, 0) + 1
+        )
+        per_pk_cost_totals[task_row.experiment_pk] = (
+            per_pk_cost_totals.get(task_row.experiment_pk, 0.0) + cost
+        )
+
+    model_costs: list[float | None] = []
+    for pk, _ in active:
+        task_count = per_pk_task_counts.get(pk, 0)
+        cost_count = per_pk_cost_counts.get(pk, 0)
+        if task_count > 0 and task_count == cost_count:
+            model_costs.append(per_pk_cost_totals[pk])
+        else:
+            model_costs.append(None)
+    model_task_scores = [
+        tuple(task_score_by_pk.get(pk, {}).get(task_name) for task_name in contributing_task_names)
+        for pk, _ in active
+    ]
+    task_metric_keys = tuple(
+        next(
+            (
+                task_hash_to_metric[task_hash]
+                for task_hash, task_name in task_hash_to_name.items()
+                if task_name == contributing_task_name
+            ),
+            None,
+        )
+        for contributing_task_name in contributing_task_names
+    )
+    contributing_profiles = [
+        task_profile_by_hash[task_hash]
+        for task_hash, task_name in task_hash_to_name.items()
+        if (
+            task_name in contributing_task_name_set
+            and task_profile_by_hash.get(task_hash) is not None
+        )
+    ]
+    units = {profile.unit for profile in contributing_profiles}
+    display_formats = {profile.display_format for profile in contributing_profiles}
+    directions = {profile.higher_is_better for profile in contributing_profiles}
+    score_unit = next(iter(units)) if len(units) == 1 else None
+    score_display_format = next(iter(display_formats)) if len(display_formats) == 1 else "mixed"
+    higher_is_better = next(iter(directions)) if len(directions) == 1 else None
+    model_shared_scores = (
+        [
+            (sum(raw_scores_by_pk[pk][key] for key in shared_ids) / len(shared_ids))
+            if shared_ids
+            else None
+            for pk, _ in active
+        ]
+        if score_unit is not None
+        else [None for _ in active]
+    )
+
+    pairs = _compute_pairs(scores_by_idx, len(active), shared_ids, margin)
+    models, pairs, model_costs, model_task_scores, model_shared_scores = _order_by_overall_win_rate(
+        models,
+        pairs,
+        model_costs=model_costs,
+        model_task_scores=model_task_scores,
+        model_shared_scores=model_shared_scores,
+    )
+
+    result_task_name = suite_name or task_rows[0].task_name
 
     return PairwiseResult(
         task_name=result_task_name,
@@ -659,12 +1003,29 @@ def compute_pairwise(
         n_experiments_matched=n_matched,
         n_experiments_dropped=n_dropped,
         filtered_models=tuple(filtered_models),
+        model_costs=tuple(model_costs),
+        task_metric_keys=task_metric_keys,
+        model_task_scores=tuple(model_task_scores),
+        model_shared_scores=tuple(model_shared_scores),
+        score_display_format=score_display_format,
+        score_unit=score_unit,
+        higher_is_better=higher_is_better,
     )
 
 
 def _order_by_overall_win_rate(
-    models: list[ModelMeta], pairs: list[PairStats]
-) -> tuple[list[ModelMeta], list[PairStats]]:
+    models: list[ModelMeta],
+    pairs: list[PairStats],
+    model_costs: list[float | None] | None = None,
+    model_task_scores: list[tuple[float | None, ...]] | None = None,
+    model_shared_scores: list[float | None] | None = None,
+) -> tuple[
+    list[ModelMeta],
+    list[PairStats],
+    list[float | None],
+    list[tuple[float | None, ...]],
+    list[float | None],
+]:
     """Order rows by overall win rate and remap pair indices."""
     n = len(models)
     wins: dict[int, int] = {i: 0 for i in range(n)}
@@ -712,4 +1073,17 @@ def _order_by_overall_win_rate(
                     var_marginal_sum=p.var_marginal_sum,
                 )
             )
-    return reordered_models, reordered_pairs
+    reordered_costs = [model_costs[old] for old in order] if model_costs is not None else []
+    reordered_task_scores = (
+        [model_task_scores[old] for old in order] if model_task_scores is not None else []
+    )
+    reordered_shared_scores = (
+        [model_shared_scores[old] for old in order] if model_shared_scores is not None else []
+    )
+    return (
+        reordered_models,
+        reordered_pairs,
+        reordered_costs,
+        reordered_task_scores,
+        reordered_shared_scores,
+    )
