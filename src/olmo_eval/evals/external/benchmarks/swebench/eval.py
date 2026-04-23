@@ -69,6 +69,7 @@ class SWEBenchArgs:
     temperature: float = 0.0
     max_turns: int = 30
     use_modal: bool = False
+    pull_timeout: int = 600
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SWEBenchArgs:
@@ -82,6 +83,7 @@ class SWEBenchArgs:
             temperature=float(data.get("temperature", 0.0)),
             max_turns=int(data.get("max_turns", 30)),
             use_modal=data.get("use_modal", False) in (True, "true", "True", "1", 1),
+            pull_timeout=int(data.get("pull_timeout", 600)),
         )
 
 
@@ -257,6 +259,7 @@ class SWEBenchExternalEval(ExternalEval):
             cmd += ["--filter", swe_args.instance_filter]
         if swe_args.instance_slice:
             cmd += ["--slice", swe_args.instance_slice]
+        cmd += ["-c", f"environment.pull_timeout={swe_args.pull_timeout}"]
 
         # mini-swe-agent respects MSWEA_DOCKER_EXECUTABLE to switch container runtimes
         env = os.environ.copy()
