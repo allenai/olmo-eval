@@ -230,6 +230,7 @@ class SciCodeExternalEval(ExternalEval):
                 "all_passed": pr.all_passed,
                 "step_results": pr.step_results,
                 "step_codes": pr.step_codes,
+                "step_texts": pr.step_texts,
                 "error": pr.error,
             }
             for pr in problem_results
