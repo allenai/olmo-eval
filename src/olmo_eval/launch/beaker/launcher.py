@@ -378,6 +378,7 @@ class BeakerJobConfig:
         default_factory=lambda: [
             BeakerWekaBucket("oe-training-default"),
             BeakerWekaBucket("oe-eval-default"),
+            BeakerWekaBucket("oe-adapt-default"),
         ]
     )
     nfs: bool = False
