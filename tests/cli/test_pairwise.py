@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import importlib
+from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 from click.testing import CliRunner
 
@@ -24,6 +26,22 @@ class _DummyDB:
 
     def dispose(self) -> None:
         pass
+
+
+class _StaticExecuteResult:
+    def __init__(self, rows):
+        self._rows = list(rows)
+
+    def all(self):
+        return list(self._rows)
+
+
+class _StaticTaskSession:
+    def __init__(self, rows):
+        self._rows = list(rows)
+
+    def execute(self, _query):
+        return _StaticExecuteResult(self._rows)
 
 
 def _build_pairwise_result(*, dropped: int = 0) -> PairwiseResult:
@@ -233,6 +251,162 @@ def test_results_viewer_csv_dump_streams_to_stdout(monkeypatch) -> None:
     ) in result.output
 
 
+def test_build_results_table_keep_all_preserves_distinct_reruns(monkeypatch) -> None:
+    pairwise_server = importlib.import_module("olmo_eval.cli.results.pairwise_server")
+
+    earlier = SimpleNamespace(
+        id=10,
+        model_name="model-a",
+        model_hash="abc12345deadbeef",
+        timestamp=datetime(2026, 4, 21, 8, 0, tzinfo=UTC),
+    )
+    later = SimpleNamespace(
+        id=11,
+        model_name="model-a",
+        model_hash="abc12345deadbeef",
+        timestamp=datetime(2026, 4, 21, 12, 0, tzinfo=UTC),
+    )
+
+    monkeypatch.setattr(
+        pairwise_server,
+        "_group_experiments",
+        lambda session, group_name, keep_all: [later, earlier] if keep_all else [later],
+    )
+
+    latest_table = pairwise_server._build_results_table(
+        _StaticTaskSession(
+            [
+                (
+                    11,
+                    "gsm8k:olmo3base",
+                    {"accuracy": {"exact_match": 0.65}},
+                    "accuracy:exact_match",
+                )
+            ]
+        ),
+        "my-group",
+        keep_all=False,
+    )
+    all_runs_table = pairwise_server._build_results_table(
+        _StaticTaskSession(
+            [
+                (
+                    10,
+                    "gsm8k:olmo3base",
+                    {"accuracy": {"exact_match": 0.55}},
+                    "accuracy:exact_match",
+                ),
+                (
+                    11,
+                    "gsm8k:olmo3base",
+                    {"accuracy": {"exact_match": 0.65}},
+                    "accuracy:exact_match",
+                ),
+            ]
+        ),
+        "my-group",
+        keep_all=True,
+    )
+
+    assert len(latest_table["models"]) == 1
+    assert len(all_runs_table["models"]) == 2
+    assert (
+        all_runs_table["models"][0]["display_label"] != all_runs_table["models"][1]["display_label"]
+    )
+    assert "2026-04-21 12:00" in all_runs_table["models"][0]["display_label"]
+    assert "2026-04-21 08:00" in all_runs_table["models"][1]["display_label"]
+    assert (
+        pairwise_server._model_key(all_runs_table["models"][0])
+        == "abc12345deadbeef|2026-04-21T12:00:00+00:00"
+    )
+    assert (
+        pairwise_server._model_key(all_runs_table["models"][1])
+        == "abc12345deadbeef|2026-04-21T08:00:00+00:00"
+    )
+
+
+def test_model_filter_score_label_uses_selected_scope_columns() -> None:
+    pairwise_server = importlib.import_module("olmo_eval.cli.results.pairwise_server")
+
+    results_table = {
+        "task_columns": [
+            {
+                "id": "gsm8k:olmo3base",
+                "score_display_format": "percentage",
+                "score_unit": "proportion",
+                "higher_is_better": True,
+            },
+            {
+                "id": "minerva_math_algebra:olmo3base",
+                "score_display_format": "percentage",
+                "score_unit": "proportion",
+                "higher_is_better": True,
+            },
+            {
+                "id": "truthfulqa:mc:olmo3base",
+                "score_display_format": "percentage",
+                "score_unit": "proportion",
+                "higher_is_better": True,
+            },
+        ]
+    }
+    selected_scope = {
+        "task_ids": [
+            "gsm8k:olmo3base",
+            "minerva_math_algebra:olmo3base",
+        ]
+    }
+    model = {
+        "task_scores": {
+            "gsm8k:olmo3base": 0.60,
+            "minerva_math_algebra:olmo3base": 0.40,
+            "truthfulqa:mc:olmo3base": 1.00,
+        }
+    }
+
+    scoped_columns = pairwise_server._scoped_task_columns(results_table, selected_scope)
+
+    assert pairwise_server._model_filter_score_label(model, scoped_columns) == "50.0%"
+
+
+def test_model_filter_score_label_formats_raw_metrics_and_hides_mixed_units() -> None:
+    pairwise_server = importlib.import_module("olmo_eval.cli.results.pairwise_server")
+
+    raw_columns = [
+        {
+            "id": "ds1000:bpb",
+            "score_display_format": "raw",
+            "score_unit": "bits_per_byte",
+            "higher_is_better": False,
+        },
+        {
+            "id": "bigcodebench:bpb",
+            "score_display_format": "raw",
+            "score_unit": "bits_per_byte",
+            "higher_is_better": False,
+        },
+    ]
+    mixed_columns = [
+        *raw_columns,
+        {
+            "id": "gsm8k:olmo3base",
+            "score_display_format": "percentage",
+            "score_unit": "proportion",
+            "higher_is_better": True,
+        },
+    ]
+    model = {
+        "task_scores": {
+            "ds1000:bpb": 0.41,
+            "bigcodebench:bpb": 0.57,
+            "gsm8k:olmo3base": 0.80,
+        }
+    }
+
+    assert pairwise_server._model_filter_score_label(model, raw_columns) == "0.5"
+    assert pairwise_server._model_filter_score_label(model, mixed_columns) == "—"
+
+
 def test_results_viewer_rejects_removed_plot_format() -> None:
     """Static plot mode has been removed in favor of the viewer."""
     results_cli = importlib.import_module("olmo_eval.cli.results")
@@ -275,6 +449,43 @@ def test_timed_value_cache_reuses_fresh_entries_and_expires_stale_ones() -> None
     assert second == {"value": 1}
     assert third == {"value": 2}
     assert calls["count"] == 2
+
+
+def test_viewer_scope_pickers_require_explicit_selection() -> None:
+    pairwise_server = importlib.import_module("olmo_eval.cli.results.pairwise_server")
+
+    groups = [
+        {"name": "alpha-benchmark", "models": 2, "tasks": 3},
+        {"name": "beta-benchmark", "models": 4, "tasks": 5},
+    ]
+    group_data = {
+        "scope_options": [
+            {
+                "key": "suite::olmobase:math",
+                "kind": "suite",
+                "label": "olmobase:math",
+                "value": "olmobase:math",
+                "task_ids": ["gsm8k:olmo3base"],
+            },
+            {
+                "key": "task::gsm8k:olmo3base",
+                "kind": "task",
+                "label": "gsm8k",
+                "value": "gsm8k:olmo3base",
+                "task_ids": ["gsm8k:olmo3base"],
+            },
+        ]
+    }
+
+    assert pairwise_server._pick_group(groups, None) is None
+    assert pairwise_server._pick_group(groups, "alpha") == "alpha-benchmark"
+    assert pairwise_server._pick_group(groups, "missing") is None
+
+    assert pairwise_server._pick_scope(group_data, None) is None
+    assert pairwise_server._pick_scope(group_data, "suite::olmobase:math") == (
+        "suite::olmobase:math"
+    )
+    assert pairwise_server._pick_scope(group_data, "suite::missing") is None
 
 
 def test_serialize_viewer_export_supports_csv_and_json() -> None:
@@ -445,6 +656,7 @@ def test_render_pairwise_browser_page_uses_dimming_only_loading_state() -> None:
     assert "function renderDiagnosticRunSection(title, items)" in html
     assert "function renderDiagnosticInstanceCounts(title, items)" in html
     assert 'const modelFilterDetails = document.getElementById("model-filter-details");' in html
+    assert "if (model?.timestamp) return modelExportRef(model);" in html
     assert 'data-search-select="group"' in html
     assert 'data-search-select="scope"' in html
     assert 'data-role="search-select-filter"' in html
@@ -720,6 +932,73 @@ def test_render_pairwise_browser_page_uses_dimming_only_loading_state() -> None:
     assert "score_difference_display_format" in html
     assert "score_diff_row_minus_column" not in html
     assert "score_diff_display_format" not in html
+
+
+def test_render_pairwise_browser_page_shows_root_default_selection_state() -> None:
+    pairwise_server = importlib.import_module("olmo_eval.cli.results.pairwise_server")
+
+    html = pairwise_server.render_pairwise_browser_page(
+        groups=[{"name": "my-benchmark", "models": 4, "tasks": 3}],
+        selected_group=None,
+        group_data=None,
+        selected_scope_key=None,
+        selected_metric=None,
+        pairwise_data=None,
+        pairwise_error=None,
+    )
+
+    assert 'type="hidden" name="group" value=""' in html
+    assert ">select group...<" in html
+    assert ">nothing to compare yet<" in html
+    assert "pick an experiment group and suite or task" in html
+    assert "use the selectors above to choose what you want to compare." in html
+    assert '"has_groups":true' in html
+    assert '"selected_group":null' in html
+    assert '"selected_scope_key":null' in html
+
+
+def test_render_pairwise_browser_page_leaves_scope_unselected_without_request() -> None:
+    pairwise_server = importlib.import_module("olmo_eval.cli.results.pairwise_server")
+
+    html = pairwise_server.render_pairwise_browser_page(
+        groups=[{"name": "my-benchmark", "models": 4, "tasks": 3}],
+        selected_group="my-benchmark",
+        group_data={
+            "summary": {"group_name": "my-benchmark"},
+            "scope_options": [
+                {
+                    "key": "suite::olmobase:math",
+                    "kind": "suite",
+                    "label": "olmobase:math",
+                    "value": "olmobase:math",
+                    "task_ids": [
+                        "gsm8k:olmo3base",
+                        "minerva_math_algebra:olmo3base",
+                    ],
+                },
+                {
+                    "key": "task::gsm8k:olmo3base",
+                    "kind": "task",
+                    "label": "gsm8k",
+                    "value": "gsm8k:olmo3base",
+                    "task_ids": ["gsm8k:olmo3base"],
+                },
+            ],
+            "results_table": {
+                "models": [],
+                "task_columns": [],
+            },
+        },
+        selected_scope_key=None,
+        selected_metric=None,
+        pairwise_data=None,
+        pairwise_error=None,
+    )
+
+    assert 'type="hidden" name="scope" value=""' in html
+    assert ">select suite or task...<" in html
+    assert "pick a suite or task to open the paired-test view." in html
+    assert '"selected_scope_key":null' in html
 
 
 def test_render_pairwise_browser_page_embeds_structured_pairwise_error() -> None:

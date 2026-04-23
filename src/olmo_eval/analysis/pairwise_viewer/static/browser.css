@@ -179,6 +179,10 @@
       cursor: pointer;
     }
 
+    .search-select-summary.is-placeholder {
+      color: var(--c-ink-50);
+    }
+
     .search-select-menu {
       left: 0;
       right: auto;

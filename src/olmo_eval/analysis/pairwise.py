@@ -275,12 +275,9 @@ def _format_experiment_label(
     resolved_name = model_name or "unnamed model"
     hash_short = (model_hash or "")[:8]
     if keep_all and timestamp is not None:
-        try:
-            timestamp_short = timestamp.strftime("%Y-%m-%d")
-        except Exception:
-            timestamp_short = None
-        if timestamp_short:
-            return f"{resolved_name} ({hash_short} @ {timestamp_short})"
+        timestamp_label = _timestamp_label(timestamp)
+        if timestamp_label:
+            return f"{resolved_name} ({hash_short} @ {timestamp_label})"
     return f"{resolved_name} ({hash_short})"
 
 
@@ -865,9 +862,12 @@ def compute_pairwise(
     ordered: list[tuple[int, ModelMeta]] = []
     for exp in selected:
         ts_iso = exp.timestamp.isoformat() if exp.timestamp is not None else None
-        if keep_all:
-            ts_short = exp.timestamp.strftime("%Y-%m-%d")
-            label = f"{exp.model_name}\n({exp.model_hash[:8]} @ {ts_short})"
+        if keep_all and exp.timestamp is not None:
+            timestamp_label = _timestamp_label(exp.timestamp)
+            if timestamp_label:
+                label = f"{exp.model_name}\n({exp.model_hash[:8]} @ {timestamp_label})"
+            else:
+                label = f"{exp.model_name}\n({exp.model_hash[:8]})"
         else:
             label = f"{exp.model_name}\n({exp.model_hash[:8]})"
         ordered.append(

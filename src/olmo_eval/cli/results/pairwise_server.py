@@ -23,6 +23,7 @@ from olmo_eval.analysis.pairwise import (
     PairwiseEligibilityError,
     _build_pairwise_score_sql_expr,
     _comparison_score,
+    _format_experiment_label,
     compute_pairwise,
     get_task_metric_profile,
 )
@@ -131,7 +132,7 @@ def _pick_group(groups: list[dict[str, Any]], requested: str | None) -> str | No
         )
         if prefix:
             return prefix
-    return groups[0]["name"]
+    return None
 
 
 def _pick_scope(group_data: dict[str, Any], requested: str | None) -> str | None:
@@ -140,11 +141,7 @@ def _pick_scope(group_data: dict[str, Any], requested: str | None) -> str | None
         return None
     if requested and any(option["key"] == requested for option in scope_options):
         return requested
-    preferred_suite = next(
-        (option["key"] for option in scope_options if option["kind"] == "suite"),
-        None,
-    )
-    return preferred_suite or scope_options[0]["key"]
+    return None
 
 
 def _list_groups(session: Session, *, limit: int = 500) -> list[dict[str, Any]]:
@@ -213,11 +210,42 @@ def _latest_group_experiments(session: Session, group_name: str) -> list[Any]:
     return sorted(experiments, key=lambda experiment: experiment.timestamp, reverse=True)
 
 
-def _build_results_table(session: Session, group_name: str) -> dict[str, Any]:
+def _all_group_experiments(session: Session, group_name: str) -> list[Any]:
+    from olmo_eval.storage.backends.postgres.models import Experiment
+
+    experiments = (
+        session.execute(
+            select(Experiment)
+            .options(
+                load_only(
+                    Experiment.id,
+                    Experiment.model_name,
+                    Experiment.model_hash,
+                    Experiment.timestamp,
+                ),
+                noload(Experiment.task_results),
+                noload(Experiment.instance_predictions),
+            )
+            .where(Experiment.experiment_group == group_name)
+            .order_by(Experiment.timestamp.desc(), Experiment.model_hash, Experiment.id.desc())
+        )
+        .scalars()
+        .all()
+    )
+    return sorted(experiments, key=lambda experiment: experiment.timestamp, reverse=True)
+
+
+def _group_experiments(session: Session, group_name: str, *, keep_all: bool) -> list[Any]:
+    if keep_all:
+        return _all_group_experiments(session, group_name)
+    return _latest_group_experiments(session, group_name)
+
+
+def _build_results_table(session: Session, group_name: str, *, keep_all: bool) -> dict[str, Any]:
     from olmo_eval.runners.processing.utils import extract_score_from_metrics
     from olmo_eval.storage.backends.postgres.models import TaskResult
 
-    experiments = _latest_group_experiments(session, group_name)
+    experiments = _group_experiments(session, group_name, keep_all=keep_all)
     if not experiments:
         return {"models": [], "task_columns": []}
 
@@ -232,15 +260,26 @@ def _build_results_table(session: Session, group_name: str) -> dict[str, Any]:
         ).where(TaskResult.experiment_pk.in_(selected_pks))
     ).all()
 
-    label_counts = Counter(experiment.model_name for experiment in experiments)
-    experiment_labels = {
-        experiment.id: (
-            f"{experiment.model_name} ({experiment.model_hash[:8]})"
-            if label_counts[experiment.model_name] > 1
-            else experiment.model_name
-        )
-        for experiment in experiments
-    }
+    if keep_all:
+        experiment_labels = {
+            experiment.id: _format_experiment_label(
+                experiment.model_name,
+                experiment.model_hash,
+                experiment.timestamp,
+                keep_all=True,
+            )
+            for experiment in experiments
+        }
+    else:
+        label_counts = Counter(experiment.model_name for experiment in experiments)
+        experiment_labels = {
+            experiment.id: (
+                f"{experiment.model_name} ({experiment.model_hash[:8]})"
+                if label_counts[experiment.model_name] > 1
+                else experiment.model_name
+            )
+            for experiment in experiments
+        }
 
     task_metric_by_name: dict[str, str | None] = {}
     task_profile_by_name: dict[str, Any] = {}
@@ -428,6 +467,87 @@ def _count_models_with_task_scores(
     return count
 
 
+def _score_display_format(meta: dict[str, Any] | None) -> str:
+    if meta is None:
+        return "percentage"
+    return str(meta.get("score_display_format") or "percentage")
+
+
+def _score_unit(meta: dict[str, Any] | None) -> Any:
+    if meta is None:
+        return None
+    return meta.get("score_unit")
+
+
+def _score_higher_is_better(meta: dict[str, Any] | None) -> bool:
+    return not (meta is not None and meta.get("higher_is_better") is False)
+
+
+def _columns_comparable(columns: list[dict[str, Any]]) -> bool:
+    if not columns:
+        return False
+    reference = columns[0]
+    return all(
+        _score_display_format(column) == _score_display_format(reference)
+        and _score_unit(column) == _score_unit(reference)
+        and _score_higher_is_better(column) == _score_higher_is_better(reference)
+        for column in columns
+    )
+
+
+def _aggregate_column_meta(columns: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not _columns_comparable(columns):
+        return None
+    return {
+        "score_display_format": _score_display_format(columns[0]),
+        "score_unit": _score_unit(columns[0]),
+        "higher_is_better": _score_higher_is_better(columns[0]),
+    }
+
+
+def _scoped_task_columns(
+    results_table: dict[str, Any] | None,
+    selected_scope_option: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    task_columns = list((results_table or {}).get("task_columns", []))
+    task_ids = list((selected_scope_option or {}).get("task_ids") or [])
+    if not task_ids:
+        return task_columns
+    allowed_task_ids = {str(task_id) for task_id in task_ids}
+    return [column for column in task_columns if str(column.get("id") or "") in allowed_task_ids]
+
+
+def _average_model_scope_score(
+    model: dict[str, Any],
+    columns: list[dict[str, Any]],
+) -> float | None:
+    if not _columns_comparable(columns):
+        return None
+    task_scores = model.get("task_scores", {})
+    scores = [
+        float(task_scores[column["id"]])
+        for column in columns
+        if _is_numeric_score(task_scores.get(column["id"]))
+    ]
+    if not scores:
+        return None
+    return sum(scores) / len(scores)
+
+
+def _format_score_value(value: Any, meta: dict[str, Any] | None) -> str:
+    if not _is_numeric_score(value) or meta is None:
+        return "—"
+    if _score_display_format(meta) == "percentage":
+        return f"{float(value) * 100:.1f}%"
+    return f"{float(value):.1f}"
+
+
+def _model_filter_score_label(model: dict[str, Any], columns: list[dict[str, Any]]) -> str:
+    column_meta = _aggregate_column_meta(columns)
+    average_score = _average_model_scope_score(model, columns)
+    return _format_score_value(average_score, column_meta)
+
+
 def _task_scope_availability(
     *,
     task_name: str,
@@ -539,6 +659,7 @@ def _build_group_browser_data(
     session: Session,
     group_name: str,
     *,
+    keep_all: bool,
     require_full_coverage: bool,
 ) -> dict[str, Any]:
     from olmo_eval.evals.suites.registry import get_suite, list_suites
@@ -572,10 +693,16 @@ def _build_group_browser_data(
         ).all()
     ]
     present_tasks = {row["name"] for row in task_rows}
-    results_table = _build_results_table(session, group_name)
-    latest_models = list(results_table.get("models", []))
+    results_table = _build_results_table(session, group_name, keep_all=keep_all)
+    availability_table = (
+        results_table if not keep_all else _build_results_table(session, group_name, keep_all=False)
+    )
+    latest_models = list(availability_table.get("models", []))
     task_column_by_id: dict[str, dict[str, Any]] = {
         str(column["id"]): column for column in results_table.get("task_columns", [])
+    }
+    latest_task_column_by_id: dict[str, dict[str, Any]] = {
+        str(column["id"]): column for column in availability_table.get("task_columns", [])
     }
     suite_rows: list[dict[str, Any]] = []
     for suite_name in list_suites():
@@ -630,7 +757,7 @@ def _build_group_browser_data(
     for task_row in task_rows:
         task_name = str(task_row["name"])
         task_column = task_column_by_id.get(task_name) or {}
-        latest_model_count = int(task_column.get("model_count", 0))
+        latest_model_count = int(latest_task_column_by_id.get(task_name, {}).get("model_count", 0))
         task_row["latest_models"] = latest_model_count
         task_row["metric_options"] = list(task_column.get("metric_options", []))
         task_row["default_metric"] = str(task_column.get("metric") or "")
@@ -726,6 +853,7 @@ def _render_search_select(
     options: list[dict[str, Any]],
     empty_label: str,
     disabled_label: str,
+    placeholder_label: str | None = None,
 ) -> str:
     if not options:
         return dedent(
@@ -739,18 +867,31 @@ def _render_search_select(
             """
         ).strip()
 
-    resolved_selected_value = _clean_inline_text(selected_value or options[0]["value"])
-    resolved_selected_label = _clean_inline_text(
-        selected_label
-        or next(
-            (
-                option["summary_text"]
-                for option in options
-                if option["value"] == resolved_selected_value
-            ),
-            options[0]["summary_text"],
-        )
+    selected_value_text = _clean_inline_text(selected_value or "")
+    selected_option = next(
+        (
+            option
+            for option in options
+            if _clean_inline_text(option["value"]) == selected_value_text
+        ),
+        None,
     )
+    summary_state_class = ""
+    if selected_option is not None:
+        resolved_selected_value = _clean_inline_text(selected_option["value"])
+        resolved_selected_label = _clean_inline_text(
+            selected_label or selected_option["summary_text"]
+        )
+    elif placeholder_label is not None:
+        resolved_selected_value = ""
+        resolved_selected_label = _clean_inline_text(placeholder_label)
+        summary_state_class = " is-placeholder"
+    else:
+        fallback_option = options[0]
+        resolved_selected_value = _clean_inline_text(fallback_option["value"])
+        resolved_selected_label = _clean_inline_text(
+            selected_label or fallback_option["summary_text"]
+        )
     control_name_html = html.escape(control_name)
     label_html = html.escape(label)
     field_name_html = html.escape(field_name)
@@ -824,7 +965,7 @@ def _render_search_select(
           <input type="hidden" name="{field_name_html}" value="{selected_value_html}" />
           <details class="tt-dd control-dd search-select-dd">
             <summary
-              class="control-summary search-select-summary"
+              class="control-summary search-select-summary{summary_state_class}"
               title="{selected_label_html}"
             >
               <span class="control-summary-text">{selected_label_html}</span>
@@ -877,6 +1018,8 @@ def _scope_option_label(
 
 
 def _model_key(model: dict[str, Any]) -> str:
+    if model.get("timestamp"):
+        return _result_model_export_ref(model.get("model_hash"), model.get("timestamp"))
     return str(
         model.get("model_hash")
         or model.get("model_name")
@@ -884,12 +1027,6 @@ def _model_key(model: dict[str, Any]) -> str:
         or model.get("index")
         or ""
     )
-
-
-def _format_model_avg(avg_score: Any) -> str:
-    if isinstance(avg_score, (int, float)):
-        return f"{float(avg_score) * 100:.1f}%"
-    return "—"
 
 
 def _selected_scope_option(
@@ -959,6 +1096,7 @@ def _resolve_export_group(
     session: Session,
     *,
     requested_group: str | None,
+    keep_all: bool,
     require_full_coverage: bool,
 ) -> tuple[str, dict[str, Any]]:
     groups = _list_groups(session)
@@ -973,6 +1111,7 @@ def _resolve_export_group(
         _build_group_browser_data(
             session,
             requested_group,
+            keep_all=keep_all,
             require_full_coverage=require_full_coverage,
         ),
     )
@@ -1675,6 +1814,8 @@ def render_pairwise_browser_page(
 ) -> str:
     """Render the viewer page with server-populated selectors and payload."""
     browser_payload = {
+        "has_groups": bool(groups),
+        "selected_group": selected_group,
         "group_data": group_data,
         "selected_scope_key": selected_scope_key,
         "selected_metric": selected_metric,
@@ -1714,6 +1855,7 @@ def render_pairwise_browser_page(
         options=group_select_options,
         empty_label="No groups match.",
         disabled_label="no groups found",
+        placeholder_label="select group...",
     )
 
     scope_select_options: list[dict[str, str]] = []
@@ -1783,13 +1925,18 @@ def render_pairwise_browser_page(
         ]
 
     model_filter_models: list[dict[str, Any]] = []
+    model_filter_columns: list[dict[str, Any]] = []
+    selected_scope_option = _selected_scope_option(group_data, selected_scope_key)
     if group_data and group_data.get("results_table"):
+        model_filter_columns = _scoped_task_columns(
+            group_data.get("results_table"),
+            selected_scope_option,
+        )
         model_filter_models = sorted(
             list(group_data["results_table"].get("models", [])),
             key=lambda model: str(model.get("display_label") or "").lower(),
         )
 
-    selected_scope_option = _selected_scope_option(group_data, selected_scope_key)
     metric_control = _render_metric_control(
         scope_option=selected_scope_option,
         selected_metric=selected_metric,
@@ -1805,7 +1952,7 @@ def render_pairwise_browser_page(
             f"{html.escape(str(model.get('display_label') or '').replace(chr(10), ' '))}"
             "</span>"
             f'<span class="tt-menu-n">'
-            f"{html.escape(_format_model_avg(model.get('avg_score')))}"
+            f"{html.escape(_model_filter_score_label(model, model_filter_columns))}"
             "</span>"
             "</label>"
         )
@@ -1860,6 +2007,7 @@ def render_pairwise_browser_page(
         options=scope_select_options,
         empty_label="No suites or tasks match.",
         disabled_label="nothing to compare yet",
+        placeholder_label="select suite or task...",
     )
 
     return (
@@ -1952,6 +2100,7 @@ def serve_pairwise_browser(
                         selected_group, group_data = _resolve_export_group(
                             session,
                             requested_group=requested_group,
+                            keep_all=keep_all,
                             require_full_coverage=require_full_coverage,
                         )
                         _, scope_kind, scope_value, selected_metric = (
@@ -2050,10 +2199,11 @@ def serve_pairwise_browser(
                 selected_group = _pick_group(groups, requested_group)
                 group_data = (
                     group_browser_cache.get_or_set(
-                        (selected_group, require_full_coverage),
+                        (selected_group, keep_all, require_full_coverage),
                         lambda: _build_group_browser_data(
                             session,
                             selected_group,
+                            keep_all=keep_all,
                             require_full_coverage=require_full_coverage,
                         ),
                     )

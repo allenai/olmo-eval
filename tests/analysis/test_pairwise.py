@@ -342,6 +342,43 @@ class TestPairwiseInstanceScoreExtraction:
             instance_metrics={"exact_match": {"exact_match": 1.0}},
         ) == pytest.approx(1.0)
 
+    def test_lab_bench_refusal_metrics_stay_percentage_without_scorer_fallback(self) -> None:
+        precision_profile = get_task_metric_profile(
+            "lab_bench_litqa2",
+            "precision:multiple_choice",
+        )
+        coverage_profile = get_task_metric_profile(
+            "lab_bench_litqa2",
+            "coverage:multiple_choice",
+        )
+
+        assert precision_profile is not None
+        assert precision_profile.supports_scorer_fallback is False
+        assert precision_profile.display_format == "percentage"
+        assert precision_profile.unit == "proportion"
+
+        assert coverage_profile is not None
+        assert coverage_profile.supports_scorer_fallback is False
+        assert coverage_profile.display_format == "percentage"
+        assert coverage_profile.unit == "proportion"
+
+        assert (
+            _extract_pairwise_instance_score(
+                task_name="lab_bench_litqa2",
+                metric_key="precision:multiple_choice",
+                instance_metrics={"multiple_choice": {"multiple_choice": 1.0}},
+            )
+            is None
+        )
+        assert (
+            _extract_pairwise_instance_score(
+                task_name="lab_bench_litqa2",
+                metric_key="coverage:multiple_choice",
+                instance_metrics={"multiple_choice": {"multiple_choice": 1.0}},
+            )
+            is None
+        )
+
     def test_bpb_metrics_resolve_as_raw_lower_is_better(self) -> None:
         profile = get_task_metric_profile("humaneval:bpb", "bits_per_byte:bits_per_byte")
         assert profile is not None

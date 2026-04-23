@@ -139,7 +139,12 @@
 
       function buildScopeUrl(form) {
         const url = new URL(window.location.href);
-        const params = new URLSearchParams(new FormData(form));
+        const params = new URLSearchParams();
+        Array.from(new FormData(form).entries()).forEach(([key, value]) => {
+          const text = String(value ?? "").trim();
+          if (!text) return;
+          params.append(key, text);
+        });
         url.search = params.toString();
         return url.toString();
       }
@@ -328,6 +333,7 @@
       }
 
       function modelKey(model) {
+        if (model?.timestamp) return modelExportRef(model);
         return String(
           model?.model_hash ||
           model?.model_name ||
@@ -764,7 +770,7 @@
 
       function renderResults(groupData) {
         const resultsData = groupData?.results_table;
-        if (!groupData) {
+        if (!pageData.has_groups) {
           return `
             <div class="browser-section">
               <div class="empty-state">
@@ -772,6 +778,19 @@
                 <div class="empty-title">no experiment groups found</div>
                 <div class="empty-sub">
                   connect to a populated results database to start exploring.
+                </div>
+              </div>
+            </div>
+          `;
+        }
+        if (!pageData.selected_group) {
+          return `
+            <div class="browser-section">
+              <div class="empty-state">
+                <div class="empty-mark">[]</div>
+                <div class="empty-title">pick an experiment group and suite or task</div>
+                <div class="empty-sub">
+                  use the selectors above to choose what you want to compare.
                 </div>
               </div>
             </div>
@@ -1121,6 +1140,41 @@
       }
 
       function renderMatrix(pairwiseData, errorMessage, errorDetails) {
+        if (!pageData.has_groups) {
+          return `
+            <div class="matrix-wrap">
+              <div class="empty-state">
+                <div class="empty-mark">[]</div>
+                <div class="empty-title">no experiment groups found</div>
+                <div class="empty-sub">
+                  connect to a populated results database to start exploring.
+                </div>
+              </div>
+            </div>
+          `;
+        }
+        if (!pageData.selected_group) {
+          return `
+            <div class="matrix-wrap">
+              <div class="empty-state">
+                <div class="empty-mark">[]</div>
+                <div class="empty-title">pick an experiment group and suite or task</div>
+                <div class="empty-sub">
+                  use the selectors above to choose what you want to compare.
+                </div>
+              </div>
+            </div>
+          `;
+        }
+        if (!pageData.selected_scope_key) {
+          return `
+            <div class="matrix-wrap">
+              <div class="single-model-note">
+                <div>pick a suite or task to open the paired-test view.</div>
+              </div>
+            </div>
+          `;
+        }
         if (errorMessage || errorDetails) {
           return renderPairwiseError(errorDetails, errorMessage, pageData.group_data);
         }
@@ -1128,7 +1182,7 @@
           return `
             <div class="matrix-wrap">
               <div class="single-model-note">
-                <div>choose a suite or task to open the paired-test view.</div>
+                <div>pick a suite or task to open the paired-test view.</div>
               </div>
             </div>
           `;
