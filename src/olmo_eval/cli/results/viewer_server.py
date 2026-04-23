@@ -63,6 +63,12 @@ class _TimedCacheEntry:
     value: Any
 
 
+@dataclass(slots=True, frozen=True)
+class _ScopeTarget:
+    task_name: str | None = None
+    suite_name: str | None = None
+
+
 class _TimedValueCache:
     """Small in-process TTL cache for browser response building."""
 
@@ -135,11 +141,11 @@ def _pluralized_label(count: int, singular: str, plural: str | None = None) -> s
     return singular if count == 1 else (plural or f"{singular}s")
 
 
-def _scope_target_kwargs(scope_kind: str | None, scope_value: str | None) -> dict[str, str | None]:
-    return {
-        "task_name": scope_value if scope_kind == "task" else None,
-        "suite_name": scope_value if scope_kind == "suite" else None,
-    }
+def _scope_target(scope_kind: str | None, scope_value: str | None) -> _ScopeTarget:
+    return _ScopeTarget(
+        task_name=scope_value if scope_kind == "task" else None,
+        suite_name=scope_value if scope_kind == "suite" else None,
+    )
 
 
 def _result_scope_name(result: Any) -> str | None:
@@ -1223,14 +1229,16 @@ def _compute_group_pairwise(
     keep_all: bool,
     require_full_coverage: bool,
 ) -> Any:
+    scope_target = _scope_target(scope_kind, scope_value)
     return compute_pairwise(
         session=session,
+        task_name=scope_target.task_name,
         margin=margin,
         experiment_groups=[group_name],
         metric=selected_metric,
         keep_all=keep_all,
         require_full_coverage=require_full_coverage,
-        **_scope_target_kwargs(scope_kind, scope_value),
+        suite_name=scope_target.suite_name,
     )
 
 
