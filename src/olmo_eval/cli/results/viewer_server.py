@@ -43,6 +43,18 @@ if TYPE_CHECKING:
 _GROUP_LIST_CACHE_TTL_SECONDS = 15.0
 _GROUP_BROWSER_CACHE_TTL_SECONDS = 15.0
 _GROUP_BROWSER_CACHE_MAX_ENTRIES = 64
+_MIN_PAIRWISE_READY_MODELS = 2
+_VIEWER_ERROR_EMPTY_COLLECTION_FIELDS = (
+    "counts",
+    "matched_runs",
+    "compared_models",
+    "dropped_duplicate_runs",
+    "dropped_partial_coverage_models",
+    "scored_models",
+    "unscored_models",
+    "unsupported_task_metrics",
+    "per_model_instance_counts",
+)
 
 
 @dataclass(slots=True)
@@ -117,6 +129,25 @@ def _parse_scope_key(scope_key: str | None) -> tuple[str | None, str | None]:
     if kind not in {"suite", "task"} or not value:
         return None, None
     return kind, value
+
+
+def _pluralized_label(count: int, singular: str, plural: str | None = None) -> str:
+    return singular if count == 1 else (plural or f"{singular}s")
+
+
+def _scope_target_kwargs(scope_kind: str | None, scope_value: str | None) -> dict[str, str | None]:
+    return {
+        "task_name": scope_value if scope_kind == "task" else None,
+        "suite_name": scope_value if scope_kind == "suite" else None,
+    }
+
+
+def _result_scope_name(result: Any) -> str | None:
+    return result.suite_name or result.task_name
+
+
+def _result_scope_kind(result: Any) -> str:
+    return "suite" if result.suite_name else "task"
 
 
 def _pick_group(groups: list[dict[str, Any]], requested: str | None) -> str | None:
@@ -549,14 +580,30 @@ def _model_filter_score_label(model: dict[str, Any], columns: list[dict[str, Any
     return _format_score_value(average_score, column_meta)
 
 
+def _scope_status_payload(
+    *,
+    ready: bool,
+    supporting_text: str,
+    title_suffix: str,
+) -> dict[str, Any]:
+    return {
+        "ready": ready,
+        "status_badge": "ready" if ready else "needs coverage",
+        "status_tone": "ready" if ready else "limited",
+        "supporting_text": supporting_text,
+        "sort_priority": 0 if ready else 1,
+        "title_suffix": title_suffix,
+    }
+
+
 def _task_scope_availability(
     *,
     task_name: str,
     group_model_count: int,
     latest_model_count: int,
 ) -> dict[str, Any]:
-    ready = latest_model_count >= 2
-    model_label = "model" if latest_model_count == 1 else "models"
+    ready = latest_model_count >= _MIN_PAIRWISE_READY_MODELS
+    model_label = _pluralized_label(latest_model_count, "model")
     if ready:
         supporting_text = f"paired test ready with {latest_model_count} latest {model_label}"
     elif latest_model_count == 1:
@@ -564,20 +611,17 @@ def _task_scope_availability(
     else:
         supporting_text = "needs coverage: no latest models have a score"
 
-    return {
-        "ready": ready,
-        "status_badge": "ready" if ready else "needs coverage",
-        "status_tone": "ready" if ready else "limited",
-        "supporting_text": supporting_text,
-        "sort_priority": 0 if ready else 1,
-        "title_suffix": (
+    return _scope_status_payload(
+        ready=ready,
+        supporting_text=supporting_text,
+        title_suffix=(
             f"paired test ready now with {latest_model_count} latest {model_label}; "
             f"{group_model_count} group-level runs scored this task"
             if ready
             else f"only {latest_model_count} latest {model_label} scored this task; "
             "click to see what is missing"
         ),
-    }
+    )
 
 
 def _suite_scope_availability(
@@ -601,7 +645,7 @@ def _suite_scope_availability(
     )
 
     if require_full_coverage:
-        ready = covered_tasks == total_tasks and full_model_count >= 2
+        ready = covered_tasks == total_tasks and full_model_count >= _MIN_PAIRWISE_READY_MODELS
         if covered_tasks < total_tasks:
             missing = total_tasks - covered_tasks
             supporting_text = (
@@ -611,8 +655,8 @@ def _suite_scope_availability(
                 f"only {covered_tasks}/{total_tasks} suite tasks appear in the group; "
                 "click to see what still needs to run"
             )
-        elif full_model_count >= 2:
-            model_label = "model" if full_model_count == 1 else "models"
+        elif full_model_count >= _MIN_PAIRWISE_READY_MODELS:
+            model_label = _pluralized_label(full_model_count, "model")
             supporting_text = f"paired test ready with {full_model_count} latest {model_label}"
             title_suffix = (
                 f"paired test ready now with {full_model_count} latest models covering all "
@@ -631,8 +675,8 @@ def _suite_scope_availability(
                 "click to see what still needs to run"
             )
     else:
-        ready = partial_model_count >= 2
-        model_label = "model" if partial_model_count == 1 else "models"
+        ready = partial_model_count >= _MIN_PAIRWISE_READY_MODELS
+        model_label = _pluralized_label(partial_model_count, "model")
         if ready:
             supporting_text = f"likely ready with {partial_model_count} latest {model_label}"
             title_suffix = (
@@ -646,14 +690,11 @@ def _suite_scope_availability(
             supporting_text = "needs coverage: no latest models have suite scores"
             title_suffix = "no latest models have scores in this suite"
 
-    return {
-        "ready": ready,
-        "status_badge": "ready" if ready else "needs coverage",
-        "status_tone": "ready" if ready else "limited",
-        "supporting_text": supporting_text,
-        "sort_priority": 0 if ready else 1,
-        "title_suffix": title_suffix,
-    }
+    return _scope_status_payload(
+        ready=ready,
+        supporting_text=supporting_text,
+        title_suffix=title_suffix,
+    )
 
 
 def _build_group_browser_data(
@@ -1010,7 +1051,7 @@ def _scope_option_label(
     if meta.get("scope_kind") == "suite":
         task_count = int(meta.get("task_count") or 0)
         if task_count > 0:
-            task_label = "task" if task_count == 1 else "tasks"
+            task_label = _pluralized_label(task_count, "task")
             scope_label = f"{scope_label} ({task_count} {task_label})"
     shared_n = meta.get("shared_n")
     if shared_n is not None:
@@ -1069,7 +1110,7 @@ def _slugify_export_part(value: str | None, fallback: str = "export") -> str:
     return slug or fallback
 
 
-def _viewer_export_base_name(group_name: str, scope_label: str) -> str:
+def _viewer_export_base_name(group_name: str, scope_label: str | None) -> str:
     group_key = _slugify_export_part(group_name, "results")
     scope_key = _slugify_export_part(scope_label, "paired-test")
     return group_key if group_key == scope_key else f"{group_key}-{scope_key}"
@@ -1077,6 +1118,33 @@ def _viewer_export_base_name(group_name: str, scope_label: str) -> str:
 
 def _result_model_export_ref(model_hash: str | None, timestamp: str | None) -> str:
     return f"{str(model_hash or '')}|{str(timestamp or '')}"
+
+
+def _build_viewer_export_metadata(
+    *,
+    group_name: str,
+    result: Any,
+    compared_model_count: int,
+    **extra: Any,
+) -> dict[str, Any]:
+    return {
+        "group_name": group_name,
+        "scope_name": _result_scope_name(result),
+        "scope_kind": _result_scope_kind(result),
+        "metric_name": result.metric,
+        "compared_model_count": compared_model_count,
+        **extra,
+    }
+
+
+def _export_experiment_identity(experiment: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "model_display_rank": int(experiment["display_rank"]),
+        "model_label": str(experiment["display_label"]),
+        "model_name": str(experiment["model_name"]),
+        "model_hash": str(experiment["model_hash"]),
+        "timestamp": experiment["timestamp"],
+    }
 
 
 def _write_csv_bytes(rows: list[dict[str, Any]], fieldnames: list[str]) -> bytes:
@@ -1142,6 +1210,28 @@ def _resolve_export_scope_and_metric(
         )
 
     return requested_scope, scope_kind, scope_value, selected_metric
+
+
+def _compute_group_pairwise(
+    session: Session,
+    *,
+    group_name: str,
+    scope_kind: str,
+    scope_value: str,
+    selected_metric: str | None,
+    margin: float,
+    keep_all: bool,
+    require_full_coverage: bool,
+) -> Any:
+    return compute_pairwise(
+        session=session,
+        margin=margin,
+        experiment_groups=[group_name],
+        metric=selected_metric,
+        keep_all=keep_all,
+        require_full_coverage=require_full_coverage,
+        **_scope_target_kwargs(scope_kind, scope_value),
+    )
 
 
 def _resolve_compared_experiments_for_result(
@@ -1308,18 +1398,16 @@ def _build_instance_results_export_data(
 
     score_expr = _build_pairwise_score_sql_expr(task_hash_to_metric, task_profile_by_hash)
     if not experiment_ids or score_expr is None:
-        metadata = {
-            "group_name": group_name,
-            "scope_name": result.suite_name or result.task_name,
-            "scope_kind": "suite" if result.suite_name else "task",
-            "metric_name": result.metric,
-            "compared_model_count": len(compared_experiments),
-            "shared_instance_count": 0,
-            "row_count": 0,
-            "score_display_format": result.score_display_format,
-            "score_unit": result.score_unit,
-            "score_higher_is_better": result.higher_is_better,
-        }
+        metadata = _build_viewer_export_metadata(
+            group_name=group_name,
+            result=result,
+            compared_model_count=len(compared_experiments),
+            shared_instance_count=0,
+            row_count=0,
+            score_display_format=result.score_display_format,
+            score_unit=result.score_unit,
+            score_higher_is_better=result.higher_is_better,
+        )
         return metadata, []
 
     score_rows = session.execute(
@@ -1364,11 +1452,7 @@ def _build_instance_results_export_data(
             key = (task_name, native_id)
             rows.append(
                 {
-                    "model_display_rank": int(experiment["display_rank"]),
-                    "model_label": str(experiment["display_label"]),
-                    "model_name": str(experiment["model_name"]),
-                    "model_hash": str(experiment["model_hash"]),
-                    "timestamp": experiment["timestamp"],
+                    **_export_experiment_identity(experiment),
                     "task_name": task_name,
                     "native_id": native_id,
                     "task_metric_key": metric_key,
@@ -1386,18 +1470,16 @@ def _build_instance_results_export_data(
                 }
             )
 
-    metadata = {
-        "group_name": group_name,
-        "scope_name": result.suite_name or result.task_name,
-        "scope_kind": "suite" if result.suite_name else "task",
-        "metric_name": result.metric,
-        "compared_model_count": len(compared_experiments),
-        "shared_instance_count": len(shared_ids),
-        "row_count": len(rows),
-        "score_display_format": result.score_display_format,
-        "score_unit": result.score_unit,
-        "score_higher_is_better": result.higher_is_better,
-    }
+    metadata = _build_viewer_export_metadata(
+        group_name=group_name,
+        result=result,
+        compared_model_count=len(compared_experiments),
+        shared_instance_count=len(shared_ids),
+        row_count=len(rows),
+        score_display_format=result.score_display_format,
+        score_unit=result.score_unit,
+        score_higher_is_better=result.higher_is_better,
+    )
     return metadata, rows
 
 
@@ -1425,11 +1507,7 @@ def _build_stored_files_export_data(
             continue
         rows.append(
             {
-                "model_display_rank": int(experiment["display_rank"]),
-                "model_label": str(experiment["display_label"]),
-                "model_name": str(experiment["model_name"]),
-                "model_hash": str(experiment["model_hash"]),
-                "timestamp": experiment["timestamp"],
+                **_export_experiment_identity(experiment),
                 "task_name": str(task_row["task_name"]),
                 "task_hash": str(task_row["task_hash"]),
                 "task_metric_key": selected_metric or task_row.get("primary_metric"),
@@ -1441,15 +1519,13 @@ def _build_stored_files_export_data(
             }
         )
 
-    metadata = {
-        "group_name": group_name,
-        "scope_name": result.suite_name or result.task_name,
-        "scope_kind": "suite" if result.suite_name else "task",
-        "metric_name": result.metric,
-        "compared_model_count": len(compared_experiments),
-        "task_count": len({str(row["task_name"]) for row in task_rows}),
-        "row_count": len(rows),
-    }
+    metadata = _build_viewer_export_metadata(
+        group_name=group_name,
+        result=result,
+        compared_model_count=len(compared_experiments),
+        task_count=len({str(row["task_name"]) for row in task_rows}),
+        row_count=len(rows),
+    )
     return metadata, rows
 
 
@@ -1577,6 +1653,28 @@ def _render_metric_control(
     ).strip()
 
 
+def _build_viewer_error_payload(
+    *,
+    code: str,
+    summary: str,
+    scope_label: str | None,
+    notes: list[str],
+    suggestions: list[str],
+    message: str,
+    filter_summary: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "code": code,
+        "summary": summary,
+        "scope_label": scope_label,
+        "notes": notes,
+        "suggestions": suggestions,
+        "filter_summary": filter_summary,
+        "message": message,
+        **{field: [] for field in _VIEWER_ERROR_EMPTY_COLLECTION_FIELDS},
+    }
+
+
 def _viewer_pairwise_error_payload(
     error: Exception,
     *,
@@ -1640,31 +1738,21 @@ def _viewer_pairwise_error_payload(
 
     if message.startswith("No primary_metric set for task '"):
         task_name = message.split("task '", 1)[1].split("'", 1)[0]
-        return {
-            "code": "missing_primary_metric",
-            "summary": f"'{task_name}' does not define a default metric for the paired test.",
-            "scope_label": task_name,
-            "notes": [
+        return _build_viewer_error_payload(
+            code="missing_primary_metric",
+            summary=f"'{task_name}' does not define a default metric for the paired test.",
+            scope_label=task_name,
+            notes=[
                 "The paired-test view needs one metric per task so it knows which "
                 "per-instance scores to compare.",
             ],
-            "suggestions": [
+            suggestions=[
                 "Choose another task or suite that already has a default metric.",
                 "If this task should support paired comparison, set a primary metric in the "
                 "stored task results and rerun it.",
             ],
-            "counts": [],
-            "matched_runs": [],
-            "compared_models": [],
-            "dropped_duplicate_runs": [],
-            "dropped_partial_coverage_models": [],
-            "scored_models": [],
-            "unscored_models": [],
-            "unsupported_task_metrics": [],
-            "per_model_instance_counts": [],
-            "filter_summary": None,
-            "message": message,
-        }
+            message=message,
+        )
 
     if message.startswith("Suite '") and " not found" in message:
         suite_name = message.split("Suite '", 1)[1].split("'", 1)[0]
@@ -1673,114 +1761,72 @@ def _viewer_pairwise_error_payload(
             hint = message.split("Did you mean:", 1)[1].strip().rstrip("?")
             if hint:
                 suggestions.append(f"Nearby suite names: {hint}.")
-        return {
-            "code": "unknown_suite",
-            "summary": f"'{suite_name}' is not a valid suite in this viewer.",
-            "scope_label": suite_name,
-            "notes": [
-                "This usually means the page was opened with a stale or mistyped suite name."
-            ],
-            "suggestions": suggestions,
-            "counts": [],
-            "matched_runs": [],
-            "compared_models": [],
-            "dropped_duplicate_runs": [],
-            "dropped_partial_coverage_models": [],
-            "scored_models": [],
-            "unscored_models": [],
-            "unsupported_task_metrics": [],
-            "per_model_instance_counts": [],
-            "filter_summary": None,
-            "message": message,
-        }
+        return _build_viewer_error_payload(
+            code="unknown_suite",
+            summary=f"'{suite_name}' is not a valid suite in this viewer.",
+            scope_label=suite_name,
+            notes=["This usually means the page was opened with a stale or mistyped suite name."],
+            suggestions=suggestions,
+            message=message,
+        )
 
     if message.startswith("Suite '") and "resolved to zero tasks" in message:
         suite_name = message.split("Suite '", 1)[1].split("'", 1)[0]
-        return {
-            "code": "empty_suite_scope",
-            "summary": f"'{suite_name}' currently has no tasks available for paired comparison.",
-            "scope_label": suite_name,
-            "notes": [
+        return _build_viewer_error_payload(
+            code="empty_suite_scope",
+            summary=f"'{suite_name}' currently has no tasks available for paired comparison.",
+            scope_label=suite_name,
+            notes=[
                 "The suite selector landed on a scope that does not currently expand to any "
                 "tasks the viewer can compare."
             ],
-            "suggestions": [
+            suggestions=[
                 "Choose another suite or a single task from the selector.",
                 "Switch to the Results tab to inspect which tasks are present in this group.",
             ],
-            "counts": [],
-            "matched_runs": [],
-            "compared_models": [],
-            "dropped_duplicate_runs": [],
-            "dropped_partial_coverage_models": [],
-            "scored_models": [],
-            "unscored_models": [],
-            "unsupported_task_metrics": [],
-            "per_model_instance_counts": [],
-            "filter_summary": None,
-            "message": message,
-        }
+            message=message,
+        )
 
     if message.startswith("--task-hash prefix '"):
         task_hash = message.split("prefix '", 1)[1].split("'", 1)[0]
-        return {
-            "code": "ambiguous_task_scope",
-            "summary": f"The saved task link '{task_hash}' is ambiguous in this viewer.",
-            "scope_label": task_hash,
-            "notes": [
+        return _build_viewer_error_payload(
+            code="ambiguous_task_scope",
+            summary=f"The saved task link '{task_hash}' is ambiguous in this viewer.",
+            scope_label=task_hash,
+            notes=[
                 "This scope matches more than one task, so the viewer cannot decide which "
                 "single task to compare."
             ],
-            "suggestions": [
+            suggestions=[
                 "Pick the specific task from the suite / task selector instead of using this "
                 "ambiguous saved URL.",
             ],
-            "counts": [],
-            "matched_runs": [],
-            "compared_models": [],
-            "dropped_duplicate_runs": [],
-            "dropped_partial_coverage_models": [],
-            "scored_models": [],
-            "unscored_models": [],
-            "unsupported_task_metrics": [],
-            "per_model_instance_counts": [],
-            "filter_summary": None,
-            "message": message,
-        }
+            message=message,
+        )
 
     if message.startswith("Task '") and "excluded" in message:
         task_name = message.split("Task '", 1)[1].split("'", 1)[0]
-        return {
-            "code": "excluded_task_scope",
-            "summary": f"'{task_name}' is not available in this viewer scope.",
-            "scope_label": task_name,
-            "notes": [
+        return _build_viewer_error_payload(
+            code="excluded_task_scope",
+            summary=f"'{task_name}' is not available in this viewer scope.",
+            scope_label=task_name,
+            notes=[
                 "The current paired-test request points at a task that is not available "
                 "for comparison."
             ],
-            "suggestions": ["Choose another task from the suite / task selector."],
-            "counts": [],
-            "matched_runs": [],
-            "compared_models": [],
-            "dropped_duplicate_runs": [],
-            "dropped_partial_coverage_models": [],
-            "scored_models": [],
-            "unscored_models": [],
-            "unsupported_task_metrics": [],
-            "per_model_instance_counts": [],
-            "filter_summary": None,
-            "message": message,
-        }
+            suggestions=["Choose another task from the suite / task selector."],
+            message=message,
+        )
 
-    return {
-        "code": "viewer_pairwise_error",
-        "summary": "The viewer could not render this paired test.",
-        "scope_label": None,
-        "notes": [
+    return _build_viewer_error_payload(
+        code="viewer_pairwise_error",
+        summary="The viewer could not render this paired test.",
+        scope_label=None,
+        notes=[
             "This scope hit a paired-test configuration or data issue that the viewer "
             "could not resolve automatically."
         ],
-        "suggestions": [
+        suggestions=[
             "Choose another suite or task from the selector.",
             *(
                 ["Switch to the Results tab to inspect what data is available in this group."]
@@ -1788,21 +1834,11 @@ def _viewer_pairwise_error_payload(
                 else []
             ),
         ],
-        "counts": [],
-        "matched_runs": [],
-        "compared_models": [],
-        "dropped_duplicate_runs": [],
-        "dropped_partial_coverage_models": [],
-        "scored_models": [],
-        "unscored_models": [],
-        "unsupported_task_metrics": [],
-        "per_model_instance_counts": [],
-        "filter_summary": None,
-        "message": message,
-    }
+        message=message,
+    )
 
 
-def render_pairwise_browser_page(
+def render_results_viewer_page(
     *,
     groups: list[dict[str, Any]],
     selected_group: str | None,
@@ -2027,7 +2063,7 @@ def render_pairwise_browser_page(
     )
 
 
-def serve_pairwise_browser(
+def serve_results_viewer(
     *,
     db: Any,
     host: str,
@@ -2045,7 +2081,7 @@ def serve_pairwise_browser(
         max_entries=_GROUP_BROWSER_CACHE_MAX_ENTRIES,
     )
 
-    class PairwiseBrowserHandler(BaseHTTPRequestHandler):
+    class ResultsViewerHandler(BaseHTTPRequestHandler):
         def _send_bytes(
             self,
             *,
@@ -2061,6 +2097,19 @@ def serve_pairwise_browser(
                 self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
             self.end_headers()
             self.wfile.write(body)
+
+        def _send_text(
+            self,
+            *,
+            text: str,
+            status: int = 200,
+            content_type: str = "text/plain; charset=utf-8",
+        ) -> None:
+            self._send_bytes(
+                status=status,
+                body=text.encode("utf-8"),
+                content_type=content_type,
+            )
 
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
@@ -2081,19 +2130,11 @@ def serve_pairwise_browser(
                 ]
 
                 if requested_kind not in {"instance-results", "stored-files"}:
-                    self._send_bytes(
-                        status=400,
-                        body=b"Unsupported export kind.\n",
-                        content_type="text/plain; charset=utf-8",
-                    )
+                    self._send_text(status=400, text="Unsupported export kind.\n")
                     return
 
                 if requested_format not in {"csv", "json"}:
-                    self._send_bytes(
-                        status=400,
-                        body=b"Unsupported export format.\n",
-                        content_type="text/plain; charset=utf-8",
-                    )
+                    self._send_text(status=400, text="Unsupported export format.\n")
                     return
 
                 try:
@@ -2111,13 +2152,13 @@ def serve_pairwise_browser(
                                 requested_metric=requested_metric,
                             )
                         )
-                        result = compute_pairwise(
+                        result = _compute_group_pairwise(
                             session=session,
-                            task_name=scope_value if scope_kind == "task" else None,
-                            suite_name=scope_value if scope_kind == "suite" else None,
+                            group_name=selected_group,
+                            scope_kind=scope_kind,
+                            scope_value=scope_value,
+                            selected_metric=selected_metric,
                             margin=margin,
-                            experiment_groups=[selected_group],
-                            metric=selected_metric,
                             keep_all=keep_all,
                             require_full_coverage=require_full_coverage,
                         )
@@ -2156,24 +2197,16 @@ def serve_pairwise_browser(
                             format_name=requested_format,
                             base_name=_viewer_export_base_name(
                                 selected_group,
-                                result.suite_name or result.task_name,
+                                _result_scope_name(result),
                             ),
                             metadata=metadata,
                             rows=rows,
                         )
                 except PairwiseEligibilityError as error:
-                    self._send_bytes(
-                        status=409,
-                        body=(str(error) + "\n").encode("utf-8"),
-                        content_type="text/plain; charset=utf-8",
-                    )
+                    self._send_text(status=409, text=str(error) + "\n")
                     return
                 except ValueError as error:
-                    self._send_bytes(
-                        status=400,
-                        body=(str(error) + "\n").encode("utf-8"),
-                        content_type="text/plain; charset=utf-8",
-                    )
+                    self._send_text(status=400, text=str(error) + "\n")
                     return
 
                 self._send_bytes(
@@ -2230,13 +2263,13 @@ def serve_pairwise_browser(
                     and scope_value is not None
                 ):
                     try:
-                        result = compute_pairwise(
+                        result = _compute_group_pairwise(
                             session=session,
-                            task_name=scope_value if scope_kind == "task" else None,
-                            suite_name=scope_value if scope_kind == "suite" else None,
+                            group_name=selected_group,
+                            scope_kind=scope_kind,
+                            scope_value=scope_value,
+                            selected_metric=selected_metric,
                             margin=margin,
-                            experiment_groups=[selected_group],
-                            metric=selected_metric,
                             keep_all=keep_all,
                             require_full_coverage=require_full_coverage,
                         )
@@ -2254,7 +2287,7 @@ def serve_pairwise_browser(
                         )
                         pairwise_error = str(pairwise_error_details.get("summary") or error)
 
-            page = render_pairwise_browser_page(
+            page = render_results_viewer_page(
                 groups=groups,
                 selected_group=selected_group,
                 group_data=group_data,
@@ -2270,7 +2303,7 @@ def serve_pairwise_browser(
         def log_message(self, format: str, *args: Any) -> None:
             return
 
-    server = ThreadingHTTPServer((host, port), PairwiseBrowserHandler)
+    server = ThreadingHTTPServer((host, port), ResultsViewerHandler)
     try:
         server.serve_forever()
     finally:

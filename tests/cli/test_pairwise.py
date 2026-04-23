@@ -79,14 +79,14 @@ def _build_pairwise_result(*, dropped: int = 0) -> PairwiseResult:
 
 
 _BROWSER_PAYLOAD_RE = re.compile(
-    r"window\.PAIRWISE_BROWSER_DATA = (?P<payload>.+?);\s*</script>",
+    r"window\.RESULTS_VIEWER_DATA = (?P<payload>.+?);\s*</script>",
     re.DOTALL,
 )
 
 
 def _extract_browser_payload(html: str) -> dict[str, Any]:
     match = _BROWSER_PAYLOAD_RE.search(html)
-    assert match is not None, "PAIRWISE_BROWSER_DATA payload not found in viewer HTML"
+    assert match is not None, "RESULTS_VIEWER_DATA payload not found in viewer HTML"
     return json.loads(match.group("payload"))
 
 
@@ -274,7 +274,7 @@ def test_results_viewer_csv_dump_streams_to_stdout(monkeypatch) -> None:
 
 
 def test_build_results_table_keep_all_preserves_distinct_reruns(monkeypatch) -> None:
-    pairwise_server = importlib.import_module("olmo_eval.cli.results.pairwise_server")
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
 
     earlier = SimpleNamespace(
         id=10,
@@ -290,12 +290,12 @@ def test_build_results_table_keep_all_preserves_distinct_reruns(monkeypatch) -> 
     )
 
     monkeypatch.setattr(
-        pairwise_server,
+        viewer_server,
         "_group_experiments",
         lambda session, group_name, keep_all: [later, earlier] if keep_all else [later],
     )
 
-    latest_table = pairwise_server._build_results_table(
+    latest_table = viewer_server._build_results_table(
         _StaticTaskSession(
             [
                 (
@@ -309,7 +309,7 @@ def test_build_results_table_keep_all_preserves_distinct_reruns(monkeypatch) -> 
         "my-group",
         keep_all=False,
     )
-    all_runs_table = pairwise_server._build_results_table(
+    all_runs_table = viewer_server._build_results_table(
         _StaticTaskSession(
             [
                 (
@@ -338,11 +338,11 @@ def test_build_results_table_keep_all_preserves_distinct_reruns(monkeypatch) -> 
     assert "2026-04-21 12:00" in all_runs_table["models"][0]["display_label"]
     assert "2026-04-21 08:00" in all_runs_table["models"][1]["display_label"]
     assert (
-        pairwise_server._model_key(all_runs_table["models"][0])
+        viewer_server._model_key(all_runs_table["models"][0])
         == "abc12345deadbeef|2026-04-21T12:00:00+00:00"
     )
     assert (
-        pairwise_server._model_key(all_runs_table["models"][1])
+        viewer_server._model_key(all_runs_table["models"][1])
         == "abc12345deadbeef|2026-04-21T08:00:00+00:00"
     )
 
@@ -350,7 +350,7 @@ def test_build_results_table_keep_all_preserves_distinct_reruns(monkeypatch) -> 
 def test_build_results_table_metric_options_do_not_double_count_primary_metric(
     monkeypatch,
 ) -> None:
-    pairwise_server = importlib.import_module("olmo_eval.cli.results.pairwise_server")
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
 
     experiment = SimpleNamespace(
         id=11,
@@ -360,12 +360,12 @@ def test_build_results_table_metric_options_do_not_double_count_primary_metric(
     )
 
     monkeypatch.setattr(
-        pairwise_server,
+        viewer_server,
         "_group_experiments",
         lambda session, group_name, keep_all: [experiment],
     )
 
-    results_table = pairwise_server._build_results_table(
+    results_table = viewer_server._build_results_table(
         _StaticTaskSession(
             [
                 (
@@ -392,7 +392,7 @@ def test_build_results_table_metric_options_do_not_double_count_primary_metric(
 
 
 def test_model_filter_score_label_uses_selected_scope_columns() -> None:
-    pairwise_server = importlib.import_module("olmo_eval.cli.results.pairwise_server")
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
 
     results_table = {
         "task_columns": [
@@ -430,13 +430,13 @@ def test_model_filter_score_label_uses_selected_scope_columns() -> None:
         }
     }
 
-    scoped_columns = pairwise_server._scoped_task_columns(results_table, selected_scope)
+    scoped_columns = viewer_server._scoped_task_columns(results_table, selected_scope)
 
-    assert pairwise_server._model_filter_score_label(model, scoped_columns) == "50.0%"
+    assert viewer_server._model_filter_score_label(model, scoped_columns) == "50.0%"
 
 
 def test_model_filter_score_label_formats_raw_metrics_and_hides_mixed_units() -> None:
-    pairwise_server = importlib.import_module("olmo_eval.cli.results.pairwise_server")
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
 
     raw_columns = [
         {
@@ -469,8 +469,8 @@ def test_model_filter_score_label_formats_raw_metrics_and_hides_mixed_units() ->
         }
     }
 
-    assert pairwise_server._model_filter_score_label(model, raw_columns) == "0.5"
-    assert pairwise_server._model_filter_score_label(model, mixed_columns) == "—"
+    assert viewer_server._model_filter_score_label(model, raw_columns) == "0.5"
+    assert viewer_server._model_filter_score_label(model, mixed_columns) == "—"
 
 
 def test_results_viewer_rejects_removed_plot_format() -> None:
@@ -496,10 +496,10 @@ def test_results_viewer_rejects_removed_html_export_format() -> None:
 
 
 def test_timed_value_cache_reuses_fresh_entries_and_expires_stale_ones() -> None:
-    pairwise_server = importlib.import_module("olmo_eval.cli.results.pairwise_server")
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
 
     now = [100.0]
-    cache = pairwise_server._TimedValueCache(ttl_seconds=5.0, clock=lambda: now[0])
+    cache = viewer_server._TimedValueCache(ttl_seconds=5.0, clock=lambda: now[0])
     calls = {"count": 0}
 
     def loader() -> dict[str, int]:
@@ -518,7 +518,7 @@ def test_timed_value_cache_reuses_fresh_entries_and_expires_stale_ones() -> None
 
 
 def test_viewer_scope_pickers_require_explicit_selection() -> None:
-    pairwise_server = importlib.import_module("olmo_eval.cli.results.pairwise_server")
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
 
     groups = [
         {"name": "alpha-benchmark", "models": 2, "tasks": 3},
@@ -543,21 +543,19 @@ def test_viewer_scope_pickers_require_explicit_selection() -> None:
         ]
     }
 
-    assert pairwise_server._pick_group(groups, None) is None
-    assert pairwise_server._pick_group(groups, "alpha") == "alpha-benchmark"
-    assert pairwise_server._pick_group(groups, "missing") is None
+    assert viewer_server._pick_group(groups, None) is None
+    assert viewer_server._pick_group(groups, "alpha") == "alpha-benchmark"
+    assert viewer_server._pick_group(groups, "missing") is None
 
-    assert pairwise_server._pick_scope(group_data, None) is None
-    assert pairwise_server._pick_scope(group_data, "suite::olmobase:math") == (
-        "suite::olmobase:math"
-    )
-    assert pairwise_server._pick_scope(group_data, "suite::missing") is None
+    assert viewer_server._pick_scope(group_data, None) is None
+    assert viewer_server._pick_scope(group_data, "suite::olmobase:math") == ("suite::olmobase:math")
+    assert viewer_server._pick_scope(group_data, "suite::missing") is None
 
 
 def test_serialize_viewer_export_supports_csv_and_json() -> None:
-    pairwise_server = importlib.import_module("olmo_eval.cli.results.pairwise_server")
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
 
-    filename, content_type, body = pairwise_server._serialize_viewer_export(
+    filename, content_type, body = viewer_server._serialize_viewer_export(
         kind="instance-results",
         format_name="csv",
         base_name="my-group-my-scope",
@@ -587,7 +585,7 @@ def test_serialize_viewer_export_supports_csv_and_json() -> None:
         "model_display_rank,model_label,model_name,model_hash,timestamp,"
     )
 
-    filename, content_type, body = pairwise_server._serialize_viewer_export(
+    filename, content_type, body = viewer_server._serialize_viewer_export(
         kind="stored-files",
         format_name="json",
         base_name="my-group-my-scope",
@@ -606,11 +604,11 @@ def test_serialize_viewer_export_supports_csv_and_json() -> None:
     assert '"predictions_file": "s3://bucket/predictions.jsonl"' in body.decode("utf-8")
 
 
-def test_render_pairwise_browser_page_renders_core_viewer_state_and_controls() -> None:
+def test_render_results_viewer_page_renders_core_viewer_state_and_controls() -> None:
     """The browser page should expose core viewer state without CSS-level snapshot checks."""
-    pairwise_server = importlib.import_module("olmo_eval.cli.results.pairwise_server")
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
 
-    html = pairwise_server.render_pairwise_browser_page(
+    html = viewer_server.render_results_viewer_page(
         groups=[
             {
                 "name": "my-benchmark",
@@ -755,10 +753,10 @@ def test_render_pairwise_browser_page_renders_core_viewer_state_and_controls() -
     assert 'id="metric-select"' not in html
 
 
-def test_render_pairwise_browser_page_shows_root_default_selection_state() -> None:
-    pairwise_server = importlib.import_module("olmo_eval.cli.results.pairwise_server")
+def test_render_results_viewer_page_shows_root_default_selection_state() -> None:
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
 
-    html = pairwise_server.render_pairwise_browser_page(
+    html = viewer_server.render_results_viewer_page(
         groups=[{"name": "my-benchmark", "models": 4, "tasks": 3}],
         selected_group=None,
         group_data=None,
@@ -781,10 +779,10 @@ def test_render_pairwise_browser_page_shows_root_default_selection_state() -> No
     assert "use the selectors above to choose what you want to compare." in html
 
 
-def test_render_pairwise_browser_page_leaves_scope_unselected_without_request() -> None:
-    pairwise_server = importlib.import_module("olmo_eval.cli.results.pairwise_server")
+def test_render_results_viewer_page_leaves_scope_unselected_without_request() -> None:
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
 
-    html = pairwise_server.render_pairwise_browser_page(
+    html = viewer_server.render_results_viewer_page(
         groups=[{"name": "my-benchmark", "models": 4, "tasks": 3}],
         selected_group="my-benchmark",
         group_data={
@@ -828,10 +826,10 @@ def test_render_pairwise_browser_page_leaves_scope_unselected_without_request() 
     assert "pick a suite or task to open the paired-test view." in html
 
 
-def test_render_pairwise_browser_page_embeds_structured_pairwise_error() -> None:
-    pairwise_server = importlib.import_module("olmo_eval.cli.results.pairwise_server")
+def test_render_results_viewer_page_embeds_structured_pairwise_error() -> None:
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
 
-    html = pairwise_server.render_pairwise_browser_page(
+    html = viewer_server.render_results_viewer_page(
         groups=[{"name": "olmo-3-parity-apr5", "models": 8, "tasks": 13}],
         selected_group="olmo-3-parity-apr5",
         group_data={
@@ -925,10 +923,10 @@ def test_render_pairwise_browser_page_embeds_structured_pairwise_error() -> None
     assert "raw detail" not in html
 
 
-def test_render_pairwise_browser_page_renders_metric_selector_for_recoverable_scope() -> None:
-    pairwise_server = importlib.import_module("olmo_eval.cli.results.pairwise_server")
+def test_render_results_viewer_page_renders_metric_selector_for_recoverable_scope() -> None:
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
 
-    html = pairwise_server.render_pairwise_browser_page(
+    html = viewer_server.render_results_viewer_page(
         groups=[{"name": "olmo-eval-external", "models": 6, "tasks": 1}],
         selected_group="olmo-eval-external",
         group_data={
@@ -998,10 +996,10 @@ def test_render_pairwise_browser_page_renders_metric_selector_for_recoverable_sc
     assert "Use the metric control above to choose a metric and retry the paired test." in html
 
 
-def test_render_pairwise_browser_page_shows_scope_readiness_states() -> None:
-    pairwise_server = importlib.import_module("olmo_eval.cli.results.pairwise_server")
+def test_render_results_viewer_page_shows_scope_readiness_states() -> None:
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
 
-    html = pairwise_server.render_pairwise_browser_page(
+    html = viewer_server.render_results_viewer_page(
         groups=[{"name": "olmo-3-parity-apr5", "models": 8, "tasks": 13}],
         selected_group="olmo-3-parity-apr5",
         group_data={
@@ -1051,9 +1049,9 @@ def test_render_pairwise_browser_page_shows_scope_readiness_states() -> None:
 
 
 def test_viewer_pairwise_error_payload_rewrites_missing_primary_metric_for_ui() -> None:
-    pairwise_server = importlib.import_module("olmo_eval.cli.results.pairwise_server")
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
 
-    payload = pairwise_server._viewer_pairwise_error_payload(
+    payload = viewer_server._viewer_pairwise_error_payload(
         ValueError(
             "No primary_metric set for task 'codex_humaneval:olmo3base' — "
             "specify --metric explicitly"
@@ -1070,7 +1068,7 @@ def test_viewer_pairwise_error_payload_rewrites_missing_primary_metric_for_ui() 
 
 
 def test_viewer_pairwise_error_payload_rewrites_structured_cli_suggestions() -> None:
-    pairwise_server = importlib.import_module("olmo_eval.cli.results.pairwise_server")
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
     analysis_pairwise = importlib.import_module("olmo_eval.analysis.pairwise")
 
     error = analysis_pairwise.PairwiseEligibilityError(
@@ -1082,7 +1080,7 @@ def test_viewer_pairwise_error_payload_rewrites_structured_cli_suggestions() -> 
         ],
     )
 
-    payload = pairwise_server._viewer_pairwise_error_payload(
+    payload = viewer_server._viewer_pairwise_error_payload(
         error,
         selected_group="foo",
     )

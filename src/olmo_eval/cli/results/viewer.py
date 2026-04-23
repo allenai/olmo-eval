@@ -538,14 +538,14 @@ def _serve_html_browser(
     require_full_coverage: bool,
 ) -> None:
     """Start the local results viewer server for interactive exploration."""
-    from olmo_eval.cli.results.pairwise_server import serve_pairwise_browser
+    from olmo_eval.cli.results.viewer_server import serve_results_viewer
 
     db = get_database_session(db_host, db_port, db_name, db_user, db_password)
     url = f"http://{host}:{port}"
     console.print(f"[green]Starting results viewer at {url}[/green]")
     console.print("[dim]Press Ctrl+C to stop the viewer.[/dim]")
     try:
-        serve_pairwise_browser(
+        serve_results_viewer(
             db=db,
             host=host,
             port=port,

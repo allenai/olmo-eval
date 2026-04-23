@@ -1,5 +1,5 @@
 (() => {
-      const pageData = window.PAIRWISE_BROWSER_DATA;
+      const pageData = window.RESULTS_VIEWER_DATA;
       const root = document.getElementById("browser-root");
       const scopeForm = document.querySelector(".scope-form");
       const modelFilterDetails = document.getElementById("model-filter-details");

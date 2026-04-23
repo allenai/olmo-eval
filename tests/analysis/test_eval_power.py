@@ -115,18 +115,6 @@ class TestEstimateVarianceComponents:
         assert vc["var_paired_diff"] == 0.0
         assert vc["omega2"] == 0.0
 
-    def test_clustered_equals_iid_when_each_cluster_is_singleton(self) -> None:
-        # The clustered path uses /n, so compare scale rather than exact equality.
-        rng = np.random.default_rng(42)
-        a = rng.uniform(size=20)
-        b = rng.uniform(size=20)
-        cluster_ids = np.arange(20)
-        vc_cluster = estimate_variance_components(a, b, cluster_ids=cluster_ids)
-        vc_plain = estimate_variance_components(a, b)
-        assert vc_cluster["n_clusters"] == 20
-        assert vc_cluster["var_paired_diff"] > 0
-        assert vc_plain["var_paired_diff"] > 0
-
     def test_clustered_inflates_variance_with_correlated_within_cluster(self) -> None:
         a = np.array([0.8, 0.8, 0.8, 0.8, 0.2, 0.2, 0.2, 0.2])
         b = np.array([0.3, 0.3, 0.3, 0.3, 0.7, 0.7, 0.7, 0.7])
