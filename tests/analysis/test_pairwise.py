@@ -12,6 +12,7 @@ from olmo_eval.analysis.eval_power import minimum_detectable_effect
 from olmo_eval.analysis.pairwise import (
     ModelMeta,
     PairStats,
+    PairwiseEligibilityError,
     PairwiseResult,
     _build_experiment_refetch_stmt,
     _compute_pairs,
@@ -25,7 +26,7 @@ from olmo_eval.analysis.pairwise import (
     get_task_metric_profile,
     get_win_rate,
 )
-from olmo_eval.analysis.pairwise_html import build_pairwise_html_payload, render_pairwise_html
+from olmo_eval.analysis.pairwise_viewer_payload import build_pairwise_viewer_payload
 from olmo_eval.common.metrics import PassPowKMetric
 from olmo_eval.common.scorers import CodeExecutionScorer
 from olmo_eval.common.types.base import EvalResult
@@ -354,6 +355,26 @@ class TestPairwiseInstanceScoreExtraction:
         assert k2_metric.supports_pairwise_scorer_fallback() is False
 
 
+class TestPairwiseEligibilityError:
+    def test_to_payload_preserves_structured_diagnostics(self) -> None:
+        error = PairwiseEligibilityError(
+            code="insufficient_matched_experiments",
+            summary="Only 1 run matched the paired-test requirements for this scope.",
+            filter_summary="groups=['olmo-3-parity-apr5'], suite='mmlu:humanities:mc:olmo3base'",
+            counts=[{"label": "matched runs", "value": 1}],
+            matched_runs=[{"label": "allenai/OLMo-3-1025-7B (abc12345)"}],
+            suggestions=["Broaden the filters."],
+        )
+
+        payload = error.to_payload()
+
+        assert str(error) == "Only 1 run matched the paired-test requirements for this scope."
+        assert payload["code"] == "insufficient_matched_experiments"
+        assert payload["counts"] == [{"label": "matched runs", "value": 1}]
+        assert payload["matched_runs"] == [{"label": "allenai/OLMo-3-1025-7B (abc12345)"}]
+        assert payload["suggestions"] == ["Broaden the filters."]
+
+
 class TestPairwiseResult:
     def test_result_fields(self) -> None:
         result = PairwiseResult(
@@ -414,7 +435,7 @@ class TestPairwiseResult:
             model_shared_scores=(0.9, 0.1),
         )
 
-        payload = build_pairwise_html_payload(result)
+        payload = build_pairwise_viewer_payload(result)
         probability = payload["matrix"]["probability"][0][1]
         p_value = payload["matrix"]["p_value"][0][1]
 
@@ -445,7 +466,7 @@ class TestPairwiseResult:
             model_shared_scores=(0.6, 0.4),
         )
 
-        payload = build_pairwise_html_payload(result)
+        payload = build_pairwise_viewer_payload(result)
 
         expected = minimum_detectable_effect(
             n=100,
@@ -473,93 +494,12 @@ class TestPairwiseResult:
             higher_is_better=False,
         )
 
-        payload = build_pairwise_html_payload(result)
+        payload = build_pairwise_viewer_payload(result)
 
         assert payload["meta"]["score_display_format"] == "raw"
         assert payload["meta"]["score_unit"] == "bits_per_byte"
         assert payload["meta"]["higher_is_better"] is False
         assert payload["matrix"]["score_diff"][0][1] == pytest.approx(-0.16)
-
-    def test_render_pairwise_html_formats_tiny_p_scale_values_with_scientific_notation(
-        self,
-    ) -> None:
-        result = PairwiseResult(
-            task_name="olmobase:math",
-            metric="accuracy:exact_match",
-            margin=0.0,
-            instance_count=100,
-            models=[
-                ModelMeta(label="model-a\n(abc12345)", model_name="model-a", model_hash="abc12345"),
-                ModelMeta(label="model-b\n(def67890)", model_name="model-b", model_hash="def67890"),
-            ],
-            pairs=[PairStats(index_a=0, index_b=1, wins_a=90, wins_b=10, ties=0)],
-            model_shared_scores=(0.9, 0.1),
-        )
-
-        html = render_pairwise_html(result)
-
-        assert html.index('data-view="matrix"') < html.index('data-view="table"')
-        assert html.index(
-            'class="th-avg sortable ${sortState.key === "avg" ? "active" : ""}"'
-        ) < html.index('class="th-task sortable ${sortState.key === column.id ? "active" : ""}"')
-        assert "function showAverageColumn(columns)" in html
-        assert "const header = showAverage" in html
-        assert "task ${sortArrow(column.id)}" not in html
-        assert "function sortSvg() {" in html
-        assert 'class="sort-glyph ${stateClass}"' in html
-        assert 'class="th-task sortable ${sortState.key === column.id ? "active" : ""}"' in html
-        assert 'data-action="table-sort"' in html
-        assert "visible mean" not in html
-        assert 'title="mean across visible task columns"' in html
-        assert "olmo-eval" in html
-        assert "Results viewer" in html
-        assert "pairwise comparison" not in html
-        assert '<span class="legend-title legend-title-alpha">α</span>' in html
-        assert ".legend-title-alpha {" in html
-        assert "text-transform: none;" in html
-        assert (
-            html.index('<span class="legend-title">intensity</span>')
-            < html.index("${alphaLegend()}")
-            < html.index('<span class="legend-title">MDE80</span>')
-        )
-        assert 'renderSelect("suite / task", scopeLabel)' in html
-        assert 'renderSelect("scoring", metricLabel)' in html
-        assert "--app-gutter: clamp(18px, 3vw, 42px);" in html
-        assert "--app-max: 1880px;" in html
-        assert "max-width: min(100%, var(--app-max));" in html
-        assert "margin-inline: auto;" in html
-        assert "padding-inline: var(--app-gutter);" in html
-        assert "width: auto;" in html
-        assert "min-width: max-content;" in html
-        assert ".results-table th.th-task:last-child," in html
-        assert "search model names..." in html
-        assert "left: calc(var(--table-idx-w) + var(--table-name-w));" in html
-        assert "align-items: flex-end;" in html
-        assert "min-height: 18px;" in html
-        assert 'class="th-inline"' in html
-        assert "function sortSvg() {" in html
-        assert 'class="sort-glyph ${stateClass}"' in html
-        assert "overflow-wrap: anywhere;" in html
-        assert "function cellSignalLevel" in html
-        assert "function matrixMde(meta, alpha)" in html
-        assert 'return `<span class="cell-signal sig-${level}" aria-hidden="true"></span>`;' in html
-        assert ".cell-signal.sig-3 {" in html
-        assert ".cell-signal-bar" not in html
-        assert "alpha: 0.05," in html
-        assert 'loadState("alpha", "0.05")' not in html
-        assert 'storageBase + "alpha"' not in html
-        assert "col-hdr-idx" not in html
-        assert 'class="matrix-hdr-hide row-hdr-hide"' in html
-        assert 'class="matrix-hdr-hide col-hdr-hide"' in html
-        assert "background: currentColor;" in html
-        assert 'const fg = lightness < 0.72 ? "var(--c-paper)" : "var(--c-ink-70)";' in html
-        assert "fmtCellMeta" not in html
-        assert "sigStars" not in html
-        assert "value < 1e-4" in html
-        assert 'toExponential(0).replace("e+", "e")' in html
-        assert 'toLocaleString("en-US"' in html
-        assert "MDE80" in html
-        assert "legend-metric-value" in html
 
 
 class TestComputePairsCompoundKeys:

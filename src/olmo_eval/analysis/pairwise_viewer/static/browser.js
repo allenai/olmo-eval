@@ -2,6 +2,7 @@
       const pageData = window.PAIRWISE_BROWSER_DATA;
       const root = document.getElementById("browser-root");
       const scopeForm = document.querySelector(".scope-form");
+      const modelFilterDetails = document.getElementById("model-filter-details");
       const storageBase = "pairwise-browser:" +
         (pageData.group_data?.summary?.group_name || "root") +
         ":";
@@ -16,9 +17,16 @@
         tableSortDir: "desc",
         excludedModels: loadSetState("excludedModels"),
         hiddenCols: new Set(),
+        columnsMenuOpen: false,
       };
       let hoverPair = null;
       let pendingNavigation = false;
+      let activeTableScrollDrag = null;
+      const resultsScrollbarObservers = new WeakMap();
+      let resultsScrollSyncQueued = false;
+      let searchSelectWidthSyncQueued = false;
+      const textMeasureCanvas = document.createElement("canvas");
+      const textMeasureContext = textMeasureCanvas.getContext("2d");
 
       function loadState(key, fallback) {
         const value = window.localStorage.getItem(storageBase + key);
@@ -41,6 +49,79 @@
           storageBase + "excludedModels",
           JSON.stringify(Array.from(state.excludedModels))
         );
+      }
+
+      function clamp(value, min, max) {
+        return Math.min(Math.max(value, min), max);
+      }
+
+      function measuredTextWidth(text, font) {
+        if (!textMeasureContext) return 0;
+        textMeasureContext.font = font;
+        return textMeasureContext.measureText(String(text || "")).width;
+      }
+
+      function nodeFont(node) {
+        const style = window.getComputedStyle(node);
+        return style.font || [
+          style.fontStyle,
+          style.fontVariant,
+          style.fontWeight,
+          style.fontSize,
+          style.fontFamily,
+        ].filter(Boolean).join(" ");
+      }
+
+      function measureNodeTextWidth(node, text = null) {
+        if (!node) return 0;
+        return measuredTextWidth(text ?? node.textContent ?? "", nodeFont(node));
+      }
+
+      function syncSearchSelectMenuWidth(control) {
+        if (!control) return;
+        if (!control.classList.contains("group-select") && !control.classList.contains("scope-select")) {
+          return;
+        }
+        const summary = control.querySelector(".search-select-summary");
+        const summaryText = control.querySelector(".control-summary-text");
+        const filterInput = control.querySelector(".search-select-filter");
+        const optionLabels = Array.from(control.querySelectorAll(".search-select-option-main"));
+        let widestText = Math.max(
+          measureNodeTextWidth(summaryText),
+          measureNodeTextWidth(filterInput, filterInput?.placeholder || "")
+        );
+        optionLabels.forEach((node) => {
+          widestText = Math.max(widestText, measureNodeTextWidth(node));
+        });
+        const summaryWidth = Math.ceil(summary?.getBoundingClientRect().width || 0);
+        const desiredWidth = Math.ceil(widestText + 44);
+        const viewportMax = Math.max(320, window.innerWidth - 48);
+        const width = clamp(desiredWidth, summaryWidth, viewportMax);
+        control.style.setProperty("--search-select-menu-width", `${width}px`);
+      }
+
+      function syncAllSearchSelectMenuWidths() {
+        scopeForm?.querySelectorAll("[data-search-select]").forEach((control) => {
+          syncSearchSelectMenuWidth(control);
+        });
+      }
+
+      function queueSearchSelectMenuWidthSync() {
+        if (searchSelectWidthSyncQueued) return;
+        searchSelectWidthSyncQueued = true;
+        window.requestAnimationFrame(() => {
+          searchSelectWidthSyncQueued = false;
+          syncAllSearchSelectMenuWidths();
+        });
+      }
+
+      function queueResultsScrollSync() {
+        if (resultsScrollSyncQueued) return;
+        resultsScrollSyncQueued = true;
+        window.requestAnimationFrame(() => {
+          resultsScrollSyncQueued = false;
+          syncResultsScrollbars();
+        });
       }
 
       function showScopeLoading() {
@@ -747,86 +828,96 @@
                 </button>
               </div>
             </div>
-            <div class="table-scroll">
-              <table class="results-table">
-                <thead>
-                  <tr>
-                    <th class="th-idx">#</th>
-                    <th
-                      class="th-name sortable ${sortState.key === "name" ? "active" : ""}"
-                      data-action="table-sort"
-                      data-key="name"
-                    >
-                      <span class="th-inline">
-                        <span>model</span>
-                        ${sortArrow("name", sortState)}
-                      </span>
-                    </th>
-                    ${showAverage ? `
-                      <th
-                        class="th-avg sortable ${sortState.key === "avg" ? "active" : ""}"
-                        data-action="table-sort"
-                        data-key="avg"
-                        title="mean across visible task columns"
-                      >
-                        <div class="th-stack th-sort-target">
-                          <span class="th-top">avg</span>
-                          <span class="th-bot th-bot-arrow">${sortArrow("avg", sortState)}</span>
-                        </div>
-                      </th>
-                    ` : ""}
-                    ${columns.map((column) => `
-                      <th
-                        class="th-task sortable ${sortState.key === column.id ? "active" : ""}"
-                        data-action="table-sort"
-                        data-key="${esc(column.id)}"
-                        title="${esc(column.full_label)}"
-                      >
-                        <div class="th-inner">
-                          <div
-                            class="th-stack th-sort-target"
-                          >
-                            <span class="th-top">${esc(column.label)}</span>
-                            <span class="th-bot th-bot-arrow">
-                              ${sortArrow(column.id, sortState)}
-                            </span>
-                          </div>
-                          <button
-                            class="th-col-hide"
-                            data-action="toggle-col"
-                            data-id="${esc(column.id)}"
-                            title="hide column"
-                          >x</button>
-                        </div>
-                      </th>
-                    `).join("")}
-                  </tr>
-                </thead>
-                <tbody>
-                  ${rows.map((model, position) => `
+            <div class="table-scroll-shell">
+              <div class="table-scroll" data-role="results-scroll-region">
+                <table class="results-table">
+                  <thead>
                     <tr>
-                      <td class="td-idx">${position + 1}</td>
+                      <th class="th-idx">#</th>
+                      <th
+                        class="th-name sortable ${sortState.key === "name" ? "active" : ""}"
+                        data-action="table-sort"
+                        data-key="name"
+                      >
+                        <span class="th-inline">
+                          <span>model</span>
+                          ${sortArrow("name", sortState)}
+                        </span>
+                      </th>
+                      ${showAverage ? `
+                        <th
+                          class="th-avg sortable ${sortState.key === "avg" ? "active" : ""}"
+                          data-action="table-sort"
+                          data-key="avg"
+                          title="mean across visible task columns"
+                        >
+                          <div class="th-stack th-sort-target">
+                            <span class="th-top">avg</span>
+                            <span class="th-bot th-bot-arrow">${sortArrow("avg", sortState)}</span>
+                          </div>
+                        </th>
+                      ` : ""}
+                      ${columns.map((column) => `
+                        <th
+                          class="th-task sortable ${sortState.key === column.id ? "active" : ""}"
+                          data-action="table-sort"
+                          data-key="${esc(column.id)}"
+                          title="${esc(column.full_label)}"
+                        >
+                          <div class="th-inner">
+                            <div
+                              class="th-stack th-sort-target"
+                            >
+                              <span class="th-top">${esc(column.label)}</span>
+                              <span class="th-bot th-bot-arrow">
+                                ${sortArrow(column.id, sortState)}
+                              </span>
+                            </div>
+                            <button
+                              class="th-col-hide"
+                              data-action="toggle-col"
+                              data-id="${esc(column.id)}"
+                              title="hide column"
+                            >x</button>
+                          </div>
+                        </th>
+                      `).join("")}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${rows.map((model, position) => `
+                      <tr>
+                        <td class="td-idx">${position + 1}</td>
                       <td class="td-name">
-                        <span class="td-name-text">${esc(model.display_label)}</span>
                         <button
                           class="td-name-hide"
                           data-action="exclude-model"
                           data-model-key="${esc(modelKey(model))}"
                           title="exclude model"
                         >x</button>
+                        <span class="td-name-main">
+                          <span class="td-name-text">${esc(model.display_label)}</span>
+                        </span>
                       </td>
-                      ${showAverage ? `
-                        <td class="td-num td-avg">
-                          ${fmtScore(averageVisibleScore(model, columns), avgMeta)}
-                        </td>
-                      ` : ""}
-                      ${columns.map((column) => `
-                        <td class="td-num">${fmtScore(model.task_scores[column.id], column)}</td>
-                      `).join("")}
-                    </tr>
-                  `).join("")}
-                </tbody>
-              </table>
+                        ${showAverage ? `
+                          <td class="td-num td-avg">
+                            ${fmtScore(averageVisibleScore(model, columns), avgMeta)}
+                          </td>
+                        ` : ""}
+                        ${columns.map((column) => `
+                          <td class="td-num">${fmtScore(model.task_scores[column.id], column)}</td>
+                        `).join("")}
+                      </tr>
+                    `).join("")}
+                  </tbody>
+                </table>
+              </div>
+              <div class="table-xbar" data-role="results-scrollbar" hidden>
+                <span class="table-xbar-label">scroll</span>
+                <div class="table-xbar-track" data-role="results-scrollbar-track">
+                  <div class="table-xbar-thumb" data-role="results-scrollbar-thumb"></div>
+                </div>
+              </div>
             </div>
           </div>
         `;
@@ -835,8 +926,9 @@
       function renderColsMenu(resultsData) {
         const scopedColumns = scopedTaskColumns(resultsData);
         const visibleCount = visibleTaskColumns(resultsData).length;
+        const hiddenCount = Math.max(0, scopedColumns.length - visibleCount);
         return `
-          <details class="tt-dd">
+          <details class="tt-dd tt-cols-menu" ${state.columnsMenuOpen ? "open" : ""}>
             <summary class="tt-icon-btn">
               ${colsSvg()} columns
               ${visibleCount !== scopedColumns.length
@@ -844,21 +936,39 @@
                 : ""}
             </summary>
             <div class="tt-menu">
-              <div class="tt-menu-head"><span>tasks</span></div>
+              <div class="tt-menu-head">
+                <span>tasks</span>
+                ${hiddenCount > 0 ? `
+                  <button
+                    type="button"
+                    class="tt-menu-clear"
+                    data-action="reset-cols"
+                    title="show all columns"
+                  >reset</button>
+                ` : ""}
+              </div>
               <div class="tt-menu-body">
                 ${scopedColumns.map((column) => {
                   const checked = !state.hiddenCols.has(column.id) ? "checked" : "";
                   return `
-                    <label class="tt-menu-row">
+                    <div class="tt-menu-row">
                       <input
                         type="checkbox"
                         data-action="toggle-col-checkbox"
                         data-id="${esc(column.id)}"
                         ${checked}
                       />
-                      <span class="tt-menu-name">${esc(column.label)}</span>
+                      <button
+                        type="button"
+                        class="tt-menu-name-btn"
+                        data-action="solo-col"
+                        data-id="${esc(column.id)}"
+                        title="show only this column"
+                      >
+                        <span class="tt-menu-name">${esc(column.label)}</span>
+                      </button>
                       <span class="tt-menu-n">${column.model_count}</span>
-                    </label>
+                    </div>
                   `;
                 }).join("")}
               </div>
@@ -867,13 +977,152 @@
         `;
       }
 
-      function renderMatrix(pairwiseData, errorMessage) {
-        if (errorMessage) {
-          return `
-            <div class="matrix-wrap">
-              <div class="alert">${esc(errorMessage)}</div>
-            </div>
-          `;
+      function bindColumnsMenu() {
+        const colsMenu = root.querySelector(".tt-cols-menu");
+        if (!colsMenu || colsMenu.dataset.bound === "1") return;
+        colsMenu.dataset.bound = "1";
+        colsMenu.addEventListener("toggle", () => {
+          state.columnsMenuOpen = colsMenu.open;
+        });
+      }
+
+      function bindResultsScrollbars() {
+        root.querySelectorAll(".table-scroll-shell").forEach((shell) => {
+          if (shell.dataset.scrollbarBound === "1") return;
+          const region = shell.querySelector('[data-role="results-scroll-region"]');
+          const track = shell.querySelector('[data-role="results-scrollbar-track"]');
+          const thumb = shell.querySelector('[data-role="results-scrollbar-thumb"]');
+          if (!region || !track || !thumb) return;
+          shell.dataset.scrollbarBound = "1";
+
+          region.addEventListener("scroll", syncResultsScrollbars);
+
+          const table = region.querySelector(".results-table");
+          if (table && "ResizeObserver" in window && !resultsScrollbarObservers.has(shell)) {
+            const observer = new ResizeObserver(() => {
+              queueResultsScrollSync();
+            });
+            observer.observe(region);
+            observer.observe(table);
+            resultsScrollbarObservers.set(shell, observer);
+          }
+
+          track.addEventListener("pointerdown", (event) => {
+            if (event.button !== 0) return;
+            const metrics = measureResultsScrollMetrics(region);
+            const rect = track.getBoundingClientRect();
+            const thumbWidth = thumb.offsetWidth || 0;
+            const maxOffset = Math.max(0, rect.width - thumbWidth);
+            const maxScroll = metrics.maxScroll;
+            if (maxOffset <= 0 || maxScroll <= 0) return;
+            const nextOffset = clamp(
+              event.clientX - rect.left - thumbWidth / 2,
+              0,
+              maxOffset
+            );
+            region.scrollLeft = (nextOffset / maxOffset) * maxScroll;
+          });
+
+          thumb.addEventListener("pointerdown", (event) => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const metrics = measureResultsScrollMetrics(region);
+            const trackWidth = track.clientWidth;
+            const thumbWidth = thumb.offsetWidth || 0;
+            const maxOffset = Math.max(0, trackWidth - thumbWidth);
+            const maxScroll = metrics.maxScroll;
+            if (maxOffset <= 0 || maxScroll <= 0) return;
+            activeTableScrollDrag = {
+              region,
+              maxOffset,
+              maxScroll,
+              startX: event.clientX,
+              startScrollLeft: region.scrollLeft,
+            };
+            document.body.classList.add("is-dragging-table-xbar");
+          });
+        });
+      }
+
+      function measureResultsScrollMetrics(region) {
+        const table = region?.querySelector(".results-table");
+        if (!region || !table) {
+          return {
+            table,
+            regionWidth: 0,
+            contentWidth: 0,
+            maxScroll: 0,
+          };
+        }
+        const regionWidth =
+          region.clientWidth ||
+          Math.round(region.getBoundingClientRect().width) ||
+          0;
+        const actualScrollWidth = region.scrollWidth || 0;
+        const fallbackWidth =
+          table.scrollWidth ||
+          table.offsetWidth ||
+          Math.round(table.getBoundingClientRect().width) ||
+          0;
+        const contentWidth = actualScrollWidth || fallbackWidth;
+        const maxScroll =
+          actualScrollWidth > 0
+            ? Math.max(0, actualScrollWidth - regionWidth)
+            : Math.max(0, fallbackWidth - regionWidth);
+        return {
+          table,
+          regionWidth,
+          contentWidth,
+          maxScroll,
+        };
+      }
+
+      function syncResultsScrollbars() {
+        root.querySelectorAll(".table-scroll-shell").forEach((shell) => {
+          const region = shell.querySelector('[data-role="results-scroll-region"]');
+          const rail = shell.querySelector('[data-role="results-scrollbar"]');
+          const track = shell.querySelector('[data-role="results-scrollbar-track"]');
+          const thumb = shell.querySelector('[data-role="results-scrollbar-thumb"]');
+          const { table, regionWidth, contentWidth, maxScroll } = measureResultsScrollMetrics(region);
+          if (!region || !rail || !track || !thumb || !table) return;
+
+          if (maxScroll <= 1) {
+            rail.hidden = true;
+            shell.classList.remove("has-x-overflow");
+            region.scrollLeft = 0;
+            thumb.style.width = "";
+            thumb.style.transform = "";
+            return;
+          }
+
+          rail.hidden = false;
+          shell.classList.add("has-x-overflow");
+          const trackWidth =
+            track.clientWidth ||
+            Math.round(track.getBoundingClientRect().width) ||
+            0;
+          if (trackWidth <= 0) {
+            queueResultsScrollSync();
+            return;
+          }
+          const thumbWidth = Math.max(
+            56,
+            Math.round(trackWidth * (regionWidth / contentWidth))
+          );
+          const maxOffset = Math.max(0, trackWidth - thumbWidth);
+          const scrollLeft = clamp(region.scrollLeft, 0, maxScroll);
+          const offset = maxScroll <= 0
+            ? 0
+            : (scrollLeft / maxScroll) * maxOffset;
+          thumb.style.width = `${thumbWidth}px`;
+          thumb.style.transform = `translateX(${offset}px)`;
+        });
+      }
+
+      function renderMatrix(pairwiseData, errorMessage, errorDetails) {
+        if (errorMessage || errorDetails) {
+          return renderPairwiseError(errorDetails, errorMessage, pageData.group_data);
         }
         if (!pairwiseData) {
           return `
@@ -999,14 +1248,16 @@
                       data-row-index="${modelIndex}"
                       title="anchor on ${esc(model.display_label)}"
                     >
-                      <span
-                        class="matrix-hdr-hide row-hdr-hide"
-                        data-action="exclude-model"
-                        data-model-key="${esc(modelKey(model))}"
-                        title="exclude model"
-                      >x</span>
-                      <span class="row-hdr-idx">${rowNumber + 1}</span>
-                      <span class="row-hdr-name">${esc(model.display_label)}</span>
+                      <span class="row-hdr-main">
+                        <span class="row-hdr-idx">${rowNumber + 1}</span>
+                        <span
+                          class="matrix-hdr-hide row-hdr-hide"
+                          data-action="exclude-model"
+                          data-model-key="${esc(modelKey(model))}"
+                          title="exclude model"
+                        >x</span>
+                        <span class="row-hdr-name">${esc(model.display_label)}</span>
+                      </span>
                       <span class="row-hdr-score">${fmtScoreValue(displayScore(model), pairwiseData.meta)}</span>
                     </button>
                     ${order.map((otherIndex, colNumber) => {
@@ -1073,6 +1324,146 @@
             <div class="empty-mark">[]</div>
             <div class="empty-title">no models match the filter</div>
             <div class="empty-sub">widen the search or add some models back in.</div>
+          </div>
+        `;
+      }
+
+      function scopeCoverageSummary(groupData) {
+        const resultsData = groupData?.results_table;
+        if (!resultsData || !Array.isArray(resultsData.models)) return null;
+        const scopedColumns = scopedTaskColumns(resultsData);
+        const scoredRows = resultsData.models.filter((model) =>
+          scopedColumns.some((column) => isNumber(model.task_scores?.[column.id]))
+        ).length;
+        return {
+          groupModelCount: resultsData.models.length,
+          scopeTaskCount: scopedColumns.length,
+          scoredRows,
+        };
+      }
+
+      function renderDiagnosticCounts(counts) {
+        if (!Array.isArray(counts) || counts.length === 0) return "";
+        return `
+          <div class="diag-count-grid">
+            ${counts.map((count) => `
+              <div class="diag-count">
+                <div class="diag-count-value">${esc(count.value)}</div>
+                <div class="diag-count-label">${esc(count.label)}</div>
+              </div>
+            `).join("")}
+          </div>
+        `;
+      }
+
+      function renderDiagnosticBulletSection(title, items) {
+        if (!Array.isArray(items) || items.length === 0) return "";
+        return `
+          <section class="diag-section">
+            <div class="diag-section-title">${esc(title)}</div>
+            <ul class="diag-bullets">
+              ${items.map((item) => `<li>${esc(item)}</li>`).join("")}
+            </ul>
+          </section>
+        `;
+      }
+
+      function renderDiagnosticRunSection(title, items) {
+        if (!Array.isArray(items) || items.length === 0) return "";
+        return `
+          <section class="diag-section">
+            <div class="diag-section-title">${esc(title)}</div>
+            <div class="diag-list">
+              ${items.map((item) => {
+                const metaParts = [];
+                if (item.timestamp_label) metaParts.push(item.timestamp_label);
+                if (item.reason_summary) metaParts.push(item.reason_summary);
+                if (item.experiment_id) metaParts.push(item.experiment_id);
+                return `
+                  <div class="diag-list-item">
+                    <div class="diag-list-title">${esc(item.label || item.model_name || "unnamed run")}</div>
+                    ${metaParts.length
+                      ? `<div class="diag-list-meta">${esc(metaParts.join(" · "))}</div>`
+                      : ""}
+                  </div>
+                `;
+              }).join("")}
+            </div>
+          </section>
+        `;
+      }
+
+      function renderDiagnosticInstanceCounts(title, items) {
+        if (!Array.isArray(items) || items.length === 0) return "";
+        return `
+          <section class="diag-section">
+            <div class="diag-section-title">${esc(title)}</div>
+            <div class="diag-list diag-list-compact">
+              ${items.map((item) => `
+                <div class="diag-list-item diag-list-item-split">
+                  <div class="diag-list-title">${esc(item.label || "")}</div>
+                  <div class="diag-list-meta">${esc(item.instance_count)}</div>
+                </div>
+              `).join("")}
+            </div>
+          </section>
+        `;
+      }
+
+      function renderPairwiseError(errorDetails, errorMessage, groupData) {
+        const details = errorDetails || {};
+        const coverage = scopeCoverageSummary(groupData);
+        const scopeOption = selectedScopeOption();
+        const metricOptions = Array.isArray(scopeOption?.metric_options)
+          ? scopeOption.metric_options
+          : [];
+        const summary = details.summary || errorMessage || "paired test unavailable";
+        const notes = Array.isArray(details.notes) ? details.notes.slice() : [];
+        if (
+          metricOptions.length > 0 &&
+          (details.code === "missing_primary_metric" ||
+            details.code === "insufficient_extractable_instance_scores")
+        ) {
+          notes.unshift(
+            "This scope has stored metric values. Use the metric control above to choose a metric and retry the paired test."
+          );
+        }
+        if (coverage) {
+          notes.unshift(
+            `The results tab is broader: it currently shows ${coverage.groupModelCount} latest group-level model row(s), with ${coverage.scoredRows} carrying at least one score in this scope. The paired test is stricter and only uses runs that match the scope, survive dedupe / coverage filtering, expose pairwise-eligible instance scores, and share common instances.`
+          );
+        }
+        return `
+          <div class="matrix-wrap">
+            <div class="diag-card">
+              <div class="diag-kicker">paired test unavailable</div>
+              <div class="diag-title">${esc(summary)}</div>
+              ${details.scope_label
+                ? `<div class="diag-scope">${esc(details.scope_label)}</div>`
+                : ""}
+              ${renderDiagnosticCounts(details.counts)}
+              ${renderDiagnosticBulletSection("why this can happen", notes)}
+              ${details.filter_summary
+                ? `
+                  <section class="diag-section">
+                    <div class="diag-section-title">active filters</div>
+                    <div class="diag-code">${esc(details.filter_summary)}</div>
+                  </section>
+                `
+                : ""}
+              ${renderDiagnosticRunSection("runs that matched this scope", details.matched_runs)}
+              ${renderDiagnosticRunSection("models still in the paired test pipeline", details.compared_models)}
+              ${renderDiagnosticRunSection("older duplicate runs ignored", details.dropped_duplicate_runs)}
+              ${renderDiagnosticRunSection(
+                "dropped by the full-coverage requirement",
+                details.dropped_partial_coverage_models
+              )}
+              ${renderDiagnosticRunSection("models with pairwise-eligible instance scores", details.scored_models)}
+              ${renderDiagnosticRunSection("models missing pairwise-eligible instance scores", details.unscored_models)}
+              ${renderDiagnosticBulletSection("unsupported task metrics", details.unsupported_task_metrics)}
+              ${renderDiagnosticInstanceCounts("per-model instance counts", details.per_model_instance_counts)}
+              ${renderDiagnosticBulletSection("what to do next", details.suggestions)}
+            </div>
           </div>
         `;
       }
@@ -1198,9 +1589,14 @@
         const groupData = pageData.group_data;
         const pairwiseData = pageData.pairwise_data;
         root.innerHTML = state.view === "matrix"
-          ? renderMatrix(pairwiseData, pageData.pairwise_error)
+          ? renderMatrix(pairwiseData, pageData.pairwise_error, pageData.pairwise_error_details)
           : renderResults(groupData);
         syncChrome();
+        bindResultsScrollbars();
+        bindColumnsMenu();
+        queueResultsScrollSync();
+        window.setTimeout(queueResultsScrollSync, 0);
+        window.setTimeout(queueResultsScrollSync, 80);
       }
 
       function syncChrome() {
@@ -1517,6 +1913,7 @@
             scope_kind: pairwiseData.meta.scope_kind || null,
             selected_scope_key: pageData.selected_scope_key || null,
             metric_name: pairwiseData.meta.metric || null,
+            selected_metric: pageData.selected_metric || null,
             shared_instance_count: pairwiseData.meta.shared_n ?? null,
             task_count: pairwiseData.meta.task_count ?? null,
             compared_model_count: pairwiseData.meta.model_count ?? null,
@@ -1705,6 +2102,7 @@
         const filterInput = control.querySelector('[data-role="search-select-filter"]');
         const summary = details?.querySelector("summary");
         resetSearchSelect(control);
+        syncSearchSelectMenuWidth(control);
 
         details?.addEventListener("toggle", () => {
           if (details.open) {
@@ -1767,6 +2165,10 @@
         setSearchSelectSummary(control, target);
         if (details) details.open = false;
         if (nextValue === previousValue) return;
+        if (hiddenInput.name === "group" || hiddenInput.name === "scope") {
+          const metricSelect = scopeForm.querySelector("#metric-select");
+          if (metricSelect) metricSelect.value = "";
+        }
         submitScopeForm();
       });
 
@@ -1774,6 +2176,41 @@
         document.querySelectorAll(".search-select-dd[open]").forEach((details) => {
           if (!details.contains(event.target)) details.open = false;
         });
+        const colsMenu = root.querySelector(".tt-cols-menu");
+        if (colsMenu?.open && !colsMenu.contains(event.target)) {
+          colsMenu.open = false;
+          state.columnsMenuOpen = false;
+        }
+        if (modelFilterDetails?.open && !modelFilterDetails.contains(event.target)) {
+          modelFilterDetails.open = false;
+        }
+      });
+
+      document.addEventListener("pointermove", (event) => {
+        if (!activeTableScrollDrag) return;
+        const { region, maxOffset, maxScroll, startX, startScrollLeft } = activeTableScrollDrag;
+        if (maxOffset <= 0 || maxScroll <= 0) return;
+        const deltaX = event.clientX - startX;
+        region.scrollLeft = clamp(
+          startScrollLeft + (deltaX / maxOffset) * maxScroll,
+          0,
+          maxScroll
+        );
+      });
+
+      function endTableScrollDrag() {
+        if (!activeTableScrollDrag) return;
+        activeTableScrollDrag = null;
+        document.body.classList.remove("is-dragging-table-xbar");
+      }
+
+      document.addEventListener("pointerup", endTableScrollDrag);
+      document.addEventListener("pointercancel", endTableScrollDrag);
+      window.addEventListener("resize", queueResultsScrollSync);
+      window.addEventListener("resize", queueSearchSelectMenuWidthSync);
+      document.fonts?.ready?.then(() => {
+        queueResultsScrollSync();
+        queueSearchSelectMenuWidthSync();
       });
 
       document.getElementById("view-table")?.addEventListener("click", () => {
@@ -1792,6 +2229,10 @@
         state.regex = event.target.value;
         persistState();
         renderApp();
+      });
+
+      document.getElementById("metric-select")?.addEventListener("change", () => {
+        submitScopeForm();
       });
 
       document.querySelectorAll('input[data-action="toggle-model-checkbox"]').forEach((input) => {
@@ -1849,6 +2290,29 @@
           renderApp();
           return;
         }
+        if (action === "solo-col") {
+          const id = target.dataset.id;
+          const resultsData = pageData.group_data?.results_table;
+          if (!id || !resultsData) return;
+          state.columnsMenuOpen = true;
+          state.hiddenCols = new Set(
+            scopedTaskColumns(resultsData)
+              .map((column) => column.id)
+              .filter((columnId) => columnId !== id)
+          );
+          renderApp();
+          return;
+        }
+        if (action === "reset-cols") {
+          const resultsData = pageData.group_data?.results_table;
+          if (!resultsData) return;
+          state.columnsMenuOpen = true;
+          scopedTaskColumns(resultsData).forEach((column) => {
+            state.hiddenCols.delete(column.id);
+          });
+          renderApp();
+          return;
+        }
         if (action === "table-sort") {
           const key = target.dataset.key;
           if (state.tableSortKey === key) {
@@ -1897,6 +2361,7 @@
         const action = target.dataset.action;
         if (action === "toggle-col-checkbox") {
           const id = target.dataset.id;
+          state.columnsMenuOpen = true;
           if (target.checked) state.hiddenCols.delete(id);
           else state.hiddenCols.add(id);
           renderApp();
@@ -1922,5 +2387,6 @@
       });
 
       trimExcludedModels();
+      queueSearchSelectMenuWidthSync();
       renderApp();
     })();

@@ -62,7 +62,7 @@ olmo-eval results suites -G my-benchmark
 - Default mode launches the local DB-backed web UI so you can discover groups,
   choose a suite or task, inspect the paired-test heatmap, and switch into the
   per-task results table.
-- `--format json` or `--format csv` dumps the same underlying pairwise
+- `-f json` or `-f csv` dumps the same underlying pairwise
   comparison data from the CLI.
 
 Statistical interpretation of the matrix lives in
@@ -70,8 +70,8 @@ Statistical interpretation of the matrix lives in
 
 ### Browser mode
 
-Browser mode is the default (`--format html`). Use these optional flags to open
-the viewer on a specific group or scope:
+Browser mode is the default. Use these optional flags to open the viewer on a
+specific group or scope:
 
 | Flag                       | Use |
 | -------------------------- | --- |
@@ -108,7 +108,7 @@ olmo-eval results viewer -G my-benchmark -t humaneval:3shot:pass_at_1
 
 ### Dump mode
 
-Use `--format json` or `--format csv` when you want the pairwise data without
+Use `-f json` or `-f csv` when you want the pairwise data without
 the browser.
 
 #### Filters (who to compare)
@@ -150,7 +150,7 @@ across different tasks don't collide.
 | `--metric METRIC`     | none    | Metric in `metric:scorer` format. Defaults to each task's `primary_metric`.              |
 | `--margin FLOAT`      | `0.0`   | Tie threshold for continuous scores. Scores within `margin` of each other count as tied. |
 | `-o, --output PATH`   | stdout  | Save JSON / CSV to a file.                                                               |
-| `-f, --format FMT`    | `html`  | One of `html`, `json`, `csv`. Use `json`/`csv` for dumps.                                |
+| `-f, --format FMT`    | none    | One of `json`, `csv`. Omit it to launch the browser viewer.                               |
 | `--all`               | off     | Keep every matched experiment as its own row (default: dedupe by model+hash to most recent). |
 
 By default matched experiments are deduped to one row per
@@ -165,13 +165,13 @@ of the same model.
 Export a JSON win-rate matrix for downstream analysis:
 
 ```
-olmo-eval results viewer -G my-benchmark -S multipl_e:pass_at_1 --format json -o matrix.json
+olmo-eval results viewer -G my-benchmark -S multipl_e:pass_at_1 -f json -o matrix.json
 ```
 
 Export a CSV for two specific models on a task hash:
 
 ```
-olmo-eval results viewer -m llama3.1-8b -m qwen2.5-7b -T abc12345 --format csv
+olmo-eval results viewer -m llama3.1-8b -m qwen2.5-7b -T abc12345 -f csv
 ```
 
 Exclude one noisy suite member and a stale model family from the dump:
@@ -182,7 +182,7 @@ olmo-eval results viewer \
   -S multipl_e:pass_at_1 \
   --exclude-task mbpp_plus:pass_at_1 \
   --exclude-model old-baseline- \
-  --format json
+  -f json
 ```
 
 ### Errors you might see

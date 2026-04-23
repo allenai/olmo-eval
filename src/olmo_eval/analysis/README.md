@@ -263,8 +263,8 @@ olmo-eval results viewer -G <group> -t <task>
 Dump the same viewer payload as JSON or CSV with:
 
 ```bash
-olmo-eval results viewer -G <group> -S <suite> --format json
-olmo-eval results viewer -G <group> -S <suite> --format csv
+olmo-eval results viewer -G <group> -S <suite> -f json
+olmo-eval results viewer -G <group> -S <suite> -f csv
 ```
 
 ## See Also

@@ -1,9 +1,7 @@
-"""Self-contained HTML renderer for pairwise comparisons."""
+"""Shared payload builder for the results viewer UI."""
 
 from __future__ import annotations
 
-import html
-import json
 import re
 from typing import Any
 
@@ -18,11 +16,6 @@ from olmo_eval.analysis.pairwise_metrics import (
     build_se_matrix,
     build_task_metrics,
     build_win_rate_matrix,
-)
-from olmo_eval.analysis.pairwise_viewer.assets import (
-    render_template,
-    shared_css_text,
-    standalone_js_text,
 )
 
 
@@ -145,7 +138,9 @@ def _build_matrix_mde80_map(result: PairwiseResult) -> dict[str, float]:
     }
 
 
-def build_pairwise_html_payload(result: PairwiseResult, title: str | None = None) -> dict[str, Any]:
+def build_pairwise_viewer_payload(
+    result: PairwiseResult, title: str | None = None
+) -> dict[str, Any]:
     page_title = title or _default_title(result)
     row_metrics = build_row_metrics(result)
     task_metrics = build_task_metrics(result) if result.task_names else []
@@ -192,7 +187,6 @@ def build_pairwise_html_payload(result: PairwiseResult, title: str | None = None
         shared_score = (
             result.model_shared_scores[index] if index < len(result.model_shared_scores) else None
         )
-        display_score = shared_score if shared_score is not None else None
         metrics = row_metrics[index] if index < len(row_metrics) else None
         model_cost = result.model_costs[index] if index < len(result.model_costs) else None
         models.append(
@@ -205,7 +199,7 @@ def build_pairwise_html_payload(result: PairwiseResult, title: str | None = None
                 "timestamp": model.timestamp,
                 "shared_score": shared_score,
                 "avg_task_score": avg_task_score,
-                "display_score": display_score,
+                "display_score": shared_score if shared_score is not None else None,
                 "strength": metrics.rating if metrics is not None else None,
                 "avg_win_rate": metrics.avg_win_rate if metrics is not None else None,
                 "dominance": metrics.dominance if metrics is not None else None,
@@ -268,26 +262,3 @@ def build_pairwise_html_payload(result: PairwiseResult, title: str | None = None
             **count_matrices,
         },
     }
-
-
-PAIRWISE_HTML_CSS = shared_css_text()
-
-
-_APP_JS = standalone_js_text()
-
-
-def render_pairwise_html(result: PairwiseResult, *, title: str | None = None) -> str:
-    """Return a self-contained interactive HTML document for one pairwise result."""
-    payload = build_pairwise_html_payload(result, title=title)
-    page_title = payload["meta"]["title"]
-    payload_json = json.dumps(payload, separators=(",", ":")).replace("</", "<\\/")
-    return (
-        render_template(
-            "standalone.html",
-            page_title=html.escape(page_title),
-            styles=PAIRWISE_HTML_CSS,
-            payload_json=payload_json,
-            script=_APP_JS,
-        ).strip()
-        + "\n"
-    )

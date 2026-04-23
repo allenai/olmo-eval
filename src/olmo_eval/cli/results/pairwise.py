@@ -106,15 +106,15 @@ from olmo_eval.cli.utils import console
     "output_path",
     default=None,
     type=click.Path(),
-    help="Save JSON / CSV to a file. Viewer mode does not use --output.",
+    help="Save JSON / CSV to a file. The browser viewer does not use --output.",
 )
 @click.option(
     "--format",
     "-f",
     "output_format",
-    type=click.Choice(["html", "json", "csv"]),
-    default="html",
-    help="Mode (default: local results viewer; json/csv dump viewer data).",
+    type=click.Choice(["json", "csv"]),
+    default=None,
+    help="Optional export format. Omit to launch the local results viewer.",
 )
 @click.option(
     "--host",
@@ -158,7 +158,7 @@ def viewer(
     metric: str | None,
     margin: float,
     output_path: str | None,
-    output_format: str,
+    output_format: str | None,
     host: str,
     port: int,
     keep_all: bool,
@@ -177,19 +177,18 @@ def viewer(
 
         olmo-eval results viewer -G my-benchmark -S multipl_e:pass_at_1
 
-        olmo-eval results viewer -G my-benchmark -S multipl_e:pass_at_1 \\
-            --format json -o matrix.json
+        olmo-eval results viewer -G my-benchmark -S multipl_e:pass_at_1 -f json -o matrix.json
 
-        olmo-eval results viewer -m model-a -m model-b -t gsm8k:olmo3base --format csv
+        olmo-eval results viewer -m model-a -m model-b -t gsm8k:olmo3base -f csv
     """
-    if output_format == "html":
+    if output_format is None:
         if output_path is not None:
             raise click.UsageError("--output is not supported when launching the results viewer.")
         if experiment_ids or model_names or model_hashes:
             raise click.UsageError(
                 "The results viewer starts from experiment-group discovery. "
                 "Use --experiment-group to open a specific group, or switch to "
-                "--format json/csv for direct filtered dumps."
+                "-f json/csv for direct filtered dumps."
             )
         if task_hash is not None:
             raise click.UsageError(

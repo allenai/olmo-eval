@@ -103,6 +103,67 @@ class MetricProfile:
     unit: str
 
 
+class PairwiseEligibilityError(ValueError):
+    """Structured failure that explains why the paired test cannot render."""
+
+    def __init__(
+        self,
+        *,
+        code: str,
+        summary: str,
+        message: str | None = None,
+        scope_label: str | None = None,
+        filter_summary: str | None = None,
+        counts: list[dict[str, Any]] | None = None,
+        matched_runs: list[dict[str, Any]] | None = None,
+        compared_models: list[dict[str, Any]] | None = None,
+        dropped_duplicate_runs: list[dict[str, Any]] | None = None,
+        dropped_partial_coverage_models: list[dict[str, Any]] | None = None,
+        scored_models: list[dict[str, Any]] | None = None,
+        unscored_models: list[dict[str, Any]] | None = None,
+        unsupported_task_metrics: list[str] | None = None,
+        per_model_instance_counts: list[dict[str, Any]] | None = None,
+        notes: list[str] | None = None,
+        suggestions: list[str] | None = None,
+    ) -> None:
+        self.code = code
+        self.summary = summary
+        self.scope_label = scope_label
+        self.filter_summary = filter_summary
+        self.counts = counts or []
+        self.matched_runs = matched_runs or []
+        self.compared_models = compared_models or []
+        self.dropped_duplicate_runs = dropped_duplicate_runs or []
+        self.dropped_partial_coverage_models = dropped_partial_coverage_models or []
+        self.scored_models = scored_models or []
+        self.unscored_models = unscored_models or []
+        self.unsupported_task_metrics = unsupported_task_metrics or []
+        self.per_model_instance_counts = per_model_instance_counts or []
+        self.notes = notes or []
+        self.suggestions = suggestions or []
+        super().__init__(message or summary)
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "code": self.code,
+            "summary": self.summary,
+            "message": str(self),
+            "scope_label": self.scope_label,
+            "filter_summary": self.filter_summary,
+            "counts": self.counts,
+            "matched_runs": self.matched_runs,
+            "compared_models": self.compared_models,
+            "dropped_duplicate_runs": self.dropped_duplicate_runs,
+            "dropped_partial_coverage_models": self.dropped_partial_coverage_models,
+            "scored_models": self.scored_models,
+            "unscored_models": self.unscored_models,
+            "unsupported_task_metrics": self.unsupported_task_metrics,
+            "per_model_instance_counts": self.per_model_instance_counts,
+            "notes": self.notes,
+            "suggestions": self.suggestions,
+        }
+
+
 @dataclass
 class PairwiseResult:
     """Pairwise comparison output for one task or suite scope."""
@@ -193,6 +254,105 @@ def _filter_suite_task_names(
 
     excluded = set(exclude_task_names)
     return tuple(task_name for task_name in task_names if task_name not in excluded)
+
+
+def _timestamp_label(value: Any) -> str | None:
+    if value is None:
+        return None
+    try:
+        return value.strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return None
+
+
+def _format_experiment_label(
+    model_name: str | None,
+    model_hash: str | None,
+    timestamp: Any = None,
+    *,
+    keep_all: bool,
+) -> str:
+    resolved_name = model_name or "unnamed model"
+    hash_short = (model_hash or "")[:8]
+    if keep_all and timestamp is not None:
+        try:
+            timestamp_short = timestamp.strftime("%Y-%m-%d")
+        except Exception:
+            timestamp_short = None
+        if timestamp_short:
+            return f"{resolved_name} ({hash_short} @ {timestamp_short})"
+    return f"{resolved_name} ({hash_short})"
+
+
+def _serialize_experiment_debug(exp: Any, *, keep_all: bool) -> dict[str, Any]:
+    return {
+        "label": _format_experiment_label(
+            getattr(exp, "model_name", None),
+            getattr(exp, "model_hash", None),
+            getattr(exp, "timestamp", None),
+            keep_all=keep_all,
+        ),
+        "model_name": getattr(exp, "model_name", "") or "",
+        "model_hash": getattr(exp, "model_hash", "") or "",
+        "model_hash_short": (getattr(exp, "model_hash", "") or "")[:8],
+        "timestamp": (
+            getattr(exp, "timestamp", None).isoformat()
+            if getattr(exp, "timestamp", None) is not None
+            else None
+        ),
+        "timestamp_label": _timestamp_label(getattr(exp, "timestamp", None)),
+        "experiment_id": getattr(exp, "experiment_id", None),
+        "experiment_group": getattr(exp, "experiment_group", None),
+    }
+
+
+def _serialize_model_meta_debug(meta: ModelMeta) -> dict[str, Any]:
+    return {
+        "label": meta.label.replace("\n", " "),
+        "model_name": meta.model_name or "",
+        "model_hash": meta.model_hash or "",
+        "model_hash_short": (meta.model_hash or "")[:8],
+        "timestamp": meta.timestamp,
+    }
+
+
+def _serialize_filtered_model_debug(model: FilteredModel) -> dict[str, Any]:
+    reasons: list[str] = []
+    if model.missing_tasks:
+        preview = ", ".join(model.missing_tasks[:3])
+        if len(model.missing_tasks) > 3:
+            preview = f"{preview}, +{len(model.missing_tasks) - 3} more"
+        reasons.append(f"missing {len(model.missing_tasks)} task(s): {preview}")
+    if model.instance_shortfalls:
+        preview = ", ".join(
+            f"{task_name} ({have}/{expected})"
+            for task_name, have, expected in model.instance_shortfalls[:3]
+        )
+        if len(model.instance_shortfalls) > 3:
+            preview = f"{preview}, +{len(model.instance_shortfalls) - 3} more"
+        reasons.append(
+            f"fewer shared instances on {len(model.instance_shortfalls)} task(s): {preview}"
+        )
+    return {
+        "label": _format_experiment_label(
+            model.model_name,
+            model.model_hash,
+            keep_all=False,
+        ),
+        "model_name": model.model_name,
+        "model_hash": model.model_hash,
+        "model_hash_short": model.model_hash[:8],
+        "missing_tasks": list(model.missing_tasks),
+        "instance_shortfalls": [
+            {
+                "task_name": task_name,
+                "instances": have,
+                "expected_instances": expected,
+            }
+            for task_name, have, expected in model.instance_shortfalls
+        ],
+        "reason_summary": "; ".join(reasons) if reasons else "partial suite coverage",
+    }
 
 
 def _compute_pairs(
@@ -544,6 +704,32 @@ def compute_pairwise(
         task_names_filter = [task_name]
     else:
         task_names_filter = None
+    scope_label = suite_name or task_name or task_hash or ""
+
+    scope_bits: list[str] = []
+    if experiment_groups:
+        scope_bits.append(f"groups={experiment_groups}")
+    if model_names:
+        scope_bits.append(f"models={model_names}")
+    if model_hashes:
+        scope_bits.append(f"hashes={model_hashes}")
+    if exclude_model_names:
+        scope_bits.append(f"exclude_models={exclude_model_names}")
+    if exclude_model_hashes:
+        scope_bits.append(f"exclude_hashes={exclude_model_hashes}")
+    if experiment_ids:
+        scope_bits.append(f"experiments={experiment_ids}")
+    if suite_name:
+        scope_bits.append(f"suite={suite_name!r} ({len(suite_task_names)} tasks)")
+    elif task_name:
+        scope_bits.append(f"task={task_name!r}")
+    elif task_hash:
+        scope_bits.append(f"task_hash={task_hash!r}")
+    if exclude_task_names:
+        scope_bits.append(f"exclude_tasks={exclude_task_names}")
+    if exclude_task_hashes:
+        scope_bits.append(f"exclude_task_hashes={exclude_task_hashes}")
+    scope_str = ", ".join(scope_bits) if scope_bits else "(no filters)"
 
     repo = ExperimentRepository(session)
     candidate_experiments = repo.query_rows(
@@ -566,40 +752,47 @@ def compute_pairwise(
     ]
 
     if len(candidate_experiments) < 2:
-        scope_bits: list[str] = []
-        if experiment_groups:
-            scope_bits.append(f"groups={experiment_groups}")
-        if model_names:
-            scope_bits.append(f"models={model_names}")
-        if model_hashes:
-            scope_bits.append(f"hashes={model_hashes}")
-        if exclude_model_names:
-            scope_bits.append(f"exclude_models={exclude_model_names}")
-        if exclude_model_hashes:
-            scope_bits.append(f"exclude_hashes={exclude_model_hashes}")
-        if experiment_ids:
-            scope_bits.append(f"experiments={experiment_ids}")
-        if suite_name:
-            scope_bits.append(f"suite={suite_name!r} ({len(suite_task_names)} tasks)")
-        elif task_name:
-            scope_bits.append(f"task={task_name!r}")
-        elif task_hash:
-            scope_bits.append(f"task_hash={task_hash!r}")
-        if exclude_task_names:
-            scope_bits.append(f"exclude_tasks={exclude_task_names}")
-        if exclude_task_hashes:
-            scope_bits.append(f"exclude_task_hashes={exclude_task_hashes}")
-        scope_str = ", ".join(scope_bits) if scope_bits else "(no filters)"
         hint = ""
         if experiment_groups:
             hint = (
                 f"\nTry: olmo-eval results group {experiment_groups[0]}"
                 " to inspect the group's models and suite coverage."
             )
-        raise ValueError(
-            f"Only {len(candidate_experiments)} experiment(s) matched the filters — "
-            "need at least 2."
-            f"\n  filters: {scope_str}{hint}"
+        raise PairwiseEligibilityError(
+            code="insufficient_matched_experiments",
+            summary=(
+                f"Only {len(candidate_experiments)} run(s) matched the paired-test "
+                "requirements for this scope."
+            ),
+            message=(
+                f"Only {len(candidate_experiments)} experiment(s) matched the filters — "
+                "need at least 2."
+                f"\n  filters: {scope_str}{hint}"
+            ),
+            scope_label=scope_label,
+            filter_summary=scope_str,
+            counts=[
+                {"label": "matched runs", "value": len(candidate_experiments)},
+                {"label": "minimum required", "value": 2},
+            ],
+            matched_runs=[
+                _serialize_experiment_debug(exp, keep_all=keep_all) for exp in candidate_experiments
+            ],
+            notes=[
+                "The paired test only uses runs that match the selected group/model/task filters "
+                "for the current scope."
+            ],
+            suggestions=[
+                "Broaden the filters or choose a scope that at least two runs completed.",
+                *(
+                    [
+                        f"Run `olmo-eval results group {experiment_groups[0]}` to inspect which "
+                        "models and suites are present in the group."
+                    ]
+                    if experiment_groups
+                    else []
+                ),
+            ],
         )
 
     n_matched = len(candidate_experiments)
@@ -615,6 +808,17 @@ def compute_pairwise(
         selected = list(chosen.values())
 
     n_dropped = n_matched - len(selected)
+    selected_before_coverage = list(selected)
+    selected_id_set_before_coverage = {exp.id for exp in selected_before_coverage}
+    dropped_duplicate_runs = (
+        [
+            _serialize_experiment_debug(exp, keep_all=keep_all)
+            for exp in candidate_experiments
+            if exp.id not in selected_id_set_before_coverage
+        ]
+        if not keep_all
+        else []
+    )
 
     filtered_models: list[FilteredModel] = []
     if require_full_coverage and suite_name:
@@ -686,13 +890,70 @@ def compute_pairwise(
                 f"after --require-full-coverage dropped {len(filtered_models)} "
                 "partial-coverage model(s)"
             )
+            code = "insufficient_full_coverage_models"
+            summary = (
+                f"Only {len(ordered)} model(s) still satisfy the full-suite coverage "
+                "requirement for the paired test."
+            )
+            notes = [
+                "The results tab can still show models with partial suite coverage, but the "
+                "paired test requires every compared model to cover the same suite tasks."
+            ]
+            suggestions = [
+                "Choose a narrower task or suite that more models completed.",
+                "Rerun the missing tasks for the dropped model hashes, or relax the "
+                "full-coverage requirement.",
+            ]
         elif not keep_all:
             detail = "after deduping by model_hash"
+            code = "insufficient_unique_models_after_dedupe"
+            summary = (
+                f"Only {len(ordered)} unique model(s) remain after collapsing to the latest "
+                "run per model hash."
+            )
+            notes = [
+                "The paired test uses one run per model hash by default so head-to-head cells "
+                "do not mix multiple runs of the same checkpoint."
+            ]
+            suggestions = [
+                "Broaden the filters to include more distinct model hashes.",
+                "Use `--all` if you intentionally want multiple runs of the same model hash.",
+            ]
         else:
             detail = "matched"
-        raise ValueError(
-            f"Only {len(ordered)} unique model(s) {detail} — "
-            "need at least 2. Broaden the filters to include more models."
+            code = "insufficient_compared_models"
+            summary = (
+                f"Only {len(ordered)} model(s) are available for pairwise comparison in this scope."
+            )
+            notes = []
+            suggestions = ["Broaden the filters to include more models."]
+        raise PairwiseEligibilityError(
+            code=code,
+            summary=summary,
+            message=(
+                f"Only {len(ordered)} unique model(s) {detail} — "
+                "need at least 2. Broaden the filters to include more models."
+            ),
+            scope_label=scope_label,
+            filter_summary=scope_str,
+            counts=[
+                {"label": "matched runs", "value": n_matched},
+                {"label": "after latest-run dedupe", "value": len(selected_before_coverage)},
+                {"label": "eligible compared models", "value": len(ordered)},
+                {"label": "minimum required", "value": 2},
+            ],
+            matched_runs=[
+                _serialize_experiment_debug(exp, keep_all=keep_all) for exp in candidate_experiments
+            ],
+            compared_models=[
+                _serialize_experiment_debug(exp, keep_all=keep_all) for exp in selected
+            ],
+            dropped_duplicate_runs=dropped_duplicate_runs,
+            dropped_partial_coverage_models=[
+                _serialize_filtered_model_debug(model) for model in filtered_models
+            ],
+            notes=notes,
+            suggestions=suggestions,
         )
 
     pks = [pk for pk, _ in ordered]
@@ -722,9 +983,12 @@ def compute_pairwise(
         )
     ]
 
-    scope_label = suite_name or task_name or task_hash or ""
     if not task_rows:
         hint = ""
+        notes = [
+            "At least two runs matched the high-level filters, but none of the retained runs "
+            "had task-result rows for this exact scope."
+        ]
         if task_name:
             candidates = (
                 session.execute(
@@ -742,15 +1006,52 @@ def compute_pairwise(
                     "\n--task uses exact matching. Similar task names in "
                     f"scope: {sorted(candidates)}"
                 )
+                notes.append(
+                    "--task uses exact matching, so a nearby task name can still miss the scope."
+                )
         if suite_name and experiment_groups:
             hint = (
                 f"\nTry: olmo-eval results suites -G {experiment_groups[0]}"
                 " to see which suites have coverage in this group."
             )
-        raise ValueError(
-            f"No task results found for '{scope_label}' in the matched experiments"
-            f"{' after applying exclusions' if exclude_task_names or exclude_task_hashes else ''}."
-            f"{hint}"
+            notes.append(
+                "The selected suite name is valid, but these retained runs do not cover it."
+            )
+        raise PairwiseEligibilityError(
+            code="missing_task_rows",
+            summary=f"No retained runs have task results for '{scope_label}'.",
+            message="".join(
+                [
+                    f"No task results found for '{scope_label}' in the matched experiments",
+                    (
+                        " after applying exclusions"
+                        if exclude_task_names or exclude_task_hashes
+                        else ""
+                    ),
+                    ".",
+                    hint,
+                ]
+            ),
+            scope_label=scope_label,
+            filter_summary=scope_str,
+            counts=[
+                {"label": "matched runs", "value": n_matched},
+                {"label": "retained comparison models", "value": len(ordered)},
+                {"label": "task-result rows", "value": 0},
+            ],
+            compared_models=[_serialize_model_meta_debug(meta) for _, meta in ordered],
+            notes=notes,
+            suggestions=[
+                "Choose another suite or task that these runs actually completed.",
+                *(
+                    [
+                        f"Run `olmo-eval results suites -G {experiment_groups[0]}` to inspect "
+                        "suite coverage for the group."
+                    ]
+                    if suite_name and experiment_groups
+                    else []
+                ),
+            ],
         )
 
     task_hash_to_metric: dict[str, str] = {}
@@ -838,7 +1139,7 @@ def compute_pairwise(
     if len(active) < 2:
         instance_row_count = len(rows)
         scored_count = sum(1 for pk in pks if comparison_scores_by_pk[pk])
-        sample_metrics = ""
+        sample_metric_keys: list[str] = []
         if rows:
             sample_instance_metrics = session.execute(
                 select(InstancePrediction.instance_metrics)
@@ -849,9 +1150,7 @@ def compute_pairwise(
                 .limit(1)
             ).scalar_one_or_none()
             if isinstance(sample_instance_metrics, dict):
-                sample_metrics = (
-                    f", sample instance_metrics keys: {list(sample_instance_metrics.keys())}"
-                )
+                sample_metric_keys = sorted(str(key) for key in sample_instance_metrics)
         unsupported_metrics = sorted(
             {
                 f"{task_hash_to_name[task_hash]} ({task_hash_to_metric[task_hash]})"
@@ -871,11 +1170,58 @@ def compute_pairwise(
                 "when per-instance storage includes the exact metric key. "
                 f"Affected tasks: {preview}"
             )
-        raise ValueError(
-            f"Only {scored_count} of {len(ordered)} experiment(s) have extractable "
-            f"instance scores for '{scope_label}' using metric='{display_metric}' "
-            f"(fetched {instance_row_count} instance rows from DB{sample_metrics})"
-            f"{unsupported_note}"
+        sample_metrics = (
+            f", sample instance_metrics keys: {sample_metric_keys}" if sample_metric_keys else ""
+        )
+        raise PairwiseEligibilityError(
+            code="insufficient_extractable_instance_scores",
+            summary=(
+                f"Only {scored_count} model(s) have pairwise-eligible instance scores "
+                f"for '{scope_label}'."
+            ),
+            message=(
+                f"Only {scored_count} of {len(ordered)} experiment(s) have extractable "
+                f"instance scores for '{scope_label}' using metric='{display_metric}' "
+                f"(fetched {instance_row_count} instance rows from DB{sample_metrics})"
+                f"{unsupported_note}"
+            ),
+            scope_label=scope_label,
+            filter_summary=scope_str,
+            counts=[
+                {"label": "retained comparison models", "value": len(ordered)},
+                {"label": "models with pairwise scores", "value": scored_count},
+                {"label": "minimum required", "value": 2},
+                {"label": "fetched instance rows", "value": instance_row_count},
+            ],
+            compared_models=[_serialize_model_meta_debug(meta) for _, meta in ordered],
+            scored_models=[_serialize_model_meta_debug(meta) for _, meta in active],
+            unscored_models=[
+                _serialize_model_meta_debug(meta)
+                for pk, meta in ordered
+                if not comparison_scores_by_pk[pk]
+            ],
+            unsupported_task_metrics=unsupported_metrics,
+            notes=[
+                *(
+                    [
+                        "These tasks use aggregate metrics whose scorer-level instance values do "
+                        "not equal the per-instance metric needed for pairwise math."
+                    ]
+                    if unsupported_metrics
+                    else []
+                ),
+                *(
+                    ["Sample stored instance metric keys: " + ", ".join(sample_metric_keys)]
+                    if sample_metric_keys
+                    else []
+                ),
+            ],
+            suggestions=[
+                "Store the exact per-instance metric key required by this scope, or choose "
+                "a scope with pairwise-eligible instance scores.",
+                "If these runs should be comparable, inspect the stored "
+                "`instance_metrics` payload for the affected model hashes.",
+            ],
         )
 
     models = [meta for _, meta in active]
@@ -901,10 +1247,34 @@ def compute_pairwise(
             if suite_name
             else ""
         )
-        raise ValueError(
-            f"No shared instances across the {len(active)} active model(s) "
-            f"for '{scope_label}'. Per-model instance counts:\n  {breakdown}"
-            f"{hint}"
+        raise PairwiseEligibilityError(
+            code="no_shared_instances",
+            summary=(f"The retained models do not share any common instances for '{scope_label}'."),
+            message=(
+                f"No shared instances across the {len(active)} active model(s) "
+                f"for '{scope_label}'. Per-model instance counts:\n  {breakdown}"
+                f"{hint}"
+            ),
+            scope_label=scope_label,
+            filter_summary=scope_str,
+            counts=[
+                {"label": "active models", "value": len(active)},
+                {"label": "shared instances", "value": 0},
+            ],
+            compared_models=[_serialize_model_meta_debug(meta) for _, meta in active],
+            per_model_instance_counts=[
+                {"label": label, "instance_count": count} for label, count in per_model
+            ],
+            notes=[
+                "Pairwise cells require the same instance ids to exist for every compared model."
+            ],
+            suggestions=[
+                (
+                    "Choose a narrower suite or a single task that all retained models completed."
+                    if suite_name
+                    else "Choose a scope where the retained models overlap on instance ids."
+                ),
+            ],
         )
 
     contributing_task_names = tuple(sorted({tn for tn, _ in shared_ids}))
