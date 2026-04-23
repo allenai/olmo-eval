@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import importlib
+import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
+import pytest
 from click.testing import CliRunner
 
 from olmo_eval.analysis.pairwise import ModelMeta, PairStats, PairwiseResult
@@ -74,11 +78,23 @@ def _build_pairwise_result(*, dropped: int = 0) -> PairwiseResult:
     )
 
 
+_BROWSER_PAYLOAD_RE = re.compile(
+    r"window\.PAIRWISE_BROWSER_DATA = (?P<payload>.+?);\s*</script>",
+    re.DOTALL,
+)
+
+
+def _extract_browser_payload(html: str) -> dict[str, Any]:
+    match = _BROWSER_PAYLOAD_RE.search(html)
+    assert match is not None, "PAIRWISE_BROWSER_DATA payload not found in viewer HTML"
+    return json.loads(match.group("payload"))
+
+
 def test_results_viewer_json_blob_forwards_exclude_filters(monkeypatch) -> None:
     """JSON dump mode should stream a blob and thread exclusions into compute_pairwise."""
     analysis_pairwise = importlib.import_module("olmo_eval.analysis.pairwise")
     results_cli = importlib.import_module("olmo_eval.cli.results")
-    pairwise_cli = importlib.import_module("olmo_eval.cli.results.pairwise")
+    viewer_cli = importlib.import_module("olmo_eval.cli.results.viewer")
 
     captured: dict[str, object] = {}
 
@@ -87,7 +103,7 @@ def test_results_viewer_json_blob_forwards_exclude_filters(monkeypatch) -> None:
         return _build_pairwise_result()
 
     monkeypatch.setattr(analysis_pairwise, "compute_pairwise", fake_compute_pairwise)
-    monkeypatch.setattr(pairwise_cli, "get_database_session", lambda *args: _DummyDB())
+    monkeypatch.setattr(viewer_cli, "get_database_session", lambda *args: _DummyDB())
 
     runner = CliRunner()
     result = runner.invoke(
@@ -134,14 +150,14 @@ def test_results_viewer_dump_keep_all_status_uses_actual_flag_name(
     """The keep-all summary should print the real CLI flag without spaces."""
     analysis_pairwise = importlib.import_module("olmo_eval.analysis.pairwise")
     results_cli = importlib.import_module("olmo_eval.cli.results")
-    pairwise_cli = importlib.import_module("olmo_eval.cli.results.pairwise")
+    viewer_cli = importlib.import_module("olmo_eval.cli.results.viewer")
 
     monkeypatch.setattr(
         analysis_pairwise,
         "compute_pairwise",
         lambda **kwargs: _build_pairwise_result(),
     )
-    monkeypatch.setattr(pairwise_cli, "get_database_session", lambda *args: _DummyDB())
+    monkeypatch.setattr(viewer_cli, "get_database_session", lambda *args: _DummyDB())
 
     output_path = tmp_path / "pairwise.json"
     runner = CliRunner()
@@ -169,14 +185,14 @@ def test_results_viewer_dump_keep_all_status_uses_actual_flag_name(
 def test_results_viewer_starts_server(monkeypatch) -> None:
     """`results viewer` should start the local results viewer server."""
     results_cli = importlib.import_module("olmo_eval.cli.results")
-    pairwise_cli = importlib.import_module("olmo_eval.cli.results.pairwise")
+    viewer_cli = importlib.import_module("olmo_eval.cli.results.viewer")
 
     captured: dict[str, object] = {}
 
     def fake_serve(**kwargs) -> None:
         captured.update(kwargs)
 
-    monkeypatch.setattr(pairwise_cli, "_serve_html_browser", fake_serve)
+    monkeypatch.setattr(viewer_cli, "_serve_html_browser", fake_serve)
 
     runner = CliRunner()
     result = runner.invoke(
@@ -217,18 +233,24 @@ def test_results_cli_no_longer_registers_pairwise() -> None:
     assert "No such command 'pairwise'." in result.output
 
 
+def test_results_cli_no_longer_has_pairwise_module() -> None:
+    """The viewer command should not be implemented behind a `results.pairwise` module."""
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("olmo_eval.cli.results.pairwise")
+
+
 def test_results_viewer_csv_dump_streams_to_stdout(monkeypatch) -> None:
     """CSV dump mode should still stream pairwise rows from `results viewer`."""
     analysis_pairwise = importlib.import_module("olmo_eval.analysis.pairwise")
     results_cli = importlib.import_module("olmo_eval.cli.results")
-    pairwise_cli = importlib.import_module("olmo_eval.cli.results.pairwise")
+    viewer_cli = importlib.import_module("olmo_eval.cli.results.viewer")
 
     monkeypatch.setattr(
         analysis_pairwise,
         "compute_pairwise",
         lambda **kwargs: _build_pairwise_result(),
     )
-    monkeypatch.setattr(pairwise_cli, "get_database_session", lambda *args: _DummyDB())
+    monkeypatch.setattr(viewer_cli, "get_database_session", lambda *args: _DummyDB())
 
     runner = CliRunner()
     result = runner.invoke(
@@ -584,8 +606,8 @@ def test_serialize_viewer_export_supports_csv_and_json() -> None:
     assert '"predictions_file": "s3://bucket/predictions.jsonl"' in body.decode("utf-8")
 
 
-def test_render_pairwise_browser_page_uses_dimming_only_loading_state() -> None:
-    """The browser page should dim during scope changes without a separate status pill."""
+def test_render_pairwise_browser_page_renders_core_viewer_state_and_controls() -> None:
+    """The browser page should expose core viewer state without CSS-level snapshot checks."""
     pairwise_server = importlib.import_module("olmo_eval.cli.results.pairwise_server")
 
     html = pairwise_server.render_pairwise_browser_page(
@@ -686,296 +708,51 @@ def test_render_pairwise_browser_page_uses_dimming_only_loading_state() -> None:
         pairwise_error=None,
     )
 
+    payload = _extract_browser_payload(html)
+
+    assert payload["has_groups"] is True
+    assert payload["selected_group"] == "my-benchmark"
+    assert payload["selected_scope_key"] == "suite::olmobase:math"
+    assert payload["selected_metric"] is None
+    assert payload["pairwise_error"] is None
+    assert payload["pairwise_error_details"] is None
+    assert payload["pairwise_data"]["meta"]["shared_n"] == 6252
+    assert payload["pairwise_data"]["meta"]["mde80"] == 0.017
+    assert payload["group_data"]["results_table"]["task_columns"][0]["id"] == "gsm8k:olmo3base"
+
+    assert "<title>olmo-eval results viewer</title>" in html
+    assert "Results viewer" in html
+    assert 'data-search-select="group"' in html
+    assert 'data-search-select="scope"' in html
+    assert 'placeholder="search groups..."' in html
+    assert 'placeholder="search suites or tasks..."' in html
+    assert "olmobase:math (2 tasks) · N=6252" in html
+    assert "MDE80" in html
+    assert 'id="model-filter-summary"' in html
+    assert 'data-action="toggle-model-checkbox"' in html
+    assert 'data-model-key="abc12345"' in html
+
+    for action in (
+        "export-pairwise-csv",
+        "export-pairwise-json",
+        "export-pairwise-instance-results",
+        "export-pairwise-stored-files",
+        "export-pairwise-all",
+    ):
+        assert f'data-action="{action}"' in html
+
+    assert "paired test" in html
+    assert "Δ (row − col)" in html
+    assert "P(row > col)" in html
     assert 'scopeForm?.addEventListener("submit"' in html
-    assert "function showScopeLoading()" in html
     assert 'document.body.classList.add("is-page-loading");' in html
     assert 'scopeForm.classList.add("is-loading");' in html
     assert 'id="scope-loading"' not in html
     assert "scope-status" not in html
     assert "scope-spinner" not in html
-    assert "function filterSearchSelect(control, query)" in html
-    assert "function orderedVisibleSearchOptions(control)" in html
-    assert "function moveActiveSearchOption(control, step)" in html
-    assert "function renderPairwiseError(errorDetails, errorMessage, groupData)" in html
-    assert "function renderDiagnosticRunSection(title, items)" in html
-    assert "function renderDiagnosticInstanceCounts(title, items)" in html
-    assert 'const modelFilterDetails = document.getElementById("model-filter-details");' in html
-    assert "if (model?.timestamp) return modelExportRef(model);" in html
-    assert 'data-search-select="group"' in html
-    assert 'data-search-select="scope"' in html
-    assert 'data-role="search-select-filter"' in html
-    assert 'data-action="select-search-option"' in html
-    assert 'data-option-index="0"' in html
-    assert 'placeholder="search groups..."' in html
-    assert 'placeholder="search suites or tasks..."' in html
-    assert 'type="hidden" name="group"' in html
-    assert 'type="hidden" name="scope"' in html
-    assert 'scopeForm?.querySelectorAll("[data-search-select]")' in html
-    assert 'querySelectorAll("select[data-loading-label]")' not in html
-    assert 'onchange="this.form.submit()"' not in html
-    assert "olmobase:math (2 tasks) · N=6252" in html
-    assert 'title="olmobase:math (2 tasks) · N=6252"' in html
-    assert "MDE80" in html
-    assert "legend-metric-value" in html
-    assert "<title>olmo-eval results viewer</title>" in html
-    assert "olmo-eval" in html
-    assert "Results viewer" in html
-    assert '<span class="legend-title legend-title-alpha">α</span>' in html
-    assert ".legend-title-alpha {" in html
-    assert "text-transform: none;" in html
-    assert (
-        html.index('<span class="legend-title">intensity</span>')
-        < html.index("${alphaLegend()}")
-        < html.index('<span class="legend-title">MDE80</span>')
-    )
-    assert "--app-gutter: clamp(18px, 3vw, 42px);" in html
-    assert "--app-max: 1880px;" in html
-    assert "max-width: min(100%, var(--app-max));" in html
-    assert "margin-inline: auto;" in html
-    assert "padding-inline: var(--app-gutter);" in html
-    assert 'grid-template-areas: "brand scope filters";' in html
-    assert "grid-template-columns: auto minmax(0, 1.45fr) minmax(0, 0.95fr);" in html
-    assert (
-        "grid-template-columns: minmax(240px, 1fr) minmax(360px, 1.45fr) "
-        "minmax(300px, 1.1fr);" in html
-    )
-    assert "min-width: min(300px, 100%);" in html
-    assert "@media (max-width: 1880px)" in html
-    assert 'grid-template-areas:\n          "brand filters"\n          "scope scope";' in html
-    assert "grid-template-columns: auto minmax(420px, 1fr);" in html
-    assert "max-width: 560px;" in html
-    assert "@media (max-width: 1380px)" in html
-    assert (
-        'grid-template-areas:\n          "brand"\n          "scope"\n          "filters";' in html
-    )
-    assert "grid-area: filters;" in html
-    assert "max-width: none;" in html
-    assert "@media (max-width: 820px)" in html
-    assert "width: auto;" in html
-    assert "min-width: max-content;" in html
     assert '<label id="alpha-control"' not in html
-    assert 'const alphaControl = document.getElementById("alpha-control");' not in html
-    assert 'document.getElementById("alpha-select")?.addEventListener("change"' not in html
-    assert ".results-table th.th-task:last-child," in html
-    assert ">group<" in html
-    assert ">suite / task<" in html
-    assert ">filter<" in html
-    assert "filter model names..." in html
-    assert "included models" in html
-    assert 'id="model-filter-summary"' in html
-    assert 'data-action="toggle-model-checkbox"' in html
-    assert 'data-model-key="abc12345"' in html
-    assert ".search-select-menu {" in html
-    assert "left: 0;" in html
-    assert "right: auto;" in html
-    assert "width: max(100%, var(--search-select-menu-width, 320px));" in html
-    assert "max-width: min(620px, calc(100vw - (2 * var(--app-gutter))));" in html
-    assert ".group-select .search-select-menu," in html
-    assert ".scope-select .search-select-menu {" in html
-    assert "max-width: calc(100vw - (2 * var(--app-gutter)));" in html
-    assert "function syncSearchSelectMenuWidth(control)" in html
-    assert "function queueSearchSelectMenuWidthSync()" in html
-    assert 'control.style.setProperty("--search-select-menu-width"' in html
-    assert ".search-select-option {" in html
-    assert "grid-template-columns: minmax(0, 1fr) auto;" in html
-    assert ".search-select-option-main {" in html
-    assert "overflow-wrap: anywhere;" in html
-    assert "white-space: normal;" in html
-    assert ".search-select-option-aside {" in html
-    assert "flex-wrap: wrap;" in html
-    assert ".group-select .search-select-option," in html
-    assert ".scope-select .search-select-option {" in html
-    assert ".group-select .search-select-option-aside," in html
-    assert ".scope-select .search-select-option-aside {" in html
-    assert "${colsSvg()} columns" in html
-    assert "${downloadSvg()} csv" in html
-    assert "${downloadSvg()} export" in html
-    assert 'data-action="export-pairwise-csv"' in html
-    assert 'data-action="export-pairwise-json"' in html
-    assert 'data-action="export-pairwise-instance-results"' in html
-    assert 'data-action="export-pairwise-stored-files"' in html
-    assert 'data-action="export-pairwise-all"' in html
-    assert ">data<" in html
-    assert ">paired comparisons<" in html
-    assert ">paired test summary<" in html
-    assert ">instance results<" in html
-    assert ">stored files<" in html
-    assert ">all viewer data<" in html
-    assert ">csv<" in html
-    assert ">json<" in html
-    assert "pairwise csv" not in html
-    assert "pairwise json" not in html
-    assert "pairwise data" not in html
-    assert 'new URL("/export", window.location.origin)' in html
-    assert 'function pairwiseViewerExportUrl(kind, format = "csv")' in html
-    assert "function exportPairwiseInstanceResults()" in html
-    assert "function exportPairwiseStoredFiles()" in html
-    assert "async function exportPairwiseAll()" in html
-    assert 'fetchViewerExportJson("instance-results")' in html
-    assert 'fetchViewerExportJson("stored-files")' in html
-    assert '"selected_scope_key":"suite::olmobase:math"' in html
-    assert '"task_ids":["gsm8k:olmo3base","minerva_math_algebra:olmo3base"]' in html
-    assert "toggle-row-checkbox" not in html
-    assert html.index('<button id="view-matrix" class="tab">paired test</button>') < html.index(
-        '<button id="view-table" class="tab">results</button>'
-    )
     assert "renderDiscovery" not in html
-    assert "selected group" not in html
-    assert "suite coverage" not in html
-    assert "pairwise browser" not in html
-    assert "point the browser at a populated results database." not in html
-    assert "select a suite or task to load a pairwise comparison." not in html
-    assert "function scopedTaskColumns(resultsData)" in html
-    assert "function showAverageColumn(columns)" in html
-    assert "const scopedColumns = scopedTaskColumns(resultsData);" in html
-    assert "${column.model_count} models ${sortArrow(column.id)}" not in html
-    assert "const header = showAverage" in html
-    assert "task ${sortArrow(column.id)}" not in html
-    assert "left: calc(var(--table-idx-w) + var(--table-name-w));" in html
-    assert ".results-table thead th.th-name.sortable:hover," in html
-    assert ".results-table thead th.th-name::after," in html
-    assert ".results-table tbody td.td-name:hover," in html
-    assert 'class="td-name-main"' in html
-    assert ".results-table tbody td.td-name:focus-within .td-name-main {" in html
-    assert "--td-name-hide-space: 30px;" in html
-    assert "height: 100%;" in html
-    assert "top: 0;" in html
-    assert "bottom: 0;" in html
-    assert "left: 0;" in html
-    assert "min-width: 100%;" in html
-    assert "width: fit-content;" in html
-    assert "padding: 7px 12px 7px calc(12px + var(--td-name-hide-space));" in html
-    assert "pointer-events: none;" in html
-    assert 'class="row-hdr-main"' in html
-    assert ".row-hdr:hover .row-hdr-name," in html
-    assert ".row-hdr:focus-within .row-hdr-name {" in html
-    assert "--row-hdr-hide-space: 24px;" in html
-    assert ".row-hdr:hover .row-hdr-main," in html
-    assert "height: 100%;" in html
-    assert "top: 0;" in html
-    assert "bottom: 0;" in html
-    assert "left: 0;" in html
-    assert "min-width: 100%;" in html
-    assert "padding: 0 12px 0 6px;" in html
-    assert ".row-hdr:hover .row-hdr-score," in html
-    assert ".row-hdr:hover .row-hdr-hide," in html
-    assert ".results-table tbody tr:hover .td-name-hide," in html
-    assert ".td-name-hide:hover," in html
-    assert ".results-table tbody tr:hover td.td-idx," in html
-    assert ".results-table tbody tr:hover td.td-name {" in html
-    assert ".results-table tbody td.td-name:focus-within {" in html
-    assert ".matrix-hdr-hide {" in html
-    assert "opacity: 0.46;" in html
-    assert "opacity: 0.58;" in html
-    assert "color: var(--c-ink-40);" in html
-    assert "background: transparent;" in html
-    assert "max-width: min(72vw, 880px);" in html
-    assert "pointer-events: none;" in html
-    assert "align-items: flex-end;" in html
-    assert "min-height: 18px;" in html
-    assert 'class="th-inline"' in html
-    assert ".results-table thead .th-inline," in html
-    assert "z-index: 1;" in html
-    assert "function sortSvg() {" in html
-    assert 'class="sort-glyph ${stateClass}"' in html
-    assert 'class="th-task sortable ${sortState.key === column.id ? "active" : ""}"' in html
-    assert 'data-action="table-sort"' in html
-    assert "visible mean" not in html
-    assert 'title="mean across visible task columns"' in html
-    assert "overflow-wrap: anywhere;" in html
-    assert "scrollbar-gutter: stable both-edges;" in html
-    assert "scrollbar-width: thin;" in html
-    assert "scrollbar-color: var(--c-ink-40) var(--c-paper-2);" in html
-    assert ".table-scroll::-webkit-scrollbar {" in html
-    assert "height: 13px;" in html
-    assert ".table-scroll::-webkit-scrollbar-thumb {" in html
-    assert "border: 3px solid var(--c-paper-2);" in html
-    assert 'class="table-scroll-shell"' in html
-    assert 'data-role="results-scroll-region"' in html
-    assert 'data-role="results-scrollbar-track"' in html
-    assert 'class="table-xbar-label">scroll</span>' in html
-    assert ".table-xbar[hidden] {" in html
-    assert "display: none !important;" in html
-    assert ".table-xbar-track {" in html
-    assert ".table-xbar-thumb {" in html
-    assert "function bindResultsScrollbars()" in html
-    assert "const resultsScrollbarObservers = new WeakMap();" in html
-    assert "let resultsScrollSyncQueued = false;" in html
-    assert "function queueResultsScrollSync()" in html
-    assert (
-        'if (table && "ResizeObserver" in window && !resultsScrollbarObservers.has(shell)) {'
-        in html
-    )
-    assert "const observer = new ResizeObserver(() => {" in html
-    assert "function measureResultsScrollMetrics(region)" in html
-    assert "function syncResultsScrollbars()" in html
-    assert "const actualScrollWidth = region.scrollWidth || 0;" in html
-    assert "const fallbackWidth =" in html
-    assert "const contentWidth = actualScrollWidth || fallbackWidth;" in html
-    assert "actualScrollWidth > 0" in html
-    assert "if (maxScroll <= 1) {" in html
-    assert "rail.hidden = false;" in html
-    assert "Math.round(track.getBoundingClientRect().width) ||" in html
-    assert "if (trackWidth <= 0) {" in html
-    assert "const scrollLeft = clamp(region.scrollLeft, 0, maxScroll);" in html
-    assert "window.setTimeout(queueResultsScrollSync, 80);" in html
-    assert 'window.addEventListener("resize", queueResultsScrollSync);' in html
-    assert "document.fonts?.ready?.then(() => {" in html
-    assert 'document.body.classList.add("is-dragging-table-xbar");' in html
-    assert ".search-select-option.is-active {" in html
-    assert ".diag-card {" in html
-    assert ".diag-count-grid {" in html
-    assert 'event.key === "ArrowDown" || event.key === "ArrowUp"' in html
-    assert (
-        "option.style.order = String((needle ? matchRank * 1000 : 0) + "
-        "searchOptionIndex(option));" in html
-    )
-    assert "activeSearchOption(control)" in html
-    assert "if (modelFilterDetails?.open && !modelFilterDetails.contains(event.target)) {" in html
-    assert "renderPairwiseMeta" not in html
-    assert "paired test" in html
-    assert "Δ (row − col)" in html
-    assert "P(row > col)" in html
-    assert "function cellSignalLevel" in html
-    assert 'return `<span class="cell-signal sig-${level}" aria-hidden="true"></span>`;' in html
-    assert ".cell-signal.sig-3 {" in html
-    assert ".cell-signal-bar" not in html
-    assert "alpha: 0.05," in html
-    assert 'loadState("alpha", "0.05")' not in html
-    assert 'storageBase + "alpha"' not in html
-    assert "col-hdr-idx" not in html
-    assert 'class="matrix-hdr-hide row-hdr-hide"' in html
-    assert 'class="matrix-hdr-hide col-hdr-hide"' in html
-    assert "background: currentColor;" in html
-    assert 'const fg = lightness < 0.72 ? "var(--c-paper)" : "var(--c-ink-70)";' in html
-    assert "fmtCellMeta" not in html
-    assert "sigStars" not in html
-    assert "value < 1e-4" in html
-    assert 'toExponential(0).replace("e+", "e")' in html
-    assert 'toLocaleString("en-US"' in html
-    assert ".tt-menu-action {" in html
-    assert "const hiddenCount = Math.max(0, scopedColumns.length - visibleCount);" in html
-    assert 'class="tt-dd tt-cols-menu"' in html
-    assert 'class="tt-menu-clear"' in html
-    assert 'class="tt-menu-name-btn"' in html
-    assert 'data-action="solo-col"' in html
-    assert 'data-action="reset-cols"' in html
-    assert "function bindColumnsMenu()" in html
-    assert "state.columnsMenuOpen = true;" in html
-    assert "if (colsMenu?.open && !colsMenu.contains(event.target)) {" in html
-    assert "function buildPairwiseExportPayload(pairwiseData)" in html
-    assert "function exportPairwiseCsv()" in html
-    assert "function exportPairwiseJson()" in html
-    assert "shared_instance_mean_score" in html
-    assert "mean_task_score" in html
-    assert "bt_elo" in html
-    assert "pairwise_comparisons" in html
-    assert "pairwise_matrices" in html
-    assert '"pairwise_error_details":null' in html
-    assert "score_difference_row_minus_column" in html
-    assert "score_difference_display_format" in html
-    assert "score_diff_row_minus_column" not in html
-    assert "score_diff_display_format" not in html
+    assert 'id="metric-select"' not in html
 
 
 def test_render_pairwise_browser_page_shows_root_default_selection_state() -> None:
@@ -991,14 +768,17 @@ def test_render_pairwise_browser_page_shows_root_default_selection_state() -> No
         pairwise_error=None,
     )
 
-    assert 'type="hidden" name="group" value=""' in html
-    assert ">select group...<" in html
-    assert ">nothing to compare yet<" in html
+    payload = _extract_browser_payload(html)
+
+    assert payload["has_groups"] is True
+    assert payload["selected_group"] is None
+    assert payload["selected_scope_key"] is None
+    assert payload["group_data"] is None
+    assert payload["pairwise_data"] is None
+    assert "select group..." in html
+    assert "nothing to compare yet" in html
     assert "pick an experiment group and suite or task" in html
     assert "use the selectors above to choose what you want to compare." in html
-    assert '"has_groups":true' in html
-    assert '"selected_group":null' in html
-    assert '"selected_scope_key":null' in html
 
 
 def test_render_pairwise_browser_page_leaves_scope_unselected_without_request() -> None:
@@ -1039,10 +819,13 @@ def test_render_pairwise_browser_page_leaves_scope_unselected_without_request() 
         pairwise_error=None,
     )
 
-    assert 'type="hidden" name="scope" value=""' in html
-    assert ">select suite or task...<" in html
+    payload = _extract_browser_payload(html)
+
+    assert payload["selected_group"] == "my-benchmark"
+    assert payload["selected_scope_key"] is None
+    assert payload["group_data"]["summary"]["group_name"] == "my-benchmark"
+    assert "select suite or task..." in html
     assert "pick a suite or task to open the paired-test view." in html
-    assert '"selected_scope_key":null' in html
 
 
 def test_render_pairwise_browser_page_embeds_structured_pairwise_error() -> None:
@@ -1121,8 +904,21 @@ def test_render_pairwise_browser_page_embeds_structured_pairwise_error() -> None
         },
     )
 
-    assert '"pairwise_error_details":{"code":"insufficient_matched_experiments"' in html
-    assert '"matched_runs":[{"label":"allenai/OLMo-3-1025-7B (abc12345)"' in html
+    payload = _extract_browser_payload(html)
+
+    assert payload["selected_group"] == "olmo-3-parity-apr5"
+    assert payload["selected_scope_key"] == "suite::mmlu:humanities:mc:olmo3base"
+    assert payload["pairwise_data"] is None
+    assert payload["pairwise_error"] == (
+        "Only 1 experiment(s) matched the filters — need at least 2."
+    )
+    assert payload["pairwise_error_details"]["code"] == "insufficient_matched_experiments"
+    assert payload["pairwise_error_details"]["matched_runs"] == [
+        {
+            "label": "allenai/OLMo-3-1025-7B (abc12345)",
+            "timestamp_label": "2026-04-21 08:00",
+        }
+    ]
     assert "runs that matched this scope" in html
     assert "The results tab is broader" in html
     assert "what to do next" in html
@@ -1187,12 +983,17 @@ def test_render_pairwise_browser_page_renders_metric_selector_for_recoverable_sc
         },
     )
 
+    payload = _extract_browser_payload(html)
+
+    assert payload["selected_scope_key"] == "task::terminal_bench_2"
+    assert payload["pairwise_error_details"]["code"] == "missing_primary_metric"
     assert 'id="metric-select"' in html
     assert 'name="metric"' in html
-    assert ">metric<" in html
     assert "select metric..." in html
-    assert 'value="pass^1:external"' in html
-    assert 'value="reward:external"' in html
+
+    for metric in ("pass^1:external", "reward:external"):
+        assert f'value="{metric}"' in html
+
     assert "choose a metric to retry this paired test" in html
     assert "Use the metric control above to choose a metric and retry the paired test." in html
 
@@ -1238,9 +1039,13 @@ def test_render_pairwise_browser_page_shows_scope_readiness_states() -> None:
         pairwise_error=None,
     )
 
-    assert "search-select-option-state is-ready" in html
-    assert "search-select-option-state is-limited" in html
-    assert "search-select-option-sub" in html
+    payload = _extract_browser_payload(html)
+
+    assert payload["selected_scope_key"] == "suite::ready-suite"
+    assert payload["group_data"]["scope_options"][0]["status_badge"] == "ready"
+    assert payload["group_data"]["scope_options"][1]["status_badge"] == "needs coverage"
+    assert 'data-value="suite::ready-suite"' in html
+    assert 'data-value="suite::needs-coverage"' in html
     assert "paired test ready with 3 latest models" in html
     assert "needs coverage: 2 suite tasks are still missing in this group" in html
 

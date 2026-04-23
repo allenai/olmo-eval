@@ -3,8 +3,8 @@
 import click
 
 from olmo_eval.cli.results.discover import group, groups, suites
-from olmo_eval.cli.results.pairwise import viewer
 from olmo_eval.cli.results.query import query
+from olmo_eval.cli.results.viewer import viewer
 
 
 @click.group()
