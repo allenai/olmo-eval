@@ -293,7 +293,7 @@ class SWEBenchExternalEval(ExternalEval):
         cwd: str | None = None,
         env: dict[str, str] | None = None,
     ) -> tuple[bool, str]:
-        """Run a subprocess and return (success, combined stdout+stderr)."""
+        """Run a subprocess, streaming output to logs and returning (success, combined stdout+stderr)."""
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -301,15 +301,26 @@ class SWEBenchExternalEval(ExternalEval):
             cwd=cwd,
             env=env if env is not None else os.environ.copy(),
         )
+        lines: list[str] = []
+        deadline = asyncio.get_event_loop().time() + timeout
         try:
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            while True:
+                remaining = deadline - asyncio.get_event_loop().time()
+                if remaining <= 0:
+                    raise TimeoutError
+                line_bytes = await asyncio.wait_for(proc.stdout.readline(), timeout=remaining)
+                if not line_bytes:
+                    break
+                line = line_bytes.decode(errors="replace").rstrip("\n")
+                lines.append(line)
+                logger.info(line)
         except TimeoutError:
             proc.kill()
             await proc.communicate()
-            return False, f"[Subprocess timed out after {timeout:.0f}s]"
+            return False, f"[Subprocess timed out after {timeout:.0f}s]\n" + "\n".join(lines)
 
-        output = stdout.decode(errors="replace")
-        return proc.returncode == 0, output
+        await proc.wait()
+        return proc.returncode == 0, "\n".join(lines)
 
     def _parse_results(
         self,
