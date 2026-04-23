@@ -325,6 +325,50 @@ def test_build_results_table_keep_all_preserves_distinct_reruns(monkeypatch) -> 
     )
 
 
+def test_build_results_table_metric_options_do_not_double_count_primary_metric(
+    monkeypatch,
+) -> None:
+    pairwise_server = importlib.import_module("olmo_eval.cli.results.pairwise_server")
+
+    experiment = SimpleNamespace(
+        id=11,
+        model_name="model-a",
+        model_hash="abc12345deadbeef",
+        timestamp=datetime(2026, 4, 21, 12, 0, tzinfo=UTC),
+    )
+
+    monkeypatch.setattr(
+        pairwise_server,
+        "_group_experiments",
+        lambda session, group_name, keep_all: [experiment],
+    )
+
+    results_table = pairwise_server._build_results_table(
+        _StaticTaskSession(
+            [
+                (
+                    11,
+                    "gsm8k:olmo3base",
+                    {
+                        "accuracy": {"exact_match": 0.65},
+                        "f1": {"exact_match": 0.72},
+                    },
+                    "accuracy:exact_match",
+                )
+            ]
+        ),
+        "my-group",
+        keep_all=False,
+    )
+
+    metric_options = results_table["task_columns"][0]["metric_options"]
+    metric_option_by_value = {option["value"]: option for option in metric_options}
+
+    assert metric_option_by_value["accuracy:exact_match"]["model_count"] == 1
+    assert metric_option_by_value["accuracy:exact_match"]["meta"] == "1 model"
+    assert metric_option_by_value["f1:exact_match"]["model_count"] == 1
+
+
 def test_model_filter_score_label_uses_selected_scope_columns() -> None:
     pairwise_server = importlib.import_module("olmo_eval.cli.results.pairwise_server")
 

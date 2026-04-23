@@ -294,9 +294,10 @@ def _build_results_table(session: Session, group_name: str, *, keep_all: bool) -
                 get_task_metric_profile(task_name, primary_metric),
             )
         metric_counter = task_metric_options_by_name.setdefault(task_name, Counter())
-        for metric_key in _available_metric_keys(metrics):
+        available_metric_keys = _available_metric_keys(metrics)
+        for metric_key in available_metric_keys:
             metric_counter[metric_key] += 1
-        if primary_metric:
+        if primary_metric and primary_metric not in available_metric_keys:
             metric_counter[primary_metric] += 1
         score = extract_score_from_metrics(metrics, primary_metric) if primary_metric else None
         task_scores_by_pk.setdefault(experiment_pk, {})[task_name] = score
