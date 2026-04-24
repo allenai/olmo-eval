@@ -144,10 +144,10 @@ def test_results_viewer_json_blob_forwards_exclude_filters(monkeypatch) -> None:
     assert captured["exclude_task_hashes"] == ["fff"]
 
 
-def test_results_viewer_dump_keep_all_status_uses_actual_flag_name(
+def test_results_viewer_dump_repeated_runs_status_uses_plain_language(
     monkeypatch, tmp_path: Path
 ) -> None:
-    """The keep-all summary should print the real CLI flag without spaces."""
+    """Repeated-run mode should be described without surfacing CLI flag syntax."""
     analysis_pairwise = importlib.import_module("olmo_eval.analysis.pairwise")
     results_cli = importlib.import_module("olmo_eval.cli.results")
     viewer_cli = importlib.import_module("olmo_eval.cli.results.viewer")
@@ -169,7 +169,7 @@ def test_results_viewer_dump_keep_all_status_uses_actual_flag_name(
             "model-",
             "--suite",
             "olmobase:math",
-            "--all",
+            "--repeated-runs",
             "--format",
             "json",
             "--output",
@@ -178,8 +178,8 @@ def test_results_viewer_dump_keep_all_status_uses_actual_flag_name(
     )
 
     assert result.exit_code == 0, result.output
-    assert "--all; no dedupe" in result.output
-    assert "-- all; no dedupe" not in result.output
+    assert "repeated runs enabled" in result.output
+    assert "--" not in result.output
 
 
 def test_results_viewer_starts_server(monkeypatch) -> None:
@@ -207,7 +207,7 @@ def test_results_viewer_starts_server(monkeypatch) -> None:
             "0.0.0.0",
             "--port",
             "9900",
-            "--all",
+            "--repeated-runs",
             "--no-require-full-coverage",
         ],
     )
@@ -688,6 +688,7 @@ def test_render_results_viewer_page_renders_core_viewer_state_and_controls() -> 
             },
         },
         selected_scope_key="suite::olmobase:math",
+        selected_run_mode="repeated",
         pairwise_data={
             "meta": {
                 "scope_label": "olmobase:math",
@@ -712,6 +713,7 @@ def test_render_results_viewer_page_renders_core_viewer_state_and_controls() -> 
     assert payload["selected_group"] == "my-benchmark"
     assert payload["selected_scope_key"] == "suite::olmobase:math"
     assert payload["selected_metric"] is None
+    assert payload["selected_run_mode"] == "repeated"
     assert payload["pairwise_error"] is None
     assert payload["pairwise_error_details"] is None
     assert payload["pairwise_data"]["meta"]["shared_n"] == 6252
@@ -745,6 +747,9 @@ def test_render_results_viewer_page_renders_core_viewer_state_and_controls() -> 
     assert 'scopeForm?.addEventListener("submit"' in html
     assert 'document.body.classList.add("is-page-loading");' in html
     assert 'scopeForm.classList.add("is-loading");' in html
+    assert 'id="run-mode-select"' in html
+    assert 'name="runs"' in html
+    assert '<option value="repeated" selected="selected">' in html
     assert 'id="scope-loading"' not in html
     assert "scope-status" not in html
     assert "scope-spinner" not in html

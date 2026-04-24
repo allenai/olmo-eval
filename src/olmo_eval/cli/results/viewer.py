@@ -128,12 +128,11 @@ from olmo_eval.cli.utils import console
     help="Listen port for viewer mode (default: 8765).",
 )
 @click.option(
-    "--all",
+    "--repeated-runs/--latest-only",
     "keep_all",
-    is_flag=True,
     default=False,
-    help="Include every matched experiment as its own row (default: dedupe "
-    "to the most recent per model+hash).",
+    help="Keep repeated runs as distinct rows instead of collapsing to the latest "
+    "run per model hash.",
 )
 @click.option(
     "--require-full-coverage/--no-require-full-coverage",
@@ -350,13 +349,13 @@ def _run_pairwise_dump(
     dropped = result.n_experiments_dropped
     if keep_all:
         console.print(
-            f"[dim]Compared all {len(result.models)} experiments (--all; no dedupe).[/dim]"
+            f"[dim]Compared all {len(result.models)} experiments (repeated runs enabled).[/dim]"
         )
     elif dropped:
         console.print(
             f"[dim]Compared {len(result.models)} unique model(s) from "
             f"{matched} matched experiments "
-            f"({dropped} re-run(s) dropped; pass --all to keep them).[/dim]"
+            f"({dropped} repeated run(s) collapsed to the latest per model hash).[/dim]"
         )
     else:
         console.print(

@@ -33,7 +33,11 @@
 
     .scope-form {
       display: grid;
-      grid-template-columns: minmax(240px, 1fr) minmax(360px, 1.45fr) minmax(300px, 1.1fr);
+      grid-template-columns:
+        minmax(220px, 1fr)
+        minmax(320px, 1.45fr)
+        minmax(180px, 0.78fr)
+        minmax(240px, 1.1fr);
       gap: 10px 14px;
       align-items: end;
       min-width: 0;
@@ -62,6 +66,10 @@
 
     .scope-form .metric-select-control {
       min-width: min(300px, 100%);
+    }
+
+    .scope-form .run-mode-control {
+      min-width: min(180px, 100%);
     }
 
     .scope-form.is-loading {

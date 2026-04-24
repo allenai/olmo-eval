@@ -1918,6 +1918,7 @@
         if (groupName) url.searchParams.set("group", groupName);
         if (pageData.selected_scope_key) url.searchParams.set("scope", pageData.selected_scope_key);
         if (pageData.selected_metric) url.searchParams.set("metric", pageData.selected_metric);
+        if (pageData.selected_run_mode) url.searchParams.set("runs", pageData.selected_run_mode);
         pairwiseExportModels(pairwiseData).forEach((model) => {
           url.searchParams.append("model_ref", modelExportRef(model));
         });
@@ -2030,6 +2031,7 @@
             selected_scope_key: pageData.selected_scope_key || null,
             metric_name: pairwiseData.meta.metric || null,
             selected_metric: pageData.selected_metric || null,
+            run_selection: pageData.selected_run_mode || "latest",
             shared_instance_count: pairwiseData.meta.shared_n ?? null,
             task_count: pairwiseData.meta.task_count ?? null,
             compared_model_count: pairwiseData.meta.model_count ?? null,
@@ -2379,6 +2381,10 @@
       });
 
       document.getElementById("metric-select")?.addEventListener("change", () => {
+        submitScopeForm();
+      });
+
+      document.getElementById("run-mode-select")?.addEventListener("change", () => {
         submitScopeForm();
       });
 

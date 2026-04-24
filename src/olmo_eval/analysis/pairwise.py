@@ -915,7 +915,8 @@ def compute_pairwise(
             ]
             suggestions = [
                 "Broaden the filters to include more distinct model hashes.",
-                "Use `--all` if you intentionally want multiple runs of the same model hash.",
+                "Keep repeated runs separate if you intentionally want multiple rows for the "
+                "same model hash.",
             ]
         else:
             detail = "matched"

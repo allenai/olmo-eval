@@ -81,7 +81,7 @@ specific group or scope:
 | `--host HOST`              | Bind address for the viewer (default `127.0.0.1`). |
 | `--port PORT`              | Listen port for the viewer (default `8765`). |
 | `--margin FLOAT`           | Tie threshold for continuous metrics in the paired test. |
-| `--all`                    | Keep every matched experiment as its own row instead of deduping by model+hash. |
+| `--repeated-runs/--latest-only` | Seed whether the viewer keeps repeated runs as separate rows or collapses to the latest run per model hash. |
 | `--require-full-coverage/--no-require-full-coverage` | Control suite-mode full-coverage filtering. |
 
 Browser-mode constraints:
@@ -91,6 +91,10 @@ Browser-mode constraints:
 - Seed filters are limited to one `--experiment-group` plus at most one of
   `--task` or `--suite`.
 - `--task-hash`, the exclude flags, and `--output` are not supported in browser mode.
+
+Once the page is open, use the `runs` selector in the viewer header to switch
+between the latest run per model hash and repeated runs without restarting the
+server.
 
 Start from discovery:
 
@@ -151,14 +155,14 @@ across different tasks don't collide.
 | `--margin FLOAT`      | `0.0`   | Tie threshold for continuous scores. Scores within `margin` of each other count as tied. |
 | `-o, --output PATH`   | stdout  | Save JSON / CSV to a file.                                                               |
 | `-f, --format FMT`    | none    | One of `json`, `csv`. Omit it to launch the browser viewer.                               |
-| `--all`               | off     | Keep every matched experiment as its own row (default: dedupe by model+hash to most recent). |
+| `--repeated-runs/--latest-only` | `latest-only` | Keep repeated runs as distinct rows instead of collapsing to the latest run per model hash. |
 
 By default matched experiments are deduped to one row per
 `(model_name, model_hash)`, keeping the most recent by timestamp. The CLI
-prints a line summarizing how many were kept vs. dropped. Pass `--all` to
-keep every re-run as a distinct row in the matrix (labels include the
-timestamp for disambiguation) — useful for comparing historical re-runs
-of the same model.
+prints a line summarizing how many were kept vs. dropped. Use
+`--repeated-runs` to keep every re-run as a distinct row in the matrix
+(labels include the timestamp for disambiguation) — useful for comparing
+historical re-runs of the same model.
 
 #### Dump workflows
 

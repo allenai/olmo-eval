@@ -181,6 +181,23 @@ def _pick_scope(group_data: dict[str, Any], requested: str | None) -> str | None
     return None
 
 
+def _serialize_run_mode(keep_all: bool) -> str:
+    return "repeated" if keep_all else "latest"
+
+
+def _resolve_run_mode(
+    requested: str | None,
+    *,
+    default_keep_all: bool,
+) -> tuple[str, bool]:
+    normalized = str(requested or "").strip().lower()
+    if normalized == "repeated":
+        return "repeated", True
+    if normalized == "latest":
+        return "latest", False
+    return _serialize_run_mode(default_keep_all), default_keep_all
+
+
 def _list_groups(session: Session, *, limit: int = 500) -> list[dict[str, Any]]:
     from olmo_eval.storage.backends.postgres.models import Experiment, TaskResult
 
@@ -1661,6 +1678,34 @@ def _render_metric_control(
     ).strip()
 
 
+def _render_run_mode_control(*, selected_run_mode: str) -> str:
+    resolved_run_mode = "repeated" if selected_run_mode == "repeated" else "latest"
+    latest_selected = ' selected="selected"' if resolved_run_mode == "latest" else ""
+    repeated_selected = ' selected="selected"' if resolved_run_mode == "repeated" else ""
+    return dedent(
+        f"""
+        <label class="select run-mode-control">
+          <span class="select-label">runs</span>
+          <div class="select-wrap">
+            <select
+              id="run-mode-select"
+              name="runs"
+              class="control-select"
+              aria-label="runs"
+            >
+              <option value="latest"{latest_selected}>
+                latest only
+              </option>
+              <option value="repeated"{repeated_selected}>
+                repeated runs
+              </option>
+            </select>
+          </div>
+        </label>
+        """
+    ).strip()
+
+
 def _build_viewer_error_payload(
     *,
     code: str,
@@ -1709,8 +1754,8 @@ def _viewer_pairwise_error_payload(
             ],
             "insufficient_unique_models_after_dedupe": [
                 "Broaden the scope to include more distinct model hashes.",
-                "The viewer keeps the latest run per model hash, so repeated runs of the "
-                "same checkpoint do not create extra heatmap rows.",
+                "Switch the runs control from latest only to repeated runs if you want "
+                "separate heatmap rows for reruns of the same checkpoint.",
             ],
             "insufficient_compared_models": [
                 "Broaden the current filters or switch to a scope with more comparable models.",
@@ -1856,6 +1901,7 @@ def render_results_viewer_page(
     pairwise_error: str | None,
     pairwise_error_details: dict[str, Any] | None = None,
     selected_metric: str | None = None,
+    selected_run_mode: str = "latest",
 ) -> str:
     """Render the viewer page with server-populated selectors and payload."""
     browser_payload = {
@@ -1864,6 +1910,7 @@ def render_results_viewer_page(
         "group_data": group_data,
         "selected_scope_key": selected_scope_key,
         "selected_metric": selected_metric,
+        "selected_run_mode": selected_run_mode,
         "pairwise_data": pairwise_data,
         "pairwise_error": pairwise_error,
         "pairwise_error_details": pairwise_error_details,
@@ -1987,6 +2034,7 @@ def render_results_viewer_page(
         selected_metric=selected_metric,
         pairwise_error_details=pairwise_error_details,
     )
+    run_mode_control = _render_run_mode_control(selected_run_mode=selected_run_mode)
 
     model_filter_options = "".join(
         (
@@ -2062,6 +2110,7 @@ def render_results_viewer_page(
             styles=_PAIRWISE_SHARED_CSS + "\n" + _BROWSER_EXTRA_CSS,
             group_select=group_select,
             scope_select=scope_select,
+            run_mode_control=run_mode_control,
             metric_control=metric_control,
             model_filter_control=model_filter_control,
             payload_json=payload_json,
@@ -2131,11 +2180,16 @@ def serve_results_viewer(
                 requested_group = params.get("group", [""])[0] or None
                 requested_scope = params.get("scope", [""])[0] or None
                 requested_metric = params.get("metric", [""])[0] or None
+                requested_run_mode = params.get("runs", [""])[0] or None
                 requested_kind = params.get("kind", [""])[0] or None
                 requested_format = params.get("format", ["csv"])[0] or "csv"
                 requested_model_refs = [
                     ref for ref in params.get("model_ref", []) if isinstance(ref, str) and ref
                 ]
+                _, selected_keep_all = _resolve_run_mode(
+                    requested_run_mode,
+                    default_keep_all=keep_all,
+                )
 
                 if requested_kind not in {"instance-results", "stored-files"}:
                     self._send_text(status=400, text="Unsupported export kind.\n")
@@ -2150,7 +2204,7 @@ def serve_results_viewer(
                         selected_group, group_data = _resolve_export_group(
                             session,
                             requested_group=requested_group,
-                            keep_all=keep_all,
+                            keep_all=selected_keep_all,
                             require_full_coverage=require_full_coverage,
                         )
                         _, scope_kind, scope_value, selected_metric = (
@@ -2167,7 +2221,7 @@ def serve_results_viewer(
                             scope_value=scope_value,
                             selected_metric=selected_metric,
                             margin=margin,
-                            keep_all=keep_all,
+                            keep_all=selected_keep_all,
                             require_full_coverage=require_full_coverage,
                         )
                         compared_experiments = _order_compared_experiments(
@@ -2232,6 +2286,11 @@ def serve_results_viewer(
             requested_group = params.get("group", [initial_group or ""])[0] or None
             requested_scope = params.get("scope", [initial_scope_key or ""])[0] or None
             requested_metric = params.get("metric", [""])[0] or None
+            requested_run_mode = params.get("runs", [""])[0] or None
+            selected_run_mode, selected_keep_all = _resolve_run_mode(
+                requested_run_mode,
+                default_keep_all=keep_all,
+            )
 
             with db.session() as session:
                 groups = groups_cache.get_or_set(
@@ -2241,11 +2300,11 @@ def serve_results_viewer(
                 selected_group = _pick_group(groups, requested_group)
                 group_data = (
                     group_browser_cache.get_or_set(
-                        (selected_group, keep_all, require_full_coverage),
+                        (selected_group, selected_keep_all, require_full_coverage),
                         lambda: _build_group_browser_data(
                             session,
                             selected_group,
-                            keep_all=keep_all,
+                            keep_all=selected_keep_all,
                             require_full_coverage=require_full_coverage,
                         ),
                     )
@@ -2278,7 +2337,7 @@ def serve_results_viewer(
                             scope_value=scope_value,
                             selected_metric=selected_metric,
                             margin=margin,
-                            keep_all=keep_all,
+                            keep_all=selected_keep_all,
                             require_full_coverage=require_full_coverage,
                         )
                         pairwise_data = build_pairwise_viewer_payload(result)
@@ -2301,6 +2360,7 @@ def serve_results_viewer(
                 group_data=group_data,
                 selected_scope_key=selected_scope_key,
                 selected_metric=selected_metric,
+                selected_run_mode=selected_run_mode,
                 pairwise_data=pairwise_data,
                 pairwise_error=pairwise_error,
                 pairwise_error_details=pairwise_error_details,
