@@ -192,12 +192,12 @@ class TestPairwiseInstanceScoreExtraction:
         )
 
     def test_mc_accuracy_metrics_do_not_fall_back_to_raw_logprob_scores(self) -> None:
-        profile = get_task_metric_profile("basic_skills_coding:rc::olmo3base", "accuracy:logprob")
+        profile = get_task_metric_profile("basic_skills_coding:rc:olmo3base", "accuracy:logprob")
         assert profile is not None
         assert profile.supports_scorer_fallback is False
         assert (
             _extract_pairwise_instance_score(
-                task_name="basic_skills_coding:rc::olmo3base",
+                task_name="basic_skills_coding:rc:olmo3base",
                 metric_key="accuracy:logprob",
                 instance_metrics={"logprob": {"logprob": -196.8}},
             )
@@ -206,7 +206,7 @@ class TestPairwiseInstanceScoreExtraction:
 
     def test_mc_accuracy_metrics_still_use_exact_metric_key_when_present(self) -> None:
         assert _extract_pairwise_instance_score(
-            task_name="basic_skills_coding:rc::olmo3base",
+            task_name="basic_skills_coding:rc:olmo3base",
             metric_key="accuracy:logprob",
             instance_metrics={
                 "accuracy": {"logprob": 1.0},
