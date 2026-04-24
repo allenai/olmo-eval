@@ -54,24 +54,6 @@ class SciCodeArgs:
     sandbox_image: str = "ghcr.io/astral-sh/uv:python3.12-bookworm-slim"
 
 
-@dataclass
-class _ProblemResult:
-    problem_id: str
-    problem_name: str
-    step_results: list[bool]
-    step_codes: dict[int, str]
-    step_texts: dict[int, str]
-    total_scorable: int
-
-    @property
-    def passed(self) -> int:
-        return sum(1 for r in self.step_results if r)
-
-    @property
-    def all_passed(self) -> bool:
-        return self.total_scorable > 0 and self.passed == self.total_scorable
-
-
 class SciCodeExternalEval(ExternalEval):
     """SciCode multi-step scientific code generation as an external evaluation.
 
@@ -93,7 +75,7 @@ class SciCodeExternalEval(ExternalEval):
 
     @property
     def timeout_seconds(self) -> float:
-        return 36000.0
+        return 14400.0
 
     @property
     def arguments(self) -> dict[str, tuple[str, Any | None]]:
@@ -129,45 +111,49 @@ class SciCodeExternalEval(ExternalEval):
         start_time = time.time()
         sc_args = SciCodeArgs(**args)
 
+        original_chat_template_kwargs = provider.chat_template_kwargs
         if sc_args.enable_thinking:
             provider.chat_template_kwargs = {
                 **(provider.chat_template_kwargs or {}),
                 "enable_thinking": True,
             }
 
-        problems = scicode_loader.load_problems(
-            split=sc_args.split, problem_ids=sc_args.problem_ids
-        )
-        if not problems:
-            return self._error_result(
-                "No SciCode problems loaded",
-                start_time,
-                raw_output=(f"split={sc_args.split}, problem_ids={sc_args.problem_ids}"),
+        try:
+            problems = scicode_loader.load_problems(
+                split=sc_args.split, problem_ids=sc_args.problem_ids
             )
-
-        sampling_params = SamplingParams(
-            max_tokens=sc_args.max_tokens, temperature=sc_args.temperature
-        )
-
-        semaphore = asyncio.Semaphore(sc_args.max_concurrency)
-
-        async def run_problem(problem: scicode_loader.SciCodeProblem) -> _ProblemResult:
-            async with semaphore:
-                return await self._run_problem(
-                    problem=problem,
-                    provider=provider,
-                    sampling_params=sampling_params,
-                    sc_args=sc_args,
-                    container_runtime=container_runtime,
+            if not problems:
+                return self._error_result(
+                    "No SciCode problems loaded",
+                    start_time,
+                    raw_output=(f"split={sc_args.split}, problem_ids={sc_args.problem_ids}"),
                 )
 
-        problem_results: list[_ProblemResult] = await asyncio.gather(
-            *[run_problem(p) for p in problems]
-        )
+            sampling_params = SamplingParams(
+                max_tokens=sc_args.max_tokens, temperature=sc_args.temperature
+            )
 
-        total_sub = sum(pr.total_scorable for pr in problem_results)
-        passed_sub = sum(pr.passed for pr in problem_results)
-        main_passed = sum(1 for pr in problem_results if pr.all_passed)
+            semaphore = asyncio.Semaphore(sc_args.max_concurrency)
+
+            async def run_problem(problem: scicode_loader.SciCodeProblem) -> dict[str, Any]:
+                async with semaphore:
+                    return await self._run_problem(
+                        problem=problem,
+                        provider=provider,
+                        sampling_params=sampling_params,
+                        sc_args=sc_args,
+                        container_runtime=container_runtime,
+                    )
+
+            problem_results: list[dict[str, Any]] = await asyncio.gather(
+                *[run_problem(p) for p in problems]
+            )
+        finally:
+            provider.chat_template_kwargs = original_chat_template_kwargs
+
+        total_sub = sum(pr["total"] for pr in problem_results)
+        passed_sub = sum(pr["passed"] for pr in problem_results)
+        main_passed = sum(1 for pr in problem_results if pr["all_passed"])
 
         metrics: dict[str, float] = {
             "sub_step_accuracy": (passed_sub / total_sub) if total_sub else 0.0,
@@ -178,20 +164,6 @@ class SciCodeExternalEval(ExternalEval):
             "num_sub_steps": float(total_sub),
             "passed_sub_steps": float(passed_sub),
         }
-
-        predictions = [
-            {
-                "problem_id": pr.problem_id,
-                "problem_name": pr.problem_name,
-                "passed": pr.passed,
-                "total": pr.total_scorable,
-                "all_passed": pr.all_passed,
-                "step_results": pr.step_results,
-                "step_codes": pr.step_codes,
-                "step_texts": pr.step_texts,
-            }
-            for pr in problem_results
-        ]
 
         result = ExternalEvalResult(
             name=self.name,
@@ -205,7 +177,7 @@ class SciCodeExternalEval(ExternalEval):
                 "temperature": sc_args.temperature,
             },
             duration_seconds=time.time() - start_time,
-            predictions=predictions,
+            predictions=problem_results,
         )
 
         if output_dir:
@@ -219,9 +191,11 @@ class SciCodeExternalEval(ExternalEval):
         sampling_params: SamplingParams,
         sc_args: SciCodeArgs,
         container_runtime: str,
-    ) -> _ProblemResult:
+    ) -> dict[str, Any]:
         hardcoded = scicode_prompts.hardcoded_for_problem(problem.problem_id)
         sub_steps = problem.sub_steps
+        # Hardcoded snippets feed generation via previous_llm_code but stay out
+        # of step_codes; the verifier receives them separately as hardcoded_prelude.
         previous_llm_code: list[str | None] = [None] * len(sub_steps)
         for idx, snippet in hardcoded.items():
             if idx < len(sub_steps):
@@ -255,14 +229,16 @@ class SciCodeExternalEval(ExternalEval):
         total_scorable = len(scorable_indices)
 
         if total_scorable == 0:
-            return _ProblemResult(
-                problem_id=problem.problem_id,
-                problem_name=problem.problem_name,
-                step_results=[],
-                step_codes=step_codes,
-                step_texts=step_texts,
-                total_scorable=0,
-            )
+            return {
+                "problem_id": problem.problem_id,
+                "problem_name": problem.problem_name,
+                "step_results": [],
+                "step_codes": step_codes,
+                "step_texts": step_texts,
+                "passed": 0,
+                "total": 0,
+                "all_passed": False,
+            }
 
         hardcoded_prelude = "\n\n".join(
             hardcoded[i] for i in sorted(hardcoded) if i < len(sub_steps)
@@ -278,14 +254,17 @@ class SciCodeExternalEval(ExternalEval):
             container_runtime=container_runtime,
         )
 
-        return _ProblemResult(
-            problem_id=problem.problem_id,
-            problem_name=problem.problem_name,
-            step_results=step_results,
-            step_codes=step_codes,
-            step_texts=step_texts,
-            total_scorable=total_scorable,
-        )
+        passed = sum(1 for r in step_results if r)
+        return {
+            "problem_id": problem.problem_id,
+            "problem_name": problem.problem_name,
+            "step_results": step_results,
+            "step_codes": step_codes,
+            "step_texts": step_texts,
+            "passed": passed,
+            "total": total_scorable,
+            "all_passed": passed == total_scorable,
+        }
 
     async def _verify(
         self,
