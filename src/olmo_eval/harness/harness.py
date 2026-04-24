@@ -1,7 +1,8 @@
-"""Harness: A model provider configured with specific capabilities.
+"""Harness: runtime orchestration layer for an evaluation run.
 
-The Harness wraps an InferenceProvider and applies configuration to all requests.
-It provides both single-turn (generate) and multi-turn (run) interfaces.
+The Harness combines the primary inference provider with runtime behavior such as
+tools, system prompts, auxiliary providers, metrics collection, and optional
+scaffolds.
 """
 
 from __future__ import annotations
@@ -10,22 +11,24 @@ from typing import TYPE_CHECKING, Any, cast
 
 from olmo_eval.common.types import LMOutput, LMRequest, SamplingParams
 
-from .backends import Backend, get_backend
 from .config import HarnessConfig
 from .result import HarnessResult
+from .scaffolds import Scaffold, get_scaffold
 
 if TYPE_CHECKING:
     from olmo_eval.inference.base import InferenceProvider
 
 
 class Harness:
-    """A model provider configured with specific capabilities.
+    """Runtime orchestration layer for an evaluation run.
 
-    The Harness wraps an InferenceProvider and applies
-    configuration to the requests. It provides both single-turn (generate/agenerate)
-    and multi-turn (run) interfaces.
+    The Harness combines the primary inference provider with execution policy
+    such as system prompts, tools, auxiliary providers, sandboxing, metrics
+    collection, and an optional scaffold for multi-turn control. This lets the
+    same task run in plain, tool-using, or scaffolded modes without changing
+    the task definition.
 
-    For multi-turn execution with run(), a backend must be configured.
+    For multi-turn execution with run(), a scaffold must be configured.
     """
 
     def __init__(self, config: HarnessConfig) -> None:
@@ -37,7 +40,7 @@ class Harness:
         """
         self.config = config
         self._provider: InferenceProvider | None = None
-        self._backend: Backend | None = None
+        self._scaffold: Scaffold | None = None
 
     @property
     def provider(self) -> InferenceProvider:
@@ -61,22 +64,22 @@ class Harness:
         return self._provider  # type: ignore[ty:invalid-return-type]
 
     @property
-    def backend(self) -> Backend:
-        """Get or create the backend.
+    def scaffold(self) -> Scaffold:
+        """Get or create the scaffold.
 
-        The backend is lazily created from config.backend on first access.
+        The scaffold is lazily created from config.scaffold on first access.
 
         Raises:
-            RuntimeError: If no backend is configured.
+            RuntimeError: If no scaffold is configured.
         """
-        if self._backend is None:
-            if not self.config.backend:
+        if self._scaffold is None:
+            if not self.config.scaffold:
                 raise RuntimeError(
-                    "No backend configured. Set config.backend to use run(). "
+                    "No scaffold configured. Set config.scaffold to use run(). "
                     "For single-turn generation, use generate() or agenerate() instead."
                 )
-            self._backend = get_backend(self.config.backend)
-        return self._backend
+            self._scaffold = get_scaffold(self.config.scaffold)
+        return self._scaffold
 
     @property
     def model_name(self) -> str:
@@ -136,7 +139,7 @@ class Harness:
         return await self.provider.alogprobs(requests)
 
     # ─────────────────────────────────────────────────────────
-    # Multi-turn interface (delegates to backend)
+    # Multi-turn interface (delegates to scaffold)
     # ─────────────────────────────────────────────────────────
 
     async def run(
@@ -145,7 +148,7 @@ class Harness:
         sampling_params: SamplingParams | None = None,
         trace_metadata: dict[str, Any] | None = None,
     ) -> HarnessResult:
-        """Multi-turn execution via configured backend.
+        """Multi-turn execution via configured scaffold.
 
         Runs an agent loop that:
         1. Sends the request to the model
@@ -161,22 +164,22 @@ class Harness:
             HarnessResult with trajectory and final output.
 
         Raises:
-            RuntimeError: If no backend is configured.
+            RuntimeError: If no scaffold is configured.
         """
-        return await self.backend.run(
+        return await self.scaffold.run(
             self.provider,
             self.config,
             request,
             sampling_params,
             trace_metadata,
-            **self.config.backend_kwargs,
+            **self.config.scaffold_kwargs,
         )
 
     async def cleanup(self) -> None:
-        """Clean up resources held by the harness and its backend."""
+        """Clean up resources held by the harness and its scaffold."""
         self.shutdown_reporters()
-        if self._backend is not None:
-            await self._backend.cleanup()
+        if self._scaffold is not None:
+            await self._scaffold.cleanup()
 
     def flush_metrics(self, batch_hash: str, clear: bool = True) -> None:
         """Flush collected metrics to configured reporters.
@@ -299,7 +302,7 @@ class Harness:
         return reporter_config
 
     # ─────────────────────────────────────────────────────────
-    # Config application (used by backends)
+    # Config application (used by scaffolds)
     # ─────────────────────────────────────────────────────────
 
     def _apply_config(self, request: LMRequest) -> LMRequest:

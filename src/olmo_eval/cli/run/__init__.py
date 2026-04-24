@@ -35,7 +35,7 @@ from olmo_eval.cli.utils import (
     required=True,
     cls=OrderedMultiOption,
     save_to="_ordered",
-    help="Model name or preset. Use --override after to add overrides.",
+    help="Model name or preset.",
 )
 @click.option(
     "--task",
@@ -44,7 +44,7 @@ from olmo_eval.cli.utils import (
     required=True,
     cls=OrderedMultiOption,
     save_to="_ordered",
-    help="Task spec or suite. Use --override after to add overrides.",
+    help="Task spec or suite. Use --override after to add task overrides.",
 )
 @click.option(
     "--override",
@@ -53,7 +53,7 @@ from olmo_eval.cli.utils import (
     multiple=True,
     cls=OrderedMultiOption,
     save_to="_ordered",
-    help="Override for preceding -m or -t (e.g., -o provider.kind=vllm -o limit=100)",
+    help="Override for preceding --task or --harness (e.g., -o limit=100)",
 )
 @click.option("--config", "-c", type=click.Path(exists=True), help="YAML config file")
 # Grouped options via decorators
@@ -107,9 +107,10 @@ def run(
 ) -> None:
     """Run evaluation on specified tasks.
 
-    Use -o/--override after -m or -t to apply overrides:
+    Use -o/--override after --harness or -t/--task to apply overrides:
 
-        olmo-eval run -m llama3.1-8b -o provider.kind=vllm -t mmlu -o limit=100
+        olmo-eval run --harness default -o provider.kind=vllm_server \
+            -m llama3.1-8b -t mmlu -o limit=100
     """
     import os
     import sys

@@ -50,7 +50,7 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     multiple=True,
     cls=OrderedMultiOption,
     save_to="_ordered",
-    help="Model name or preset (can specify multiple). Use -o after to add overrides.",
+    help="Model name or preset (can specify multiple).",
 )
 @click.option(
     "--task",
@@ -58,7 +58,7 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     multiple=True,
     cls=OrderedMultiOption,
     save_to="_ordered",
-    help="Task name with optional @priority suffix. Use -o after to add overrides.",
+    help="Task name with optional @priority suffix. Use -o after to add task overrides.",
 )
 @click.option(
     "--override",
@@ -66,7 +66,7 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     multiple=True,
     cls=OrderedMultiOption,
     save_to="_ordered",
-    help="Override for preceding -m or -t (e.g., -o provider.kind=vllm -o limit=100)",
+    help="Override for preceding --task or --harness (e.g., -o limit=100)",
 )
 @click.option("--cluster", "-c", default=None, help="Cluster alias (h100, a100, aus) or full name")
 @click.option(

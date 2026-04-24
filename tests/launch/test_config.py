@@ -71,9 +71,9 @@ class TestGetTasksShortName:
         """Test single task strips :variant suffix."""
         assert get_tasks_short_name(["arc:mc"]) == "arc"
 
-    def test_single_task_with_regime(self):
-        """Test single task strips :regime suffix."""
-        assert get_tasks_short_name(["mmlu:olmes"]) == "mmlu"
+    def test_single_task_with_stacked_variant(self):
+        """Test single task strips stacked variant suffixes."""
+        assert get_tasks_short_name(["arc_easy:mc:full"]) == "arc"
 
     def test_two_tasks(self):
         """Test two tasks joined with underscore."""
@@ -109,7 +109,7 @@ class TestGetTasksShortName:
 
     def test_mixed_priorities_and_variants(self):
         """Test tasks with mixed priorities and variants."""
-        tasks = ["mmlu@high", "gsm8k:olmes", "arc:mc@low"]
+        tasks = ["mmlu@high", "gsm8k", "arc_easy:mc@low"]
         result = get_tasks_short_name(tasks)
         assert result == "mmlu_gsm8k_arc"
 

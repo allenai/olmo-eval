@@ -1,8 +1,8 @@
 # Development Commands
 
 - Use `uv run` for Python commands
-- Use `make lint` for linting
-- Use `make verify` for type checking and tests
+- Use `uv run ruff check src/ tests/` and `uv run ruff format --check src/ tests/` for linting
+- Use `uv run ty check src/ alembic/` and `uv run pytest tests/ --ignore=tests/integration -v` for local verification
 
 # Code Style
 

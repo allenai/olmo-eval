@@ -12,14 +12,13 @@ from olmo_eval.evals.tasks.common import (
     get_base_task_name,
     get_task,
     get_task_dependencies,
-    list_regimes,
     list_tasks,
+    list_variants,
     parse_overrides,
     register,
-    register_regime,
     register_variant,
 )
-from olmo_eval.evals.tasks.common.registry import _configs, _regimes, _tasks, _variants
+from olmo_eval.evals.tasks.common.registry import _configs, _tasks, _variants
 
 
 class DummyTask(Task):
@@ -46,7 +45,6 @@ def clean_registry():
     # Save original state
     original_tasks = _tasks.copy()
     original_configs = _configs.copy()
-    original_regimes = {k: v.copy() for k, v in _regimes.items()}
     original_variants = {k: v.copy() for k, v in _variants.items()}
 
     clear_registry()
@@ -56,7 +54,6 @@ def clean_registry():
     clear_registry()
     _tasks.update(original_tasks)
     _configs.update(original_configs)
-    _regimes.update(original_regimes)
     _variants.update(original_variants)
 
 
@@ -96,39 +93,39 @@ class TestRegister:
         assert issubclass(PreservedTask, Task)
 
 
-class TestRegisterRegime:
-    """Tests for register_regime function."""
+class TestRegisterVariant:
+    """Tests for register_variant function."""
 
-    def test_register_regime(self):
-        """Test registering a regime for an existing task."""
+    def test_register_variant(self):
+        """Test registering a variant for an existing task."""
 
         @register("base_task")
         class BaseTask(DummyTask):
             data_source = DataSource(path="test/dataset")
 
-        register_regime("base_task", "custom", num_fewshot=5, limit=100)
+        register_variant("base_task", "custom", num_fewshot=5, limit=100)
 
-        regimes = list_regimes("base_task")
-        assert "custom" in regimes["base_task"]
+        variants = list_variants("base_task")
+        assert "custom" in variants["base_task"]
 
-    def test_register_regime_unknown_task_raises(self):
-        """Test that registering regime for unknown task raises error."""
+    def test_register_variant_unknown_task_raises(self):
+        """Test that registering a variant for an unknown task raises error."""
         with pytest.raises(ValueError, match="unknown task"):
-            register_regime("nonexistent", "regime", num_fewshot=5)
+            register_variant("nonexistent", "variant", num_fewshot=5)
 
-    def test_register_multiple_regimes(self):
-        """Test registering multiple regimes for one task."""
+    def test_register_multiple_variants(self):
+        """Test registering multiple variants for one task."""
 
-        @register("multi_regime")
-        class MultiRegimeTask(DummyTask):
+        @register("multi_variant")
+        class MultiVariantTask(DummyTask):
             data_source = DataSource(path="test/dataset")
 
-        register_regime("multi_regime", "fast", limit=10)
-        register_regime("multi_regime", "full", limit=None)
-        register_regime("multi_regime", "fewshot", num_fewshot=5)
+        register_variant("multi_variant", "fast", limit=10)
+        register_variant("multi_variant", "full", limit=None)
+        register_variant("multi_variant", "fewshot", num_fewshot=5)
 
-        regimes = list_regimes("multi_regime")
-        assert set(regimes["multi_regime"]) == {"fast", "full", "fewshot"}
+        variants = list_variants("multi_variant")
+        assert set(variants["multi_variant"]) == {"fast", "full", "fewshot"}
 
 
 class TestGetTask:
@@ -147,43 +144,39 @@ class TestGetTask:
         assert task.config.name == "simple_task"
         assert task.config.num_fewshot == 0
 
-    def test_get_task_with_regime(self):
-        """Test getting a task with regime overrides.
+    def test_get_task_with_variant(self):
+        """Test getting a task with variant overrides."""
 
-        Regimes are accessed as variants using single colon syntax: task:regime
-        """
-
-        @register("regime_task")
-        class RegimeTask(DummyTask):
+        @register("variant_task")
+        class VariantTask(DummyTask):
             data_source = DataSource(path="test/dataset")
             num_fewshot = 0
 
-        register_regime("regime_task", "fewshot", num_fewshot=5)
+        register_variant("variant_task", "fewshot", num_fewshot=5)
 
-        # Without regime
-        task_base = get_task("regime_task")
+        # Without variant
+        task_base = get_task("variant_task")
         assert task_base.config.num_fewshot == 0
 
-        # With regime (using new variant-style syntax)
-        task_regime = get_task("regime_task:fewshot")
-        assert task_regime.config.num_fewshot == 5
+        # With variant
+        task_variant = get_task("variant_task:fewshot")
+        assert task_variant.config.num_fewshot == 5
 
     def test_get_task_unknown_raises(self):
         """Test that getting unknown task raises KeyError."""
         with pytest.raises(KeyError, match="Unknown task"):
             get_task("nonexistent_task")
 
-    def test_get_task_with_unknown_regime_raises(self):
-        """Test that unknown regime/variant raises KeyError."""
+    def test_get_task_with_unknown_variant_raises(self):
+        """Test that an unknown variant raises KeyError."""
 
         @register("fallback_task")
         class FallbackTask(DummyTask):
             data_source = DataSource(path="test/dataset")
             num_fewshot = 3
 
-        # Unknown variant/regime should raise KeyError
-        with pytest.raises(KeyError, match="Unknown variant 'unknown_regime'"):
-            get_task("fallback_task:unknown_regime")
+        with pytest.raises(KeyError, match="Unknown variant 'unknown_variant'"):
+            get_task("fallback_task:unknown_variant")
 
 
 class TestListTasks:
@@ -212,11 +205,11 @@ class TestListTasks:
         assert tasks == ["alpha", "middle", "zebra"]
 
 
-class TestListRegimes:
-    """Tests for list_regimes function."""
+class TestListVariants:
+    """Tests for list_variants function."""
 
-    def test_list_regimes_all(self):
-        """Test listing all regimes."""
+    def test_list_variants_all(self):
+        """Test listing all variants."""
 
         @register("task_a")
         class TaskA(DummyTask):
@@ -226,40 +219,40 @@ class TestListRegimes:
         class TaskB(DummyTask):
             data_source = DataSource(path="test/dataset")
 
-        register_regime("task_a", "regime1")
-        register_regime("task_a", "regime2")
-        register_regime("task_b", "regime3")
+        register_variant("task_a", "variant1")
+        register_variant("task_a", "variant2")
+        register_variant("task_b", "variant3")
 
-        all_regimes = list_regimes()
-        assert "task_a" in all_regimes
-        assert "task_b" in all_regimes
-        assert set(all_regimes["task_a"]) == {"regime1", "regime2"}
-        assert all_regimes["task_b"] == ["regime3"]
+        all_variants = list_variants()
+        assert "task_a" in all_variants
+        assert "task_b" in all_variants
+        assert set(all_variants["task_a"]) == {"variant1", "variant2"}
+        assert all_variants["task_b"] == ["variant3"]
 
-    def test_list_regimes_filtered(self):
-        """Test listing regimes for specific task."""
+    def test_list_variants_filtered(self):
+        """Test listing variants for a specific task."""
 
         @register("filtered")
         class FilteredTask(DummyTask):
             data_source = DataSource(path="test/dataset")
 
-        register_regime("filtered", "fast")
-        register_regime("filtered", "slow")
+        register_variant("filtered", "fast")
+        register_variant("filtered", "slow")
 
-        regimes = list_regimes("filtered")
-        assert "filtered" in regimes
-        assert len(regimes) == 1
-        assert set(regimes["filtered"]) == {"fast", "slow"}
+        variants = list_variants("filtered")
+        assert "filtered" in variants
+        assert len(variants) == 1
+        assert set(variants["filtered"]) == {"fast", "slow"}
 
-    def test_list_regimes_no_regimes(self):
-        """Test listing regimes for task with none registered."""
+    def test_list_variants_no_variants(self):
+        """Test listing variants for a task with none registered."""
 
-        @register("no_regimes")
-        class NoRegimesTask(DummyTask):
+        @register("no_variants")
+        class NoVariantsTask(DummyTask):
             data_source = DataSource(path="test/dataset")
 
-        regimes = list_regimes("no_regimes")
-        assert regimes == {"no_regimes": []}
+        variants = list_variants("no_variants")
+        assert variants == {"no_variants": []}
 
 
 class TestClearRegistry:
@@ -272,15 +265,15 @@ class TestClearRegistry:
         class ToClearTask(DummyTask):
             data_source = DataSource(path="test/dataset")
 
-        register_regime("to_clear", "regime")
+        register_variant("to_clear", "variant")
 
         assert "to_clear" in list_tasks()
-        assert list_regimes("to_clear")["to_clear"] == ["regime"]
+        assert list_variants("to_clear")["to_clear"] == ["variant"]
 
         clear_registry()
 
         assert list_tasks() == []
-        assert list_regimes() == {}
+        assert list_variants() == {}
 
 
 class TestGetBaseTaskName:
@@ -293,7 +286,7 @@ class TestGetBaseTaskName:
     def test_task_with_variant(self):
         """Test that variants are preserved."""
         assert get_base_task_name("arc_easy:mc") == "arc_easy:mc"
-        assert get_base_task_name("arc_easy:mc:olmes") == "arc_easy:mc:olmes"
+        assert get_base_task_name("humaneval:3shot:bpb") == "humaneval:3shot:bpb"
 
     def test_task_with_priority(self):
         """Test that priority suffix is stripped."""

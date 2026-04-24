@@ -86,7 +86,7 @@ class HarnessPresets:
                 kwargs={"timeout": 60},
             ),
             metrics=MetricsConfig(),
-            backend="openai_agents",
+            scaffold="openai_agents",
             max_concurrency=4,
             batching=BatchConfig.streaming(),
         )
@@ -106,7 +106,7 @@ class HarnessPresets:
             system_prompt=DR_TULU_SYSTEM_PROMPT,
             max_turns=10,
             max_concurrency=4,
-            backend="openai_agents",
+            scaffold="openai_agents",
             required_secrets=("S2_API_KEY", "SERPER_API_KEY", "OPENAI_API_KEY"),
             batching=BatchConfig.streaming(),
         )
@@ -181,7 +181,7 @@ class HarnessPresets:
             system_prompt=CODING_AGENT_SYSTEM_PROMPT,
             max_turns=10,
             max_concurrency=4,
-            backend="openai_agents",
+            scaffold="openai_agents",
             required_secrets=("OPENAI_API_KEY",),
             sandboxes=(
                 SandboxConfig(
@@ -214,7 +214,7 @@ class HarnessPresets:
             system_prompt=CODE_COMPLETION_SYSTEM_PROMPT,
             max_turns=10,
             max_concurrency=16,
-            backend="openai_agents",
+            scaffold="openai_agents",
             required_secrets=("OPENAI_API_KEY",),
             sandboxes=(
                 SandboxConfig(

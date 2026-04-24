@@ -95,7 +95,7 @@ class SerializedTask(Task):
 
 _BPB_METRICS = (BPBMetricInstanceAvg(),)
 
-# humaneval:3shot:bpb::none
+# humaneval:3shot:bpb:none
 register_variant(
     "serialized",
     "humaneval_3shot_bpb",
@@ -103,7 +103,7 @@ register_variant(
     metrics=_BPB_METRICS,
 )
 
-# mbpp:3shot:bpb::none
+# mbpp:3shot:bpb:none
 register_variant(
     "serialized",
     "mbpp_3shot_bpb",

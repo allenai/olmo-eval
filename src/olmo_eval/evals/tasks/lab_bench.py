@@ -143,9 +143,9 @@ class LabBenchTask(Task):
             metrics=(LogprobPerCharMCAccuracyMetric(),),
         )
         # Register name:bpb as a separate task (like drop:bpb) so that
-        # name:bpb:olmo3base works reliably without needing the :: regime
-        # mechanism. This matches the old oe-eval-internal lab_bench_*:bpb
-        # config: RC format, 3-shot, seed 1234, BPB metric.
+        # name:bpb:olmo3base works reliably with stacked variants. This
+        # matches the old oe-eval-internal lab_bench_*:bpb config: RC format,
+        # 3-shot, seed 1234, BPB metric.
         import sys
 
         bpb_name = f"{name}:bpb"

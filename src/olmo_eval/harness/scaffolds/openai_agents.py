@@ -1,4 +1,4 @@
-"""OpenAI Agents SDK backend."""
+"""OpenAI Agents SDK scaffold."""
 
 from __future__ import annotations
 
@@ -10,9 +10,9 @@ from typing import TYPE_CHECKING, Any
 from olmo_eval.common.types import LMOutput, LMRequest, SamplingParams
 from olmo_eval.common.types.tools import ToolCall, ToolResult
 from olmo_eval.common.types.trajectory import AgentTrajectory, AgentTurn
-from olmo_eval.harness.backends import Backend, register_backend
 from olmo_eval.harness.config import HarnessConfig
 from olmo_eval.harness.result import HarnessResult
+from olmo_eval.harness.scaffolds import Scaffold, register_scaffold
 from olmo_eval.harness.tools import Tool
 from olmo_eval.inference.base import InferenceProvider
 
@@ -24,11 +24,11 @@ logger = logging.getLogger(__name__)
 _current_binding: ContextVar[ExecutorBinding | None] = ContextVar("_current_binding", default=None)
 
 
-@register_backend("openai_agents")
-class OpenAIAgentsBackend(Backend):
-    """Backend that delegates execution to OpenAI Agents SDK.
+@register_scaffold("openai_agents")
+class OpenAIAgentsScaffold(Scaffold):
+    """Scaffold that delegates execution to OpenAI Agents SDK.
 
-    This backend converts Harness tools to the agents SDK format
+    This scaffold converts Harness tools to the agents SDK format
     and uses the SDK's Runner for execution.
     """
 
@@ -241,7 +241,7 @@ class OpenAIAgentsBackend(Backend):
             request: The initial request.
             sampling_params: Optional sampling parameters.
             trace_metadata: Optional metadata for tracing (e.g., instance_id, task_id).
-            **kwargs: Backend-specific options:
+            **kwargs: Scaffold-specific options:
                 - enable_compaction: Enable context compaction (default: True).
 
         Returns:

@@ -214,7 +214,7 @@ register_variant(
 register_variant("codex_humaneval", "olmo3base", num_fewshot=3, fewshot_seed=1234)
 
 # Chat variants for instruction-tuned models
-# Use with agent backends: humaneval:chat:pass_at_1
+# Use with agent scaffolds: humaneval:chat:pass_at_1
 # Note: System prompt is owned by the harness (e.g., codex_agent preset)
 _CHAT_USER_TEMPLATE = """\
 Complete this Python function. Write only the function body (the implementation \

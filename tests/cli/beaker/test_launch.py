@@ -264,7 +264,7 @@ class TestTaskExpansionInExperimentSummary:
         # Patch the harness and provider lookups that happen inside the function
         with patch("olmo_eval.harness.get_harness_preset") as mock_harness:
             mock_harness_config = MagicMock()
-            mock_harness_config.backend = None
+            mock_harness_config.scaffold = None
             mock_harness_config.sandboxes = ()
             mock_harness_config.merge_provider = MagicMock(return_value=mock_harness_config)
             mock_harness.return_value = mock_harness_config

@@ -9,7 +9,7 @@ Key Components:
 - ProviderConfig: Configuration for creating an InferenceProvider
 - HarnessConfig: Immutable configuration describing model capabilities
 - Harness: Wraps a provider with config, provides generate() and run()
-- Backend: Pluggable execution backends
+- Scaffold: Pluggable execution scaffolds
 
 Example:
     from olmo_eval.harness import (
@@ -33,7 +33,7 @@ Example:
             kind="vllm",
             model="llama3.1-8b",
         ),
-        tool_names=("web_search",),
+        tools=("web_search",),
         system_prompt="You have access to search tools.",
         max_turns=10,
     )
@@ -51,15 +51,6 @@ Example:
     harness = Harness(config)
 """
 
-from .backends import (
-    BACKEND_REGISTRY,
-    Backend,
-    OpenAIAgentsBackend,
-    get_backend,
-    get_backend_extras,
-    list_backends,
-    register_backend,
-)
 from .config import HarnessConfig, ProviderConfig, harness_config
 from .harness import Harness, create_harness
 from .presets import (
@@ -69,6 +60,17 @@ from .presets import (
     register_harness_preset,
 )
 from .result import HarnessResult
+from .scaffolds import (
+    SCAFFOLD_REGISTRY,
+    OpenAIAgentsScaffold,
+    OpenHandsScaffold,
+    Scaffold,
+    get_scaffold,
+    get_scaffold_extras,
+    list_scaffolds,
+    register_scaffold,
+    validate_scaffold,
+)
 from .tools import (
     TOOL_REGISTRY,
     Tool,
@@ -102,14 +104,16 @@ __all__ = [
     "clear_registry",
     "ensure_tools_registered",
     "TOOL_REGISTRY",
-    # Backends
-    "Backend",
-    "OpenAIAgentsBackend",
-    "BACKEND_REGISTRY",
-    "get_backend",
-    "get_backend_extras",
-    "list_backends",
-    "register_backend",
+    # Scaffolds
+    "Scaffold",
+    "OpenAIAgentsScaffold",
+    "OpenHandsScaffold",
+    "SCAFFOLD_REGISTRY",
+    "get_scaffold",
+    "get_scaffold_extras",
+    "list_scaffolds",
+    "register_scaffold",
+    "validate_scaffold",
     # Presets
     "HarnessPresets",
     "get_harness_preset",

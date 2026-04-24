@@ -151,7 +151,7 @@ def parse_task_with_priority(task_spec: str, default_priority: str = "normal") -
     Examples:
         - "mmlu" -> ("mmlu", "normal")
         - "mmlu@high" -> ("mmlu", "high")
-        - "mmlu:olmes@high" -> ("mmlu:olmes", "high")
+        - "arc_easy:mc@high" -> ("arc_easy:mc", "high")
 
     Args:
         task_spec: Task specification, optionally with @priority suffix.
