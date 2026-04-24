@@ -8,7 +8,8 @@ GROUP="${GROUP:-olmo-eval-olmo3-baselines-0426}"
 WORKSPACE="${WORKSPACE:-ai2/olmo-eval-debug}"
 BUDGET="${BUDGET:-ai2/oe-base}"
 CLUSTER="${CLUSTER:-h100}"
-HARNESS="${HARNESS:-codex_universal}"
+EXEC_HARNESS="${EXEC_HARNESS:-${HARNESS:-codex_universal}}"
+NON_EXEC_HARNESS="${NON_EXEC_HARNESS:-default}"
 TASK_PRIORITY="${TASK_PRIORITY:-urgent}"
 MODAL_ENVIRONMENT="${MODAL_ENVIRONMENT:-oe-eval}"
 PROVIDER_NUM_INSTANCES="${PROVIDER_NUM_INSTANCES:-8}"
@@ -17,11 +18,14 @@ usage() {
     cat <<EOF
 Usage: ${SCRIPT_NAME} [--dry-run]
 
-Launches four Beaker variants for the OLMo 3 baseline sweep:
-  1. Baseline models on code execution tasks
-  2. Baseline models on non-execution tasks
-  3. Gemma on code execution tasks
-  4. Gemma on non-execution tasks
+Launches Beaker variants for the OLMo 3 baseline sweep across:
+  1. Code execution tasks
+  2. MCQA tasks
+  3. Gen + math tasks
+  4. Easy QA tasks
+  5. Easy math + easy code tasks
+
+Each task group is launched once for the baseline model bundle and once for Gemma.
 
 Options:
   --dry-run   Print the commands without launching them
@@ -32,7 +36,8 @@ Environment overrides:
   WORKSPACE=${WORKSPACE}
   BUDGET=${BUDGET}
   CLUSTER=${CLUSTER}
-  HARNESS=${HARNESS}
+  EXEC_HARNESS=${EXEC_HARNESS}
+  NON_EXEC_HARNESS=${NON_EXEC_HARNESS}
   TASK_PRIORITY=${TASK_PRIORITY}
   MODAL_ENVIRONMENT=${MODAL_ENVIRONMENT}
   PROVIDER_NUM_INSTANCES=${PROVIDER_NUM_INSTANCES}
@@ -57,18 +62,27 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-main_tasks=(
-    "olmobase:mcqa_stem"
-    "olmobase:mcqa_non_stem"
-    "olmobase:gen"
-    "olmobase:math"
+code_exec_tasks=(
     "olmobase:code"
     "olmobase:code_fim"
 )
 
-easy_tasks=(
+non_exec_mcqa_tasks=(
+    "olmobase:mcqa_stem"
+    "olmobase:mcqa_non_stem"
+)
+
+non_exec_gen_math_tasks=(
+    "olmobase:gen"
+    "olmobase:math"
+)
+
+non_exec_easy_qa_tasks=(
     "olmobase:easy:qa:rc"
     "olmobase:easy:qa:bpb"
+)
+
+non_exec_easy_math_code_tasks=(
     "olmobase:easy:math:bpb"
     "olmobase:easy:code:bpb"
 )
@@ -118,26 +132,14 @@ common_tail_args=(
     "-y"
 )
 
-code_exec_tasks=()
-non_exec_tasks=()
-
-for task in "${main_tasks[@]}" "${easy_tasks[@]}"; do
-    case "${task}" in
-        "olmobase:code"|"olmobase:code_fim")
-            code_exec_tasks+=("${task}")
-            ;;
-        *)
-            non_exec_tasks+=("${task}")
-            ;;
-    esac
-done
-
 declare -a current_cmd
 
 start_command() {
+    local harness=$1
+
     current_cmd=(
         "olmo-eval" "beaker" "launch"
-        "-H" "${HARNESS}"
+        "-H" "${harness}"
     )
 }
 
@@ -161,42 +163,101 @@ append_tasks() {
     done
 }
 
+save_current_cmd() {
+    local target=$1
+    eval "${target}=(\"\${current_cmd[@]}\")"
+}
+
 build_baseline_exec_cmd() {
-    start_command
+    start_command "${EXEC_HARNESS}"
     append_args "${baseline_launch_args[@]}"
     append_args "${exec_only_args[@]}"
     append_models "${baseline_models[@]}"
     append_tasks "${code_exec_tasks[@]}"
     append_args "${common_tail_args[@]}"
-    baseline_exec_cmd=("${current_cmd[@]}")
+    save_current_cmd baseline_exec_cmd
 }
 
-build_baseline_non_exec_cmd() {
-    start_command
+build_baseline_non_exec_mcqa_cmd() {
+    start_command "${NON_EXEC_HARNESS}"
     append_args "${baseline_launch_args[@]}"
     append_models "${baseline_models[@]}"
-    append_tasks "${non_exec_tasks[@]}"
+    append_tasks "${non_exec_mcqa_tasks[@]}"
     append_args "${common_tail_args[@]}"
-    baseline_non_exec_cmd=("${current_cmd[@]}")
+    save_current_cmd baseline_non_exec_mcqa_cmd
+}
+
+build_baseline_non_exec_gen_math_cmd() {
+    start_command "${NON_EXEC_HARNESS}"
+    append_args "${baseline_launch_args[@]}"
+    append_models "${baseline_models[@]}"
+    append_tasks "${non_exec_gen_math_tasks[@]}"
+    append_args "${common_tail_args[@]}"
+    save_current_cmd baseline_non_exec_gen_math_cmd
+}
+
+build_baseline_non_exec_easy_qa_cmd() {
+    start_command "${NON_EXEC_HARNESS}"
+    append_args "${baseline_launch_args[@]}"
+    append_models "${baseline_models[@]}"
+    append_tasks "${non_exec_easy_qa_tasks[@]}"
+    append_args "${common_tail_args[@]}"
+    save_current_cmd baseline_non_exec_easy_qa_cmd
+}
+
+build_baseline_non_exec_easy_math_code_cmd() {
+    start_command "${NON_EXEC_HARNESS}"
+    append_args "${baseline_launch_args[@]}"
+    append_models "${baseline_models[@]}"
+    append_tasks "${non_exec_easy_math_code_tasks[@]}"
+    append_args "${common_tail_args[@]}"
+    save_current_cmd baseline_non_exec_easy_math_code_cmd
 }
 
 build_gemma_exec_cmd() {
-    start_command
+    start_command "${EXEC_HARNESS}"
     append_args "${gemma_launch_args[@]}"
     append_args "${exec_only_args[@]}"
     append_models "${gemma_models[@]}"
     append_tasks "${code_exec_tasks[@]}"
     append_args "${common_tail_args[@]}"
-    gemma_exec_cmd=("${current_cmd[@]}")
+    save_current_cmd gemma_exec_cmd
 }
 
-build_gemma_non_exec_cmd() {
-    start_command
+build_gemma_non_exec_mcqa_cmd() {
+    start_command "${NON_EXEC_HARNESS}"
     append_args "${gemma_launch_args[@]}"
     append_models "${gemma_models[@]}"
-    append_tasks "${non_exec_tasks[@]}"
+    append_tasks "${non_exec_mcqa_tasks[@]}"
     append_args "${common_tail_args[@]}"
-    gemma_non_exec_cmd=("${current_cmd[@]}")
+    save_current_cmd gemma_non_exec_mcqa_cmd
+}
+
+build_gemma_non_exec_gen_math_cmd() {
+    start_command "${NON_EXEC_HARNESS}"
+    append_args "${gemma_launch_args[@]}"
+    append_models "${gemma_models[@]}"
+    append_tasks "${non_exec_gen_math_tasks[@]}"
+    append_args "${common_tail_args[@]}"
+    save_current_cmd gemma_non_exec_gen_math_cmd
+}
+
+build_gemma_non_exec_easy_qa_cmd() {
+    start_command "${NON_EXEC_HARNESS}"
+    append_args "${gemma_launch_args[@]}"
+    append_models "${gemma_models[@]}"
+    append_tasks "${non_exec_easy_qa_tasks[@]}"
+    append_args "${common_tail_args[@]}"
+    save_current_cmd gemma_non_exec_easy_qa_cmd
+}
+
+build_gemma_non_exec_easy_math_code_cmd() {
+    start_command "${NON_EXEC_HARNESS}"
+    append_args "${gemma_launch_args[@]}"
+    append_models "${gemma_models[@]}"
+    append_tasks "${non_exec_easy_math_code_tasks[@]}"
+    append_args "${common_tail_args[@]}"
+    save_current_cmd gemma_non_exec_easy_math_code_cmd
 }
 
 print_command() {
@@ -296,14 +357,26 @@ run_variant() {
 }
 
 declare -a baseline_exec_cmd
-declare -a baseline_non_exec_cmd
+declare -a baseline_non_exec_mcqa_cmd
+declare -a baseline_non_exec_gen_math_cmd
+declare -a baseline_non_exec_easy_qa_cmd
+declare -a baseline_non_exec_easy_math_code_cmd
 declare -a gemma_exec_cmd
-declare -a gemma_non_exec_cmd
+declare -a gemma_non_exec_mcqa_cmd
+declare -a gemma_non_exec_gen_math_cmd
+declare -a gemma_non_exec_easy_qa_cmd
+declare -a gemma_non_exec_easy_math_code_cmd
 
 build_baseline_exec_cmd
-build_baseline_non_exec_cmd
+build_baseline_non_exec_mcqa_cmd
+build_baseline_non_exec_gen_math_cmd
+build_baseline_non_exec_easy_qa_cmd
+build_baseline_non_exec_easy_math_code_cmd
 build_gemma_exec_cmd
-build_gemma_non_exec_cmd
+build_gemma_non_exec_mcqa_cmd
+build_gemma_non_exec_gen_math_cmd
+build_gemma_non_exec_easy_qa_cmd
+build_gemma_non_exec_easy_math_code_cmd
 
 if [[ "${DRY_RUN}" == "true" ]]; then
     echo "Dry run enabled. Commands will be printed but not launched."
@@ -314,6 +387,12 @@ else
 fi
 
 run_variant "Baseline models: code execution suites" "${baseline_exec_cmd[@]}"
-run_variant "Baseline models: non-execution suites" "${baseline_non_exec_cmd[@]}"
+run_variant "Baseline models: MCQA suites" "${baseline_non_exec_mcqa_cmd[@]}"
+run_variant "Baseline models: gen + math suites" "${baseline_non_exec_gen_math_cmd[@]}"
+run_variant "Baseline models: easy QA suites" "${baseline_non_exec_easy_qa_cmd[@]}"
+run_variant "Baseline models: easy math + easy code suites" "${baseline_non_exec_easy_math_code_cmd[@]}"
 run_variant "Gemma: code execution suites" "${gemma_exec_cmd[@]}"
-run_variant "Gemma: non-execution suites" "${gemma_non_exec_cmd[@]}"
+run_variant "Gemma: MCQA suites" "${gemma_non_exec_mcqa_cmd[@]}"
+run_variant "Gemma: gen + math suites" "${gemma_non_exec_gen_math_cmd[@]}"
+run_variant "Gemma: easy QA suites" "${gemma_non_exec_easy_qa_cmd[@]}"
+run_variant "Gemma: easy math + easy code suites" "${gemma_non_exec_easy_math_code_cmd[@]}"
