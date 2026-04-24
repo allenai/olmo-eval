@@ -629,6 +629,10 @@ class BeakerLauncher:
             self._beaker = Beaker.from_env(default_workspace=self._workspace)
         return self._beaker
 
+    def _default_github_token_secret(self) -> str:
+        """Return the user-scoped GitHub token secret name for Gantry clones."""
+        return f"{self.beaker.user_name}_GITHUB_TOKEN"
+
     def _build_install_cmd(
         self,
         extras: list[str],
@@ -847,6 +851,7 @@ class BeakerLauncher:
             budget=config.budget,
             beaker_image=config.beaker_image,
             weka=weka_mounts if weka_mounts else None,
+            gh_token_secret=self._default_github_token_secret(),
             env_vars=env_vars if env_vars else None,
             env_secrets=env_secrets if env_secrets else None,
             google_credentials_secret=google_credentials_secret,
