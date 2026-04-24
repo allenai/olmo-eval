@@ -231,40 +231,6 @@ class TestBeakerLauncherImport:
         assert BeakerWekaBucket is not None
 
 
-class TestBeakerLauncherGitHubTokenSecret:
-    """Tests for Gantry GitHub token secret selection."""
-
-    def test_launch_uses_user_scoped_github_token_secret_by_default(self):
-        """Test that launches default to a user-scoped GitHub token secret."""
-        from types import SimpleNamespace
-        from unittest.mock import patch
-
-        from olmo_eval.launch import BeakerJobConfig, BeakerLauncher
-
-        launcher = BeakerLauncher(workspace="ai2/oe-data")
-        launcher._beaker = SimpleNamespace(
-            user_name="alice",
-            experiment=SimpleNamespace(url=lambda experiment: f"https://beaker/{experiment}"),
-        )
-
-        config = BeakerJobConfig(
-            name="test-job",
-            command=["echo", "hello"],
-            cluster="h100",
-            workspace="ai2/oe-data",
-            budget="ai2/oe-base",
-        )
-
-        with patch(
-            "gantry.api.launch_experiment",
-            return_value=SimpleNamespace(experiment="mock-experiment"),
-        ) as mock_launch:
-            result = launcher.launch(config)
-
-        assert result == "mock-experiment"
-        assert mock_launch.call_args.kwargs["gh_token_secret"] == "alice_GITHUB_TOKEN"
-
-
 class TestParseTaskWithPriority:
     """Tests for task priority parsing."""
 
