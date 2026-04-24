@@ -331,6 +331,46 @@ class TestNamedSandboxPlanning:
         assert sandboxes_by_cap[frozenset({"sandbox:bigcodebench"})].instances == 49
         assert sandboxes_by_cap[frozenset({"sandbox:bigcodebench"})].min_instances == 24
 
+    def test_warns_when_default_explicit_instances_bypass_shared_pool(self, caplog):
+        """Explicit default capacity with no pool should warn when named envs stay at one each."""
+        trackers = {
+            "humaneval:bpb": TaskTracker(
+                model_name="test-model",
+                spec="humaneval:bpb",
+                task=get_task("humaneval:bpb"),
+                total_instances=15,
+            ),
+            "bigcodebench:olmo3base": TaskTracker(
+                model_name="test-model",
+                spec="bigcodebench:olmo3base",
+                task=get_task("bigcodebench:olmo3base"),
+                total_instances=228,
+            ),
+            "ds1000:olmo3base": TaskTracker(
+                model_name="test-model",
+                spec="ds1000:olmo3base",
+                task=get_task("ds1000:olmo3base"),
+                total_instances=1000,
+            ),
+        }
+
+        with caplog.at_level("WARNING", logger="olmo_eval.runners.asynq.runner"):
+            plan = _plan_sandbox_configs(
+                self.make_codex_universal_like_sandboxes(default_instances=32),
+                ["humaneval:bpb", "bigcodebench:olmo3base", "ds1000:olmo3base"],
+                trackers,
+                sandbox_pool_instances=None,
+            )
+
+        assert plan is not None
+        assert plan.allocated == {
+            _DEFAULT_SANDBOX_ENV: 32,
+            "bigcodebench": 1,
+            "ds1000": 1,
+        }
+        assert "auto-managed with no shared sandbox pool" in caplog.text
+        assert "bigcodebench, ds1000" in caplog.text
+
     def test_default_sandbox_defaults_to_one_executor_when_unset(self):
         """Default-only execution should materialize one executor when no pool is set."""
         trackers = {

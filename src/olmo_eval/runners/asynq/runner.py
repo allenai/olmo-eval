@@ -191,6 +191,21 @@ def _plan_sandbox_configs(
         if instances is not None:
             explicit_allocations[env_key] = instances
     auto_env_keys = [env_key for env_key in env_to_index if env_key not in explicit_allocations]
+    if (
+        sandbox_pool_instances is None
+        and _DEFAULT_SANDBOX_ENV in explicit_allocations
+        and auto_env_keys
+    ):
+        auto_env_list = ", ".join(sorted(auto_env_keys))
+        logger.warning(
+            "Default sandbox has explicit instances=%s while sandbox envs [%s] are "
+            "auto-managed with no shared sandbox pool; those envs will default to one "
+            "executor each. Use sandbox_pool_instances or a global "
+            "'sandboxes={...,\"instances\":N}' override to distribute capacity across all "
+            "sandbox envs.",
+            explicit_allocations[_DEFAULT_SANDBOX_ENV],
+            auto_env_list,
+        )
     auto_allocations = _allocate_auto_sandbox_instances(
         auto_env_keys,
         env_demand,

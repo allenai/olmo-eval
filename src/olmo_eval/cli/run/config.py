@@ -76,7 +76,7 @@ def _apply_dotlist_overrides(base_dict: dict[str, Any], overrides: list[str]) ->
     this function treats them as list indices (e.g., sandboxes.0.mode=modal).
 
     Supports JSON values for nested structures:
-        sandboxes.0='{"mode":"modal","instances":4}'
+        sandboxes.0='{"mode":"modal"}'
         sandboxes='{"mode":"modal","instances":64}'
 
     A dict override applied directly to the top-level sandboxes key is treated
