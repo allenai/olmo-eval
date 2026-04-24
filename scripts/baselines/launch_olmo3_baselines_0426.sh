@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
 DRY_RUN=false
+GEMMA_ONLY=false
 
 GROUP="${GROUP:-olmo-eval-olmo3-baselines-0426}"
 WORKSPACE="${WORKSPACE:-ai2/olmo-eval-debug}"
@@ -16,7 +17,7 @@ PROVIDER_NUM_INSTANCES="${PROVIDER_NUM_INSTANCES:-8}"
 
 usage() {
     cat <<EOF
-Usage: ${SCRIPT_NAME} [--dry-run]
+Usage: ${SCRIPT_NAME} [--dry-run] [--gemma-only]
 
 Launches Beaker variants for the OLMo 3 baseline sweep across:
   1. Code execution tasks
@@ -28,8 +29,9 @@ Launches Beaker variants for the OLMo 3 baseline sweep across:
 Each task group is launched once for the baseline model bundle and once for Gemma.
 
 Options:
-  --dry-run   Print the commands without launching them
-  --help      Show this help
+  --dry-run     Print the commands without launching them
+  --gemma-only  Launch only the Gemma variants
+  --help        Show this help
 
 Environment overrides:
   GROUP=${GROUP}
@@ -48,6 +50,10 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run)
             DRY_RUN=true
+            shift
+            ;;
+        --gemma-only)
+            GEMMA_ONLY=true
             shift
             ;;
         --help|-h)
@@ -129,6 +135,7 @@ common_tail_args=(
     "--store"
     "--inspect"
     "--gcp-credentials"
+    "--no-follow"
     "-y"
 )
 
@@ -382,15 +389,22 @@ if [[ "${DRY_RUN}" == "true" ]]; then
     echo "Dry run enabled. Commands will be printed but not launched."
     echo ""
 else
-    echo "Launching Beaker baseline variants..."
+    if [[ "${GEMMA_ONLY}" == "true" ]]; then
+        echo "Launching Gemma-only Beaker baseline variants..."
+    else
+        echo "Launching Beaker baseline variants..."
+    fi
     echo ""
 fi
 
-run_variant "Baseline models: code execution suites" "${baseline_exec_cmd[@]}"
-run_variant "Baseline models: MCQA suites" "${baseline_non_exec_mcqa_cmd[@]}"
-run_variant "Baseline models: gen + math suites" "${baseline_non_exec_gen_math_cmd[@]}"
-run_variant "Baseline models: easy QA suites" "${baseline_non_exec_easy_qa_cmd[@]}"
-run_variant "Baseline models: easy math + easy code suites" "${baseline_non_exec_easy_math_code_cmd[@]}"
+if [[ "${GEMMA_ONLY}" == "false" ]]; then
+    run_variant "Baseline models: code execution suites" "${baseline_exec_cmd[@]}"
+    run_variant "Baseline models: MCQA suites" "${baseline_non_exec_mcqa_cmd[@]}"
+    run_variant "Baseline models: gen + math suites" "${baseline_non_exec_gen_math_cmd[@]}"
+    run_variant "Baseline models: easy QA suites" "${baseline_non_exec_easy_qa_cmd[@]}"
+    run_variant "Baseline models: easy math + easy code suites" "${baseline_non_exec_easy_math_code_cmd[@]}"
+fi
+
 run_variant "Gemma: code execution suites" "${gemma_exec_cmd[@]}"
 run_variant "Gemma: MCQA suites" "${gemma_non_exec_mcqa_cmd[@]}"
 run_variant "Gemma: gen + math suites" "${gemma_non_exec_gen_math_cmd[@]}"
