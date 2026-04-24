@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections import Counter
 from typing import NamedTuple
 
 import numpy as np
@@ -39,6 +40,14 @@ class TaskMetrics(NamedTuple):
 type PairCellLookup = dict[tuple[int, int], _PairCell]
 
 _SIGNIFICANCE_Z = 2.0
+
+
+class TaskDisplayEntry(NamedTuple):
+    id: str
+    task_name: str
+    task_hash: str | None
+    label: str
+    full_label: str
 
 
 def _build_pair_cell_lookup(result: PairwiseResult) -> PairCellLookup:
@@ -114,6 +123,13 @@ def _format_model_table_label(model: ModelMeta) -> str:
     return model.label.replace("\n", " ")
 
 
+def _task_hash_at(task_hashes: tuple[str, ...], task_idx: int) -> str | None:
+    if task_idx >= len(task_hashes):
+        return None
+    task_hash = task_hashes[task_idx]
+    return task_hash or None
+
+
 def _build_task_label_lookup(task_names: tuple[str, ...]) -> dict[str, str]:
     if not task_names:
         return {}
@@ -157,6 +173,37 @@ def _build_task_label_lookup(task_names: tuple[str, ...]) -> dict[str, str]:
         task_name: (label if counts[label] == 1 else task_name)
         for task_name, label in labels.items()
     }
+
+
+def build_task_display_entries(
+    task_names: tuple[str, ...],
+    task_hashes: tuple[str, ...] = (),
+) -> list[TaskDisplayEntry]:
+    if not task_names:
+        return []
+
+    label_lookup = _build_task_label_lookup(task_names)
+    duplicate_name_counts = Counter(task_names)
+    entries: list[TaskDisplayEntry] = []
+    for task_idx, task_name in enumerate(task_names):
+        task_hash = _task_hash_at(task_hashes, task_idx)
+        task_id = task_hash or task_name
+        hash_suffix = (
+            f" [{task_hash[:8]}]"
+            if task_hash is not None and duplicate_name_counts[task_name] > 1
+            else ""
+        )
+        base_label = label_lookup.get(task_name, task_name)
+        entries.append(
+            TaskDisplayEntry(
+                id=task_id,
+                task_name=task_name,
+                task_hash=task_hash,
+                label=f"{base_label}{hash_suffix}",
+                full_label=f"{task_name}{hash_suffix}",
+            )
+        )
+    return entries
 
 
 def _is_nonsignificant(win_rate: float, se: float) -> bool:
@@ -232,7 +279,7 @@ def _build_bradley_terry_rating_vector(result: PairwiseResult) -> np.ndarray:
 def build_row_metrics(result: PairwiseResult) -> list[RowMetrics]:
     overall_win_rates = _build_overall_win_rate_vector(result)
     ratings = _build_bradley_terry_rating_vector(result)
-    task_labels = _build_task_label_lookup(result.task_names)
+    task_entries = build_task_display_entries(result.task_names, result.task_hashes)
     task_higher_is_better = _task_higher_is_better_flags(result)
     dominance = np.zeros(len(result.models), dtype=int)
     for pair in result.pairs:
@@ -249,9 +296,9 @@ def build_row_metrics(result: PairwiseResult) -> list[RowMetrics]:
     for idx in range(len(result.models)):
         task_scores = result.model_task_scores[idx] if idx < len(result.model_task_scores) else ()
         scored_tasks = [
-            (task_idx, task_name, score)
-            for task_idx, (task_name, score) in enumerate(
-                zip(result.task_names, task_scores, strict=False)
+            (task_idx, task_entry, score)
+            for task_idx, (task_entry, score) in enumerate(
+                zip(task_entries, task_scores, strict=False)
             )
             if score is not None
         ]
@@ -282,9 +329,9 @@ def build_row_metrics(result: PairwiseResult) -> list[RowMetrics]:
                 rating=ratings[idx],
                 dominance=int(dominance[idx]),
                 avg_win_rate=overall_win_rates[idx],
-                best_task_label=task_labels.get(best_task[1]) if best_task else None,
+                best_task_label=best_task[1].label if best_task else None,
                 best_task_score=best_task[2] if best_task else None,
-                worst_task_label=task_labels.get(worst_task[1]) if worst_task else None,
+                worst_task_label=worst_task[1].label if worst_task else None,
                 worst_task_score=worst_task[2] if worst_task else None,
             )
         )
@@ -293,10 +340,11 @@ def build_row_metrics(result: PairwiseResult) -> list[RowMetrics]:
 
 def build_task_metrics(result: PairwiseResult) -> list[TaskMetrics]:
     model_labels = [_format_model_table_label(model) for model in result.models]
+    task_entries = build_task_display_entries(result.task_names, result.task_hashes)
     task_higher_is_better = _task_higher_is_better_flags(result)
 
     task_metrics: list[TaskMetrics] = []
-    for task_idx, task_name in enumerate(result.task_names):
+    for task_idx, task_entry in enumerate(task_entries):
         scored_models: list[tuple[str, float]] = []
         for model_idx, task_scores in enumerate(result.model_task_scores):
             if task_idx >= len(task_scores):
@@ -308,7 +356,7 @@ def build_task_metrics(result: PairwiseResult) -> list[TaskMetrics]:
         if not scored_models:
             task_metrics.append(
                 TaskMetrics(
-                    task_label=task_name,
+                    task_label=task_entry.full_label,
                     median_score=None,
                     spread=None,
                     best_model_label=None,
@@ -333,7 +381,7 @@ def build_task_metrics(result: PairwiseResult) -> list[TaskMetrics]:
         )
         task_metrics.append(
             TaskMetrics(
-                task_label=task_name,
+                task_label=task_entry.full_label,
                 median_score=float(np.median(scores)),
                 spread=max(scores) - min(scores),
                 best_model_label=best_model[0],

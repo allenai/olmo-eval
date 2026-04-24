@@ -425,6 +425,38 @@ class TestPairwiseResult:
         assert payload["task_stats"][0]["best_model_score"] == pytest.approx(0.30)
         assert payload["task_stats"][0]["worst_model_score"] == pytest.approx(0.90)
 
+    def test_html_payload_keeps_same_name_task_hashes_distinct(self) -> None:
+        result = PairwiseResult(
+            task_name="gsm8k:olmo3base",
+            metric="accuracy:exact_match",
+            margin=0.0,
+            instance_count=20,
+            models=[
+                ModelMeta(label="model-a\n(abc12345)", model_name="model-a", model_hash="abc12345"),
+                ModelMeta(label="model-b\n(def67890)", model_name="model-b", model_hash="def67890"),
+            ],
+            pairs=[PairStats(index_a=0, index_b=1, wins_a=12, wins_b=8, ties=0)],
+            task_names=("gsm8k:olmo3base", "gsm8k:olmo3base"),
+            task_hashes=("task-hash-alpha", "task-hash-beta"),
+            task_metric_keys=("accuracy:exact_match", "accuracy:exact_match"),
+            model_task_scores=((0.70, 0.55), (0.60, 0.45)),
+            model_shared_scores=(0.625, 0.525),
+        )
+
+        payload = build_pairwise_viewer_payload(result)
+
+        assert [column["id"] for column in payload["task_columns"]] == [
+            "task-hash-alpha",
+            "task-hash-beta",
+        ]
+        assert all("[" in column["full_label"] for column in payload["task_columns"])
+        assert payload["models"][0]["task_scores"]["task-hash-alpha"] == pytest.approx(0.70)
+        assert payload["models"][0]["task_scores"]["task-hash-beta"] == pytest.approx(0.55)
+        assert [task_stat["id"] for task_stat in payload["task_stats"]] == [
+            "task-hash-alpha",
+            "task-hash-beta",
+        ]
+
 
 class TestComputePairsCompoundKeys:
     """Compound keys keep identical native IDs in different tasks distinct."""

@@ -10,10 +10,10 @@ import numpy as np
 from olmo_eval.analysis.eval_power import minimum_detectable_effect
 from olmo_eval.analysis.pairwise import PairwiseResult, get_task_metric_profile
 from olmo_eval.analysis.pairwise_metrics import (
-    _build_task_label_lookup,
     build_probability_matrix,
     build_row_metrics,
     build_se_matrix,
+    build_task_display_entries,
     build_task_metrics,
     build_win_rate_matrix,
 )
@@ -144,7 +144,7 @@ def build_pairwise_viewer_payload(
     page_title = title or _default_title(result)
     row_metrics = build_row_metrics(result)
     task_metrics = build_task_metrics(result) if result.task_names else []
-    task_label_lookup = _build_task_label_lookup(result.task_names)
+    task_entries = build_task_display_entries(result.task_names, result.task_hashes)
     probability_matrix = build_probability_matrix(result)
     win_rate_matrix = build_win_rate_matrix(result)
     se_matrix = build_se_matrix(result)
@@ -152,26 +152,28 @@ def build_pairwise_viewer_payload(
     score_diff_matrix = _build_score_diff_matrix(result)
     mde80_by_alpha = _build_matrix_mde80_map(result)
 
-    task_columns = [
-        {
-            "id": task_name,
-            "label": task_label_lookup.get(task_name, task_name),
-            "full_label": task_name,
-            "score_display_format": (
-                profile.display_format if profile is not None else result.score_display_format
-            ),
-            "score_unit": profile.unit if profile is not None else result.score_unit,
-            "higher_is_better": (
-                profile.higher_is_better if profile is not None else result.higher_is_better
-            ),
-        }
-        for task_name, metric_key in zip(
-            result.task_names,
-            result.task_metric_keys or tuple(None for _ in result.task_names),
-            strict=False,
+    task_columns = []
+    for task_idx, task_entry in enumerate(task_entries):
+        metric_key = (
+            result.task_metric_keys[task_idx] if task_idx < len(result.task_metric_keys) else None
         )
-        for profile in [get_task_metric_profile(task_name, metric_key) if metric_key else None]
-    ]
+        profile = get_task_metric_profile(task_entry.task_name, metric_key) if metric_key else None
+        task_columns.append(
+            {
+                "id": task_entry.id,
+                "task_name": task_entry.task_name,
+                "task_hash": task_entry.task_hash,
+                "label": task_entry.label,
+                "full_label": task_entry.full_label,
+                "score_display_format": (
+                    profile.display_format if profile is not None else result.score_display_format
+                ),
+                "score_unit": profile.unit if profile is not None else result.score_unit,
+                "higher_is_better": (
+                    profile.higher_is_better if profile is not None else result.higher_is_better
+                ),
+            }
+        )
 
     models: list[dict[str, Any]] = []
     for index, model in enumerate(result.models):
@@ -179,8 +181,8 @@ def build_pairwise_viewer_payload(
             list(result.model_task_scores[index]) if index < len(result.model_task_scores) else []
         )
         task_score_map = {
-            task_name: task_scores[task_idx] if task_idx < len(task_scores) else None
-            for task_idx, task_name in enumerate(result.task_names)
+            task_entry.id: task_scores[task_idx] if task_idx < len(task_scores) else None
+            for task_idx, task_entry in enumerate(task_entries)
         }
         scored_values = [float(score) for score in task_scores if score is not None]
         avg_task_score = _mean(scored_values)
@@ -213,13 +215,14 @@ def build_pairwise_viewer_payload(
         )
 
     task_stats: list[dict[str, Any]] = []
-    for metric in task_metrics:
-        full_label = metric.task_label
+    for task_entry, metric in zip(task_entries, task_metrics, strict=False):
         task_stats.append(
             {
-                "id": full_label,
-                "label": task_label_lookup.get(full_label, full_label),
-                "full_label": full_label,
+                "id": task_entry.id,
+                "task_name": task_entry.task_name,
+                "task_hash": task_entry.task_hash,
+                "label": task_entry.label,
+                "full_label": task_entry.full_label,
                 "median_score": metric.median_score,
                 "spread": metric.spread,
                 "best_model_label": metric.best_model_label,

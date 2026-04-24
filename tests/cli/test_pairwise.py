@@ -301,6 +301,7 @@ def test_build_results_table_keep_all_preserves_distinct_reruns(monkeypatch) -> 
                 (
                     11,
                     "gsm8k:olmo3base",
+                    "task-hash-11",
                     {"accuracy": {"exact_match": 0.65}},
                     "accuracy:exact_match",
                 )
@@ -315,12 +316,14 @@ def test_build_results_table_keep_all_preserves_distinct_reruns(monkeypatch) -> 
                 (
                     10,
                     "gsm8k:olmo3base",
+                    "task-hash-10",
                     {"accuracy": {"exact_match": 0.55}},
                     "accuracy:exact_match",
                 ),
                 (
                     11,
                     "gsm8k:olmo3base",
+                    "task-hash-11",
                     {"accuracy": {"exact_match": 0.65}},
                     "accuracy:exact_match",
                 ),
@@ -371,6 +374,7 @@ def test_build_results_table_metric_options_do_not_double_count_primary_metric(
                 (
                     11,
                     "gsm8k:olmo3base",
+                    "task-hash-11",
                     {
                         "accuracy": {"exact_match": 0.65},
                         "f1": {"exact_match": 0.72},
@@ -389,6 +393,55 @@ def test_build_results_table_metric_options_do_not_double_count_primary_metric(
     assert metric_option_by_value["accuracy:exact_match"]["model_count"] == 1
     assert metric_option_by_value["accuracy:exact_match"]["meta"] == "1 model"
     assert metric_option_by_value["f1:exact_match"]["model_count"] == 1
+
+
+def test_build_results_table_splits_same_name_tasks_by_hash(monkeypatch) -> None:
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
+
+    experiment = SimpleNamespace(
+        id=11,
+        model_name="model-a",
+        model_hash="abc12345deadbeef",
+        timestamp=datetime(2026, 4, 21, 12, 0, tzinfo=UTC),
+    )
+
+    monkeypatch.setattr(
+        viewer_server,
+        "_group_experiments",
+        lambda session, group_name, keep_all: [experiment],
+    )
+
+    results_table = viewer_server._build_results_table(
+        _StaticTaskSession(
+            [
+                (
+                    11,
+                    "gsm8k:olmo3base",
+                    "task-hash-alpha",
+                    {"accuracy": {"exact_match": 0.65}},
+                    "accuracy:exact_match",
+                ),
+                (
+                    11,
+                    "gsm8k:olmo3base",
+                    "task-hash-beta",
+                    {"accuracy": {"exact_match": 0.55}},
+                    "accuracy:exact_match",
+                ),
+            ]
+        ),
+        "my-group",
+        keep_all=False,
+    )
+
+    assert len(results_table["task_columns"]) == 2
+    assert {column["id"] for column in results_table["task_columns"]} == {
+        "task-hash-alpha",
+        "task-hash-beta",
+    }
+    assert all("[" in column["full_label"] for column in results_table["task_columns"])
+    assert results_table["models"][0]["task_scores"]["task-hash-alpha"] == pytest.approx(0.65)
+    assert results_table["models"][0]["task_scores"]["task-hash-beta"] == pytest.approx(0.55)
 
 
 def test_model_filter_score_label_uses_selected_scope_columns() -> None:

@@ -380,9 +380,14 @@ def _short_label(meta: Any) -> str:
 def _output_json(result: Any, output_path: str | None) -> None:
     """Write the pairwise result as JSON."""
     from olmo_eval.analysis.pairwise import get_win_rate
+    from olmo_eval.analysis.pairwise_metrics import build_task_display_entries
 
     n = len(result.models)
     labels = [_short_label(m) for m in result.models]
+    task_entries = build_task_display_entries(
+        tuple(result.task_names),
+        tuple(getattr(result, "task_hashes", ()) or ()),
+    )
 
     data: dict[str, Any] = {
         "metadata": {
@@ -390,6 +395,22 @@ def _output_json(result: Any, output_path: str | None) -> None:
             "scope_kind": "suite" if result.suite_name else "task",
             "suite_name": result.suite_name,
             "contributing_task_names": list(result.task_names),
+            "contributing_task_hashes": list(getattr(result, "task_hashes", ()) or ()),
+            "contributing_tasks": [
+                {
+                    "task_id": task_entry.id,
+                    "task_name": task_entry.task_name,
+                    "task_hash": task_entry.task_hash,
+                    "task_label": task_entry.label,
+                    "task_full_label": task_entry.full_label,
+                    "metric_key": (
+                        result.task_metric_keys[task_idx]
+                        if task_idx < len(result.task_metric_keys)
+                        else None
+                    ),
+                }
+                for task_idx, task_entry in enumerate(task_entries)
+            ],
             "metric_name": result.metric,
             "tie_margin": result.margin,
             "shared_instance_count": result.instance_count,
@@ -410,6 +431,14 @@ def _output_json(result: Any, output_path: str | None) -> None:
                 "shared_instance_mean_score": (
                     result.model_shared_scores[i] if i < len(result.model_shared_scores) else None
                 ),
+                "task_metric_keys_by_task_id": {
+                    task_entry.id: (
+                        result.task_metric_keys[task_idx]
+                        if task_idx < len(result.task_metric_keys)
+                        else None
+                    )
+                    for task_idx, task_entry in enumerate(task_entries)
+                },
                 "task_metric_keys_by_task_name": {
                     task_name: (
                         result.task_metric_keys[task_idx]
@@ -417,6 +446,15 @@ def _output_json(result: Any, output_path: str | None) -> None:
                         else None
                     )
                     for task_idx, task_name in enumerate(result.task_names)
+                },
+                "task_scores_by_task_id": {
+                    task_entry.id: (
+                        result.model_task_scores[i][task_idx]
+                        if i < len(result.model_task_scores)
+                        and task_idx < len(result.model_task_scores[i])
+                        else None
+                    )
+                    for task_idx, task_entry in enumerate(task_entries)
                 },
                 "task_scores_by_task_name": {
                     task_name: (

@@ -176,6 +176,7 @@ class PairwiseResult:
     pairs: list[PairStats]
     suite_name: str | None = None
     task_names: tuple[str, ...] = ()
+    task_hashes: tuple[str, ...] = ()
     n_experiments_matched: int = 0
     n_experiments_dropped: int = 0
     filtered_models: tuple[FilteredModel, ...] = ()
@@ -265,6 +266,15 @@ def _timestamp_label(value: Any) -> str | None:
         return None
 
 
+def _short_task_hash(task_hash: str | None) -> str:
+    return (task_hash or "")[:8]
+
+
+def _format_task_variant_label(task_name: str, task_hash: str | None = None) -> str:
+    hash_short = _short_task_hash(task_hash)
+    return f"{task_name} [{hash_short}]" if hash_short else task_name
+
+
 def _format_experiment_label(
     model_name: str | None,
     model_hash: str | None,
@@ -347,6 +357,206 @@ def _serialize_filtered_model_debug(model: FilteredModel) -> dict[str, Any]:
         ],
         "reason_summary": "; ".join(reasons) if reasons else "partial suite coverage",
     }
+
+
+def _build_ordered_models(selected: list[Any], *, keep_all: bool) -> list[tuple[int, ModelMeta]]:
+    ordered: list[tuple[int, ModelMeta]] = []
+    for exp in selected:
+        ts_iso = exp.timestamp.isoformat() if exp.timestamp is not None else None
+        if keep_all and exp.timestamp is not None:
+            timestamp_label = _timestamp_label(exp.timestamp)
+            if timestamp_label:
+                label = f"{exp.model_name}\n({exp.model_hash[:8]} @ {timestamp_label})"
+            else:
+                label = f"{exp.model_name}\n({exp.model_hash[:8]})"
+        else:
+            label = f"{exp.model_name}\n({exp.model_hash[:8]})"
+        ordered.append(
+            (
+                exp.id,
+                ModelMeta(
+                    label=label,
+                    model_name=exp.model_name,
+                    model_hash=exp.model_hash,
+                    timestamp=ts_iso,
+                ),
+            )
+        )
+    return ordered
+
+
+def _build_suite_coverage_lookup(
+    *,
+    task_rows: list[Any],
+    selected_pks: set[int],
+    suite_task_names: tuple[str, ...],
+) -> dict[int, dict[str, dict[str, int]]]:
+    allowed_task_names = set(suite_task_names)
+    rows_by_pk_name_hash: dict[int, dict[str, dict[str, int]]] = {}
+    for row in task_rows:
+        pk = int(row.experiment_pk)
+        task_name = str(row.task_name or "")
+        task_hash = str(row.task_hash or "")
+        if pk not in selected_pks or task_name not in allowed_task_names or not task_hash:
+            continue
+        rows_by_pk_name_hash.setdefault(pk, {}).setdefault(task_name, {})[task_hash] = int(
+            row.num_instances or 0
+        )
+    return rows_by_pk_name_hash
+
+
+def _best_suite_task_hashes(
+    rows_by_pk_name_hash: dict[int, dict[str, dict[str, int]]],
+    selected_pks: set[int],
+    suite_task_names: tuple[str, ...],
+) -> tuple[dict[str, str | None], dict[str, int]]:
+    chosen_hash_by_task_name: dict[str, str | None] = {}
+    max_instances_by_hash: dict[str, int] = {}
+
+    for task_name in suite_task_names:
+        coverage_by_hash: dict[str, set[int]] = {}
+        instances_by_hash: dict[str, int] = {}
+        for pk in selected_pks:
+            hash_rows = rows_by_pk_name_hash.get(pk, {}).get(task_name, {})
+            for task_hash, instance_count in hash_rows.items():
+                coverage_by_hash.setdefault(task_hash, set()).add(pk)
+                instances_by_hash[task_hash] = max(
+                    instances_by_hash.get(task_hash, 0),
+                    instance_count,
+                )
+        if not coverage_by_hash:
+            chosen_hash_by_task_name[task_name] = None
+            continue
+        chosen_hash = max(
+            coverage_by_hash,
+            key=lambda task_hash: (
+                len(coverage_by_hash[task_hash]),
+                instances_by_hash.get(task_hash, 0),
+                task_hash,
+            ),
+        )
+        chosen_hash_by_task_name[task_name] = chosen_hash
+        max_instances_by_hash[chosen_hash] = instances_by_hash.get(chosen_hash, 0)
+
+    return chosen_hash_by_task_name, max_instances_by_hash
+
+
+def _suite_hashes_shared_by_models(
+    rows_by_pk_name_hash: dict[int, dict[str, dict[str, int]]],
+    selected_pks: set[int],
+    suite_task_names: tuple[str, ...],
+) -> set[str]:
+    if not selected_pks:
+        return set()
+
+    common_hashes: set[str] = set()
+    for task_name in suite_task_names:
+        hash_sets = [
+            set(rows_by_pk_name_hash.get(pk, {}).get(task_name, {})) for pk in selected_pks
+        ]
+        if hash_sets:
+            common_hashes.update(set.intersection(*hash_sets))
+    return common_hashes
+
+
+def _build_filtered_suite_model(
+    exp: Any,
+    *,
+    rows_by_pk_name_hash: dict[int, dict[str, dict[str, int]]],
+    chosen_hash_by_task_name: dict[str, str | None],
+    max_instances_by_hash: dict[str, int],
+    suite_task_names: tuple[str, ...],
+) -> FilteredModel:
+    task_hashes_by_name = rows_by_pk_name_hash.get(int(exp.id), {})
+    missing: list[str] = []
+    shortfalls: list[tuple[str, int, int]] = []
+
+    for task_name in suite_task_names:
+        chosen_hash = chosen_hash_by_task_name.get(task_name)
+        if not chosen_hash:
+            missing.append(task_name)
+            continue
+
+        task_label = _format_task_variant_label(task_name, chosen_hash)
+        instance_count = task_hashes_by_name.get(task_name, {}).get(chosen_hash)
+        if instance_count is None:
+            missing.append(task_label)
+            continue
+
+        expected_instances = max_instances_by_hash.get(chosen_hash, 0)
+        if expected_instances > instance_count:
+            shortfalls.append((task_label, instance_count, expected_instances))
+
+    return FilteredModel(
+        model_name=exp.model_name,
+        model_hash=exp.model_hash,
+        missing_tasks=tuple(sorted(set(missing))),
+        instance_shortfalls=tuple(sorted(shortfalls)),
+    )
+
+
+def _filter_full_coverage_suite_models(
+    *,
+    task_rows: list[Any],
+    selected: list[Any],
+    suite_task_names: tuple[str, ...],
+) -> tuple[list[Any], list[FilteredModel], set[str]]:
+    if not selected or not suite_task_names:
+        return list(selected), [], set()
+
+    selected_by_pk = {int(exp.id): exp for exp in selected}
+    rows_by_pk_name_hash = _build_suite_coverage_lookup(
+        task_rows=task_rows,
+        selected_pks=set(selected_by_pk),
+        suite_task_names=suite_task_names,
+    )
+
+    remaining_pks = set(selected_by_pk)
+    chosen_hash_by_task_name: dict[str, str | None] = {}
+    max_instances_by_hash: dict[str, int] = {}
+
+    while remaining_pks:
+        chosen_hash_by_task_name, max_instances_by_hash = _best_suite_task_hashes(
+            rows_by_pk_name_hash,
+            remaining_pks,
+            suite_task_names,
+        )
+        next_remaining = {
+            pk
+            for pk in remaining_pks
+            if all(
+                (chosen_hash := chosen_hash_by_task_name.get(task_name))
+                and rows_by_pk_name_hash.get(pk, {}).get(task_name, {}).get(chosen_hash)
+                == max_instances_by_hash.get(chosen_hash, 0)
+                for task_name in suite_task_names
+            )
+        }
+        if next_remaining == remaining_pks:
+            break
+        remaining_pks = next_remaining
+
+    kept = [exp for exp in selected if int(exp.id) in remaining_pks]
+    filtered_models = [
+        _build_filtered_suite_model(
+            exp,
+            rows_by_pk_name_hash=rows_by_pk_name_hash,
+            chosen_hash_by_task_name=chosen_hash_by_task_name,
+            max_instances_by_hash=max_instances_by_hash,
+            suite_task_names=suite_task_names,
+        )
+        for exp in selected
+        if int(exp.id) not in remaining_pks
+    ]
+
+    return (
+        kept,
+        filtered_models,
+        _suite_hashes_shared_by_models(
+            rows_by_pk_name_hash,
+            remaining_pks,
+            suite_task_names,
+        ),
+    )
 
 
 def _compute_pairs(
@@ -622,6 +832,181 @@ def _build_experiment_refetch_stmt(eval_results: list[EvalResult]):
     )
 
 
+def _validate_requested_task_scope(
+    task_rows: list[Any],
+    *,
+    task_name: str | None,
+    task_hash: str | None,
+) -> None:
+    distinct_task_hashes = sorted({str(row.task_hash or "") for row in task_rows if row.task_hash})
+
+    if task_name and len(distinct_task_hashes) > 1:
+        variants = [
+            _format_task_variant_label(task_name, resolved_task_hash)
+            for resolved_task_hash in distinct_task_hashes
+        ]
+        raise ValueError(
+            f"Task '{task_name}' matches {len(distinct_task_hashes)} task configs in this "
+            f"scope: {variants}. Use --task-hash or narrow the filters."
+        )
+
+    if task_hash and len(distinct_task_hashes) > 1:
+        raise ValueError(
+            f"--task-hash prefix '{task_hash}' matches {len(distinct_task_hashes)} task "
+            f"hashes in this scope: {distinct_task_hashes}. Use a longer prefix."
+        )
+
+    if task_hash:
+        distinct_task_names = sorted(
+            {str(row.task_name or "") for row in task_rows if row.task_name}
+        )
+        if len(distinct_task_names) > 1:
+            raise ValueError(
+                f"--task-hash prefix '{task_hash}' matches {len(distinct_task_names)} "
+                f"distinct task names: {distinct_task_names}. Use a longer prefix, "
+                "pass --task for a single task, or --suite to pool intentionally."
+            )
+
+
+def _restrict_task_rows_to_selected_models(
+    *,
+    task_rows: list[Any],
+    selected: list[Any],
+    keep_all: bool,
+    suite_task_names: tuple[str, ...],
+    require_full_coverage: bool,
+) -> tuple[list[Any], list[tuple[int, ModelMeta]], list[Any], list[FilteredModel]]:
+    filtered_models: list[FilteredModel] = []
+    common_suite_hashes: set[str] | None = None
+    if require_full_coverage and suite_task_names:
+        selected, filtered_models, common_suite_hashes = _filter_full_coverage_suite_models(
+            task_rows=task_rows,
+            selected=selected,
+            suite_task_names=suite_task_names,
+        )
+
+    ordered = _build_ordered_models(selected, keep_all=keep_all)
+    selected_pks = {pk for pk, _ in ordered}
+    allowed_hashes = (
+        {str(task_hash) for task_hash in common_suite_hashes}
+        if common_suite_hashes is not None
+        else None
+    )
+    filtered_task_rows = [
+        row
+        for row in task_rows
+        if row.experiment_pk in selected_pks
+        and (allowed_hashes is None or row.task_hash in allowed_hashes)
+    ]
+    return selected, ordered, filtered_task_rows, filtered_models
+
+
+def _raise_insufficient_compared_models(
+    *,
+    ordered: list[tuple[int, ModelMeta]],
+    selected: list[Any],
+    keep_all: bool,
+    filtered_models: list[FilteredModel],
+    n_matched: int,
+    selected_before_coverage: list[Any],
+    scope_label: str,
+    scope_str: str,
+    candidate_experiments: list[Any],
+    dropped_duplicate_runs: list[dict[str, Any]],
+) -> None:
+    if filtered_models:
+        detail = (
+            f"after --require-full-coverage dropped {len(filtered_models)} "
+            "partial-coverage model(s)"
+        )
+        code = "insufficient_full_coverage_models"
+        summary = (
+            f"Only {len(ordered)} model(s) still satisfy the full-suite coverage "
+            "requirement for the paired test."
+        )
+        notes = [
+            "The results tab can still show models with partial suite coverage, but the "
+            "paired test requires every compared model to cover the same task hashes."
+        ]
+        suggestions = [
+            "Choose a narrower task or suite that more models completed.",
+            "Rerun the missing task configs for the dropped model hashes, or relax the "
+            "full-coverage requirement.",
+        ]
+    elif not keep_all:
+        detail = "after deduping by model_hash"
+        code = "insufficient_unique_models_after_dedupe"
+        summary = (
+            f"Only {len(ordered)} unique model(s) remain after collapsing to the latest "
+            "run per model hash."
+        )
+        notes = [
+            "The paired test uses one run per model hash by default so head-to-head cells "
+            "do not mix multiple runs of the same checkpoint."
+        ]
+        suggestions = [
+            "Broaden the filters to include more distinct model hashes.",
+            "Keep repeated runs separate if you intentionally want multiple rows for the "
+            "same model hash.",
+        ]
+    else:
+        detail = "matched"
+        code = "insufficient_compared_models"
+        summary = (
+            f"Only {len(ordered)} model(s) are available for pairwise comparison in this scope."
+        )
+        notes = []
+        suggestions = ["Broaden the filters to include more models."]
+
+    raise PairwiseEligibilityError(
+        code=code,
+        summary=summary,
+        message=(
+            f"Only {len(ordered)} unique model(s) {detail} — "
+            "need at least 2. Broaden the filters to include more models."
+        ),
+        scope_label=scope_label,
+        filter_summary=scope_str,
+        counts=[
+            {"label": "matched runs", "value": n_matched},
+            {"label": "after latest-run dedupe", "value": len(selected_before_coverage)},
+            {"label": "eligible compared models", "value": len(ordered)},
+            {"label": "minimum required", "value": 2},
+        ],
+        matched_runs=[
+            _serialize_experiment_debug(exp, keep_all=keep_all) for exp in candidate_experiments
+        ],
+        compared_models=[_serialize_experiment_debug(exp, keep_all=keep_all) for exp in selected],
+        dropped_duplicate_runs=dropped_duplicate_runs,
+        dropped_partial_coverage_models=[
+            _serialize_filtered_model_debug(model) for model in filtered_models
+        ],
+        notes=notes,
+        suggestions=suggestions,
+    )
+
+
+def _resolve_result_task_name(
+    *,
+    suite_name: str | None,
+    task_hash: str | None,
+    contributing_task_hashes: tuple[str, ...],
+    task_hash_to_name: dict[str, str],
+    fallback_task_name: str,
+) -> str:
+    if suite_name:
+        return suite_name
+
+    if not contributing_task_hashes:
+        return fallback_task_name
+
+    first_task_hash = contributing_task_hashes[0]
+    task_name_for_hash = task_hash_to_name.get(first_task_hash, fallback_task_name)
+    if task_hash is not None:
+        return _format_task_variant_label(task_name_for_hash, first_task_hash)
+    return task_name_for_hash
+
+
 def compute_pairwise(
     session: Session,
     task_name: str | None = None,
@@ -642,8 +1027,8 @@ def compute_pairwise(
 ) -> PairwiseResult:
     """Compute pairwise stats across the matched experiments.
 
-    Scores are aligned by ``(task_name, native_id)``. In ``task_hash`` mode the
-    prefix must resolve to one task name so that key stays well-defined.
+    Scores are aligned by ``(task_hash, native_id)`` so differently configured
+    variants of the same task name never get merged together.
     """
     from sqlalchemy import select
 
@@ -816,151 +1201,14 @@ def compute_pairwise(
     )
 
     filtered_models: list[FilteredModel] = []
-    if require_full_coverage and suite_name:
-        expected_tasks = set(suite_task_names)
-        selected_pks = [exp.id for exp in selected]
-        coverage_rows = session.execute(
-            select(
-                TaskResult.experiment_pk,
-                TaskResult.task_name,
-                TaskResult.num_instances,
-            )
-            .where(TaskResult.experiment_pk.in_(selected_pks))
-            .where(TaskResult.task_name.in_(suite_task_names))
-        ).all()
-
-        per_pk_tasks: dict[int, dict[str, int]] = {}
-        max_instances_per_task: dict[str, int] = {}
-        for pk, tname, ninst in coverage_rows:
-            ninst_val = ninst or 0
-            per_pk_tasks.setdefault(pk, {})[tname] = ninst_val
-            if ninst_val > max_instances_per_task.get(tname, 0):
-                max_instances_per_task[tname] = ninst_val
-
-        kept: list[Any] = []
-        for exp in selected:
-            have = per_pk_tasks.get(exp.id, {})
-            missing = tuple(sorted(expected_tasks - have.keys()))
-            shortfalls = tuple(
-                (t, have[t], max_instances_per_task.get(t, 0))
-                for t in sorted(have.keys())
-                if max_instances_per_task.get(t, 0) > have[t]
-            )
-            if missing or shortfalls:
-                filtered_models.append(
-                    FilteredModel(
-                        model_name=exp.model_name,
-                        model_hash=exp.model_hash,
-                        missing_tasks=missing,
-                        instance_shortfalls=shortfalls,
-                    )
-                )
-            else:
-                kept.append(exp)
-        selected = kept
-
-    ordered: list[tuple[int, ModelMeta]] = []
-    for exp in selected:
-        ts_iso = exp.timestamp.isoformat() if exp.timestamp is not None else None
-        if keep_all and exp.timestamp is not None:
-            timestamp_label = _timestamp_label(exp.timestamp)
-            if timestamp_label:
-                label = f"{exp.model_name}\n({exp.model_hash[:8]} @ {timestamp_label})"
-            else:
-                label = f"{exp.model_name}\n({exp.model_hash[:8]})"
-        else:
-            label = f"{exp.model_name}\n({exp.model_hash[:8]})"
-        ordered.append(
-            (
-                exp.id,
-                ModelMeta(
-                    label=label,
-                    model_name=exp.model_name,
-                    model_hash=exp.model_hash,
-                    timestamp=ts_iso,
-                ),
-            )
-        )
-
-    if len(ordered) < 2:
-        if filtered_models:
-            detail = (
-                f"after --require-full-coverage dropped {len(filtered_models)} "
-                "partial-coverage model(s)"
-            )
-            code = "insufficient_full_coverage_models"
-            summary = (
-                f"Only {len(ordered)} model(s) still satisfy the full-suite coverage "
-                "requirement for the paired test."
-            )
-            notes = [
-                "The results tab can still show models with partial suite coverage, but the "
-                "paired test requires every compared model to cover the same suite tasks."
-            ]
-            suggestions = [
-                "Choose a narrower task or suite that more models completed.",
-                "Rerun the missing tasks for the dropped model hashes, or relax the "
-                "full-coverage requirement.",
-            ]
-        elif not keep_all:
-            detail = "after deduping by model_hash"
-            code = "insufficient_unique_models_after_dedupe"
-            summary = (
-                f"Only {len(ordered)} unique model(s) remain after collapsing to the latest "
-                "run per model hash."
-            )
-            notes = [
-                "The paired test uses one run per model hash by default so head-to-head cells "
-                "do not mix multiple runs of the same checkpoint."
-            ]
-            suggestions = [
-                "Broaden the filters to include more distinct model hashes.",
-                "Keep repeated runs separate if you intentionally want multiple rows for the "
-                "same model hash.",
-            ]
-        else:
-            detail = "matched"
-            code = "insufficient_compared_models"
-            summary = (
-                f"Only {len(ordered)} model(s) are available for pairwise comparison in this scope."
-            )
-            notes = []
-            suggestions = ["Broaden the filters to include more models."]
-        raise PairwiseEligibilityError(
-            code=code,
-            summary=summary,
-            message=(
-                f"Only {len(ordered)} unique model(s) {detail} — "
-                "need at least 2. Broaden the filters to include more models."
-            ),
-            scope_label=scope_label,
-            filter_summary=scope_str,
-            counts=[
-                {"label": "matched runs", "value": n_matched},
-                {"label": "after latest-run dedupe", "value": len(selected_before_coverage)},
-                {"label": "eligible compared models", "value": len(ordered)},
-                {"label": "minimum required", "value": 2},
-            ],
-            matched_runs=[
-                _serialize_experiment_debug(exp, keep_all=keep_all) for exp in candidate_experiments
-            ],
-            compared_models=[
-                _serialize_experiment_debug(exp, keep_all=keep_all) for exp in selected
-            ],
-            dropped_duplicate_runs=dropped_duplicate_runs,
-            dropped_partial_coverage_models=[
-                _serialize_filtered_model_debug(model) for model in filtered_models
-            ],
-            notes=notes,
-            suggestions=suggestions,
-        )
-
+    ordered = _build_ordered_models(selected, keep_all=keep_all)
     pks = [pk for pk, _ in ordered]
 
     tr_stmt = select(
         TaskResult.experiment_pk,
         TaskResult.task_name,
         TaskResult.task_hash,
+        TaskResult.num_instances,
         TaskResult.metrics,
         TaskResult.primary_metric,
     ).where(TaskResult.experiment_pk.in_(pks))
@@ -1053,6 +1301,30 @@ def compute_pairwise(
             ],
         )
 
+    _validate_requested_task_scope(task_rows, task_name=task_name, task_hash=task_hash)
+    selected, ordered, task_rows, filtered_models = _restrict_task_rows_to_selected_models(
+        task_rows=task_rows,
+        selected=selected,
+        keep_all=keep_all,
+        suite_task_names=suite_task_names if suite_name else (),
+        require_full_coverage=require_full_coverage,
+    )
+    pks = [pk for pk, _ in ordered]
+
+    if len(ordered) < 2:
+        _raise_insufficient_compared_models(
+            ordered=ordered,
+            selected=selected,
+            keep_all=keep_all,
+            filtered_models=filtered_models,
+            n_matched=n_matched,
+            selected_before_coverage=selected_before_coverage,
+            scope_label=scope_label,
+            scope_str=scope_str,
+            candidate_experiments=candidate_experiments,
+            dropped_duplicate_runs=dropped_duplicate_runs,
+        )
+
     task_hash_to_metric: dict[str, str] = {}
     task_hash_to_name: dict[str, str] = {}
     for task_row in task_rows:
@@ -1064,15 +1336,6 @@ def compute_pairwise(
             )
         task_hash_to_metric[task_row.task_hash] = resolved_metric
         task_hash_to_name[task_row.task_hash] = task_row.task_name
-
-    if task_hash:
-        distinct_names = sorted(set(task_hash_to_name.values()))
-        if len(distinct_names) > 1:
-            raise ValueError(
-                f"--task-hash prefix '{task_hash}' matches {len(distinct_names)} "
-                f"distinct task names: {distinct_names}. Use a longer prefix, "
-                "pass --task for a single task, or --suite to pool intentionally."
-            )
 
     unique_task_hashes = set(task_hash_to_metric.keys())
     distinct_metrics = set(task_hash_to_metric.values())
@@ -1114,15 +1377,14 @@ def compute_pairwise(
             continue
         task_score = extract_score_from_metrics(task_row.metrics, task_metric)
         if task_score is not None:
-            task_score_by_pk[task_row.experiment_pk][task_row.task_name] = task_score
+            task_score_by_pk[task_row.experiment_pk][task_row.task_hash] = task_score
 
     for exp_pk, native_id, th, raw_score in rows:
         if exp_pk not in raw_scores_by_pk or exp_pk not in comparison_scores_by_pk:
             continue
-        row_task_name = task_hash_to_name.get(th)
-        if raw_score is None or row_task_name is None:
+        if raw_score is None or th not in task_hash_to_name:
             continue
-        key = (row_task_name, native_id)
+        key = (str(th), str(native_id))
         raw_scores_by_pk[exp_pk][key] = raw_score
         comparison_scores_by_pk[exp_pk][key] = _comparison_score(
             raw_score,
@@ -1276,8 +1538,16 @@ def compute_pairwise(
             ],
         )
 
-    contributing_task_names = tuple(sorted({tn for tn, _ in shared_ids}))
-    contributing_task_name_set = set(contributing_task_names)
+    contributing_task_hashes = tuple(
+        sorted(
+            {task_hash for task_hash, _ in shared_ids},
+            key=lambda resolved_hash: (task_hash_to_name.get(resolved_hash, ""), resolved_hash),
+        )
+    )
+    contributing_task_hash_set = set(contributing_task_hashes)
+    contributing_task_names = tuple(
+        task_hash_to_name.get(task_hash, "") for task_hash in contributing_task_hashes
+    )
 
     per_pk_task_counts: dict[int, int] = {}
     per_pk_cost_counts: dict[int, int] = {}
@@ -1285,7 +1555,7 @@ def compute_pairwise(
     for task_row in task_rows:
         if (
             task_row.experiment_pk not in pks
-            or task_row.task_name not in contributing_task_name_set
+            or task_row.task_hash not in contributing_task_hash_set
         ):
             continue
         per_pk_task_counts[task_row.experiment_pk] = (
@@ -1310,27 +1580,17 @@ def compute_pairwise(
         else:
             model_costs.append(None)
     model_task_scores = [
-        tuple(task_score_by_pk.get(pk, {}).get(task_name) for task_name in contributing_task_names)
+        tuple(task_score_by_pk.get(pk, {}).get(task_hash) for task_hash in contributing_task_hashes)
         for pk, _ in active
     ]
     task_metric_keys = tuple(
-        next(
-            (
-                task_hash_to_metric[task_hash]
-                for task_hash, task_name in task_hash_to_name.items()
-                if task_name == contributing_task_name
-            ),
-            None,
-        )
-        for contributing_task_name in contributing_task_names
+        task_hash_to_metric.get(task_hash) for task_hash in contributing_task_hashes
     )
-    contributing_profiles: list[MetricProfile] = []
-    for task_hash, task_name in task_hash_to_name.items():
-        if task_name not in contributing_task_name_set:
-            continue
-        profile = task_profile_by_hash.get(task_hash)
-        if profile is not None:
-            contributing_profiles.append(profile)
+    contributing_profiles = [
+        profile
+        for task_hash in contributing_task_hashes
+        if (profile := task_profile_by_hash.get(task_hash)) is not None
+    ]
     units = {profile.unit for profile in contributing_profiles}
     display_formats = {profile.display_format for profile in contributing_profiles}
     directions = {profile.higher_is_better for profile in contributing_profiles}
@@ -1357,7 +1617,13 @@ def compute_pairwise(
         model_shared_scores=model_shared_scores,
     )
 
-    result_task_name = suite_name or task_rows[0].task_name
+    result_task_name = _resolve_result_task_name(
+        suite_name=suite_name,
+        task_hash=task_hash,
+        contributing_task_hashes=contributing_task_hashes,
+        task_hash_to_name=task_hash_to_name,
+        fallback_task_name=task_rows[0].task_name,
+    )
 
     return PairwiseResult(
         task_name=result_task_name,
@@ -1368,6 +1634,7 @@ def compute_pairwise(
         pairs=pairs,
         suite_name=suite_name,
         task_names=contributing_task_names,
+        task_hashes=contributing_task_hashes,
         n_experiments_matched=n_matched,
         n_experiments_dropped=n_dropped,
         filtered_models=tuple(filtered_models),

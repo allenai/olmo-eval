@@ -8,7 +8,7 @@ import io
 import json
 import re
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from textwrap import dedent
 from threading import RLock
@@ -27,7 +27,7 @@ from olmo_eval.analysis.pairwise import (
     compute_pairwise,
     get_task_metric_profile,
 )
-from olmo_eval.analysis.pairwise_metrics import _build_task_label_lookup
+from olmo_eval.analysis.pairwise_metrics import TaskDisplayEntry, build_task_display_entries
 from olmo_eval.analysis.pairwise_viewer.assets import (
     browser_css_text,
     browser_js_text,
@@ -66,7 +66,22 @@ class _TimedCacheEntry:
 @dataclass(slots=True, frozen=True)
 class _ScopeTarget:
     task_name: str | None = None
+    task_hash: str | None = None
     suite_name: str | None = None
+
+
+@dataclass(slots=True)
+class _TaskColumnState:
+    task_name: str
+    task_hash: str | None
+    metric: str | None = None
+    profile: Any = None
+    metric_options: Counter[str] = field(default_factory=Counter)
+    model_count: int = 0
+
+    @property
+    def task_id(self) -> str:
+        return str(self.task_hash or self.task_name)
 
 
 class _TimedValueCache:
@@ -132,7 +147,7 @@ def _parse_scope_key(scope_key: str | None) -> tuple[str | None, str | None]:
     if not scope_key or "::" not in scope_key:
         return None, None
     kind, value = scope_key.split("::", 1)
-    if kind not in {"suite", "task"} or not value:
+    if kind not in {"suite", "task", "task-hash"} or not value:
         return None, None
     return kind, value
 
@@ -144,6 +159,7 @@ def _pluralized_label(count: int, singular: str, plural: str | None = None) -> s
 def _scope_target(scope_kind: str | None, scope_value: str | None) -> _ScopeTarget:
     return _ScopeTarget(
         task_name=scope_value if scope_kind == "task" else None,
+        task_hash=scope_value if scope_kind == "task-hash" else None,
         suite_name=scope_value if scope_kind == "suite" else None,
     )
 
@@ -178,6 +194,16 @@ def _pick_scope(group_data: dict[str, Any], requested: str | None) -> str | None
         return None
     if requested and any(option["key"] == requested for option in scope_options):
         return requested
+    requested_kind, requested_value = _parse_scope_key(requested)
+    if requested_kind == "task" and requested_value:
+        matching_tasks = [
+            str(option["key"])
+            for option in scope_options
+            if str(option.get("kind") or "") == "task"
+            and str(option.get("task_name") or option.get("value") or "") == requested_value
+        ]
+        if len(matching_tasks) == 1:
+            return matching_tasks[0]
     return None
 
 
@@ -295,6 +321,99 @@ def _group_experiments(session: Session, group_name: str, *, keep_all: bool) -> 
     return _latest_group_experiments(session, group_name)
 
 
+def _task_scope_id(task_name: Any, task_hash: Any) -> str:
+    return str(task_hash or task_name or "")
+
+
+def _record_task_column_state(
+    task_states_by_id: dict[str, _TaskColumnState],
+    *,
+    task_name: Any,
+    task_hash: Any,
+    metrics: Any,
+    primary_metric: Any,
+) -> _TaskColumnState:
+    resolved_name = str(task_name or "")
+    resolved_hash = str(task_hash) if task_hash else None
+    task_id = _task_scope_id(resolved_name, resolved_hash)
+    task_state = task_states_by_id.setdefault(
+        task_id,
+        _TaskColumnState(task_name=resolved_name, task_hash=resolved_hash),
+    )
+
+    metric_key = str(primary_metric) if primary_metric else None
+    if metric_key is not None and task_state.metric is None:
+        task_state.metric = metric_key
+        task_state.profile = get_task_metric_profile(resolved_name, metric_key)
+
+    available_metric_keys = _available_metric_keys(metrics)
+    task_state.metric_options.update(available_metric_keys)
+    if metric_key and metric_key not in available_metric_keys:
+        task_state.metric_options[metric_key] += 1
+    return task_state
+
+
+def _ordered_task_columns(
+    task_states: list[_TaskColumnState],
+) -> list[tuple[_TaskColumnState, TaskDisplayEntry]]:
+    ordered_states = sorted(
+        task_states,
+        key=lambda task_state: (task_state.task_name, task_state.task_hash or ""),
+    )
+    task_entries = build_task_display_entries(
+        tuple(task_state.task_name for task_state in ordered_states),
+        tuple(task_state.task_hash or "" for task_state in ordered_states),
+    )
+    return list(zip(ordered_states, task_entries, strict=False))
+
+
+def _serialize_task_column(
+    task_state: _TaskColumnState,
+    task_entry: TaskDisplayEntry,
+) -> dict[str, Any]:
+    profile = task_state.profile
+    metric = task_state.metric or ""
+    return {
+        "id": task_entry.id,
+        "task_name": task_entry.task_name,
+        "task_hash": task_entry.task_hash,
+        "label": task_entry.label,
+        "full_label": task_entry.full_label,
+        "metric": metric,
+        "metric_options": _serialize_metric_options(task_state.metric_options),
+        "score_display_format": profile.display_format if profile is not None else "raw",
+        "score_unit": profile.unit if profile is not None else metric,
+        "higher_is_better": profile.higher_is_better if profile is not None else True,
+        "model_count": int(task_state.model_count),
+    }
+
+
+def _annotate_task_variants(
+    raw_task_rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, list[str]]]:
+    task_entries = build_task_display_entries(
+        tuple(str(row["name"]) for row in raw_task_rows),
+        tuple(str(row.get("task_hash") or "") for row in raw_task_rows),
+    )
+    task_variant_count_by_name = Counter(str(row["name"]) for row in raw_task_rows)
+
+    task_rows: list[dict[str, Any]] = []
+    task_ids_by_name: dict[str, list[str]] = {}
+    for raw_row, task_entry in zip(raw_task_rows, task_entries, strict=False):
+        task_rows.append(
+            {
+                **raw_row,
+                "id": task_entry.id,
+                "label": task_entry.label,
+                "full_label": task_entry.full_label,
+                "hash_qualified": task_variant_count_by_name[str(raw_row["name"])] > 1,
+            }
+        )
+        task_ids_by_name.setdefault(str(raw_row["name"]), []).append(task_entry.id)
+
+    return task_rows, task_ids_by_name
+
+
 def _build_results_table(session: Session, group_name: str, *, keep_all: bool) -> dict[str, Any]:
     from olmo_eval.runners.processing.utils import extract_score_from_metrics
     from olmo_eval.storage.backends.postgres.models import TaskResult
@@ -309,6 +428,7 @@ def _build_results_table(session: Session, group_name: str, *, keep_all: bool) -
         select(
             TaskResult.experiment_pk,
             TaskResult.task_name,
+            TaskResult.task_hash,
             TaskResult.metrics,
             TaskResult.primary_metric,
         ).where(TaskResult.experiment_pk.in_(selected_pks))
@@ -335,61 +455,28 @@ def _build_results_table(session: Session, group_name: str, *, keep_all: bool) -
             for experiment in experiments
         }
 
-    task_metric_by_name: dict[str, str | None] = {}
-    task_profile_by_name: dict[str, Any] = {}
-    task_metric_options_by_name: dict[str, Counter[str]] = {}
-    model_count_by_task: dict[str, int] = {}
+    task_states_by_id: dict[str, _TaskColumnState] = {}
     task_scores_by_pk: dict[int, dict[str, float | None]] = {pk: {} for pk in selected_pks}
-    for experiment_pk, task_name, metrics, primary_metric in task_rows:
-        if primary_metric:
-            task_metric_by_name.setdefault(task_name, primary_metric)
-            task_profile_by_name.setdefault(
-                task_name,
-                get_task_metric_profile(task_name, primary_metric),
-            )
-        metric_counter = task_metric_options_by_name.setdefault(task_name, Counter())
-        available_metric_keys = _available_metric_keys(metrics)
-        for metric_key in available_metric_keys:
-            metric_counter[metric_key] += 1
-        if primary_metric and primary_metric not in available_metric_keys:
-            metric_counter[primary_metric] += 1
-        score = extract_score_from_metrics(metrics, primary_metric) if primary_metric else None
-        task_scores_by_pk.setdefault(experiment_pk, {})[task_name] = score
-        if task_name not in model_count_by_task:
-            model_count_by_task[task_name] = 0
+    for experiment_pk, task_name, task_hash, metrics, primary_metric in task_rows:
+        task_state = _record_task_column_state(
+            task_states_by_id,
+            task_name=task_name,
+            task_hash=task_hash,
+            metrics=metrics,
+            primary_metric=primary_metric,
+        )
+        task_id = task_state.task_id
+        metric_key = str(primary_metric) if primary_metric else None
+        score = extract_score_from_metrics(metrics, metric_key) if metric_key else None
+        task_scores_by_pk.setdefault(experiment_pk, {})[task_id] = score
         if score is not None:
-            model_count_by_task[task_name] += 1
+            task_state.model_count += 1
 
-    task_names = tuple(sorted({task_name for _, task_name, _, _ in task_rows}))
-    task_label_lookup = _build_task_label_lookup(task_names)
-
+    ordered_task_columns = _ordered_task_columns(list(task_states_by_id.values()))
+    ordered_task_ids = [task_entry.id for _, task_entry in ordered_task_columns]
     task_columns = [
-        {
-            "id": task_name,
-            "label": task_label_lookup.get(task_name, task_name),
-            "full_label": task_name,
-            "metric": task_metric_by_name.get(task_name) or "",
-            "metric_options": _serialize_metric_options(
-                task_metric_options_by_name.get(task_name, Counter()),
-            ),
-            "score_display_format": (
-                task_profile_by_name[task_name].display_format
-                if task_name in task_profile_by_name and task_profile_by_name[task_name] is not None
-                else "raw"
-            ),
-            "score_unit": (
-                task_profile_by_name[task_name].unit
-                if task_name in task_profile_by_name and task_profile_by_name[task_name] is not None
-                else task_metric_by_name.get(task_name) or ""
-            ),
-            "higher_is_better": (
-                task_profile_by_name[task_name].higher_is_better
-                if task_name in task_profile_by_name and task_profile_by_name[task_name] is not None
-                else True
-            ),
-            "model_count": int(model_count_by_task.get(task_name, 0)),
-        }
-        for task_name in task_names
+        _serialize_task_column(task_state, task_entry)
+        for task_state, task_entry in ordered_task_columns
     ]
 
     models: list[dict[str, Any]] = []
@@ -405,7 +492,7 @@ def _build_results_table(session: Session, group_name: str, *, keep_all: bool) -
                 "model_hash": experiment.model_hash,
                 "timestamp": experiment.timestamp.isoformat(),
                 "avg_score": avg_score,
-                "task_scores": {task_name: task_scores.get(task_name) for task_name in task_names},
+                "task_scores": {task_id: task_scores.get(task_id) for task_id in ordered_task_ids},
             }
         )
 
@@ -739,24 +826,28 @@ def _build_group_browser_data(
         ).where(Experiment.experiment_group == group_name)
     ).one()
 
-    task_rows: list[dict[str, Any]] = [
+    raw_task_rows = [
         {
-            "name": task_name,
+            "name": str(task_name or ""),
+            "task_hash": str(task_hash) if task_hash else None,
             "models": int(model_count or 0),
             "metric": metric or "",
         }
-        for task_name, model_count, metric in session.execute(
+        for task_name, task_hash, model_count, metric in session.execute(
             select(
                 TaskResult.task_name,
+                TaskResult.task_hash,
                 func.count(distinct(Experiment.model_hash)).label("models"),
                 func.max(TaskResult.primary_metric).label("metric"),
             )
             .join(Experiment, Experiment.id == TaskResult.experiment_pk)
             .where(Experiment.experiment_group == group_name)
-            .group_by(TaskResult.task_name)
-            .order_by(TaskResult.task_name)
+            .group_by(TaskResult.task_name, TaskResult.task_hash)
+            .order_by(TaskResult.task_name, TaskResult.task_hash)
         ).all()
     ]
+    task_rows, task_ids_by_name = _annotate_task_variants(raw_task_rows)
+
     present_tasks = {row["name"] for row in task_rows}
     results_table = _build_results_table(session, group_name, keep_all=keep_all)
     availability_table = (
@@ -772,22 +863,43 @@ def _build_group_browser_data(
     suite_rows: list[dict[str, Any]] = []
     for suite_name in list_suites():
         expanded_tasks = get_suite(suite_name).expanded_tasks
-        visible_tasks = list(
+        visible_task_names = list(
             dict.fromkeys(task_name for task_name in expanded_tasks if task_name in present_tasks)
         )
         total = len(expanded_tasks)
-        covered = len(visible_tasks)
+        covered = len(visible_task_names)
         if covered == 0:
             continue
         ratio = covered / total if total else 0.0
+        visible_task_ids = [
+            task_id
+            for task_name in visible_task_names
+            for task_id in task_ids_by_name.get(task_name, [])
+        ]
+        availability_task_ids: list[str] = []
+        for task_name in visible_task_names:
+            task_variant_ids = task_ids_by_name.get(task_name, [])
+            if not task_variant_ids:
+                continue
+            availability_task_ids.append(
+                max(
+                    task_variant_ids,
+                    key=lambda task_id: (
+                        int(latest_task_column_by_id.get(task_id, {}).get("model_count", 0)),
+                        str(task_id),
+                    ),
+                )
+            )
         suite_rows.append(
             {
                 "name": suite_name,
                 "covered": covered,
                 "total": total,
                 "ratio": ratio,
-                "task_ids": list(dict.fromkeys(expanded_tasks)),
-                "visible_task_ids": visible_tasks,
+                "task_ids": visible_task_ids,
+                "visible_task_ids": visible_task_ids,
+                "visible_task_names": visible_task_names,
+                "availability_task_ids": availability_task_ids,
             }
         )
     for suite_row in suite_rows:
@@ -798,7 +910,7 @@ def _build_group_browser_data(
         }
         suite_row["availability"] = _suite_scope_availability(
             suite_name=suite_row["name"],
-            all_task_ids=list(suite_row["task_ids"]),
+            all_task_ids=list(suite_row["availability_task_ids"]),
             covered_tasks=int(suite_row["covered"]),
             total_tasks=int(suite_row["total"]),
             latest_models=latest_models,
@@ -820,14 +932,14 @@ def _build_group_browser_data(
     )
 
     for task_row in task_rows:
-        task_name = str(task_row["name"])
-        task_column = task_column_by_id.get(task_name) or {}
-        latest_model_count = int(latest_task_column_by_id.get(task_name, {}).get("model_count", 0))
+        task_id = str(task_row["id"])
+        task_column = task_column_by_id.get(task_id) or {}
+        latest_model_count = int(latest_task_column_by_id.get(task_id, {}).get("model_count", 0))
         task_row["latest_models"] = latest_model_count
         task_row["metric_options"] = list(task_column.get("metric_options", []))
         task_row["default_metric"] = str(task_column.get("metric") or "")
         task_row["availability"] = _task_scope_availability(
-            task_name=task_name,
+            task_name=str(task_row["full_label"]),
             group_model_count=int(task_row["models"]),
             latest_model_count=latest_model_count,
         )
@@ -835,7 +947,7 @@ def _build_group_browser_data(
         key=lambda row: (
             int(row["availability"]["sort_priority"]),
             -int(row["latest_models"]),
-            str(row["name"]),
+            str(row["full_label"]),
         )
     )
 
@@ -859,11 +971,16 @@ def _build_group_browser_data(
     ]
     scope_options.extend(
         {
-            "key": _make_scope_key("task", task_row["name"]),
+            "key": _make_scope_key(
+                "task-hash" if task_row["hash_qualified"] else "task",
+                str(task_row["task_hash"] or task_row["name"]),
+            ),
             "kind": "task",
-            "label": f"{task_row['name']} · {task_row['models']} models",
-            "value": task_row["name"],
-            "task_ids": [task_row["name"]],
+            "label": f"{task_row['full_label']} · {task_row['models']} models",
+            "value": task_row["full_label"],
+            "task_name": task_row["name"],
+            "task_hash": task_row["task_hash"],
+            "task_ids": [task_row["id"]],
             "default_metric": task_row["default_metric"],
             "metric_options": list(task_row["metric_options"]),
             "status_badge": task_row["availability"]["status_badge"],
@@ -1250,6 +1367,7 @@ def _compute_group_pairwise(
     return compute_pairwise(
         session=session,
         task_name=scope_target.task_name,
+        task_hash=scope_target.task_hash,
         margin=margin,
         experiment_groups=[group_name],
         metric=selected_metric,
@@ -1359,24 +1477,26 @@ def _load_compared_scope_task_rows(
     from olmo_eval.storage.backends.postgres.models import TaskResult
 
     experiment_ids = [int(experiment["experiment_pk"]) for experiment in compared_experiments]
+    task_hashes = list(getattr(result, "task_hashes", ()) or ())
     task_names = list(result.task_names or ((result.task_name,) if result.task_name else ()))
-    if not experiment_ids or not task_names:
+    if not experiment_ids or (not task_hashes and not task_names):
         return []
 
-    task_rows = session.execute(
-        select(
-            TaskResult.experiment_pk,
-            TaskResult.task_name,
-            TaskResult.task_hash,
-            TaskResult.num_instances,
-            TaskResult.primary_metric,
-            TaskResult.s3_metrics_key,
-            TaskResult.s3_predictions_key,
-            TaskResult.s3_requests_key,
-        )
-        .where(TaskResult.experiment_pk.in_(experiment_ids))
-        .where(TaskResult.task_name.in_(task_names))
-    ).all()
+    stmt = select(
+        TaskResult.experiment_pk,
+        TaskResult.task_name,
+        TaskResult.task_hash,
+        TaskResult.num_instances,
+        TaskResult.primary_metric,
+        TaskResult.s3_metrics_key,
+        TaskResult.s3_predictions_key,
+        TaskResult.s3_requests_key,
+    ).where(TaskResult.experiment_pk.in_(experiment_ids))
+    if task_hashes:
+        stmt = stmt.where(TaskResult.task_hash.in_(task_hashes))
+    elif task_names:
+        stmt = stmt.where(TaskResult.task_name.in_(task_names))
+    task_rows = session.execute(stmt).all()
 
     return [
         {
@@ -1407,7 +1527,6 @@ def _build_instance_results_export_data(
     experiment_ids = [int(experiment["experiment_pk"]) for experiment in compared_experiments]
     task_hash_to_metric: dict[str, str] = {}
     task_hash_to_name: dict[str, str] = {}
-    task_metric_by_name: dict[str, str] = {}
     task_profile_by_hash: dict[str, Any] = {}
 
     for row in task_rows:
@@ -1418,7 +1537,6 @@ def _build_instance_results_export_data(
             continue
         task_hash_to_metric[task_hash] = metric_key
         task_hash_to_name[task_hash] = task_name
-        task_metric_by_name.setdefault(task_name, metric_key)
         task_profile_by_hash[task_hash] = get_task_metric_profile(task_name, metric_key)
 
     score_expr = _build_pairwise_score_sql_expr(task_hash_to_metric, task_profile_by_hash)
@@ -1452,14 +1570,15 @@ def _build_instance_results_export_data(
     for experiment_pk, native_id, task_hash, raw_score in score_rows:
         if raw_score is None:
             continue
-        task_name = task_hash_to_name.get(str(task_hash))
+        resolved_task_hash = str(task_hash)
+        task_name = task_hash_to_name.get(resolved_task_hash)
         if not task_name:
             continue
-        key = (task_name, str(native_id))
+        key = (resolved_task_hash, str(native_id))
         raw_scores_by_pk[int(experiment_pk)][key] = float(raw_score)
         comparison_scores_by_pk[int(experiment_pk)][key] = _comparison_score(
             float(raw_score),
-            task_profile_by_hash.get(str(task_hash)),
+            task_profile_by_hash.get(resolved_task_hash),
         )
 
     shared_ids: set[tuple[str, str]] = set(
@@ -1469,16 +1588,23 @@ def _build_instance_results_export_data(
         shared_ids &= set(comparison_scores_by_pk.get(experiment_id, {}).keys())
 
     rows: list[dict[str, Any]] = []
-    for task_name, native_id in sorted(shared_ids):
-        metric_key = task_metric_by_name.get(task_name)
-        profile = get_task_metric_profile(task_name, metric_key) if metric_key else None
+    for task_hash, native_id in sorted(
+        shared_ids,
+        key=lambda pair: (task_hash_to_name.get(pair[0], ""), pair[0], pair[1]),
+    ):
+        task_name = task_hash_to_name.get(task_hash)
+        if not task_name:
+            continue
+        metric_key = task_hash_to_metric.get(task_hash)
+        profile = task_profile_by_hash.get(task_hash)
         for experiment in compared_experiments:
             experiment_id = int(experiment["experiment_pk"])
-            key = (task_name, native_id)
+            key = (task_hash, native_id)
             rows.append(
                 {
                     **_export_experiment_identity(experiment),
                     "task_name": task_name,
+                    "task_hash": task_hash,
                     "native_id": native_id,
                     "task_metric_key": metric_key,
                     "raw_score": raw_scores_by_pk[experiment_id].get(key),
@@ -1548,7 +1674,7 @@ def _build_stored_files_export_data(
         group_name=group_name,
         result=result,
         compared_model_count=len(compared_experiments),
-        task_count=len({str(row["task_name"]) for row in task_rows}),
+        task_count=len({str(row["task_hash"] or row["task_name"]) for row in task_rows}),
         row_count=len(rows),
     )
     return metadata, rows
@@ -1571,6 +1697,7 @@ def _serialize_viewer_export(
             "model_hash",
             "timestamp",
             "task_name",
+            "task_hash",
             "native_id",
             "task_metric_key",
             "raw_score",
@@ -1853,6 +1980,23 @@ def _viewer_pairwise_error_payload(
             suggestions=[
                 "Pick the specific task from the suite / task selector instead of using this "
                 "ambiguous saved URL.",
+            ],
+            message=message,
+        )
+
+    if message.startswith("Task '") and "matches" in message and "task configs" in message:
+        task_name = message.split("Task '", 1)[1].split("'", 1)[0]
+        return _build_viewer_error_payload(
+            code="ambiguous_task_scope",
+            summary=f"'{task_name}' has multiple task configs in this viewer.",
+            scope_label=task_name,
+            notes=[
+                "The same task name appears with more than one saved config hash, so the "
+                "viewer will not merge them into one paired test."
+            ],
+            suggestions=[
+                "Pick one of the hash-qualified task entries from the suite / task selector.",
+                "Switch to the Results tab to inspect the separate task columns for each config.",
             ],
             message=message,
         )
