@@ -42,14 +42,11 @@ jobs:
           restore-keys: |
             uv-${{ runner.os }}-
 
-      - name: Install dependencies
-        run: uv sync --frozen
-
       - name: Run Ruff linter
-        run: uv run ruff check src/ tests/
+        run: uv run --frozen ruff check src/ tests/
 
       - name: Run Ruff formatter check
-        run: uv run ruff format --check src/ tests/
+        run: uv run --frozen ruff format --check src/ tests/
 
   type-check:
     name: Type Check
@@ -74,11 +71,8 @@ jobs:
           restore-keys: |
             uv-${{ runner.os }}-
 
-      - name: Install dependencies
-        run: uv sync --frozen
-
       - name: Run type checker
-        run: uv run ty check src/ alembic/
+        run: uv run --frozen ty check src/ alembic/
 
   # ============================================================================
   # Unit Tests
@@ -110,12 +104,9 @@ jobs:
           restore-keys: |
             uv-${{ runner.os }}-py${{ matrix.python-version }}-
 
-      - name: Install dependencies
-        run: uv sync --frozen
-
       - name: Run unit tests with coverage
         run: |
-          uv run pytest tests/ \
+          uv run --frozen pytest tests/ \
             --ignore=tests/integration/ \
             -v \
             --cov=src/olmo_eval \
@@ -129,7 +120,7 @@ jobs:
           echo "## Coverage Report" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          uv run coverage report --format=markdown >> $GITHUB_STEP_SUMMARY || uv run coverage report >> $GITHUB_STEP_SUMMARY
+          uv run --frozen coverage report --format=markdown >> $GITHUB_STEP_SUMMARY || uv run --frozen coverage report >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
       - name: Upload coverage HTML report
@@ -202,9 +193,6 @@ jobs:
           restore-keys: |
             uv-${{ runner.os }}-
 
-      - name: Install dependencies
-        run: uv sync --frozen
-
       - name: Wait for services to be ready
         run: |
           echo "Waiting for Postgres..."
@@ -223,7 +211,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: "test"
           AWS_DEFAULT_REGION: "us-east-1"
         run: |
-          uv run pytest tests/integration/test_storage.py \
+          uv run --frozen pytest tests/integration/test_storage.py \
             -v \
             --tb=short
 
@@ -251,17 +239,14 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
-      - name: Install dependencies with vLLM
-        run: uv sync --frozen
-
       - name: Verify GPU availability
         run: |
           nvidia-smi
-          python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}'); print(f'GPU count: {torch.cuda.device_count()}')"
+          uv run --frozen python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}'); print(f'GPU count: {torch.cuda.device_count()}')"
 
       - name: Run vLLM integration tests
         run: |
-          uv run pytest tests/integration/test_vllm_provider.py \
+          uv run --frozen pytest tests/integration/test_vllm_provider.py \
             -v \
             --integration \
             --no-docker \
@@ -291,9 +276,6 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
-      - name: Install dependencies
-        run: uv sync --frozen
-
       - name: Verify Docker and GPU
         run: |
           docker --version
@@ -303,7 +285,7 @@ jobs:
 
       - name: Run vLLM integration tests with Docker
         run: |
-          uv run pytest tests/integration/test_vllm_provider.py \
+          uv run --frozen pytest tests/integration/test_vllm_provider.py \
             -v \
             --integration \
             --tb=short
@@ -338,7 +320,7 @@ jobs:
       - name: Verify package contents
         run: |
           ls -la dist/
-          uv run python -m zipfile -l dist/*.whl | head -50
+          uv run --frozen python -m zipfile -l dist/*.whl | head -50
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
