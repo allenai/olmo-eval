@@ -176,6 +176,45 @@ def _get_olmo3_tool_template_path() -> str:
     )
 
 
+def _bake_chat_template_kwargs(
+    model_name: str, chat_template_kwargs: dict[str, Any]
+) -> str | None:
+    """Bake chat_template_kwargs into a patched template file.
+
+    Loads the model's Jinja chat template from its tokenizer, prepends
+    ``{%- set key = value -%}`` lines for each kwarg so the values are
+    available as template variables, and writes the result to a temp file.
+    Returns the path to that file, or *None* if the template could not be
+    loaded.
+    """
+    import tempfile
+
+    try:
+        from transformers import AutoTokenizer
+
+        tok = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+        template = getattr(tok, "chat_template", None)
+        if template is None:
+            logger.warning("No chat_template found for %s; skipping bake", model_name)
+            return None
+    except Exception:
+        logger.warning("Could not load tokenizer for %s; skipping bake", model_name, exc_info=True)
+        return None
+
+    import json as _json
+
+    prefix_lines: list[str] = []
+    for key, value in chat_template_kwargs.items():
+        prefix_lines.append(f"{{% set {key} = {_json.dumps(value)} %}}")
+    patched = "\n".join(prefix_lines) + "\n" + template
+
+    fd, path = tempfile.mkstemp(suffix=".jinja", prefix="chat_template_")
+    with os.fdopen(fd, "w") as f:
+        f.write(patched)
+    logger.info("Wrote patched chat template to %s (kwargs=%s)", path, chat_template_kwargs)
+    return path
+
+
 # Kwargs that are used for deployment/setup, not vLLM server CLI arguments
 _NON_VLLM_KWARGS = frozenset({"patch_olmo3_tool_parser"})
 
@@ -292,9 +331,13 @@ def _build_server_command(
     if enable_prefix_caching:
         cmd.append("--enable-prefix-caching")
 
-    # Chat template kwargs (e.g., for Qwen3 enable_thinking)
+    # Chat template kwargs (e.g., for Qwen3 enable_thinking).
+    # Bake kwargs into a patched copy of the model's Jinja template and load
+    # it via --chat-template, which is supported by all vLLM versions.
     if chat_template_kwargs:
-        cmd.extend(["--chat-template-kwargs", json.dumps(chat_template_kwargs)])
+        patched = _bake_chat_template_kwargs(model_name, chat_template_kwargs)
+        if patched is not None:
+            cmd.extend(["--chat-template", patched])
 
     # Disable tqdm loading bar by default, enable with --debug-provider
     if is_debug_provider():
