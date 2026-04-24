@@ -82,8 +82,9 @@ def _apply_dotlist_overrides(base_dict: dict[str, Any], overrides: list[str]) ->
     A dict override applied directly to the top-level sandboxes key is treated
     specially:
     - most fields are deep-merged into each existing sandbox config
-    - the special field ``instances`` is peeled off into the shared
-      ``sandbox_pool_instances`` budget instead of being applied per sandbox
+    - the special fields ``instances`` and ``min_instances`` are peeled off into
+      the shared ``sandbox_pool_instances`` budget and
+      ``sandbox_pool_min_instances`` minimum instead of being applied per sandbox
 
     Args:
         base_dict: The base dictionary to modify.
@@ -155,8 +156,10 @@ def _apply_dotlist_overrides(base_dict: dict[str, Any], overrides: list[str]) ->
                 and isinstance(target.get(final_key), list)
             ):
                 override_dict = copy.deepcopy(parsed_value)
-                if final_key == "sandboxes" and "instances" in override_dict:
+                if "instances" in override_dict:
                     base_dict["sandbox_pool_instances"] = override_dict.pop("instances")
+                if "min_instances" in override_dict:
+                    base_dict["sandbox_pool_min_instances"] = override_dict.pop("min_instances")
                 if override_dict:
                     _merge_dict_into_list_items(target[final_key], override_dict, key_path)
             else:

@@ -89,6 +89,7 @@ class TestHarnessConfig:
             scaffold_kwargs={"enable_compaction": False},
             required_secrets=("API_KEY",),
             sandbox_pool_instances=32,
+            sandbox_pool_min_instances=12,
             sandboxes=(
                 SandboxConfig(
                     image="python:3.12",
@@ -115,6 +116,7 @@ class TestHarnessConfig:
         assert restored.scaffold_kwargs == config.scaffold_kwargs
         assert restored.required_secrets == config.required_secrets
         assert restored.sandbox_pool_instances == 32
+        assert restored.sandbox_pool_min_instances == 12
         assert len(restored.sandboxes) == 1
         assert restored.sandboxes[0].instances is None
 
@@ -126,6 +128,7 @@ class TestHarnessConfig:
                 "backend": "openai_agents",
                 "backend_kwargs": {"enable_compaction": False},
                 "sandbox_pool_instances": 8,
+                "sandbox_pool_min_instances": 3,
             }
         )
 
@@ -134,10 +137,22 @@ class TestHarnessConfig:
         assert restored.scaffold == "openai_agents"
         assert restored.scaffold_kwargs == {"enable_compaction": False}
         assert restored.sandbox_pool_instances == 8
+        assert restored.sandbox_pool_min_instances == 3
         assert "backend" not in serialized
         assert "backend_kwargs" not in serialized
         assert serialized["scaffold"] == "openai_agents"
         assert serialized["scaffold_kwargs"] == {"enable_compaction": False}
+
+    def test_sandbox_config_resolved_min_instances_clamps(self):
+        """Configured startup minimums should never exceed resolved executor count."""
+        config = SandboxConfig(
+            image="python:3.12",
+            mode=SandboxMode.DOCKER,
+            instances=1,
+            min_instances=24,
+        )
+
+        assert config.resolved_min_instances == 1
 
     def test_config_immutable(self):
         """Test that HarnessConfig is frozen (immutable)."""

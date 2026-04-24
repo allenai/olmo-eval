@@ -45,6 +45,7 @@ class HarnessConfig:
     sandboxes: tuple[SandboxConfig, ...] = ()
     scaffold_kwargs: dict[str, Any] = field(default_factory=dict)
     sandbox_pool_instances: int | None = None
+    sandbox_pool_min_instances: int | None = None
     metrics: MetricsConfig | None = None
     batching: BatchConfig | None = None
     scorer_startup_timeout: float | None = None
@@ -146,6 +147,8 @@ class HarnessConfig:
             d["scaffold_kwargs"] = self.scaffold_kwargs
         if self.sandbox_pool_instances is not None:
             d["sandbox_pool_instances"] = self.sandbox_pool_instances
+        if self.sandbox_pool_min_instances is not None:
+            d["sandbox_pool_min_instances"] = self.sandbox_pool_min_instances
         if self.metrics is not None:
             d["metrics"] = self.metrics.to_dict()
         if self.batching is not None:
@@ -202,6 +205,7 @@ class HarnessConfig:
             scoring_concurrency=data.get("scoring_concurrency"),
             sandboxes=sandboxes,
             sandbox_pool_instances=data.get("sandbox_pool_instances"),
+            sandbox_pool_min_instances=data.get("sandbox_pool_min_instances"),
             scaffold_kwargs=scaffold_kwargs,
             metrics=metrics,
             batching=batching,
@@ -284,6 +288,7 @@ def harness_config(
     sandboxes: Sequence[SandboxConfig] = (),
     scaffold_kwargs: dict[str, Any] | None = None,
     sandbox_pool_instances: int | None = None,
+    sandbox_pool_min_instances: int | None = None,
     metrics: MetricsConfig | None = None,
     batching: BatchConfig | None = None,
     scorer_startup_timeout: float | None = None,
@@ -305,6 +310,7 @@ def harness_config(
         sandboxes: Sandbox configurations for isolated tool execution.
         scaffold_kwargs: Scaffold-specific kwargs (e.g., enable_compaction for openai_agents).
         sandbox_pool_instances: Shared executor budget for auto-allocated sandboxes.
+        sandbox_pool_min_instances: Shared startup minimum for auto-allocated sandboxes.
         metrics: Metrics collection configuration (None = no metrics).
         batching: Batching strategy configuration (None = sequential).
         scorer_startup_timeout: Timeout for scorer worker startup. If None, derived from
@@ -328,6 +334,7 @@ def harness_config(
         sandboxes=tuple(sandboxes),
         scaffold_kwargs=scaffold_kwargs or {},
         sandbox_pool_instances=sandbox_pool_instances,
+        sandbox_pool_min_instances=sandbox_pool_min_instances,
         metrics=metrics,
         batching=batching,
         scorer_startup_timeout=scorer_startup_timeout,

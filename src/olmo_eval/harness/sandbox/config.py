@@ -128,6 +128,13 @@ class SandboxConfig:
         """Executor count with the default auto-allocation fallback applied."""
         return self.instances if self.instances is not None else 1
 
+    @property
+    def resolved_min_instances(self) -> int:
+        """Minimum required instances, clamped to the resolved executor count."""
+        if self.min_instances is None:
+            return self.resolved_instances
+        return min(self.min_instances, self.resolved_instances)
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         from dataclasses import asdict

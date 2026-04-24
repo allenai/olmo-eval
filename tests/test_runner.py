@@ -126,17 +126,21 @@ class TestNamedSandboxPlanning:
     def make_codex_universal_like_sandboxes(
         *,
         default_instances: int | None = None,
+        default_min_instances: int | None = None,
         bigcodebench_instances: int | None = None,
+        bigcodebench_min_instances: int | None = None,
     ) -> tuple[SandboxConfig, SandboxConfig]:
         return (
             SandboxConfig(
                 instances=default_instances,
+                min_instances=default_min_instances,
                 image="default-sandbox:latest",
                 mode=SandboxMode.DOCKER,
                 inject_swerex=True,
             ),
             SandboxConfig(
                 instances=bigcodebench_instances,
+                min_instances=bigcodebench_min_instances,
                 image="bigcodebench-sandbox:latest",
                 mode=SandboxMode.DOCKER,
                 capabilities=frozenset({"sandbox:bigcodebench"}),
@@ -224,6 +228,39 @@ class TestNamedSandboxPlanning:
         assert plan.allocated[_DEFAULT_SANDBOX_ENV] == 15
         assert plan.allocated["bigcodebench"] == 49
 
+    def test_pool_minimum_is_distributed_with_auto_allocated_envs(self):
+        """Shared startup minimums should track the same demand-based split as instances."""
+        trackers = {
+            "humaneval:bpb": TaskTracker(
+                model_name="test-model",
+                spec="humaneval:bpb",
+                task=get_task("humaneval:bpb"),
+                total_instances=3,
+            ),
+            "bigcodebench:olmo3base": TaskTracker(
+                model_name="test-model",
+                spec="bigcodebench:olmo3base",
+                task=get_task("bigcodebench:olmo3base"),
+                total_instances=2,
+            ),
+        }
+
+        plan = _plan_sandbox_configs(
+            self.make_codex_universal_like_sandboxes(),
+            ["humaneval:bpb", "bigcodebench:olmo3base"],
+            trackers,
+            sandbox_pool_instances=64,
+            sandbox_pool_min_instances=24,
+        )
+
+        assert plan is not None
+        assert plan.min_required == {_DEFAULT_SANDBOX_ENV: 6, "bigcodebench": 18}
+        sandboxes_by_cap = {cfg.capabilities: cfg for cfg in plan.sandboxes}
+        assert sandboxes_by_cap[frozenset({"bash"})].instances == 15
+        assert sandboxes_by_cap[frozenset({"bash"})].min_instances == 6
+        assert sandboxes_by_cap[frozenset({"sandbox:bigcodebench"})].instances == 49
+        assert sandboxes_by_cap[frozenset({"sandbox:bigcodebench"})].min_instances == 18
+
     def test_default_and_named_envs_add_explicit_instances_on_top_of_pool(self):
         """Explicit sandbox counts should be preserved alongside the shared pool."""
         trackers = {
@@ -259,6 +296,40 @@ class TestNamedSandboxPlanning:
             frozenset({"bash"}),
             frozenset({"sandbox:bigcodebench"}),
         }
+
+    def test_auto_allocated_minimums_are_clamped_to_distributed_capacity(self):
+        """Auto-managed configs should not keep impossible per-config startup minimums."""
+        trackers = {
+            "humaneval:bpb": TaskTracker(
+                model_name="test-model",
+                spec="humaneval:bpb",
+                task=get_task("humaneval:bpb"),
+                total_instances=3,
+            ),
+            "bigcodebench:olmo3base": TaskTracker(
+                model_name="test-model",
+                spec="bigcodebench:olmo3base",
+                task=get_task("bigcodebench:olmo3base"),
+                total_instances=2,
+            ),
+        }
+
+        plan = _plan_sandbox_configs(
+            self.make_codex_universal_like_sandboxes(
+                default_min_instances=24,
+                bigcodebench_min_instances=24,
+            ),
+            ["humaneval:bpb", "bigcodebench:olmo3base"],
+            trackers,
+            sandbox_pool_instances=64,
+        )
+
+        assert plan is not None
+        sandboxes_by_cap = {cfg.capabilities: cfg for cfg in plan.sandboxes}
+        assert sandboxes_by_cap[frozenset({"bash"})].instances == 15
+        assert sandboxes_by_cap[frozenset({"bash"})].min_instances == 15
+        assert sandboxes_by_cap[frozenset({"sandbox:bigcodebench"})].instances == 49
+        assert sandboxes_by_cap[frozenset({"sandbox:bigcodebench"})].min_instances == 24
 
     def test_default_sandbox_defaults_to_one_executor_when_unset(self):
         """Default-only execution should materialize one executor when no pool is set."""

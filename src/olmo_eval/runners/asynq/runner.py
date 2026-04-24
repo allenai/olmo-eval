@@ -53,6 +53,7 @@ class _SandboxPlan:
     env_demand: dict[str, int]
     env_task_count: dict[str, int]
     allocated: dict[str, int]
+    min_required: dict[str, int]
     budget: int
     needs_default: bool
 
@@ -131,6 +132,7 @@ def _plan_sandbox_configs(
     expanded_tasks: Sequence[str],
     trackers: Mapping[str, TaskTracker],
     sandbox_pool_instances: int | None,
+    sandbox_pool_min_instances: int | None = None,
 ) -> _SandboxPlan | None:
     """Resolve relevant sandbox configs and concrete executor counts."""
     from olmo_eval.evals.tasks.common import get_sandbox_envs, get_task
@@ -194,14 +196,31 @@ def _plan_sandbox_configs(
         env_demand,
         sandbox_pool_instances,
     )
+    auto_min_requirements = (
+        _allocate_auto_sandbox_instances(
+            auto_env_keys,
+            env_demand,
+            sandbox_pool_min_instances,
+        )
+        if sandbox_pool_min_instances is not None
+        else {}
+    )
     allocated: dict[str, int] = dict(explicit_allocations)
     allocated.update(auto_allocations)
 
     materialized_sandboxes = list(sandboxes)
+    min_required: dict[str, int] = {}
     for env_key, idx in env_to_index.items():
+        original = materialized_sandboxes[idx]
+        resolved_instances = allocated[env_key]
+        resolved_min = auto_min_requirements.get(env_key, original.min_instances)
+        if resolved_min is not None:
+            resolved_min = min(resolved_min, resolved_instances)
+        min_required[env_key] = resolved_min if resolved_min is not None else resolved_instances
         materialized_sandboxes[idx] = replace(
-            materialized_sandboxes[idx],
-            instances=allocated[env_key],
+            original,
+            instances=resolved_instances,
+            min_instances=resolved_min,
         )
 
     return _SandboxPlan(
@@ -209,6 +228,7 @@ def _plan_sandbox_configs(
         env_demand=env_demand,
         env_task_count=env_task_count,
         allocated=allocated,
+        min_required=min_required,
         budget=sum(allocated.values()),
         needs_default=needs_default,
     )
@@ -411,6 +431,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                     expanded_tasks,
                     trackers,
                     self.harness_config.sandbox_pool_instances,
+                    self.harness_config.sandbox_pool_min_instances,
                 )
                 if sandbox_plan is not None:
                     sandboxes = sandbox_plan.sandboxes

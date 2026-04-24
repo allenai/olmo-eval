@@ -160,16 +160,22 @@ class TestDotlistJsonMerge:
 
         result = _apply_dotlist_overrides(
             base,
-            ['sandboxes={"mode":"modal","instances":64,"registry_auth":{"provider":"gcp"}}'],
+            [
+                'sandboxes={"mode":"modal","instances":64,"min_instances":24,'
+                '"registry_auth":{"provider":"gcp"}}'
+            ],
         )
 
         assert result["sandbox_pool_instances"] == 64
+        assert result["sandbox_pool_min_instances"] == 24
         assert result["sandboxes"][0]["mode"] == "modal"
         assert result["sandboxes"][0]["registry_auth"] == {"provider": "gcp"}
         assert "instances" not in result["sandboxes"][0]
+        assert "min_instances" not in result["sandboxes"][0]
         assert result["sandboxes"][1]["mode"] == "modal"
         assert result["sandboxes"][1]["registry_auth"] == {"provider": "gcp"}
         assert result["sandboxes"][1]["instances"] == 8
+        assert "min_instances" not in result["sandboxes"][1]
 
 
 # ── Non-dict values at list indices ─────────────────────────────────────────

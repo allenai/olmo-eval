@@ -158,11 +158,17 @@ class SandboxManager:
 
         # Check minimum requirements per config
         for config_idx, config in enumerate(self._configs):
-            min_required = (
-                config.min_instances
-                if config.min_instances is not None
-                else config.resolved_instances
-            )
+            if (
+                config.min_instances is not None
+                and config.min_instances > config.resolved_instances
+            ):
+                self._logger.warning(
+                    f"Sandbox config {config_idx} ({config.image}) requested "
+                    f"min_instances={config.min_instances} with only "
+                    f"{config.resolved_instances} executor(s); clamping to "
+                    f"{config.resolved_instances}"
+                )
+            min_required = config.resolved_min_instances
             started_count = len(config_successes[config_idx])
             failed_count = len(config_failures[config_idx])
 
