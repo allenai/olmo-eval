@@ -8,7 +8,7 @@ import os
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.debug import is_debug_provider, is_debug_requests
-from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
+from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 
@@ -224,7 +224,19 @@ class VLLMProvider(InferenceProvider):
         params = self._default_sampling_params(sampling_params)
         vllm_params = self._build_sampling_params(params)
 
-        prompt_strs = [req.prompt for req in requests]
+        tokenizer = self.llm.get_tokenizer()
+        prompt_strs: list[str] = []
+        for req in requests:
+            if req.request_type == RequestType.CHAT and req.messages:
+                prompt_strs.append(
+                    tokenizer.apply_chat_template(
+                        list(req.messages),
+                        tokenize=False,
+                        add_generation_prompt=True,
+                    )
+                )
+            else:
+                prompt_strs.append(req.prompt)
 
         if is_debug_requests():
             for i, prompt in enumerate(prompt_strs):
@@ -234,7 +246,6 @@ class VLLMProvider(InferenceProvider):
         # This bypasses vLLM's internal tokenization, matching the old framework behavior of
         # calling tokenizer(text, add_special_tokens=False) before passing to vLLM.
         if self._add_bos_token is False:
-            tokenizer = self.llm.get_tokenizer()
             vllm_prompts: list = [
                 {"prompt_token_ids": tokenizer.encode(p, add_special_tokens=False)}
                 for p in prompt_strs

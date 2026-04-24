@@ -41,10 +41,11 @@ Issues = "https://github.com/allenai/olmo-eval/issues"
 
 [project.optional-dependencies]
 hf = [
-    "transformers~=4.57.3",
+    "transformers>=5.4.0",
 ]
 vllm = [
-    "vllm[runai]==0.13.0",  # runai extras enable S3 model loading
+    "vllm[runai]>=0.19.0",  # runai extras enable S3 model loading
+    "transformers>=5.4.0",
     "opencv-python-headless==4.13.0.92",  # Required to avoid libxcb import error
     "torch-c-dlpack-ext",  # Required for TVM tensor allocation in vLLM
 ]
