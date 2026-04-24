@@ -101,6 +101,20 @@ class TestHarnessPresets:
         assert isinstance(config, HarnessConfig)
         assert config.name == "dr_tulu"
 
+    def test_codex_universal_bigcodebench_uses_public_upstream_image(self):
+        """Test BigCodeBench sandbox reuses the public upstream execution image."""
+        config = get_harness_preset("codex_universal")
+
+        bigcodebench_sandbox = next(
+            sandbox
+            for sandbox in config.sandboxes
+            if sandbox.capabilities == frozenset({"sandbox:bigcodebench"})
+        )
+
+        assert bigcodebench_sandbox.image == "bigcodebench/bigcodebench-gradio:latest"
+        assert bigcodebench_sandbox.dockerfile_extra == ()
+        assert bigcodebench_sandbox.instances is None
+
 
 class TestSearchTools:
     """Tests for search tools in the search preset."""

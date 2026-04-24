@@ -35,7 +35,7 @@ class RunnerFactory:
         Returns:
             Configured AsyncEvalRunner instance.
         """
-        from olmo_eval.runners.asynq import AsyncEvalRunner
+        from olmo_eval.runners.asynq.runner import AsyncEvalRunner
 
         # Get attention_backend from provider kwargs if specified
         provider_kwargs = self.config.harness_config.provider.kwargs

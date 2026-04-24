@@ -44,6 +44,7 @@ class HarnessConfig:
     scoring_concurrency: int | None = None
     sandboxes: tuple[SandboxConfig, ...] = ()
     scaffold_kwargs: dict[str, Any] = field(default_factory=dict)
+    sandbox_pool_instances: int | None = None
     metrics: MetricsConfig | None = None
     batching: BatchConfig | None = None
     scorer_startup_timeout: float | None = None
@@ -143,6 +144,8 @@ class HarnessConfig:
             d["sandboxes"] = [s.to_dict() for s in self.sandboxes]
         if self.scaffold_kwargs:
             d["scaffold_kwargs"] = self.scaffold_kwargs
+        if self.sandbox_pool_instances is not None:
+            d["sandbox_pool_instances"] = self.sandbox_pool_instances
         if self.metrics is not None:
             d["metrics"] = self.metrics.to_dict()
         if self.batching is not None:
@@ -180,6 +183,10 @@ class HarnessConfig:
         auxiliary_providers = {
             name: ProviderConfig.from_dict(config) for name, config in auxiliary_data.items()
         }
+        scaffold = data["scaffold"] if "scaffold" in data else data.get("backend")
+        scaffold_kwargs = (
+            data["scaffold_kwargs"] if "scaffold_kwargs" in data else data.get("backend_kwargs", {})
+        )
 
         return cls(
             name=data.get("name", "default"),
@@ -188,13 +195,14 @@ class HarnessConfig:
             tools=tuple(data.get("tool_names", [])),
             system_prompt=data.get("system_prompt"),
             tool_choice=data.get("tool_choice", "auto"),
-            scaffold=data.get("scaffold"),
+            scaffold=scaffold,
             required_secrets=tuple(data.get("required_secrets", [])),
             max_turns=data.get("max_turns"),
             max_concurrency=data.get("max_concurrency"),
             scoring_concurrency=data.get("scoring_concurrency"),
             sandboxes=sandboxes,
-            scaffold_kwargs=data.get("scaffold_kwargs", {}),
+            sandbox_pool_instances=data.get("sandbox_pool_instances"),
+            scaffold_kwargs=scaffold_kwargs,
             metrics=metrics,
             batching=batching,
             scorer_startup_timeout=data.get("scorer_startup_timeout"),
@@ -275,6 +283,7 @@ def harness_config(
     scoring_concurrency: int | None = None,
     sandboxes: Sequence[SandboxConfig] = (),
     scaffold_kwargs: dict[str, Any] | None = None,
+    sandbox_pool_instances: int | None = None,
     metrics: MetricsConfig | None = None,
     batching: BatchConfig | None = None,
     scorer_startup_timeout: float | None = None,
@@ -295,6 +304,7 @@ def harness_config(
         scoring_concurrency: Maximum concurrent scoring operations (default 8).
         sandboxes: Sandbox configurations for isolated tool execution.
         scaffold_kwargs: Scaffold-specific kwargs (e.g., enable_compaction for openai_agents).
+        sandbox_pool_instances: Shared executor budget for auto-allocated sandboxes.
         metrics: Metrics collection configuration (None = no metrics).
         batching: Batching strategy configuration (None = sequential).
         scorer_startup_timeout: Timeout for scorer worker startup. If None, derived from
@@ -317,6 +327,7 @@ def harness_config(
         scoring_concurrency=scoring_concurrency,
         sandboxes=tuple(sandboxes),
         scaffold_kwargs=scaffold_kwargs or {},
+        sandbox_pool_instances=sandbox_pool_instances,
         metrics=metrics,
         batching=batching,
         scorer_startup_timeout=scorer_startup_timeout,

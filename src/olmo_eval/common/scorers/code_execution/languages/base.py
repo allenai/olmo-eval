@@ -38,6 +38,12 @@ class LanguageEvaluator(Protocol):
     LANG_EXT: ClassVar[str]  # File extension, e.g., "cpp"
     LANG_ID: ClassVar[str]  # Language identifier, e.g., "cpp"
     DEFAULT_TIMEOUT: ClassVar[float]
+    COMPILE_TIMEOUT: ClassVar[float]
+    RUN_TIMEOUT: ClassVar[float]
+
+    def get_total_timeout(self) -> float:
+        """Get total timeout for the full command chain."""
+        ...
 
     def build_eval_command(self, tmp_dir: str, code: str) -> str:
         """Build the shell command to evaluate code.
@@ -80,6 +86,11 @@ class BaseLanguageEvaluator:
     LANG_EXT: ClassVar[str] = ""
     LANG_ID: ClassVar[str] = ""
     DEFAULT_TIMEOUT: ClassVar[float] = 10.0
+    # Per-step timeouts matching oe-eval-internal's safe_subprocess.run defaults.
+    # The old system runs compile and run as separate subprocess calls, each with
+    # its own timeout. We use the `timeout` shell command to replicate this.
+    COMPILE_TIMEOUT: ClassVar[float] = 15.0
+    RUN_TIMEOUT: ClassVar[float] = 15.0
 
     # Subclasses can override these
     filename: str = field(default="", repr=False)
@@ -100,6 +111,12 @@ class BaseLanguageEvaluator:
         """Get the run command."""
         return self.run_cmd.format(d=tmp_dir, f=file_path)
 
+    def get_total_timeout(self) -> float:
+        """Get total timeout for the full command chain (compile + run + buffer)."""
+        if self.compile_cmd:
+            return self.COMPILE_TIMEOUT + self.RUN_TIMEOUT + 5.0
+        return self.RUN_TIMEOUT + 5.0
+
     def build_eval_command(self, tmp_dir: str, code: str) -> str:
         """Build the complete evaluation command."""
         import shlex
@@ -114,11 +131,28 @@ class BaseLanguageEvaluator:
 
         compile_cmd = self.get_compile_command(tmp_dir, file_path)
         if compile_cmd:
-            parts.append(compile_cmd)
+            parts.append(self._wrap_with_timeout(compile_cmd, self.COMPILE_TIMEOUT))
 
-        parts.append(self.get_run_command(tmp_dir, file_path))
+        run_cmd = self.get_run_command(tmp_dir, file_path)
+        parts.append(self._wrap_with_timeout(run_cmd, self.RUN_TIMEOUT))
 
         return " && ".join(parts)
+
+    @staticmethod
+    def _wrap_with_timeout(cmd: str, timeout_secs: float) -> str:
+        """Wrap a command with the `timeout` shell command.
+
+        For compound commands (containing shell operators like &&, ||, cd, etc.),
+        wraps in `bash -c` so `timeout` can execute the full command.
+        """
+        # Check if the command contains shell operators or builtins that
+        # require a shell to execute
+        needs_shell = any(op in cmd for op in ("&&", "||", ";", "cd ", "|"))
+        if needs_shell:
+            # Escape single quotes in the command for bash -c '...'
+            escaped = cmd.replace("'", "'\\''")
+            return f"timeout {int(timeout_secs)} bash -c '{escaped}'"
+        return f"timeout {int(timeout_secs)} {cmd}"
 
     def _is_syntax_error(self, exit_code: int, stdout: str, stderr: str) -> bool:
         """Check if the result indicates a syntax error. Override in subclasses."""

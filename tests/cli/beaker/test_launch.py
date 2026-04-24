@@ -193,6 +193,24 @@ class TestHarnessOverridesProviderDependencies:
         assert job_config.provider_packages is not None
         assert "https://github.com/user/vllm@custom" in job_config.provider_packages
 
+    def test_apply_harness_overrides_with_global_sandbox_override(self):
+        """Test that sandboxes={...} sets the shared pool and common sandbox fields."""
+        from olmo_eval.cli.beaker.launch import _apply_harness_overrides
+        from olmo_eval.harness import get_harness_preset
+        from olmo_eval.harness.sandbox import SandboxMode
+
+        preset = get_harness_preset("codex_universal")
+
+        result = _apply_harness_overrides(
+            preset,
+            ['sandboxes={"mode":"modal","instances":64,"registry_auth":{"provider":"gcp"}}'],
+        )
+
+        assert result.sandbox_pool_instances == 64
+        assert all(sandbox.mode == SandboxMode.MODAL for sandbox in result.sandboxes)
+        assert all(sandbox.registry_auth is not None for sandbox in result.sandboxes)
+        assert all(sandbox.registry_auth.provider == "gcp" for sandbox in result.sandboxes)
+
 
 class TestTaskExpansionInExperimentSummary:
     """Tests for task expansion in _build_experiment_summary."""

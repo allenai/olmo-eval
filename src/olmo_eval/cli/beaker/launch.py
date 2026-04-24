@@ -848,7 +848,7 @@ def _build_experiment_summary(
 ) -> ExperimentSummary:
     """Build experiment summary for display."""
     from olmo_eval.common.configs import expand_tasks
-    from olmo_eval.runners import AsyncEvalRunner
+    from olmo_eval.runners.asynq.runner import AsyncEvalRunner
 
     # Expand task specs to match keys in task_configs_by_spec
     expanded_tasks = expand_tasks(exp.tasks)
@@ -1008,6 +1008,10 @@ def _apply_harness_overrides(harness_config, overrides: list[str]):
         overrides: List of dotlist override strings (e.g., ["sandbox.mode=docker"]).
             Supports list indices like "sandboxes.0.mode=modal".
             Supports JSON values like 'sandboxes.0={"mode":"modal","instances":4}'.
+            Supports shared sandbox overrides like
+            'sandboxes={"mode":"modal","instances":64}' where non-instance
+            fields are applied to each sandbox config and instances sets the
+            shared sandbox pool budget.
 
     Returns:
         New HarnessConfig with overrides applied.

@@ -18,7 +18,7 @@ class CppEvaluator(BaseLanguageEvaluator):
     DEFAULT_TIMEOUT: ClassVar[float] = 15.0
 
     filename: str = "code.cpp"
-    compile_cmd: str | None = "g++ -o {d}/a.out {f}"
+    compile_cmd: str | None = "g++ -std=c++17 -o {d}/a.out {f}"
     run_cmd: str = "{d}/a.out"
 
     def _is_syntax_error(self, exit_code: int, stdout: str, stderr: str) -> bool:

@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import logging
+import math
+import shlex
+import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -13,7 +16,7 @@ from ..execution import ExecutionScorer
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from olmo_eval.common.execution import ExecutionEnvironment
+    from olmo_eval.common.execution import ExecutionEnvironment, ExecutionResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +39,59 @@ class CodeExecutionScorer(ExecutionScorer):
     name: str = "code_exec"
     timeout: float = 20.0
     language: str = "python"
+    separator: str = "\n\n"
+
+    async def execute_python_script(
+        self,
+        execution_env: ExecutionEnvironment,
+        code: str,
+        *,
+        timeout: float,
+        python_executable: str = "python3",
+        filename: str = "script.py",
+        virtual_memory_limit_kb: int | None = None,
+        data_limit_kb: int | None = None,
+        stack_limit_kb: int | None = None,
+    ) -> ExecutionResult:
+        """Execute a Python script from a fresh temp directory."""
+        tmp_dir = f"/tmp/{uuid.uuid4().hex}"
+        script_path = f"{tmp_dir}/{filename}"
+        quoted_tmp_dir = shlex.quote(tmp_dir)
+        quoted_script_path = shlex.quote(script_path)
+        cleanup_cmd = f"rm -rf {quoted_tmp_dir} || true"
+
+        limit_cmds: list[str] = []
+        if virtual_memory_limit_kb is not None:
+            limit_cmds.append(f"ulimit -v {int(virtual_memory_limit_kb)}")
+        if data_limit_kb is not None:
+            limit_cmds.append(f"ulimit -d {int(data_limit_kb)}")
+        if stack_limit_kb is not None:
+            limit_cmds.append(f"ulimit -s {int(stack_limit_kb)}")
+
+        inner_cmd_parts = [
+            *limit_cmds,
+            f"exec {shlex.quote(python_executable)} {shlex.quote(filename)}",
+        ]
+        run_cmd = (
+            f"timeout {math.ceil(timeout)} bash -c {shlex.quote(' && '.join(inner_cmd_parts))}"
+        )
+
+        command = "\n".join(
+            [
+                f"mkdir -p {quoted_tmp_dir} || exit $?",
+                (
+                    f"printf '%s' {shlex.quote(code)} > {quoted_script_path}"
+                    f" || {{ status=$?; {cleanup_cmd}; exit $status; }}"
+                ),
+                f"cd {quoted_tmp_dir} || {{ status=$?; {cleanup_cmd}; exit $status; }}",
+                "status=0",
+                f"{run_cmd} || status=$?",
+                cleanup_cmd,
+                "exit $status",
+            ]
+        )
+
+        return await execution_env.execute_command(command, timeout=timeout + 1.0)
 
     async def ascore(
         self,
@@ -60,8 +116,7 @@ class CodeExecutionScorer(ExecutionScorer):
         if not test_code:
             return 0.0
 
-        # Combine generated code with tests
-        full_code = f"{output.extracted_answer}\n\n{test_code}"
+        full_code = f"{output.extracted_answer}{self.separator}{test_code}"
 
         result = await execution_env.execute_code(
             full_code,

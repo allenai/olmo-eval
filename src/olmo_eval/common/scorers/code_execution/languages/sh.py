@@ -15,7 +15,7 @@ class ShEvaluator(BaseLanguageEvaluator):
     LANG_NAME: ClassVar[str] = "Bash"
     LANG_EXT: ClassVar[str] = "sh"
     LANG_ID: ClassVar[str] = "sh"
-    DEFAULT_TIMEOUT: ClassVar[float] = 5.0
+    DEFAULT_TIMEOUT: ClassVar[float] = 15.0
 
     filename: str = "code.sh"
     compile_cmd: str | None = None

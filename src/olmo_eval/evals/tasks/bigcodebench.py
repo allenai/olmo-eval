@@ -28,17 +28,24 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_BCB_VIRTUAL_MEMORY_LIMIT_KB = 30 * 1024 * 1024
+_BCB_DATA_LIMIT_KB = 30 * 1024 * 1024
+_BCB_STACK_LIMIT_KB = 10 * 1024
+
 
 @dataclass(frozen=True, slots=True)
 class BigCodeBenchScorer(CodeExecutionScorer):
-    """Scorer for BigCodeBench that invokes unittest after test class definition.
+    """Scorer for BigCodeBench matching the original BCB execution harness.
 
-    BigCodeBench test code defines unittest.TestCase classes but does not
-    invoke the test runner. Without unittest.main(), the test classes are
-    defined but never executed, causing all submissions to appear to pass.
+    Replicates the old oe-eval-internal execution pattern:
+    - Calibration: prepends code_prompt + pass stub before solution
+    - Module-based execution: runs code in a __test__ module via exec()
+    - TestLoader: explicitly loads TestCases class and runs via suite.run()
+    - Pass condition: no failures AND no errors in test_result
+    - Environment: sets TZ=UTC, OMP_NUM_THREADS=1, TF_CPP_MIN_LOG_LEVEL=3
     """
 
-    timeout: float = 20.0
+    timeout: float = 3.0
 
     async def ascore(
         self,
@@ -53,14 +60,27 @@ class BigCodeBenchScorer(CodeExecutionScorer):
         if not test_code:
             return 0.0
 
-        full_code = (
-            f"{output.extracted_answer}\n\n{test_code}\n\nimport unittest\nunittest.main()\n"
-        )
+        solution = output.extracted_answer
+        code_prompt = instance.metadata.get("code_prompt", "")
 
-        result = await execution_env.execute_code(
+        # Calibration: prepend code_prompt + pass stub (matches old BCB Lambda)
+        if code_prompt:
+            solution = code_prompt + "\n    pass\n" + solution
+
+        # Build a script that replicates the old unsafe_execute pattern:
+        # - exec code+test in a __test__ module
+        # - use TestLoader to load TestCases class
+        # - run suite and check failures+errors
+        full_code = _build_bcb_execution_script(solution, test_code)
+
+        result = await self.execute_python_script(
+            execution_env,
             full_code,
-            language=self.language,
             timeout=self.timeout,
+            python_executable="/usr/local/bin/python3",
+            virtual_memory_limit_kb=_BCB_VIRTUAL_MEMORY_LIMIT_KB,
+            data_limit_kb=_BCB_DATA_LIMIT_KB,
+            stack_limit_kb=_BCB_STACK_LIMIT_KB,
         )
         if not result.success and result.error:
             instance_id = instance.metadata.get("id", "?")
@@ -68,88 +88,76 @@ class BigCodeBenchScorer(CodeExecutionScorer):
         return 1.0 if result.success else 0.0
 
 
+def _build_bcb_execution_script(solution: str, test_code: str) -> str:
+    """Build a Python script replicating the old BCB execution harness.
+
+    The old system (bcb_execution/execution.py unsafe_execute):
+    1. Sets environment variables (TZ, OMP_NUM_THREADS, TF_CPP_MIN_LOG_LEVEL)
+    2. Creates a __test__ module with builtins, sys, os
+    3. exec(code + test) in the module
+    4. Loads TestCases via unittest.TestLoader
+    5. Runs suite via suite.run(test_result)
+    6. Passes only if no failures AND no errors
+    """
+    return (
+        "import types, sys, os, builtins, unittest, io, contextlib\n"
+        "import time, resource, platform, faulthandler\n"
+        "os.environ['TZ'] = 'UTC'\n"
+        "time.tzset()\n"
+        "os.environ['OMP_NUM_THREADS'] = '1'\n"
+        "os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'\n"
+        "os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'\n"
+        "_max_as = 30 * 1024 * 1024 * 1024\n"
+        "_max_data = 30 * 1024 * 1024 * 1024\n"
+        "_max_stack = 10 * 1024 * 1024\n"
+        "resource.setrlimit(resource.RLIMIT_AS, (_max_as, _max_as))\n"
+        "resource.setrlimit(resource.RLIMIT_DATA, (_max_data, _max_data))\n"
+        "if platform.uname().system != 'Darwin':\n"
+        "    resource.setrlimit(resource.RLIMIT_STACK, (_max_stack, _max_stack))\n"
+        "faulthandler.disable()\n"
+        "builtins.exit = None\n"
+        "builtins.quit = None\n"
+        "import matplotlib.pyplot as _plt\n"
+        "_plt.close('all')\n"
+        "module_name = '__test__'\n"
+        "new_module = types.ModuleType(module_name)\n"
+        "new_module.__dict__.update({\n"
+        "    '__builtins__': builtins,\n"
+        "    '__file__': f'{module_name}.py',\n"
+        "    '__package__': None,\n"
+        "    '__doc__': None,\n"
+        "    'sys': sys,\n"
+        "    'os': os,\n"
+        "    'environ': os.environ,\n"
+        "})\n"
+        f"_code = {solution!r}\n"
+        f"_test = {test_code!r}\n"
+        "full_code = _code + '\\n' + _test\n"
+        "stream = io.StringIO()\n"
+        "with contextlib.redirect_stdout(stream), contextlib.redirect_stderr(stream):\n"
+        "    exec(compile(full_code, f'{module_name}.py', 'exec'), new_module.__dict__)\n"
+        "sys.modules[module_name] = new_module\n"
+        "TestCases = getattr(new_module, 'TestCases')\n"
+        "loader = unittest.TestLoader()\n"
+        "suite = loader.loadTestsFromTestCase(TestCases)\n"
+        "test_result = unittest.TestResult()\n"
+        "with contextlib.redirect_stdout(stream), contextlib.redirect_stderr(stream):\n"
+        "    suite.run(test_result)\n"
+        "if test_result.failures or test_result.errors:\n"
+        "    sys.exit(1)\n"
+        "sys.exit(0)\n"
+    )
+
+
 @register("bigcodebench")
 class BigCodeBench(Task):
     """BigCodeBench code completion task (full subset, complete prompt variant)."""
 
     data_source = DataSource(path="bigcode/bigcodebench")
-    # Python deps from the official BigCodeBench requirements-eval.txt:
-    # https://github.com/bigcode-project/bigcodebench/blob/main/Requirements/requirements-eval.txt
-    sandbox_env = SandboxEnv(
-        "bigcodebench",
-        (
-            "beautifulsoup4",
-            "blake3",
-            "chardet",
-            "cryptography",
-            "datetime",
-            "django",
-            "dnspython",
-            "docxtpl",
-            "faker",
-            "flask",
-            "flask-login",
-            "flask-mail",
-            "flask-restful",
-            "flask-wtf",
-            "folium",
-            "gensim",
-            "geopandas",
-            "geopy",
-            "holidays",
-            "keras",
-            "Levenshtein",
-            "librosa",
-            "lxml",
-            "matplotlib",
-            "mechanize",
-            "natsort",
-            "networkx",
-            "numba",
-            "nltk",
-            "numpy",
-            "opencv-python-headless",
-            "openpyxl",
-            "pandas",
-            "pillow",
-            "prettytable",
-            "psutil",
-            "pycryptodome",
-            "pyfakefs",
-            "pyquery",
-            "pytest",
-            "pytesseract",
-            "python-dateutil",
-            "python-docx",
-            "python-http-client",
-            "pytz",
-            "pyyaml",
-            "requests",
-            "requests-mock",
-            "rsa",
-            "scikit-image",
-            "scikit-learn",
-            "scipy",
-            "seaborn",
-            "selenium",
-            "sendgrid",
-            "shapely",
-            "soundfile",
-            "statsmodels",
-            "sympy",
-            "tensorflow",
-            "textblob",
-            "texttable",
-            "werkzeug",
-            "wikipedia",
-            "wordcloud",
-            "wordninja",
-            "wtforms",
-            "xlrd",
-            "xlwt",
-            "xmltodict",
-        ),
-    )
+    # The preset-provided sandbox image now carries the upstream BigCodeBench
+    # execution environment, so the task itself does not request extra package
+    # installation or image customization.
+    sandbox_env = SandboxEnv("bigcodebench")
     sampling_params = SamplingParams(
         max_tokens=1280,
         temperature=0.6,
@@ -188,6 +196,7 @@ class BigCodeBench(Task):
                 "id": doc.get("task_id", str(index)),
                 "entry_point": doc.get("entry_point", ""),
                 "answer_prefix": doc["complete_prompt"],
+                "code_prompt": doc.get("code_prompt", ""),
                 "test": test_code,
             },
         )
@@ -237,7 +246,10 @@ class BigCodeBench(Task):
         for response in responses:
             entry_point = response.instance.metadata.get("entry_point", "")
             for output in response.outputs:
-                code = self.extract_answer(output)
+                # Use raw text directly (no extract_code_before_fence) to match
+                # old oe-eval-internal behavior, which prepends complete_prompt
+                # to the raw continuation and sanitizes.
+                code = output.text
                 if code:
                     full_code = response.instance.metadata["answer_prefix"] + code
                     if entry_point:

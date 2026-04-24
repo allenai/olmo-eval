@@ -26,7 +26,7 @@ echo "Running verification checks..."
 
 echo ""
 echo "==> Syncing dependencies..."
-uv sync --dev --extra beaker --extra hf --extra postgres
+uv sync --dev --extra beaker --extra hf --extra postgres --extra analysis
 
 echo ""
 echo "==> Checking formatting with ruff..."

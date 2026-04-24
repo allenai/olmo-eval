@@ -8,6 +8,7 @@ Dataset: davidheineman/deepseek-leetcode
 
 import re
 from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from olmo_eval.common.metrics import PassAtKMetric
@@ -16,6 +17,12 @@ from olmo_eval.common.types import Instance, LMOutput, LMRequest, Response, Samp
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import OLMO3_HUMANEVAL_STOP_SEQUENCES
 from olmo_eval.evals.tasks.common import Task, register, register_variant
+
+
+@dataclass(frozen=True, slots=True)
+class CodeExecutionScorer3s(CodeExecutionScorer):
+    timeout: float = 3.0
+    separator: str = "\n"
 
 
 @register("deepseek_leetcode")
@@ -32,11 +39,11 @@ class DeepSeekLeetCode(Task):
         stop_sequences=OLMO3_HUMANEVAL_STOP_SEQUENCES,
     )
     metrics = (
-        PassAtKMetric(k=1, scorer=CodeExecutionScorer),
-        PassAtKMetric(k=2, scorer=CodeExecutionScorer),
-        PassAtKMetric(k=4, scorer=CodeExecutionScorer),
-        PassAtKMetric(k=8, scorer=CodeExecutionScorer),
-        PassAtKMetric(k=16, scorer=CodeExecutionScorer),
+        PassAtKMetric(k=1, scorer=CodeExecutionScorer3s),
+        PassAtKMetric(k=2, scorer=CodeExecutionScorer3s),
+        PassAtKMetric(k=4, scorer=CodeExecutionScorer3s),
+        PassAtKMetric(k=8, scorer=CodeExecutionScorer3s),
+        PassAtKMetric(k=16, scorer=CodeExecutionScorer3s),
     )
 
     @property
@@ -96,4 +103,10 @@ class DeepSeekLeetCode(Task):
                     output.extracted_answer = None
 
 
-register_variant("deepseek_leetcode", "olmo3base", num_fewshot=3, fewshot_seed=1234)
+register_variant(
+    "deepseek_leetcode",
+    "olmo3base",
+    num_fewshot=3,
+    fewshot_seed=1234,
+    primary_metric=PassAtKMetric(k=1, scorer=CodeExecutionScorer),
+)

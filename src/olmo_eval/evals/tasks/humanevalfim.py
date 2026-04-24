@@ -9,6 +9,7 @@ Dataset: loubnabnl/humaneval_infilling
 """
 
 from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from olmo_eval.common.metrics import PassAtKMetric
@@ -24,6 +25,12 @@ from olmo_eval.common.types import (
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.constants.code import OLMO_FIM
 from olmo_eval.evals.tasks.common import Task, register, register_variant
+
+
+@dataclass(frozen=True, slots=True)
+class CodeExecutionScorer3s(CodeExecutionScorer):
+    timeout: float = 3.0
+    separator: str = "\n"
 
 
 @register("humanevalfim_single")
@@ -151,37 +158,47 @@ register_variant("humanevalfim_single", "olmo3")
 register_variant("humanevalfim_multi", "olmo3")
 register_variant("humanevalfim_random", "olmo3")
 
-_OLMO3BASE_FIM_PARAMS = SamplingParams(
-    max_tokens=1024,
-    temperature=0.6,
-    top_p=0.6,
-    do_sample=True,
-    num_samples=32,
-    stop_sequences=OLMO_FIM.stop_sequences,
-)
 _OLMO3BASE_FIM_METRICS = (
-    PassAtKMetric(k=1, scorer=CodeExecutionScorer),
-    PassAtKMetric(k=2, scorer=CodeExecutionScorer),
-    PassAtKMetric(k=4, scorer=CodeExecutionScorer),
-    PassAtKMetric(k=8, scorer=CodeExecutionScorer),
-    PassAtKMetric(k=16, scorer=CodeExecutionScorer),
+    PassAtKMetric(k=1, scorer=CodeExecutionScorer3s),
+    PassAtKMetric(k=10, scorer=CodeExecutionScorer3s),
 )
 
 register_variant(
     "humanevalfim_single",
     "olmo3base",
-    sampling_params=_OLMO3BASE_FIM_PARAMS,
+    sampling_params=SamplingParams(
+        max_tokens=512,
+        temperature=0.8,
+        top_p=0.95,
+        do_sample=True,
+        num_samples=10,
+        stop_sequences=OLMO_FIM.stop_sequences,
+    ),
     metrics=_OLMO3BASE_FIM_METRICS,
 )
 register_variant(
     "humanevalfim_multi",
     "olmo3base",
-    sampling_params=_OLMO3BASE_FIM_PARAMS,
+    sampling_params=SamplingParams(
+        max_tokens=512,
+        temperature=0.8,
+        top_p=0.95,
+        do_sample=True,
+        num_samples=1,
+        stop_sequences=OLMO_FIM.stop_sequences,
+    ),
     metrics=_OLMO3BASE_FIM_METRICS,
 )
 register_variant(
     "humanevalfim_random",
     "olmo3base",
-    sampling_params=_OLMO3BASE_FIM_PARAMS,
+    sampling_params=SamplingParams(
+        max_tokens=512,
+        temperature=0.8,
+        top_p=0.95,
+        do_sample=True,
+        num_samples=5,
+        stop_sequences=OLMO_FIM.stop_sequences,
+    ),
     metrics=_OLMO3BASE_FIM_METRICS,
 )

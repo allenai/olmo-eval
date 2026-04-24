@@ -121,7 +121,6 @@ class HarnessPresets:
             metrics=MetricsConfig(),
             sandboxes=(
                 SandboxConfig(
-                    instances=16,
                     image="volcengine/sandbox-fusion:base-20250609",
                     mode=SandboxMode.DOCKER,
                     startup_timeout=300.0,
@@ -131,6 +130,14 @@ class HarnessPresets:
                         "RUN mkdir -p /runtime/java",
                         "RUN curl -L -o /runtime/java/javatuples-1.2.jar https://repo1.maven.org/maven2/org/javatuples/javatuples/1.2/javatuples-1.2.jar",
                     ),
+                ),
+                SandboxConfig(
+                    image="bigcodebench/bigcodebench-gradio:latest",
+                    mode=SandboxMode.DOCKER,
+                    capabilities=frozenset({"sandbox:bigcodebench"}),
+                    startup_timeout=300.0,
+                    log_dir=_get_logs_dir(),
+                    inject_swerex=True,
                 ),
             ),
         )

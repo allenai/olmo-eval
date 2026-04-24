@@ -149,6 +149,28 @@ class TestDotlistJsonMerge:
         result = _apply_dotlist_overrides(sandbox_preset, ["sandboxes.0={}"])
         assert result["sandboxes"][0] == original["sandboxes"][0]
 
+    def test_json_merge_into_sandboxes_broadcasts_shared_fields_only(self):
+        """Global sandbox overrides should treat instances as a shared pool, not per-config."""
+        base = {
+            "sandboxes": [
+                {"image": "default:latest", "mode": "docker"},
+                {"image": "named:latest", "mode": "docker", "instances": 8},
+            ]
+        }
+
+        result = _apply_dotlist_overrides(
+            base,
+            ['sandboxes={"mode":"modal","instances":64,"registry_auth":{"provider":"gcp"}}'],
+        )
+
+        assert result["sandbox_pool_instances"] == 64
+        assert result["sandboxes"][0]["mode"] == "modal"
+        assert result["sandboxes"][0]["registry_auth"] == {"provider": "gcp"}
+        assert "instances" not in result["sandboxes"][0]
+        assert result["sandboxes"][1]["mode"] == "modal"
+        assert result["sandboxes"][1]["registry_auth"] == {"provider": "gcp"}
+        assert result["sandboxes"][1]["instances"] == 8
+
 
 # ── Non-dict values at list indices ─────────────────────────────────────────
 

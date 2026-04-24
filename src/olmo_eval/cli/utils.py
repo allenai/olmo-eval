@@ -101,6 +101,7 @@ HARNESS_CONFIG_FIELDS = frozenset(
         "scoring_concurrency",
         "sandboxes",
         "scaffold_kwargs",
+        "sandbox_pool_instances",
         "metrics",
         "batching",
         "scorer_startup_timeout",

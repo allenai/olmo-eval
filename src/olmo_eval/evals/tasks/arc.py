@@ -239,6 +239,14 @@ register_variant(
     metrics=(LogprobUncondMCAccuracyMetric(),),
 )
 register_variant(
+    "arc_challenge",
+    "mc_olmo3base",
+    formatter=MultipleChoiceFormatter(),
+    num_fewshot=5,
+    fewshot_source="olmes_arc_challenge_fixed",
+    split=Split.ALL,
+)
+register_variant(
     "arc_challenge", "olmes", num_fewshot=5, fewshot_source="olmes_arc_challenge_fixed"
 )
 register_variant("arc_challenge", "full")

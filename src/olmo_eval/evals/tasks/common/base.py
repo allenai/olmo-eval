@@ -39,6 +39,7 @@ class SandboxEnv:
 
     name: str
     dependencies: tuple[str, ...] = ()
+    dockerfile_extra: tuple[str, ...] = ()
 
     @property
     def capability(self) -> frozenset[str]:

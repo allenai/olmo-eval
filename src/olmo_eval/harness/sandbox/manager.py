@@ -107,12 +107,14 @@ class SandboxManager:
         # Create all executors first
         executor_idx = 0
         for config_idx, config in enumerate(self._configs):
-            # Derive type name from capabilities
+            # Derive type name from capabilities, replacing ':' to avoid
+            # breaking podman volume mount paths (host:container separator)
             type_name = "+".join(sorted(config.capabilities)) or str(config_idx)
+            safe_type_name = type_name.replace(":", "_")
 
-            for _ in range(config.instances):
+            for _ in range(config.resolved_instances):
                 idx = type_indices.get(type_name, 0)
-                name = f"sb-{type_name}-{self._owner}-{idx}"
+                name = f"sb-{safe_type_name}-{self._owner}-{idx}"
                 type_indices[type_name] = idx + 1
 
                 executor = SandboxExecutor(config, name=name, modal_app_name=self._modal_app_name)
@@ -157,7 +159,9 @@ class SandboxManager:
         # Check minimum requirements per config
         for config_idx, config in enumerate(self._configs):
             min_required = (
-                config.min_instances if config.min_instances is not None else config.instances
+                config.min_instances
+                if config.min_instances is not None
+                else config.resolved_instances
             )
             started_count = len(config_successes[config_idx])
             failed_count = len(config_failures[config_idx])
@@ -172,7 +176,7 @@ class SandboxManager:
             if failed_count > 0:
                 self._logger.warning(
                     f"Sandbox config {config_idx} ({config.image}): "
-                    f"{started_count}/{config.instances} instances started "
+                    f"{started_count}/{config.resolved_instances} instances started "
                     f"({failed_count} failed, min_required={min_required})"
                 )
 
@@ -195,7 +199,7 @@ class SandboxManager:
             )
 
         elapsed = time.time() - start_time
-        total_attempted = sum(c.instances for c in self._configs)
+        total_attempted = sum(c.resolved_instances for c in self._configs)
         self._logger.info(
             f"Started {len(self._executors)}/{total_attempted} sandbox executors in {elapsed:.1f}s"
         )

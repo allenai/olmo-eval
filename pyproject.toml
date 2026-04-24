@@ -54,6 +54,11 @@ agents = [
     "openai-agents~=0.7.0",
     "httpx~=0.28.1",
 ]
+analysis = [
+    "matplotlib~=3.10.8",
+    "seaborn~=0.13.2",
+    "scipy~=1.17.1",
+]
 openhands = [
     "openhands-ai~=1.4.0",
 ]
@@ -104,6 +109,9 @@ conflicts = [
     ],
 ]
 
+[tool.setuptools.package-data]
+"olmo_eval.analysis.pairwise_viewer" = ["static/*.css", "static/*.js", "templates/*.html"]
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.0",
@@ -111,7 +119,8 @@ dev = [
     "ruff>=0.14.0",
     "ty==0.0.32",
     "pre-commit>=4.0.0",
-    "olmo-eval-internal[storage]",
+    # Unit tests import analysis helpers directly, so dev installs need these extras too.
+    "olmo-eval-internal[storage,analysis]",
     "jinja2>=3.1.6",
     "google-api-core>=2.0.0",
 ]
@@ -195,6 +204,8 @@ allowed-unresolved-imports = [
     "openai.**",
     "smart_open.**",
     "google.cloud.**",
+    "matplotlib.**",
+    "scipy.**",
 ]
 
 [tool.gantry]

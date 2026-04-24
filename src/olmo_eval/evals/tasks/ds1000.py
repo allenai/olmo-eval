@@ -62,12 +62,51 @@ class DS1000Scorer(CodeExecutionScorer):
         return 1.0 if result.success else 0.0
 
 
+_PY310_URL = (
+    "https://github.com/indygreg/python-build-standalone/releases/download/"
+    "20240107/cpython-3.10.13+20240107-x86_64-unknown-linux-gnu-install_only.tar.gz"
+)
+
+_DS1000_DEPS = (
+    "numpy==1.26.4 pandas==1.5.3 matplotlib==3.8.4 scipy==1.12.0"
+    " scikit-learn==1.4.0 seaborn==0.13.2 statsmodels==0.14.1"
+    " xgboost==2.0.3 gensim==4.3.2"
+)
+
+
 @register("ds1000")
 class DS1000(Task):
     """DS-1000 data science code generation task."""
 
     data_source = DataSource(path="xlangai/DS-1000")
-    sandbox_env = SandboxEnv("ds1000", ("numpy", "pandas", "matplotlib", "scipy", "scikit-learn"))
+    sandbox_env = SandboxEnv(
+        "ds1000",
+        (
+            "numpy==1.26.4",
+            "pandas==1.5.3",
+            "matplotlib==3.8.4",
+            "scipy==1.12.0",
+            "scikit-learn==1.4.0",
+            "seaborn==0.13.2",
+            "statsmodels==0.14.1",
+            "xgboost==2.0.3",
+            "gensim==4.3.2",
+        ),
+        dockerfile_extra=(
+            # Install Python 3.10 to match old oe-eval-internal Lambda environment.
+            # swe-rex runs on Python 3.11 (/root/python/bin); test code runs on 3.10.
+            f"ADD {_PY310_URL} /tmp/python310.tar.gz",
+            "RUN mkdir -p /root/python310 && tar xzf /tmp/python310.tar.gz -C /root/python310"
+            " && rm /tmp/python310.tar.gz",
+            "RUN /root/python310/python/bin/pip install --no-cache-dir uv",
+            f"RUN /root/python310/python/bin/python3 -m uv pip install --system --no-cache"
+            f" {_DS1000_DEPS}",
+            "RUN /root/python310/python/bin/python3 -m uv pip install --system --no-cache"
+            " torch==2.2.0+cpu --index-url https://download.pytorch.org/whl/cpu",
+            "RUN /root/python310/python/bin/python3 -m uv pip install --system --no-cache"
+            " tensorflow-cpu==2.16.1",
+        ),
+    )
     sampling_params = SamplingParams(
         max_tokens=1024,
         temperature=0.6,
@@ -165,8 +204,55 @@ class DS1000(Task):
     def extract_answer(self, output: LMOutput) -> str | None:
         return output.text
 
+    # Wrapper that reproduces the old oe-eval-internal Lambda execution
+    # pattern: tempdir + swallowed I/O + exec() with empty globals.
+    # Delegates to Python 3.10 (/root/python310/python/bin/python3) to match
+    # the old Lambda (public.ecr.aws/lambda/python:3.10).
+    # The outer python3 (3.11, swe-rex) writes the inner code to a temp file
+    # and invokes Python 3.10 to execute it.
+    _EXEC_WRAPPER = """\
+import subprocess, sys, tempfile, os
+_inner = '''
+import contextlib, io, os, sys, tempfile
+
+class _WriteOnlyStringIO(io.StringIO):
+    def read(self, *a, **k): raise IOError
+    def readline(self, *a, **k): raise IOError
+    def readlines(self, *a, **k): raise IOError
+    def readable(self, *a, **k): return False
+
+class _RedirectStdin(contextlib._RedirectStream):
+    _stream = "stdin"
+
+_td = tempfile.mkdtemp()
+os.chdir(_td)
+_stream = _WriteOnlyStringIO()
+with contextlib.redirect_stdout(_stream):
+    with contextlib.redirect_stderr(_stream):
+        with _RedirectStdin(_stream):
+            exec(compile(_TEST_CODE, "<test>", "exec"), {})
+'''
+_py310 = "/root/python310/python/bin/python3"
+if not os.path.exists(_py310):
+    _py310 = "python3"  # fallback for local testing
+_f = tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False)
+_f.write(f"_TEST_CODE = {repr(_TEST_CODE)}\\n")
+_f.write(_inner)
+_f.close()
+try:
+    _r = subprocess.run([_py310, _f.name], timeout=115)
+    sys.exit(_r.returncode)
+finally:
+    os.unlink(_f.name)
+"""
+
     def _extract_answers(self, responses: Sequence[Response]) -> None:
-        """Assemble test program from code_context and model continuation."""
+        """Assemble test program from code_context and model continuation.
+
+        Wraps each test in the old oe-eval-internal Lambda execution pattern:
+        tempdir isolation, swallowed I/O, and exec() with empty globals.
+        This ensures identical pass/fail behavior to the old system.
+        """
         for response in responses:
             code_context = response.instance.metadata.get("code_context", "")
             for output in response.outputs:
@@ -174,13 +260,14 @@ class DS1000(Task):
                 if continuation and code_context:
                     # DS-1000 test harness format:
                     # code_context defines test_execution() and optionally test_string()
-                    test_program = (
+                    inner_code = (
                         code_context
                         + "\n"
                         + f"code = {repr(continuation)}\n"
                         + "test_execution(code)\n"
                         + ("test_string(code)\n" if "test_string(" in code_context else "\n")
                     )
+                    test_program = f"_TEST_CODE = {repr(inner_code)}\n" + self._EXEC_WRAPPER
                     output.extracted_answer = test_program
                 else:
                     output.extracted_answer = None
