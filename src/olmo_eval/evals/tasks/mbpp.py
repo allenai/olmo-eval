@@ -232,6 +232,17 @@ class MBPPBPB(MBPPBase):
             },
         )
 
+    def _extract_answers(self, responses: Sequence[Response]) -> None:
+        """Extract BPB answers without requiring completion-style prefixes.
+
+        MBPPBPB scores logprobs over the full fenced code continuation, so the
+        base MBPP extraction path that prepends ``metadata["answer_prefix"]``
+        does not apply here.
+        """
+        for response in responses:
+            for output in response.outputs:
+                output.extracted_answer = self.extract_answer(output)
+
 
 register_variant(
     "mbpp:bpb",

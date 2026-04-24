@@ -2,7 +2,7 @@
 
 import pytest
 
-from olmo_eval.common.types import Instance, LMOutput, RequestType
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
 from olmo_eval.evals.tasks.common import get_task, list_tasks
 from olmo_eval.evals.tasks.gsm8k import _clean_short_answer, _extract_last_number
 
@@ -172,6 +172,42 @@ class TestMBPPTask:
         request = task.format_request(instance)
         assert request.request_type == RequestType.COMPLETION
         assert "add" in request.prompt
+
+    @pytest.mark.anyio
+    async def test_bpb_scoring_does_not_require_answer_prefix(self):
+        """MBPP BPB scoring should not depend on completion-only metadata."""
+        task = get_task("mbpp:bpb")
+        instance = Instance(
+            question="Write a function to add two numbers.\n```python\n",
+            gold_answer="def add(a, b):\n    return a + b\n```",
+            metadata={
+                "id": 1,
+                "test": "assert add(1, 2) == 3",
+            },
+        )
+        request = LMRequest(
+            request_type=RequestType.LOGLIKELIHOOD,
+            prompt=instance.question,
+            continuations=(instance.gold_answer,),
+        )
+        response = Response(
+            instance=instance,
+            request=request,
+            outputs=[
+                LMOutput(
+                    text=instance.gold_answer,
+                    logprobs=[
+                        {"token": "def", "logprob": -1.0},
+                        {"token": " add", "logprob": -1.0},
+                    ],
+                )
+            ],
+        )
+
+        scored = await task.score_responses([response])
+
+        assert scored[0].outputs[0].extracted_answer.startswith("def add(a, b):")
+        assert "bits_per_byte" in scored[0].scores
 
 
 class TestMultilingualMBPPTask:
