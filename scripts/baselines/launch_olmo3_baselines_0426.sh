@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_NAME="$(basename "$0")"
 DRY_RUN=false
 GEMMA_ONLY=false
+declare -a SELECTED_GROUPS=()
 
 GROUP="${GROUP:-olmo-eval-olmo3-baselines-0426}"
 WORKSPACE="${WORKSPACE:-ai2/olmo-eval-debug}"
@@ -17,7 +18,7 @@ PROVIDER_NUM_INSTANCES="${PROVIDER_NUM_INSTANCES:-8}"
 
 usage() {
     cat <<EOF
-Usage: ${SCRIPT_NAME} [--dry-run] [--gemma-only]
+Usage: ${SCRIPT_NAME} [--dry-run] [--gemma-only] [--only-group GROUP ...]
 
 Launches Beaker variants for the OLMo 3 baseline sweep across:
   1. Code execution tasks
@@ -31,7 +32,15 @@ Each task group is launched once for the baseline model bundle and once for Gemm
 Options:
   --dry-run     Print the commands without launching them
   --gemma-only  Launch only the Gemma variants
+  --only-group  Restrict launches to specific task groups (repeatable)
   --help        Show this help
+
+Valid group names:
+  code_exec, mcqa, gen_math, easy_qa, easy_math_code
+
+Examples:
+  ${SCRIPT_NAME} --gemma-only --only-group mcqa --only-group gen_math
+  ${SCRIPT_NAME} --only-group code_exec
 
 Environment overrides:
   GROUP=${GROUP}
@@ -46,6 +55,42 @@ Environment overrides:
 EOF
 }
 
+normalize_group_name() {
+    case "$1" in
+        code_exec|code-exec|code|exec)
+            printf "code_exec"
+            ;;
+        mcqa)
+            printf "mcqa"
+            ;;
+        gen_math|gen-math|gen+math)
+            printf "gen_math"
+            ;;
+        easy_qa|easy-qa)
+            printf "easy_qa"
+            ;;
+        easy_math_code|easy-math-code|easy_math|easy-math|easy_code|easy-code)
+            printf "easy_math_code"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+add_selected_group() {
+    local group=$1
+    local existing
+
+    for existing in "${SELECTED_GROUPS[@]-}"; do
+        if [[ "${existing}" == "${group}" ]]; then
+            return 0
+        fi
+    done
+
+    SELECTED_GROUPS+=("${group}")
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run)
@@ -55,6 +100,19 @@ while [[ $# -gt 0 ]]; do
         --gemma-only)
             GEMMA_ONLY=true
             shift
+            ;;
+        --only-group)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --only-group requires a value." >&2
+                exit 1
+            fi
+            if ! normalized_group="$(normalize_group_name "$2")"; then
+                echo "Error: Unknown group '$2'." >&2
+                echo "Valid groups: code_exec, mcqa, gen_math, easy_qa, easy_math_code" >&2
+                exit 1
+            fi
+            add_selected_group "${normalized_group}"
+            shift 2
             ;;
         --help|-h)
             usage
@@ -67,6 +125,23 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+group_is_selected() {
+    local wanted=$1
+    local selected
+
+    if [[ "${#SELECTED_GROUPS[@]}" -eq 0 ]]; then
+        return 0
+    fi
+
+    for selected in "${SELECTED_GROUPS[@]-}"; do
+        if [[ "${selected}" == "${wanted}" ]]; then
+            return 0
+        fi
+    done
+
+    return 1
+}
 
 code_exec_tasks=(
     "olmobase:code"
@@ -397,16 +472,47 @@ else
     echo ""
 fi
 
-if [[ "${GEMMA_ONLY}" == "false" ]]; then
+if [[ "${#SELECTED_GROUPS[@]}" -gt 0 ]]; then
+    echo "Selected groups: ${SELECTED_GROUPS[*]}"
+    echo ""
+fi
+
+if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "code_exec"; then
     run_variant "Baseline models: code execution suites" "${baseline_exec_cmd[@]}"
+fi
+
+if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "mcqa"; then
     run_variant "Baseline models: MCQA suites" "${baseline_non_exec_mcqa_cmd[@]}"
+fi
+
+if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "gen_math"; then
     run_variant "Baseline models: gen + math suites" "${baseline_non_exec_gen_math_cmd[@]}"
+fi
+
+if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_qa"; then
     run_variant "Baseline models: easy QA suites" "${baseline_non_exec_easy_qa_cmd[@]}"
+fi
+
+if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_math_code"; then
     run_variant "Baseline models: easy math + easy code suites" "${baseline_non_exec_easy_math_code_cmd[@]}"
 fi
 
-run_variant "Gemma: code execution suites" "${gemma_exec_cmd[@]}"
-run_variant "Gemma: MCQA suites" "${gemma_non_exec_mcqa_cmd[@]}"
-run_variant "Gemma: gen + math suites" "${gemma_non_exec_gen_math_cmd[@]}"
-run_variant "Gemma: easy QA suites" "${gemma_non_exec_easy_qa_cmd[@]}"
-run_variant "Gemma: easy math + easy code suites" "${gemma_non_exec_easy_math_code_cmd[@]}"
+if group_is_selected "code_exec"; then
+    run_variant "Gemma: code execution suites" "${gemma_exec_cmd[@]}"
+fi
+
+if group_is_selected "mcqa"; then
+    run_variant "Gemma: MCQA suites" "${gemma_non_exec_mcqa_cmd[@]}"
+fi
+
+if group_is_selected "gen_math"; then
+    run_variant "Gemma: gen + math suites" "${gemma_non_exec_gen_math_cmd[@]}"
+fi
+
+if group_is_selected "easy_qa"; then
+    run_variant "Gemma: easy QA suites" "${gemma_non_exec_easy_qa_cmd[@]}"
+fi
+
+if group_is_selected "easy_math_code"; then
+    run_variant "Gemma: easy math + easy code suites" "${gemma_non_exec_easy_math_code_cmd[@]}"
+fi

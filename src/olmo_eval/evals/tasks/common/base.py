@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import math
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
@@ -93,6 +94,20 @@ class TaskConfig:
 
     #: Sandbox environment for code execution scoring. None = use default sandbox.
     sandbox_env: SandboxEnv | None = None
+
+    #: Scheduler-only weight hint for shared sandbox allocation.
+    sandbox_allocation_weight: float = 1.0
+
+    def __post_init__(self) -> None:
+        """Validate scheduler-only sandbox allocation hints."""
+        try:
+            weight = float(self.sandbox_allocation_weight)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("sandbox_allocation_weight must be a positive finite float") from exc
+
+        if not math.isfinite(weight) or weight <= 0:
+            raise ValueError("sandbox_allocation_weight must be a positive finite float")
+        self.sandbox_allocation_weight = weight
 
     def get_data_source(self, split: str | None = None) -> DataSource:
         """Get the data source for a specific split.

@@ -36,6 +36,7 @@ from olmo_eval.runners.processing.utils import compute_task_hash, generate_exper
 from olmo_eval.storage import StorageBackend
 
 if TYPE_CHECKING:
+    from olmo_eval.evals.tasks.common import SandboxEnv, Task
     from olmo_eval.harness.sandbox import SandboxConfig
 
 logger = get_logger(__name__)
@@ -46,11 +47,23 @@ _DEFAULT_SANDBOX_ENV = "__default__"
 
 
 @dataclass(frozen=True)
+class _SandboxDemand:
+    """Execution-aware sandbox demand summary for allocation and logging."""
+
+    sandbox_envs: list[SandboxEnv]
+    env_sandbox_items: dict[str, int]
+    env_work_units: dict[str, float]
+    env_task_count: dict[str, int]
+    needs_default: bool
+
+
+@dataclass(frozen=True)
 class _SandboxPlan:
     """Resolved sandbox configs and allocation data for relevant sandbox envs."""
 
     sandboxes: list[SandboxConfig]
-    env_demand: dict[str, int]
+    env_sandbox_items: dict[str, int]
+    env_work_units: dict[str, float]
     env_task_count: dict[str, int]
     allocated: dict[str, int]
     min_required: dict[str, int]
@@ -66,27 +79,76 @@ def _materialize_sandbox_instances(sandboxes: Sequence[SandboxConfig]) -> list[S
     ]
 
 
+def _count_execution_scorers(task: Task) -> int:
+    """Count unique execution scorers after task-level deduplication."""
+    from olmo_eval.common.scorers.execution import ExecutionScorer
+
+    return sum(1 for scorer in task._get_scorers().values() if isinstance(scorer, ExecutionScorer))
+
+
 def _collect_sandbox_demand(
     trackers: Mapping[str, TaskTracker],
-) -> tuple[dict[str, int], dict[str, int]]:
-    """Collect scoring demand and task counts per sandbox environment."""
-    env_demand: dict[str, int] = {}
+    expanded_tasks: Sequence[str] | None = None,
+) -> _SandboxDemand:
+    """Collect execution-aware sandbox demand and task counts per environment."""
+    env_sandbox_items: dict[str, int] = {}
+    env_work_units: dict[str, float] = {}
     env_task_count: dict[str, int] = {}
-    for tracker in trackers.values():
+    named_envs: dict[str, SandboxEnv] = {}
+    needs_default = False
+    relevant_specs = set(expanded_tasks) if expanded_tasks else None
+
+    for spec, tracker in trackers.items():
+        if relevant_specs is not None and spec not in relevant_specs:
+            continue
         if tracker.task is None:
             continue
+        execution_scorer_count = _count_execution_scorers(tracker.task)
+        if execution_scorer_count <= 0:
+            continue
+
         tcfg = tracker.task.config
         num_samples = tcfg.sampling_params.num_samples if tcfg.sampling_params else 1
-        scoring_items = tracker.total_instances * num_samples
-        env_key = tcfg.sandbox_env.name if tcfg.sandbox_env else _DEFAULT_SANDBOX_ENV
-        env_demand[env_key] = env_demand.get(env_key, 0) + scoring_items
+        sandbox_items = tracker.total_instances * num_samples * execution_scorer_count
+
+        if tcfg.sandbox_env is None:
+            env_key = _DEFAULT_SANDBOX_ENV
+            needs_default = True
+        else:
+            senv = tcfg.sandbox_env
+            if senv.name in named_envs and named_envs[senv.name] != senv:
+                raise ValueError(
+                    f"Conflicting sandbox_env for '{senv.name}': "
+                    f"{named_envs[senv.name].dependencies} vs {senv.dependencies}"
+                )
+            named_envs[senv.name] = senv
+            env_key = senv.name
+
+        env_sandbox_items[env_key] = env_sandbox_items.get(env_key, 0) + sandbox_items
+        env_work_units[env_key] = env_work_units.get(env_key, 0.0) + (
+            sandbox_items * tcfg.sandbox_allocation_weight
+        )
         env_task_count[env_key] = env_task_count.get(env_key, 0) + 1
-    return env_demand, env_task_count
+
+    return _SandboxDemand(
+        sandbox_envs=list(named_envs.values()),
+        env_sandbox_items=env_sandbox_items,
+        env_work_units=env_work_units,
+        env_task_count=env_task_count,
+        needs_default=needs_default,
+    )
+
+
+def _format_work_units(work_units: float) -> str:
+    """Format weighted sandbox work units for logs and tables."""
+    if float(work_units).is_integer():
+        return str(int(work_units))
+    return f"{work_units:.1f}"
 
 
 def _allocate_auto_sandbox_instances(
     auto_env_keys: Sequence[str],
-    env_demand: Mapping[str, int],
+    env_work_units: Mapping[str, float],
     sandbox_pool_instances: int | None,
 ) -> dict[str, int]:
     """Allocate the shared sandbox pool across auto-managed environments."""
@@ -104,7 +166,7 @@ def _allocate_auto_sandbox_instances(
         )
         budget = min_budget
 
-    total_demand = sum(env_demand.get(env_key, 0) for env_key in auto_env_keys)
+    total_demand = sum(env_work_units.get(env_key, 0.0) for env_key in auto_env_keys)
     if total_demand <= 0:
         base = budget // len(auto_env_keys)
         remainder = budget % len(auto_env_keys)
@@ -116,13 +178,13 @@ def _allocate_auto_sandbox_instances(
     distributable = budget - len(auto_env_keys)
     allocated = {}
     for env_key in auto_env_keys:
-        demand = env_demand.get(env_key, 0)
+        demand = env_work_units.get(env_key, 0.0)
         extra = max(0, round(distributable * demand / total_demand))
         allocated[env_key] = 1 + extra
 
     diff = budget - sum(allocated.values())
     if diff != 0:
-        top = max(auto_env_keys, key=lambda key: env_demand.get(key, 0))
+        top = max(auto_env_keys, key=lambda key: env_work_units.get(key, 0.0))
         allocated[top] = max(1, allocated[top] + diff)
     return allocated
 
@@ -135,11 +197,11 @@ def _plan_sandbox_configs(
     sandbox_pool_min_instances: int | None = None,
 ) -> _SandboxPlan | None:
     """Resolve relevant sandbox configs and concrete executor counts."""
-    from olmo_eval.evals.tasks.common import get_sandbox_envs, get_task
     from olmo_eval.harness.sandbox.image import dependencies_to_dockerfile_extra
 
-    sandbox_envs = get_sandbox_envs(list(expanded_tasks))
-    needs_default = any(get_task(spec).config.sandbox_env is None for spec in expanded_tasks)
+    sandbox_demand = _collect_sandbox_demand(trackers, expanded_tasks)
+    sandbox_envs = sandbox_demand.sandbox_envs
+    needs_default = sandbox_demand.needs_default
     if not sandbox_envs and not needs_default:
         return None
 
@@ -150,11 +212,6 @@ def _plan_sandbox_configs(
         for i, cfg in enumerate(base_sandboxes)
         if (i == 0 and needs_default) or (i != 0 and cfg.capabilities in used_caps)
     ]
-    env_demand, env_task_count = _collect_sandbox_demand(trackers)
-
-    if not needs_default:
-        env_demand.pop(_DEFAULT_SANDBOX_ENV, None)
-        env_task_count.pop(_DEFAULT_SANDBOX_ENV, None)
 
     env_to_index: dict[str, int] = {}
     if needs_default and sandboxes:
@@ -208,13 +265,13 @@ def _plan_sandbox_configs(
         )
     auto_allocations = _allocate_auto_sandbox_instances(
         auto_env_keys,
-        env_demand,
+        sandbox_demand.env_work_units,
         sandbox_pool_instances,
     )
     auto_min_requirements = (
         _allocate_auto_sandbox_instances(
             auto_env_keys,
-            env_demand,
+            sandbox_demand.env_work_units,
             sandbox_pool_min_instances,
         )
         if sandbox_pool_min_instances is not None
@@ -240,8 +297,9 @@ def _plan_sandbox_configs(
 
     return _SandboxPlan(
         sandboxes=materialized_sandboxes,
-        env_demand=env_demand,
-        env_task_count=env_task_count,
+        env_sandbox_items=sandbox_demand.env_sandbox_items,
+        env_work_units=sandbox_demand.env_work_units,
+        env_task_count=sandbox_demand.env_task_count,
         allocated=allocated,
         min_required=min_required,
         budget=sum(allocated.values()),
@@ -451,19 +509,16 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 if sandbox_plan is not None:
                     sandboxes = sandbox_plan.sandboxes
 
-                    for env_key in sorted(sandbox_plan.env_demand):
-                        if env_key == _DEFAULT_SANDBOX_ENV:
-                            continue
-                        runner_logger.info(
-                            f"Sandbox env '{env_key}' "
-                            f"({sandbox_plan.allocated.get(env_key, 1)} executors, "
-                            f"{sandbox_plan.env_demand.get(env_key, 0)} scoring items)"
+                    for env_key in sorted(sandbox_plan.env_work_units):
+                        display_name = "default" if env_key == _DEFAULT_SANDBOX_ENV else env_key
+                        work_units = _format_work_units(
+                            sandbox_plan.env_work_units.get(env_key, 0.0)
                         )
-                    if sandbox_plan.needs_default:
                         runner_logger.info(
-                            f"Sandbox env 'default' "
-                            f"({sandbox_plan.allocated.get(_DEFAULT_SANDBOX_ENV, 1)} executors, "
-                            f"{sandbox_plan.env_demand.get(_DEFAULT_SANDBOX_ENV, 0)} scoring items)"
+                            f"Sandbox env '{display_name}' "
+                            f"({sandbox_plan.allocated.get(env_key, 1)} executors, "
+                            f"{sandbox_plan.env_sandbox_items.get(env_key, 0)} sandbox items, "
+                            f"{work_units} work units)"
                         )
 
                     # Print sandbox distribution summary
@@ -472,11 +527,12 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                     dist_table = Table(title="Sandbox Distribution")
                     dist_table.add_column("Env", style="cyan")
                     dist_table.add_column("Tasks", justify="right")
-                    dist_table.add_column("Scoring Items", justify="right")
+                    dist_table.add_column("Sandbox Items", justify="right")
+                    dist_table.add_column("Work Units", justify="right")
                     dist_table.add_column("Executors", justify="right")
                     dist_table.add_column("Share", justify="right")
 
-                    for env_key in sorted(sandbox_plan.env_demand):
+                    for env_key in sorted(sandbox_plan.env_work_units):
                         display_name = "default" if env_key == _DEFAULT_SANDBOX_ENV else env_key
                         executors = sandbox_plan.allocated.get(env_key, 0)
                         share = (
@@ -487,7 +543,8 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                         dist_table.add_row(
                             display_name,
                             str(sandbox_plan.env_task_count.get(env_key, 0)),
-                            str(sandbox_plan.env_demand.get(env_key, 0)),
+                            str(sandbox_plan.env_sandbox_items.get(env_key, 0)),
+                            _format_work_units(sandbox_plan.env_work_units.get(env_key, 0.0)),
                             str(executors),
                             share,
                         )

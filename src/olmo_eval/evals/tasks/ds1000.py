@@ -79,6 +79,7 @@ class DS1000(Task):
     """DS-1000 data science code generation task."""
 
     data_source = DataSource(path="xlangai/DS-1000")
+    sandbox_allocation_weight = 12.0
     sandbox_env = SandboxEnv(
         "ds1000",
         (
