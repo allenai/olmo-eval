@@ -87,6 +87,9 @@ class ProviderConfig:
         "vllm_server": (
             "base_url",
             "tokenizer",
+            "revision",
+            "trust_remote_code",
+            "dtype",
             "max_concurrency",
             "max_model_len",
         ),
