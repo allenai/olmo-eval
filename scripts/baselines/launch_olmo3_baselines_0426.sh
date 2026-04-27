@@ -10,7 +10,7 @@ declare -a RAW_SELECTED_SUITES=()
 declare -a SELECTED_MODELS=()
 declare -a SELECTED_SUITES=()
 
-GROUP="${GROUP:-olmo-eval-olmo3-baselines-0426}"
+GROUP="${GROUP:-olmo-eval-olmo3-baselines-04272026}"
 WORKSPACE="${WORKSPACE:-ai2/olmo-eval-debug}"
 BUDGET="${BUDGET:-ai2/oe-base}"
 CLUSTER="${CLUSTER:-h100}"
