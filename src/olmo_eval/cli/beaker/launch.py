@@ -993,13 +993,20 @@ def _prebuild_external_eval_sandbox_images(external_evals: list[str]) -> None:
     machine, means the GPU node only has to pull a ready image instead of running
     apt/uv at startup — keeping the GPU from idling while deps install.
     """
+    import os
     import shutil
 
-    from olmo_eval.common.config import get_infra_config
+    from olmo_eval.common.config import infrastructure as infra_config_module
     from olmo_eval.evals.external.registry import get_external_eval
     from olmo_eval.harness.sandbox.image import get_swerex_image
+    from olmo_eval.launch.beaker.constants import BEAKER_INFRA_ENV_VARS
 
-    if not get_infra_config().swerex_registry:
+    # Default the launch host to the same registry the Beaker job will use,
+    # so users don't have to set SWEREX_REGISTRY in their shell to get pre-bake.
+    os.environ.setdefault("SWEREX_REGISTRY", BEAKER_INFRA_ENV_VARS["SWEREX_REGISTRY"])
+    infra_config_module.reset_infra_config()
+
+    if not infra_config_module.get_infra_config().swerex_registry:
         return
 
     runtime = "docker" if shutil.which("docker") else "podman"
