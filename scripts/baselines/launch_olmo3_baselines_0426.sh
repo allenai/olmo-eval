@@ -246,7 +246,7 @@ gemma_launch_args=(
 )
 
 exec_only_args=(
-    "-o" 'sandboxes.0={"mode":"modal","instances":64, "min_instances": 56, "registry_auth":{"provider":"gcp"}}'
+    "-o" 'sandboxes={"mode":"modal","instances":64, "min_instances": 56, "registry_auth":{"provider":"gcp"}}'
     "-e" "MODAL_ENVIRONMENT=${MODAL_ENVIRONMENT}"
     "--secret-env" "ai2-tylerm_MODAL_TOKEN_ID:MODAL_TOKEN_ID"
     "--secret-env" "ai2-tylerm_MODAL_TOKEN_SECRET:MODAL_TOKEN_SECRET"
