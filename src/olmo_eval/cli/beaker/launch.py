@@ -1001,13 +1001,9 @@ def _prebuild_external_eval_sandbox_images(external_evals: list[str]) -> None:
     from olmo_eval.harness.sandbox.image import get_swerex_image
     from olmo_eval.launch.beaker.constants import BEAKER_INFRA_ENV_VARS
 
-    # Default the launch host to the same registry the Beaker job will use,
-    # so users don't have to set SWEREX_REGISTRY in their shell to get pre-bake.
-    os.environ.setdefault("SWEREX_REGISTRY", BEAKER_INFRA_ENV_VARS["SWEREX_REGISTRY"])
+    # The launch host must push to the same registry the Beaker job pulls from.
+    os.environ["SWEREX_REGISTRY"] = BEAKER_INFRA_ENV_VARS["SWEREX_REGISTRY"]
     infra_config_module.reset_infra_config()
-
-    if not infra_config_module.get_infra_config().swerex_registry:
-        return
 
     runtime = "docker" if shutil.which("docker") else "podman"
     if not shutil.which(runtime):
