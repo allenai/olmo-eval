@@ -94,6 +94,18 @@ class TestPrompts(unittest.TestCase):
         )
 
 
+class TestPrebuildSandboxSpecs(unittest.TestCase):
+    def test_specs_bake_lockfile_into_dockerfile(self) -> None:
+        specs = scicode_eval.SciCodeExternalEval().prebuild_sandbox_specs()
+        self.assertEqual(len(specs), 1)
+        base_image, dockerfile_extra = specs[0]
+        self.assertIn("uv", base_image)
+        joined = "\n".join(dockerfile_extra)
+        self.assertIn("/opt/scicode-deps/pyproject.toml", joined)
+        self.assertIn("/opt/scicode-deps/uv.lock", joined)
+        self.assertIn("uv sync --active --frozen --no-dev --project /opt/scicode-deps", joined)
+
+
 class TestVerifierScript(unittest.TestCase):
     def test_build_step_script_includes_all_sections(self) -> None:
         step = _make_sub_step(
@@ -158,9 +170,9 @@ class TestRunProblemCascade(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(len(provider.calls), 3)
-        self.assertEqual(result.total_scorable, 3)
-        self.assertEqual(result.passed, 3)
-        self.assertTrue(result.all_passed)
+        self.assertEqual(result["total"], 3)
+        self.assertEqual(result["passed"], 3)
+        self.assertTrue(result["all_passed"])
 
     async def test_hardcoded_snippet_is_not_generated(self) -> None:
         problem = _make_problem(problem_id="62", num_steps=3)
@@ -187,9 +199,9 @@ class TestRunProblemCascade(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(len(provider.calls), 2)
-        self.assertEqual(result.total_scorable, 2)
-        self.assertEqual(result.passed, 1)
-        self.assertNotIn(0, result.step_codes)
+        self.assertEqual(result["total"], 2)
+        self.assertEqual(result["passed"], 1)
+        self.assertNotIn(0, result["step_codes"])
 
     async def test_cascade_embeds_previous_step_code_in_later_prompts(self) -> None:
         problem = _make_problem(problem_id="99", num_steps=3)
