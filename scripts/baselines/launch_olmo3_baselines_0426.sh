@@ -5,6 +5,10 @@ SCRIPT_NAME="$(basename "$0")"
 DRY_RUN=false
 GEMMA_ONLY=false
 declare -a SELECTED_GROUPS=()
+declare -a RAW_SELECTED_MODELS=()
+declare -a RAW_SELECTED_SUITES=()
+declare -a SELECTED_MODELS=()
+declare -a SELECTED_SUITES=()
 
 GROUP="${GROUP:-olmo-eval-olmo3-baselines-0426}"
 WORKSPACE="${WORKSPACE:-ai2/olmo-eval-debug}"
@@ -18,7 +22,7 @@ PROVIDER_NUM_INSTANCES="${PROVIDER_NUM_INSTANCES:-8}"
 
 usage() {
     cat <<EOF
-Usage: ${SCRIPT_NAME} [--dry-run] [--gemma-only] [--only-group GROUP ...]
+Usage: ${SCRIPT_NAME} [--dry-run] [--gemma-only] [--only-group GROUP ...] [--only-suite SUITE ...] [--only-model MODEL ...]
 
 Launches Beaker variants for the OLMo 3 baseline sweep across:
   1. Code execution tasks
@@ -33,14 +37,33 @@ Options:
   --dry-run     Print the commands without launching them
   --gemma-only  Launch only the Gemma variants
   --only-group  Restrict launches to specific task groups (repeatable)
+  --only-suite  Restrict launches to specific suites (repeatable)
+  --only-model  Restrict launches to specific models (repeatable)
   --help        Show this help
 
 Valid group names:
   code_exec, mcqa, gen_math, easy_qa, easy_math_code
 
+Valid suite names:
+  olmobase:code
+  olmobase:code_fim
+  olmobase:easy:code:bpb
+  olmobase:easy:math:bpb
+  olmobase:easy:qa:bpb
+  olmobase:easy:qa:rc
+  olmobase:gen
+  olmobase:math
+  olmobase:mcqa_non_stem
+  olmobase:mcqa_stem
+
+Models may be specified as full Hugging Face ids or trailing names such as
+gemma-2-9b, qwen3-8b, or mimo-7b-base.
+
 Examples:
   ${SCRIPT_NAME} --gemma-only --only-group mcqa --only-group gen_math
   ${SCRIPT_NAME} --only-group code_exec
+  ${SCRIPT_NAME} --only-suite olmobase:math --only-suite olmobase:code_fim
+  ${SCRIPT_NAME} --only-model gemma-2-9b --only-model qwen3-8b --only-group gen_math
 
 Environment overrides:
   GROUP=${GROUP}
@@ -114,6 +137,22 @@ while [[ $# -gt 0 ]]; do
             add_selected_group "${normalized_group}"
             shift 2
             ;;
+        --only-suite)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --only-suite requires a value." >&2
+                exit 1
+            fi
+            RAW_SELECTED_SUITES+=("$2")
+            shift 2
+            ;;
+        --only-model)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --only-model requires a value." >&2
+                exit 1
+            fi
+            RAW_SELECTED_MODELS+=("$2")
+            shift 2
+            ;;
         --help|-h)
             usage
             exit 0
@@ -169,14 +208,15 @@ non_exec_easy_math_code_tasks=(
 )
 
 baseline_models=(
+    "allenai/OLMo-2-1124-7B"
+    "allenai/Olmo-3-1025-7B"
     "marin-community/marin-8b-base"
     "swiss-ai/Apertus-8B-2509"
     "almanach/Gaperon-1125-8B"
-    "allenai/OLMo-2-1124-7B"
     "Qwen/Qwen3-8B"
+    "Qwen/Qwen2.5-7B"
     "mistralai/Mistral-Nemo-Base-2407"
     "nvidia/NVIDIA-Nemotron-Nano-9B-v2"
-    "Qwen/Qwen2.5-7B"
     "ibm-granite/granite-3.3-8b-base"
     "XiaomiMiMo/MiMo-7B-Base"
 )
@@ -213,6 +253,235 @@ common_tail_args=(
     "--no-follow"
     "-y"
 )
+
+to_lower() {
+    printf "%s" "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+normalize_suite_name() {
+    case "$1" in
+        olmobase:code|code)
+            printf "olmobase:code"
+            ;;
+        olmobase:code_fim|code_fim|code-fim|fim)
+            printf "olmobase:code_fim"
+            ;;
+        olmobase:mcqa_stem|mcqa_stem|mcqa-stem)
+            printf "olmobase:mcqa_stem"
+            ;;
+        olmobase:mcqa_non_stem|mcqa_non_stem|mcqa-non-stem|mcqa_nonstem|mcqa-nonstem)
+            printf "olmobase:mcqa_non_stem"
+            ;;
+        olmobase:gen|gen)
+            printf "olmobase:gen"
+            ;;
+        olmobase:math|math)
+            printf "olmobase:math"
+            ;;
+        olmobase:easy:qa:rc|easy:qa:rc|easy_qa_rc|easy-qa-rc)
+            printf "olmobase:easy:qa:rc"
+            ;;
+        olmobase:easy:qa:bpb|easy:qa:bpb|easy_qa_bpb|easy-qa-bpb)
+            printf "olmobase:easy:qa:bpb"
+            ;;
+        olmobase:easy:math:bpb|easy:math:bpb|easy_math_bpb|easy-math-bpb)
+            printf "olmobase:easy:math:bpb"
+            ;;
+        olmobase:easy:code:bpb|easy:code:bpb|easy_code_bpb|easy-code-bpb)
+            printf "olmobase:easy:code:bpb"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+normalize_model_name() {
+    local candidate=$1
+    local candidate_lower
+    local model
+    local model_lower
+    local short_lower
+
+    candidate_lower="$(to_lower "${candidate}")"
+
+    case "${candidate_lower}" in
+        gemma|gemma-2|gemma2|gemma-2-9b)
+            printf "google/gemma-2-9b"
+            return 0
+            ;;
+    esac
+
+    for model in "${baseline_models[@]}" "${gemma_models[@]}"; do
+        model_lower="$(to_lower "${model}")"
+        short_lower="$(to_lower "${model##*/}")"
+        if [[ "${candidate_lower}" == "${model_lower}" || "${candidate_lower}" == "${short_lower}" ]]; then
+            printf "%s" "${model}"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+print_valid_suites() {
+    local suite
+
+    for suite in \
+        "${code_exec_tasks[@]}" \
+        "${non_exec_mcqa_tasks[@]}" \
+        "${non_exec_gen_math_tasks[@]}" \
+        "${non_exec_easy_qa_tasks[@]}" \
+        "${non_exec_easy_math_code_tasks[@]}"; do
+        echo "  ${suite}" >&2
+    done
+}
+
+print_valid_models() {
+    local model
+
+    for model in "${baseline_models[@]}" "${gemma_models[@]}"; do
+        echo "  ${model}" >&2
+    done
+}
+
+add_selected_suite() {
+    local suite=$1
+    local existing
+
+    for existing in "${SELECTED_SUITES[@]-}"; do
+        if [[ "${existing}" == "${suite}" ]]; then
+            return 0
+        fi
+    done
+
+    SELECTED_SUITES+=("${suite}")
+}
+
+add_selected_model() {
+    local model=$1
+    local existing
+
+    for existing in "${SELECTED_MODELS[@]-}"; do
+        if [[ "${existing}" == "${model}" ]]; then
+            return 0
+        fi
+    done
+
+    SELECTED_MODELS+=("${model}")
+}
+
+suite_is_selected() {
+    local wanted=$1
+    local selected
+
+    if [[ "${#SELECTED_SUITES[@]}" -eq 0 ]]; then
+        return 0
+    fi
+
+    for selected in "${SELECTED_SUITES[@]-}"; do
+        if [[ "${selected}" == "${wanted}" ]]; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+model_is_selected() {
+    local wanted=$1
+    local selected
+
+    if [[ "${#SELECTED_MODELS[@]}" -eq 0 ]]; then
+        return 0
+    fi
+
+    for selected in "${SELECTED_MODELS[@]-}"; do
+        if [[ "${selected}" == "${wanted}" ]]; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+filter_tasks() {
+    local target=$1
+    shift
+    local filtered=()
+    local task
+
+    for task in "$@"; do
+        if suite_is_selected "${task}"; then
+            filtered+=("${task}")
+        fi
+    done
+
+    if [[ "${#filtered[@]}" -gt 0 ]]; then
+        eval "${target}=(\"\${filtered[@]}\")"
+    else
+        eval "${target}=()"
+    fi
+}
+
+filter_models() {
+    local target=$1
+    shift
+    local filtered=()
+    local model
+
+    for model in "$@"; do
+        if model_is_selected "${model}"; then
+            filtered+=("${model}")
+        fi
+    done
+
+    if [[ "${#filtered[@]}" -gt 0 ]]; then
+        eval "${target}=(\"\${filtered[@]}\")"
+    else
+        eval "${target}=()"
+    fi
+}
+
+if [[ "${#RAW_SELECTED_SUITES[@]}" -gt 0 ]]; then
+    for raw_selected_suite in "${RAW_SELECTED_SUITES[@]}"; do
+        if ! normalized_suite="$(normalize_suite_name "${raw_selected_suite}")"; then
+            echo "Error: Unknown suite '${raw_selected_suite}'." >&2
+            echo "Valid suites:" >&2
+            print_valid_suites
+            exit 1
+        fi
+        add_selected_suite "${normalized_suite}"
+    done
+fi
+
+if [[ "${#RAW_SELECTED_MODELS[@]}" -gt 0 ]]; then
+    for raw_selected_model in "${RAW_SELECTED_MODELS[@]}"; do
+        if ! normalized_model="$(normalize_model_name "${raw_selected_model}")"; then
+            echo "Error: Unknown model '${raw_selected_model}'." >&2
+            echo "Valid models:" >&2
+            print_valid_models
+            exit 1
+        fi
+        add_selected_model "${normalized_model}"
+    done
+fi
+
+declare -a selected_code_exec_tasks
+declare -a selected_non_exec_mcqa_tasks
+declare -a selected_non_exec_gen_math_tasks
+declare -a selected_non_exec_easy_qa_tasks
+declare -a selected_non_exec_easy_math_code_tasks
+declare -a selected_baseline_models
+declare -a selected_gemma_models
+
+filter_tasks selected_code_exec_tasks "${code_exec_tasks[@]}"
+filter_tasks selected_non_exec_mcqa_tasks "${non_exec_mcqa_tasks[@]}"
+filter_tasks selected_non_exec_gen_math_tasks "${non_exec_gen_math_tasks[@]}"
+filter_tasks selected_non_exec_easy_qa_tasks "${non_exec_easy_qa_tasks[@]}"
+filter_tasks selected_non_exec_easy_math_code_tasks "${non_exec_easy_math_code_tasks[@]}"
+filter_models selected_baseline_models "${baseline_models[@]}"
+filter_models selected_gemma_models "${gemma_models[@]}"
 
 declare -a current_cmd
 
@@ -254,8 +523,8 @@ build_baseline_exec_cmd() {
     start_command "${EXEC_HARNESS}"
     append_args "${baseline_launch_args[@]}"
     append_args "${exec_only_args[@]}"
-    append_models "${baseline_models[@]}"
-    append_tasks "${code_exec_tasks[@]}"
+    append_models "${selected_baseline_models[@]-}"
+    append_tasks "${selected_code_exec_tasks[@]-}"
     append_args "${common_tail_args[@]}"
     save_current_cmd baseline_exec_cmd
 }
@@ -263,8 +532,8 @@ build_baseline_exec_cmd() {
 build_baseline_non_exec_mcqa_cmd() {
     start_command "${NON_EXEC_HARNESS}"
     append_args "${baseline_launch_args[@]}"
-    append_models "${baseline_models[@]}"
-    append_tasks "${non_exec_mcqa_tasks[@]}"
+    append_models "${selected_baseline_models[@]-}"
+    append_tasks "${selected_non_exec_mcqa_tasks[@]-}"
     append_args "${common_tail_args[@]}"
     save_current_cmd baseline_non_exec_mcqa_cmd
 }
@@ -272,8 +541,8 @@ build_baseline_non_exec_mcqa_cmd() {
 build_baseline_non_exec_gen_math_cmd() {
     start_command "${NON_EXEC_HARNESS}"
     append_args "${baseline_launch_args[@]}"
-    append_models "${baseline_models[@]}"
-    append_tasks "${non_exec_gen_math_tasks[@]}"
+    append_models "${selected_baseline_models[@]-}"
+    append_tasks "${selected_non_exec_gen_math_tasks[@]-}"
     append_args "${common_tail_args[@]}"
     save_current_cmd baseline_non_exec_gen_math_cmd
 }
@@ -281,8 +550,8 @@ build_baseline_non_exec_gen_math_cmd() {
 build_baseline_non_exec_easy_qa_cmd() {
     start_command "${NON_EXEC_HARNESS}"
     append_args "${baseline_launch_args[@]}"
-    append_models "${baseline_models[@]}"
-    append_tasks "${non_exec_easy_qa_tasks[@]}"
+    append_models "${selected_baseline_models[@]-}"
+    append_tasks "${selected_non_exec_easy_qa_tasks[@]-}"
     append_args "${common_tail_args[@]}"
     save_current_cmd baseline_non_exec_easy_qa_cmd
 }
@@ -290,8 +559,8 @@ build_baseline_non_exec_easy_qa_cmd() {
 build_baseline_non_exec_easy_math_code_cmd() {
     start_command "${NON_EXEC_HARNESS}"
     append_args "${baseline_launch_args[@]}"
-    append_models "${baseline_models[@]}"
-    append_tasks "${non_exec_easy_math_code_tasks[@]}"
+    append_models "${selected_baseline_models[@]-}"
+    append_tasks "${selected_non_exec_easy_math_code_tasks[@]-}"
     append_args "${common_tail_args[@]}"
     save_current_cmd baseline_non_exec_easy_math_code_cmd
 }
@@ -300,8 +569,8 @@ build_gemma_exec_cmd() {
     start_command "${EXEC_HARNESS}"
     append_args "${gemma_launch_args[@]}"
     append_args "${exec_only_args[@]}"
-    append_models "${gemma_models[@]}"
-    append_tasks "${code_exec_tasks[@]}"
+    append_models "${selected_gemma_models[@]-}"
+    append_tasks "${selected_code_exec_tasks[@]-}"
     append_args "${common_tail_args[@]}"
     save_current_cmd gemma_exec_cmd
 }
@@ -309,8 +578,8 @@ build_gemma_exec_cmd() {
 build_gemma_non_exec_mcqa_cmd() {
     start_command "${NON_EXEC_HARNESS}"
     append_args "${gemma_launch_args[@]}"
-    append_models "${gemma_models[@]}"
-    append_tasks "${non_exec_mcqa_tasks[@]}"
+    append_models "${selected_gemma_models[@]-}"
+    append_tasks "${selected_non_exec_mcqa_tasks[@]-}"
     append_args "${common_tail_args[@]}"
     save_current_cmd gemma_non_exec_mcqa_cmd
 }
@@ -318,8 +587,8 @@ build_gemma_non_exec_mcqa_cmd() {
 build_gemma_non_exec_gen_math_cmd() {
     start_command "${NON_EXEC_HARNESS}"
     append_args "${gemma_launch_args[@]}"
-    append_models "${gemma_models[@]}"
-    append_tasks "${non_exec_gen_math_tasks[@]}"
+    append_models "${selected_gemma_models[@]-}"
+    append_tasks "${selected_non_exec_gen_math_tasks[@]-}"
     append_args "${common_tail_args[@]}"
     save_current_cmd gemma_non_exec_gen_math_cmd
 }
@@ -327,8 +596,8 @@ build_gemma_non_exec_gen_math_cmd() {
 build_gemma_non_exec_easy_qa_cmd() {
     start_command "${NON_EXEC_HARNESS}"
     append_args "${gemma_launch_args[@]}"
-    append_models "${gemma_models[@]}"
-    append_tasks "${non_exec_easy_qa_tasks[@]}"
+    append_models "${selected_gemma_models[@]-}"
+    append_tasks "${selected_non_exec_easy_qa_tasks[@]-}"
     append_args "${common_tail_args[@]}"
     save_current_cmd gemma_non_exec_easy_qa_cmd
 }
@@ -336,8 +605,8 @@ build_gemma_non_exec_easy_qa_cmd() {
 build_gemma_non_exec_easy_math_code_cmd() {
     start_command "${NON_EXEC_HARNESS}"
     append_args "${gemma_launch_args[@]}"
-    append_models "${gemma_models[@]}"
-    append_tasks "${non_exec_easy_math_code_tasks[@]}"
+    append_models "${selected_gemma_models[@]-}"
+    append_tasks "${selected_non_exec_easy_math_code_tasks[@]-}"
     append_args "${common_tail_args[@]}"
     save_current_cmd gemma_non_exec_easy_math_code_cmd
 }
@@ -460,6 +729,63 @@ build_gemma_non_exec_gen_math_cmd
 build_gemma_non_exec_easy_qa_cmd
 build_gemma_non_exec_easy_math_code_cmd
 
+planned_variants=0
+
+if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "code_exec" \
+    && [[ "${#selected_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_code_exec_tasks[@]}" -gt 0 ]]; then
+    planned_variants=$((planned_variants + 1))
+fi
+
+if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "mcqa" \
+    && [[ "${#selected_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_mcqa_tasks[@]}" -gt 0 ]]; then
+    planned_variants=$((planned_variants + 1))
+fi
+
+if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "gen_math" \
+    && [[ "${#selected_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_gen_math_tasks[@]}" -gt 0 ]]; then
+    planned_variants=$((planned_variants + 1))
+fi
+
+if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_qa" \
+    && [[ "${#selected_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_qa_tasks[@]}" -gt 0 ]]; then
+    planned_variants=$((planned_variants + 1))
+fi
+
+if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_math_code" \
+    && [[ "${#selected_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_math_code_tasks[@]}" -gt 0 ]]; then
+    planned_variants=$((planned_variants + 1))
+fi
+
+if group_is_selected "code_exec" \
+    && [[ "${#selected_gemma_models[@]}" -gt 0 ]] && [[ "${#selected_code_exec_tasks[@]}" -gt 0 ]]; then
+    planned_variants=$((planned_variants + 1))
+fi
+
+if group_is_selected "mcqa" \
+    && [[ "${#selected_gemma_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_mcqa_tasks[@]}" -gt 0 ]]; then
+    planned_variants=$((planned_variants + 1))
+fi
+
+if group_is_selected "gen_math" \
+    && [[ "${#selected_gemma_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_gen_math_tasks[@]}" -gt 0 ]]; then
+    planned_variants=$((planned_variants + 1))
+fi
+
+if group_is_selected "easy_qa" \
+    && [[ "${#selected_gemma_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_qa_tasks[@]}" -gt 0 ]]; then
+    planned_variants=$((planned_variants + 1))
+fi
+
+if group_is_selected "easy_math_code" \
+    && [[ "${#selected_gemma_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_math_code_tasks[@]}" -gt 0 ]]; then
+    planned_variants=$((planned_variants + 1))
+fi
+
+if [[ "${planned_variants}" -eq 0 ]]; then
+    echo "Error: No launch variants matched the selected groups, suites, and models." >&2
+    exit 1
+fi
+
 if [[ "${DRY_RUN}" == "true" ]]; then
     echo "Dry run enabled. Commands will be printed but not launched."
     echo ""
@@ -477,42 +803,62 @@ if [[ "${#SELECTED_GROUPS[@]}" -gt 0 ]]; then
     echo ""
 fi
 
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "code_exec"; then
+if [[ "${#SELECTED_SUITES[@]}" -gt 0 ]]; then
+    echo "Selected suites: ${SELECTED_SUITES[*]}"
+    echo ""
+fi
+
+if [[ "${#SELECTED_MODELS[@]}" -gt 0 ]]; then
+    echo "Selected models: ${SELECTED_MODELS[*]}"
+    echo ""
+fi
+
+if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "code_exec" \
+    && [[ "${#selected_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_code_exec_tasks[@]}" -gt 0 ]]; then
     run_variant "Baseline models: code execution suites" "${baseline_exec_cmd[@]}"
 fi
 
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "mcqa"; then
+if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "mcqa" \
+    && [[ "${#selected_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_mcqa_tasks[@]}" -gt 0 ]]; then
     run_variant "Baseline models: MCQA suites" "${baseline_non_exec_mcqa_cmd[@]}"
 fi
 
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "gen_math"; then
+if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "gen_math" \
+    && [[ "${#selected_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_gen_math_tasks[@]}" -gt 0 ]]; then
     run_variant "Baseline models: gen + math suites" "${baseline_non_exec_gen_math_cmd[@]}"
 fi
 
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_qa"; then
+if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_qa" \
+    && [[ "${#selected_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_qa_tasks[@]}" -gt 0 ]]; then
     run_variant "Baseline models: easy QA suites" "${baseline_non_exec_easy_qa_cmd[@]}"
 fi
 
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_math_code"; then
+if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_math_code" \
+    && [[ "${#selected_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_math_code_tasks[@]}" -gt 0 ]]; then
     run_variant "Baseline models: easy math + easy code suites" "${baseline_non_exec_easy_math_code_cmd[@]}"
 fi
 
-if group_is_selected "code_exec"; then
+if group_is_selected "code_exec" \
+    && [[ "${#selected_gemma_models[@]}" -gt 0 ]] && [[ "${#selected_code_exec_tasks[@]}" -gt 0 ]]; then
     run_variant "Gemma: code execution suites" "${gemma_exec_cmd[@]}"
 fi
 
-if group_is_selected "mcqa"; then
+if group_is_selected "mcqa" \
+    && [[ "${#selected_gemma_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_mcqa_tasks[@]}" -gt 0 ]]; then
     run_variant "Gemma: MCQA suites" "${gemma_non_exec_mcqa_cmd[@]}"
 fi
 
-if group_is_selected "gen_math"; then
+if group_is_selected "gen_math" \
+    && [[ "${#selected_gemma_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_gen_math_tasks[@]}" -gt 0 ]]; then
     run_variant "Gemma: gen + math suites" "${gemma_non_exec_gen_math_cmd[@]}"
 fi
 
-if group_is_selected "easy_qa"; then
+if group_is_selected "easy_qa" \
+    && [[ "${#selected_gemma_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_qa_tasks[@]}" -gt 0 ]]; then
     run_variant "Gemma: easy QA suites" "${gemma_non_exec_easy_qa_cmd[@]}"
 fi
 
-if group_is_selected "easy_math_code"; then
+if group_is_selected "easy_math_code" \
+    && [[ "${#selected_gemma_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_math_code_tasks[@]}" -gt 0 ]]; then
     run_variant "Gemma: easy math + easy code suites" "${gemma_non_exec_easy_math_code_cmd[@]}"
 fi

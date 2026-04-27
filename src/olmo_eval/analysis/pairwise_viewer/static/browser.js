@@ -384,6 +384,29 @@
         return fmtPct(value, digits) + " pp";
       }
 
+      function adaptiveRawDigits(value, minDigits = 1, maxDigits = minDigits + 3) {
+        if (!isNumber(value)) return minDigits;
+        const absValue = Math.abs(Number(value));
+        if (absValue === 0) return minDigits;
+        return Math.max(
+          minDigits,
+          Math.min(maxDigits, Math.ceil(-Math.log10(absValue)))
+        );
+      }
+
+      function fmtRaw(value, minDigits = 1, maxDigits = minDigits + 3) {
+        if (!isNumber(value)) return "-";
+        const numeric = Number(value);
+        const absValue = Math.abs(numeric);
+        if (absValue === 0) return (0).toFixed(minDigits);
+        if (absValue < Math.pow(10, -maxDigits)) {
+          return numeric.toExponential(1).replace(/\.0+e/, "e").replace("e+", "e");
+        }
+        const digits = adaptiveRawDigits(numeric, minDigits, maxDigits);
+        const rendered = numeric.toFixed(digits);
+        return Number(rendered) === 0 ? (0).toFixed(digits) : rendered;
+      }
+
       function fmtP(value) {
         if (!isNumber(value)) return "-";
         if (value < 0.001) return "<0.001";
@@ -409,13 +432,13 @@
       function fmtScore(value, meta, digits = 1) {
         if (!isNumber(value)) return "-";
         if (isPercentageMetric(meta)) return fmtPct(value, digits);
-        return Number(value).toFixed(digits);
+        return fmtRaw(value, digits);
       }
 
       function fmtScoreDiff(value, meta, digits = 1) {
         if (!isNumber(value)) return "-";
         if (isPercentageMetric(meta)) return fmtDiff(value, digits);
-        const rendered = Number(value).toFixed(digits);
+        const rendered = fmtRaw(value, digits);
         return value > 0 ? "+" + rendered : rendered;
       }
 

@@ -526,6 +526,22 @@ def test_model_filter_score_label_formats_raw_metrics_and_hides_mixed_units() ->
     assert viewer_server._model_filter_score_label(model, mixed_columns) == "—"
 
 
+def test_format_score_value_keeps_small_raw_values_visible() -> None:
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
+
+    raw_meta = {
+        "score_display_format": "raw",
+        "score_unit": "bits_per_byte",
+        "higher_is_better": False,
+    }
+
+    assert viewer_server._format_score_value(0.41, raw_meta) == "0.4"
+    assert viewer_server._format_score_value(0.04, raw_meta) == "0.04"
+    assert viewer_server._format_score_value(0.004, raw_meta) == "0.004"
+    assert viewer_server._format_score_value(-0.04, raw_meta) == "-0.04"
+    assert viewer_server._format_score_value(0.00009, raw_meta) == "9e-5"
+
+
 def test_results_viewer_rejects_removed_plot_format() -> None:
     """Static plot mode has been removed in favor of the viewer."""
     results_cli = importlib.import_module("olmo_eval.cli.results")

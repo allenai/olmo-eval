@@ -6,6 +6,7 @@ import csv
 import html
 import io
 import json
+import math
 import re
 from collections import Counter
 from dataclasses import dataclass, field
@@ -681,7 +682,29 @@ def _format_score_value(value: Any, meta: dict[str, Any] | None) -> str:
         return "—"
     if _score_display_format(meta) == "percentage":
         return f"{float(value) * 100:.1f}%"
-    return f"{float(value):.1f}"
+    return _format_raw_score_value(float(value))
+
+
+def _format_raw_score_value(
+    value: float,
+    *,
+    min_digits: int = 1,
+    max_digits: int | None = None,
+) -> str:
+    max_digits = max(min_digits, min_digits + 3 if max_digits is None else max_digits)
+    abs_value = abs(value)
+    if abs_value == 0:
+        return f"{0:.{min_digits}f}"
+    if abs_value < 10 ** (-max_digits):
+        return (
+            f"{value:.1e}".replace(".0e", "e")
+            .replace("e+0", "e")
+            .replace("e-0", "e-")
+            .replace("e+", "e")
+        )
+    digits = max(min_digits, min(max_digits, math.ceil(-math.log10(abs_value))))
+    rendered = f"{value:.{digits}f}"
+    return f"{0:.{digits}f}" if float(rendered) == 0 else rendered
 
 
 def _model_filter_score_label(model: dict[str, Any], columns: list[dict[str, Any]]) -> str:
