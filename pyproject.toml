@@ -123,6 +123,7 @@ dev = [
     "olmo-eval-internal[storage,analysis]",
     "jinja2>=3.1.6",
     "google-api-core>=2.0.0",
+    "parameterized>=0.9.0",
 ]
 
 [tool.ruff]
