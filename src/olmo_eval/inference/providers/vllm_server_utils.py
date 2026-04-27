@@ -177,7 +177,7 @@ def _get_olmo3_tool_template_path() -> str:
 
 
 # Kwargs that are used for deployment/setup, not vLLM server CLI arguments
-_NON_VLLM_KWARGS = frozenset({"patch_olmo3_tool_parser"})
+_NON_VLLM_KWARGS = frozenset({"patch_olmo3_tool_parser", "use_olmo3_chat_template"})
 
 
 def _apply_olmo3_tool_parser_patch() -> None:
@@ -284,8 +284,10 @@ def _build_server_command(
         parser = tool_call_parser or _infer_tool_call_parser(model_name)
         cmd.extend(["--tool-call-parser", parser])
 
-        # OLMo3 requires custom chat template for tool calling (only when patch is applied)
-        if parser == "olmo3" and patch_olmo3_tool_parser:
+        # OLMo3 custom chat template: on by default when patch is applied, but can be
+        # disabled with use_olmo3_chat_template=False to use the model's own template
+        use_olmo3_chat_template = kwargs.get("use_olmo3_chat_template", patch_olmo3_tool_parser)
+        if parser == "olmo3" and use_olmo3_chat_template:
             cmd.extend(["--chat-template", _get_olmo3_tool_template_path()])
 
     # Prefix caching (enabled by default for faster inference)
