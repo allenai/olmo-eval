@@ -233,14 +233,16 @@ def _coerce_value(value: str) -> Any:
 
     Handles booleans, integers, floats, JSON objects/arrays, and plain strings.
     """
-    # Booleans
+    # JSON scalar literals
     if value.lower() == "true":
         return True
     if value.lower() == "false":
         return False
+    if value == "null":
+        return None
 
-    # JSON objects and arrays
-    if value.startswith("{") or value.startswith("["):
+    # JSON objects, arrays, and quoted strings (so launcher round-trips survive)
+    if value.startswith(("{", "[", '"')):
         try:
             return json.loads(value)
         except json.JSONDecodeError:
