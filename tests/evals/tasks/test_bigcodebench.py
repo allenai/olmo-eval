@@ -80,6 +80,25 @@ class TestCodeExecutionScorerPythonScriptHelper:
         assert "ulimit -d" not in command
         assert "ulimit -s" not in command
 
+    async def test_code_execution_scorer_records_execution_result(self) -> None:
+        scorer = CodeExecutionScorer()
+        env = _StubExecutionEnv(
+            result=ExecutionResult(success=False, output="traceback", exit_code=1)
+        )
+        instance = Instance(question="Q", metadata={"test": "assert answer() == 42"})
+        output = LMOutput(text="unused")
+        output.extracted_answer = "def answer():\n    return 0\n"
+
+        score = await scorer.ascore(instance, output, env)
+
+        assert score == 0.0
+        assert output.metadata["execution_result"] == {
+            "success": False,
+            "exit_code": 1,
+            "error": "",
+            "output": "traceback",
+        }
+
 
 @pytest.mark.anyio
 class TestBigCodeBenchScorer:
@@ -107,6 +126,12 @@ class TestBigCodeBenchScorer:
         assert score == 1.0
         assert env.code_calls == []
         assert len(env.command_calls) == 1
+        assert output.metadata["execution_result"] == {
+            "success": True,
+            "exit_code": 0,
+            "error": "",
+            "output": "",
+        }
 
         command, timeout = env.command_calls[0]
         tmp_dir = _extract_tmp_dir(command)
@@ -134,6 +159,12 @@ class TestBigCodeBenchScorer:
         assert score == 0.0
         assert env.code_calls == []
         assert len(env.command_calls) == 1
+        assert output.metadata["execution_result"] == {
+            "success": False,
+            "exit_code": 1,
+            "error": "",
+            "output": "",
+        }
 
     @pytest.mark.parametrize(
         ("metadata", "extracted_answer"),
@@ -158,6 +189,8 @@ class TestBigCodeBenchScorer:
         assert score == 0.0
         assert env.command_calls == []
         assert env.code_calls == []
+        expected_error = "No test code" if not metadata["test"] else "No extracted answer"
+        assert output.metadata["execution_result"] == {"success": False, "error": expected_error}
 
 
 class TestBuildBcbExecutionScript:

@@ -40,6 +40,7 @@ class CodeExecutionScorer(ExecutionScorer):
     timeout: float = 20.0
     language: str = "python"
     separator: str = "\n\n"
+    max_output_len: int = 4000
 
     async def execute_python_script(
         self,
@@ -110,10 +111,12 @@ class CodeExecutionScorer(ExecutionScorer):
             1.0 if all tests pass, 0.0 otherwise.
         """
         if output.extracted_answer is None:
+            output.metadata["execution_result"] = {"success": False, "error": "No extracted answer"}
             return 0.0
 
         test_code = instance.metadata.get("test", "")
         if not test_code:
+            output.metadata["execution_result"] = {"success": False, "error": "No test code"}
             return 0.0
 
         full_code = f"{output.extracted_answer}{self.separator}{test_code}"
@@ -123,6 +126,12 @@ class CodeExecutionScorer(ExecutionScorer):
             language=self.language,
             timeout=self.timeout,
         )
+        output.metadata["execution_result"] = {
+            "success": result.success,
+            "exit_code": result.exit_code,
+            "error": result.error or "",
+            "output": result.output[: self.max_output_len] if result.output else "",
+        }
         if not result.success and result.error:
             instance_id = instance.metadata.get("id", "?")
             logger.warning(f"Code execution failed [{instance_id}]: {result.error}")

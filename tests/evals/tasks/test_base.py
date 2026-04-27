@@ -327,6 +327,20 @@ class _MockExecutionScorer(ExecutionScorer):
                 await self.tracker.exit()
 
 
+@dataclass(frozen=True, slots=True)
+class _FailingExecutionScorer(ExecutionScorer):
+    """ExecutionScorer that can fail for selected outputs."""
+
+    name: str = "failing_exec"
+    fail_text: str = "boom"
+    requires_async: ClassVar[bool] = True
+
+    async def ascore(self, instance, output, execution_env) -> float:
+        if output.text == self.fail_text:
+            raise RuntimeError("intentional scorer failure")
+        return 1.0
+
+
 class _MockExecutionEnv:
     """Minimal mock that satisfies the ExecutionEnvironment protocol + semaphore."""
 
@@ -447,3 +461,58 @@ class TestExecutionConcurrency:
 
         for resp in responses:
             assert "mock_exec" in resp.scores
+
+
+@pytest.mark.anyio
+class TestAsyncScoringFailures:
+    """Tests that async scoring failures are recorded instead of dropping metrics."""
+
+    async def test_async_scorer_failure_becomes_zero_with_diagnostics(self):
+        env = _MockExecutionEnv(semaphore=asyncio.Semaphore(4))
+        scorer = _FailingExecutionScorer()
+        metric = PassAtKMetric(k=1, scorer=lambda: scorer)
+        config = TaskConfig(name="test", data_source="test/dataset", metrics=(metric,))
+        task = ConcreteTask(config)
+
+        responses = _make_responses(n_responses=2, n_outputs=1)
+        responses[0].outputs[0].text = "ok"
+        responses[1].outputs[0].text = "boom"
+        context = ScoringContext(execution_env=env, scoring_concurrency=8)
+
+        scored = await task.score_responses(responses, context=context)
+
+        assert scored[0].scores["failing_exec"] == 1.0
+        assert scored[0].outputs[0].metadata["score:failing_exec"] == 1.0
+        assert "scoring_errors" not in scored[0].outputs[0].metadata
+
+        failing_output = scored[1].outputs[0]
+        assert scored[1].scores["failing_exec"] == 0.0
+        assert failing_output.metadata["score:failing_exec"] == 0.0
+        assert failing_output.metadata["scoring_errors"] == {
+            "failing_exec": {
+                "phase": "execution",
+                "type": "RuntimeError",
+                "message": "intentional scorer failure",
+            }
+        }
+
+    async def test_partial_async_failures_preserve_passing_outputs(self):
+        env = _MockExecutionEnv(semaphore=asyncio.Semaphore(4))
+        scorer = _FailingExecutionScorer()
+        metric = PassAtKMetric(k=1, scorer=lambda: scorer)
+        config = TaskConfig(name="test", data_source="test/dataset", metrics=(metric,))
+        task = ConcreteTask(config)
+
+        response = _make_responses(n_responses=1, n_outputs=2)[0]
+        response.outputs[0].text = "ok"
+        response.outputs[1].text = "boom"
+        context = ScoringContext(execution_env=env, scoring_concurrency=8)
+
+        scored = await task.score_responses([response], context=context)
+
+        assert scored[0].scores["failing_exec"] == 1.0
+        assert scored[0].outputs[0].metadata["score:failing_exec"] == 1.0
+        assert scored[0].outputs[1].metadata["score:failing_exec"] == 0.0
+        assert scored[0].outputs[1].metadata["scoring_errors"]["failing_exec"]["type"] == (
+            "RuntimeError"
+        )

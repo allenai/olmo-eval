@@ -46,6 +46,7 @@ class BigCodeBenchScorer(CodeExecutionScorer):
     """
 
     timeout: float = 3.0
+    max_output_len: int = 4000
 
     async def ascore(
         self,
@@ -54,10 +55,12 @@ class BigCodeBenchScorer(CodeExecutionScorer):
         execution_env: ExecutionEnvironment,
     ) -> float:
         if output.extracted_answer is None:
+            output.metadata["execution_result"] = {"success": False, "error": "No extracted answer"}
             return 0.0
 
         test_code = instance.metadata.get("test", "")
         if not test_code:
+            output.metadata["execution_result"] = {"success": False, "error": "No test code"}
             return 0.0
 
         solution = output.extracted_answer
@@ -82,6 +85,12 @@ class BigCodeBenchScorer(CodeExecutionScorer):
             data_limit_kb=_BCB_DATA_LIMIT_KB,
             stack_limit_kb=_BCB_STACK_LIMIT_KB,
         )
+        output.metadata["execution_result"] = {
+            "success": result.success,
+            "exit_code": result.exit_code,
+            "error": result.error or "",
+            "output": result.output[: self.max_output_len] if result.output else "",
+        }
         if not result.success and result.error:
             instance_id = instance.metadata.get("id", "?")
             logger.warning(f"Code execution failed [{instance_id}]: {result.error}")

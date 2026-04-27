@@ -61,6 +61,8 @@ def build_predictions(scored: Sequence[Any]) -> list[dict]:
             # Include execution result if present
             if "execution_result" in meta:
                 out_data["execution_result"] = meta["execution_result"]
+            if "scoring_errors" in meta:
+                out_data["scoring_errors"] = meta["scoring_errors"]
 
             model_output.append(out_data)
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import math
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Sequence
@@ -28,6 +29,20 @@ from olmo_eval.common.types import (
 if TYPE_CHECKING:
     from olmo_eval.common.execution import ScoringContext
     from olmo_eval.data import DataSource
+
+logger = logging.getLogger(__name__)
+
+
+def _format_scoring_error(exc: Exception, *, phase: str) -> dict[str, str]:
+    """Build a JSON-serializable scoring error payload."""
+    error = {
+        "phase": phase,
+        "type": type(exc).__qualname__,
+    }
+    message = str(exc).strip()
+    if message:
+        error["message"] = message
+    return error
 
 
 @dataclass(frozen=True, slots=True)
@@ -580,22 +595,46 @@ class Task(ABC):
 
             async def score_execution(
                 resp_idx: int, scorer: ExecutionScorer, out_idx: int
-            ) -> tuple[int, str, int, float]:
-                async with exec_semaphore:
-                    response = responses[resp_idx]
-                    output = response.outputs[out_idx]
-                    assert task_executor is not None
-                    score = await scorer.ascore(response.instance, output, task_executor)
-                    return (resp_idx, scorer.name, out_idx, score)
+            ) -> tuple[int, str, int, float, dict[str, str] | None]:
+                response = responses[resp_idx]
+                output = response.outputs[out_idx]
+                try:
+                    async with exec_semaphore:
+                        assert task_executor is not None
+                        score = await scorer.ascore(response.instance, output, task_executor)
+                except Exception as exc:
+                    error = _format_scoring_error(exc, phase="execution")
+                    instance_id = response.instance.metadata.get("id", str(resp_idx))
+                    logger.warning(
+                        "Async scoring failed for instance %s output %s with scorer %s: %s",
+                        instance_id,
+                        out_idx,
+                        scorer.name,
+                        error.get("message", error["type"]),
+                    )
+                    return (resp_idx, scorer.name, out_idx, 0.0, error)
+                return (resp_idx, scorer.name, out_idx, score, None)
 
             async def score_context(
                 resp_idx: int, scorer: ContextScorer, out_idx: int
-            ) -> tuple[int, str, int, float]:
-                async with ctx_semaphore:
-                    response = responses[resp_idx]
-                    output = response.outputs[out_idx]
-                    score = await scorer.ascore_with_context(response.instance, output, context)
-                    return (resp_idx, scorer.name, out_idx, score)
+            ) -> tuple[int, str, int, float, dict[str, str] | None]:
+                response = responses[resp_idx]
+                output = response.outputs[out_idx]
+                try:
+                    async with ctx_semaphore:
+                        score = await scorer.ascore_with_context(response.instance, output, context)
+                except Exception as exc:
+                    error = _format_scoring_error(exc, phase="context")
+                    instance_id = response.instance.metadata.get("id", str(resp_idx))
+                    logger.warning(
+                        "Context scoring failed for instance %s output %s with scorer %s: %s",
+                        instance_id,
+                        out_idx,
+                        scorer.name,
+                        error.get("message", error["type"]),
+                    )
+                    return (resp_idx, scorer.name, out_idx, 0.0, error)
+                return (resp_idx, scorer.name, out_idx, score, None)
 
             tasks = []
             for resp_idx, response in enumerate(responses):
@@ -614,12 +653,19 @@ class Task(ABC):
             # Store individual scores in output metadata for pass@k expansion
             # Structure: {resp_idx: {scorer_name: {out_idx: score}}}
             scores_by_response: dict[int, dict[str, dict[int, float]]] = {}
-            for resp_idx, scorer_name, out_idx, score in results:
+            scoring_errors_by_response: dict[int, dict[int, dict[str, dict[str, str]]]] = {}
+            for resp_idx, scorer_name, out_idx, score, scoring_error in results:
                 if resp_idx not in scores_by_response:
                     scores_by_response[resp_idx] = {}
                 if scorer_name not in scores_by_response[resp_idx]:
                     scores_by_response[resp_idx][scorer_name] = {}
                 scores_by_response[resp_idx][scorer_name][out_idx] = score
+                if scoring_error is not None:
+                    if resp_idx not in scoring_errors_by_response:
+                        scoring_errors_by_response[resp_idx] = {}
+                    if out_idx not in scoring_errors_by_response[resp_idx]:
+                        scoring_errors_by_response[resp_idx][out_idx] = {}
+                    scoring_errors_by_response[resp_idx][out_idx][scorer_name] = scoring_error
 
             # Store individual scores in output metadata and assign max to response
             for resp_idx, scorer_scores in scores_by_response.items():
@@ -631,6 +677,18 @@ class Task(ABC):
                         if output.metadata is None:
                             output.metadata = {}
                         output.metadata[f"score:{scorer_name}"] = score
+                        if (
+                            resp_idx in scoring_errors_by_response
+                            and out_idx in scoring_errors_by_response[resp_idx]
+                            and scorer_name in scoring_errors_by_response[resp_idx][out_idx]
+                        ):
+                            existing = output.metadata.get("scoring_errors")
+                            if not isinstance(existing, dict):
+                                existing = {}
+                                output.metadata["scoring_errors"] = existing
+                            existing[scorer_name] = scoring_errors_by_response[resp_idx][out_idx][
+                                scorer_name
+                            ]
                     # Response-level score is max for backward compatibility
                     all_scores = list(output_scores.values())
                     response.scores[scorer_name] = max(all_scores) if all_scores else 0.0
