@@ -154,7 +154,8 @@ class BigCodeBench(Task):
     """BigCodeBench code completion task (full subset, complete prompt variant)."""
 
     data_source = DataSource(path="bigcode/bigcodebench")
-    sandbox_allocation_weight = 8.0
+    # Keep BigCodeBench near a 15% share of shared sandbox pools in mixed code suites.
+    sandbox_allocation_weight = 6.0
     # The preset-provided sandbox image now carries the upstream BigCodeBench
     # execution environment, so the task itself does not request extra package
     # installation or image customization.

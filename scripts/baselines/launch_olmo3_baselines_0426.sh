@@ -32,6 +32,8 @@ Launches Beaker variants for the OLMo 3 baseline sweep across:
   5. Easy math + easy code tasks
 
 Each task group is launched once for the baseline model bundle and once for Gemma.
+Nemotron Nano, when selected, is launched in its own baseline variant with
+prefix caching disabled to avoid the current vLLM bug.
 
 Options:
   --dry-run     Print the commands without launching them
@@ -225,9 +227,17 @@ gemma_models=(
     "google/gemma-2-9b"
 )
 
+NEMOTRON_NANO_MODEL="nvidia/NVIDIA-Nemotron-Nano-9B-v2"
+
 baseline_launch_args=(
     "-o" "provider.num_instances=${PROVIDER_NUM_INSTANCES}"
     "-o" "provider.trust_remote_code=true"
+)
+
+nemotron_launch_args=(
+    "-o" "provider.num_instances=${PROVIDER_NUM_INSTANCES}"
+    "-o" "provider.trust_remote_code=true"
+    "-o" "provider.kwargs.enable_prefix_caching=false"
 )
 
 gemma_launch_args=(
@@ -473,6 +483,8 @@ declare -a selected_non_exec_gen_math_tasks
 declare -a selected_non_exec_easy_qa_tasks
 declare -a selected_non_exec_easy_math_code_tasks
 declare -a selected_baseline_models
+declare -a selected_standard_baseline_models
+declare -a selected_nemotron_nano_models
 declare -a selected_gemma_models
 
 filter_tasks selected_code_exec_tasks "${code_exec_tasks[@]}"
@@ -482,6 +494,14 @@ filter_tasks selected_non_exec_easy_qa_tasks "${non_exec_easy_qa_tasks[@]}"
 filter_tasks selected_non_exec_easy_math_code_tasks "${non_exec_easy_math_code_tasks[@]}"
 filter_models selected_baseline_models "${baseline_models[@]}"
 filter_models selected_gemma_models "${gemma_models[@]}"
+
+for model in "${selected_baseline_models[@]-}"; do
+    if [[ "${model}" == "${NEMOTRON_NANO_MODEL}" ]]; then
+        selected_nemotron_nano_models+=("${model}")
+    else
+        selected_standard_baseline_models+=("${model}")
+    fi
+done
 
 declare -a current_cmd
 
@@ -523,7 +543,7 @@ build_baseline_exec_cmd() {
     start_command "${EXEC_HARNESS}"
     append_args "${baseline_launch_args[@]}"
     append_args "${exec_only_args[@]}"
-    append_models "${selected_baseline_models[@]-}"
+    append_models "${selected_standard_baseline_models[@]-}"
     append_tasks "${selected_code_exec_tasks[@]-}"
     append_args "${common_tail_args[@]}"
     save_current_cmd baseline_exec_cmd
@@ -532,7 +552,7 @@ build_baseline_exec_cmd() {
 build_baseline_non_exec_mcqa_cmd() {
     start_command "${NON_EXEC_HARNESS}"
     append_args "${baseline_launch_args[@]}"
-    append_models "${selected_baseline_models[@]-}"
+    append_models "${selected_standard_baseline_models[@]-}"
     append_tasks "${selected_non_exec_mcqa_tasks[@]-}"
     append_args "${common_tail_args[@]}"
     save_current_cmd baseline_non_exec_mcqa_cmd
@@ -541,7 +561,7 @@ build_baseline_non_exec_mcqa_cmd() {
 build_baseline_non_exec_gen_math_cmd() {
     start_command "${NON_EXEC_HARNESS}"
     append_args "${baseline_launch_args[@]}"
-    append_models "${selected_baseline_models[@]-}"
+    append_models "${selected_standard_baseline_models[@]-}"
     append_tasks "${selected_non_exec_gen_math_tasks[@]-}"
     append_args "${common_tail_args[@]}"
     save_current_cmd baseline_non_exec_gen_math_cmd
@@ -550,7 +570,7 @@ build_baseline_non_exec_gen_math_cmd() {
 build_baseline_non_exec_easy_qa_cmd() {
     start_command "${NON_EXEC_HARNESS}"
     append_args "${baseline_launch_args[@]}"
-    append_models "${selected_baseline_models[@]-}"
+    append_models "${selected_standard_baseline_models[@]-}"
     append_tasks "${selected_non_exec_easy_qa_tasks[@]-}"
     append_args "${common_tail_args[@]}"
     save_current_cmd baseline_non_exec_easy_qa_cmd
@@ -559,10 +579,56 @@ build_baseline_non_exec_easy_qa_cmd() {
 build_baseline_non_exec_easy_math_code_cmd() {
     start_command "${NON_EXEC_HARNESS}"
     append_args "${baseline_launch_args[@]}"
-    append_models "${selected_baseline_models[@]-}"
+    append_models "${selected_standard_baseline_models[@]-}"
     append_tasks "${selected_non_exec_easy_math_code_tasks[@]-}"
     append_args "${common_tail_args[@]}"
     save_current_cmd baseline_non_exec_easy_math_code_cmd
+}
+
+build_nemotron_exec_cmd() {
+    start_command "${EXEC_HARNESS}"
+    append_args "${nemotron_launch_args[@]}"
+    append_args "${exec_only_args[@]}"
+    append_models "${selected_nemotron_nano_models[@]-}"
+    append_tasks "${selected_code_exec_tasks[@]-}"
+    append_args "${common_tail_args[@]}"
+    save_current_cmd nemotron_exec_cmd
+}
+
+build_nemotron_non_exec_mcqa_cmd() {
+    start_command "${NON_EXEC_HARNESS}"
+    append_args "${nemotron_launch_args[@]}"
+    append_models "${selected_nemotron_nano_models[@]-}"
+    append_tasks "${selected_non_exec_mcqa_tasks[@]-}"
+    append_args "${common_tail_args[@]}"
+    save_current_cmd nemotron_non_exec_mcqa_cmd
+}
+
+build_nemotron_non_exec_gen_math_cmd() {
+    start_command "${NON_EXEC_HARNESS}"
+    append_args "${nemotron_launch_args[@]}"
+    append_models "${selected_nemotron_nano_models[@]-}"
+    append_tasks "${selected_non_exec_gen_math_tasks[@]-}"
+    append_args "${common_tail_args[@]}"
+    save_current_cmd nemotron_non_exec_gen_math_cmd
+}
+
+build_nemotron_non_exec_easy_qa_cmd() {
+    start_command "${NON_EXEC_HARNESS}"
+    append_args "${nemotron_launch_args[@]}"
+    append_models "${selected_nemotron_nano_models[@]-}"
+    append_tasks "${selected_non_exec_easy_qa_tasks[@]-}"
+    append_args "${common_tail_args[@]}"
+    save_current_cmd nemotron_non_exec_easy_qa_cmd
+}
+
+build_nemotron_non_exec_easy_math_code_cmd() {
+    start_command "${NON_EXEC_HARNESS}"
+    append_args "${nemotron_launch_args[@]}"
+    append_models "${selected_nemotron_nano_models[@]-}"
+    append_tasks "${selected_non_exec_easy_math_code_tasks[@]-}"
+    append_args "${common_tail_args[@]}"
+    save_current_cmd nemotron_non_exec_easy_math_code_cmd
 }
 
 build_gemma_exec_cmd() {
@@ -712,6 +778,11 @@ declare -a baseline_non_exec_mcqa_cmd
 declare -a baseline_non_exec_gen_math_cmd
 declare -a baseline_non_exec_easy_qa_cmd
 declare -a baseline_non_exec_easy_math_code_cmd
+declare -a nemotron_exec_cmd
+declare -a nemotron_non_exec_mcqa_cmd
+declare -a nemotron_non_exec_gen_math_cmd
+declare -a nemotron_non_exec_easy_qa_cmd
+declare -a nemotron_non_exec_easy_math_code_cmd
 declare -a gemma_exec_cmd
 declare -a gemma_non_exec_mcqa_cmd
 declare -a gemma_non_exec_gen_math_cmd
@@ -723,6 +794,11 @@ build_baseline_non_exec_mcqa_cmd
 build_baseline_non_exec_gen_math_cmd
 build_baseline_non_exec_easy_qa_cmd
 build_baseline_non_exec_easy_math_code_cmd
+build_nemotron_exec_cmd
+build_nemotron_non_exec_mcqa_cmd
+build_nemotron_non_exec_gen_math_cmd
+build_nemotron_non_exec_easy_qa_cmd
+build_nemotron_non_exec_easy_math_code_cmd
 build_gemma_exec_cmd
 build_gemma_non_exec_mcqa_cmd
 build_gemma_non_exec_gen_math_cmd
@@ -732,27 +808,52 @@ build_gemma_non_exec_easy_math_code_cmd
 planned_variants=0
 
 if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "code_exec" \
-    && [[ "${#selected_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_code_exec_tasks[@]}" -gt 0 ]]; then
+    && [[ "${#selected_standard_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_code_exec_tasks[@]}" -gt 0 ]]; then
     planned_variants=$((planned_variants + 1))
 fi
 
 if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "mcqa" \
-    && [[ "${#selected_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_mcqa_tasks[@]}" -gt 0 ]]; then
+    && [[ "${#selected_standard_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_mcqa_tasks[@]}" -gt 0 ]]; then
     planned_variants=$((planned_variants + 1))
 fi
 
 if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "gen_math" \
-    && [[ "${#selected_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_gen_math_tasks[@]}" -gt 0 ]]; then
+    && [[ "${#selected_standard_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_gen_math_tasks[@]}" -gt 0 ]]; then
     planned_variants=$((planned_variants + 1))
 fi
 
 if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_qa" \
-    && [[ "${#selected_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_qa_tasks[@]}" -gt 0 ]]; then
+    && [[ "${#selected_standard_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_qa_tasks[@]}" -gt 0 ]]; then
     planned_variants=$((planned_variants + 1))
 fi
 
 if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_math_code" \
-    && [[ "${#selected_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_math_code_tasks[@]}" -gt 0 ]]; then
+    && [[ "${#selected_standard_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_math_code_tasks[@]}" -gt 0 ]]; then
+    planned_variants=$((planned_variants + 1))
+fi
+
+if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "code_exec" \
+    && [[ "${#selected_nemotron_nano_models[@]}" -gt 0 ]] && [[ "${#selected_code_exec_tasks[@]}" -gt 0 ]]; then
+    planned_variants=$((planned_variants + 1))
+fi
+
+if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "mcqa" \
+    && [[ "${#selected_nemotron_nano_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_mcqa_tasks[@]}" -gt 0 ]]; then
+    planned_variants=$((planned_variants + 1))
+fi
+
+if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "gen_math" \
+    && [[ "${#selected_nemotron_nano_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_gen_math_tasks[@]}" -gt 0 ]]; then
+    planned_variants=$((planned_variants + 1))
+fi
+
+if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_qa" \
+    && [[ "${#selected_nemotron_nano_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_qa_tasks[@]}" -gt 0 ]]; then
+    planned_variants=$((planned_variants + 1))
+fi
+
+if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_math_code" \
+    && [[ "${#selected_nemotron_nano_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_math_code_tasks[@]}" -gt 0 ]]; then
     planned_variants=$((planned_variants + 1))
 fi
 
@@ -814,28 +915,53 @@ if [[ "${#SELECTED_MODELS[@]}" -gt 0 ]]; then
 fi
 
 if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "code_exec" \
-    && [[ "${#selected_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_code_exec_tasks[@]}" -gt 0 ]]; then
+    && [[ "${#selected_standard_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_code_exec_tasks[@]}" -gt 0 ]]; then
     run_variant "Baseline models: code execution suites" "${baseline_exec_cmd[@]}"
 fi
 
 if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "mcqa" \
-    && [[ "${#selected_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_mcqa_tasks[@]}" -gt 0 ]]; then
+    && [[ "${#selected_standard_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_mcqa_tasks[@]}" -gt 0 ]]; then
     run_variant "Baseline models: MCQA suites" "${baseline_non_exec_mcqa_cmd[@]}"
 fi
 
 if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "gen_math" \
-    && [[ "${#selected_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_gen_math_tasks[@]}" -gt 0 ]]; then
+    && [[ "${#selected_standard_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_gen_math_tasks[@]}" -gt 0 ]]; then
     run_variant "Baseline models: gen + math suites" "${baseline_non_exec_gen_math_cmd[@]}"
 fi
 
 if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_qa" \
-    && [[ "${#selected_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_qa_tasks[@]}" -gt 0 ]]; then
+    && [[ "${#selected_standard_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_qa_tasks[@]}" -gt 0 ]]; then
     run_variant "Baseline models: easy QA suites" "${baseline_non_exec_easy_qa_cmd[@]}"
 fi
 
 if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_math_code" \
-    && [[ "${#selected_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_math_code_tasks[@]}" -gt 0 ]]; then
+    && [[ "${#selected_standard_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_math_code_tasks[@]}" -gt 0 ]]; then
     run_variant "Baseline models: easy math + easy code suites" "${baseline_non_exec_easy_math_code_cmd[@]}"
+fi
+
+if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "code_exec" \
+    && [[ "${#selected_nemotron_nano_models[@]}" -gt 0 ]] && [[ "${#selected_code_exec_tasks[@]}" -gt 0 ]]; then
+    run_variant "Nemotron Nano: code execution suites (prefix caching disabled)" "${nemotron_exec_cmd[@]}"
+fi
+
+if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "mcqa" \
+    && [[ "${#selected_nemotron_nano_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_mcqa_tasks[@]}" -gt 0 ]]; then
+    run_variant "Nemotron Nano: MCQA suites (prefix caching disabled)" "${nemotron_non_exec_mcqa_cmd[@]}"
+fi
+
+if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "gen_math" \
+    && [[ "${#selected_nemotron_nano_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_gen_math_tasks[@]}" -gt 0 ]]; then
+    run_variant "Nemotron Nano: gen + math suites (prefix caching disabled)" "${nemotron_non_exec_gen_math_cmd[@]}"
+fi
+
+if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_qa" \
+    && [[ "${#selected_nemotron_nano_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_qa_tasks[@]}" -gt 0 ]]; then
+    run_variant "Nemotron Nano: easy QA suites (prefix caching disabled)" "${nemotron_non_exec_easy_qa_cmd[@]}"
+fi
+
+if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_math_code" \
+    && [[ "${#selected_nemotron_nano_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_math_code_tasks[@]}" -gt 0 ]]; then
+    run_variant "Nemotron Nano: easy math + easy code suites (prefix caching disabled)" "${nemotron_non_exec_easy_math_code_cmd[@]}"
 fi
 
 if group_is_selected "code_exec" \

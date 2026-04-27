@@ -127,6 +127,7 @@ TASK_CONFIG_FIELDS = frozenset(
         "primary_metric",
         "sampling_params",
         "dependencies",
+        "sandbox_allocation_weight",
         "priority",  # Special: extracted for job priority, not a real TaskConfig field
     }
 )

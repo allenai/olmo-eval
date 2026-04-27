@@ -806,3 +806,41 @@ class TestDetectGpuRequirement:
 
         # 2 instances × 1 TP (main) + 0 (external server) = 2 GPUs
         assert gpus == 2
+
+
+class TestLaunchConfigLoaderExperimentNames:
+    """Tests for auto-generated Beaker experiment names."""
+
+    def test_generated_name_strips_task_priority_suffixes(self):
+        loader = LaunchConfigLoader(
+            config_path=None,
+            cli_args={
+                "model": ("XiaomiMiMo/MiMo-7B-Base", "nvidia/NVIDIA-Nemotron-Nano-9B-v2"),
+                "task": ("olmobase:code@urgent", "olmobase:code_fim@urgent"),
+                "cluster": "h100",
+                "workspace": "ai2/test-workspace",
+                "budget": "ai2/test-budget",
+                "gpus": 0,
+            },
+        )
+
+        config = loader.load()
+
+        assert config.name == "olmobase_code-olmobase_code_fim"
+
+    def test_generated_name_strips_priority_for_many_tasks(self):
+        loader = LaunchConfigLoader(
+            config_path=None,
+            cli_args={
+                "model": ("XiaomiMiMo/MiMo-7B-Base",),
+                "task": ("olmobase:code@urgent", "olmobase:code_fim@urgent", "olmobase:math@high"),
+                "cluster": "h100",
+                "workspace": "ai2/test-workspace",
+                "budget": "ai2/test-budget",
+                "gpus": 0,
+            },
+        )
+
+        config = loader.load()
+
+        assert config.name == "mimo-7b-base-olmobase_code-and-2-more"

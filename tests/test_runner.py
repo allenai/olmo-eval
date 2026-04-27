@@ -228,8 +228,8 @@ class TestNamedSandboxPlanning:
         assert plan is not None
         assert plan.budget == 64
         assert plan.allocated[_DEFAULT_SANDBOX_ENV] + plan.allocated["bigcodebench"] == 64
-        assert plan.allocated[_DEFAULT_SANDBOX_ENV] == 3
-        assert plan.allocated["bigcodebench"] == 61
+        assert plan.allocated[_DEFAULT_SANDBOX_ENV] == 4
+        assert plan.allocated["bigcodebench"] == 60
 
     def test_pool_minimum_is_distributed_with_auto_allocated_envs(self):
         """Shared startup minimums should follow the weighted execution split."""
@@ -263,14 +263,14 @@ class TestNamedSandboxPlanning:
         )
 
         assert plan is not None
-        assert plan.min_required == {_DEFAULT_SANDBOX_ENV: 4, "bigcodebench": 8, "ds1000": 12}
+        assert plan.min_required == {_DEFAULT_SANDBOX_ENV: 6, "bigcodebench": 9, "ds1000": 9}
         sandboxes_by_cap = {cfg.capabilities: cfg for cfg in plan.sandboxes}
-        assert sandboxes_by_cap[frozenset({"bash"})].instances == 10
-        assert sandboxes_by_cap[frozenset({"bash"})].min_instances == 4
-        assert sandboxes_by_cap[frozenset({"sandbox:bigcodebench"})].instances == 22
-        assert sandboxes_by_cap[frozenset({"sandbox:bigcodebench"})].min_instances == 8
-        assert sandboxes_by_cap[frozenset({"sandbox:ds1000"})].instances == 32
-        assert sandboxes_by_cap[frozenset({"sandbox:ds1000"})].min_instances == 12
+        assert sandboxes_by_cap[frozenset({"bash"})].instances == 15
+        assert sandboxes_by_cap[frozenset({"bash"})].min_instances == 6
+        assert sandboxes_by_cap[frozenset({"sandbox:bigcodebench"})].instances == 24
+        assert sandboxes_by_cap[frozenset({"sandbox:bigcodebench"})].min_instances == 9
+        assert sandboxes_by_cap[frozenset({"sandbox:ds1000"})].instances == 25
+        assert sandboxes_by_cap[frozenset({"sandbox:ds1000"})].min_instances == 9
 
     def test_default_and_named_envs_add_explicit_instances_on_top_of_pool(self):
         """Explicit sandbox counts should be preserved alongside the shared pool."""
@@ -337,9 +337,9 @@ class TestNamedSandboxPlanning:
 
         assert plan is not None
         sandboxes_by_cap = {cfg.capabilities: cfg for cfg in plan.sandboxes}
-        assert sandboxes_by_cap[frozenset({"bash"})].instances == 3
-        assert sandboxes_by_cap[frozenset({"bash"})].min_instances == 3
-        assert sandboxes_by_cap[frozenset({"sandbox:bigcodebench"})].instances == 61
+        assert sandboxes_by_cap[frozenset({"bash"})].instances == 4
+        assert sandboxes_by_cap[frozenset({"bash"})].min_instances == 4
+        assert sandboxes_by_cap[frozenset({"sandbox:bigcodebench"})].instances == 60
         assert sandboxes_by_cap[frozenset({"sandbox:bigcodebench"})].min_instances == 24
 
     def test_warns_when_default_explicit_instances_bypass_shared_pool(self, caplog):
@@ -487,10 +487,10 @@ class TestNamedSandboxPlanning:
         assert plan.env_sandbox_items == {_DEFAULT_SANDBOX_ENV: 18, "bigcodebench": 5, "ds1000": 5}
         assert plan.env_work_units == {
             _DEFAULT_SANDBOX_ENV: 18.0,
-            "bigcodebench": 40.0,
-            "ds1000": 60.0,
+            "bigcodebench": 30.0,
+            "ds1000": 33.0,
         }
-        assert plan.allocated == {_DEFAULT_SANDBOX_ENV: 10, "bigcodebench": 22, "ds1000": 32}
+        assert plan.allocated == {_DEFAULT_SANDBOX_ENV: 15, "bigcodebench": 24, "ds1000": 25}
 
 
 class TestTaskConfigSandboxAllocationWeight:

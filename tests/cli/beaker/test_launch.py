@@ -215,6 +215,17 @@ class TestHarnessOverridesProviderDependencies:
         assert all(sandbox.registry_auth is not None for sandbox in result.sandboxes)
         assert all(sandbox.registry_auth.provider == "gcp" for sandbox in result.sandboxes)
 
+    def test_get_task_configs_applies_sandbox_allocation_weight_override(self):
+        """Beaker task config preview should carry scheduler-only weight overrides."""
+        from olmo_eval.cli.beaker.launch import _get_task_configs
+
+        task_configs = _get_task_configs(
+            ["bigcodebench:olmo3base"],
+            {"bigcodebench:olmo3base": ["sandbox_allocation_weight=6.0"]},
+        )
+
+        assert task_configs["bigcodebench:olmo3base"].sandbox_allocation_weight == 6.0
+
 
 class TestTaskExpansionInExperimentSummary:
     """Tests for task expansion in _build_experiment_summary."""

@@ -132,6 +132,18 @@ class TestProcessOrderedArgs:
         assert task_overrides == {"mmlu": ["limit=100"]}
         assert harness_overrides == []
 
+    def test_task_accepts_sandbox_allocation_weight_override(self):
+        """Task overrides should allow sandbox allocation weight hints."""
+        ordered = [
+            FlaggedArg("t", "bigcodebench:olmo3base"),
+            FlaggedArg("o", "sandbox_allocation_weight=6.0"),
+        ]
+
+        task_overrides, harness_overrides = process_ordered_args(ordered)
+
+        assert task_overrides == {"bigcodebench:olmo3base": ["sandbox_allocation_weight=6.0"]}
+        assert harness_overrides == []
+
     def test_multiple_tasks_with_overrides(self):
         """Test multiple tasks with overrides."""
         ordered = [

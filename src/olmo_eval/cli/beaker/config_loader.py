@@ -246,12 +246,15 @@ class LaunchConfigLoader:
         - Single model, 3+ tasks: {model}-{task1}-and-{N}-more
         - Multi-model: {tasks_part} only (each model name is appended per-experiment)
         """
+        from olmo_eval.evals.tasks.common.registry import get_base_task_name
         from olmo_eval.launch import get_model_short_name, sanitize_beaker_name
 
-        if len(task_specs) <= 2:
-            tasks_part = "-".join(task_specs)
+        name_task_specs = [get_base_task_name(task_spec) for task_spec in task_specs]
+
+        if len(name_task_specs) <= 2:
+            tasks_part = "-".join(name_task_specs)
         else:
-            tasks_part = f"{task_specs[0]}-and-{len(task_specs) - 1}-more"
+            tasks_part = f"{name_task_specs[0]}-and-{len(name_task_specs) - 1}-more"
 
         if len(model_specs) > 1:
             return sanitize_beaker_name(tasks_part)
