@@ -94,6 +94,18 @@ class TestPrompts(unittest.TestCase):
         )
 
 
+class TestPrebuildSandboxSpecs(unittest.TestCase):
+    def test_specs_bake_lockfile_into_dockerfile(self) -> None:
+        specs = scicode_eval.SciCodeExternalEval().prebuild_sandbox_specs()
+        self.assertEqual(len(specs), 1)
+        base_image, dockerfile_extra = specs[0]
+        self.assertIn("uv", base_image)
+        joined = "\n".join(dockerfile_extra)
+        self.assertIn("/opt/scicode-deps/pyproject.toml", joined)
+        self.assertIn("/opt/scicode-deps/uv.lock", joined)
+        self.assertIn("uv sync --active --frozen --no-dev --project /opt/scicode-deps", joined)
+
+
 class TestVerifierScript(unittest.TestCase):
     def test_build_step_script_includes_all_sections(self) -> None:
         step = _make_sub_step(

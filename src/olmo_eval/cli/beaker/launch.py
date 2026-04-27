@@ -985,6 +985,56 @@ def _apply_harness_overrides(harness_config, overrides: list[str]):
     return HarnessConfig.from_dict(harness_dict)
 
 
+def _prebuild_external_eval_sandbox_images(external_evals: list[str]) -> None:
+    """Build & push sandbox images on the launch host before submitting the GPU job.
+
+    Each external eval may declare swerex-derived images (base + dockerfile_extra)
+    via ExternalEval.prebuild_sandbox_specs. Building them here, on the user's
+    machine, means the GPU node only has to pull a ready image instead of running
+    apt/uv at startup — keeping the GPU from idling while deps install.
+    """
+    import os
+    import shutil
+
+    from olmo_eval.common.config import infrastructure as infra_config_module
+    from olmo_eval.evals.external.registry import get_external_eval
+    from olmo_eval.harness.sandbox.image import get_swerex_image
+    from olmo_eval.launch.beaker.constants import BEAKER_INFRA_ENV_VARS
+
+    # The launch host must push to the same registry the Beaker job pulls from.
+    os.environ["SWEREX_REGISTRY"] = BEAKER_INFRA_ENV_VARS["SWEREX_REGISTRY"]
+    infra_config_module.reset_infra_config()
+
+    runtime = "docker" if shutil.which("docker") else "podman"
+    if not shutil.which(runtime):
+        console.print(
+            "[yellow]Skipping sandbox image pre-bake: no docker or podman on PATH[/yellow]"
+        )
+        return
+
+    seen: set[tuple[str, tuple[str, ...]]] = set()
+    specs: list[tuple[str, tuple[str, ...]]] = []
+    for eval_name in external_evals:
+        for spec in get_external_eval(eval_name).prebuild_sandbox_specs():
+            if spec not in seen:
+                seen.add(spec)
+                specs.append(spec)
+
+    if not specs:
+        return
+
+    console.print(f"[bold]Pre-building {len(specs)} sandbox image(s) for external evals[/bold]")
+    for base_image, dockerfile_extra in specs:
+        console.print(f"  building from [blue]{base_image}[/blue]…")
+        image = get_swerex_image(
+            base_image,
+            container_runtime=runtime,
+            dockerfile_extra=dockerfile_extra,
+            require_registry=True,
+        )
+        console.print(f"  [green]ready:[/green] {image}")
+
+
 def _launch_external_evals(
     external_evals: list[str],
     model: tuple[str, ...],
@@ -1232,6 +1282,9 @@ def _launch_external_evals(
     if not dry_run and not yes and not click.confirm("Proceed with launch?", default=True):
         console.print("[yellow]Launch cancelled[/yellow]")
         raise SystemExit(0)
+
+    if not dry_run:
+        _prebuild_external_eval_sandbox_images(external_evals)
 
     launched_experiments = _launch_jobs(launcher, job_configs, dry_run)
 

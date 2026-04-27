@@ -65,6 +65,16 @@ class ExternalEval(ABC):
         """Backend name used by this evaluation, if any."""
         return None
 
+    def prebuild_sandbox_specs(self) -> tuple[tuple[str, tuple[str, ...]], ...]:
+        """Sandbox images this eval would build at runtime, for CLI pre-baking.
+
+        Returns a tuple of (base_image, dockerfile_extra) pairs. The launcher uses
+        these to build and push images to the registry on the launch host before
+        submitting the GPU job, so the GPU node only needs to pull a ready image.
+        Default: empty (no sandbox images to pre-build).
+        """
+        return ()
+
     @abstractmethod
     async def execute(
         self,

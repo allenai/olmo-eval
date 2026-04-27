@@ -17,6 +17,8 @@ from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
+from olmo_eval.common.console import console as shared_console
+
 if TYPE_CHECKING:
     from olmo_eval.common.types import Instance, LMRequest, Response
 
@@ -161,8 +163,6 @@ def inspect_object(
         show_none: Whether to show fields with None values.
     """
     if console is None:
-        from olmo_eval.cli.utils import console as shared_console
-
         console = shared_console
 
     if not is_dataclass(obj) or isinstance(obj, type):
@@ -208,8 +208,6 @@ def inspect_instance(
     import json
 
     if console is None:
-        from olmo_eval.cli.utils import console as shared_console
-
         console = shared_console
 
     renderables: list[Any] = []
@@ -308,8 +306,6 @@ def inspect_request(
         max_string_length: Maximum length for string values.
     """
     if console is None:
-        from olmo_eval.cli.utils import console as shared_console
-
         console = shared_console
 
     renderables: list[Any] = []
@@ -832,8 +828,6 @@ def inspect_formatted_request(
             When truncating, shows first half and last half.
     """
     if console is None:
-        from olmo_eval.cli.utils import console as shared_console
-
         console = shared_console
 
     # Pattern to match common special tokens
@@ -909,8 +903,6 @@ def inspect_tokens(
         show_decoded: Whether to show decoded token values.
     """
     if console is None:
-        from olmo_eval.cli.utils import console as shared_console
-
         console = shared_console
 
     # Get special token IDs
@@ -1051,8 +1043,6 @@ def inspect_response(
     import json
 
     if console is None:
-        from olmo_eval.cli.utils import console as shared_console
-
         console = shared_console
 
     renderables: list[Any] = []
@@ -1153,8 +1143,6 @@ def inspect_task_instances(
     logger = get_logger(__name__)
 
     if console is None:
-        from olmo_eval.cli.utils import console as shared_console
-
         console = shared_console
 
     tokenizer = None

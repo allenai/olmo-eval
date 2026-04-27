@@ -11,6 +11,7 @@ Dataset: https://huggingface.co/datasets/SciCode1/SciCode
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import time
 from dataclasses import dataclass
@@ -20,6 +21,8 @@ from typing import Any
 from olmo_eval.common.types import LMRequest, RequestType, SamplingParams
 from olmo_eval.evals.external.base import ExternalEval
 from olmo_eval.evals.external.result import ExternalEvalResult
+from olmo_eval.harness.sandbox import SandboxManager
+from olmo_eval.harness.sandbox.config import Capability, SandboxConfig, SandboxMode
 from olmo_eval.inference.base import InferenceProvider
 
 from . import loader as scicode_loader
@@ -34,6 +37,23 @@ DEFAULT_H5PY_CONTAINER_PATH = "/workspace/scicode_test_data.h5"
 
 _SANDBOX_LOCK_DIR = Path(__file__).parent / "sandbox"
 _SANDBOX_DEPS_CONTAINER_DIR = "/opt/scicode-deps"
+
+
+def _scicode_dockerfile_extra() -> tuple[str, ...]:
+    """Bake SciCode sandbox deps into the swerex image at build time.
+
+    Embedding the lockfile contents (base64) makes the image hash sensitive to
+    lockfile changes (see image.py:55-57), so dep bumps invalidate the cache.
+    """
+    pyproject_b64 = base64.b64encode((_SANDBOX_LOCK_DIR / "pyproject.toml").read_bytes()).decode()
+    uvlock_b64 = base64.b64encode((_SANDBOX_LOCK_DIR / "uv.lock").read_bytes()).decode()
+    deps_dir = _SANDBOX_DEPS_CONTAINER_DIR
+    return (
+        f"RUN mkdir -p {deps_dir}",
+        f"RUN echo {pyproject_b64} | base64 -d > {deps_dir}/pyproject.toml",
+        f"RUN echo {uvlock_b64} | base64 -d > {deps_dir}/uv.lock",
+        f"RUN uv sync --active --frozen --no-dev --project {deps_dir}",
+    )
 
 
 @dataclass
@@ -76,6 +96,10 @@ class SciCodeExternalEval(ExternalEval):
     @property
     def timeout_seconds(self) -> float:
         return 14400.0
+
+    def prebuild_sandbox_specs(self) -> tuple[tuple[str, tuple[str, ...]], ...]:
+        base_image = SciCodeConfig.__dataclass_fields__["sandbox_image"].default
+        return ((base_image, _scicode_dockerfile_extra()),)
 
     async def execute(
         self,
@@ -253,13 +277,6 @@ class SciCodeExternalEval(ExternalEval):
         if not scorable_indices:
             return []
 
-        from olmo_eval.harness.sandbox import SandboxManager
-        from olmo_eval.harness.sandbox.config import (
-            Capability,
-            SandboxConfig,
-            SandboxMode,
-        )
-
         sandbox_config = SandboxConfig(
             image=sc_args.sandbox_image,
             mode=SandboxMode.DOCKER,
@@ -268,32 +285,14 @@ class SciCodeExternalEval(ExternalEval):
             startup_timeout=sc_args.startup_timeout,
             command_timeout=sc_args.command_timeout,
             inject_swerex=True,
-            volumes=(
-                (sc_args.h5py_host_path, sc_args.h5py_container_path),
-                (
-                    str(_SANDBOX_LOCK_DIR / "pyproject.toml"),
-                    f"{_SANDBOX_DEPS_CONTAINER_DIR}/pyproject.toml",
-                ),
-                (
-                    str(_SANDBOX_LOCK_DIR / "uv.lock"),
-                    f"{_SANDBOX_DEPS_CONTAINER_DIR}/uv.lock",
-                ),
-            ),
+            dockerfile_extra=_scicode_dockerfile_extra(),
+            volumes=((sc_args.h5py_host_path, sc_args.h5py_container_path),),
         )
         sandbox_manager = SandboxManager([sandbox_config], owner=f"scicode-{problem.problem_id}")
 
         results: list[bool] = []
         try:
             await sandbox_manager.start()
-            # --active installs into the venv that swerex's image bakes at /root/venv
-            # (exported via VIRTUAL_ENV); without it, uv would create a fresh project venv.
-            sync_result = await sandbox_manager.execute_code(
-                f"uv sync --active --frozen --no-dev --project {_SANDBOX_DEPS_CONTAINER_DIR}",
-                language="bash",
-                timeout=sc_args.startup_timeout,
-            )
-            if not sync_result.success:
-                raise RuntimeError(f"SciCode sandbox dep install failed: {sync_result.output}")
             for idx in scorable_indices:
                 step = problem.sub_steps[idx]
                 script = scicode_verifier.build_step_script(
