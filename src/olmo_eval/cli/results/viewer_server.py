@@ -419,12 +419,18 @@ def _build_results_table(session: Session, group_name: str, *, keep_all: bool) -
     from olmo_eval.runners.processing.utils import extract_score_from_metrics
     from olmo_eval.storage.backends.postgres.models import TaskResult
 
-    experiments = _group_experiments(session, group_name, keep_all=keep_all)
-    if not experiments:
+    display_experiments = _group_experiments(session, group_name, keep_all=keep_all)
+    if not display_experiments:
         return {"models": [], "task_columns": []}
 
-    experiments.sort(key=lambda experiment: experiment.timestamp, reverse=True)
-    selected_pks = [experiment.id for experiment in experiments]
+    display_experiments.sort(key=lambda experiment: experiment.timestamp, reverse=True)
+    source_experiments = (
+        list(display_experiments)
+        if keep_all
+        else _group_experiments(session, group_name, keep_all=True)
+    )
+    selected_pks = [experiment.id for experiment in display_experiments]
+    source_pks = [experiment.id for experiment in source_experiments]
     task_rows = session.execute(
         select(
             TaskResult.experiment_pk,
@@ -432,8 +438,14 @@ def _build_results_table(session: Session, group_name: str, *, keep_all: bool) -
             TaskResult.task_hash,
             TaskResult.metrics,
             TaskResult.primary_metric,
-        ).where(TaskResult.experiment_pk.in_(selected_pks))
+        ).where(TaskResult.experiment_pk.in_(source_pks))
     ).all()
+    if not keep_all:
+        task_rows = _merge_latest_task_rows(
+            list(task_rows),
+            source_experiments=list(source_experiments),
+            display_experiments=list(display_experiments),
+        )
 
     if keep_all:
         experiment_labels = {
@@ -443,17 +455,17 @@ def _build_results_table(session: Session, group_name: str, *, keep_all: bool) -
                 experiment.timestamp,
                 keep_all=True,
             )
-            for experiment in experiments
+            for experiment in display_experiments
         }
     else:
-        label_counts = Counter(experiment.model_name for experiment in experiments)
+        label_counts = Counter(experiment.model_name for experiment in display_experiments)
         experiment_labels = {
             experiment.id: (
                 f"{experiment.model_name} ({experiment.model_hash[:8]})"
                 if label_counts[experiment.model_name] > 1
                 else experiment.model_name
             )
-            for experiment in experiments
+            for experiment in display_experiments
         }
 
     task_states_by_id: dict[str, _TaskColumnState] = {}
@@ -481,7 +493,7 @@ def _build_results_table(session: Session, group_name: str, *, keep_all: bool) -
     ]
 
     models: list[dict[str, Any]] = []
-    for index, experiment in enumerate(experiments):
+    for index, experiment in enumerate(display_experiments):
         task_scores = task_scores_by_pk.get(experiment.id, {})
         scored_values = [score for score in task_scores.values() if score is not None]
         avg_score = sum(scored_values) / len(scored_values) if scored_values else None
@@ -518,6 +530,133 @@ def _available_metric_keys(metrics: Any) -> set[str]:
             if isinstance(scorer_name, str):
                 keys.add(f"{metric_name}:{scorer_name}")
     return keys
+
+
+def _merge_metric_values(
+    merged_metrics: dict[str, dict[str, Any]],
+    metrics: Any,
+) -> None:
+    if not isinstance(metrics, dict):
+        return
+    for metric_name, scorer_values in metrics.items():
+        if not isinstance(metric_name, str) or not isinstance(scorer_values, dict):
+            continue
+        merged_scorers = merged_metrics.setdefault(metric_name, {})
+        for scorer_name, score in scorer_values.items():
+            if not isinstance(scorer_name, str) or scorer_name in merged_scorers:
+                continue
+            merged_scorers[scorer_name] = score
+
+
+def _merge_latest_task_rows(
+    task_rows: list[tuple[Any, Any, Any, Any, Any]],
+    *,
+    source_experiments: list[Any],
+    display_experiments: list[Any],
+) -> list[tuple[int, str, str | None, dict[str, dict[str, Any]], str | None]]:
+    from olmo_eval.runners.processing.utils import extract_score_from_metrics
+
+    source_experiment_by_pk = {
+        int(experiment.id): experiment
+        for experiment in source_experiments
+        if getattr(experiment, "id", None) is not None
+    }
+    display_experiment_by_hash = {
+        str(experiment.model_hash or ""): experiment
+        for experiment in display_experiments
+        if getattr(experiment, "model_hash", None)
+    }
+    display_experiment_by_pk = {
+        int(experiment.id): experiment
+        for experiment in display_experiments
+        if getattr(experiment, "id", None) is not None
+    }
+
+    enriched_rows: list[tuple[str, str, str, float, int, int, Any, Any, Any, Any]] = []
+    for experiment_pk, task_name, task_hash, metrics, primary_metric in task_rows:
+        try:
+            resolved_pk = int(experiment_pk)
+        except (TypeError, ValueError):
+            continue
+        source_experiment = source_experiment_by_pk.get(resolved_pk)
+        if source_experiment is None:
+            continue
+        model_hash = str(getattr(source_experiment, "model_hash", "") or "")
+        display_experiment = display_experiment_by_hash.get(model_hash)
+        if display_experiment is None:
+            continue
+        source_timestamp = getattr(source_experiment, "timestamp", None)
+        timestamp_value = (
+            float(source_timestamp.timestamp()) if source_timestamp is not None else float("-inf")
+        )
+        enriched_rows.append(
+            (
+                model_hash,
+                str(task_name or ""),
+                str(task_hash or ""),
+                -timestamp_value,
+                -resolved_pk,
+                int(display_experiment.id),
+                task_name,
+                task_hash,
+                metrics,
+                primary_metric,
+            )
+        )
+
+    enriched_rows.sort()
+
+    merged_rows_by_key: dict[tuple[int, str], dict[str, Any]] = {}
+    for _, _, _, _, _, display_pk, task_name, task_hash, metrics, primary_metric in enriched_rows:
+        resolved_name = str(task_name or "")
+        resolved_hash = str(task_hash) if task_hash else None
+        task_id = _task_scope_id(resolved_name, resolved_hash)
+        merged_row = merged_rows_by_key.setdefault(
+            (display_pk, task_id),
+            {
+                "experiment_pk": display_pk,
+                "task_name": resolved_name,
+                "task_hash": resolved_hash,
+                "metrics": {},
+                "primary_metric_candidates": [],
+            },
+        )
+        _merge_metric_values(merged_row["metrics"], metrics)
+        if primary_metric:
+            metric_key = str(primary_metric)
+            if metric_key not in merged_row["primary_metric_candidates"]:
+                merged_row["primary_metric_candidates"].append(metric_key)
+
+    merged_rows: list[tuple[int, str, str | None, dict[str, dict[str, Any]], str | None]] = []
+    for merged_row in merged_rows_by_key.values():
+        merged_metrics = merged_row["metrics"]
+        primary_metric_candidates = list(merged_row["primary_metric_candidates"])
+        primary_metric = next(
+            (
+                candidate
+                for candidate in primary_metric_candidates
+                if extract_score_from_metrics(merged_metrics, candidate) is not None
+            ),
+            primary_metric_candidates[0] if primary_metric_candidates else None,
+        )
+        merged_rows.append(
+            (
+                int(merged_row["experiment_pk"]),
+                str(merged_row["task_name"]),
+                str(merged_row["task_hash"]) if merged_row["task_hash"] else None,
+                dict(merged_metrics),
+                primary_metric,
+            )
+        )
+
+    merged_rows.sort(
+        key=lambda row: (
+            -float(display_experiment_by_pk[int(row[0])].timestamp.timestamp()),
+            str(row[1]),
+            str(row[2] or ""),
+        )
+    )
+    return merged_rows
 
 
 def _serialize_metric_options(metric_counter: Counter[str]) -> list[dict[str, Any]]:

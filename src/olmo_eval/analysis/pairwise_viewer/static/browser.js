@@ -743,7 +743,7 @@
         if (scores.length > 0) {
           return scores.reduce((sum, value) => sum + value, 0) / scores.length;
         }
-        return displayScore(model);
+        return null;
       }
 
       function compareValues(a, b, direction) {
