@@ -166,8 +166,9 @@ def build_step_prompt(
     prior_blocks: list[str] = []
     for i in range(step_idx):
         parts = [_step_description(sub_steps[i], with_background)]
-        if previous_llm_code[i] is not None:
-            parts.append(previous_llm_code[i])  # type: ignore[arg-type]
+        code = previous_llm_code[i]
+        if code is not None:
+            parts.append(code)
         prior_blocks.append("\n".join(parts))
     problem_steps_str = "\n\n------\n\n".join(prior_blocks)
 

@@ -15,12 +15,14 @@ import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from olmo_eval.common.types import LMRequest, RequestType, SamplingParams
 from olmo_eval.evals.external.base import ExternalEval
 from olmo_eval.evals.external.result import ExternalEvalResult
+from olmo_eval.harness.sandbox.config import ContainerRuntime
 from olmo_eval.inference.base import InferenceProvider
+from olmo_eval.inference.providers.vllm_server import VLLMServerProvider
 
 from . import loader as scicode_loader
 from . import prompts as scicode_prompts
@@ -87,8 +89,10 @@ class SciCodeExternalEval(ExternalEval):
         start_time = time.time()
         sc_args = SciCodeConfig(**args)
 
+        if not isinstance(provider, VLLMServerProvider):
+            raise TypeError(f"SciCode requires VLLMServerProvider, got {type(provider).__name__}.")
         provider.chat_template_kwargs = (provider.chat_template_kwargs or {}) | {
-            "enable_thinking": sc_args.enable_thinking
+            "enable_thinking": sc_args.enable_thinking,
         }
 
         problems = scicode_loader.load_problems(
@@ -263,7 +267,7 @@ class SciCodeExternalEval(ExternalEval):
         sandbox_config = SandboxConfig(
             image=sc_args.sandbox_image,
             mode=SandboxMode.DOCKER,
-            container_runtime=container_runtime,
+            container_runtime=cast(ContainerRuntime, container_runtime),
             capabilities=Capability.PYTHON,
             startup_timeout=sc_args.startup_timeout,
             command_timeout=sc_args.command_timeout,
