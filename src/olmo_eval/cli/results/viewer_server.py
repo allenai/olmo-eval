@@ -44,6 +44,8 @@ if TYPE_CHECKING:
 _GROUP_LIST_CACHE_TTL_SECONDS = 15.0
 _GROUP_BROWSER_CACHE_TTL_SECONDS = 15.0
 _GROUP_BROWSER_CACHE_MAX_ENTRIES = 64
+_PAIRWISE_CACHE_TTL_SECONDS = 30.0
+_PAIRWISE_CACHE_MAX_ENTRIES = 64
 _MIN_PAIRWISE_READY_MODELS = 2
 _VIEWER_ERROR_EMPTY_COLLECTION_FIELDS = (
     "counts",
@@ -142,6 +144,13 @@ class _TimedValueCache:
 
 def _make_scope_key(kind: str, value: str) -> str:
     return f"{kind}::{value}"
+
+
+def _task_scope_key(task_row: dict[str, Any]) -> str:
+    hash_qualified = bool(task_row.get("hash_qualified"))
+    scope_kind = "task-hash" if hash_qualified else "task"
+    scope_value = task_row.get("task_hash") if hash_qualified else task_row.get("name")
+    return _make_scope_key(scope_kind, str(scope_value or ""))
 
 
 def _parse_scope_key(scope_key: str | None) -> tuple[str | None, str | None]:
@@ -1133,10 +1142,7 @@ def _build_group_browser_data(
     ]
     scope_options.extend(
         {
-            "key": _make_scope_key(
-                "task-hash" if task_row["hash_qualified"] else "task",
-                str(task_row["task_hash"] or task_row["name"]),
-            ),
+            "key": _task_scope_key(task_row),
             "kind": "task",
             "label": f"{task_row['full_label']} · {task_row['models']} models",
             "value": task_row["full_label"],
@@ -2197,6 +2203,55 @@ def _viewer_pairwise_error_payload(
     )
 
 
+def _compute_viewer_pairwise_bundle(
+    *,
+    session: Session,
+    selected_group: str,
+    scope_kind: str,
+    scope_value: str,
+    selected_metric: str | None,
+    margin: float,
+    keep_all: bool,
+    require_full_coverage: bool,
+) -> dict[str, Any]:
+    try:
+        result = _compute_group_pairwise(
+            session=session,
+            group_name=selected_group,
+            scope_kind=scope_kind,
+            scope_value=scope_value,
+            selected_metric=selected_metric,
+            margin=margin,
+            keep_all=keep_all,
+            require_full_coverage=require_full_coverage,
+        )
+        return {
+            "pairwise_data": build_pairwise_viewer_payload(result),
+            "pairwise_error": None,
+            "pairwise_error_details": None,
+        }
+    except PairwiseEligibilityError as error:
+        pairwise_error_details = _viewer_pairwise_error_payload(
+            error,
+            selected_group=selected_group,
+        )
+        return {
+            "pairwise_data": None,
+            "pairwise_error": str(pairwise_error_details.get("summary") or error),
+            "pairwise_error_details": pairwise_error_details,
+        }
+    except ValueError as error:
+        pairwise_error_details = _viewer_pairwise_error_payload(
+            error,
+            selected_group=selected_group,
+        )
+        return {
+            "pairwise_data": None,
+            "pairwise_error": str(pairwise_error_details.get("summary") or error),
+            "pairwise_error_details": pairwise_error_details,
+        }
+
+
 def render_results_viewer_page(
     *,
     groups: list[dict[str, Any]],
@@ -2443,6 +2498,10 @@ def serve_results_viewer(
         ttl_seconds=_GROUP_BROWSER_CACHE_TTL_SECONDS,
         max_entries=_GROUP_BROWSER_CACHE_MAX_ENTRIES,
     )
+    pairwise_cache = _TimedValueCache(
+        ttl_seconds=_PAIRWISE_CACHE_TTL_SECONDS,
+        max_entries=_PAIRWISE_CACHE_MAX_ENTRIES,
+    )
 
     class ResultsViewerHandler(BaseHTTPRequestHandler):
         def _send_bytes(
@@ -2459,7 +2518,10 @@ def serve_results_viewer(
             if filename:
                 self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
             self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                return
 
         def _send_text(
             self,
@@ -2635,30 +2697,30 @@ def serve_results_viewer(
                     and scope_kind is not None
                     and scope_value is not None
                 ):
-                    try:
-                        result = _compute_group_pairwise(
+                    pairwise_bundle = pairwise_cache.get_or_set(
+                        (
+                            selected_group,
+                            scope_kind,
+                            scope_value,
+                            selected_metric,
+                            margin,
+                            selected_keep_all,
+                            require_full_coverage,
+                        ),
+                        lambda: _compute_viewer_pairwise_bundle(
                             session=session,
-                            group_name=selected_group,
+                            selected_group=selected_group,
                             scope_kind=scope_kind,
                             scope_value=scope_value,
                             selected_metric=selected_metric,
                             margin=margin,
                             keep_all=selected_keep_all,
                             require_full_coverage=require_full_coverage,
-                        )
-                        pairwise_data = build_pairwise_viewer_payload(result)
-                    except PairwiseEligibilityError as error:
-                        pairwise_error_details = _viewer_pairwise_error_payload(
-                            error,
-                            selected_group=selected_group,
-                        )
-                        pairwise_error = str(pairwise_error_details.get("summary") or error)
-                    except ValueError as error:
-                        pairwise_error_details = _viewer_pairwise_error_payload(
-                            error,
-                            selected_group=selected_group,
-                        )
-                        pairwise_error = str(pairwise_error_details.get("summary") or error)
+                        ),
+                    )
+                    pairwise_data = pairwise_bundle.get("pairwise_data")
+                    pairwise_error = pairwise_bundle.get("pairwise_error")
+                    pairwise_error_details = pairwise_bundle.get("pairwise_error_details")
 
             page = render_results_viewer_page(
                 groups=groups,

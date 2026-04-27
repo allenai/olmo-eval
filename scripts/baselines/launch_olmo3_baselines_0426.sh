@@ -48,7 +48,6 @@ Valid group names:
 
 Valid suite names:
   olmobase:code
-  olmobase:code_fim
   olmobase:easy:code:bpb
   olmobase:easy:math:bpb
   olmobase:easy:qa:bpb
@@ -64,7 +63,7 @@ gemma-2-9b, qwen3-8b, or mimo-7b-base.
 Examples:
   ${SCRIPT_NAME} --gemma-only --only-group mcqa --only-group gen_math
   ${SCRIPT_NAME} --only-group code_exec
-  ${SCRIPT_NAME} --only-suite olmobase:math --only-suite olmobase:code_fim
+  ${SCRIPT_NAME} --only-suite olmobase:math --only-suite olmobase:code
   ${SCRIPT_NAME} --only-model gemma-2-9b --only-model qwen3-8b --only-group gen_math
 
 Environment overrides:
@@ -186,7 +185,6 @@ group_is_selected() {
 
 code_exec_tasks=(
     "olmobase:code"
-    "olmobase:code_fim"
 )
 
 non_exec_mcqa_tasks=(
@@ -272,9 +270,6 @@ normalize_suite_name() {
     case "$1" in
         olmobase:code|code)
             printf "olmobase:code"
-            ;;
-        olmobase:code_fim|code_fim|code-fim|fim)
-            printf "olmobase:code_fim"
             ;;
         olmobase:mcqa_stem|mcqa_stem|mcqa-stem)
             printf "olmobase:mcqa_stem"

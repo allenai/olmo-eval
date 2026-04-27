@@ -90,6 +90,31 @@ def _extract_browser_payload(html: str) -> dict[str, Any]:
     return json.loads(match.group("payload"))
 
 
+def test_task_scope_key_uses_task_name_unless_hash_qualified() -> None:
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
+
+    assert (
+        viewer_server._task_scope_key(
+            {
+                "name": "hellaswag:rc:olmo3base",
+                "task_hash": "b480b4ea63abf387",
+                "hash_qualified": False,
+            }
+        )
+        == "task::hellaswag:rc:olmo3base"
+    )
+    assert (
+        viewer_server._task_scope_key(
+            {
+                "name": "duplicate-task",
+                "task_hash": "abc12345deadbeef",
+                "hash_qualified": True,
+            }
+        )
+        == "task-hash::abc12345deadbeef"
+    )
+
+
 def test_results_viewer_json_blob_forwards_exclude_filters(monkeypatch) -> None:
     """JSON dump mode should stream a blob and thread exclusions into compute_pairwise."""
     analysis_pairwise = importlib.import_module("olmo_eval.analysis.pairwise")

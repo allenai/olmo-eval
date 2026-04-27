@@ -20,8 +20,10 @@ from olmo_eval.analysis.pairwise import (
     _extract_pairwise_instance_score,
     _merge_latest_instance_key_rows,
     _merge_latest_instance_score_rows,
+    _merge_latest_task_count_rows,
     _merge_latest_task_rows,
     _update_task_rows_num_instances,
+    _update_task_rows_num_instances_from_counts,
     compute_pairwise,
     get_task_metric_profile,
     get_win_rate,
@@ -608,6 +610,36 @@ class TestLatestRunMergeHelpers:
         assert score_by_native["q2"] == pytest.approx(0.9)
         assert score_by_native["q3"] == pytest.approx(0.4)
 
+    def test_merge_latest_instance_rows_accepts_sql_score_alias(self) -> None:
+        older = self._experiment(10, hour=8)
+        latest = self._experiment(11, hour=12)
+
+        score_rows = [
+            SimpleNamespace(
+                experiment_pk=10,
+                task_hash="task-hash-a",
+                native_id="q1",
+                score=0.4,
+            ),
+            SimpleNamespace(
+                experiment_pk=11,
+                task_hash="task-hash-a",
+                native_id="q1",
+                score=0.9,
+            ),
+        ]
+
+        merged_scores = _merge_latest_instance_score_rows(
+            instance_rows=score_rows,
+            source_experiments=[older, latest],
+            display_experiments=[latest],
+        )
+
+        assert len(merged_scores) == 1
+        assert merged_scores[0].experiment_pk == 11
+        assert merged_scores[0].native_id == "q1"
+        assert merged_scores[0].raw_score == pytest.approx(0.9)
+
     def test_update_task_rows_num_instances_uses_merged_instance_counts(self) -> None:
         task_rows = [
             SimpleNamespace(
@@ -642,6 +674,63 @@ class TestLatestRunMergeHelpers:
         assert row_by_hash["task-hash-a"].num_instances == 3
         assert row_by_hash["task-hash-b"].num_instances == 5
 
+    def test_merge_latest_task_count_rows_maps_model_hash_to_latest_display_run(self) -> None:
+        latest = self._experiment(11, hour=12)
+
+        count_rows = [
+            SimpleNamespace(
+                model_hash="abc12345deadbeef",
+                task_hash="task-hash-a",
+                num_instances=7,
+            )
+        ]
+
+        merged_rows = _merge_latest_task_count_rows(
+            count_rows=count_rows,
+            display_experiments=[latest],
+        )
+
+        assert len(merged_rows) == 1
+        assert merged_rows[0].experiment_pk == 11
+        assert merged_rows[0].task_hash == "task-hash-a"
+        assert merged_rows[0].num_instances == 7
+
+    def test_update_task_rows_num_instances_from_counts_uses_aggregated_counts(self) -> None:
+        task_rows = [
+            SimpleNamespace(
+                experiment_pk=11,
+                task_name="task-a",
+                task_hash="task-hash-a",
+                num_instances=2,
+                metrics={"accuracy": {"exact_match": 0.60}},
+                primary_metric="accuracy:exact_match",
+            ),
+            SimpleNamespace(
+                experiment_pk=11,
+                task_name="task-b",
+                task_hash="task-hash-b",
+                num_instances=5,
+                metrics={"accuracy": {"exact_match": 0.80}},
+                primary_metric="accuracy:exact_match",
+            ),
+        ]
+        count_rows = [
+            SimpleNamespace(
+                experiment_pk=11,
+                task_hash="task-hash-a",
+                num_instances=3,
+            )
+        ]
+
+        updated_rows = _update_task_rows_num_instances_from_counts(
+            task_rows=task_rows,
+            count_rows=count_rows,
+        )
+
+        row_by_hash = {row.task_hash: row for row in updated_rows}
+        assert row_by_hash["task-hash-a"].num_instances == 3
+        assert row_by_hash["task-hash-b"].num_instances == 5
+
 
 class _SequenceExecuteResult:
     def __init__(self, rows):
@@ -650,14 +739,27 @@ class _SequenceExecuteResult:
     def all(self):
         return list(self._rows)
 
+    def scalar_one(self):
+        if not self._rows:
+            raise AssertionError("Expected one scalar result")
+        return self._rows[0]
+
+    def scalar_one_or_none(self):
+        if not self._rows:
+            return None
+        return self._rows[0]
+
 
 class _SequenceSession:
-    def __init__(self, responses):
+    def __init__(self, responses, *, compile_queries: bool = False):
         self._responses = list(responses)
+        self._compile_queries = compile_queries
 
     def execute(self, _query):
         if not self._responses:
             raise AssertionError("Unexpected session.execute() call")
+        if self._compile_queries:
+            _query.compile(dialect=postgresql.dialect())
         return _SequenceExecuteResult(self._responses.pop(0))
 
 
@@ -749,19 +851,15 @@ class TestComputePairwiseLatestRunMerge:
                 primary_metric="accuracy:exact_match",
             ),
         ]
-        instance_key_rows = [
-            SimpleNamespace(experiment_pk=10, task_hash="task-a-hash", native_id="q1"),
-            SimpleNamespace(experiment_pk=10, task_hash="task-a-hash", native_id="q2"),
-            SimpleNamespace(experiment_pk=11, task_hash="task-a-hash", native_id="q1"),
-            SimpleNamespace(experiment_pk=11, task_hash="task-a-hash", native_id="q2"),
-            SimpleNamespace(experiment_pk=10, task_hash="task-b-hash", native_id="q3"),
-            SimpleNamespace(experiment_pk=10, task_hash="task-b-hash", native_id="q4"),
-            SimpleNamespace(experiment_pk=20, task_hash="task-a-hash", native_id="q1"),
-            SimpleNamespace(experiment_pk=20, task_hash="task-a-hash", native_id="q2"),
-            SimpleNamespace(experiment_pk=21, task_hash="task-a-hash", native_id="q1"),
-            SimpleNamespace(experiment_pk=21, task_hash="task-a-hash", native_id="q2"),
-            SimpleNamespace(experiment_pk=20, task_hash="task-b-hash", native_id="q3"),
-            SimpleNamespace(experiment_pk=20, task_hash="task-b-hash", native_id="q4"),
+        instance_count_rows = [
+            SimpleNamespace(model_hash="hash-a", task_hash="task-a-hash", num_instances=2),
+            SimpleNamespace(model_hash="hash-a", task_hash="task-b-hash", num_instances=2),
+            SimpleNamespace(model_hash="hash-b", task_hash="task-a-hash", num_instances=2),
+            SimpleNamespace(model_hash="hash-b", task_hash="task-b-hash", num_instances=2),
+        ]
+        preflight_rows = [
+            SimpleNamespace(model_hash="hash-a"),
+            SimpleNamespace(model_hash="hash-b"),
         ]
         score_rows = [
             SimpleNamespace(
@@ -837,7 +935,10 @@ class TestComputePairwiseLatestRunMerge:
                 raw_score=0.0,
             ),
         ]
-        session = _SequenceSession([task_rows, instance_key_rows, score_rows])
+        session = _SequenceSession(
+            [task_rows, instance_count_rows, preflight_rows, score_rows],
+            compile_queries=True,
+        )
 
         result = compute_pairwise(
             session=session,
@@ -858,6 +959,73 @@ class TestComputePairwiseLatestRunMerge:
         assert len(result.pairs) == 1
         assert result.pairs[0].wins_a == 3
         assert result.pairs[0].wins_b == 1
+        assert session._responses == []
+
+    def test_latest_mode_keeps_sample_metric_keys_when_sql_filters_out_null_scores(
+        self,
+        monkeypatch,
+    ) -> None:
+        from olmo_eval.evals.suites import registry as suite_registry
+        from olmo_eval.storage.backends.postgres import repository as repository_mod
+
+        latest_a = self._experiment(11, model_name="model-a", model_hash="hash-a", hour=12)
+        latest_b = self._experiment(21, model_name="model-b", model_hash="hash-b", hour=11)
+        all_experiments = [latest_a, latest_b]
+
+        monkeypatch.setattr(
+            repository_mod.ExperimentRepository,
+            "query_rows",
+            lambda self, **kwargs: list(all_experiments),
+        )
+        monkeypatch.setattr(suite_registry, "suite_exists", lambda name: name == "demo:suite")
+        monkeypatch.setattr(
+            suite_registry,
+            "get_suite",
+            lambda name: SimpleNamespace(expand=lambda: ("task-a",)),
+        )
+
+        task_rows = [
+            SimpleNamespace(
+                experiment_pk=11,
+                task_name="task-a",
+                task_hash="task-a-hash",
+                num_instances=2,
+                metrics={"accuracy": {"logprob": 0.90}},
+                primary_metric="accuracy:logprob",
+            ),
+            SimpleNamespace(
+                experiment_pk=21,
+                task_name="task-a",
+                task_hash="task-a-hash",
+                num_instances=2,
+                metrics={"accuracy": {"logprob": 0.70}},
+                primary_metric="accuracy:logprob",
+            ),
+        ]
+        instance_count_rows = [
+            SimpleNamespace(model_hash="hash-a", task_hash="task-a-hash", num_instances=2),
+            SimpleNamespace(model_hash="hash-b", task_hash="task-a-hash", num_instances=2),
+        ]
+        session = _SequenceSession(
+            [
+                task_rows,
+                instance_count_rows,
+                [],
+                [0],
+                [{"exact_match": 1.0}],
+            ],
+            compile_queries=True,
+        )
+
+        with pytest.raises(PairwiseEligibilityError) as exc_info:
+            compute_pairwise(
+                session=session,
+                suite_name="demo:suite",
+                keep_all=False,
+                require_full_coverage=True,
+            )
+
+        assert "Sample stored instance metric keys: exact_match" in exc_info.value.notes
         assert session._responses == []
 
 

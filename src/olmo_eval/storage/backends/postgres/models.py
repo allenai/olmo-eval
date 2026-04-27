@@ -209,6 +209,12 @@ Index("idx_experiments_experiment_id", Experiment.experiment_id)
 Index("idx_experiments_model_hash", Experiment.model_hash)
 Index("idx_experiments_model_name", Experiment.model_name)
 Index("idx_experiments_model_name_ts", Experiment.model_name, Experiment.timestamp.desc())
+Index(
+    "idx_experiments_group_model_hash_ts",
+    Experiment.experiment_group,
+    Experiment.model_hash,
+    Experiment.timestamp.desc(),
+)
 # Note: ix_experiments_experiment_group is auto-created via index=True on the column
 
 # Task Results Indexes
@@ -221,6 +227,12 @@ Index(
     "idx_instance_exp_task_hash",
     InstancePrediction.experiment_pk,
     InstancePrediction.task_hash,
+)
+Index(
+    "idx_instance_exp_task_hash_native",
+    InstancePrediction.experiment_pk,
+    InstancePrediction.task_hash,
+    InstancePrediction.native_id,
 )
 Index(
     "idx_instance_task_hash_native",
