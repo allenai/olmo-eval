@@ -183,7 +183,7 @@ class SWEBenchExternalEval(ExternalEval):
             )
             logger.info(f"[{self.name}] Patch generation exit: {'ok' if gen_ok else 'failed'}")
 
-            if not gen_ok or not preds_path.exists():
+            if not preds_path.exists():
                 return self._error_result(
                     "mini-swe-agent produced no preds.json", start_time, gen_output
                 )
