@@ -20,7 +20,13 @@ from typing import Any, cast
 from olmo_eval.common.types import LMRequest, RequestType, SamplingParams
 from olmo_eval.evals.external.base import ExternalEval
 from olmo_eval.evals.external.result import ExternalEvalResult
-from olmo_eval.harness.sandbox.config import ContainerRuntime
+from olmo_eval.harness.sandbox import SandboxManager
+from olmo_eval.harness.sandbox.config import (
+    Capability,
+    ContainerRuntime,
+    SandboxConfig,
+    SandboxMode,
+)
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.providers.vllm_server import VLLMServerProvider
 
@@ -256,13 +262,6 @@ class SciCodeExternalEval(ExternalEval):
     ) -> list[bool]:
         if not scorable_indices:
             return []
-
-        from olmo_eval.harness.sandbox import SandboxManager
-        from olmo_eval.harness.sandbox.config import (
-            Capability,
-            SandboxConfig,
-            SandboxMode,
-        )
 
         sandbox_config = SandboxConfig(
             image=sc_args.sandbox_image,
