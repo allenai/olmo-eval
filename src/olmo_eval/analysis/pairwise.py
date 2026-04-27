@@ -94,6 +94,31 @@ class FilteredModel:
 
 
 @dataclass(frozen=True)
+class _PairwiseTaskRow:
+    experiment_pk: int
+    task_name: str
+    task_hash: str
+    num_instances: int | None
+    metrics: dict[str, Any]
+    primary_metric: str | None
+
+
+@dataclass(frozen=True)
+class _PairwiseInstanceKeyRow:
+    experiment_pk: int
+    native_id: str
+    task_hash: str
+
+
+@dataclass(frozen=True)
+class _PairwiseInstanceScoreRow:
+    experiment_pk: int
+    native_id: str
+    task_hash: str
+    raw_score: float | None
+
+
+@dataclass(frozen=True)
 class MetricProfile:
     """Resolved pairwise semantics for one task metric."""
 
@@ -383,6 +408,331 @@ def _build_ordered_models(selected: list[Any], *, keep_all: bool) -> list[tuple[
             )
         )
     return ordered
+
+
+def _merge_metric_values(
+    merged_metrics: dict[str, dict[str, Any]],
+    metrics: Any,
+) -> None:
+    if not isinstance(metrics, dict):
+        return
+    for metric_name, scorer_values in metrics.items():
+        if not isinstance(metric_name, str) or not isinstance(scorer_values, dict):
+            continue
+        merged_scorers = merged_metrics.setdefault(metric_name, {})
+        for scorer_name, score in scorer_values.items():
+            if not isinstance(scorer_name, str) or scorer_name in merged_scorers:
+                continue
+            merged_scorers[scorer_name] = score
+
+
+def _latest_merge_context(
+    *,
+    source_experiments: list[Any],
+    display_experiments: list[Any],
+) -> tuple[dict[int, Any], dict[str, Any], dict[int, int]]:
+    source_experiment_by_pk = {
+        int(experiment.id): experiment
+        for experiment in source_experiments
+        if getattr(experiment, "id", None) is not None
+    }
+    display_experiment_by_hash = {
+        str(experiment.model_hash or ""): experiment
+        for experiment in display_experiments
+        if getattr(experiment, "model_hash", None)
+    }
+    display_order = {
+        int(experiment.id): index for index, experiment in enumerate(display_experiments)
+    }
+    return source_experiment_by_pk, display_experiment_by_hash, display_order
+
+
+def _merge_latest_task_rows(
+    *,
+    task_rows: list[Any],
+    source_experiments: list[Any],
+    display_experiments: list[Any],
+) -> list[_PairwiseTaskRow]:
+    from olmo_eval.runners.processing.utils import extract_score_from_metrics
+
+    (
+        source_experiment_by_pk,
+        display_experiment_by_hash,
+        display_order,
+    ) = _latest_merge_context(
+        source_experiments=source_experiments,
+        display_experiments=display_experiments,
+    )
+
+    enriched_rows: list[tuple[int, str, str, float, int, Any]] = []
+    for row in task_rows:
+        try:
+            source_pk = int(row.experiment_pk)
+        except (TypeError, ValueError):
+            continue
+        source_experiment = source_experiment_by_pk.get(source_pk)
+        if source_experiment is None:
+            continue
+        model_hash = str(getattr(source_experiment, "model_hash", "") or "")
+        display_experiment = display_experiment_by_hash.get(model_hash)
+        if display_experiment is None:
+            continue
+        source_timestamp = getattr(source_experiment, "timestamp", None)
+        timestamp_value = (
+            float(source_timestamp.timestamp()) if source_timestamp is not None else float("-inf")
+        )
+        enriched_rows.append(
+            (
+                int(display_experiment.id),
+                str(row.task_name or ""),
+                str(row.task_hash or ""),
+                -timestamp_value,
+                -source_pk,
+                row,
+            )
+        )
+
+    enriched_rows.sort()
+
+    merged_rows_by_key: dict[tuple[int, str], dict[str, Any]] = {}
+    for display_pk, task_name, task_hash, _, _, row in enriched_rows:
+        task_id = str(task_hash or task_name)
+        merged_row = merged_rows_by_key.setdefault(
+            (display_pk, task_id),
+            {
+                "experiment_pk": display_pk,
+                "task_name": task_name,
+                "task_hash": task_hash,
+                "num_instances": 0,
+                "num_instances_seen": False,
+                "metrics": {},
+                "primary_metric_candidates": [],
+            },
+        )
+        row_num_instances = getattr(row, "num_instances", None)
+        if row_num_instances is not None:
+            merged_row["num_instances"] = max(
+                int(merged_row["num_instances"]),
+                int(row_num_instances),
+            )
+            merged_row["num_instances_seen"] = True
+        _merge_metric_values(merged_row["metrics"], getattr(row, "metrics", None))
+        primary_metric = getattr(row, "primary_metric", None)
+        if primary_metric:
+            metric_key = str(primary_metric)
+            if metric_key not in merged_row["primary_metric_candidates"]:
+                merged_row["primary_metric_candidates"].append(metric_key)
+
+    merged_rows: list[_PairwiseTaskRow] = []
+    for merged_row in merged_rows_by_key.values():
+        merged_metrics = dict(merged_row["metrics"])
+        primary_metric_candidates = list(merged_row["primary_metric_candidates"])
+        primary_metric = next(
+            (
+                candidate
+                for candidate in primary_metric_candidates
+                if extract_score_from_metrics(merged_metrics, candidate) is not None
+            ),
+            primary_metric_candidates[0] if primary_metric_candidates else None,
+        )
+        merged_rows.append(
+            _PairwiseTaskRow(
+                experiment_pk=int(merged_row["experiment_pk"]),
+                task_name=str(merged_row["task_name"]),
+                task_hash=str(merged_row["task_hash"]),
+                num_instances=(
+                    int(merged_row["num_instances"]) if merged_row["num_instances_seen"] else None
+                ),
+                metrics=merged_metrics,
+                primary_metric=primary_metric,
+            )
+        )
+
+    merged_rows.sort(
+        key=lambda row: (
+            display_order.get(int(row.experiment_pk), math.inf),
+            row.task_name,
+            row.task_hash,
+        )
+    )
+    return merged_rows
+
+
+def _merge_latest_instance_key_rows(
+    *,
+    instance_rows: list[Any],
+    source_experiments: list[Any],
+    display_experiments: list[Any],
+) -> list[_PairwiseInstanceKeyRow]:
+    (
+        source_experiment_by_pk,
+        display_experiment_by_hash,
+        display_order,
+    ) = _latest_merge_context(
+        source_experiments=source_experiments,
+        display_experiments=display_experiments,
+    )
+
+    enriched_rows: list[tuple[int, str, str, float, int]] = []
+    for row in instance_rows:
+        try:
+            source_pk = int(row.experiment_pk)
+        except (TypeError, ValueError):
+            continue
+        source_experiment = source_experiment_by_pk.get(source_pk)
+        if source_experiment is None:
+            continue
+        model_hash = str(getattr(source_experiment, "model_hash", "") or "")
+        display_experiment = display_experiment_by_hash.get(model_hash)
+        if display_experiment is None:
+            continue
+        source_timestamp = getattr(source_experiment, "timestamp", None)
+        timestamp_value = (
+            float(source_timestamp.timestamp()) if source_timestamp is not None else float("-inf")
+        )
+        enriched_rows.append(
+            (
+                int(display_experiment.id),
+                str(row.task_hash or ""),
+                str(row.native_id or ""),
+                -timestamp_value,
+                -source_pk,
+            )
+        )
+
+    enriched_rows.sort()
+
+    merged_keys: list[_PairwiseInstanceKeyRow] = []
+    seen_keys: set[tuple[int, str, str]] = set()
+    for display_pk, task_hash, native_id, _, _ in enriched_rows:
+        key = (display_pk, task_hash, native_id)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        merged_keys.append(
+            _PairwiseInstanceKeyRow(
+                experiment_pk=display_pk,
+                native_id=native_id,
+                task_hash=task_hash,
+            )
+        )
+
+    merged_keys.sort(
+        key=lambda row: (
+            display_order.get(int(row.experiment_pk), math.inf),
+            row.task_hash,
+            row.native_id,
+        )
+    )
+    return merged_keys
+
+
+def _update_task_rows_num_instances(
+    *,
+    task_rows: list[Any],
+    instance_rows: list[Any],
+) -> list[_PairwiseTaskRow]:
+    instance_count_by_task: dict[tuple[int, str], int] = {}
+    for row in instance_rows:
+        key = (int(row.experiment_pk), str(row.task_hash or ""))
+        instance_count_by_task[key] = instance_count_by_task.get(key, 0) + 1
+
+    updated_rows: list[_PairwiseTaskRow] = []
+    for row in task_rows:
+        resolved_count = max(
+            int(getattr(row, "num_instances", 0) or 0),
+            instance_count_by_task.get((int(row.experiment_pk), str(row.task_hash or "")), 0),
+        )
+        updated_rows.append(
+            _PairwiseTaskRow(
+                experiment_pk=int(row.experiment_pk),
+                task_name=str(row.task_name or ""),
+                task_hash=str(row.task_hash or ""),
+                num_instances=resolved_count if resolved_count > 0 else None,
+                metrics=dict(getattr(row, "metrics", {}) or {}),
+                primary_metric=(
+                    str(row.primary_metric) if getattr(row, "primary_metric", None) else None
+                ),
+            )
+        )
+    return updated_rows
+
+
+def _merge_latest_instance_score_rows(
+    *,
+    instance_rows: list[Any],
+    source_experiments: list[Any],
+    display_experiments: list[Any],
+) -> list[_PairwiseInstanceScoreRow]:
+    (
+        source_experiment_by_pk,
+        display_experiment_by_hash,
+        display_order,
+    ) = _latest_merge_context(
+        source_experiments=source_experiments,
+        display_experiments=display_experiments,
+    )
+
+    enriched_rows: list[tuple[int, str, str, float, int, float | None]] = []
+    for row in instance_rows:
+        try:
+            source_pk = int(row.experiment_pk)
+        except (TypeError, ValueError):
+            continue
+        source_experiment = source_experiment_by_pk.get(source_pk)
+        if source_experiment is None:
+            continue
+        model_hash = str(getattr(source_experiment, "model_hash", "") or "")
+        display_experiment = display_experiment_by_hash.get(model_hash)
+        if display_experiment is None:
+            continue
+        source_timestamp = getattr(source_experiment, "timestamp", None)
+        timestamp_value = (
+            float(source_timestamp.timestamp()) if source_timestamp is not None else float("-inf")
+        )
+        raw_score = getattr(row, "raw_score", None)
+        enriched_rows.append(
+            (
+                int(display_experiment.id),
+                str(row.task_hash or ""),
+                str(row.native_id or ""),
+                -timestamp_value,
+                -source_pk,
+                float(raw_score) if raw_score is not None else None,
+            )
+        )
+
+    enriched_rows.sort()
+
+    merged_rows_by_key: dict[tuple[int, str, str], _PairwiseInstanceScoreRow] = {}
+    for display_pk, task_hash, native_id, _, _, raw_score in enriched_rows:
+        key = (display_pk, task_hash, native_id)
+        existing = merged_rows_by_key.get(key)
+        if existing is None:
+            merged_rows_by_key[key] = _PairwiseInstanceScoreRow(
+                experiment_pk=display_pk,
+                native_id=native_id,
+                task_hash=task_hash,
+                raw_score=raw_score,
+            )
+            continue
+        if existing.raw_score is None and raw_score is not None:
+            merged_rows_by_key[key] = _PairwiseInstanceScoreRow(
+                experiment_pk=display_pk,
+                native_id=native_id,
+                task_hash=task_hash,
+                raw_score=raw_score,
+            )
+
+    merged_rows = list(merged_rows_by_key.values())
+    merged_rows.sort(
+        key=lambda row: (
+            display_order.get(int(row.experiment_pk), math.inf),
+            row.task_hash,
+            row.native_id,
+        )
+    )
+    return merged_rows
 
 
 def _build_suite_coverage_lookup(
@@ -934,15 +1284,15 @@ def _raise_insufficient_compared_models(
             "full-coverage requirement.",
         ]
     elif not keep_all:
-        detail = "after deduping by model_hash"
+        detail = "after collapsing repeated runs by model_hash"
         code = "insufficient_unique_models_after_dedupe"
         summary = (
-            f"Only {len(ordered)} unique model(s) remain after collapsing to the latest "
-            "run per model hash."
+            f"Only {len(ordered)} unique model(s) remain after merging compatible repeated "
+            "runs by model hash."
         )
         notes = [
-            "The paired test uses one run per model hash by default so head-to-head cells "
-            "do not mix multiple runs of the same checkpoint."
+            "The paired test collapses repeated runs into one comparison row per model hash "
+            "while merging compatible task and instance coverage across those runs."
         ]
         suggestions = [
             "Broaden the filters to include more distinct model hashes.",
@@ -969,7 +1319,7 @@ def _raise_insufficient_compared_models(
         filter_summary=scope_str,
         counts=[
             {"label": "matched runs", "value": n_matched},
-            {"label": "after latest-run dedupe", "value": len(selected_before_coverage)},
+            {"label": "after model-hash collapse", "value": len(selected_before_coverage)},
             {"label": "eligible compared models", "value": len(ordered)},
             {"label": "minimum required", "value": 2},
         ],
@@ -1179,6 +1529,7 @@ def compute_pairwise(
 
     if keep_all:
         selected = sorted(candidate_experiments, key=lambda e: e.timestamp, reverse=True)
+        source_experiments = list(selected)
     else:
         chosen: dict[str, Any] = {}
         for exp in candidate_experiments:
@@ -1186,6 +1537,7 @@ def compute_pairwise(
             if existing is None or exp.timestamp > existing.timestamp:
                 chosen[exp.model_hash] = exp
         selected = list(chosen.values())
+        source_experiments = list(candidate_experiments)
 
     n_dropped = n_matched - len(selected)
     selected_before_coverage = list(selected)
@@ -1203,6 +1555,7 @@ def compute_pairwise(
     filtered_models: list[FilteredModel] = []
     ordered = _build_ordered_models(selected, keep_all=keep_all)
     pks = [pk for pk, _ in ordered]
+    source_pks = [int(exp.id) for exp in source_experiments]
 
     tr_stmt = select(
         TaskResult.experiment_pk,
@@ -1211,7 +1564,7 @@ def compute_pairwise(
         TaskResult.num_instances,
         TaskResult.metrics,
         TaskResult.primary_metric,
-    ).where(TaskResult.experiment_pk.in_(pks))
+    ).where(TaskResult.experiment_pk.in_(source_pks))
     if suite_name:
         tr_stmt = tr_stmt.where(TaskResult.task_name.in_(suite_task_names))
     elif task_name:
@@ -1229,6 +1582,12 @@ def compute_pairwise(
             exclude_task_hashes=exclude_task_hashes,
         )
     ]
+    if not keep_all:
+        task_rows = _merge_latest_task_rows(
+            task_rows=task_rows,
+            source_experiments=source_experiments,
+            display_experiments=selected,
+        )
 
     if not task_rows:
         hint = ""
@@ -1302,6 +1661,31 @@ def compute_pairwise(
         )
 
     _validate_requested_task_scope(task_rows, task_name=task_name, task_hash=task_hash)
+    initial_task_hashes = {str(row.task_hash or "") for row in task_rows if row.task_hash}
+    instance_key_rows = (
+        session.execute(
+            select(
+                InstancePrediction.experiment_pk,
+                InstancePrediction.native_id,
+                InstancePrediction.task_hash,
+            ).where(
+                InstancePrediction.experiment_pk.in_(source_pks),
+                InstancePrediction.task_hash.in_(initial_task_hashes),
+            )
+        ).all()
+        if initial_task_hashes
+        else []
+    )
+    if not keep_all:
+        instance_key_rows = _merge_latest_instance_key_rows(
+            instance_rows=instance_key_rows,
+            source_experiments=source_experiments,
+            display_experiments=selected,
+        )
+    task_rows = _update_task_rows_num_instances(
+        task_rows=task_rows,
+        instance_rows=instance_key_rows,
+    )
     selected, ordered, task_rows, filtered_models = _restrict_task_rows_to_selected_models(
         task_rows=task_rows,
         selected=selected,
@@ -1358,13 +1742,19 @@ def compute_pairwise(
                 InstancePrediction.task_hash,
                 score_expr,
             ).where(
-                InstancePrediction.experiment_pk.in_(pks),
+                InstancePrediction.experiment_pk.in_(source_pks),
                 InstancePrediction.task_hash.in_(unique_task_hashes),
             )
         ).all()
         if score_expr is not None
         else []
     )
+    if not keep_all:
+        rows = _merge_latest_instance_score_rows(
+            instance_rows=rows,
+            source_experiments=source_experiments,
+            display_experiments=selected,
+        )
 
     raw_scores_by_pk: dict[int, dict[tuple[str, str], float]] = {pk: {} for pk in pks}
     comparison_scores_by_pk: dict[int, dict[tuple[str, str], float]] = {pk: {} for pk in pks}
@@ -1379,7 +1769,11 @@ def compute_pairwise(
         if task_score is not None:
             task_score_by_pk[task_row.experiment_pk][task_row.task_hash] = task_score
 
-    for exp_pk, native_id, th, raw_score in rows:
+    for row in rows:
+        exp_pk = int(row.experiment_pk)
+        native_id = str(row.native_id)
+        th = str(row.task_hash)
+        raw_score = row.raw_score
         if exp_pk not in raw_scores_by_pk or exp_pk not in comparison_scores_by_pk:
             continue
         if raw_score is None or th not in task_hash_to_name:
@@ -1405,7 +1799,7 @@ def compute_pairwise(
             sample_instance_metrics = session.execute(
                 select(InstancePrediction.instance_metrics)
                 .where(
-                    InstancePrediction.experiment_pk.in_(pks),
+                    InstancePrediction.experiment_pk.in_(source_pks),
                     InstancePrediction.task_hash.in_(unique_task_hashes),
                 )
                 .limit(1)

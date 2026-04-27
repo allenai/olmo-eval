@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy.dialects import postgresql
@@ -17,6 +18,11 @@ from olmo_eval.analysis.pairwise import (
     _build_experiment_refetch_stmt,
     _compute_pairs,
     _extract_pairwise_instance_score,
+    _merge_latest_instance_key_rows,
+    _merge_latest_instance_score_rows,
+    _merge_latest_task_rows,
+    _update_task_rows_num_instances,
+    compute_pairwise,
     get_task_metric_profile,
     get_win_rate,
 )
@@ -470,6 +476,389 @@ class TestComputePairsCompoundKeys:
         pairs = _compute_pairs(scores, 2, shared, margin=0.0)
         assert pairs[0].wins_a == 2
         assert pairs[0].wins_b == 0
+
+
+class TestLatestRunMergeHelpers:
+    @staticmethod
+    def _experiment(experiment_id: int, *, hour: int) -> SimpleNamespace:
+        return SimpleNamespace(
+            id=experiment_id,
+            model_name="model-a",
+            model_hash="abc12345deadbeef",
+            timestamp=datetime(2026, 4, 21, hour, 0, tzinfo=UTC),
+        )
+
+    def test_merge_latest_task_rows_backfills_missing_tasks_and_prefers_newest_metric_values(
+        self,
+    ) -> None:
+        older = self._experiment(10, hour=8)
+        latest = self._experiment(11, hour=12)
+
+        task_rows = [
+            SimpleNamespace(
+                experiment_pk=10,
+                task_name="task-a",
+                task_hash="task-hash-a",
+                num_instances=2,
+                metrics={
+                    "accuracy": {"exact_match": 0.40},
+                    "f1": {"exact_match": 0.70},
+                },
+                primary_metric="accuracy:exact_match",
+            ),
+            SimpleNamespace(
+                experiment_pk=11,
+                task_name="task-a",
+                task_hash="task-hash-a",
+                num_instances=2,
+                metrics={"accuracy": {"exact_match": 0.60}},
+                primary_metric="accuracy:exact_match",
+            ),
+            SimpleNamespace(
+                experiment_pk=10,
+                task_name="task-b",
+                task_hash="task-hash-b",
+                num_instances=3,
+                metrics={"accuracy": {"exact_match": 0.80}},
+                primary_metric="accuracy:exact_match",
+            ),
+        ]
+
+        merged_rows = _merge_latest_task_rows(
+            task_rows=task_rows,
+            source_experiments=[older, latest],
+            display_experiments=[latest],
+        )
+
+        assert {row.task_hash for row in merged_rows} == {"task-hash-a", "task-hash-b"}
+        row_by_hash = {row.task_hash: row for row in merged_rows}
+
+        assert row_by_hash["task-hash-a"].experiment_pk == 11
+        assert row_by_hash["task-hash-a"].metrics["accuracy"]["exact_match"] == pytest.approx(0.60)
+        assert row_by_hash["task-hash-a"].metrics["f1"]["exact_match"] == pytest.approx(0.70)
+        assert row_by_hash["task-hash-b"].experiment_pk == 11
+        assert row_by_hash["task-hash-b"].num_instances == 3
+
+    def test_merge_latest_instance_rows_backfills_keys_and_prefers_latest_non_null_scores(
+        self,
+    ) -> None:
+        older = self._experiment(10, hour=8)
+        latest = self._experiment(11, hour=12)
+
+        instance_rows = [
+            SimpleNamespace(experiment_pk=10, task_hash="task-hash-a", native_id="q1"),
+            SimpleNamespace(experiment_pk=10, task_hash="task-hash-a", native_id="q3"),
+            SimpleNamespace(experiment_pk=11, task_hash="task-hash-a", native_id="q1"),
+            SimpleNamespace(experiment_pk=11, task_hash="task-hash-a", native_id="q2"),
+        ]
+
+        merged_keys = _merge_latest_instance_key_rows(
+            instance_rows=instance_rows,
+            source_experiments=[older, latest],
+            display_experiments=[latest],
+        )
+
+        assert {(row.experiment_pk, row.task_hash, row.native_id) for row in merged_keys} == {
+            (11, "task-hash-a", "q1"),
+            (11, "task-hash-a", "q2"),
+            (11, "task-hash-a", "q3"),
+        }
+
+        score_rows = [
+            SimpleNamespace(
+                experiment_pk=10,
+                task_hash="task-hash-a",
+                native_id="q1",
+                raw_score=1.0,
+            ),
+            SimpleNamespace(
+                experiment_pk=11,
+                task_hash="task-hash-a",
+                native_id="q1",
+                raw_score=None,
+            ),
+            SimpleNamespace(
+                experiment_pk=10,
+                task_hash="task-hash-a",
+                native_id="q2",
+                raw_score=0.2,
+            ),
+            SimpleNamespace(
+                experiment_pk=11,
+                task_hash="task-hash-a",
+                native_id="q2",
+                raw_score=0.9,
+            ),
+            SimpleNamespace(
+                experiment_pk=10,
+                task_hash="task-hash-a",
+                native_id="q3",
+                raw_score=0.4,
+            ),
+        ]
+
+        merged_scores = _merge_latest_instance_score_rows(
+            instance_rows=score_rows,
+            source_experiments=[older, latest],
+            display_experiments=[latest],
+        )
+
+        score_by_native = {row.native_id: row.raw_score for row in merged_scores}
+        assert score_by_native["q1"] == pytest.approx(1.0)
+        assert score_by_native["q2"] == pytest.approx(0.9)
+        assert score_by_native["q3"] == pytest.approx(0.4)
+
+    def test_update_task_rows_num_instances_uses_merged_instance_counts(self) -> None:
+        task_rows = [
+            SimpleNamespace(
+                experiment_pk=11,
+                task_name="task-a",
+                task_hash="task-hash-a",
+                num_instances=2,
+                metrics={"accuracy": {"exact_match": 0.60}},
+                primary_metric="accuracy:exact_match",
+            ),
+            SimpleNamespace(
+                experiment_pk=11,
+                task_name="task-b",
+                task_hash="task-hash-b",
+                num_instances=5,
+                metrics={"accuracy": {"exact_match": 0.80}},
+                primary_metric="accuracy:exact_match",
+            ),
+        ]
+        instance_rows = [
+            SimpleNamespace(experiment_pk=11, task_hash="task-hash-a", native_id="q1"),
+            SimpleNamespace(experiment_pk=11, task_hash="task-hash-a", native_id="q2"),
+            SimpleNamespace(experiment_pk=11, task_hash="task-hash-a", native_id="q3"),
+        ]
+
+        updated_rows = _update_task_rows_num_instances(
+            task_rows=task_rows,
+            instance_rows=instance_rows,
+        )
+
+        row_by_hash = {row.task_hash: row for row in updated_rows}
+        assert row_by_hash["task-hash-a"].num_instances == 3
+        assert row_by_hash["task-hash-b"].num_instances == 5
+
+
+class _SequenceExecuteResult:
+    def __init__(self, rows):
+        self._rows = list(rows)
+
+    def all(self):
+        return list(self._rows)
+
+
+class _SequenceSession:
+    def __init__(self, responses):
+        self._responses = list(responses)
+
+    def execute(self, _query):
+        if not self._responses:
+            raise AssertionError("Unexpected session.execute() call")
+        return _SequenceExecuteResult(self._responses.pop(0))
+
+
+class TestComputePairwiseLatestRunMerge:
+    @staticmethod
+    def _experiment(
+        experiment_id: int,
+        *,
+        model_name: str,
+        model_hash: str,
+        hour: int,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(
+            id=experiment_id,
+            model_name=model_name,
+            model_hash=model_hash,
+            timestamp=datetime(2026, 4, 21, hour, 0, tzinfo=UTC),
+        )
+
+    def test_latest_mode_merges_compatible_repeated_runs(self, monkeypatch) -> None:
+        from olmo_eval.evals.suites import registry as suite_registry
+        from olmo_eval.storage.backends.postgres import repository as repository_mod
+
+        older_a = self._experiment(10, model_name="model-a", model_hash="hash-a", hour=8)
+        latest_a = self._experiment(11, model_name="model-a", model_hash="hash-a", hour=12)
+        older_b = self._experiment(20, model_name="model-b", model_hash="hash-b", hour=7)
+        latest_b = self._experiment(21, model_name="model-b", model_hash="hash-b", hour=11)
+        all_experiments = [older_a, latest_a, older_b, latest_b]
+
+        monkeypatch.setattr(
+            repository_mod.ExperimentRepository,
+            "query_rows",
+            lambda self, **kwargs: list(all_experiments),
+        )
+        monkeypatch.setattr(suite_registry, "suite_exists", lambda name: name == "demo:suite")
+        monkeypatch.setattr(
+            suite_registry,
+            "get_suite",
+            lambda name: SimpleNamespace(expand=lambda: ("task-a", "task-b")),
+        )
+
+        task_rows = [
+            SimpleNamespace(
+                experiment_pk=10,
+                task_name="task-a",
+                task_hash="task-a-hash",
+                num_instances=2,
+                metrics={"accuracy": {"exact_match": 0.50}},
+                primary_metric="accuracy:exact_match",
+            ),
+            SimpleNamespace(
+                experiment_pk=11,
+                task_name="task-a",
+                task_hash="task-a-hash",
+                num_instances=2,
+                metrics={"accuracy": {"exact_match": 0.90}},
+                primary_metric="accuracy:exact_match",
+            ),
+            SimpleNamespace(
+                experiment_pk=10,
+                task_name="task-b",
+                task_hash="task-b-hash",
+                num_instances=2,
+                metrics={"accuracy": {"exact_match": 0.40}},
+                primary_metric="accuracy:exact_match",
+            ),
+            SimpleNamespace(
+                experiment_pk=20,
+                task_name="task-a",
+                task_hash="task-a-hash",
+                num_instances=2,
+                metrics={"accuracy": {"exact_match": 0.30}},
+                primary_metric="accuracy:exact_match",
+            ),
+            SimpleNamespace(
+                experiment_pk=21,
+                task_name="task-a",
+                task_hash="task-a-hash",
+                num_instances=2,
+                metrics={"accuracy": {"exact_match": 0.70}},
+                primary_metric="accuracy:exact_match",
+            ),
+            SimpleNamespace(
+                experiment_pk=20,
+                task_name="task-b",
+                task_hash="task-b-hash",
+                num_instances=2,
+                metrics={"accuracy": {"exact_match": 0.60}},
+                primary_metric="accuracy:exact_match",
+            ),
+        ]
+        instance_key_rows = [
+            SimpleNamespace(experiment_pk=10, task_hash="task-a-hash", native_id="q1"),
+            SimpleNamespace(experiment_pk=10, task_hash="task-a-hash", native_id="q2"),
+            SimpleNamespace(experiment_pk=11, task_hash="task-a-hash", native_id="q1"),
+            SimpleNamespace(experiment_pk=11, task_hash="task-a-hash", native_id="q2"),
+            SimpleNamespace(experiment_pk=10, task_hash="task-b-hash", native_id="q3"),
+            SimpleNamespace(experiment_pk=10, task_hash="task-b-hash", native_id="q4"),
+            SimpleNamespace(experiment_pk=20, task_hash="task-a-hash", native_id="q1"),
+            SimpleNamespace(experiment_pk=20, task_hash="task-a-hash", native_id="q2"),
+            SimpleNamespace(experiment_pk=21, task_hash="task-a-hash", native_id="q1"),
+            SimpleNamespace(experiment_pk=21, task_hash="task-a-hash", native_id="q2"),
+            SimpleNamespace(experiment_pk=20, task_hash="task-b-hash", native_id="q3"),
+            SimpleNamespace(experiment_pk=20, task_hash="task-b-hash", native_id="q4"),
+        ]
+        score_rows = [
+            SimpleNamespace(
+                experiment_pk=10,
+                task_hash="task-a-hash",
+                native_id="q1",
+                raw_score=0.2,
+            ),
+            SimpleNamespace(
+                experiment_pk=10,
+                task_hash="task-a-hash",
+                native_id="q2",
+                raw_score=0.2,
+            ),
+            SimpleNamespace(
+                experiment_pk=11,
+                task_hash="task-a-hash",
+                native_id="q1",
+                raw_score=1.0,
+            ),
+            SimpleNamespace(
+                experiment_pk=11,
+                task_hash="task-a-hash",
+                native_id="q2",
+                raw_score=0.0,
+            ),
+            SimpleNamespace(
+                experiment_pk=10,
+                task_hash="task-b-hash",
+                native_id="q3",
+                raw_score=1.0,
+            ),
+            SimpleNamespace(
+                experiment_pk=10,
+                task_hash="task-b-hash",
+                native_id="q4",
+                raw_score=1.0,
+            ),
+            SimpleNamespace(
+                experiment_pk=20,
+                task_hash="task-a-hash",
+                native_id="q1",
+                raw_score=0.1,
+            ),
+            SimpleNamespace(
+                experiment_pk=20,
+                task_hash="task-a-hash",
+                native_id="q2",
+                raw_score=0.1,
+            ),
+            SimpleNamespace(
+                experiment_pk=21,
+                task_hash="task-a-hash",
+                native_id="q1",
+                raw_score=0.0,
+            ),
+            SimpleNamespace(
+                experiment_pk=21,
+                task_hash="task-a-hash",
+                native_id="q2",
+                raw_score=1.0,
+            ),
+            SimpleNamespace(
+                experiment_pk=20,
+                task_hash="task-b-hash",
+                native_id="q3",
+                raw_score=0.0,
+            ),
+            SimpleNamespace(
+                experiment_pk=20,
+                task_hash="task-b-hash",
+                native_id="q4",
+                raw_score=0.0,
+            ),
+        ]
+        session = _SequenceSession([task_rows, instance_key_rows, score_rows])
+
+        result = compute_pairwise(
+            session=session,
+            suite_name="demo:suite",
+            keep_all=False,
+            require_full_coverage=True,
+        )
+
+        assert [model.model_name for model in result.models] == ["model-a", "model-b"]
+        assert [model.model_hash for model in result.models] == ["hash-a", "hash-b"]
+        assert result.n_experiments_matched == 4
+        assert result.n_experiments_dropped == 2
+        assert result.instance_count == 4
+        assert result.task_names == ("task-a", "task-b")
+        assert result.task_hashes == ("task-a-hash", "task-b-hash")
+        assert result.model_task_scores[0] == pytest.approx((0.90, 0.40))
+        assert result.model_task_scores[1] == pytest.approx((0.70, 0.60))
+        assert len(result.pairs) == 1
+        assert result.pairs[0].wins_a == 3
+        assert result.pairs[0].wins_b == 1
+        assert session._responses == []
 
 
 class TestBuildExperimentRefetchStmt:
