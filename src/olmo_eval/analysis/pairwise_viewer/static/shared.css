@@ -1201,7 +1201,7 @@
       --table-idx-w: 44px;
       --table-name-w: 280px;
       --table-avg-w: 116px;
-      --table-task-w: 152px;
+      --table-task-w: 184px;
       border-collapse: separate;
       border-spacing: 0;
       width: auto;
@@ -1654,6 +1654,6 @@
 
       .results-table {
         --table-name-w: 220px;
-        --table-task-w: 132px;
+        --table-task-w: 156px;
       }
     }
