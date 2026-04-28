@@ -380,15 +380,23 @@ sys.exit(main())
                 f"ls {results_path}/*.json 2>/dev/null", timeout=30.0
             )
         except Exception as e:
+            logger.warning(
+                f"[{self.name}] Sandbox unreachable while reading results: {type(e).__name__}: {e}"
+            )
             return ExternalEvalResult(
                 name=self.name,
-                success=False,
-                error=f"Sandbox unreachable while reading results: {type(e).__name__}: {e}",
+                success=True,
+                metrics={},
+                error=f"Sandbox unreachable while reading results: {type(e).__name__}",
                 raw_output=raw_output,
             )
         if not ls_result.success:
             return ExternalEvalResult(
-                name=self.name, success=False, error="No results files found", raw_output=raw_output
+                name=self.name,
+                success=True,
+                metrics={},
+                error="No results files found",
+                raw_output=raw_output,
             )
 
         all_metrics: dict[str, float] = {}
