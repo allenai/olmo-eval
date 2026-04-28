@@ -400,6 +400,33 @@ class VLLMServerProvider(InferenceProvider):
         else:
             return await self._generate_chat(client, request, params)
 
+    def _get_completion_eos_stop(self) -> str | None:
+        """Best-effort EOS stop string for completion parity with oe-eval."""
+        try:
+            tokenizer = self._get_tokenizer(require_local=True)
+        except (ImportError, Exception):
+            return None
+
+        eos_token_id = getattr(tokenizer, "eos_token_id", None)
+        if eos_token_id is not None:
+            try:
+                eos_token = tokenizer.decode([eos_token_id], skip_special_tokens=False)
+            except TypeError:
+                eos_token = tokenizer.decode([eos_token_id])
+            if eos_token:
+                return eos_token
+
+        eos_token = getattr(tokenizer, "eos_token", None)
+        return str(eos_token) if eos_token else None
+
+    def _get_completion_stop_sequences(self, params: SamplingParams) -> list[str] | None:
+        """Build stop sequences for completions, including EOS when available."""
+        stop_sequences = list(params.stop_sequences or ())
+        eos_stop = self._get_completion_eos_stop()
+        if eos_stop and eos_stop not in stop_sequences:
+            stop_sequences.append(eos_stop)
+        return stop_sequences or None
+
     async def _generate_completion(
         self, client: AsyncOpenAI, request: LMRequest, params: SamplingParams
     ) -> list[LMOutput]:
@@ -411,6 +438,7 @@ class VLLMServerProvider(InferenceProvider):
             "max_tokens": params.max_tokens,
             "logprobs": 1,  # Request logprobs for metrics
         }
+        extra_body: dict[str, Any] = {"add_special_tokens": False}
 
         # Always send temperature explicitly to avoid server defaults (OpenAI API defaults to 1.0)
         kwargs["temperature"] = params.temperature
@@ -418,9 +446,12 @@ class VLLMServerProvider(InferenceProvider):
             if params.top_p is not None:
                 kwargs["top_p"] = params.top_p
             if params.top_k is not None:
-                kwargs["extra_body"] = {"top_k": params.top_k}
-        if params.stop_sequences:
-            kwargs["stop"] = list(params.stop_sequences)
+                extra_body["top_k"] = params.top_k
+        stop_sequences = self._get_completion_stop_sequences(params)
+        if stop_sequences:
+            kwargs["stop"] = stop_sequences
+        if extra_body:
+            kwargs["extra_body"] = extra_body
 
         response = await client.completions.create(**kwargs)
 

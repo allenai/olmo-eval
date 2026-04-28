@@ -1,10 +1,10 @@
-"""Unit tests for VLLMServerProvider logprobs implementation."""
+"""Unit tests for VLLMServerProvider completion and logprobs behavior."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from olmo_eval.common.types import LMRequest, RequestType
+from olmo_eval.common.types import LMRequest, RequestType, SamplingParams
 
 
 class TestVLLMServerProviderLogprobs:
@@ -48,6 +48,45 @@ class TestVLLMServerProviderLogprobs:
             "choices": [{"prompt_logprobs": prompt_logprobs}],
         }
         return resp
+
+    def _make_completion_response(self, text="test completion"):
+        """Build a completion response matching the OpenAI client shape."""
+        choice = MagicMock()
+        choice.text = text
+        choice.logprobs = None
+
+        resp = MagicMock()
+        resp.choices = [choice]
+        resp.usage = None
+        return resp
+
+    @pytest.mark.anyio
+    async def test_generate_completion_sets_add_special_tokens_false(self, provider):
+        """Completion payloads should disable server-side special token insertion."""
+        client = MagicMock()
+        client.completions.create = AsyncMock(return_value=self._make_completion_response())
+
+        request = LMRequest(request_type=RequestType.COMPLETION, prompt="Test prompt")
+        params = SamplingParams(max_tokens=32, temperature=0.6, top_p=0.6)
+
+        await provider._generate_completion(client, request, params)
+
+        call_kwargs = client.completions.create.call_args.kwargs
+        assert call_kwargs["extra_body"]["add_special_tokens"] is False
+
+    @pytest.mark.anyio
+    async def test_generate_completion_appends_eos_to_stop_sequences(self, provider):
+        """Completion payloads should include EOS in the stop list when available."""
+        client = MagicMock()
+        client.completions.create = AsyncMock(return_value=self._make_completion_response())
+
+        request = LMRequest(request_type=RequestType.COMPLETION, prompt="Test prompt")
+        params = SamplingParams(max_tokens=32, stop_sequences=("Question:", "</s>"))
+
+        await provider._generate_completion(client, request, params)
+
+        call_kwargs = client.completions.create.call_args.kwargs
+        assert call_kwargs["stop"] == ["Question:", "</s>", "tok1"]
 
     @pytest.mark.anyio
     async def test_logprobs_extracts_continuation_tokens(self, provider, mock_tokenizer):
