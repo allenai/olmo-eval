@@ -37,11 +37,24 @@ def prepare_task_items(
     """
     task = get_task(spec)
 
+    # Pull sampling_params out of `overrides` so it deep-merges into the
+    # existing SamplingParams dataclass instead of replacing it with a dict.
+    sampling_params_override: dict[str, Any] | SamplingParams | None = None
     if overrides:
-        task.config = replace(task.config, **overrides)
+        overrides = dict(overrides)
+        sampling_params_override = overrides.pop("sampling_params", None)
+        if overrides:
+            task.config = replace(task.config, **overrides)
 
     # Build sampling params from overrides
     existing_params = task.config.sampling_params or SamplingParams()
+
+    if isinstance(sampling_params_override, SamplingParams):
+        existing_params = sampling_params_override
+    elif isinstance(sampling_params_override, dict):
+        for key, value in sampling_params_override.items():
+            if hasattr(existing_params, key):
+                existing_params = replace(existing_params, **{key: value})
 
     # Apply sampling_overrides
     if sampling_overrides:
