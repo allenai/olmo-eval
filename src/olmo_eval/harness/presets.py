@@ -86,7 +86,7 @@ class HarnessPresets:
                 kwargs={"timeout": 60},
             ),
             metrics=MetricsConfig(),
-            backend="openai_agents",
+            scaffold="openai_agents",
             max_concurrency=4,
             batching=BatchConfig.streaming(),
         )
@@ -106,7 +106,7 @@ class HarnessPresets:
             system_prompt=DR_TULU_SYSTEM_PROMPT,
             max_turns=10,
             max_concurrency=4,
-            backend="openai_agents",
+            scaffold="openai_agents",
             required_secrets=("S2_API_KEY", "SERPER_API_KEY", "OPENAI_API_KEY"),
             batching=BatchConfig.streaming(),
         )
@@ -121,7 +121,6 @@ class HarnessPresets:
             metrics=MetricsConfig(),
             sandboxes=(
                 SandboxConfig(
-                    instances=16,
                     image="volcengine/sandbox-fusion:base-20250609",
                     mode=SandboxMode.DOCKER,
                     startup_timeout=300.0,
@@ -131,6 +130,14 @@ class HarnessPresets:
                         "RUN mkdir -p /runtime/java",
                         "RUN curl -L -o /runtime/java/javatuples-1.2.jar https://repo1.maven.org/maven2/org/javatuples/javatuples/1.2/javatuples-1.2.jar",
                     ),
+                ),
+                SandboxConfig(
+                    image="bigcodebench/bigcodebench-gradio:latest",
+                    mode=SandboxMode.DOCKER,
+                    capabilities=frozenset({"sandbox:bigcodebench"}),
+                    startup_timeout=300.0,
+                    log_dir=_get_logs_dir(),
+                    inject_swerex=True,
                 ),
             ),
         )
@@ -174,7 +181,7 @@ class HarnessPresets:
             system_prompt=CODING_AGENT_SYSTEM_PROMPT,
             max_turns=10,
             max_concurrency=4,
-            backend="openai_agents",
+            scaffold="openai_agents",
             required_secrets=("OPENAI_API_KEY",),
             sandboxes=(
                 SandboxConfig(
@@ -207,7 +214,7 @@ class HarnessPresets:
             system_prompt=CODE_COMPLETION_SYSTEM_PROMPT,
             max_turns=10,
             max_concurrency=16,
-            backend="openai_agents",
+            scaffold="openai_agents",
             required_secrets=("OPENAI_API_KEY",),
             sandboxes=(
                 SandboxConfig(

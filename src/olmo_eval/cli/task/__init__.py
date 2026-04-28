@@ -59,12 +59,12 @@ def inspect(
 ) -> None:
     """Inspect instances from a task without running evaluation.
 
-    TASK_SPEC is the task name with optional variants (e.g., arc_easy, mmlu:olmes).
+    TASK_SPEC is the task name with optional variants (e.g., arc_easy, arc_easy:mc).
 
     Examples:
         olmo-eval task inspect arc_easy
         olmo-eval task inspect arc_easy -n 3
-        olmo-eval task inspect mmlu:olmes --request
+        olmo-eval task inspect arc_easy:mc --request
         olmo-eval task inspect arc_easy --json
         olmo-eval task inspect humaneval -T meta-llama/Llama-3.1-8B-Instruct --formatted
         olmo-eval task inspect humaneval -T meta-llama/Llama-3.1-8B-Instruct --tokens

@@ -32,7 +32,7 @@ async def execute_bash(command: str) -> str:
 
     Note:
         This is a placeholder implementation. Actual execution is delegated
-        to the SandboxExecutor by the backend when sandbox is enabled.
+        to the SandboxExecutor by the scaffold when sandbox is enabled.
     """
     raise NotImplementedError(
         "execute_bash requires sandbox execution. Ensure sandbox is enabled in HarnessConfig."

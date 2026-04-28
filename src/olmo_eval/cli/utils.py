@@ -1,12 +1,15 @@
 """Shared utilities for the CLI."""
 
+import dataclasses
 import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 import click
-from rich.console import Console
+
+from olmo_eval.common import types
+from olmo_eval.common.console import console
 
 if TYPE_CHECKING:
     from olmo_eval.evals.external.base import ExternalEval
@@ -14,9 +17,6 @@ if TYPE_CHECKING:
     from olmo_eval.harness import HarnessConfig
     from olmo_eval.inference.providers.config import ProviderConfig
     from olmo_eval.launch.beaker.launcher import BeakerJobConfig
-
-
-console = Console(force_terminal=True, width=120)
 
 
 @dataclass
@@ -94,13 +94,14 @@ HARNESS_CONFIG_FIELDS = frozenset(
         "tools",
         "system_prompt",
         "tool_choice",
-        "backend",
+        "scaffold",
         "required_secrets",
         "max_turns",
         "max_concurrency",
         "scoring_concurrency",
         "sandboxes",
-        "backend_kwargs",
+        "scaffold_kwargs",
+        "sandbox_pool_instances",
         "metrics",
         "batching",
         "scorer_startup_timeout",
@@ -170,10 +171,12 @@ def process_ordered_args(
 
             # Apply to task or harness with validation
             if last_flag == "t" and current_task:
-                if top_key not in TASK_CONFIG_FIELDS:
+                sampling_fields = {f.name for f in dataclasses.fields(types.SamplingParams)}
+                if top_key not in TASK_CONFIG_FIELDS and top_key not in sampling_fields:
                     raise click.UsageError(
-                        f"Invalid task override: '{top_key}' is not a TaskConfig field. "
-                        f"Did you mean to put this after --harness instead of -t?"
+                        f"Invalid task override: '{top_key}' is not a TaskConfig or "
+                        f"SamplingParams field. Did you mean to put this after --harness "
+                        f"instead of -t?"
                     )
                 task_overrides[current_task].append(arg.value)
             elif last_flag == "h":
@@ -233,14 +236,16 @@ def _coerce_value(value: str) -> Any:
 
     Handles booleans, integers, floats, JSON objects/arrays, and plain strings.
     """
-    # Booleans
+    # JSON scalar literals
     if value.lower() == "true":
         return True
     if value.lower() == "false":
         return False
+    if value == "null":
+        return None
 
-    # JSON objects and arrays
-    if value.startswith("{") or value.startswith("["):
+    # JSON objects, arrays, and quoted strings (so launcher round-trips survive)
+    if value.startswith(("{", "[", '"')):
         try:
             return json.loads(value)
         except json.JSONDecodeError:

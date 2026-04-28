@@ -360,6 +360,7 @@ class VLLMServerProcess:
         self.server_kwargs = kwargs
         self._process: subprocess.Popen | None = None
         self._log_file: Any | None = None
+        self._log_path: Any | None = None
         self._started = False
 
     @property
@@ -373,6 +374,33 @@ class VLLMServerProcess:
             logger.log(level, f"[{self.owner}] {msg}")
         else:
             logger.log(level, msg)
+
+    def _read_log_output(self) -> str | None:
+        """Read server logs, preferring the current server's log file."""
+        if not self.log_dir:
+            return None
+
+        import pathlib
+
+        candidate_paths: list[pathlib.Path] = []
+        if self._log_path is not None:
+            candidate_paths.append(self._log_path)
+
+        log_dir = pathlib.Path(self.log_dir)
+        if log_dir.exists():
+            for path in sorted(
+                log_dir.glob("vllm_server*.log"),
+                key=lambda log_path: log_path.stat().st_mtime,
+                reverse=True,
+            ):
+                if path not in candidate_paths:
+                    candidate_paths.append(path)
+
+        for log_path in candidate_paths:
+            if log_path.exists():
+                return log_path.read_text(errors="replace")
+
+        return None
 
     def start(self, progress_callback: ProgressCallback | None = None) -> str:
         """Start the vLLM server.
@@ -424,9 +452,9 @@ class VLLMServerProcess:
         if self.log_dir:
             import pathlib
 
-            log_path = pathlib.Path(self.log_dir) / "vllm_server.log"
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            self._log_file = open(log_path, "w")  # noqa: SIM115
+            self._log_path = pathlib.Path(self.log_dir) / f"vllm_server_{self.port}.log"
+            self._log_path.parent.mkdir(parents=True, exist_ok=True)
+            self._log_file = open(self._log_path, "w")  # noqa: SIM115
             self._process = subprocess.Popen(
                 cmd,
                 stdout=self._log_file,
@@ -468,11 +496,7 @@ class VLLMServerProcess:
             # If log_dir is set, output went to file - read it from there
             if process_output is None and self.log_dir:
                 with suppress(Exception):
-                    import pathlib
-
-                    log_path = pathlib.Path(self.log_dir) / "vllm_server.log"
-                    if log_path.exists():
-                        process_output = log_path.read_text(errors="replace")
+                    process_output = self._read_log_output()
 
             # Log the captured output for debugging
             if process_output:
@@ -487,7 +511,7 @@ class VLLMServerProcess:
                 error_msg += f". Error: {last_error}"
             if process_output:
                 # Include a truncated version of the output in the exception
-                max_output_len = 2000
+                max_output_len = 20000
                 if len(process_output) > max_output_len:
                     truncated_output = "...[truncated]...\n" + process_output[-max_output_len:]
                 else:

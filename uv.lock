@@ -1222,7 +1222,8 @@ name = "contourpy"
 version = "1.3.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" } },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-18-olmo-eval-internal-agents' or extra == 'extra-18-olmo-eval-internal-clients' or extra != 'extra-18-olmo-eval-internal-openhands' or (extra == 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm')" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-18-olmo-eval-internal-openhands'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/58/01/1253e6698a07380cd31a736d248a3f2a50a7c88779a1813da27503cadc2a/contourpy-1.3.3.tar.gz", hash = "sha256:083e12155b210502d0bca491432bb04d56dc3432f95a979b429f2848c3dbe880", size = 13466174, upload-time = "2025-07-26T12:03:12.549Z" }
 wheels = [
@@ -4111,7 +4112,8 @@ dependencies = [
     { name = "cycler" },
     { name = "fonttools" },
     { name = "kiwisolver" },
-    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" } },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-18-olmo-eval-internal-agents' or extra == 'extra-18-olmo-eval-internal-clients' or extra != 'extra-18-olmo-eval-internal-openhands' or (extra == 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm')" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-18-olmo-eval-internal-openhands'" },
     { name = "packaging" },
     { name = "pillow" },
     { name = "pyparsing" },
@@ -5085,12 +5087,19 @@ dependencies = [
     { name = "rich" },
     { name = "sympy" },
     { name = "textual-plot" },
+    { name = "tree-sitter" },
+    { name = "tree-sitter-python" },
 ]
 
 [package.optional-dependencies]
 agents = [
     { name = "httpx" },
     { name = "openai-agents" },
+]
+analysis = [
+    { name = "matplotlib" },
+    { name = "scipy" },
+    { name = "seaborn" },
 ]
 beaker = [
     { name = "beaker-gantry" },
@@ -5140,7 +5149,8 @@ vllm = [
 dev = [
     { name = "google-api-core" },
     { name = "jinja2" },
-    { name = "olmo-eval-internal", extra = ["beaker", "hf", "storage"] },
+    { name = "olmo-eval-internal", extra = ["analysis", "beaker", "hf", "storage"] },
+    { name = "parameterized" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -5162,6 +5172,7 @@ requires-dist = [
     { name = "datasets", specifier = ">=3.2.0" },
     { name = "httpx", marker = "extra == 'agents'", specifier = "~=0.28.1" },
     { name = "litellm", marker = "extra == 'litellm'", specifier = "~=1.80.11" },
+    { name = "matplotlib", marker = "extra == 'analysis'", specifier = "~=3.10.8" },
     { name = "numpy", specifier = ">=1.20.0" },
     { name = "nvidia-ml-py", marker = "sys_platform != 'darwin' and extra == 'gpu'", specifier = ">=12.560" },
     { name = "olmo-eval-internal", extras = ["s3", "postgres"], marker = "extra == 'storage'" },
@@ -5173,6 +5184,8 @@ requires-dist = [
     { name = "prometheus-client", specifier = ">=0.21.0" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.1.0" },
     { name = "rich", specifier = "~=14.3.4" },
+    { name = "scipy", marker = "extra == 'analysis'", specifier = "~=1.17.1" },
+    { name = "seaborn", marker = "extra == 'analysis'", specifier = "~=0.13.2" },
     { name = "smart-open", extras = ["s3"], marker = "extra == 's3'", specifier = ">=7.0.0" },
     { name = "sqlalchemy", marker = "extra == 'postgres'", specifier = ">=2.0.49" },
     { name = "swe-rex", extras = ["modal"], marker = "extra == 'sandbox'", git = "https://github.com/jdahm/SWE-ReX.git?rev=johannd%2Fai2" },
@@ -5180,20 +5193,23 @@ requires-dist = [
     { name = "textual-plot", specifier = ">=0.10.1" },
     { name = "torch-c-dlpack-ext", marker = "sys_platform != 'darwin' and extra == 'vllm'" },
     { name = "transformers", marker = "extra == 'hf'", specifier = "~=4.57.3" },
+    { name = "tree-sitter", specifier = ">=0.24.0" },
+    { name = "tree-sitter-python", specifier = ">=0.23.0,<0.26.0" },
     { name = "vllm", extras = ["runai"], marker = "sys_platform != 'darwin' and extra == 'vllm'", specifier = "==0.13.0" },
 ]
-provides-extras = ["hf", "vllm", "litellm", "agents", "openhands", "sandbox", "beaker", "s3", "postgres", "gpu", "clients", "storage"]
+provides-extras = ["hf", "vllm", "litellm", "agents", "analysis", "openhands", "sandbox", "beaker", "s3", "postgres", "gpu", "clients", "storage"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "google-api-core", specifier = ">=2.0.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
-    { name = "olmo-eval-internal", extras = ["storage", "beaker", "hf"] },
+    { name = "olmo-eval-internal", extras = ["storage", "beaker", "hf", "analysis"] },
+    { name = "parameterized", specifier = ">=0.9.0" },
     { name = "pre-commit", specifier = ">=4.0.0" },
     { name = "pytest", specifier = ">=9.0.0" },
     { name = "pytest-cov", specifier = ">=6.0.0" },
     { name = "ruff", specifier = ">=0.14.0" },
-    { name = "ty", specifier = ">=0.0.10" },
+    { name = "ty", specifier = "==0.0.32" },
 ]
 vllm = [{ name = "olmo-eval-internal", extras = ["vllm"] }]
 
@@ -5894,6 +5910,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/70/6f/3dd4940bbe001c06a65f88e36bad298bc7a0de5036115639926b0c5c0458/pandocfilters-1.5.1.tar.gz", hash = "sha256:002b4a555ee4ebc03f8b66307e287fa492e4a77b4ea14d3f934328297bb4939e", size = 8454, upload-time = "2024-01-18T20:08:13.726Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ef/af/4fbc8cab944db5d21b7e2a5b8e9211a03a79852b1157e2c102fcc61ac440/pandocfilters-1.5.1-py2.py3-none-any.whl", hash = "sha256:93be382804a9cdb0a7267585f157e5d1731bbe5545a85b268d6f5fe6232de2bc", size = 8663, upload-time = "2024-01-18T20:08:11.28Z" },
+]
+
+[[package]]
+name = "parameterized"
+version = "0.9.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ea/49/00c0c0cc24ff4266025a53e41336b79adaa5a4ebfad214f433d623f9865e/parameterized-0.9.0.tar.gz", hash = "sha256:7fc905272cefa4f364c1a3429cbbe9c0f98b793988efb5bf90aac80f08db09b1", size = 24351, upload-time = "2023-03-27T02:01:11.592Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/00/2f/804f58f0b856ab3bf21617cccf5b39206e6c4c94c2cd227bde125ea6105f/parameterized-0.9.0-py2.py3-none-any.whl", hash = "sha256:4e0758e3d41bea3bbd05ec14fc2c24736723f243b28d702081aef438c9372b1b", size = 20475, upload-time = "2023-03-27T02:01:09.31Z" },
 ]
 
 [[package]]
@@ -10663,7 +10688,8 @@ name = "scipy"
 version = "1.17.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" } },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-18-olmo-eval-internal-agents' or extra == 'extra-18-olmo-eval-internal-clients' or extra != 'extra-18-olmo-eval-internal-openhands' or (extra == 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm')" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-18-olmo-eval-internal-openhands'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7a/97/5a3609c4f8d58b039179648e62dd220f89864f56f7357f5d4f45c29eb2cc/scipy-1.17.1.tar.gz", hash = "sha256:95d8e012d8cb8816c226aef832200b1d45109ed4464303e997c5b13122b297c0", size = 30573822, upload-time = "2026-02-23T00:26:24.851Z" }
 wheels = [
@@ -10742,6 +10768,22 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/ec/bb/e69e5e628d43f118e0af4fc063c20058faa8635c95a1296764acc8167e27/screeninfo-0.8.1.tar.gz", hash = "sha256:9983076bcc7e34402a1a9e4d7dabf3729411fd2abb3f3b4be7eba73519cd2ed1", size = 10666, upload-time = "2022-09-09T11:35:23.419Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6e/bf/c5205d480307bef660e56544b9e3d7ff687da776abb30c9cb3f330887570/screeninfo-0.8.1-py3-none-any.whl", hash = "sha256:e97d6b173856edcfa3bd282f81deb528188aff14b11ec3e195584e7641be733c", size = 12907, upload-time = "2022-09-09T11:35:21.351Z" },
+]
+
+[[package]]
+name = "seaborn"
+version = "0.13.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-18-olmo-eval-internal-agents' or extra == 'extra-18-olmo-eval-internal-clients' or extra != 'extra-18-olmo-eval-internal-openhands' or (extra == 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm')" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-18-olmo-eval-internal-openhands'" },
+    { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.14' and extra == 'extra-18-olmo-eval-internal-agents') or (python_full_version >= '3.14' and extra == 'extra-18-olmo-eval-internal-clients') or (python_full_version >= '3.14' and extra != 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-clients' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm')" },
+    { name = "pandas", version = "3.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14' or extra == 'extra-18-olmo-eval-internal-openhands'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/86/59/a451d7420a77ab0b98f7affa3a1d78a313d2f7281a57afb1a34bae8ab412/seaborn-0.13.2.tar.gz", hash = "sha256:93e60a40988f4d65e9f4885df477e2fdaff6b73a9ded434c1ab356dd57eefff7", size = 1457696, upload-time = "2024-01-25T13:21:52.551Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/83/11/00d3c3dfc25ad54e731d91449895a79e4bf2384dc3ac01809010ba88f6d5/seaborn-0.13.2-py3-none-any.whl", hash = "sha256:636f8336facf092165e27924f223d3c62ca560b1f2bb5dff7ab7fad265361987", size = 294914, upload-time = "2024-01-25T13:21:49.598Z" },
 ]
 
 [[package]]
@@ -11736,6 +11778,22 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/1f/88/8761fecb761eb7b7acd6b9dc8e987813f9b58195895c437c3a7a416813da/tree_sitter_language_pack-0.7.3-cp39-abi3-manylinux2014_aarch64.whl", hash = "sha256:0be05f63cd1da06bd277570bbb6cd37c9652ddd1d2ee63ff71da20a66ce36cd8", size = 17593772, upload-time = "2025-05-07T07:49:33.287Z" },
     { url = "https://files.pythonhosted.org/packages/23/15/22f731997285a7e0d68934881ffc374f2575a9e3f800af9b86af44d928a0/tree_sitter_language_pack-0.7.3-cp39-abi3-manylinux2014_x86_64.whl", hash = "sha256:fd6481b0501ae3a957f673d235bdd68bc7095899f3d58882be7e31fa8e06bd66", size = 17449045, upload-time = "2025-05-07T07:49:36.053Z" },
     { url = "https://files.pythonhosted.org/packages/c7/a0/82ee17141c5d4b4b99445ba442f397f3e783b6dc2b48fa49570f89397cdf/tree_sitter_language_pack-0.7.3-cp39-abi3-win_amd64.whl", hash = "sha256:5c0078532d839d45af0477b1b2e5b1a168e88ca3544e94b27dcba6ddbadb6511", size = 14331659, upload-time = "2025-05-07T07:49:39.957Z" },
+]
+
+[[package]]
+name = "tree-sitter-python"
+version = "0.25.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b8/8b/c992ff0e768cb6768d5c96234579bf8842b3a633db641455d86dd30d5dac/tree_sitter_python-0.25.0.tar.gz", hash = "sha256:b13e090f725f5b9c86aa455a268553c65cadf325471ad5b65cd29cac8a1a68ac", size = 159845, upload-time = "2025-09-11T06:47:58.159Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cf/64/a4e503c78a4eb3ac46d8e72a29c1b1237fa85238d8e972b063e0751f5a94/tree_sitter_python-0.25.0-cp310-abi3-macosx_10_9_x86_64.whl", hash = "sha256:14a79a47ddef72f987d5a2c122d148a812169d7484ff5c75a3db9609d419f361", size = 73790, upload-time = "2025-09-11T06:47:47.652Z" },
+    { url = "https://files.pythonhosted.org/packages/e6/1d/60d8c2a0cc63d6ec4ba4e99ce61b802d2e39ef9db799bdf2a8f932a6cd4b/tree_sitter_python-0.25.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:480c21dbd995b7fe44813e741d71fed10ba695e7caab627fb034e3828469d762", size = 76691, upload-time = "2025-09-11T06:47:49.038Z" },
+    { url = "https://files.pythonhosted.org/packages/aa/cb/d9b0b67d037922d60cbe0359e0c86457c2da721bc714381a63e2c8e35eba/tree_sitter_python-0.25.0-cp310-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:86f118e5eecad616ecdb81d171a36dde9bef5a0b21ed71ea9c3e390813c3baf5", size = 108133, upload-time = "2025-09-11T06:47:50.499Z" },
+    { url = "https://files.pythonhosted.org/packages/40/bd/bf4787f57e6b2860f3f1c8c62f045b39fb32d6bac4b53d7a9e66de968440/tree_sitter_python-0.25.0-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:be71650ca2b93b6e9649e5d65c6811aad87a7614c8c1003246b303f6b150f61b", size = 110603, upload-time = "2025-09-11T06:47:51.985Z" },
+    { url = "https://files.pythonhosted.org/packages/5d/25/feff09f5c2f32484fbce15db8b49455c7572346ce61a699a41972dea7318/tree_sitter_python-0.25.0-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:e6d5b5799628cc0f24691ab2a172a8e676f668fe90dc60468bee14084a35c16d", size = 108998, upload-time = "2025-09-11T06:47:53.046Z" },
+    { url = "https://files.pythonhosted.org/packages/75/69/4946da3d6c0df316ccb938316ce007fb565d08f89d02d854f2d308f0309f/tree_sitter_python-0.25.0-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:71959832fc5d9642e52c11f2f7d79ae520b461e63334927e93ca46cd61cd9683", size = 107268, upload-time = "2025-09-11T06:47:54.388Z" },
+    { url = "https://files.pythonhosted.org/packages/ed/a2/996fc2dfa1076dc460d3e2f3c75974ea4b8f02f6bc925383aaae519920e8/tree_sitter_python-0.25.0-cp310-abi3-win_amd64.whl", hash = "sha256:9bcde33f18792de54ee579b00e1b4fe186b7926825444766f849bf7181793a76", size = 76073, upload-time = "2025-09-11T06:47:55.773Z" },
+    { url = "https://files.pythonhosted.org/packages/07/19/4b5569d9b1ebebb5907d11554a96ef3fa09364a30fcfabeff587495b512f/tree_sitter_python-0.25.0-cp310-abi3-win_arm64.whl", hash = "sha256:0fbf6a3774ad7e89ee891851204c2e2c47e12b63a5edbe2e9156997731c128bb", size = 74169, upload-time = "2025-09-11T06:47:56.747Z" },
 ]
 
 [[package]]

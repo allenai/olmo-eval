@@ -11,9 +11,8 @@ from olmo_eval.common.types import Instance, LMOutput, LMRequest, Response, Samp
 if TYPE_CHECKING:
     from olmo_eval.evals.tasks.common import Task
 
-# Sentinel values for fatal worker errors
+# Sentinel value for fatal worker errors
 WORKER_FATAL = "__WORKER_FATAL__"
-SCORER_FATAL = "__SCORER_FATAL__"
 
 # Default concurrency for scoring worker
 DEFAULT_SCORING_CONCURRENCY = 8
@@ -91,38 +90,10 @@ class ResultItem:
     attempt: int = 0
 
 
-@dataclass
-class ScoringItem:
-    """Single response to be scored by the scoring worker.
-
-    The ``task`` field is only set on the first item for each spec;
-    the scoring worker caches it and subsequent items leave it as None
-    to avoid re-pickling the full Task object through the multiprocessing queue.
-    """
-
-    spec: str
-    instance_idx: int
-    response: Response
-    task: Task | None = None
-
-
-@dataclass
-class ScoredResponse:
-    """Single scored response from the scoring worker."""
-
-    spec: str
-    instance_idx: int
-    scored: Response | None  # Response with score populated (None if fatal error)
-    error: str | None = None  # Error message if scoring failed
-
-
 __all__ = [
     "DEFAULT_SCORING_CONCURRENCY",
     "WORKER_FATAL",
-    "SCORER_FATAL",
     "QueueItem",
     "TaskTracker",
     "ResultItem",
-    "ScoringItem",
-    "ScoredResponse",
 ]

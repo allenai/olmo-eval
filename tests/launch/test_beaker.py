@@ -246,10 +246,10 @@ class TestParseTaskWithPriority:
         assert task == "mmlu"
         assert priority == "high"
 
-    def test_task_with_regime_and_priority(self):
-        """Test task with regime and priority."""
-        task, priority = parse_task_with_priority("mmlu:olmes@high")
-        assert task == "mmlu:olmes"
+    def test_task_with_variant_and_priority(self):
+        """Test task with a variant and priority."""
+        task, priority = parse_task_with_priority("arc_easy:mc@high")
+        assert task == "arc_easy:mc"
         assert priority == "high"
 
     def test_custom_default_priority(self):
@@ -322,8 +322,8 @@ class TestValidatePriorityConfiguration:
 
     def test_task_with_variant_and_priority(self):
         """Test task with variant (:) and @priority suffix."""
-        result = validate_priority_configuration(["mmlu:olmes@high"])
-        assert result == {"high": ["mmlu:olmes"]}
+        result = validate_priority_configuration(["arc_easy:mc@high"])
+        assert result == {"high": ["arc_easy:mc"]}
 
 
 class TestCalculateExperimentSplits:

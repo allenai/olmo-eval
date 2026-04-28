@@ -43,6 +43,46 @@ class Metric(ABC):
         """Serialize to a dictionary."""
         return {"type": self.__class__.__name__, "name": self.name, "scorer": self.scorer.__name__}
 
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        """Whether scorer-level instance values match the metric's per-instance signal.
+
+        Pairwise analysis sometimes has to fall back from an exact per-instance metric key
+        (for example ``accuracy:exact_match``) to the stored scorer channel
+        (for example ``exact_match:exact_match``). That fallback is only valid when the
+        task-level metric is literally an average of per-instance scorer values.
+
+        Metrics that aggregate across multiple continuations, weight instances unevenly,
+        or otherwise derive the final value from richer response structure should override
+        this to ``False``.
+        """
+        return True
+
+    def pairwise_higher_is_better(self) -> bool:
+        """Whether larger metric values mean better model quality."""
+        return True
+
+    def pairwise_display_format(self) -> str:
+        """Return the preferred viewer formatting family for this metric.
+
+        ``percentage`` means the metric is naturally interpreted on a 0-1 scale and
+        should be rendered as percentages / percentage-point deltas. ``raw`` means the
+        metric should stay in its native numeric units.
+        """
+        percentage_names = {"accuracy", "f1", "recall", "tool_accuracy"}
+        if self.name in percentage_names:
+            return "percentage"
+        if self.name.endswith("_accuracy"):
+            return "percentage"
+        if self.name.startswith("pass_at_") or self.name.startswith("pass_pow_"):
+            return "percentage"
+        return "raw"
+
+    def pairwise_unit(self) -> str:
+        """Return the unit family used to decide whether suite pooling is comparable."""
+        if self.pairwise_display_format() == "percentage":
+            return "proportion"
+        return self.name
+
 
 @dataclass(frozen=True, slots=True)
 class AccuracyMetric(Metric):
@@ -179,6 +219,13 @@ class BPBMetricInstanceAvg(Metric):
 
         return sum(bpb_values) / len(bpb_values)
 
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        # Keep BPB handling conservative: pairwise should read the exact stored metric key.
+        return False
+
+    def pairwise_higher_is_better(self) -> bool:
+        return False
+
 
 @dataclass(frozen=True, slots=True)
 class BPBMetricByteAvg(Metric):
@@ -216,6 +263,14 @@ class BPBMetricByteAvg(Metric):
             return 0.0
 
         return weighted_sum / total_bytes
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        # Byte-weighted BPB is a corpus aggregate, so scorer-level per-instance values
+        # are not equivalent to the stored task metric.
+        return False
+
+    def pairwise_higher_is_better(self) -> bool:
+        return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,6 +312,9 @@ class MeanPerplexityMetric(Metric):
             total += scorer.score(response.instance, output)
 
         return total / len(responses)
+
+    def pairwise_higher_is_better(self) -> bool:
+        return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -306,6 +364,9 @@ class PassAtKMetric(Metric):
 
         return sum(pass_at_k_values) / len(pass_at_k_values) if pass_at_k_values else 0.0
 
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return self.k == 1
+
 
 @dataclass(frozen=True, slots=True)
 class PassPowKMetric(Metric):
@@ -354,6 +415,9 @@ class PassPowKMetric(Metric):
 
         return sum(pass_pow_k_values) / len(pass_pow_k_values) if pass_pow_k_values else 0.0
 
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return self.k == 1
+
 
 @dataclass(frozen=True, slots=True)
 class LogprobMCAccuracyMetric(Metric):
@@ -379,6 +443,9 @@ class LogprobMCAccuracyMetric(Metric):
             if logprob_sums.index(max(logprob_sums)) == gold_idx:
                 correct += 1
         return correct / len(responses)
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -423,6 +490,9 @@ class LogprobUncondMCAccuracyMetric(Metric):
                 correct += 1
         return correct / len(responses)
 
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return False
+
 
 @dataclass(frozen=True, slots=True)
 class LogprobPerCharMCAccuracyMetric(Metric):
@@ -457,6 +527,9 @@ class LogprobPerCharMCAccuracyMetric(Metric):
                 correct += 1
         return correct / len(responses)
 
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return False
+
 
 @dataclass(frozen=True, slots=True)
 class LogprobPerTokenMCAccuracyMetric(Metric):
@@ -490,6 +563,9 @@ class LogprobPerTokenMCAccuracyMetric(Metric):
                 correct += 1
         return correct / len(responses)
 
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return False
+
 
 @dataclass(frozen=True, slots=True)
 class GreedyAccuracyMetric(Metric):
@@ -520,6 +596,9 @@ class GreedyAccuracyMetric(Metric):
                 if output.metadata.get("is_greedy", False):
                     correct += 1
         return correct / len(responses)
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -572,3 +651,9 @@ class CorpusPerplexityMetric(Metric):
 
         avg_logprob = total_logprob / total_tokens
         return math.exp(-avg_logprob)
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        return False
+
+    def pairwise_higher_is_better(self) -> bool:
+        return False

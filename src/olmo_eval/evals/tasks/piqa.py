@@ -12,7 +12,7 @@ from olmo_eval.common.metrics import (
 )
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
-from olmo_eval.evals.tasks.common import Task, register, register_regime, register_variant
+from olmo_eval.evals.tasks.common import Task, register, register_variant
 from olmo_eval.evals.tasks.constants.piqa import PIQA_FIXED_FEWSHOT
 
 
@@ -152,14 +152,16 @@ register_variant(
     split=Split.VALIDATION,
     metrics=(LogprobPerCharMCAccuracyMetric(),),
 )
-register_regime(
+register_variant(
     "piqa",
-    "olmo3base",
+    "mc_olmo3base",
+    formatter=MultipleChoiceFormatter(),
     num_fewshot=5,
     fewshot_source="olmes_piqa_fixed",
-    split=Split.VALIDATION,
+    split=Split.ALL,
+    limit=10_000,
+    metrics=(LogprobPerCharMCAccuracyMetric(),),
 )
-
 register_variant(
     "piqa",
     "olmes",

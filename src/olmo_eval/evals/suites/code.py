@@ -67,7 +67,7 @@ OLMO3_BASE_EASY_CODE_BPB_SERIALIZED = register(
     Suite(
         name="olmo3:base_easy:code:bpb:serialized",
         tasks=(
-            "serialized:codex_humaneval_3shot_bpb",
+            "serialized:humaneval_3shot_bpb",
             "serialized:mbpp_3shot_bpb",
             _SERIALIZED_MT_MBPP_V2FIX_BPB,
         ),
@@ -102,3 +102,74 @@ for _suffix, _desc_suffix in _MULTIPL_E_VARIANTS:
         tuple(f"{t}{_suffix}" for t in MULTIPL_E_HUMANEVAL_TASKS + MULTIPL_E_MBPP_TASKS),
         description=f"MULTIPL_E HumanEval + MBPP (6 languages each){_desc_suffix}",
     )
+
+# OLMo3 base variants (pass@k evaluation with 32 samples)
+_MULTIPL_E_HUMANEVAL_OLMO3BASE = register(
+    Suite(
+        name="multipl_e_humaneval:olmo3base",
+        tasks=tuple(f"{t}:olmo3base" for t in MULTIPL_E_HUMANEVAL_TASKS),
+        aggregation=AggregationStrategy.AVERAGE,
+        description="MULTIPL_E HumanEval (6 languages) OLMo3 base pass@k evaluation",
+    )
+)
+_MULTIPL_E_MBPP_OLMO3BASE = register(
+    Suite(
+        name="multipl_e_mbpp:olmo3base",
+        tasks=tuple(f"{t}:olmo3base" for t in MULTIPL_E_MBPP_TASKS),
+        aggregation=AggregationStrategy.AVERAGE,
+        description="MULTIPL_E MBPP (6 languages) OLMo3 base pass@k evaluation",
+    )
+)
+make_suite(
+    "multipl_e:olmo3base",
+    tuple(f"{t}:olmo3base" for t in MULTIPL_E_HUMANEVAL_TASKS + MULTIPL_E_MBPP_TASKS),
+    description="MULTIPL_E HumanEval + MBPP (6 languages each) OLMo3 base pass@k evaluation",
+)
+
+# FIM infilling suite
+make_suite(
+    "humanevalfim",
+    ("humanevalfim_single", "humanevalfim_multi", "humanevalfim_random"),
+    description="HumanEval FIM infilling tasks (single, multi, random)",
+)
+
+# =============================================================================
+# OLMoBase Evaluation Suites
+# =============================================================================
+
+register(
+    Suite(
+        name="olmobase:code",
+        tasks=(
+            "bigcodebench:olmo3base",
+            "humaneval:olmo3base",
+            "deepseek_leetcode:olmo3base",
+            "ds1000:olmo3base",
+            "mbpp:olmo3base",
+            _MULTIPL_E_HUMANEVAL_OLMO3BASE,
+            _MULTIPL_E_MBPP_OLMO3BASE,
+        ),
+        aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+        description="OLMoBase code generation evaluation suite",
+    )
+)
+
+make_suite(
+    "olmobase:code_fim",
+    (
+        "humanevalfim_single:olmo3base",
+        "humanevalfim_multi:olmo3base",
+        "humanevalfim_random:olmo3base",
+    ),
+    description="OLMoBase FIM code completion evaluation suite",
+)
+
+make_suite(
+    "humanevalfim:olmo3base",
+    (
+        "humanevalfim_single:olmo3base",
+        "humanevalfim_multi:olmo3base",
+        "humanevalfim_random:olmo3base",
+    ),
+    description="HumanEval FIM infilling tasks with OLMo3 base pass@k evaluation",
+)

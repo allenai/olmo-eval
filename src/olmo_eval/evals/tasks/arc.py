@@ -12,7 +12,7 @@ from olmo_eval.common.metrics import (
 )
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
-from olmo_eval.evals.tasks.common import Task, register, register_regime, register_variant
+from olmo_eval.evals.tasks.common import Task, register, register_variant
 from olmo_eval.evals.tasks.common.format_helpers import format_mc as _format_mc
 from olmo_eval.evals.tasks.common.format_helpers import format_rc as _format_rc
 from olmo_eval.evals.tasks.constants.arc import (
@@ -222,13 +222,6 @@ register_variant(
     split=Split.TEST,
     metrics=(LogprobPerCharMCAccuracyMetric(),),
 )
-register_regime(
-    "arc_easy",
-    "olmo3base",
-    num_fewshot=5,
-    fewshot_source="olmes_arc_easy_fixed",
-    split=Split.TEST,
-)
 register_variant("arc_easy", "olmes", num_fewshot=5, fewshot_source="olmes_arc_easy_fixed")
 register_variant("arc_easy", "full")
 
@@ -245,12 +238,13 @@ register_variant(
     split=Split.TEST,
     metrics=(LogprobUncondMCAccuracyMetric(),),
 )
-register_regime(
+register_variant(
     "arc_challenge",
-    "olmo3base",
+    "mc_olmo3base",
+    formatter=MultipleChoiceFormatter(),
     num_fewshot=5,
     fewshot_source="olmes_arc_challenge_fixed",
-    split=Split.TEST,
+    split=Split.ALL,
 )
 register_variant(
     "arc_challenge", "olmes", num_fewshot=5, fewshot_source="olmes_arc_challenge_fixed"

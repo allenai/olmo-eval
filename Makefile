@@ -1,4 +1,4 @@
-.PHONY: setup fix verify test lint type-check clean
+.PHONY: setup fix verify test lint type-check clean db-upgrade db-downgrade db-status
 
 setup:
 	uv run --frozen pre-commit install

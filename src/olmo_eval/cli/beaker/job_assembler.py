@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.constants.infrastructure import (
@@ -87,7 +88,7 @@ def collect_install_extras(
     sandbox: bool = False,
     metrics: bool = False,
     collect_gpu: bool = False,
-    backend_name: str | None = None,
+    scaffold_name: str | None = None,
     provider_extras: list[str] | None = None,
 ) -> list[str]:
     """Collect pip extras needed for a job.
@@ -97,7 +98,7 @@ def collect_install_extras(
         sandbox: Whether sandbox is enabled.
         metrics: Whether metrics collection is enabled.
         collect_gpu: Whether GPU metrics collection is enabled.
-        backend_name: Harness backend name (e.g., "openai_agents").
+        scaffold_name: Harness scaffold name (e.g., "openai_agents").
         provider_extras: Provider-specific extras.
 
     Returns:
@@ -114,10 +115,10 @@ def collect_install_extras(
     if collect_gpu:
         extras.append("gpu")
 
-    if backend_name:
-        from olmo_eval.harness import get_backend_extras
+    if scaffold_name:
+        from olmo_eval.harness import get_scaffold_extras
 
-        for extra in get_backend_extras(backend_name):
+        for extra in get_scaffold_extras(scaffold_name):
             if extra not in extras:
                 extras.append(extra)
 
@@ -156,6 +157,7 @@ def assemble_external_eval_job(
     retries: int | None = None,
     provider_kind: str | None = None,
     base_url: str | None = None,
+    user_env_vars: dict[str, str] | None = None,
 ) -> Any:
     """Assemble a BeakerJobConfig for running external evaluations.
 
@@ -204,12 +206,12 @@ def assemble_external_eval_job(
     # Add eval_args
     if eval_args:
         for key, value in eval_args.items():
-            command.extend(["-a", f"{key}={value}"])
+            command.extend(["-a", f"{key}={json.dumps(value)}"])
 
     # Add provider_kwargs
     if provider_kwargs:
         for key, value in provider_kwargs.items():
-            command.extend(["-K", f"{key}={value}"])
+            command.extend(["-K", f"{key}={json.dumps(value)}"])
 
     # Add storage options (only when --store is enabled)
     if store:
@@ -274,35 +276,39 @@ def assemble_external_eval_job(
 
         env_vars.update(get_store_env_defaults())
 
-    # Collect backend names from external evals
-    # Check eval_args for backend override, otherwise use eval's default
+    # User-supplied env vars win over everything above
+    if user_env_vars:
+        env_vars.update(user_env_vars)
+
+    # Collect scaffold names from external evals
+    # Check eval_args for scaffold override, otherwise use eval's default
     from olmo_eval.evals.external.registry import get_external_eval
 
-    backend_names: list[str] = []
+    scaffold_names: list[str] = []
 
-    # Check if backend is specified in eval_args (overrides eval default)
-    args_backend = eval_args.get("backend") if eval_args else None
-    if args_backend:
-        backend_names.append(args_backend)
+    # Check if scaffold is specified in eval_args (overrides eval default)
+    args_scaffold = eval_args.get("scaffold") if eval_args else None
+    if args_scaffold:
+        scaffold_names.append(args_scaffold)
     else:
-        # Fall back to each eval's default backend
+        # Fall back to each eval's default scaffold
         for eval_name in external_evals:
             eval_instance = get_external_eval(eval_name)
-            if eval_instance.backend and eval_instance.backend not in backend_names:
-                backend_names.append(eval_instance.backend)
+            if eval_instance.scaffold and eval_instance.scaffold not in scaffold_names:
+                scaffold_names.append(eval_instance.scaffold)
 
     # External evals always run vLLM as a server subprocess, so use isolated venv
     # to avoid dependency conflicts with other packages (e.g., openhands)
     vllm_isolated_venv = True
 
-    # Collect extras from all backends
+    # Collect extras from all scaffolds
     extras: list[str] = collect_install_extras(
         store=store,
         sandbox=True,
         provider_extras=get_provider_extras(model, default_kind="vllm_server"),
     )
-    for backend_name in backend_names:
-        for extra in collect_install_extras(backend_name=backend_name):
+    for scaffold_name in scaffold_names:
+        for extra in collect_install_extras(scaffold_name=scaffold_name):
             if extra not in extras:
                 extras.append(extra)
 
@@ -370,8 +376,8 @@ class JobConfigAssembler:
 
         command = self._build_command(exp)
 
-        # Determine backend and sandbox requirements from harness preset
-        backend_name: str | None = None
+        # Determine scaffold and sandbox requirements from harness preset
+        scaffold_name: str | None = None
         sandbox_enabled = False
         metrics_enabled = False
         collect_gpu_enabled = False
@@ -385,7 +391,7 @@ class JobConfigAssembler:
                 from olmo_eval.cli.beaker.launch import _apply_harness_overrides
 
                 preset = _apply_harness_overrides(preset, self.config.harness_overrides)
-            backend_name = preset.backend
+            scaffold_name = preset.scaffold
             sandbox_enabled = bool(preset.sandboxes)
             from olmo_eval.inference.metrics import ReporterType
 
@@ -420,7 +426,7 @@ class JobConfigAssembler:
             sandbox=sandbox_enabled,
             metrics=metrics_enabled,
             collect_gpu=collect_gpu_enabled,
-            backend_name=backend_name,
+            scaffold_name=scaffold_name,
             provider_extras=provider_extras,
         )
 
@@ -504,6 +510,9 @@ class JobConfigAssembler:
                     job_env_vars["MODAL_GCP_SECRET_NAME"] = secret_name
                     setup_modal_gcp_secret = True
                     log.info(f"Modal GCP secret setup enabled: {secret_name}")
+
+        # User-supplied env vars win over everything above
+        job_env_vars.update(self.config.env_vars)
 
         # Collect task dependencies and provider dependencies separately
         task_packages = self._extract_task_dependencies(exp.tasks, exp.task_overrides) or None

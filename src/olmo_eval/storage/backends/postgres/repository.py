@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import and_, delete, exists, insert, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only, noload
 from sqlalchemy.sql.elements import ColumnElement
 
 from olmo_eval.common.types import EvalResult, StoredTaskResult
@@ -41,6 +41,66 @@ class ExperimentRepository:
             session: Active SQLAlchemy session.
         """
         self.session = session
+
+    def _build_query_stmt(
+        self,
+        experiment_ids: list[str] | None = None,
+        model_names: list[str] | None = None,
+        model_hashes: list[str] | None = None,
+        task_names: list[str] | None = None,
+        task_hashes: list[str] | None = None,
+        experiment_groups: list[str] | None = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        latest: bool = False,
+        limit: int | None = None,
+        offset: int = 0,
+    ):
+        """Build the shared experiment query statement."""
+        stmt = select(Experiment)
+
+        if experiment_ids:
+            stmt = stmt.where(Experiment.experiment_id.in_(experiment_ids))
+
+        if model_names:
+            conditions = [_prefix_filter(Experiment.model_name, n) for n in model_names]
+            stmt = stmt.where(or_(*conditions))
+
+        if model_hashes:
+            conditions = [_prefix_filter(Experiment.model_hash, h) for h in model_hashes]
+            stmt = stmt.where(or_(*conditions))
+
+        if experiment_groups:
+            conditions = [_prefix_filter(Experiment.experiment_group, g) for g in experiment_groups]
+            stmt = stmt.where(or_(*conditions))
+
+        if start_time:
+            stmt = stmt.where(Experiment.timestamp >= start_time)
+
+        if end_time:
+            stmt = stmt.where(Experiment.timestamp <= end_time)
+
+        if task_names:
+            conditions = [_prefix_filter(TaskResult.task_name, t) for t in task_names]
+            stmt = stmt.where(
+                exists().where(TaskResult.experiment_pk == Experiment.id).where(or_(*conditions))
+            )
+
+        if task_hashes:
+            conditions = [_prefix_filter(TaskResult.task_hash, h) for h in task_hashes]
+            stmt = stmt.where(
+                exists().where(TaskResult.experiment_pk == Experiment.id).where(or_(*conditions))
+            )
+
+        stmt = stmt.order_by(Experiment.timestamp.desc())
+
+        if latest:
+            stmt = stmt.limit(1)
+        elif limit is not None:
+            stmt = stmt.limit(limit)
+            stmt = stmt.offset(offset)
+
+        return stmt
 
     def save(self, eval_result: EvalResult) -> int:
         """Save a new evaluation experiment.
@@ -194,57 +254,72 @@ class ExperimentRepository:
         Returns:
             List of matching EvalResult objects.
         """
-        stmt = select(Experiment)
-
-        # Apply filters (all combined with AND, prefix matching for strings)
-        if experiment_ids:
-            stmt = stmt.where(Experiment.experiment_id.in_(experiment_ids))
-
-        if model_names:
-            conditions = [_prefix_filter(Experiment.model_name, n) for n in model_names]
-            stmt = stmt.where(or_(*conditions))
-
-        if model_hashes:
-            conditions = [_prefix_filter(Experiment.model_hash, h) for h in model_hashes]
-            stmt = stmt.where(or_(*conditions))
-
-        if experiment_groups:
-            conditions = [_prefix_filter(Experiment.experiment_group, g) for g in experiment_groups]
-            stmt = stmt.where(or_(*conditions))
-
-        if start_time:
-            stmt = stmt.where(Experiment.timestamp >= start_time)
-
-        if end_time:
-            stmt = stmt.where(Experiment.timestamp <= end_time)
-
-        if task_names:
-            # Subquery: experiment has ANY of these tasks (OR within list)
-            conditions = [_prefix_filter(TaskResult.task_name, t) for t in task_names]
-            stmt = stmt.where(
-                exists().where(TaskResult.experiment_pk == Experiment.id).where(or_(*conditions))
-            )
-
-        if task_hashes:
-            conditions = [_prefix_filter(TaskResult.task_hash, h) for h in task_hashes]
-            stmt = stmt.where(
-                exists().where(TaskResult.experiment_pk == Experiment.id).where(or_(*conditions))
-            )
-
-        # Order by timestamp descending (most recent first)
-        stmt = stmt.order_by(Experiment.timestamp.desc())
-
-        # Apply pagination (latest overrides limit)
-        if latest:
-            stmt = stmt.limit(1)
-        elif limit is not None:
-            stmt = stmt.limit(limit)
-            stmt = stmt.offset(offset)
-
-        # Execute query
+        stmt = self._build_query_stmt(
+            experiment_ids=experiment_ids,
+            model_names=model_names,
+            model_hashes=model_hashes,
+            task_names=task_names,
+            task_hashes=task_hashes,
+            experiment_groups=experiment_groups,
+            start_time=start_time,
+            end_time=end_time,
+            latest=latest,
+            limit=limit,
+            offset=offset,
+        )
         experiments = self.session.execute(stmt).scalars().all()
 
         return [self._to_eval_result(exp) for exp in experiments]
+
+    def query_rows(
+        self,
+        experiment_ids: list[str] | None = None,
+        model_names: list[str] | None = None,
+        model_hashes: list[str] | None = None,
+        task_names: list[str] | None = None,
+        task_hashes: list[str] | None = None,
+        experiment_groups: list[str] | None = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        latest: bool = False,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[Experiment]:
+        """Query experiment rows without hydrating task payloads.
+
+        This is the fast path for viewer and pairwise workflows that only need
+        experiment identity and timestamp metadata.
+        """
+        stmt = self._build_query_stmt(
+            experiment_ids=experiment_ids,
+            model_names=model_names,
+            model_hashes=model_hashes,
+            task_names=task_names,
+            task_hashes=task_hashes,
+            experiment_groups=experiment_groups,
+            start_time=start_time,
+            end_time=end_time,
+            latest=latest,
+            limit=limit,
+            offset=offset,
+        ).options(
+            load_only(
+                Experiment.id,
+                Experiment.experiment_id,
+                Experiment.model_name,
+                Experiment.model_hash,
+                Experiment.timestamp,
+                Experiment.experiment_group,
+            ),
+            noload(Experiment.task_results),
+            noload(Experiment.instance_predictions),
+        )
+        experiments: list[Experiment] = []
+        for experiment in self.session.execute(stmt).scalars().all():
+            if not isinstance(experiment, Experiment):
+                raise TypeError(f"Expected Experiment row, got {type(experiment)!r}")
+            experiments.append(experiment)
+        return experiments
 
     @staticmethod
     def _to_eval_result(experiment: Experiment) -> EvalResult:

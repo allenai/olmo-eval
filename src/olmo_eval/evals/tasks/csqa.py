@@ -11,7 +11,7 @@ from olmo_eval.common.metrics import (
 )
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
 from olmo_eval.data import DataSource
-from olmo_eval.evals.tasks.common import Task, register, register_regime, register_variant
+from olmo_eval.evals.tasks.common import Task, register, register_variant
 from olmo_eval.evals.tasks.common.format_helpers import (
     format_mc as _format_mc,
 )
@@ -160,12 +160,15 @@ register_variant(
     data_source=DataSource(path="commonsense_qa", split="validation"),
     metrics=(LogprobUncondMCAccuracyMetric(),),
 )
-register_regime(
+register_variant(
     "csqa",
-    "olmo3base",
+    "mc_olmo3base",
+    formatter=MultipleChoiceFormatter(),
     num_fewshot=5,
     fewshot_source="olmes_csqa_fixed",
-    data_source=DataSource(path="commonsense_qa", split="validation"),
+    data_source=DataSource(path="commonsense_qa", split="validation+train"),
+    limit=10000,
+    seed=1234,
 )
 register_variant(
     "csqa",

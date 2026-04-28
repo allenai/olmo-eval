@@ -4,17 +4,18 @@ Task specs follow the format: task_name[:variant1[:variant2...]]
 
 Examples:
     - "arc_easy" - base task
-    - "arc_easy:mc" - task with multiple-choice variant
-    - "arc_easy:olmes" - task with olmes regime (regimes are now variants)
-    - "arc_easy:mc:olmes" - task with variant and regime
-    - "mbpp:3shot:bpb:none" - task with stacked variants and regime
+    - "arc_easy:mc" - task with a multiple-choice variant
+    - "arc_easy:mc:full" - task with stacked variants
+    - "humaneval:3shot:bpb" - task with composable evaluation variants
 """
+
+from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Any, TypeVar
 
-from .base import Task, TaskConfig
+from .base import SandboxEnv, Task, TaskConfig
 
 T = TypeVar("T", bound=type[Task])
 
@@ -22,7 +23,6 @@ T = TypeVar("T", bound=type[Task])
 _tasks: dict[str, type[Task]] = {}
 _configs: dict[str, TaskConfig] = {}
 _variants: dict[str, dict[str, dict[str, Any]]] = {}
-_regimes: dict[str, dict[str, dict[str, Any]]] = {}
 
 
 def _build_config(name: str, cls: type[Task]) -> TaskConfig:
@@ -71,10 +71,10 @@ def register(name: str) -> Callable[[T], T]:
 
 
 def register_variant(task_name: str, variant: str, **overrides: Any) -> None:
-    """Register a variant (format modifier) for a task.
+    """Register a variant for a task.
 
-    Variants modify how a task is evaluated (e.g., :mc for multiple choice,
-    :gen for generation). They are applied before regimes.
+    Variants are composable task presets. They can change formatting, metrics,
+    few-shot settings, data sources, or any other TaskConfig field.
 
     Args:
         task_name: Name of the base task (must already be registered).
@@ -101,28 +101,6 @@ def register_variant(task_name: str, variant: str, **overrides: Any) -> None:
         )
 
     _variants.setdefault(task_name, {})[variant] = overrides
-
-
-def register_regime(task_name: str, regime: str, **overrides: Any) -> None:
-    """Register a regime (configuration preset) for a task.
-
-    Regimes are configuration presets that define evaluation settings
-    (e.g., :olmes for OLMo-style evaluation). They are applied after variants.
-
-    Args:
-        task_name: Name of the base task (must already be registered).
-        regime: Name of the regime (e.g., "olmes").
-        **overrides: TaskConfig field overrides for this regime.
-
-    Raises:
-        ValueError: If the task is not registered.
-    """
-    if task_name not in _tasks:
-        raise ValueError(
-            f"Cannot register regime '{regime}' for unknown task '{task_name}'. "
-            f"Register the task first using @register()."
-        )
-    _regimes.setdefault(task_name, {})[regime] = overrides
 
 
 def parse_overrides(override_str: str) -> dict[str, Any]:
@@ -214,8 +192,6 @@ def parse_task_spec(spec: str) -> tuple[str, list[str], dict[str, Any]]:
 
     Spec format: task_name[:variant1[:variant2...]]
 
-    Note: Regimes are now treated as variants.
-
     Args:
         spec: Task specification string.
 
@@ -228,10 +204,10 @@ def parse_task_spec(spec: str) -> tuple[str, list[str], dict[str, Any]]:
         ("arc_easy", [], {})
         >>> parse_task_spec("arc_easy:mc")
         ("arc_easy", ["mc"], {})
-        >>> parse_task_spec("arc_easy:olmes")
-        ("arc_easy", ["olmes"], {})
-        >>> parse_task_spec("arc_easy:mc:olmes")
-        ("arc_easy", ["mc", "olmes"], {})
+        >>> parse_task_spec("arc_easy:mc:full")
+        ("arc_easy", ["mc", "full"], {})
+        >>> parse_task_spec("humaneval:3shot:bpb")
+        ("humaneval", ["3shot", "bpb"], {})
     """
     # Split on : to get task name and variants
     parts = spec.split(":")
@@ -274,14 +250,11 @@ def get_task(spec: str, config_overrides: dict[str, Any] | None = None) -> Task:
 
     Spec format: task_name[:variant1[:variant2...]]
 
-    Note: Regimes are now treated as variants. When looking up a variant,
-    we check both the variants and regimes registries.
-
     Task names with colons (e.g., "humaneval:bpb") are checked first before
     parsing as base_task:variant.
 
     Args:
-        spec: Task specification (e.g., "arc_easy", "arc_easy:mc:olmes").
+        spec: Task specification (e.g., "arc_easy", "arc_easy:mc:full").
         config_overrides: Additional config overrides to apply (highest priority).
 
     Returns:
@@ -308,20 +281,6 @@ def get_task(spec: str, config_overrides: dict[str, Any] | None = None) -> Task:
         task_name = parts[0]
         variants = parts[1:] if len(parts) > 1 else []
 
-    # Separate items before :: (variant-first) from items after :: (regime-first).
-    # For "task:v1::r1", v1 checks variants first, r1 checks regimes first.
-    variant_items: list[str] = []
-    regime_items: list[str] = []
-    hit_separator = False
-    for v in variants:
-        if v == "":
-            hit_separator = True
-            continue
-        if hit_separator:
-            regime_items.append(v)
-        else:
-            variant_items.append(v)
-
     if task_name not in _tasks:
         available = ", ".join(sorted(_tasks.keys()))
         raise KeyError(f"Unknown task '{task_name}'. Available: {available}")
@@ -330,30 +289,17 @@ def get_task(spec: str, config_overrides: dict[str, Any] | None = None) -> Task:
 
     def _resolve_error(name: str) -> KeyError:
         available_variants = list(_variants.get(task_name, {}).keys())
-        available_regimes = list(_regimes.get(task_name, {}).keys())
-        avail = sorted(set(available_variants + available_regimes))
         return KeyError(
             f"Unknown variant '{name}' for task '{task_name}'. "
-            f"Available: {', '.join(avail) if avail else 'none'}"
+            f"Available: {', '.join(sorted(available_variants)) if available_variants else 'none'}"
         )
 
-    # Apply variant items (check variants first, then regimes)
-    for v in variant_items:
-        if task_name in _variants and v in _variants[task_name]:
-            config = replace(config, **_variants[task_name][v])
-        elif task_name in _regimes and v in _regimes[task_name]:
-            config = replace(config, **_regimes[task_name][v])
-        else:
-            raise _resolve_error(v)
-
-    # Apply regime items (check regimes first, then variants)
-    for r in regime_items:
-        if task_name in _regimes and r in _regimes[task_name]:
-            config = replace(config, **_regimes[task_name][r])
-        elif task_name in _variants and r in _variants[task_name]:
-            config = replace(config, **_variants[task_name][r])
-        else:
-            raise _resolve_error(r)
+    for variant in variants:
+        if not variant:
+            raise _resolve_error(variant)
+        if task_name not in _variants or variant not in _variants[task_name]:
+            raise _resolve_error(variant)
+        config = replace(config, **_variants[task_name][variant])
 
     # Apply additional config overrides (highest priority)
     if config_overrides:
@@ -379,20 +325,6 @@ def list_variants(task_name: str | None = None) -> dict[str, list[str]]:
     if task_name:
         return {task_name: list(_variants.get(task_name, {}).keys())}
     return {name: list(variants.keys()) for name, variants in _variants.items()}
-
-
-def list_regimes(task_name: str | None = None) -> dict[str, list[str]]:
-    """List available regimes, optionally filtered by task.
-
-    Args:
-        task_name: If provided, only return regimes for this task.
-
-    Returns:
-        Dict mapping task names to their available regimes.
-    """
-    if task_name:
-        return {task_name: list(_regimes.get(task_name, {}).keys())}
-    return {name: list(regimes.keys()) for name, regimes in _regimes.items()}
 
 
 def task_exists(spec: str) -> bool:
@@ -421,29 +353,10 @@ def task_exists(spec: str) -> bool:
     if task_name is None:
         return False
 
-    # Separate variant-first items (before ::) from regime-first items (after ::)
-    variant_items: list[str] = []
-    regime_items: list[str] = []
-    hit_sep = False
-    for v in variants:
-        if v == "":
-            hit_sep = True
-            continue
-        if hit_sep:
-            regime_items.append(v)
-        else:
-            variant_items.append(v)
-
-    for v in variant_items:
-        has_variant = task_name in _variants and v in _variants[task_name]
-        has_regime = task_name in _regimes and v in _regimes[task_name]
-        if not has_variant and not has_regime:
+    for variant in variants:
+        if not variant:
             return False
-
-    for r in regime_items:
-        has_regime = task_name in _regimes and r in _regimes[task_name]
-        has_variant = task_name in _variants and r in _variants[task_name]
-        if not has_regime and not has_variant:
+        if task_name not in _variants or variant not in _variants[task_name]:
             return False
 
     return True
@@ -454,7 +367,6 @@ def clear_registry() -> None:
     _tasks.clear()
     _configs.clear()
     _variants.clear()
-    _regimes.clear()
 
 
 def register_subtasks(
@@ -559,3 +471,27 @@ def get_task_dependencies(specs: list[str]) -> list[str]:
             all_deps.extend(task.config.dependencies)
     # Dedupe preserving order
     return list(dict.fromkeys(all_deps))
+
+
+def get_sandbox_envs(specs: list[str]) -> list[SandboxEnv]:
+    """Collect unique sandbox environments from task specs.
+
+    Returns:
+        Deduplicated list of SandboxEnv objects (by name).
+
+    Raises:
+        ValueError: If two tasks declare the same sandbox_env name with different deps.
+    """
+    envs: dict[str, SandboxEnv] = {}
+    for spec in specs:
+        task = get_task(spec)
+        senv = task.config.sandbox_env
+        if senv is None:
+            continue
+        if senv.name in envs and envs[senv.name] != senv:
+            raise ValueError(
+                f"Conflicting sandbox_env for '{senv.name}': "
+                f"{envs[senv.name].dependencies} vs {senv.dependencies}"
+            )
+        envs[senv.name] = senv
+    return list(envs.values())

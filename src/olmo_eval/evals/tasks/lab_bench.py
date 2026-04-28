@@ -76,6 +76,14 @@ class PrecisionMetric(Metric):
             return 0.0
         return sum(r.scores.get(scorer_name, 0.0) for r in committed) / len(committed)
 
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        # Precision excludes refusals before averaging, so raw MC scorer values
+        # are not interchangeable with the stored task metric.
+        return False
+
+    def pairwise_display_format(self) -> str:
+        return "percentage"
+
 
 @dataclass(frozen=True, slots=True)
 class CoverageMetric(Metric):
@@ -92,6 +100,13 @@ class CoverageMetric(Metric):
             return 0.0
         committed = sum(1 for r in responses if not _is_refusal(r))
         return committed / len(responses)
+
+    def supports_pairwise_scorer_fallback(self) -> bool:
+        # Coverage is derived from refusal handling, not the MC scorer signal.
+        return False
+
+    def pairwise_display_format(self) -> str:
+        return "percentage"
 
 
 def _format_lab_bench_rc(question: str, answer: str | None = None) -> str:
@@ -128,9 +143,9 @@ class LabBenchTask(Task):
             metrics=(LogprobPerCharMCAccuracyMetric(),),
         )
         # Register name:bpb as a separate task (like drop:bpb) so that
-        # name:bpb:olmo3base works reliably without needing the :: regime
-        # mechanism. This matches the old oe-eval-internal lab_bench_*:bpb
-        # config: RC format, 3-shot, seed 1234, BPB metric.
+        # name:bpb:olmo3base works reliably with stacked variants. This
+        # matches the old oe-eval-internal lab_bench_*:bpb config: RC format,
+        # 3-shot, seed 1234, BPB metric.
         import sys
 
         bpb_name = f"{name}:bpb"

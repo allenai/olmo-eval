@@ -27,7 +27,7 @@ class HarnessConfig:
     - Which tools are available (Tool objects or names resolved from registry)
     - System prompt to prepend to requests
     - Tool choice behavior (auto, none, required)
-    - Backend selection (default, openai_agents)
+    - Scaffold selection (e.g., openai_agents, openhands)
     - Sandbox configurations for isolated tool execution
     """
 
@@ -37,13 +37,14 @@ class HarnessConfig:
     tools: tuple[Tool | str, ...] = ()
     system_prompt: str | None = None
     tool_choice: Literal["auto", "none", "required"] | str = "auto"
-    backend: str | None = None
+    scaffold: str | None = None
     required_secrets: tuple[str, ...] = ()
     max_turns: int | None = None
     max_concurrency: int | None = None
     scoring_concurrency: int | None = None
     sandboxes: tuple[SandboxConfig, ...] = ()
-    backend_kwargs: dict[str, Any] = field(default_factory=dict)
+    scaffold_kwargs: dict[str, Any] = field(default_factory=dict)
+    sandbox_pool_instances: int | None = None
     metrics: MetricsConfig | None = None
     batching: BatchConfig | None = None
     scorer_startup_timeout: float | None = None
@@ -126,7 +127,7 @@ class HarnessConfig:
             "tool_names": list(self.tool_names),
             "system_prompt": self.system_prompt,
             "tool_choice": self.tool_choice,
-            "backend": self.backend,
+            "scaffold": self.scaffold,
             "required_secrets": list(self.required_secrets),
         }
         if self.auxiliary_providers:
@@ -141,8 +142,10 @@ class HarnessConfig:
             d["scoring_concurrency"] = self.scoring_concurrency
         if self.sandboxes:
             d["sandboxes"] = [s.to_dict() for s in self.sandboxes]
-        if self.backend_kwargs:
-            d["backend_kwargs"] = self.backend_kwargs
+        if self.scaffold_kwargs:
+            d["scaffold_kwargs"] = self.scaffold_kwargs
+        if self.sandbox_pool_instances is not None:
+            d["sandbox_pool_instances"] = self.sandbox_pool_instances
         if self.metrics is not None:
             d["metrics"] = self.metrics.to_dict()
         if self.batching is not None:
@@ -180,6 +183,10 @@ class HarnessConfig:
         auxiliary_providers = {
             name: ProviderConfig.from_dict(config) for name, config in auxiliary_data.items()
         }
+        scaffold = data["scaffold"] if "scaffold" in data else data.get("backend")
+        scaffold_kwargs = (
+            data["scaffold_kwargs"] if "scaffold_kwargs" in data else data.get("backend_kwargs", {})
+        )
 
         return cls(
             name=data.get("name", "default"),
@@ -188,13 +195,14 @@ class HarnessConfig:
             tools=tuple(data.get("tool_names", [])),
             system_prompt=data.get("system_prompt"),
             tool_choice=data.get("tool_choice", "auto"),
-            backend=data.get("backend"),
+            scaffold=scaffold,
             required_secrets=tuple(data.get("required_secrets", [])),
             max_turns=data.get("max_turns"),
             max_concurrency=data.get("max_concurrency"),
             scoring_concurrency=data.get("scoring_concurrency"),
             sandboxes=sandboxes,
-            backend_kwargs=data.get("backend_kwargs", {}),
+            sandbox_pool_instances=data.get("sandbox_pool_instances"),
+            scaffold_kwargs=scaffold_kwargs,
             metrics=metrics,
             batching=batching,
             scorer_startup_timeout=data.get("scorer_startup_timeout"),
@@ -268,13 +276,14 @@ def harness_config(
     tools: Sequence[Tool | str] = (),
     system_prompt: str | None = None,
     tool_choice: Literal["auto", "none", "required"] | str = "auto",
-    backend: str | None = None,
+    scaffold: str | None = None,
     required_secrets: Sequence[str] = (),
     max_turns: int | None = None,
     max_concurrency: int | None = None,
     scoring_concurrency: int | None = None,
     sandboxes: Sequence[SandboxConfig] = (),
-    backend_kwargs: dict[str, Any] | None = None,
+    scaffold_kwargs: dict[str, Any] | None = None,
+    sandbox_pool_instances: int | None = None,
     metrics: MetricsConfig | None = None,
     batching: BatchConfig | None = None,
     scorer_startup_timeout: float | None = None,
@@ -288,13 +297,14 @@ def harness_config(
         tools: Sequence of Tool instances or tool names.
         system_prompt: System prompt to prepend to requests.
         tool_choice: How the model should use tools.
-        backend: Backend name (None = no multi-turn support via run()).
+        scaffold: Scaffold name (None = no multi-turn support via run()).
         required_secrets: Environment variable names for tools.
-        max_turns: Maximum turns for agent backends (None = backend default).
-        max_concurrency: Maximum concurrent tool executions for agent backends.
+        max_turns: Maximum turns for agent scaffolds (None = scaffold default).
+        max_concurrency: Maximum concurrent tool executions for agent scaffolds.
         scoring_concurrency: Maximum concurrent scoring operations (default 8).
         sandboxes: Sandbox configurations for isolated tool execution.
-        backend_kwargs: Backend-specific kwargs (e.g., enable_compaction for openai_agents).
+        scaffold_kwargs: Scaffold-specific kwargs (e.g., enable_compaction for openai_agents).
+        sandbox_pool_instances: Shared executor budget for auto-allocated sandboxes.
         metrics: Metrics collection configuration (None = no metrics).
         batching: Batching strategy configuration (None = sequential).
         scorer_startup_timeout: Timeout for scorer worker startup. If None, derived from
@@ -310,13 +320,14 @@ def harness_config(
         tools=tuple(tools),
         system_prompt=system_prompt,
         tool_choice=tool_choice,
-        backend=backend,
+        scaffold=scaffold,
         required_secrets=tuple(required_secrets),
         max_turns=max_turns,
         max_concurrency=max_concurrency,
         scoring_concurrency=scoring_concurrency,
         sandboxes=tuple(sandboxes),
-        backend_kwargs=backend_kwargs or {},
+        scaffold_kwargs=scaffold_kwargs or {},
+        sandbox_pool_instances=sandbox_pool_instances,
         metrics=metrics,
         batching=batching,
         scorer_startup_timeout=scorer_startup_timeout,

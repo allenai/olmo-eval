@@ -21,7 +21,7 @@ make_suite(
 )
 make_suite(
     name="arc:mc:olmo3base",
-    tasks=("arc_challenge:mc:olmo3base", "arc_easy:mc:olmo3base"),
+    tasks=("arc_challenge:mc_olmo3base", "arc_easy:mc:olmo3base"),
 )
 
 # -- MMLU ---------------------------------------------------------------------
@@ -211,9 +211,9 @@ make_suite(
         get_suite("mmlu:humanities:mc:olmo3base"),
         get_suite("mmlu:other:mc:olmo3base"),
         get_suite("mmlu:social_sciences:mc:olmo3base"),
-        "csqa:mc:olmo3base",
-        "piqa:mc:olmo3base",
-        "socialiqa:mc:olmo3base",
+        "csqa:mc_olmo3base",
+        "piqa:mc_olmo3base",
+        "socialiqa:mc_olmo3base",
         "coqa:mc:olmo3base",
         "drop:mc:olmo3base",
         "jeopardy:mc:olmo3base",

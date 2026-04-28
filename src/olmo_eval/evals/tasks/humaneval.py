@@ -1,4 +1,5 @@
 from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from olmo_eval.common.formatters import ChatFormatter, CompletionFormatter, PPLFormatter
@@ -12,9 +13,15 @@ from olmo_eval.common.types import (
     SamplingParams,
 )
 from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.constants.code import HUMANEVAL_STOP_SEQUENCES
+from olmo_eval.evals.constants.code import HUMANEVAL_STOP_SEQUENCES, OLMO3_HUMANEVAL_STOP_SEQUENCES
 from olmo_eval.evals.extract import extract_code, indent_code
 from olmo_eval.evals.tasks.common import Task, register, register_variant
+
+
+@dataclass(frozen=True, slots=True)
+class CodeExecutionScorer3s(CodeExecutionScorer):
+    timeout: float = 3.0
+    separator: str = "\n"
 
 
 @register("humaneval")
@@ -207,7 +214,7 @@ register_variant(
 register_variant("codex_humaneval", "olmo3base", num_fewshot=3, fewshot_seed=1234)
 
 # Chat variants for instruction-tuned models
-# Use with agent backends: humaneval:chat:pass_at_1
+# Use with agent scaffolds: humaneval:chat:pass_at_1
 # Note: System prompt is owned by the harness (e.g., codex_agent preset)
 _CHAT_USER_TEMPLATE = """\
 Complete this Python function. Write only the function body (the implementation \
@@ -287,3 +294,60 @@ register_variant(
         stop_sequences=HUMANEVAL_STOP_SEQUENCES,
     ),
 )
+
+
+# =============================================================================
+# OLMo3 base variant (```python code block prompt wrapping)
+# =============================================================================
+
+
+@register("humaneval:olmo3base")
+class HumanEvalOlmo3Base(HumanEval):
+    """HumanEval with OLMo3 prompt wrapping (```python code block)."""
+
+    num_fewshot: int = 3
+    fewshot_seed: int = 1234
+    formatter = CompletionFormatter(answer_prefix="")
+    sampling_params = SamplingParams(
+        max_tokens=1024,
+        temperature=0.6,
+        top_p=0.6,
+        do_sample=True,
+        num_samples=32,
+        stop_sequences=OLMO3_HUMANEVAL_STOP_SEQUENCES,
+    )
+    metrics = (
+        PassAtKMetric(k=1, scorer=CodeExecutionScorer3s),
+        PassAtKMetric(k=2, scorer=CodeExecutionScorer3s),
+        PassAtKMetric(k=4, scorer=CodeExecutionScorer3s),
+        PassAtKMetric(k=8, scorer=CodeExecutionScorer3s),
+        PassAtKMetric(k=16, scorer=CodeExecutionScorer3s),
+    )
+    primary_metric = PassAtKMetric(k=1, scorer=CodeExecutionScorer)
+    fewshot_split: str = "test"
+
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
+        prompt = "```python\n" + doc["prompt"]
+        unit_tests = doc["test"] + f"\ncheck({doc['entry_point']})"
+
+        return Instance(
+            question=prompt,
+            gold_answer=doc["canonical_solution"] + "```",
+            metadata={
+                "id": doc["task_id"],
+                "entry_point": doc["entry_point"],
+                "answer_prefix": doc["prompt"],
+                "test": unit_tests,
+            },
+        )
+
+    def _extract_answers(self, responses: Sequence[Response]) -> None:
+        """Use raw continuation like the old oe-eval-internal system.
+
+        The old system does ``doc["prompt"] + continuation`` with no code
+        extraction or indentation normalisation, so we replicate that here.
+        """
+        for response in responses:
+            for output in response.outputs:
+                raw = output.text or ""
+                output.extracted_answer = response.instance.metadata["answer_prefix"] + raw

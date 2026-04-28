@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from olmo_eval.cli.utils import console
+from olmo_eval.common.console import console
 from olmo_eval.common.logging import get_logger
 from olmo_eval.runners.common.models import (
     MetricsOutput,
@@ -73,7 +73,7 @@ class RunnerResultsMixin:
 
         Checks that:
         1. All tasks/suites exist
-        2. All variants/regimes are valid
+        2. All variants are valid
         3. All tasks have metrics configured
 
         Returns:
@@ -81,11 +81,10 @@ class RunnerResultsMixin:
         """
         from olmo_eval.common.configs import expand_tasks, validate_task_metrics
         from olmo_eval.evals.suites import suite_exists
-        from olmo_eval.evals.tasks.common import list_regimes, list_tasks, list_variants
+        from olmo_eval.evals.tasks.common import list_tasks, list_variants
 
         errors: list[str] = []
         available_tasks = set(list_tasks())
-        regimes_by_task = list_regimes()
         variants_by_task = list_variants()
 
         for spec in self.task_specs:
@@ -108,25 +107,23 @@ class RunnerResultsMixin:
                 errors.append(f"Unknown task or suite: '{spec}'")
                 continue
 
-            # Validate each variant/regime exists (check both registries)
+            # Validate each variant exists.
             task_variants = set(variants_by_task.get(task_name, []))
-            task_regimes = set(regimes_by_task.get(task_name, []))
-            all_valid_variants = task_variants | task_regimes
 
             for variant in variants:
                 if not variant:
                     continue
-                if variant not in all_valid_variants:
-                    available_list = sorted(all_valid_variants)
+                if variant not in task_variants:
+                    available_list = sorted(task_variants)
                     if available_list:
                         errors.append(
-                            f"Unknown variant/regime '{variant}' for task '{task_name}'. "
+                            f"Unknown variant '{variant}' for task '{task_name}'. "
                             f"Available: {', '.join(available_list)}"
                         )
                     else:
                         errors.append(
-                            f"Unknown variant/regime '{variant}' for task '{task_name}'. "
-                            f"This task has no registered variants or regimes."
+                            f"Unknown variant '{variant}' for task '{task_name}'. "
+                            "This task has no registered variants."
                         )
 
         # If we have errors so far, return early (can't validate metrics on invalid tasks)

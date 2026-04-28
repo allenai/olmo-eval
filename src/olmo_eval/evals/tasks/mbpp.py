@@ -1,14 +1,30 @@
-from collections.abc import Iterator
+"""MBPP code generation task implementations."""
+
+from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
 from typing import Any
 
-from olmo_eval.common.formatters import PPLFormatter
-from olmo_eval.common.metrics import BPBMetricInstanceAvg, PassAtKMetric
+from olmo_eval.common.formatters import CompletionFormatter, PPLFormatter
+from olmo_eval.common.metrics import BPBMetricByteAvg, BPBMetricInstanceAvg, PassAtKMetric
 from olmo_eval.common.scorers import CodeExecutionScorer
-from olmo_eval.common.types import Instance, LMOutput, LMRequest, SamplingParams
+from olmo_eval.common.types import (
+    Instance,
+    LMOutput,
+    LMRequest,
+    RequestType,
+    Response,
+    SamplingParams,
+)
 from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.constants.code import MBPP_STOP_SEQUENCES
-from olmo_eval.evals.extract import extract_code
+from olmo_eval.evals.constants.code import MBPP_STOP_SEQUENCES, OLMO3_MBPP_STOP_SEQUENCES
+from olmo_eval.evals.extract import extract_code, extract_code_before_fence
 from olmo_eval.evals.tasks.common import Task, register, register_variant
+from olmo_eval.evals.tasks.constants.mbpp import MBPP_FEWSHOT_SOURCES
+
+
+@dataclass(frozen=True, slots=True)
+class CodeExecutionScorer3s(CodeExecutionScorer):
+    separator: str = "\n"
 
 
 class MBPPBase(Task):
@@ -28,7 +44,8 @@ class MBPPBase(Task):
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
         # Build prompt from text and function signature
-        question = doc["text"].strip() + "\n" + doc["code"].split(":")[0] + ":"
+        func_sig = doc["code"].split(":")[0] + ":"
+        question = doc["text"].strip() + "\n" + func_sig
 
         # Build test code
         tests = doc.get("test_setup_code", "") or ""
@@ -41,7 +58,7 @@ class MBPPBase(Task):
             gold_answer=doc["code"],
             metadata={
                 "id": doc["task_id"],
-                "answer_prefix": question,
+                "answer_prefix": func_sig,
                 "test": tests,
             },
         )
@@ -58,10 +75,22 @@ class MBPPBase(Task):
 
     def extract_answer(self, output: LMOutput) -> str | None:
         """Extract code from model output."""
-        code = extract_code(output.text)
-        if code and "answer_prefix" in (output.metadata or {}):
-            return output.metadata["answer_prefix"] + code
-        return code
+        return extract_code(output.text)
+
+    def _extract_answers(self, responses: Sequence[Response]) -> None:
+        """Extract code and prepend the function signature.
+
+        The answer_prefix contains the function signature (e.g. ``def func(x):``).
+        Prepending it ensures the generated body is wrapped in a valid function
+        definition so that test assertions can call the function.
+        """
+        for response in responses:
+            for output in response.outputs:
+                code = self.extract_answer(output)
+                if code:
+                    output.extracted_answer = response.instance.metadata["answer_prefix"] + code
+                else:
+                    output.extracted_answer = None
 
     def _build_fewshot(self) -> list[Instance]:
         """Build few-shot examples from the prompt split.
@@ -296,4 +325,108 @@ register_variant(
         num_samples=10,
         stop_sequences=MBPP_STOP_SEQUENCES,
     ),
+)
+
+
+# =============================================================================
+# EvalPlus Variant (different prompt format)
+# =============================================================================
+
+
+@register("mbpp:olmo3base")
+class MBPPOlmo3Base(MBPPBase):
+    """MBPP with EvalPlus-style prompt format for OLMo3 base evaluation.
+
+    Wraps the problem in an instruction + markdown code block with a sample test case.
+    Matches the old oe-eval-internal ``mbpp:3shot::olmo3:n32:v2`` configuration:
+    - Fewshot examples use ``question + code + "\\n"`` (no answer prefix).
+    - The answer prefix ``Here is the completed function:\\n\\n```python\\n`` is
+      appended only to the final (target) prompt.
+    - Fewshot examples are taken in dataset order (no shuffle).
+    """
+
+    data_source = DataSource(path="google-research-datasets/mbpp")
+    num_fewshot: int = 3
+    fewshot_seed: int = 1234
+    # We override format_request so the formatter is unused for this task, but
+    # keep it for the bpb variant which overrides it via register_variant.
+    formatter = CompletionFormatter(
+        answer_prefix="Here is the completed function:\n\n```python\n",
+    )
+    sampling_params = SamplingParams(
+        max_tokens=512,
+        temperature=0.6,
+        top_p=0.6,
+        do_sample=True,
+        num_samples=32,
+        stop_sequences=OLMO3_MBPP_STOP_SEQUENCES,
+    )
+    metrics = (
+        PassAtKMetric(k=1, scorer=CodeExecutionScorer3s),
+        PassAtKMetric(k=2, scorer=CodeExecutionScorer3s),
+        PassAtKMetric(k=4, scorer=CodeExecutionScorer3s),
+        PassAtKMetric(k=8, scorer=CodeExecutionScorer3s),
+        PassAtKMetric(k=16, scorer=CodeExecutionScorer3s),
+    )
+    primary_metric = PassAtKMetric(k=1, scorer=CodeExecutionScorer)
+
+    _ANSWER_PREFIX = "Here is the completed function:\n\n```python\n"
+
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
+        random_test = doc["test_list"][0] if doc.get("test_list") else ""
+        question = (
+            "Please provide a self-contained Python script that solves the "
+            "following problem in a markdown code block:\n```\n"
+            + doc["text"].strip()
+            + "\n"
+            + random_test
+            + "\n```\n"
+        )
+
+        # Match old oe-eval-internal: only use test_list, no test_setup_code
+        tests = "\n".join(doc["test_list"])
+
+        return Instance(
+            question=question,
+            gold_answer=doc["code"] + "\n```",
+            metadata={
+                "id": doc["task_id"],
+                "answer_prefix": "",
+                "test": tests,
+                "code": doc["code"],
+            },
+        )
+
+    def format_request(self, instance: Instance) -> LMRequest:
+        """Build prompt matching old oe-eval-internal format.
+
+        Fewshot examples: ``question + code + "\\n"`` (no answer prefix).
+        Target: ``question + answer_prefix``.
+        Separator between parts: ``"\\n\\n"``.
+        """
+        fewshot = self.get_fewshot()
+        parts: list[str] = []
+        for ex in fewshot:
+            parts.append(ex.question + ex.metadata["code"] + "\n")
+        # Target gets the answer prefix
+        parts.append(instance.question + self._ANSWER_PREFIX)
+        prompt = "\n\n".join(parts)
+        return LMRequest(request_type=RequestType.COMPLETION, prompt=prompt)
+
+    def _build_fewshot(self) -> list[Instance]:
+        if self.config.num_fewshot == 0:
+            return []
+
+        instances = [self.process_doc(doc) for doc in MBPP_FEWSHOT_SOURCES]
+        return instances[: self.config.num_fewshot]
+
+    def extract_answer(self, output: LMOutput) -> str | None:
+        return extract_code_before_fence(output.text)
+
+
+register_variant(
+    "mbpp:olmo3base",
+    "bpb",
+    formatter=PPLFormatter(leading_space=False),
+    metrics=(BPBMetricByteAvg(),),
 )

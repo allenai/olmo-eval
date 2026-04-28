@@ -50,7 +50,7 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     multiple=True,
     cls=OrderedMultiOption,
     save_to="_ordered",
-    help="Model name or preset (can specify multiple). Use -o after to add overrides.",
+    help="Model name or preset (can specify multiple).",
 )
 @click.option(
     "--task",
@@ -58,7 +58,7 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     multiple=True,
     cls=OrderedMultiOption,
     save_to="_ordered",
-    help="Task name with optional @priority suffix. Use -o after to add overrides.",
+    help="Task name with optional @priority suffix. Use -o after to add task overrides.",
 )
 @click.option(
     "--override",
@@ -66,7 +66,7 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     multiple=True,
     cls=OrderedMultiOption,
     save_to="_ordered",
-    help="Override for preceding -m or -t (e.g., -o provider.kind=vllm -o limit=100)",
+    help="Override for preceding --task or --harness (e.g., -o limit=100)",
 )
 @click.option("--cluster", "-c", default=None, help="Cluster alias (h100, a100, aus) or full name")
 @click.option(
@@ -226,6 +226,17 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     help="Map Beaker secret to env var: BEAKER_SECRET:ENV_VAR (e.g., my-openai-key:OPENAI_API_KEY)",
 )
 @click.option(
+    "-e",
+    "--env",
+    "env_vars",
+    multiple=True,
+    help=(
+        "Forward or set a job env var. Use 'KEY' to forward from the local shell, "
+        "'KEY=VALUE' to set directly. Repeatable. Values are plain text in the job "
+        "spec - use --secret-env for sensitive values."
+    ),
+)
+@click.option(
     "--gpus",
     "-G",
     type=int,
@@ -274,6 +285,7 @@ def launch(
     provider_kwargs: tuple[str, ...],
     uv_cache_dir: str,
     secret_env: tuple[str, ...],
+    env_vars: tuple[str, ...],
     gpus: int | None,
 ) -> None:
     """Launch an evaluation job on Beaker.
@@ -329,6 +341,27 @@ def launch(
         beaker_secret, env_var = mapping.split(":", 1)
         secret_env_overrides[beaker_secret] = env_var
 
+    # Parse --env/-e entries: "KEY" forwards from local shell, "KEY=VALUE" sets directly
+    import os as _os
+
+    parsed_env_vars: dict[str, str] = {}
+    for entry in env_vars:
+        if "=" in entry:
+            key, value = entry.split("=", 1)
+            if not key:
+                console.print(f"[red]Error:[/red] Invalid --env entry '{entry}': empty key")
+                raise SystemExit(1)
+            parsed_env_vars[key] = value
+        else:
+            local_value = _os.environ.get(entry)
+            if local_value is None:
+                console.print(
+                    f"[yellow]Warning:[/yellow] --env {entry} is not set in the local "
+                    "shell, skipping"
+                )
+                continue
+            parsed_env_vars[entry] = local_value
+
     # Build CLI args dict
     cli_args = {
         "name": name,
@@ -364,6 +397,7 @@ def launch(
         "harness_overrides": harness_overrides,
         "uv_cache_dir": uv_cache_dir,
         "secret_env_overrides": secret_env_overrides,
+        "env_vars": parsed_env_vars,
     }
 
     # Handle external evaluations mode
@@ -410,6 +444,7 @@ def launch(
             s3_region=s3_region,
             store=store,
             secret_env_overrides=secret_env_overrides,
+            user_env_vars=parsed_env_vars,
             eval_args=parsed_eval_args if parsed_eval_args else None,
             provider_kwargs=parsed_provider_kwargs if parsed_provider_kwargs else None,
             uv_cache_dir=uv_cache_dir,
@@ -813,7 +848,7 @@ def _build_experiment_summary(
 ) -> ExperimentSummary:
     """Build experiment summary for display."""
     from olmo_eval.common.configs import expand_tasks
-    from olmo_eval.runners import AsyncEvalRunner
+    from olmo_eval.runners.asynq.runner import AsyncEvalRunner
 
     # Expand task specs to match keys in task_configs_by_spec
     expanded_tasks = expand_tasks(exp.tasks)
@@ -973,6 +1008,10 @@ def _apply_harness_overrides(harness_config, overrides: list[str]):
         overrides: List of dotlist override strings (e.g., ["sandbox.mode=docker"]).
             Supports list indices like "sandboxes.0.mode=modal".
             Supports JSON values like 'sandboxes.0={"mode":"modal","instances":4}'.
+            Supports shared sandbox overrides like
+            'sandboxes={"mode":"modal","instances":64}' where non-instance
+            fields are applied to each sandbox config and instances sets the
+            shared sandbox pool budget.
 
     Returns:
         New HarnessConfig with overrides applied.
@@ -1006,6 +1045,7 @@ def _launch_external_evals(
     s3_region: str,
     store: bool = False,
     secret_env_overrides: dict[str, str] | None = None,
+    user_env_vars: dict[str, str] | None = None,
     eval_args: dict[str, str] | None = None,
     provider_kwargs: dict[str, str] | None = None,
     uv_cache_dir: str | None = None,
@@ -1195,6 +1235,7 @@ def _launch_external_evals(
             retries=retries,
             provider_kind=str(provider_config.kind),
             base_url=provider_config.base_url,
+            user_env_vars=user_env_vars,
         )
         job_configs.append(job_config)
 

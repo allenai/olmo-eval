@@ -52,7 +52,7 @@ class TestHarnessPresets:
         assert "semantic_scholar_snippet_search" in config.tool_names
         assert "serper_google_webpage_search" in config.tool_names
         assert config.system_prompt is not None
-        assert config.backend == "openai_agents"
+        assert config.scaffold == "openai_agents"
 
     def test_get_unknown_preset(self):
         """Test getting an unknown preset raises error."""
@@ -100,6 +100,20 @@ class TestHarnessPresets:
         config = HarnessPresets.dr_tulu
         assert isinstance(config, HarnessConfig)
         assert config.name == "dr_tulu"
+
+    def test_codex_universal_bigcodebench_uses_public_upstream_image(self):
+        """Test BigCodeBench sandbox reuses the public upstream execution image."""
+        config = get_harness_preset("codex_universal")
+
+        bigcodebench_sandbox = next(
+            sandbox
+            for sandbox in config.sandboxes
+            if sandbox.capabilities == frozenset({"sandbox:bigcodebench"})
+        )
+
+        assert bigcodebench_sandbox.image == "bigcodebench/bigcodebench-gradio:latest"
+        assert bigcodebench_sandbox.dockerfile_extra == ()
+        assert bigcodebench_sandbox.instances is None
 
 
 class TestSearchTools:

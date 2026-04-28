@@ -155,6 +155,17 @@ register_variant(
 )
 register_variant(
     "socialiqa",
+    "mc_olmo3base",
+    formatter=MultipleChoiceFormatter(),
+    data_source=DataSource(
+        path="social_i_qa", split="train+validation", revision="refs/convert/parquet"
+    ),
+    num_fewshot=5,
+    limit=10000,
+    fewshot_source="olmes_socialiqa_fixed",
+)
+register_variant(
+    "socialiqa",
     "xlarge",
     data_source=DataSource(
         path="social_i_qa", split="train+validation", revision="refs/convert/parquet"

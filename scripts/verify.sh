@@ -24,6 +24,10 @@ done
 
 echo "Running verification checks..."
 
+echo ""
+echo "==> Syncing dependencies..."
+uv sync --frozen --extra beaker --extra hf --extra postgres --extra analysis
+
 UV_RUN="uv run --frozen"
 
 echo ""
