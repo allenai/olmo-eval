@@ -235,7 +235,11 @@ class Tau2ExternalEval(SandboxedExternalEval):
 
         except Exception as e:
             logger.exception(f"[{self.name}] Execution failed")
-            return self._error_result(str(e), start_time, "\n".join(all_output))
+            return self._error_result(
+                f"{type(e).__name__}: {e}" if str(e) else type(e).__name__,
+                start_time,
+                "\n".join(all_output),
+            )
 
         result.duration_seconds = time.time() - start_time
         if output_dir:
@@ -371,9 +375,17 @@ sys.exit(main())
         """Extract metrics from tau2-bench results."""
         # tau2 saves results to {repo}/data/simulations/*.json
         results_path = f"{self.working_dir}/tau2-bench/data/simulations"
-        ls_result = await executor.execute_command(
-            f"ls {results_path}/*.json 2>/dev/null", timeout=30.0
-        )
+        try:
+            ls_result = await executor.execute_command(
+                f"ls {results_path}/*.json 2>/dev/null", timeout=30.0
+            )
+        except Exception as e:
+            return ExternalEvalResult(
+                name=self.name,
+                success=False,
+                error=f"Sandbox unreachable while reading results: {type(e).__name__}: {e}",
+                raw_output=raw_output,
+            )
         if not ls_result.success:
             return ExternalEvalResult(
                 name=self.name, success=False, error="No results files found", raw_output=raw_output
@@ -387,7 +399,11 @@ sys.exit(main())
             if not (json_file := json_file.strip()):
                 continue
 
-            cat_result = await executor.execute_command(f"cat {json_file}", timeout=30.0)
+            try:
+                cat_result = await executor.execute_command(f"cat {json_file}", timeout=30.0)
+            except Exception as e:
+                logger.warning(f"[{self.name}] Failed to read {json_file}: {type(e).__name__}: {e}")
+                continue
             if not cat_result.success:
                 continue
 
