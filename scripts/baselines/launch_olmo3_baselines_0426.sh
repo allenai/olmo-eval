@@ -34,8 +34,7 @@ Launches Beaker variants for the OLMo 3 baseline sweep across:
   7. Easy math + easy code tasks
 
 Each task group is launched for the standard baseline model bundle, for Qwen3 with
-thinking disabled, and for Gemma. Nemotron Nano is temporarily disabled in this
-launcher.
+thinking disabled, for Nemotron Nano with prefix caching disabled, and for Gemma.
 
 Options:
   --dry-run     Print the commands without launching them
@@ -240,8 +239,7 @@ baseline_models=(
     "almanach/Gaperon-1125-8B"
     "Qwen/Qwen3-8B"
     "Qwen/Qwen2.5-7B"
-    # Temporarily disabled while we sort out the current Nemotron launch issue.
-    # "nvidia/NVIDIA-Nemotron-Nano-9B-v2"
+    "nvidia/NVIDIA-Nemotron-Nano-9B-v2"
     "ibm-granite/granite-3.3-8b-base"
     "XiaomiMiMo/MiMo-7B-Base"
 )
