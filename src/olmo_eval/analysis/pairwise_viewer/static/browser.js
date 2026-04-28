@@ -1202,6 +1202,16 @@
           return renderPairwiseError(errorDetails, errorMessage, pageData.group_data);
         }
         if (!pairwiseData) {
+          if (pageData.pairwise_pending) {
+            return `
+              <div class="matrix-wrap">
+                <div class="single-model-note">
+                  <div>computing paired test...</div>
+                  <div class="dim">this can take a few seconds for large suites.</div>
+                </div>
+              </div>
+            `;
+          }
           return `
             <div class="matrix-wrap">
               <div class="single-model-note">
@@ -1956,6 +1966,77 @@
         document.body.removeChild(link);
       }
 
+      let downloadToastCount = 0;
+      function getDownloadToast() {
+        let toast = document.getElementById("download-toast");
+        if (toast) return toast;
+        toast = document.createElement("div");
+        toast.id = "download-toast";
+        toast.setAttribute("role", "status");
+        toast.setAttribute("aria-live", "polite");
+        toast.style.cssText =
+          "position:fixed;right:16px;bottom:16px;z-index:9999;padding:8px 14px;" +
+          "background:#1f2937;color:#fff;border-radius:6px;font:13px/1.4 system-ui, sans-serif;" +
+          "box-shadow:0 4px 12px rgba(0,0,0,0.25);display:none;";
+        document.body.appendChild(toast);
+        return toast;
+      }
+      function showDownloadToast(message) {
+        const toast = getDownloadToast();
+        toast.textContent = message;
+        toast.style.display = "block";
+        downloadToastCount += 1;
+      }
+      function hideDownloadToast() {
+        downloadToastCount = Math.max(0, downloadToastCount - 1);
+        if (downloadToastCount === 0) {
+          const toast = document.getElementById("download-toast");
+          if (toast) toast.style.display = "none";
+        }
+      }
+
+      function filenameFromContentDisposition(header, fallback) {
+        const match = String(header || "").match(
+          /filename\*?=(?:UTF-8'')?"?([^"\n;]+)"?/i
+        );
+        if (match) {
+          try {
+            return decodeURIComponent(match[1].trim());
+          } catch (_error) {
+            return match[1].trim();
+          }
+        }
+        return fallback;
+      }
+
+      async function downloadServerExport(url, label, fallbackFilename) {
+        showDownloadToast(`preparing ${label}...`);
+        try {
+          const response = await fetch(url.toString());
+          if (!response.ok) {
+            const message = (await response.text()).trim();
+            throw new Error(message || `failed to download ${label}`);
+          }
+          const blob = await response.blob();
+          const filename = filenameFromContentDisposition(
+            response.headers.get("Content-Disposition"),
+            fallbackFilename
+          );
+          const blobUrl = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = blobUrl;
+          link.download = filename;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+        } catch (error) {
+          window.alert(error instanceof Error ? error.message : `failed to download ${label}`);
+        } finally {
+          hideDownloadToast();
+        }
+      }
+
       async function fetchViewerExportJson(kind) {
         const response = await fetch(pairwiseViewerExportUrl(kind, "json"));
         if (!response.ok) {
@@ -2045,9 +2126,38 @@
               worst_model_score: taskStat.worst_model_score ?? null,
             }))
           : [];
+        const taskColumns = Array.isArray(pairwiseData.task_columns)
+          ? pairwiseData.task_columns
+          : [];
+        const taskNameById = new Map(
+          taskColumns.map((column) => [
+            String(column.id ?? ""),
+            String(column.full_label || column.task_name || column.id || ""),
+          ])
+        );
+        const taskHashById = new Map(
+          taskColumns.map((column) => [String(column.id ?? ""), column.task_hash ?? null])
+        );
+        const remapTaskScoresById = (taskScores) => {
+          const out = {};
+          if (!taskScores) return out;
+          for (const id of Object.keys(taskScores)) {
+            const hash = taskHashById.get(id);
+            out[hash || id] = taskScores[id];
+          }
+          return out;
+        };
+        const remapTaskScoresByName = (taskScores) => {
+          const out = {};
+          if (!taskScores) return out;
+          for (const id of Object.keys(taskScores)) {
+            const name = taskNameById.get(id) || id;
+            out[name] = taskScores[id];
+          }
+          return out;
+        };
         return {
           metadata: {
-            page_title: pairwiseData.meta.title || null,
             group_name: currentGroupName(),
             scope_name: pairwiseData.meta.scope_label || null,
             scope_kind: pairwiseData.meta.scope_kind || null,
@@ -2110,7 +2220,8 @@
               worst_scoring_task_label: model.worst_task_label ?? null,
               worst_scoring_task_score: model.worst_task_score ?? null,
               total_cost: model.cost ?? null,
-              task_scores_by_task_name: model.task_scores || {},
+              task_scores_by_task_hash: remapTaskScoresById(model.task_scores),
+              task_scores_by_task_name: remapTaskScoresByName(model.task_scores),
             };
           }),
           pairwise_comparisons: buildPairwiseExportRows(pairwiseData, order),
@@ -2234,16 +2345,31 @@
       }
 
       function exportPairwiseInstanceResults() {
-        triggerDownload(pairwiseViewerExportUrl("instance-results", "csv"));
+        const pairwiseData = pageData.pairwise_data;
+        const fallback = (pairwiseData ? pairwiseExportBase(pairwiseData) : "results") +
+          "-instance-results.csv";
+        void downloadServerExport(
+          pairwiseViewerExportUrl("instance-results", "csv"),
+          "instance results CSV",
+          fallback
+        );
       }
 
       function exportPairwiseStoredFiles() {
-        triggerDownload(pairwiseViewerExportUrl("stored-files", "csv"));
+        const pairwiseData = pageData.pairwise_data;
+        const fallback = (pairwiseData ? pairwiseExportBase(pairwiseData) : "results") +
+          "-stored-files.csv";
+        void downloadServerExport(
+          pairwiseViewerExportUrl("stored-files", "csv"),
+          "stored files CSV",
+          fallback
+        );
       }
 
       async function exportPairwiseAll() {
         const pairwiseData = pageData.pairwise_data;
         if (!pairwiseData) return;
+        showDownloadToast("preparing combined export...");
         try {
           const [instanceResults, storedFiles] = await Promise.all([
             fetchViewerExportJson("instance-results"),
@@ -2261,6 +2387,8 @@
           );
         } catch (error) {
           window.alert(error instanceof Error ? error.message : "The viewer export failed.");
+        } finally {
+          hideDownloadToast();
         }
       }
 
@@ -2577,7 +2705,93 @@
         hideTooltip();
       });
 
+      function pairwiseFetchUrl() {
+        const params = new URLSearchParams();
+        if (pageData.selected_group) params.set("group", pageData.selected_group);
+        if (pageData.selected_scope_key) params.set("scope", pageData.selected_scope_key);
+        if (pageData.selected_metric) params.set("metric", pageData.selected_metric);
+        if (pageData.selected_run_mode) params.set("runs", pageData.selected_run_mode);
+        return "/pairwise?" + params.toString();
+      }
+
+      function scopeOptionsFetchUrl() {
+        const params = new URLSearchParams();
+        if (pageData.selected_group) params.set("group", pageData.selected_group);
+        if (pageData.selected_scope_key) params.set("scope", pageData.selected_scope_key);
+        if (pageData.selected_run_mode) params.set("runs", pageData.selected_run_mode);
+        return "/scope-options?" + params.toString();
+      }
+
+      async function loadPairwiseAsync() {
+        try {
+          const response = await fetch(pairwiseFetchUrl(), {
+            headers: { Accept: "application/json" },
+          });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const bundle = await response.json();
+          pageData.pairwise_data = bundle.pairwise_data ?? null;
+          pageData.pairwise_error = bundle.pairwise_error ?? null;
+          pageData.pairwise_error_details = bundle.pairwise_error_details ?? null;
+        } catch (error) {
+          pageData.pairwise_data = null;
+          pageData.pairwise_error = "failed to load paired test: " + (error?.message || error);
+          pageData.pairwise_error_details = null;
+        } finally {
+          pageData.pairwise_pending = false;
+          renderApp();
+        }
+      }
+
+      function bindSearchSelectOptionHandlers(control) {
+        if (!control) return;
+        control.querySelectorAll('[data-role="search-select-option"]').forEach((option) => {
+          if (option.__searchSelectBound) return;
+          option.__searchSelectBound = true;
+          option.addEventListener("mouseenter", () => {
+            if (!option.hidden) setActiveSearchOption(control, option);
+          });
+          option.addEventListener("focus", () => {
+            if (!option.hidden) setActiveSearchOption(control, option);
+          });
+        });
+      }
+
+      async function loadScopeOptionsAsync() {
+        try {
+          const response = await fetch(scopeOptionsFetchUrl(), {
+            headers: { Accept: "application/json" },
+          });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const bundle = await response.json();
+          if (Array.isArray(bundle.scope_options) && pageData.group_data) {
+            pageData.group_data.scope_options = bundle.scope_options;
+          }
+          const scopeControl = scopeForm?.querySelector(".scope-select");
+          const body = scopeControl?.querySelector(".search-select-body");
+          if (body && typeof bundle.scope_select_html === "string") {
+            body.innerHTML = bundle.scope_select_html;
+            bindSearchSelectOptionHandlers(scopeControl);
+            if (scopeControl) resetSearchSelect(scopeControl);
+            queueSearchSelectMenuWidthSync();
+          }
+        } catch (_error) {
+          // Leave the partial dropdown in place; user can still navigate via URL.
+        } finally {
+          pageData.scope_options_pending = false;
+        }
+      }
+
       trimExcludedModels();
       queueSearchSelectMenuWidthSync();
       renderApp();
+      if (pageData.pairwise_pending) {
+        void loadPairwiseAsync();
+      }
+      if (pageData.scope_options_pending) {
+        void loadScopeOptionsAsync();
+      }
     })();

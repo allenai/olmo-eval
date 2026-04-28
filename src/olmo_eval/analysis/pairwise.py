@@ -454,6 +454,58 @@ def _latest_merge_context(
     return source_experiment_by_pk, display_experiment_by_hash, display_order
 
 
+def _latest_source_experiment_pks_subquery(
+    *,
+    data_table: Any,
+    source_pks: list[int],
+    extra_filters: list[Any],
+):
+    """Subquery yielding (experiment_pk, task_hash) pairs that are latest by
+    ``(experiment.model_hash, data_table.task_hash)`` over the given source PKs.
+
+    ``data_table`` is either ``TaskResult`` or ``InstancePrediction``. Use the
+    returned subquery to JOIN against the data table, restricting the fetch to
+    the latest run per (model_hash, task_hash) and skipping the Python-side
+    duplicate-run merge entirely.
+    """
+    from sqlalchemy import func, select
+
+    from olmo_eval.storage.backends.postgres.models import Experiment
+
+    runs = (
+        select(
+            data_table.experiment_pk.label("experiment_pk"),
+            data_table.task_hash.label("task_hash"),
+            Experiment.model_hash.label("model_hash"),
+            Experiment.timestamp.label("timestamp"),
+        )
+        .select_from(data_table)
+        .join(Experiment, Experiment.id == data_table.experiment_pk)
+        .where(data_table.experiment_pk.in_(source_pks), *extra_filters)
+        .group_by(
+            data_table.experiment_pk,
+            data_table.task_hash,
+            Experiment.model_hash,
+            Experiment.timestamp,
+        )
+    ).subquery()
+
+    ranked = (
+        select(
+            runs.c.experiment_pk,
+            runs.c.task_hash,
+            func.row_number()
+            .over(
+                partition_by=[runs.c.model_hash, runs.c.task_hash],
+                order_by=[runs.c.timestamp.desc(), runs.c.experiment_pk.desc()],
+            )
+            .label("rn"),
+        )
+    ).subquery()
+
+    return select(ranked.c.experiment_pk, ranked.c.task_hash).where(ranked.c.rn == 1).subquery()
+
+
 def _merge_latest_task_rows(
     *,
     task_rows: list[Any],
@@ -1661,12 +1713,26 @@ def compute_pairwise(
         TaskResult.metrics,
         TaskResult.primary_metric,
     ).where(TaskResult.experiment_pk.in_(source_pks))
+    tr_scope_filters: list[Any] = []
     if suite_name:
-        tr_stmt = tr_stmt.where(TaskResult.task_name.in_(suite_task_names))
+        tr_scope_filters.append(TaskResult.task_name.in_(suite_task_names))
     elif task_name:
-        tr_stmt = tr_stmt.where(TaskResult.task_name == task_name)
+        tr_scope_filters.append(TaskResult.task_name == task_name)
     elif task_hash:
-        tr_stmt = tr_stmt.where(TaskResult.task_hash.startswith(task_hash))
+        tr_scope_filters.append(TaskResult.task_hash.startswith(task_hash))
+    for scope_filter in tr_scope_filters:
+        tr_stmt = tr_stmt.where(scope_filter)
+    if not keep_all and source_pks:
+        latest_tr_pairs = _latest_source_experiment_pks_subquery(
+            data_table=TaskResult,
+            source_pks=source_pks,
+            extra_filters=tr_scope_filters,
+        )
+        tr_stmt = tr_stmt.join(
+            latest_tr_pairs,
+            (latest_tr_pairs.c.experiment_pk == TaskResult.experiment_pk)
+            & (latest_tr_pairs.c.task_hash == TaskResult.task_hash),
+        )
     task_rows = session.execute(tr_stmt).all()
     task_rows = [
         row
@@ -2012,22 +2078,31 @@ def compute_pairwise(
                 instance_row_count=instance_row_count,
             )
 
-    rows = (
-        session.execute(
-            select(
-                InstancePrediction.experiment_pk,
-                InstancePrediction.native_id,
-                InstancePrediction.task_hash,
-                score_expr,
-            ).where(
-                InstancePrediction.experiment_pk.in_(selected_source_pks),
-                InstancePrediction.task_hash.in_(unique_task_hashes),
-                score_expr.is_not(None),
+    if score_expr is None:
+        rows = []
+    else:
+        ip_stmt = select(
+            InstancePrediction.experiment_pk,
+            InstancePrediction.native_id,
+            InstancePrediction.task_hash,
+            score_expr,
+        ).where(
+            InstancePrediction.experiment_pk.in_(selected_source_pks),
+            InstancePrediction.task_hash.in_(unique_task_hashes),
+            score_expr.is_not(None),
+        )
+        if not keep_all and selected_source_pks:
+            latest_ip_pairs = _latest_source_experiment_pks_subquery(
+                data_table=InstancePrediction,
+                source_pks=selected_source_pks,
+                extra_filters=[InstancePrediction.task_hash.in_(unique_task_hashes)],
             )
-        ).all()
-        if score_expr is not None
-        else []
-    )
+            ip_stmt = ip_stmt.join(
+                latest_ip_pairs,
+                (latest_ip_pairs.c.experiment_pk == InstancePrediction.experiment_pk)
+                & (latest_ip_pairs.c.task_hash == InstancePrediction.task_hash),
+            )
+        rows = session.execute(ip_stmt).all()
     if not keep_all:
         rows = _merge_latest_instance_score_rows(
             instance_rows=rows,

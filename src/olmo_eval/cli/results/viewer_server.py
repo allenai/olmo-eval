@@ -162,6 +162,34 @@ def _parse_scope_key(scope_key: str | None) -> tuple[str | None, str | None]:
     return kind, value
 
 
+def _resolve_scope_filter(
+    requested_scope: str | None,
+) -> tuple[tuple[str, ...] | None, str | None]:
+    """Resolve a requested scope key into a task-name filter and (optional) suite name.
+
+    Returns ``(scope_task_names, scope_suite_name)``. When the scope is a suite,
+    ``scope_task_names`` is the suite's expanded task names. When it's a single
+    ``task`` scope, the tuple has just that task name. ``None, None`` means no
+    eager scoping should be applied (e.g., unrecognised scope or task-hash).
+    """
+    kind, value = _parse_scope_key(requested_scope)
+    if kind is None or value is None:
+        return None, None
+    if kind == "task":
+        return (value,), None
+    if kind == "suite":
+        from olmo_eval.evals.suites.registry import get_suite, suite_exists
+
+        if not suite_exists(value):
+            return None, None
+        try:
+            tasks = tuple(get_suite(value).expand())
+        except Exception:
+            return None, None
+        return (tasks or None, value)
+    return None, None
+
+
 def _pluralized_label(count: int, singular: str, plural: str | None = None) -> str:
     return singular if count == 1 else (plural or f"{singular}s")
 
@@ -424,7 +452,13 @@ def _annotate_task_variants(
     return task_rows, task_ids_by_name
 
 
-def _build_results_table(session: Session, group_name: str, *, keep_all: bool) -> dict[str, Any]:
+def _build_results_table(
+    session: Session,
+    group_name: str,
+    *,
+    keep_all: bool,
+    scope_task_names: tuple[str, ...] | None = None,
+) -> dict[str, Any]:
     from olmo_eval.runners.processing.utils import extract_score_from_metrics
     from olmo_eval.storage.backends.postgres.models import TaskResult
 
@@ -440,15 +474,16 @@ def _build_results_table(session: Session, group_name: str, *, keep_all: bool) -
     )
     selected_pks = [experiment.id for experiment in display_experiments]
     source_pks = [experiment.id for experiment in source_experiments]
-    task_rows = session.execute(
-        select(
-            TaskResult.experiment_pk,
-            TaskResult.task_name,
-            TaskResult.task_hash,
-            TaskResult.metrics,
-            TaskResult.primary_metric,
-        ).where(TaskResult.experiment_pk.in_(source_pks))
-    ).all()
+    tr_stmt = select(
+        TaskResult.experiment_pk,
+        TaskResult.task_name,
+        TaskResult.task_hash,
+        TaskResult.metrics,
+        TaskResult.primary_metric,
+    ).where(TaskResult.experiment_pk.in_(source_pks))
+    if scope_task_names:
+        tr_stmt = tr_stmt.where(TaskResult.task_name.in_(scope_task_names))
+    task_rows = session.execute(tr_stmt).all()
     if not keep_all:
         task_rows = _merge_latest_task_rows(
             list(task_rows),
@@ -984,6 +1019,8 @@ def _build_group_browser_data(
     *,
     keep_all: bool,
     require_full_coverage: bool,
+    scope_task_names: tuple[str, ...] | None = None,
+    scope_suite_name: str | None = None,
 ) -> dict[str, Any]:
     from olmo_eval.evals.suites.registry import get_suite, list_suites
     from olmo_eval.storage.backends.postgres.models import Experiment, TaskResult
@@ -997,6 +1034,21 @@ def _build_group_browser_data(
         ).where(Experiment.experiment_group == group_name)
     ).one()
 
+    rt_stmt = (
+        select(
+            TaskResult.task_name,
+            TaskResult.task_hash,
+            func.count(distinct(Experiment.model_hash)).label("models"),
+            func.max(TaskResult.primary_metric).label("metric"),
+        )
+        .join(Experiment, Experiment.id == TaskResult.experiment_pk)
+        .where(Experiment.experiment_group == group_name)
+    )
+    if scope_task_names:
+        rt_stmt = rt_stmt.where(TaskResult.task_name.in_(scope_task_names))
+    rt_stmt = rt_stmt.group_by(TaskResult.task_name, TaskResult.task_hash).order_by(
+        TaskResult.task_name, TaskResult.task_hash
+    )
     raw_task_rows = [
         {
             "name": str(task_name or ""),
@@ -1004,25 +1056,20 @@ def _build_group_browser_data(
             "models": int(model_count or 0),
             "metric": metric or "",
         }
-        for task_name, task_hash, model_count, metric in session.execute(
-            select(
-                TaskResult.task_name,
-                TaskResult.task_hash,
-                func.count(distinct(Experiment.model_hash)).label("models"),
-                func.max(TaskResult.primary_metric).label("metric"),
-            )
-            .join(Experiment, Experiment.id == TaskResult.experiment_pk)
-            .where(Experiment.experiment_group == group_name)
-            .group_by(TaskResult.task_name, TaskResult.task_hash)
-            .order_by(TaskResult.task_name, TaskResult.task_hash)
-        ).all()
+        for task_name, task_hash, model_count, metric in session.execute(rt_stmt).all()
     ]
     task_rows, task_ids_by_name = _annotate_task_variants(raw_task_rows)
 
     present_tasks = {row["name"] for row in task_rows}
-    results_table = _build_results_table(session, group_name, keep_all=keep_all)
+    results_table = _build_results_table(
+        session, group_name, keep_all=keep_all, scope_task_names=scope_task_names
+    )
     availability_table = (
-        results_table if not keep_all else _build_results_table(session, group_name, keep_all=False)
+        results_table
+        if not keep_all
+        else _build_results_table(
+            session, group_name, keep_all=False, scope_task_names=scope_task_names
+        )
     )
     latest_models = list(availability_table.get("models", []))
     task_column_by_id: dict[str, dict[str, Any]] = {
@@ -1031,8 +1078,12 @@ def _build_group_browser_data(
     latest_task_column_by_id: dict[str, dict[str, Any]] = {
         str(column["id"]): column for column in availability_table.get("task_columns", [])
     }
+    if scope_suite_name is not None:
+        candidate_suites = [scope_suite_name] if scope_suite_name in set(list_suites()) else []
+    else:
+        candidate_suites = list(list_suites())
     suite_rows: list[dict[str, Any]] = []
-    for suite_name in list_suites():
+    for suite_name in candidate_suites:
         expanded_tasks = get_suite(suite_name).expanded_tasks
         visible_task_names = list(
             dict.fromkeys(task_name for task_name in expanded_tasks if task_name in present_tasks)
@@ -1192,6 +1243,119 @@ def _clean_inline_text(value: Any) -> str:
     return str(value or "").replace("\n", " ").strip()
 
 
+def _build_scope_select_options(
+    *,
+    group_data_scope_options: list[dict[str, Any]],
+    selected_scope_key: str | None,
+    pairwise_data: dict[str, Any] | None,
+) -> list[dict[str, str]]:
+    """Map raw ``group_data["scope_options"]`` entries to the search-select shape."""
+    return [
+        {
+            "value": _clean_inline_text(option["key"]),
+            "label": _clean_inline_text(option["label"]),
+            "summary_text": _clean_inline_text(
+                _scope_option_label(
+                    option,
+                    selected_scope_key=selected_scope_key,
+                    pairwise_data=pairwise_data,
+                )
+                if option["key"] == selected_scope_key
+                else option["label"]
+            ),
+            "filter_text": _clean_inline_text(
+                " ".join(
+                    part
+                    for part in (
+                        option["value"],
+                        option["label"],
+                        option["kind"],
+                        option.get("supporting_text"),
+                        option.get("status_badge"),
+                    )
+                    if part
+                )
+            ),
+            "meta": _clean_inline_text(option["kind"]),
+            "supporting_text": _clean_inline_text(option.get("supporting_text", "")),
+            "status_badge": _clean_inline_text(option.get("status_badge", "")),
+            "status_tone": _clean_inline_text(option.get("status_tone", "")),
+            "title": _clean_inline_text(
+                " · ".join(
+                    part
+                    for part in (
+                        _scope_option_label(
+                            option,
+                            selected_scope_key=selected_scope_key,
+                            pairwise_data=pairwise_data,
+                        )
+                        if option["key"] == selected_scope_key
+                        else option["label"],
+                        option.get("supporting_text"),
+                        option.get("title_suffix"),
+                    )
+                    if part
+                )
+            ),
+        }
+        for option in group_data_scope_options
+    ]
+
+
+def _render_search_select_option_html(
+    option: dict[str, Any], *, index: int, selected_value: str
+) -> str:
+    selected_class = " is-selected" if option["value"] == selected_value else ""
+    tone_class = (
+        f" is-{html.escape(str(option['status_tone']))}" if option.get("status_tone") else ""
+    )
+    meta_markup = ""
+    if option["meta"]:
+        meta_markup = (
+            f'<span class="search-select-option-meta">{html.escape(option["meta"])}</span>'
+        )
+    status_markup = ""
+    if option.get("status_badge"):
+        status_tone = html.escape(str(option.get("status_tone") or "neutral"))
+        status_markup = (
+            '<span class="search-select-option-state '
+            f'is-{status_tone}">{html.escape(str(option["status_badge"]))}</span>'
+        )
+    supporting_markup = ""
+    if option.get("supporting_text"):
+        supporting_markup = (
+            '<span class="search-select-option-sub">'
+            f"{html.escape(str(option['supporting_text']))}"
+            "</span>"
+        )
+    aside_markup = ""
+    if meta_markup or status_markup:
+        aside_markup = (
+            f'<span class="search-select-option-aside">{meta_markup}{status_markup}</span>'
+        )
+    return dedent(
+        f"""
+        <button
+          type="button"
+          class="search-select-option{selected_class}{tone_class}"
+          data-action="select-search-option"
+          data-role="search-select-option"
+          data-value="{html.escape(option["value"])}"
+          data-summary-text="{html.escape(option["summary_text"])}"
+          data-filter-text="{html.escape(option["filter_text"])}"
+          data-option-index="{index}"
+          title="{html.escape(option["title"])}"
+        >
+          <span class="search-select-option-copy">
+            <span class="search-select-option-main">{html.escape(option["label"])}</span>
+            {supporting_markup}
+          </span>
+          {aside_markup}
+        </button>
+        """
+    ).strip()
+
+
 def _render_search_select(
     *,
     control_name: str,
@@ -1250,59 +1414,11 @@ def _render_search_select(
     placeholder_html = html.escape(placeholder)
     empty_label_html = html.escape(empty_label)
 
-    def _render_search_select_option(index: int, option: dict[str, Any]) -> str:
-        selected_class = " is-selected" if option["value"] == resolved_selected_value else ""
-        tone_class = (
-            f" is-{html.escape(str(option['status_tone']))}" if option.get("status_tone") else ""
-        )
-        meta_markup = ""
-        if option["meta"]:
-            meta_markup = (
-                f'<span class="search-select-option-meta">{html.escape(option["meta"])}</span>'
-            )
-        status_markup = ""
-        if option.get("status_badge"):
-            status_tone = html.escape(str(option.get("status_tone") or "neutral"))
-            status_markup = (
-                '<span class="search-select-option-state '
-                f'is-{status_tone}">{html.escape(str(option["status_badge"]))}</span>'
-            )
-        supporting_markup = ""
-        if option.get("supporting_text"):
-            supporting_markup = (
-                '<span class="search-select-option-sub">'
-                f"{html.escape(str(option['supporting_text']))}"
-                "</span>"
-            )
-        aside_markup = ""
-        if meta_markup or status_markup:
-            aside_markup = (
-                f'<span class="search-select-option-aside">{meta_markup}{status_markup}</span>'
-            )
-        return dedent(
-            f"""
-            <button
-              type="button"
-              class="search-select-option{selected_class}{tone_class}"
-              data-action="select-search-option"
-              data-role="search-select-option"
-              data-value="{html.escape(option["value"])}"
-              data-summary-text="{html.escape(option["summary_text"])}"
-              data-filter-text="{html.escape(option["filter_text"])}"
-              data-option-index="{index}"
-              title="{html.escape(option["title"])}"
-            >
-              <span class="search-select-option-copy">
-                <span class="search-select-option-main">{html.escape(option["label"])}</span>
-                {supporting_markup}
-              </span>
-              {aside_markup}
-            </button>
-            """
-        ).strip()
-
     rendered_options = "".join(
-        _render_search_select_option(index, option) for index, option in enumerate(options)
+        _render_search_select_option_html(
+            option, index=index, selected_value=resolved_selected_value
+        )
+        for index, option in enumerate(options)
     )
 
     return dedent(
@@ -1764,28 +1880,19 @@ def _build_instance_results_export_data(
         if not task_name:
             continue
         metric_key = task_hash_to_metric.get(task_hash)
-        profile = task_profile_by_hash.get(task_hash)
         for experiment in compared_experiments:
             experiment_id = int(experiment["experiment_pk"])
             key = (task_hash, native_id)
             rows.append(
                 {
-                    **_export_experiment_identity(experiment),
+                    "model_name": str(experiment["model_name"]),
+                    "model_hash": str(experiment["model_hash"]),
+                    "timestamp": experiment["timestamp"],
                     "task_name": task_name,
                     "task_hash": task_hash,
                     "native_id": native_id,
                     "task_metric_key": metric_key,
                     "raw_score": raw_scores_by_pk[experiment_id].get(key),
-                    "comparison_score": comparison_scores_by_pk[experiment_id].get(key),
-                    "score_display_format": (
-                        profile.display_format
-                        if profile is not None
-                        else result.score_display_format
-                    ),
-                    "score_unit": profile.unit if profile is not None else result.score_unit,
-                    "score_higher_is_better": (
-                        profile.higher_is_better if profile is not None else result.higher_is_better
-                    ),
                 }
             )
 
@@ -1859,8 +1966,6 @@ def _serialize_viewer_export(
     if kind == "instance-results":
         suffix = "instance-results"
         csv_fields = [
-            "model_display_rank",
-            "model_label",
             "model_name",
             "model_hash",
             "timestamp",
@@ -1869,10 +1974,6 @@ def _serialize_viewer_export(
             "native_id",
             "task_metric_key",
             "raw_score",
-            "comparison_score",
-            "score_display_format",
-            "score_unit",
-            "score_higher_is_better",
         ]
     elif kind == "stored-files":
         suffix = "stored-files"
@@ -2263,6 +2364,8 @@ def render_results_viewer_page(
     pairwise_error_details: dict[str, Any] | None = None,
     selected_metric: str | None = None,
     selected_run_mode: str = "latest",
+    pairwise_pending: bool = False,
+    scope_options_pending: bool = False,
 ) -> str:
     """Render the viewer page with server-populated selectors and payload."""
     browser_payload = {
@@ -2275,6 +2378,8 @@ def render_results_viewer_page(
         "pairwise_data": pairwise_data,
         "pairwise_error": pairwise_error,
         "pairwise_error_details": pairwise_error_details,
+        "pairwise_pending": bool(pairwise_pending),
+        "scope_options_pending": bool(scope_options_pending),
     }
     payload_json = json.dumps(browser_payload, separators=(",", ":")).replace("</", "<\\/")
 
@@ -2326,56 +2431,11 @@ def render_results_viewer_page(
             ),
             "",
         )
-        scope_select_options = [
-            {
-                "value": _clean_inline_text(option["key"]),
-                "label": _clean_inline_text(option["label"]),
-                "summary_text": _clean_inline_text(
-                    _scope_option_label(
-                        option,
-                        selected_scope_key=selected_scope_key,
-                        pairwise_data=pairwise_data,
-                    )
-                    if option["key"] == selected_scope_key
-                    else option["label"]
-                ),
-                "filter_text": _clean_inline_text(
-                    " ".join(
-                        part
-                        for part in (
-                            option["value"],
-                            option["label"],
-                            option["kind"],
-                            option.get("supporting_text"),
-                            option.get("status_badge"),
-                        )
-                        if part
-                    )
-                ),
-                "meta": _clean_inline_text(option["kind"]),
-                "supporting_text": _clean_inline_text(option.get("supporting_text", "")),
-                "status_badge": _clean_inline_text(option.get("status_badge", "")),
-                "status_tone": _clean_inline_text(option.get("status_tone", "")),
-                "title": _clean_inline_text(
-                    " · ".join(
-                        part
-                        for part in (
-                            _scope_option_label(
-                                option,
-                                selected_scope_key=selected_scope_key,
-                                pairwise_data=pairwise_data,
-                            )
-                            if option["key"] == selected_scope_key
-                            else option["label"],
-                            option.get("supporting_text"),
-                            option.get("title_suffix"),
-                        )
-                        if part
-                    )
-                ),
-            }
-            for option in group_data["scope_options"]
-        ]
+        scope_select_options = _build_scope_select_options(
+            group_data_scope_options=group_data["scope_options"],
+            selected_scope_key=selected_scope_key,
+            pairwise_data=pairwise_data,
+        )
 
     model_filter_models: list[dict[str, Any]] = []
     model_filter_columns: list[dict[str, Any]] = []
@@ -2478,6 +2538,121 @@ def render_results_viewer_page(
             script=_BROWSER_JS,
         ).strip()
         + "\n"
+    )
+
+
+def _build_scope_options_endpoint_bundle(
+    *,
+    session: Session,
+    groups: list[dict[str, Any]],
+    requested_group: str | None,
+    requested_scope: str | None,
+    keep_all: bool,
+    require_full_coverage: bool,
+    group_browser_cache: _TimedValueCache,
+) -> dict[str, Any]:
+    """Compute the JSON payload for the deferred ``/scope-options`` endpoint."""
+    empty: dict[str, Any] = {
+        "scope_options": [],
+        "scope_select_html": "",
+        "summary": None,
+    }
+    selected_group = _pick_group(groups, requested_group)
+    if selected_group is None:
+        return empty
+    full_group_data = group_browser_cache.get_or_set(
+        (selected_group, keep_all, require_full_coverage, None, None),
+        lambda: _build_group_browser_data(
+            session,
+            selected_group,
+            keep_all=keep_all,
+            require_full_coverage=require_full_coverage,
+        ),
+    )
+    selected_scope_key = _pick_scope(full_group_data, requested_scope)
+    scope_select_options = _build_scope_select_options(
+        group_data_scope_options=full_group_data["scope_options"],
+        selected_scope_key=selected_scope_key,
+        pairwise_data=None,
+    )
+    scope_select_html = "".join(
+        _render_search_select_option_html(
+            option,
+            index=index,
+            selected_value=_clean_inline_text(selected_scope_key or ""),
+        )
+        for index, option in enumerate(scope_select_options)
+    )
+    return {
+        "scope_options": full_group_data["scope_options"],
+        "scope_select_html": scope_select_html,
+        "summary": full_group_data.get("summary"),
+    }
+
+
+def _build_pairwise_endpoint_bundle(
+    *,
+    session: Session,
+    groups: list[dict[str, Any]],
+    requested_group: str | None,
+    requested_scope: str | None,
+    requested_metric: str | None,
+    keep_all: bool,
+    margin: float,
+    require_full_coverage: bool,
+    group_browser_cache: _TimedValueCache,
+    pairwise_cache: _TimedValueCache,
+) -> dict[str, Any]:
+    """Compute the JSON payload for the deferred ``/pairwise`` endpoint."""
+    empty: dict[str, Any] = {
+        "pairwise_data": None,
+        "pairwise_error": None,
+        "pairwise_error_details": None,
+    }
+    selected_group = _pick_group(groups, requested_group)
+    if selected_group is None:
+        return empty
+    scope_task_names, scope_suite_name = _resolve_scope_filter(requested_scope)
+    group_data = group_browser_cache.get_or_set(
+        (selected_group, keep_all, require_full_coverage, scope_task_names, scope_suite_name),
+        lambda: _build_group_browser_data(
+            session,
+            selected_group,
+            keep_all=keep_all,
+            require_full_coverage=require_full_coverage,
+            scope_task_names=scope_task_names,
+            scope_suite_name=scope_suite_name,
+        ),
+    )
+    selected_scope_key = _pick_scope(group_data, requested_scope)
+    selected_metric = _pick_metric_for_scope(
+        group_data,
+        selected_scope_key,
+        requested_metric,
+    )
+    scope_kind, scope_value = _parse_scope_key(selected_scope_key)
+    if scope_kind is None or scope_value is None:
+        return empty
+    return pairwise_cache.get_or_set(
+        (
+            selected_group,
+            scope_kind,
+            scope_value,
+            selected_metric,
+            margin,
+            keep_all,
+            require_full_coverage,
+        ),
+        lambda: _compute_viewer_pairwise_bundle(
+            session=session,
+            selected_group=selected_group,
+            scope_kind=scope_kind,
+            scope_value=scope_value,
+            selected_metric=selected_metric,
+            margin=margin,
+            keep_all=keep_all,
+            require_full_coverage=require_full_coverage,
+        ),
     )
 
 
@@ -2646,6 +2821,76 @@ def serve_results_viewer(
                 )
                 return
 
+            if parsed.path == "/pairwise":
+                requested_group = params.get("group", [""])[0] or None
+                requested_scope = params.get("scope", [""])[0] or None
+                requested_metric = params.get("metric", [""])[0] or None
+                requested_run_mode = params.get("runs", [""])[0] or None
+                _, selected_keep_all = _resolve_run_mode(
+                    requested_run_mode,
+                    default_keep_all=keep_all,
+                )
+
+                pairwise_bundle: dict[str, Any] = {
+                    "pairwise_data": None,
+                    "pairwise_error": None,
+                    "pairwise_error_details": None,
+                }
+                with db.session() as session:
+                    groups = groups_cache.get_or_set(
+                        ("groups", 500),
+                        lambda: _list_groups(session),
+                    )
+                    pairwise_bundle = _build_pairwise_endpoint_bundle(
+                        session=session,
+                        groups=groups,
+                        requested_group=requested_group,
+                        requested_scope=requested_scope,
+                        requested_metric=requested_metric,
+                        keep_all=selected_keep_all,
+                        margin=margin,
+                        require_full_coverage=require_full_coverage,
+                        group_browser_cache=group_browser_cache,
+                        pairwise_cache=pairwise_cache,
+                    )
+
+                payload = json.dumps(pairwise_bundle, separators=(",", ":")).encode("utf-8")
+                self._send_bytes(
+                    body=payload,
+                    content_type="application/json; charset=utf-8",
+                )
+                return
+
+            if parsed.path == "/scope-options":
+                requested_group = params.get("group", [""])[0] or None
+                requested_scope = params.get("scope", [""])[0] or None
+                requested_run_mode = params.get("runs", [""])[0] or None
+                _, selected_keep_all = _resolve_run_mode(
+                    requested_run_mode,
+                    default_keep_all=keep_all,
+                )
+                with db.session() as session:
+                    groups = groups_cache.get_or_set(
+                        ("groups", 500),
+                        lambda: _list_groups(session),
+                    )
+                    bundle = _build_scope_options_endpoint_bundle(
+                        session=session,
+                        groups=groups,
+                        requested_group=requested_group,
+                        requested_scope=requested_scope,
+                        keep_all=selected_keep_all,
+                        require_full_coverage=require_full_coverage,
+                        group_browser_cache=group_browser_cache,
+                    )
+
+                payload = json.dumps(bundle, separators=(",", ":")).encode("utf-8")
+                self._send_bytes(
+                    body=payload,
+                    content_type="application/json; charset=utf-8",
+                )
+                return
+
             if parsed.path not in {"", "/"}:
                 self.send_response(404)
                 self.end_headers()
@@ -2660,6 +2905,9 @@ def serve_results_viewer(
                 default_keep_all=keep_all,
             )
 
+            scope_task_names, scope_suite_name = _resolve_scope_filter(requested_scope)
+            scope_options_pending = scope_task_names is not None or scope_suite_name is not None
+
             with db.session() as session:
                 groups = groups_cache.get_or_set(
                     ("groups", 500),
@@ -2668,12 +2916,20 @@ def serve_results_viewer(
                 selected_group = _pick_group(groups, requested_group)
                 group_data = (
                     group_browser_cache.get_or_set(
-                        (selected_group, selected_keep_all, require_full_coverage),
+                        (
+                            selected_group,
+                            selected_keep_all,
+                            require_full_coverage,
+                            scope_task_names,
+                            scope_suite_name,
+                        ),
                         lambda: _build_group_browser_data(
                             session,
                             selected_group,
                             keep_all=selected_keep_all,
                             require_full_coverage=require_full_coverage,
+                            scope_task_names=scope_task_names,
+                            scope_suite_name=scope_suite_name,
                         ),
                     )
                     if selected_group is not None
@@ -2687,40 +2943,11 @@ def serve_results_viewer(
                     selected_scope_key,
                     requested_metric,
                 )
-                pairwise_data: dict[str, Any] | None = None
-                pairwise_error: str | None = None
-                pairwise_error_details: dict[str, Any] | None = None
 
-                scope_kind, scope_value = _parse_scope_key(selected_scope_key)
-                if (
-                    selected_group is not None
-                    and scope_kind is not None
-                    and scope_value is not None
-                ):
-                    pairwise_bundle = pairwise_cache.get_or_set(
-                        (
-                            selected_group,
-                            scope_kind,
-                            scope_value,
-                            selected_metric,
-                            margin,
-                            selected_keep_all,
-                            require_full_coverage,
-                        ),
-                        lambda: _compute_viewer_pairwise_bundle(
-                            session=session,
-                            selected_group=selected_group,
-                            scope_kind=scope_kind,
-                            scope_value=scope_value,
-                            selected_metric=selected_metric,
-                            margin=margin,
-                            keep_all=selected_keep_all,
-                            require_full_coverage=require_full_coverage,
-                        ),
-                    )
-                    pairwise_data = pairwise_bundle.get("pairwise_data")
-                    pairwise_error = pairwise_bundle.get("pairwise_error")
-                    pairwise_error_details = pairwise_bundle.get("pairwise_error_details")
+            scope_kind, scope_value = _parse_scope_key(selected_scope_key)
+            pairwise_pending = (
+                selected_group is not None and scope_kind is not None and scope_value is not None
+            )
 
             page = render_results_viewer_page(
                 groups=groups,
@@ -2729,9 +2956,11 @@ def serve_results_viewer(
                 selected_scope_key=selected_scope_key,
                 selected_metric=selected_metric,
                 selected_run_mode=selected_run_mode,
-                pairwise_data=pairwise_data,
-                pairwise_error=pairwise_error,
-                pairwise_error_details=pairwise_error_details,
+                pairwise_data=None,
+                pairwise_error=None,
+                pairwise_error_details=None,
+                pairwise_pending=pairwise_pending,
+                scope_options_pending=scope_options_pending,
             )
             encoded = page.encode("utf-8")
             self._send_bytes(body=encoded, content_type="text/html; charset=utf-8")
