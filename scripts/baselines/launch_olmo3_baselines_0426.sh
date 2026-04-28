@@ -261,8 +261,8 @@ baseline_launch_args=(
 qwen3_launch_args=(
     "-o" "provider.num_instances=${PROVIDER_NUM_INSTANCES}"
     "-o" "provider.trust_remote_code=true"
-    # Match completion-style baselines by disabling Qwen3 thinking mode at the vLLM server.
-    "-o" "provider.kwargs.default_chat_template_kwargs.enable_thinking=false"
+    # Apply Qwen3 thinking disablement at request time for broad vLLM compatibility.
+    "-o" "provider.kwargs.chat_template_kwargs.enable_thinking=false"
 )
 
 nemotron_launch_args=(

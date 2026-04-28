@@ -233,7 +233,9 @@ def _build_server_command(
         tool_call_parser: Parser for tool calls (auto-detected if not specified
             when enable_auto_tool_choice is True)
         enable_prefix_caching: Enable prefix caching for faster inference (default: True)
-        chat_template_kwargs: Extra kwargs for chat template (e.g., {"enable_thinking": false})
+        chat_template_kwargs: Extra kwargs for chat template (e.g., {"enable_thinking": false}).
+            These are applied at request time by the provider for broad vLLM compatibility,
+            rather than being forwarded as server CLI flags.
         **kwargs: Additional vLLM server arguments. May include patch_olmo3_tool_parser
             which controls whether to use the custom OLMo3 chat template.
 
@@ -291,10 +293,6 @@ def _build_server_command(
     # Prefix caching (enabled by default for faster inference)
     if enable_prefix_caching:
         cmd.append("--enable-prefix-caching")
-
-    # Chat template kwargs (e.g., for Qwen3 enable_thinking)
-    if chat_template_kwargs:
-        cmd.extend(["--chat-template-kwargs", json.dumps(chat_template_kwargs)])
 
     # Disable tqdm loading bar by default, enable with --debug-provider
     if is_debug_provider():

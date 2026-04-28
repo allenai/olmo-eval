@@ -108,12 +108,10 @@ class TestDotlistScalarOverrides:
         base = {"provider": {"kwargs": {}}}
         result = _apply_dotlist_overrides(
             base,
-            ["provider.kwargs.default_chat_template_kwargs.enable_thinking=false"],
+            ["provider.kwargs.chat_template_kwargs.enable_thinking=false"],
         )
 
-        assert result["provider"]["kwargs"]["default_chat_template_kwargs"] == {
-            "enable_thinking": False
-        }
+        assert result["provider"]["kwargs"]["chat_template_kwargs"] == {"enable_thinking": False}
 
 
 # ── JSON object deep-merge ──────────────────────────────────────────────────

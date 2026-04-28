@@ -232,9 +232,6 @@ class VLLMServerProvider(InferenceProvider):
                     srv_kwargs["tool_call_parser"] = tool_call_parser
             if trust_remote_code:
                 srv_kwargs["trust_remote_code"] = True
-            if chat_template_kwargs:
-                srv_kwargs["chat_template_kwargs"] = chat_template_kwargs
-
             self._server = VLLMServerProcess(
                 model_name=model_name,
                 tensor_parallel_size=tensor_parallel_size,
