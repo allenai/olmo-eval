@@ -3,6 +3,7 @@
       const root = document.getElementById("browser-root");
       const scopeForm = document.querySelector(".scope-form");
       const modelFilterDetails = document.getElementById("model-filter-details");
+      const modelConfigModalRoot = document.getElementById("model-config-modal-root");
       const storageBase = "pairwise-browser:" +
         (pageData.group_data?.summary?.group_name || "root") +
         ":";
@@ -18,11 +19,15 @@
         excludedModels: loadSetState("excludedModels"),
         hiddenCols: new Set(),
         columnsMenuOpen: false,
+        modelConfigModal: null,
       };
       let hoverPair = null;
       let pendingNavigation = false;
       let activeTableScrollDrag = null;
+      let modelConfigRequestToken = 0;
+      let modelConfigReturnFocus = null;
       const resultsScrollbarObservers = new WeakMap();
+      const modelConfigCache = new Map();
       let resultsScrollSyncQueued = false;
       let searchSelectWidthSyncQueued = false;
       const textMeasureCanvas = document.createElement("canvas");
@@ -326,6 +331,28 @@
           .replace(/>/g, "&gt;")
           .replace(/"/g, "&quot;")
           .replace(/'/g, "&#39;");
+      }
+
+      function formatTimestampLabel(value) {
+        if (!value) return "-";
+        const parsed = new Date(value);
+        if (Number.isNaN(parsed.getTime())) return String(value);
+        return parsed.toLocaleString("en-US", {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        });
+      }
+
+      function prettyJson(value) {
+        if (value === null || value === undefined) return "";
+        try {
+          return JSON.stringify(value, null, 2);
+        } catch (_error) {
+          return String(value);
+        }
       }
 
       function isNumber(value) {
@@ -963,9 +990,15 @@
                           data-model-key="${esc(modelKey(model))}"
                           title="exclude model"
                         >x</button>
-                        <span class="td-name-main">
+                        <button
+                          type="button"
+                          class="td-name-main td-name-link"
+                          data-action="open-model-config"
+                          data-model-ref="${esc(modelKey(model))}"
+                          title="view stored model config"
+                        >
                           <span class="td-name-text">${esc(model.display_label)}</span>
-                        </span>
+                        </button>
                       </td>
                         ${showAggregate ? `
                           <td class="td-num td-avg">
@@ -1724,6 +1757,7 @@
         root.innerHTML = state.view === "matrix"
           ? renderMatrix(pairwiseData, pageData.pairwise_error, pageData.pairwise_error_details)
           : renderResults(groupData);
+        renderModelConfigModal();
         syncChrome();
         bindResultsScrollbars();
         bindColumnsMenu();
@@ -1960,6 +1994,255 @@
 
       function modelExportRef(model) {
         return String((model?.model_hash || "") + "|" + (model?.timestamp || ""));
+      }
+
+      function currentResultsScopeColumns() {
+        const resultsData = pageData.group_data?.results_table;
+        return resultsData ? scopedTaskColumns(resultsData) : [];
+      }
+
+      function runModeLabel() {
+        return pageData.selected_run_mode === "repeated" ? "repeated runs" : "latest only";
+      }
+
+      function modelConfigFetchUrl(modelRef) {
+        if (!pageData.selected_group || !modelRef) return null;
+        const url = new URL("/model-config", window.location.origin);
+        url.searchParams.set("group", pageData.selected_group);
+        url.searchParams.set("model_ref", modelRef);
+        if (pageData.selected_run_mode) url.searchParams.set("runs", pageData.selected_run_mode);
+        return url;
+      }
+
+      function modalMetaItem(label, value, extraClass = "") {
+        const displayValue = value === null || value === undefined || value === "" ? "-" : value;
+        return `
+          <div class="model-config-meta-item${extraClass ? " " + extraClass : ""}">
+            <div class="model-config-meta-label">${esc(label)}</div>
+            <div class="model-config-meta-value">${esc(displayValue)}</div>
+          </div>
+        `;
+      }
+
+      function closeModelConfigModal(options = {}) {
+        if (!state.modelConfigModal) return;
+        const restoreFocus = options.restoreFocus !== false;
+        state.modelConfigModal = null;
+        if (modelConfigModalRoot) modelConfigModalRoot.innerHTML = "";
+        document.body.classList.remove("has-viewer-modal");
+        if (
+          restoreFocus &&
+          modelConfigReturnFocus &&
+          typeof modelConfigReturnFocus.focus === "function"
+        ) {
+          modelConfigReturnFocus.focus();
+        }
+        modelConfigReturnFocus = null;
+      }
+
+      function renderModelConfigModal() {
+        if (!modelConfigModalRoot) return;
+        const modalState = state.modelConfigModal;
+        if (!modalState) {
+          modelConfigModalRoot.innerHTML = "";
+          document.body.classList.remove("has-viewer-modal");
+          return;
+        }
+
+        const payload = modalState.payload;
+        const scopeOption = selectedScopeOption();
+        const scopeColumns = currentResultsScopeColumns();
+        const scopeTaskCount = scopeColumns.length;
+        const scopeLabel = scopeOption
+          ? String(scopeOption.value || scopeOption.label || pageData.selected_scope_key || "selected scope")
+          : (scopeTaskCount > 0 ? "all tasks in the current results table" : "current group");
+        const modelMeta = payload?.model || {};
+        const configSource = payload?.config_source || null;
+        const fallbackNotice = configSource?.kind === "model_hash_fallback"
+          ? `
+            <div class="model-config-note">
+              displayed run has no stored config, so this uses a saved config from
+              ${esc(formatTimestampLabel(configSource.timestamp))} with the same model hash.
+            </div>
+          `
+          : "";
+        const latestOnlyNotice = (
+          pageData.selected_run_mode !== "repeated" &&
+          configSource?.kind !== "model_hash_fallback"
+        )
+          ? `
+            <div class="model-config-note">
+              latest-only rows can combine task scores from multiple runs with the same model hash.
+              the config below is the shared model config for that hash.
+            </div>
+          `
+          : "";
+
+        let body = "";
+        if (modalState.status === "loading") {
+          body = `
+            <div class="diag-card">
+              <div class="diag-kicker">loading</div>
+              <div class="diag-title">fetching the stored model config...</div>
+              <div class="diag-scope">pulling config metadata for ${esc(modalState.modelLabel)}</div>
+            </div>
+          `;
+        } else if (modalState.status === "error") {
+          body = `
+            <div class="diag-card">
+              <div class="diag-kicker">unavailable</div>
+              <div class="diag-title">could not load the stored model config</div>
+              <div class="diag-scope">${esc(modalState.error || "unknown error")}</div>
+            </div>
+          `;
+        } else if (!payload?.config) {
+          body = `
+            <div class="diag-card">
+              <div class="diag-kicker">missing</div>
+              <div class="diag-title">no stored model config was found for this model</div>
+              <div class="diag-scope">
+                the viewer has row metadata for this run, but there is no saved config payload to show.
+              </div>
+            </div>
+          `;
+        } else {
+          body = `
+            ${fallbackNotice}
+            ${latestOnlyNotice}
+            <section class="model-config-section">
+              <div class="diag-section-title">stored config</div>
+              <pre class="model-config-code"><code>${esc(prettyJson(payload.config))}</code></pre>
+            </section>
+          `;
+        }
+
+        modelConfigModalRoot.innerHTML = `
+          <div class="viewer-modal" role="presentation">
+            <button
+              type="button"
+              class="viewer-modal-backdrop"
+              data-action="close-model-config-modal"
+              aria-label="close model config"
+            ></button>
+            <div
+              class="viewer-modal-panel"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="model-config-modal-title"
+            >
+              <div class="viewer-modal-head">
+                <div class="viewer-modal-copy">
+                  <div class="diag-kicker">model config</div>
+                  <div id="model-config-modal-title" class="viewer-modal-title">
+                    ${esc(modalState.modelLabel)}
+                  </div>
+                  ${modalState.modelName && modalState.modelName !== modalState.modelLabel
+                    ? `<div class="viewer-modal-sub">${esc(modalState.modelName)}</div>`
+                    : ""}
+                </div>
+                <button
+                  type="button"
+                  class="viewer-modal-close"
+                  data-action="close-model-config-modal"
+                  aria-label="close model config"
+                >x</button>
+              </div>
+              <div class="model-config-meta-grid">
+                ${modalMetaItem("group", currentGroupName())}
+                ${modalMetaItem("scope", scopeTaskCount > 0 ? `${scopeLabel} · ${scopeTaskCount} task${scopeTaskCount === 1 ? "" : "s"}` : scopeLabel)}
+                ${modalMetaItem("runs", runModeLabel())}
+                ${modalMetaItem("timestamp", formatTimestampLabel(modelMeta.timestamp || modalState.timestamp))}
+                ${modalMetaItem("hash", modelMeta.model_hash || modalState.modelHash || "-", "is-mono")}
+                ${modalMetaItem("experiment", modelMeta.experiment_id || "-")}
+                ${modalMetaItem("backend", modelMeta.backend_name || "-")}
+              </div>
+              <div class="viewer-modal-body">
+                ${body}
+              </div>
+            </div>
+          </div>
+        `;
+        document.body.classList.add("has-viewer-modal");
+        window.requestAnimationFrame(() => {
+          modelConfigModalRoot.querySelector(".viewer-modal-close")?.focus();
+        });
+      }
+
+      async function fetchModelConfigModalData(modelRef, requestToken) {
+        const url = modelConfigFetchUrl(modelRef);
+        if (!url) {
+          state.modelConfigModal = {
+            ...(state.modelConfigModal || {}),
+            status: "error",
+            error: "missing viewer context for model config lookup",
+          };
+          renderModelConfigModal();
+          return;
+        }
+        try {
+          const response = await fetch(url.toString());
+          if (!response.ok) {
+            const message = (await response.text()).trim();
+            throw new Error(message || "failed to load model config");
+          }
+          const payload = await response.json();
+          modelConfigCache.set(modelRef, payload);
+          if (
+            !state.modelConfigModal ||
+            state.modelConfigModal.modelRef !== modelRef ||
+            requestToken !== modelConfigRequestToken
+          ) {
+            return;
+          }
+          state.modelConfigModal = {
+            ...state.modelConfigModal,
+            status: "ready",
+            payload,
+            error: null,
+          };
+        } catch (error) {
+          if (
+            !state.modelConfigModal ||
+            state.modelConfigModal.modelRef !== modelRef ||
+            requestToken !== modelConfigRequestToken
+          ) {
+            return;
+          }
+          state.modelConfigModal = {
+            ...state.modelConfigModal,
+            status: "error",
+            error: error instanceof Error ? error.message : "failed to load model config",
+          };
+        }
+        renderModelConfigModal();
+      }
+
+      function openModelConfigModal(model, trigger = null) {
+        const modelRef = modelKey(model);
+        if (!modelRef) return;
+        modelConfigReturnFocus = trigger || document.activeElement;
+        state.modelConfigModal = {
+          status: "loading",
+          modelRef,
+          modelLabel: model?.display_label || model?.model_name || model?.model_hash || "model",
+          modelName: model?.model_name || null,
+          modelHash: model?.model_hash || null,
+          timestamp: model?.timestamp || null,
+          payload: null,
+          error: null,
+        };
+        renderModelConfigModal();
+        if (modelConfigCache.has(modelRef)) {
+          state.modelConfigModal = {
+            ...state.modelConfigModal,
+            status: "ready",
+            payload: modelConfigCache.get(modelRef),
+          };
+          renderModelConfigModal();
+          return;
+        }
+        modelConfigRequestToken += 1;
+        void fetchModelConfigModalData(modelRef, modelConfigRequestToken);
       }
 
       function pairwiseExportModels(pairwiseData) {
@@ -2517,6 +2800,12 @@
         }
       });
 
+      modelConfigModalRoot?.addEventListener("click", (event) => {
+        if (event.target.closest('[data-action="close-model-config-modal"]')) {
+          closeModelConfigModal();
+        }
+      });
+
       document.addEventListener("pointermove", (event) => {
         if (!activeTableScrollDrag) return;
         const { region, maxOffset, maxScroll, startX, startScrollLeft } = activeTableScrollDrag;
@@ -2537,6 +2826,12 @@
 
       document.addEventListener("pointerup", endTableScrollDrag);
       document.addEventListener("pointercancel", endTableScrollDrag);
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && state.modelConfigModal) {
+          event.preventDefault();
+          closeModelConfigModal();
+        }
+      });
       window.addEventListener("resize", queueResultsScrollSync);
       window.addEventListener("resize", queueSearchSelectMenuWidthSync);
       document.fonts?.ready?.then(() => {
@@ -2592,6 +2887,14 @@
         const target = event.target.closest("[data-action]");
         if (!target) return;
         const action = target.dataset.action;
+        if (action === "open-model-config") {
+          const modelRef = String(target.dataset.modelRef || "");
+          const resultsData = pageData.group_data?.results_table;
+          const model = resultsData?.models?.find((entry) => modelKey(entry) === modelRef);
+          if (!model) return;
+          openModelConfigModal(model, target);
+          return;
+        }
         if (action === "matrix-sort") {
           state.matrixSort = target.dataset.kind;
           if (state.matrixSort !== "anchor") state.anchorIndex = null;

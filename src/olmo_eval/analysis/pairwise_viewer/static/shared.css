@@ -1569,7 +1569,7 @@
       height: 100%;
       min-width: 0;
       padding-left: var(--td-name-hide-space);
-      pointer-events: none;
+      pointer-events: auto;
     }
 
     .td-name-text {
@@ -1578,6 +1578,21 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+
+    .td-name-link {
+      width: 100%;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .td-name-link .td-name-text {
+      text-decoration: underline dotted transparent;
+      text-underline-offset: 0.18em;
+      transition: color 120ms ease, text-decoration-color 120ms ease;
     }
 
     .results-table tbody td.td-name:hover,
@@ -1591,6 +1606,7 @@
       overflow: visible;
       text-overflow: clip;
       white-space: nowrap;
+      text-decoration-color: var(--c-ink-40);
     }
 
     .results-table tbody td.td-name:hover .td-name-main,

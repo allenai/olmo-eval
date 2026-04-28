@@ -240,7 +240,6 @@ baseline_models=(
     "almanach/Gaperon-1125-8B"
     "Qwen/Qwen3-8B"
     "Qwen/Qwen2.5-7B"
-    "mistralai/Mistral-Nemo-Base-2407"
     # Temporarily disabled while we sort out the current Nemotron launch issue.
     # "nvidia/NVIDIA-Nemotron-Nano-9B-v2"
     "ibm-granite/granite-3.3-8b-base"

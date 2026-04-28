@@ -40,12 +40,33 @@ class _StaticExecuteResult:
         return list(self._rows)
 
 
+class _StaticLookupResult:
+    def __init__(self, row):
+        self._row = row
+
+    def first(self):
+        return self._row
+
+    def one_or_none(self):
+        return self._row
+
+
 class _StaticTaskSession:
     def __init__(self, rows):
         self._rows = list(rows)
 
     def execute(self, _query):
         return _StaticExecuteResult(self._rows)
+
+
+class _SequentialExecuteSession:
+    def __init__(self, results):
+        self._results = list(results)
+
+    def execute(self, _query):
+        if not self._results:
+            raise AssertionError("unexpected execute() call")
+        return self._results.pop(0)
 
 
 def _build_pairwise_result(*, dropped: int = 0) -> PairwiseResult:
@@ -373,6 +394,96 @@ def test_build_results_table_keep_all_preserves_distinct_reruns(monkeypatch) -> 
         viewer_server._model_key(all_runs_table["models"][1])
         == "abc12345deadbeef|2026-04-21T08:00:00+00:00"
     )
+
+
+def test_load_results_model_config_bundle_prefers_displayed_run_config(monkeypatch) -> None:
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
+
+    displayed = SimpleNamespace(
+        id=11,
+        model_name="model-a",
+        model_hash="abc12345deadbeef",
+        timestamp=datetime(2026, 4, 21, 12, 0, tzinfo=UTC),
+    )
+    detail_row = SimpleNamespace(
+        id=11,
+        experiment_id="exp-11",
+        model_name="model-a",
+        model_hash="abc12345deadbeef",
+        model_config={"provider": {"name": "openai"}, "model": "model-a"},
+        backend_name="openai",
+        timestamp=datetime(2026, 4, 21, 12, 0, tzinfo=UTC),
+    )
+
+    monkeypatch.setattr(
+        viewer_server,
+        "_group_experiments",
+        lambda session, group_name, keep_all: [displayed],
+    )
+
+    bundle = viewer_server._load_results_model_config_bundle(
+        _SequentialExecuteSession([_StaticLookupResult(detail_row)]),
+        group_name="my-group",
+        model_ref="abc12345deadbeef|2026-04-21T12:00:00+00:00",
+        keep_all=False,
+    )
+
+    assert bundle["has_config"] is True
+    assert bundle["config"] == {"provider": {"name": "openai"}, "model": "model-a"}
+    assert bundle["config_source"]["kind"] == "display_run"
+    assert bundle["config_source"]["experiment_id"] == "exp-11"
+    assert bundle["model"]["experiment_pk"] == 11
+    assert bundle["model"]["model_hash_short"] == "abc12345"
+
+
+def test_load_results_model_config_bundle_falls_back_to_same_hash(monkeypatch) -> None:
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
+
+    displayed = SimpleNamespace(
+        id=11,
+        model_name="model-a",
+        model_hash="abc12345deadbeef",
+        timestamp=datetime(2026, 4, 21, 12, 0, tzinfo=UTC),
+    )
+    display_row = SimpleNamespace(
+        id=11,
+        experiment_id="exp-11",
+        model_name="model-a",
+        model_hash="abc12345deadbeef",
+        model_config=None,
+        backend_name="openai",
+        timestamp=datetime(2026, 4, 21, 12, 0, tzinfo=UTC),
+    )
+    fallback_row = SimpleNamespace(
+        id=10,
+        experiment_id="exp-10",
+        timestamp=datetime(2026, 4, 21, 8, 0, tzinfo=UTC),
+        model_config={"provider": {"name": "openai"}, "model": "model-a"},
+    )
+
+    monkeypatch.setattr(
+        viewer_server,
+        "_group_experiments",
+        lambda session, group_name, keep_all: [displayed],
+    )
+
+    bundle = viewer_server._load_results_model_config_bundle(
+        _SequentialExecuteSession(
+            [
+                _StaticLookupResult(display_row),
+                _StaticLookupResult(fallback_row),
+            ]
+        ),
+        group_name="my-group",
+        model_ref="abc12345deadbeef|2026-04-21T12:00:00+00:00",
+        keep_all=False,
+    )
+
+    assert bundle["has_config"] is True
+    assert bundle["config"] == {"provider": {"name": "openai"}, "model": "model-a"}
+    assert bundle["config_source"]["kind"] == "model_hash_fallback"
+    assert bundle["config_source"]["experiment_id"] == "exp-10"
+    assert bundle["config_source"]["timestamp"] == "2026-04-21T08:00:00+00:00"
 
 
 def test_build_results_table_metric_options_do_not_double_count_primary_metric(
@@ -1029,11 +1140,14 @@ def test_render_results_viewer_page_renders_core_viewer_state_and_controls() -> 
     assert 'data-search-select="scope"' in html
     assert 'placeholder="search groups..."' in html
     assert 'placeholder="search suites or tasks..."' in html
+    assert 'id="model-config-modal-root"' in html
     assert "olmobase:math (2 tasks) · N=6252" in html
     assert "MDE80" in html
     assert 'id="model-filter-summary"' in html
     assert 'data-action="toggle-model-checkbox"' in html
     assert 'data-model-key="abc12345"' in html
+    assert 'data-action="open-model-config"' in html
+    assert 'new URL("/model-config", window.location.origin)' in html
 
     for action in (
         "export-pairwise-csv",

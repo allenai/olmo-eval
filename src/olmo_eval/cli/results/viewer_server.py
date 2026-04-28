@@ -1664,6 +1664,12 @@ def _result_model_export_ref(model_hash: str | None, timestamp: str | None) -> s
     return f"{str(model_hash or '')}|{str(timestamp or '')}"
 
 
+def _timestamp_iso(value: Any) -> str | None:
+    if value is None or not hasattr(value, "isoformat"):
+        return None
+    return str(value.isoformat())
+
+
 def _build_viewer_export_metadata(
     *,
     group_name: str,
@@ -2795,6 +2801,106 @@ def _build_pairwise_endpoint_bundle(
     )
 
 
+def _serialize_model_config_source(
+    *,
+    kind: str,
+    experiment_pk: Any,
+    experiment_id: Any,
+    timestamp: Any,
+) -> dict[str, Any]:
+    return {
+        "kind": kind,
+        "experiment_pk": int(experiment_pk) if experiment_pk is not None else None,
+        "experiment_id": str(experiment_id) if experiment_id is not None else None,
+        "timestamp": _timestamp_iso(timestamp),
+    }
+
+
+def _load_results_model_config_bundle(
+    session: Session,
+    *,
+    group_name: str,
+    model_ref: str,
+    keep_all: bool,
+) -> dict[str, Any]:
+    from olmo_eval.storage.backends.postgres.models import Experiment
+
+    display_experiment = next(
+        (
+            experiment
+            for experiment in _group_experiments(session, group_name, keep_all=keep_all)
+            if _result_model_export_ref(
+                getattr(experiment, "model_hash", None),
+                _timestamp_iso(getattr(experiment, "timestamp", None)),
+            )
+            == model_ref
+        ),
+        None,
+    )
+    if display_experiment is None:
+        raise ValueError("Unknown results-table model selection.")
+
+    display_row = session.execute(
+        select(
+            Experiment.id,
+            Experiment.experiment_id,
+            Experiment.model_name,
+            Experiment.model_hash,
+            Experiment.model_config,
+            Experiment.backend_name,
+            Experiment.timestamp,
+        ).where(Experiment.id == int(display_experiment.id))
+    ).one_or_none()
+    if display_row is None:
+        raise ValueError("The selected displayed run is no longer available.")
+
+    model_config = display_row.model_config
+    config_source = _serialize_model_config_source(
+        kind="display_run",
+        experiment_pk=display_row.id,
+        experiment_id=display_row.experiment_id,
+        timestamp=display_row.timestamp,
+    )
+
+    if model_config is None and display_row.model_hash:
+        fallback_row = session.execute(
+            select(
+                Experiment.id,
+                Experiment.experiment_id,
+                Experiment.timestamp,
+                Experiment.model_config,
+            )
+            .where(Experiment.experiment_group == group_name)
+            .where(Experiment.model_hash == str(display_row.model_hash))
+            .where(Experiment.model_config.is_not(None))
+            .order_by(Experiment.timestamp.desc(), Experiment.id.desc())
+            .limit(1)
+        ).first()
+        if fallback_row is not None:
+            model_config = fallback_row.model_config
+            config_source = _serialize_model_config_source(
+                kind="model_hash_fallback",
+                experiment_pk=fallback_row.id,
+                experiment_id=fallback_row.experiment_id,
+                timestamp=fallback_row.timestamp,
+            )
+
+    return {
+        "model": {
+            "experiment_pk": int(display_row.id),
+            "experiment_id": str(display_row.experiment_id or ""),
+            "model_name": str(display_row.model_name or ""),
+            "model_hash": str(display_row.model_hash or ""),
+            "model_hash_short": str(display_row.model_hash or "")[:8],
+            "timestamp": _timestamp_iso(display_row.timestamp),
+            "backend_name": str(display_row.backend_name or ""),
+        },
+        "config": model_config,
+        "config_source": config_source,
+        "has_config": model_config is not None,
+    }
+
+
 def serve_results_viewer(
     *,
     db: Any,
@@ -3022,6 +3128,51 @@ def serve_results_viewer(
                         require_full_coverage=require_full_coverage,
                         group_browser_cache=group_browser_cache,
                     )
+
+                payload = json.dumps(bundle, separators=(",", ":")).encode("utf-8")
+                self._send_bytes(
+                    body=payload,
+                    content_type="application/json; charset=utf-8",
+                )
+                return
+
+            if parsed.path == "/model-config":
+                requested_group = params.get("group", [""])[0] or None
+                requested_model_ref = params.get("model_ref", [""])[0] or None
+                requested_run_mode = params.get("runs", [""])[0] or None
+                _, selected_keep_all = _resolve_run_mode(
+                    requested_run_mode,
+                    default_keep_all=keep_all,
+                )
+
+                if not requested_group:
+                    self._send_text(status=400, text="Missing group for model config lookup.\n")
+                    return
+                if not requested_model_ref:
+                    self._send_text(
+                        status=400,
+                        text="Missing results-table model reference for model config lookup.\n",
+                    )
+                    return
+
+                try:
+                    with db.session() as session:
+                        groups = groups_cache.get_or_set(
+                            ("groups", 500),
+                            lambda: _list_groups(session),
+                        )
+                        selected_group = _pick_group(groups, requested_group)
+                        if selected_group is None:
+                            raise ValueError(f"Unknown group '{requested_group}' for model config.")
+                        bundle = _load_results_model_config_bundle(
+                            session,
+                            group_name=selected_group,
+                            model_ref=requested_model_ref,
+                            keep_all=selected_keep_all,
+                        )
+                except ValueError as error:
+                    self._send_text(status=404, text=str(error) + "\n")
+                    return
 
                 payload = json.dumps(bundle, separators=(",", ":")).encode("utf-8")
                 self._send_bytes(
