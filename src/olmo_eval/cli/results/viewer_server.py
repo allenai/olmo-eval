@@ -36,6 +36,7 @@ from olmo_eval.analysis.pairwise_viewer.assets import (
     shared_css_text,
 )
 from olmo_eval.analysis.pairwise_viewer_payload import build_pairwise_viewer_payload
+from olmo_eval.analysis.scope_scores import compute_scope_score
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -843,6 +844,115 @@ def _scoped_task_columns(
     return [column for column in task_columns if str(column.get("id") or "") in allowed_task_ids]
 
 
+def _group_model_task_scores_by_name(
+    model: dict[str, Any],
+    columns: list[dict[str, Any]],
+) -> dict[str, list[float | None]]:
+    task_scores = model.get("task_scores", {})
+    grouped_scores: dict[str, list[float | None]] = {}
+    for column in columns:
+        task_name = str(column.get("task_name") or "")
+        if not task_name:
+            continue
+        raw_score = task_scores.get(column.get("id"))
+        grouped_scores.setdefault(task_name, []).append(
+            float(raw_score) if _is_numeric_score(raw_score) else None
+        )
+    return grouped_scores
+
+
+def _scoped_model_score(
+    model: dict[str, Any],
+    columns: list[dict[str, Any]],
+    *,
+    selected_scope_key: str | None,
+    selected_scope_option: dict[str, Any] | None,
+) -> float | None:
+    if selected_scope_option is None or not _columns_comparable(columns):
+        return None
+
+    scope_kind, _ = _parse_scope_key(selected_scope_key)
+    task_scores = model.get("task_scores", {})
+    if scope_kind == "task-hash":
+        task_id = next(iter(selected_scope_option.get("task_ids") or []), None)
+        raw_score = task_scores.get(task_id)
+        return float(raw_score) if _is_numeric_score(raw_score) else None
+
+    grouped_scores = _group_model_task_scores_by_name(model, columns)
+    if scope_kind == "suite":
+        suite_name = str(selected_scope_option.get("value") or "")
+        return compute_scope_score(
+            task_scores_by_name=grouped_scores,
+            suite_name=suite_name,
+        )
+    if scope_kind == "task":
+        task_name = str(
+            selected_scope_option.get("task_name") or selected_scope_option.get("value") or ""
+        )
+        return compute_scope_score(
+            task_scores_by_name=grouped_scores,
+            task_name=task_name,
+        )
+    return None
+
+
+def _scope_score_title(
+    *,
+    selected_scope_key: str | None,
+    selected_scope_option: dict[str, Any] | None,
+) -> str:
+    from olmo_eval.evals.suites.registry import get_suite, suite_exists
+
+    scope_kind, _ = _parse_scope_key(selected_scope_key)
+    if scope_kind == "suite" and selected_scope_option is not None:
+        suite_name = str(selected_scope_option.get("value") or "")
+        if suite_exists(suite_name):
+            aggregation = get_suite(suite_name).aggregation.value
+            return f"suite aggregate using {aggregation}"
+        return "suite aggregate"
+    return "selected task score"
+
+
+def _annotate_results_table_scope_scores(
+    results_table: dict[str, Any] | None,
+    *,
+    selected_scope_key: str | None,
+    selected_scope_option: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if results_table is None:
+        return None
+
+    prepared = {
+        **results_table,
+        "task_columns": [dict(column) for column in results_table.get("task_columns", [])],
+        "models": [dict(model) for model in results_table.get("models", [])],
+    }
+    if selected_scope_option is None:
+        return prepared
+
+    scoped_columns = _scoped_task_columns(prepared, selected_scope_option)
+    scope_score_meta = _aggregate_column_meta(scoped_columns)
+    if scope_score_meta is None:
+        return prepared
+
+    scope_kind, _ = _parse_scope_key(selected_scope_key)
+    prepared["scope_score_meta"] = scope_score_meta
+    prepared["scope_score_label"] = "agg" if scope_kind == "suite" else "score"
+    prepared["scope_score_csv_label"] = "aggregate" if scope_kind == "suite" else "score"
+    prepared["scope_score_title"] = _scope_score_title(
+        selected_scope_key=selected_scope_key,
+        selected_scope_option=selected_scope_option,
+    )
+    for model in prepared["models"]:
+        model["scope_score"] = _scoped_model_score(
+            model,
+            scoped_columns,
+            selected_scope_key=selected_scope_key,
+            selected_scope_option=selected_scope_option,
+        )
+    return prepared
+
+
 def _average_model_scope_score(
     model: dict[str, Any],
     columns: list[dict[str, Any]],
@@ -858,6 +968,16 @@ def _average_model_scope_score(
     if not scores:
         return None
     return sum(scores) / len(scores)
+
+
+def _model_scope_score(
+    model: dict[str, Any],
+    columns: list[dict[str, Any]],
+) -> float | None:
+    raw_scope_score = model.get("scope_score")
+    if _is_numeric_score(raw_scope_score):
+        return float(raw_scope_score)
+    return _average_model_scope_score(model, columns)
 
 
 def _format_score_value(value: Any, meta: dict[str, Any] | None) -> str:
@@ -892,8 +1012,8 @@ def _format_raw_score_value(
 
 def _model_filter_score_label(model: dict[str, Any], columns: list[dict[str, Any]]) -> str:
     column_meta = _aggregate_column_meta(columns)
-    average_score = _average_model_scope_score(model, columns)
-    return _format_score_value(average_score, column_meta)
+    scope_score = _model_scope_score(model, columns)
+    return _format_score_value(scope_score, column_meta)
 
 
 def _scope_status_payload(
@@ -2353,6 +2473,24 @@ def _compute_viewer_pairwise_bundle(
         }
 
 
+def _prepare_group_data_for_browser(
+    group_data: dict[str, Any] | None,
+    selected_scope_key: str | None,
+) -> dict[str, Any] | None:
+    if group_data is None:
+        return None
+
+    selected_scope_option = _selected_scope_option(group_data, selected_scope_key)
+    return {
+        **group_data,
+        "results_table": _annotate_results_table_scope_scores(
+            group_data.get("results_table"),
+            selected_scope_key=selected_scope_key,
+            selected_scope_option=selected_scope_option,
+        ),
+    }
+
+
 def render_results_viewer_page(
     *,
     groups: list[dict[str, Any]],
@@ -2368,10 +2506,11 @@ def render_results_viewer_page(
     scope_options_pending: bool = False,
 ) -> str:
     """Render the viewer page with server-populated selectors and payload."""
+    browser_group_data = _prepare_group_data_for_browser(group_data, selected_scope_key)
     browser_payload = {
         "has_groups": bool(groups),
         "selected_group": selected_group,
-        "group_data": group_data,
+        "group_data": browser_group_data,
         "selected_scope_key": selected_scope_key,
         "selected_metric": selected_metric,
         "selected_run_mode": selected_run_mode,
@@ -2418,7 +2557,7 @@ def render_results_viewer_page(
 
     scope_select_options: list[dict[str, str]] = []
     selected_scope_label = ""
-    if group_data:
+    if browser_group_data:
         selected_scope_label = next(
             (
                 _scope_option_label(
@@ -2426,27 +2565,27 @@ def render_results_viewer_page(
                     selected_scope_key=selected_scope_key,
                     pairwise_data=pairwise_data,
                 )
-                for option in group_data["scope_options"]
+                for option in browser_group_data["scope_options"]
                 if option["key"] == selected_scope_key
             ),
             "",
         )
         scope_select_options = _build_scope_select_options(
-            group_data_scope_options=group_data["scope_options"],
+            group_data_scope_options=browser_group_data["scope_options"],
             selected_scope_key=selected_scope_key,
             pairwise_data=pairwise_data,
         )
 
     model_filter_models: list[dict[str, Any]] = []
     model_filter_columns: list[dict[str, Any]] = []
-    selected_scope_option = _selected_scope_option(group_data, selected_scope_key)
-    if group_data and group_data.get("results_table"):
+    selected_scope_option = _selected_scope_option(browser_group_data, selected_scope_key)
+    if browser_group_data and browser_group_data.get("results_table"):
         model_filter_columns = _scoped_task_columns(
-            group_data.get("results_table"),
+            browser_group_data.get("results_table"),
             selected_scope_option,
         )
         model_filter_models = sorted(
-            list(group_data["results_table"].get("models", [])),
+            list(browser_group_data["results_table"].get("models", [])),
             key=lambda model: str(model.get("display_label") or "").lower(),
         )
 

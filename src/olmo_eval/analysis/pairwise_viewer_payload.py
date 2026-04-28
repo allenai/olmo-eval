@@ -17,6 +17,7 @@ from olmo_eval.analysis.pairwise_metrics import (
     build_task_metrics,
     build_win_rate_matrix,
 )
+from olmo_eval.analysis.scope_scores import compute_scope_score
 
 
 def _default_title(result: PairwiseResult) -> str:
@@ -107,12 +108,6 @@ def _build_p_value_matrix(result: PairwiseResult) -> list[list[float | None]]:
     return matrix
 
 
-def _mean(values: list[float]) -> float | None:
-    if not values:
-        return None
-    return sum(values) / len(values)
-
-
 def _storage_key(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-") or "pairwise"
 
@@ -136,6 +131,37 @@ def _build_matrix_mde80_map(result: PairwiseResult) -> dict[str, float]:
         )
         for alpha in alpha_options
     }
+
+
+def _pairwise_model_scope_score(
+    result: PairwiseResult,
+    task_entries: list[Any],
+    task_scores: list[float | None],
+) -> float | None:
+    if (
+        result.score_unit is None
+        or result.higher_is_better is None
+        or result.score_display_format == "mixed"
+    ):
+        return None
+
+    task_scores_by_name: dict[str, list[float | None]] = {}
+    for task_entry, task_score in zip(task_entries, task_scores, strict=False):
+        task_scores_by_name.setdefault(task_entry.task_name, []).append(
+            float(task_score) if task_score is not None else None
+        )
+
+    if result.suite_name:
+        return compute_scope_score(
+            task_scores_by_name=task_scores_by_name,
+            suite_name=result.suite_name,
+        )
+
+    scope_task_name = task_entries[0].task_name if task_entries else result.task_name
+    return compute_scope_score(
+        task_scores_by_name=task_scores_by_name,
+        task_name=scope_task_name,
+    )
 
 
 def build_pairwise_viewer_payload(
@@ -184,8 +210,7 @@ def build_pairwise_viewer_payload(
             task_entry.id: task_scores[task_idx] if task_idx < len(task_scores) else None
             for task_idx, task_entry in enumerate(task_entries)
         }
-        scored_values = [float(score) for score in task_scores if score is not None]
-        avg_task_score = _mean(scored_values)
+        scope_score = _pairwise_model_scope_score(result, task_entries, task_scores)
         shared_score = (
             result.model_shared_scores[index] if index < len(result.model_shared_scores) else None
         )
@@ -200,8 +225,8 @@ def build_pairwise_viewer_payload(
                 "model_hash_short": (model.model_hash or "")[:8],
                 "timestamp": model.timestamp,
                 "shared_score": shared_score,
-                "avg_task_score": avg_task_score,
-                "display_score": shared_score if shared_score is not None else None,
+                "scope_score": scope_score,
+                "display_score": shared_score if shared_score is not None else scope_score,
                 "strength": metrics.rating if metrics is not None else None,
                 "avg_win_rate": metrics.avg_win_rate if metrics is not None else None,
                 "dominance": metrics.dominance if metrics is not None else None,

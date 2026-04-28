@@ -191,9 +191,11 @@ scores on this evaluation scope?" Use it to:
 A few details matter:
 
 - in suite scope, each visible task column is one task inside the suite
-- `avg` is the mean across the currently visible task columns
-- in single-task scope, the viewer hides `avg` because it would duplicate the
-  only visible task
+- in suite scope, `agg` follows the suite registry's aggregation strategy
+- otherwise the table falls back to `avg`, the mean across the currently
+  visible task columns
+- in single-task scope, the aggregate column hides because it would duplicate
+  the only visible task
 
 Use the results table to understand where the paired result comes from. Use the
 paired test to judge whether the head-to-head difference is actually resolved.

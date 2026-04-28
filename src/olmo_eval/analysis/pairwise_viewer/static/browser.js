@@ -538,7 +538,7 @@
 
       function displayScore(model) {
         if (isNumber(model.display_score)) return model.display_score;
-        if (isNumber(model.avg_task_score)) return model.avg_task_score;
+        if (isNumber(model.scope_score)) return model.scope_score;
         if (isNumber(model.avg_score)) return model.avg_score;
         return null;
       }
@@ -710,27 +710,46 @@
         };
       }
 
+      function tableAggregateMeta(resultsData, columns) {
+        return resultsData?.scope_score_meta || aggregateColumnMeta(columns);
+      }
+
+      function tableAggregateLabel(resultsData) {
+        return resultsData?.scope_score_label || "avg";
+      }
+
+      function tableAggregateCsvLabel(resultsData) {
+        return resultsData?.scope_score_csv_label || tableAggregateLabel(resultsData);
+      }
+
+      function tableAggregateTitle(resultsData) {
+        return resultsData?.scope_score_title || "mean across visible task columns";
+      }
+
       function defaultScoreSortDir(meta) {
         return scoreHigherIsBetter(meta) ? "desc" : "asc";
       }
 
-      function showAverageColumn(columns) {
+      function showAggregateColumn(resultsData, scopedColumns, columns) {
+        if (resultsData?.scope_score_meta) return scopedColumns.length > 1;
         return columns.length > 1 && columnsComparable(columns);
       }
 
-      function resolvedTableSort(columns, showAverage) {
+      function resolvedTableSort(resultsData, columns, showAggregate) {
         if (state.tableSortKey === "name") {
           return { key: "name", dir: state.tableSortDir };
         }
         if (state.tableSortKey === "avg") {
-          if (showAverage) return { key: "avg", dir: state.tableSortDir };
+          if (showAggregate) return { key: "avg", dir: state.tableSortDir };
           if (columns[0]) return { key: columns[0].id, dir: defaultScoreSortDir(columns[0]) };
           return { key: "name", dir: "asc" };
         }
         if (columns.some((column) => column.id === state.tableSortKey)) {
           return { key: state.tableSortKey, dir: state.tableSortDir };
         }
-        if (showAverage) return { key: "avg", dir: defaultScoreSortDir(aggregateColumnMeta(columns)) };
+        if (showAggregate) {
+          return { key: "avg", dir: defaultScoreSortDir(tableAggregateMeta(resultsData, columns)) };
+        }
         if (columns[0]) return { key: columns[0].id, dir: defaultScoreSortDir(columns[0]) };
         return { key: "name", dir: "asc" };
       }
@@ -744,6 +763,13 @@
           return scores.reduce((sum, value) => sum + value, 0) / scores.length;
         }
         return null;
+      }
+
+      function tableAggregateScore(model, resultsData, columns) {
+        if (resultsData?.scope_score_meta && isNumber(model.scope_score)) {
+          return model.scope_score;
+        }
+        return averageVisibleScore(model, columns);
       }
 
       function compareValues(a, b, direction) {
@@ -766,8 +792,8 @@
           }
           if (sortState.key === "avg") {
             return compareValues(
-              averageVisibleScore(left, columns),
-              averageVisibleScore(right, columns),
+              tableAggregateScore(left, resultsData, columns),
+              tableAggregateScore(right, resultsData, columns),
               sortState.dir
             );
           }
@@ -842,9 +868,9 @@
         }
         const scopedColumns = scopedTaskColumns(resultsData);
         const columns = visibleTaskColumns(resultsData);
-        const showAverage = showAverageColumn(columns);
-        const avgMeta = aggregateColumnMeta(columns);
-        const sortState = resolvedTableSort(columns, showAverage);
+        const showAggregate = showAggregateColumn(resultsData, scopedColumns, columns);
+        const aggregateMeta = tableAggregateMeta(resultsData, columns);
+        const sortState = resolvedTableSort(resultsData, columns, showAggregate);
         const rows = sortedTableRows(resultsData, filtered.indices, columns, sortState);
         return `
           <div class="table-wrap">
@@ -886,15 +912,15 @@
                           ${sortArrow("name", sortState)}
                         </span>
                       </th>
-                      ${showAverage ? `
+                      ${showAggregate ? `
                         <th
                           class="th-avg sortable ${sortState.key === "avg" ? "active" : ""}"
                           data-action="table-sort"
                           data-key="avg"
-                          title="mean across visible task columns"
+                          title="${esc(tableAggregateTitle(resultsData))}"
                         >
                           <div class="th-stack th-sort-target">
-                            <span class="th-top">avg</span>
+                            <span class="th-top">${esc(tableAggregateLabel(resultsData))}</span>
                             <span class="th-bot th-bot-arrow">${sortArrow("avg", sortState)}</span>
                           </div>
                         </th>
@@ -941,9 +967,9 @@
                           <span class="td-name-text">${esc(model.display_label)}</span>
                         </span>
                       </td>
-                        ${showAverage ? `
+                        ${showAggregate ? `
                           <td class="td-num td-avg">
-                            ${fmtScore(averageVisibleScore(model, columns), avgMeta)}
+                            ${fmtScore(tableAggregateScore(model, resultsData, columns), aggregateMeta)}
                           </td>
                         ` : ""}
                         ${columns.map((column) => `
@@ -2211,7 +2237,7 @@
               model_hash_short: model.model_hash_short || null,
               timestamp: model.timestamp || null,
               shared_instance_mean_score: model.shared_score ?? null,
-              mean_task_score: model.avg_task_score ?? null,
+              scope_aggregate_score: model.scope_score ?? null,
               bt_elo: model.strength ?? null,
               mean_pairwise_win_rate: model.avg_win_rate ?? null,
               significant_pairwise_net_wins: model.dominance ?? null,
@@ -2251,17 +2277,22 @@
         if (!resultsData) return;
         const filtered = filteredResultsModelIndices(resultsData).indices;
         const columns = visibleTaskColumns(resultsData);
-        const showAverage = showAverageColumn(columns);
-        const avgMeta = aggregateColumnMeta(columns);
-        const sortState = resolvedTableSort(columns, showAverage);
+        const scopedColumns = scopedTaskColumns(resultsData);
+        const showAggregate = showAggregateColumn(resultsData, scopedColumns, columns);
+        const aggregateMeta = tableAggregateMeta(resultsData, columns);
+        const sortState = resolvedTableSort(resultsData, columns, showAggregate);
         const rows = sortedTableRows(resultsData, filtered, columns, sortState);
-        const header = showAverage
-          ? ["model", "avg", ...columns.map((column) => column.full_label)]
+        const header = showAggregate
+          ? [
+              "model",
+              tableAggregateCsvLabel(resultsData),
+              ...columns.map((column) => column.full_label),
+            ]
           : ["model", ...columns.map((column) => column.full_label)];
-        const body = rows.map((model) => showAverage
+        const body = rows.map((model) => showAggregate
           ? [
               model.display_label,
-              fmtScore(averageVisibleScore(model, columns), avgMeta, 2),
+              fmtScore(tableAggregateScore(model, resultsData, columns), aggregateMeta, 2),
               ...columns.map((column) => fmtScore(model.task_scores[column.id], column, 2)),
             ]
           : [
@@ -2629,7 +2660,9 @@
               const resultsTable = pageData.group_data?.results_table;
               const visibleColumns = resultsTable ? visibleTaskColumns(resultsTable) : [];
               if (key === "avg") {
-                state.tableSortDir = defaultScoreSortDir(aggregateColumnMeta(visibleColumns));
+                state.tableSortDir = defaultScoreSortDir(
+                  tableAggregateMeta(resultsTable, visibleColumns)
+                );
               } else {
                 const column = visibleColumns.find((entry) => entry.id === key);
                 state.tableSortDir = defaultScoreSortDir(column);

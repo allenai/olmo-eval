@@ -104,6 +104,17 @@ class TestDotlistScalarOverrides:
         result = _apply_dotlist_overrides(base, ["a.b.c=1"])
         assert result == {"a": {"b": {"c": 1}}}
 
+    def test_creates_nested_provider_kwargs(self):
+        base = {"provider": {"kwargs": {}}}
+        result = _apply_dotlist_overrides(
+            base,
+            ["provider.kwargs.default_chat_template_kwargs.enable_thinking=false"],
+        )
+
+        assert result["provider"]["kwargs"]["default_chat_template_kwargs"] == {
+            "enable_thinking": False
+        }
+
 
 # ── JSON object deep-merge ──────────────────────────────────────────────────
 

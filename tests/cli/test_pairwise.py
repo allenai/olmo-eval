@@ -634,6 +634,94 @@ def test_model_filter_score_label_uses_selected_scope_columns() -> None:
     assert viewer_server._model_filter_score_label(model, scoped_columns) == "50.0%"
 
 
+def test_results_table_scope_score_uses_suite_aggregation_strategy() -> None:
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
+    from olmo_eval.evals.suites.registry import _REGISTRY, AggregationStrategy, Suite
+
+    nested_suite = Suite(
+        name="_test_nested_results_table",
+        tasks=("task_a", "task_b", "task_c"),
+        aggregation=AggregationStrategy.AVERAGE,
+    )
+    aoa_suite = Suite(
+        name="_test_aoa_results_table",
+        tasks=("task_single", nested_suite),
+        aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+    )
+    _REGISTRY["_test_aoa_results_table"] = aoa_suite
+
+    try:
+        selected_scope_option = {
+            "key": "suite::_test_aoa_results_table",
+            "kind": "suite",
+            "value": "_test_aoa_results_table",
+            "task_ids": ["task_single", "task_a", "task_b", "task_c"],
+        }
+        results_table = {
+            "models": [
+                {
+                    "index": 0,
+                    "display_label": "model-a",
+                    "avg_score": 0.625,
+                    "task_scores": {
+                        "task_single": 1.0,
+                        "task_a": 0.4,
+                        "task_b": 0.5,
+                        "task_c": 0.6,
+                    },
+                }
+            ],
+            "task_columns": [
+                {
+                    "id": "task_single",
+                    "task_name": "task_single",
+                    "score_display_format": "percentage",
+                    "score_unit": "proportion",
+                    "higher_is_better": True,
+                },
+                {
+                    "id": "task_a",
+                    "task_name": "task_a",
+                    "score_display_format": "percentage",
+                    "score_unit": "proportion",
+                    "higher_is_better": True,
+                },
+                {
+                    "id": "task_b",
+                    "task_name": "task_b",
+                    "score_display_format": "percentage",
+                    "score_unit": "proportion",
+                    "higher_is_better": True,
+                },
+                {
+                    "id": "task_c",
+                    "task_name": "task_c",
+                    "score_display_format": "percentage",
+                    "score_unit": "proportion",
+                    "higher_is_better": True,
+                },
+            ],
+        }
+
+        annotated = viewer_server._annotate_results_table_scope_scores(
+            results_table,
+            selected_scope_key="suite::_test_aoa_results_table",
+            selected_scope_option=selected_scope_option,
+        )
+
+        assert annotated is not None
+        assert annotated["scope_score_label"] == "agg"
+        assert annotated["models"][0]["avg_score"] == pytest.approx(0.625)
+        assert annotated["models"][0]["scope_score"] == pytest.approx(0.75)
+
+        scoped_columns = viewer_server._scoped_task_columns(annotated, selected_scope_option)
+        assert viewer_server._model_filter_score_label(annotated["models"][0], scoped_columns) == (
+            "75.0%"
+        )
+    finally:
+        del _REGISTRY["_test_aoa_results_table"]
+
+
 def test_model_filter_score_label_formats_raw_metrics_and_hides_mixed_units() -> None:
     viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
 

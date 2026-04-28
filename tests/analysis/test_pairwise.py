@@ -465,6 +465,59 @@ class TestPairwiseResult:
             "task-hash-beta",
         ]
 
+    def test_html_payload_scope_score_uses_suite_aggregation_strategy(self) -> None:
+        from olmo_eval.evals.suites.registry import _REGISTRY, AggregationStrategy, Suite
+
+        nested_suite = Suite(
+            name="_test_nested_payload",
+            tasks=("task_a", "task_b", "task_c"),
+            aggregation=AggregationStrategy.AVERAGE,
+        )
+        aoa_suite = Suite(
+            name="_test_aoa_payload",
+            tasks=("task_single", nested_suite),
+            aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+        )
+        _REGISTRY["_test_aoa_payload"] = aoa_suite
+
+        try:
+            result = PairwiseResult(
+                task_name="_test_aoa_payload",
+                suite_name="_test_aoa_payload",
+                metric="accuracy:exact_match",
+                margin=0.0,
+                instance_count=20,
+                models=[
+                    ModelMeta(
+                        label="model-a\n(abc12345)",
+                        model_name="model-a",
+                        model_hash="abc12345",
+                    ),
+                    ModelMeta(
+                        label="model-b\n(def67890)",
+                        model_name="model-b",
+                        model_hash="def67890",
+                    ),
+                ],
+                pairs=[PairStats(index_a=0, index_b=1, wins_a=12, wins_b=8, ties=0)],
+                task_names=("task_single", "task_a", "task_b", "task_c"),
+                task_hashes=("task-single", "task-a", "task-b", "task-c"),
+                task_metric_keys=("accuracy:exact_match",) * 4,
+                model_task_scores=((1.0, 0.4, 0.5, 0.6), (0.8, 0.2, 0.3, 0.4)),
+                score_display_format="percentage",
+                score_unit="proportion",
+                higher_is_better=True,
+            )
+
+            payload = build_pairwise_viewer_payload(result)
+
+            assert payload["models"][0]["scope_score"] == pytest.approx(0.75)
+            assert payload["models"][1]["scope_score"] == pytest.approx(0.55)
+            assert payload["models"][0]["display_score"] == pytest.approx(0.75)
+            assert "avg_task_score" not in payload["models"][0]
+        finally:
+            del _REGISTRY["_test_aoa_payload"]
+
 
 class TestComputePairsCompoundKeys:
     """Compound keys keep identical native IDs in different tasks distinct."""

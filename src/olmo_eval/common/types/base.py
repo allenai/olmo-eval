@@ -16,6 +16,91 @@ if TYPE_CHECKING:
     from .trajectory import AgentTrajectory
 
 
+_MODEL_HASH_IGNORED_PROVIDER_KEYS = frozenset(
+    {
+        # Transport and auth metadata should not split a logical model identity.
+        "api_base",
+        "base_url",
+        "max_concurrency",
+        "num_instances",
+        "required_secrets",
+        # Loader policy rather than model behavior.
+        "trust_remote_code",
+    }
+)
+
+_MODEL_HASH_IGNORED_PROVIDER_KWARGS = frozenset(
+    {
+        # Backend/runtime tuning knobs that affect throughput or scaling, not model identity.
+        # Keep request/template kwargs like default_chat_template_kwargs because they can
+        # change the model's actual outputs.
+        "attention_backend",
+        "enable_expert_parallel",
+        "enable_prefix_caching",
+        "gpu_memory_utilization",
+        "max_num_batched_tokens",
+        "max_num_seqs",
+        "pipeline_parallel_size",
+        "tensor_parallel_size",
+    }
+)
+
+
+def _normalize_model_config_for_hash(
+    config: Any,
+    *,
+    root: bool = False,
+    provider_kwargs: bool = False,
+) -> Any:
+    """Drop operational provider fields so model hashes track model behavior.
+
+    The stored model_config also contains execution details like endpoint selection,
+    concurrency, and parallelism. Those should not create distinct model hashes.
+    """
+    if isinstance(config, dict):
+        ignored_keys = (
+            _MODEL_HASH_IGNORED_PROVIDER_KEYS
+            if root
+            else _MODEL_HASH_IGNORED_PROVIDER_KWARGS
+            if provider_kwargs
+            else frozenset()
+        )
+
+        canonical_attention_backend = None
+        if root:
+            root_attention_backend = config.get("attention_backend")
+            kwargs_attention_backend = None
+            kwargs_value = config.get("kwargs")
+            if isinstance(kwargs_value, dict):
+                kwargs_attention_backend = kwargs_value.get("attention_backend")
+            canonical_attention_backend = (
+                root_attention_backend
+                if root_attention_backend is not None
+                else kwargs_attention_backend
+            )
+
+        normalized: dict[str, Any] = {}
+        for key, value in config.items():
+            if key in ignored_keys:
+                continue
+            if root and key == "attention_backend":
+                continue
+            if root and key == "kwargs" and isinstance(value, dict):
+                normalized_kwargs = _normalize_model_config_for_hash(value, provider_kwargs=True)
+                if normalized_kwargs:
+                    normalized[key] = normalized_kwargs
+                continue
+            normalized[key] = _normalize_model_config_for_hash(value)
+        if root and canonical_attention_backend is not None:
+            normalized["attention_backend"] = canonical_attention_backend
+        return normalized
+
+    if isinstance(config, list):
+        return [_normalize_model_config_for_hash(item) for item in config]
+
+    return config
+
+
 def compute_model_hash(config: dict[str, Any] | None) -> str | None:
     """Compute a deterministic hash from a model configuration dict.
 
@@ -25,7 +110,8 @@ def compute_model_hash(config: dict[str, Any] | None) -> str | None:
     associated with the same model configuration.
 
     Args:
-        config: Model configuration dictionary.
+        config: Model configuration dictionary. Operational provider fields such as
+            replica count, endpoint URLs, and concurrency limits are ignored.
 
     Returns:
         16-character hex string hash of the config, or None if config is None.
@@ -39,7 +125,8 @@ def compute_model_hash(config: dict[str, Any] | None) -> str | None:
     if not config:
         return None
 
-    config_str = json.dumps(config, sort_keys=True)
+    normalized_config = _normalize_model_config_for_hash(config, root=True)
+    config_str = json.dumps(normalized_config, sort_keys=True)
     return hashlib.sha256(config_str.encode()).hexdigest()[:16]
 
 
