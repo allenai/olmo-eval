@@ -6,9 +6,12 @@ import asyncio
 import os
 from typing import TYPE_CHECKING, Any
 
+from olmo_eval.common.logging import get_logger
 from olmo_eval.common.types import LMOutput, LMRequest, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
+
+logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     import torch
@@ -64,7 +67,15 @@ class HuggingFaceProvider(InferenceProvider):
             model_kwargs.pop(key, None)
 
         # Resolve HF auth token: explicit kwarg > HF_TOKEN env var > none (public).
-        token = model_kwargs.pop("token", None) or os.getenv("HF_TOKEN")
+        explicit_token = model_kwargs.pop("token", None)
+        env_token = os.getenv("HF_TOKEN")
+        token = explicit_token or env_token
+        if explicit_token:
+            logger.info("HF token resolved from explicit provider.kwargs.")
+        elif env_token:
+            logger.info("HF token resolved from HF_TOKEN env var.")
+        else:
+            logger.info("No HF token found (HF_TOKEN unset); proceeding unauthenticated.")
         auth_kwargs: dict[str, Any] = {"token": token} if token else {}
 
         super().__init__(model_name)
