@@ -360,7 +360,9 @@
       }
 
       function modelKey(model) {
-        if (model?.timestamp) return modelExportRef(model);
+        if (pageData.selected_run_mode === "repeated" && model?.timestamp) {
+          return modelExportRef(model);
+        }
         return String(
           model?.model_hash ||
           model?.model_name ||
@@ -382,6 +384,23 @@
       function trimExcludedModels() {
         const validKeys = new Set(allFilterModels().map((model) => modelKey(model)));
         let changed = false;
+        if (pageData.selected_run_mode !== "repeated") {
+          const migratedKeys = [];
+          state.excludedModels.forEach((key) => {
+            const hashKey = String(key).split("|", 1)[0];
+            if (key !== hashKey && !validKeys.has(key) && validKeys.has(hashKey)) {
+              state.excludedModels.delete(key);
+              migratedKeys.push(hashKey);
+              changed = true;
+            }
+          });
+          migratedKeys.forEach((key) => {
+            if (!state.excludedModels.has(key)) {
+              state.excludedModels.add(key);
+              changed = true;
+            }
+          });
+        }
         state.excludedModels.forEach((key) => {
           if (!validKeys.has(key)) {
             state.excludedModels.delete(key);
@@ -1699,8 +1718,8 @@
                     <span class="tt-menu-n">csv</span>
                   </button>
                   <button type="button" class="tt-menu-action" data-action="export-pairwise-all">
-                    <span class="tt-menu-name">all viewer data</span>
-                    <span class="tt-menu-n">json</span>
+                    <span class="tt-menu-name">all export files</span>
+                    <span class="tt-menu-n">json + csv</span>
                   </button>
                 </div>
               </div>
@@ -1966,6 +1985,10 @@
 
       function downloadText(filename, contents, type) {
         const blob = new Blob([contents], { type });
+        triggerBlobDownload(blob, filename);
+      }
+
+      function triggerBlobDownload(blob, filename) {
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = url;
@@ -2318,41 +2341,30 @@
         return fallback;
       }
 
+      async function fetchServerExportAsset(url, label, fallbackFilename) {
+        const response = await fetch(url.toString());
+        if (!response.ok) {
+          const message = (await response.text()).trim();
+          throw new Error(message || `failed to download ${label}`);
+        }
+        const blob = await response.blob();
+        const filename = filenameFromContentDisposition(
+          response.headers.get("Content-Disposition"),
+          fallbackFilename
+        );
+        return { blob, filename };
+      }
+
       async function downloadServerExport(url, label, fallbackFilename) {
         showDownloadToast(`preparing ${label}...`);
         try {
-          const response = await fetch(url.toString());
-          if (!response.ok) {
-            const message = (await response.text()).trim();
-            throw new Error(message || `failed to download ${label}`);
-          }
-          const blob = await response.blob();
-          const filename = filenameFromContentDisposition(
-            response.headers.get("Content-Disposition"),
-            fallbackFilename
-          );
-          const blobUrl = URL.createObjectURL(blob);
-          const link = document.createElement("a");
-          link.href = blobUrl;
-          link.download = filename;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+          const { blob, filename } = await fetchServerExportAsset(url, label, fallbackFilename);
+          triggerBlobDownload(blob, filename);
         } catch (error) {
           window.alert(error instanceof Error ? error.message : `failed to download ${label}`);
         } finally {
           hideDownloadToast();
         }
-      }
-
-      async function fetchViewerExportJson(kind) {
-        const response = await fetch(pairwiseViewerExportUrl(kind, "json"));
-        if (!response.ok) {
-          const message = (await response.text()).trim();
-          throw new Error(message || "The viewer export failed.");
-        }
-        return response.json();
       }
 
       function currentPairwiseExportOrder(pairwiseData) {
@@ -2683,22 +2695,28 @@
       async function exportPairwiseAll() {
         const pairwiseData = pageData.pairwise_data;
         if (!pairwiseData) return;
-        showDownloadToast("preparing combined export...");
+        const base = pairwiseExportBase(pairwiseData);
+        showDownloadToast("preparing export files...");
         try {
           const [instanceResults, storedFiles] = await Promise.all([
-            fetchViewerExportJson("instance-results"),
-            fetchViewerExportJson("stored-files"),
+            fetchServerExportAsset(
+              pairwiseViewerExportUrl("instance-results", "csv"),
+              "instance results CSV",
+              base + "-instance-results.csv"
+            ),
+            fetchServerExportAsset(
+              pairwiseViewerExportUrl("stored-files", "csv"),
+              "stored files CSV",
+              base + "-stored-files.csv"
+            ),
           ]);
-          const payload = {
-            paired_test: buildPairwiseExportPayload(pairwiseData),
-            instance_results: instanceResults,
-            stored_files: storedFiles,
-          };
           downloadText(
-            pairwiseExportBase(pairwiseData) + "-all.json",
-            JSON.stringify(payload, null, 2) + "\\n",
+            base + ".json",
+            JSON.stringify(buildPairwiseExportPayload(pairwiseData), null, 2) + "\\n",
             "application/json;charset=utf-8"
           );
+          triggerBlobDownload(instanceResults.blob, instanceResults.filename);
+          triggerBlobDownload(storedFiles.blob, storedFiles.filename);
         } catch (error) {
           window.alert(error instanceof Error ? error.message : "The viewer export failed.");
         } finally {

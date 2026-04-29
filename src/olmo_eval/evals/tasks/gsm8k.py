@@ -6,7 +6,12 @@ from olmo_eval.common.metrics import AccuracyMetric, PassAtKMetric
 from olmo_eval.common.scorers import ExactMatchScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.data import DataSource
-from olmo_eval.evals.tasks.common import Task, register, register_variant
+from olmo_eval.evals.tasks.common import (
+    OutputScoreAggregation,
+    Task,
+    register,
+    register_variant,
+)
 from olmo_eval.evals.tasks.constants.gsm_symbolic import GSM8K_FIXED_FEWSHOT
 
 _NUMBER_RE = re.compile(r"[-+]?\d*\.\d+|[-+]?\d+")
@@ -107,4 +112,5 @@ register_variant(
         stop_sequences=("Question:", "</s>", "<|im_end|>", "\n\n"),
         num_samples=8,
     ),
+    output_score_aggregation=OutputScoreAggregation.FIRST,
 )

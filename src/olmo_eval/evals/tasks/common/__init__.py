@@ -1,6 +1,6 @@
 """Core task framework - base classes, registry, and configuration."""
 
-from .base import SandboxEnv, Task, TaskConfig
+from .base import OutputScoreAggregation, SandboxEnv, Task, TaskConfig
 from .format_helpers import format_mc, format_rc
 from .registry import (
     clear_registry,
@@ -19,6 +19,7 @@ from .registry import (
 )
 
 __all__ = [
+    "OutputScoreAggregation",
     "SandboxEnv",
     "Task",
     "TaskConfig",

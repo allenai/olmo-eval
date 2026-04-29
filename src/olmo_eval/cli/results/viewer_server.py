@@ -1603,8 +1603,12 @@ def _scope_option_label(
     return scope_label
 
 
-def _model_key(model: dict[str, Any]) -> str:
-    if model.get("timestamp"):
+def _model_key(
+    model: dict[str, Any],
+    *,
+    selected_run_mode: str = "latest",
+) -> str:
+    if selected_run_mode == "repeated" and model.get("timestamp"):
         return _result_model_export_ref(model.get("model_hash"), model.get("timestamp"))
     return str(
         model.get("model_hash")
@@ -2606,7 +2610,9 @@ def render_results_viewer_page(
         (
             '<label class="tt-menu-row">'
             f'<input type="checkbox" data-action="toggle-model-checkbox" '
-            f'data-model-key="{html.escape(_model_key(model))}" checked />'
+            'data-model-key="'
+            f"{html.escape(_model_key(model, selected_run_mode=selected_run_mode))}"
+            '" checked />'
             f'<span class="tt-menu-name">'
             f"{html.escape(str(model.get('display_label') or '').replace(chr(10), ' '))}"
             "</span>"
@@ -2825,15 +2831,19 @@ def _load_results_model_config_bundle(
 ) -> dict[str, Any]:
     from olmo_eval.storage.backends.postgres.models import Experiment
 
+    def _matches_model_ref(experiment: Any) -> bool:
+        model_hash = str(getattr(experiment, "model_hash", "") or "")
+        timestamp = _timestamp_iso(getattr(experiment, "timestamp", None))
+        export_ref = _result_model_export_ref(model_hash, timestamp)
+        if export_ref == model_ref:
+            return True
+        return not keep_all and model_hash == model_ref
+
     display_experiment = next(
         (
             experiment
             for experiment in _group_experiments(session, group_name, keep_all=keep_all)
-            if _result_model_export_ref(
-                getattr(experiment, "model_hash", None),
-                _timestamp_iso(getattr(experiment, "timestamp", None)),
-            )
-            == model_ref
+            if _matches_model_ref(experiment)
         ),
         None,
     )

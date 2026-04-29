@@ -381,17 +381,18 @@ def test_build_results_table_keep_all_preserves_distinct_reruns(monkeypatch) -> 
 
     assert len(latest_table["models"]) == 1
     assert len(all_runs_table["models"]) == 2
+    assert viewer_server._model_key(latest_table["models"][0]) == "abc12345deadbeef"
     assert (
         all_runs_table["models"][0]["display_label"] != all_runs_table["models"][1]["display_label"]
     )
     assert "2026-04-21 12:00" in all_runs_table["models"][0]["display_label"]
     assert "2026-04-21 08:00" in all_runs_table["models"][1]["display_label"]
     assert (
-        viewer_server._model_key(all_runs_table["models"][0])
+        viewer_server._model_key(all_runs_table["models"][0], selected_run_mode="repeated")
         == "abc12345deadbeef|2026-04-21T12:00:00+00:00"
     )
     assert (
-        viewer_server._model_key(all_runs_table["models"][1])
+        viewer_server._model_key(all_runs_table["models"][1], selected_run_mode="repeated")
         == "abc12345deadbeef|2026-04-21T08:00:00+00:00"
     )
 
@@ -424,7 +425,7 @@ def test_load_results_model_config_bundle_prefers_displayed_run_config(monkeypat
     bundle = viewer_server._load_results_model_config_bundle(
         _SequentialExecuteSession([_StaticLookupResult(detail_row)]),
         group_name="my-group",
-        model_ref="abc12345deadbeef|2026-04-21T12:00:00+00:00",
+        model_ref="abc12345deadbeef",
         keep_all=False,
     )
 
@@ -482,6 +483,50 @@ def test_load_results_model_config_bundle_falls_back_to_same_hash(monkeypatch) -
     assert bundle["has_config"] is True
     assert bundle["config"] == {"provider": {"name": "openai"}, "model": "model-a"}
     assert bundle["config_source"]["kind"] == "model_hash_fallback"
+
+
+def test_load_results_model_config_bundle_repeated_runs_still_require_exact_ref(
+    monkeypatch,
+) -> None:
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
+
+    first = SimpleNamespace(
+        id=10,
+        model_name="model-a",
+        model_hash="abc12345deadbeef",
+        timestamp=datetime(2026, 4, 21, 8, 0, tzinfo=UTC),
+    )
+    second = SimpleNamespace(
+        id=11,
+        model_name="model-a",
+        model_hash="abc12345deadbeef",
+        timestamp=datetime(2026, 4, 21, 12, 0, tzinfo=UTC),
+    )
+    detail_row = SimpleNamespace(
+        id=10,
+        experiment_id="exp-10",
+        model_name="model-a",
+        model_hash="abc12345deadbeef",
+        model_config={"provider": {"name": "openai"}, "model": "model-a"},
+        backend_name="openai",
+        timestamp=datetime(2026, 4, 21, 8, 0, tzinfo=UTC),
+    )
+
+    monkeypatch.setattr(
+        viewer_server,
+        "_group_experiments",
+        lambda session, group_name, keep_all: [second, first],
+    )
+
+    bundle = viewer_server._load_results_model_config_bundle(
+        _SequentialExecuteSession([_StaticLookupResult(detail_row)]),
+        group_name="my-group",
+        model_ref="abc12345deadbeef|2026-04-21T08:00:00+00:00",
+        keep_all=True,
+    )
+
+    assert bundle["has_config"] is True
+    assert bundle["model"]["experiment_pk"] == 10
     assert bundle["config_source"]["experiment_id"] == "exp-10"
     assert bundle["config_source"]["timestamp"] == "2026-04-21T08:00:00+00:00"
 
@@ -1157,6 +1202,7 @@ def test_render_results_viewer_page_renders_core_viewer_state_and_controls() -> 
         "export-pairwise-all",
     ):
         assert f'data-action="{action}"' in html
+    assert "all export files" in html
 
     assert "paired test" in html
     assert "Δ (row − col)" in html

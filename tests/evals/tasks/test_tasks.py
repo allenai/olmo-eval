@@ -3,7 +3,7 @@
 import pytest
 
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
-from olmo_eval.evals.tasks.common import get_task, list_tasks
+from olmo_eval.evals.tasks.common import OutputScoreAggregation, get_task, list_tasks
 from olmo_eval.evals.tasks.gsm8k import _clean_short_answer, _extract_last_number
 
 
@@ -54,6 +54,11 @@ class TestGSMNumberExtraction:
     )
     def test_clean_short_answer(self, text: str, expected: str):
         assert _clean_short_answer(text) == expected
+
+
+def test_gsm8k_olmo3base_uses_first_sample_exact_match() -> None:
+    task = get_task("gsm8k:olmo3base")
+    assert task.config.output_score_aggregation == OutputScoreAggregation.FIRST
 
 
 class TestTaskRegistration:

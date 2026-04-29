@@ -33,8 +33,8 @@ Launches Beaker variants for the OLMo 3 baseline sweep across:
   6. Easy QA tasks
   7. Easy math + easy code tasks
 
-Each task group is launched for the standard baseline model bundle, for Qwen3 with
-thinking disabled, for Nemotron Nano with prefix caching disabled, and for Gemma.
+Each task group is launched for the standard baseline model bundle, for Qwen3 Base,
+for Nemotron Nano with prefix caching disabled, and for Gemma.
 
 Options:
   --dry-run     Print the commands without launching them
@@ -63,13 +63,13 @@ Valid suite names:
   olmobase:mcqa_stem
 
 Models may be specified as full Hugging Face ids or trailing names such as
-gemma-2-9b, qwen3-8b, or mimo-7b-base.
+gemma-2-9b, qwen3-8b-base, or mimo-7b-base.
 
 Examples:
   ${SCRIPT_NAME} --gemma-only --only-group mcqa_stem --only-group math
   ${SCRIPT_NAME} --only-group code_exec
   ${SCRIPT_NAME} --only-suite olmobase:math --only-suite olmobase:code
-  ${SCRIPT_NAME} --only-model gemma-2-9b --only-model qwen3-8b --only-group gen
+  ${SCRIPT_NAME} --only-model gemma-2-9b --only-model qwen3-8b-base --only-group gen
 
 Environment overrides:
   GROUP=${GROUP}
@@ -237,7 +237,7 @@ baseline_models=(
     "marin-community/marin-8b-base"
     "swiss-ai/Apertus-8B-2509"
     "almanach/Gaperon-1125-8B"
-    "Qwen/Qwen3-8B"
+    "Qwen/Qwen3-8B-Base"
     "Qwen/Qwen2.5-7B"
     "nvidia/NVIDIA-Nemotron-Nano-9B-v2"
     "ibm-granite/granite-3.3-8b-base"
@@ -249,7 +249,7 @@ gemma_models=(
 )
 
 NEMOTRON_NANO_MODEL="nvidia/NVIDIA-Nemotron-Nano-9B-v2"
-QWEN3_MODEL="Qwen/Qwen3-8B"
+QWEN3_MODEL="Qwen/Qwen3-8B-Base"
 
 baseline_launch_args=(
     "-o" "provider.num_instances=${PROVIDER_NUM_INSTANCES}"
@@ -259,8 +259,6 @@ baseline_launch_args=(
 qwen3_launch_args=(
     "-o" "provider.num_instances=${PROVIDER_NUM_INSTANCES}"
     "-o" "provider.trust_remote_code=true"
-    # Apply Qwen3 thinking disablement at request time for broad vLLM compatibility.
-    "-o" "provider.kwargs.chat_template_kwargs.enable_thinking=false"
 )
 
 nemotron_launch_args=(
@@ -344,6 +342,10 @@ normalize_model_name() {
     case "${candidate_lower}" in
         gemma|gemma-2|gemma2|gemma-2-9b)
             printf "google/gemma-2-9b"
+            return 0
+            ;;
+        qwen3|qwen3-8b|qwen3-base|qwen3-8b-base)
+            printf "Qwen/Qwen3-8B-Base"
             return 0
             ;;
     esac
@@ -928,7 +930,7 @@ fi
 
 if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "code_exec" \
     && [[ "${#selected_qwen3_models[@]}" -gt 0 ]] && [[ "${#selected_code_exec_tasks[@]}" -gt 0 ]]; then
-    run_variant "Qwen3: code execution suites (thinking disabled)" "${qwen3_exec_cmd[@]}"
+    run_variant "Qwen3 Base: code execution suites" "${qwen3_exec_cmd[@]}"
 fi
 
 if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "mcqa_stem" \
@@ -938,7 +940,7 @@ fi
 
 if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "mcqa_stem" \
     && [[ "${#selected_qwen3_models[@]}" -gt 0 ]] && [[ "${#selected_mcqa_stem_tasks[@]}" -gt 0 ]]; then
-    run_variant "Qwen3: MCQA stem suites (thinking disabled)" "${qwen3_mcqa_stem_cmd[@]}"
+    run_variant "Qwen3 Base: MCQA stem suites" "${qwen3_mcqa_stem_cmd[@]}"
 fi
 
 if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "mcqa_non_stem" \
@@ -948,7 +950,7 @@ fi
 
 if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "mcqa_non_stem" \
     && [[ "${#selected_qwen3_models[@]}" -gt 0 ]] && [[ "${#selected_mcqa_non_stem_tasks[@]}" -gt 0 ]]; then
-    run_variant "Qwen3: MCQA non-stem suites (thinking disabled)" "${qwen3_mcqa_non_stem_cmd[@]}"
+    run_variant "Qwen3 Base: MCQA non-stem suites" "${qwen3_mcqa_non_stem_cmd[@]}"
 fi
 
 if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "gen" \
@@ -958,7 +960,7 @@ fi
 
 if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "gen" \
     && [[ "${#selected_qwen3_models[@]}" -gt 0 ]] && [[ "${#selected_gen_tasks[@]}" -gt 0 ]]; then
-    run_variant "Qwen3: generation suites (thinking disabled)" "${qwen3_gen_cmd[@]}"
+    run_variant "Qwen3 Base: generation suites" "${qwen3_gen_cmd[@]}"
 fi
 
 if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "math" \
@@ -968,7 +970,7 @@ fi
 
 if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "math" \
     && [[ "${#selected_qwen3_models[@]}" -gt 0 ]] && [[ "${#selected_math_tasks[@]}" -gt 0 ]]; then
-    run_variant "Qwen3: math suites (thinking disabled)" "${qwen3_math_cmd[@]}"
+    run_variant "Qwen3 Base: math suites" "${qwen3_math_cmd[@]}"
 fi
 
 if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_qa" \
@@ -978,7 +980,7 @@ fi
 
 if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_qa" \
     && [[ "${#selected_qwen3_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_qa_tasks[@]}" -gt 0 ]]; then
-    run_variant "Qwen3: easy QA suites (thinking disabled)" "${qwen3_non_exec_easy_qa_cmd[@]}"
+    run_variant "Qwen3 Base: easy QA suites" "${qwen3_non_exec_easy_qa_cmd[@]}"
 fi
 
 if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_math_code" \
@@ -988,7 +990,7 @@ fi
 
 if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_math_code" \
     && [[ "${#selected_qwen3_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_math_code_tasks[@]}" -gt 0 ]]; then
-    run_variant "Qwen3: easy math + easy code suites (thinking disabled)" "${qwen3_non_exec_easy_math_code_cmd[@]}"
+    run_variant "Qwen3 Base: easy math + easy code suites" "${qwen3_non_exec_easy_math_code_cmd[@]}"
 fi
 
 if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "code_exec" \

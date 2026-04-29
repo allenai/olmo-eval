@@ -9,6 +9,7 @@ import math
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.formatters import Formatter
@@ -63,6 +64,13 @@ class SandboxEnv:
         return frozenset({f"sandbox:{self.name}"})
 
 
+class OutputScoreAggregation(StrEnum):
+    """How per-output scorer values collapse to a response-level score."""
+
+    MAX = "max"
+    FIRST = "first"
+
+
 @hide_unset()
 @dataclass
 class TaskConfig:
@@ -99,6 +107,7 @@ class TaskConfig:
     split: Split = Split.TEST
     primary_metric: MetricName | Metric | None = None
     sampling_params: SamplingParams | None = None
+    output_score_aggregation: OutputScoreAggregation = OutputScoreAggregation.MAX
 
     #: Maximum prompt length in tokens for loglikelihood truncation (matches oe-eval max_length).
     #: When set, prompts exceeding this length are left-truncated before scoring.
@@ -115,6 +124,18 @@ class TaskConfig:
 
     def __post_init__(self) -> None:
         """Validate scheduler-only sandbox allocation hints."""
+        if isinstance(self.output_score_aggregation, str):
+            try:
+                self.output_score_aggregation = OutputScoreAggregation(
+                    self.output_score_aggregation
+                )
+            except ValueError as exc:
+                valid = ", ".join(option.value for option in OutputScoreAggregation)
+                raise ValueError(
+                    f"output_score_aggregation must be one of: {valid}; "
+                    f"got {self.output_score_aggregation!r}"
+                ) from exc
+
         try:
             weight = float(self.sandbox_allocation_weight)
         except (TypeError, ValueError) as exc:
@@ -208,6 +229,7 @@ class TaskConfig:
             "split": self.split.value,
             "primary_metric": serialize_primary_metric(self.get_primary_metric()),
             "sampling_params": asdict(self.sampling_params) if self.sampling_params else None,
+            "output_score_aggregation": self.output_score_aggregation.value,
             "max_length": self.max_length,
             "dependencies": self.dependencies,
         }
@@ -508,7 +530,7 @@ class Task(ABC):
                     if output.metadata is None:
                         output.metadata = {}
                     output.metadata[f"score:{scorer.name}"] = scores[i] if i < len(scores) else 0.0
-                response.scores[scorer.name] = max(scores) if scores else 0.0
+                response.scores[scorer.name] = self._aggregate_output_scores(scores)
 
     async def _apply_scorers_async(
         self,
@@ -572,7 +594,7 @@ class Task(ABC):
                     if output.metadata is None:
                         output.metadata = {}
                     output.metadata[f"score:{scorer.name}"] = scores[i] if i < len(scores) else 0.0
-                response.scores[scorer.name] = max(scores) if scores else 0.0
+                response.scores[scorer.name] = self._aggregate_output_scores(scores)
 
         # Apply async scorers (both execution and context) concurrently
         async_scorers_exist = bool(execution_scorers) or bool(context_scorers)
@@ -667,7 +689,7 @@ class Task(ABC):
                         scoring_errors_by_response[resp_idx][out_idx] = {}
                     scoring_errors_by_response[resp_idx][out_idx][scorer_name] = scoring_error
 
-            # Store individual scores in output metadata and assign max to response
+            # Store individual scores in output metadata and aggregate to response
             for resp_idx, scorer_scores in scores_by_response.items():
                 response = responses[resp_idx]
                 for scorer_name, output_scores in scorer_scores.items():
@@ -689,9 +711,25 @@ class Task(ABC):
                             existing[scorer_name] = scoring_errors_by_response[resp_idx][out_idx][
                                 scorer_name
                             ]
-                    # Response-level score is max for backward compatibility
-                    all_scores = list(output_scores.values())
-                    response.scores[scorer_name] = max(all_scores) if all_scores else 0.0
+                    response.scores[scorer_name] = self._aggregate_output_scores(output_scores)
+
+    def _aggregate_output_scores(self, scores: Sequence[float] | dict[int, float]) -> float:
+        """Collapse per-output scorer values into one response-level score."""
+        aggregation = self.config.output_score_aggregation
+        if isinstance(scores, dict):
+            if not scores:
+                return 0.0
+            ordered_scores = [score for _, score in sorted(scores.items())]
+        else:
+            ordered_scores = list(scores)
+            if not ordered_scores:
+                return 0.0
+
+        if aggregation == OutputScoreAggregation.MAX:
+            return max(ordered_scores)
+        if aggregation == OutputScoreAggregation.FIRST:
+            return ordered_scores[0]
+        raise ValueError(f"Unsupported output_score_aggregation: {aggregation}")
 
     def _expand_multi_output_responses(self, responses: Sequence[Response]) -> list[Response]:
         """Expand multi-output responses into individual responses for pass@k.

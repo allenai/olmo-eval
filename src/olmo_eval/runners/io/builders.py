@@ -58,6 +58,14 @@ def build_predictions(scored: Sequence[Any]) -> list[dict]:
 
             out_data["num_chars"] = num_chars
 
+            sample_metrics: dict[str, dict[str, float]] = {}
+            for key, value in meta.items():
+                if key.startswith("score:") and isinstance(value, (int, float)):
+                    scorer_name = key[6:]
+                    sample_metrics.setdefault(scorer_name, {})[scorer_name] = float(value)
+            if sample_metrics:
+                out_data["sample_metrics"] = sample_metrics
+
             # Include execution result if present
             if "execution_result" in meta:
                 out_data["execution_result"] = meta["execution_result"]
