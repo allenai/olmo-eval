@@ -501,6 +501,9 @@ sys.exit(main())
                     trial_data["reward_breakdown"] = reward_info["reward_breakdown"]
                 if "reward_basis" in reward_info:
                     trial_data["reward_basis"] = reward_info["reward_basis"]
+                # Include conversation messages so model outputs are inspectable
+                if "messages" in sim:
+                    trial_data["messages"] = sim["messages"]
                 trials.append(trial_data)
 
             # Compute aggregated metrics
