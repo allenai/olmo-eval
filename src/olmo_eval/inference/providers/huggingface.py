@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.types import LMOutput, LMRequest, SamplingParams
@@ -62,10 +63,16 @@ class HuggingFaceProvider(InferenceProvider):
         for key in self._IGNORED_KWARGS:
             model_kwargs.pop(key, None)
 
+        # Resolve HF auth token: explicit kwarg > HF_TOKEN env var > none (public).
+        token = model_kwargs.pop("token", None) or os.getenv("HF_TOKEN")
+        auth_kwargs: dict[str, Any] = {"token": token} if token else {}
+
         super().__init__(model_name)
         tokenizer_path = tokenizer or model_name
-        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
-        self.model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
+        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, **auth_kwargs)
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_name, **auth_kwargs, **model_kwargs
+        )
         self.device = _get_device()
         self.model.to(self.device)
         self.model.eval()
