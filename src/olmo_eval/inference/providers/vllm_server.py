@@ -622,7 +622,7 @@ class VLLMServerProvider(InferenceProvider):
                 elapsed = max(now - start, 1e-9)
                 rate = completed / elapsed
                 pct = completed / total * 100 if total > 0 else 0.0
-                callback(f"vLLM gen {completed}/{total} ({pct:.0f}%) at {rate:.2f} req/sec")
+                callback(f"vLLM gen {completed}/{total} ({pct:.0f}%) at {rate:.4f} req/sec")
                 last_emit = now
             return result
 
