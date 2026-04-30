@@ -14,6 +14,7 @@ import importlib.util
 import logging
 import os
 import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -122,3 +123,18 @@ class BeakerStatusReporter:
             f"{label} {count}/{total} ({pct:.0f}%) at {rate:.4f} {units}",
             force=force,
         )
+
+    def progress_callback(self, label: str, units: str = "items/sec") -> Callable[..., None]:
+        """Return a ``(count, total, *, force=False)`` callback bound to a fresh start time.
+
+        When called without ``force``, forces a flush iff ``count == total``.
+        Suitable for passing as ``on_progress`` to ``dispatch_concurrent``.
+        """
+        start = time.monotonic()
+
+        def _cb(count: int, total: int, *, force: bool = False) -> None:
+            self.report_progress(
+                label, count, total, start, units=units, force=force or count == total
+            )
+
+        return _cb

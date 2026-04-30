@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import queue
-import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -53,7 +52,7 @@ class StreamingStrategy(BatchingStrategy):
             color="green",
         )
         reporter = BeakerStatusReporter()
-        beaker_start = time.monotonic()
+        report_progress = reporter.progress_callback("Processed")
 
         async def process_single(item: QueueItem) -> None:
             async with semaphore:
@@ -61,7 +60,7 @@ class StreamingStrategy(BatchingStrategy):
                     [item], harness, result_queue, 1, worker_logger, show_progress=False
                 )
                 progress.update(1)
-                reporter.report_progress("Processed", progress.count, progress.total, beaker_start)
+                report_progress(progress.count, progress.total)
 
         async def get_item() -> QueueItem | None:
             """Get next item from queue asynchronously."""
@@ -93,6 +92,4 @@ class StreamingStrategy(BatchingStrategy):
             await asyncio.gather(*in_flight)
 
         progress.close()
-        reporter.report_progress(
-            "Processed", progress.count, progress.total, beaker_start, force=True
-        )
+        report_progress(progress.count, progress.total, force=True)

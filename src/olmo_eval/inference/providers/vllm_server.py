@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import time
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -601,29 +600,15 @@ class VLLMServerProvider(InferenceProvider):
 
         params = self._default_sampling_params(sampling_params)
 
-        total = len(requests)
-        completed = 0
-        start = time.monotonic()
-
         async def process(req: LMRequest) -> list[LMOutput]:
-            nonlocal completed
-            result = await self._generate_single_async(req, params)
-            completed += 1
-            self._beaker_reporter.report_progress(
-                "vLLM gen",
-                completed,
-                total,
-                start,
-                units="req/sec",
-                force=(completed == total),
-            )
-            return result
+            return await self._generate_single_async(req, params)
 
         results = await dispatch_concurrent(
             requests,
             process,
             max_in_flight=self.max_concurrency,
             max_retries=self.max_retries,
+            on_progress=self._beaker_reporter.progress_callback("vLLM gen", units="req/sec"),
         )
         return [r if r is not None else [] for r in results]
 
