@@ -735,10 +735,15 @@ class BeakerLauncher:
         else:
             steps.append(f"cd /gantry-runtime && uv pip install -e . -c {constraints}")
 
-        # Install provider-specific dependencies
+        # Install provider-specific dependencies. When vLLM runs in an isolated
+        # venv, target that venv so vLLM-side plugins (entry-points) are visible
+        # to the server subprocess.
         if provider_packages:
+            venv_prefix = (
+                f"VIRTUAL_ENV={vllm_venv} " if use_isolated_vllm_venv else ""
+            )
             for pkg in provider_packages:
-                steps.append(build_install_command(pkg, constraints))
+                steps.append(f"{venv_prefix}{build_install_command(pkg, constraints)}")
 
         # Install task-specific dependencies
         if task_packages:
