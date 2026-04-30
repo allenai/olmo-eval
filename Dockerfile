@@ -41,8 +41,8 @@ RUN uv python install ${PYTHON_VERSION} \
 WORKDIR /opt/project
 COPY pyproject.toml uv.lock README.md ./
 
-# Base deps from lockfile (no extras, no dev, no project — extras install at runtime).
-RUN uv sync --frozen --no-dev --no-install-project
+# Base deps from lockfile (no extras, no default groups, no project — extras install at runtime).
+RUN uv sync --frozen --no-default-groups --no-install-project
 
 # PyTorch from the CUDA-specific PyTorch index (overrides any transitive CPU torch).
 RUN CUDA_SHORT=$(echo "${CUDA_VERSION}" | sed 's/\.//g' | cut -c1-3) \
@@ -70,6 +70,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* \
     && apt-get clean
 
+COPY --from=builder /root/.local/share/uv/python /root/.local/share/uv/python
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /opt/project /opt/project
 COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
