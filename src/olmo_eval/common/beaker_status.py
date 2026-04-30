@@ -10,13 +10,18 @@ Outside of a Beaker job (env var unset) the reporter is a no-op.
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 import os
 import time
+from typing import TYPE_CHECKING
 
-from beaker import Beaker, BeakerWorkload
+if TYPE_CHECKING:
+    from beaker import Beaker, BeakerWorkload
 
 logger = logging.getLogger(__name__)
+
+_BEAKER_AVAILABLE = importlib.util.find_spec("beaker") is not None
 
 DEFAULT_MIN_INTERVAL = 10.0
 
@@ -41,7 +46,12 @@ class BeakerStatusReporter:
         self._workload_id = os.environ.get("BEAKER_WORKLOAD_ID") or os.environ.get(
             "BEAKER_EXPERIMENT_ID"
         )
-        self.enabled = bool(self._workload_id)
+        self.enabled = bool(self._workload_id) and _BEAKER_AVAILABLE
+        if bool(self._workload_id) and not _BEAKER_AVAILABLE:
+            logger.warning(
+                "BEAKER_WORKLOAD_ID set but beaker-py not installed; "
+                "Beaker status updates disabled."
+            )
         self._client: Beaker | None = None
         self._workload: BeakerWorkload | None = None
         self._last_update: float = float("-inf")
@@ -52,6 +62,8 @@ class BeakerStatusReporter:
             return False
         if self._client is not None and self._workload is not None:
             return True
+        from beaker import Beaker
+
         self._client = Beaker.from_env()
         self._workload = self._client.workload.get(self._workload_id)
         return True

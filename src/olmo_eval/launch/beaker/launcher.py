@@ -728,6 +728,11 @@ class BeakerLauncher:
         # vllm_server mode needs HuggingFace tokenizer for accurate logprobs boundary
         if use_isolated_vllm_venv and "hf" not in main_extras:
             main_extras.append("hf")
+
+        # Always install the beaker extra so BeakerStatusReporter can push progress
+        # updates to the workload description.
+        if "beaker" not in main_extras:
+            main_extras.append("beaker")
         if main_extras:
             extras_str = ",".join(main_extras)
             install_cmd = f"uv pip install -e '.[{extras_str}]' -c {constraints}"
