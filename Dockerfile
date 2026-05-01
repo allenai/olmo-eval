@@ -42,7 +42,7 @@ WORKDIR /opt/project
 COPY pyproject.toml uv.lock README.md ./
 
 # Base deps from lockfile (no extras, no default groups, no project — extras install at runtime).
-RUN uv sync --frozen --no-default-groups --no-install-project
+RUN uv sync --frozen --active --no-default-groups --no-install-project
 
 # PyTorch from the CUDA-specific PyTorch index (overrides any transitive CPU torch).
 RUN CUDA_SHORT=$(echo "${CUDA_VERSION}" | sed 's/\.//g' | cut -c1-3) \
