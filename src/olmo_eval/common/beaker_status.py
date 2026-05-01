@@ -10,6 +10,7 @@ Outside of a Beaker job (env var unset) the reporter is a no-op.
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from collections.abc import Callable
@@ -18,6 +19,8 @@ from beaker import Beaker, BeakerWorkload
 from beaker.exceptions import BeakerConfigurationError
 
 DEFAULT_MIN_INTERVAL = 10.0
+
+logger = logging.getLogger(__name__)
 
 
 def _git_suffix() -> str:
@@ -69,12 +72,15 @@ class BeakerStatusReporter:
         def _cb(count: int, total: int, *, force: bool = False) -> None:
             if self._client is None:
                 return
-            elapsed = max(time.monotonic() - start, 1e-9)
-            rate = count / elapsed
-            pct = (count / total * 100) if total > 0 else 0.0
-            self.update(
-                f"{label} {count}/{total} ({pct:.0f}%) at {rate:.4f} {units}",
-                force=force or count == total,
-            )
+            try:
+                elapsed = max(time.monotonic() - start, 1e-9)
+                rate = count / elapsed
+                pct = (count / total * 100) if total > 0 else 0.0
+                self.update(
+                    f"{label} {count}/{total} ({pct:.0f}%) at {rate:.4f} {units}",
+                    force=force or count == total,
+                )
+            except Exception:
+                logger.exception("BeakerStatusReporter progress callback failed")
 
         return _cb

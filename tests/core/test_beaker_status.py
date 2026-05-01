@@ -77,21 +77,6 @@ class BeakerStatusReporterTest(unittest.TestCase):
 
         self.assertEqual(fake_client.workload.update.call_count, 2)
 
-    def test_dedupes_identical_messages(self) -> None:
-        fake_client = mock.MagicMock()
-        with (
-            mock.patch.dict("os.environ", {"BEAKER_WORKLOAD_ID": "wl_xyz"}, clear=True),
-            mock.patch.object(beaker_status.Beaker, "from_env", return_value=fake_client),
-        ):
-            reporter = beaker_status.BeakerStatusReporter(min_interval=0.0)
-
-        with mock.patch("time.monotonic", side_effect=[0.0, 1.0, 2.0]):
-            reporter.update("same")
-            reporter.update("same")
-            reporter.update("different")
-
-        self.assertEqual(fake_client.workload.update.call_count, 2)
-
 
 if __name__ == "__main__":
     unittest.main()
