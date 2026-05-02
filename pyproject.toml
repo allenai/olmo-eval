@@ -31,6 +31,7 @@ dependencies = [
     "textual-plot>=0.10.1",
     "tree-sitter>=0.24.0",
     "tree-sitter-python>=0.23.0,<0.26.0",
+    "beaker-py>=2.0",
 ]
 
 [project.urls]
