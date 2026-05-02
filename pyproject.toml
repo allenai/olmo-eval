@@ -94,6 +94,14 @@ storage = [
 [project.scripts]
 olmo-eval = "olmo_eval.cli:main"
 
+[[tool.uv.index]]
+name = "vllm-cu129"
+url = "https://wheels.vllm.ai/0.19.0/cu129/"
+explicit = true
+
+[tool.uv.sources]
+vllm = { index = "vllm-cu129" }
+
 [tool.uv]
 package = true
 override-dependencies = [
