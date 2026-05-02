@@ -114,9 +114,9 @@ torchaudio = { index = "pytorch-cu129" }
 package = true
 override-dependencies = [
     "transformers>=5.4.0",
-    "torch<2.10",
-    "torchvision<0.25",
-    "torchaudio<2.10",
+    "torch==2.10.0",
+    "torchvision==0.25.0",
+    "torchaudio==2.10.0",
 ]
 # vllm is installed by default; openhands users must opt out via
 # `uv sync --no-group vllm --group openhands`.
