@@ -98,6 +98,9 @@ olmo-eval = "olmo_eval.cli:main"
 package = true
 override-dependencies = [
     "transformers>=5.4.0",
+    "torch<2.10",
+    "torchvision<0.25",
+    "torchaudio<2.10",
 ]
 # vllm is installed by default; openhands users must opt out via
 # `uv sync --no-group vllm --group openhands`.
