@@ -507,18 +507,18 @@ if [[ "${#RAW_SELECTED_MODELS[@]}" -gt 0 ]]; then
     done
 fi
 
-declare -a selected_code_exec_tasks
-declare -a selected_mcqa_stem_tasks
-declare -a selected_mcqa_non_stem_tasks
-declare -a selected_gen_tasks
-declare -a selected_math_tasks
-declare -a selected_non_exec_easy_qa_tasks
-declare -a selected_non_exec_easy_math_code_tasks
-declare -a selected_baseline_models
-declare -a selected_standard_baseline_models
-declare -a selected_qwen3_models
-declare -a selected_nemotron_nano_models
-declare -a selected_gemma_models
+declare -a selected_code_exec_tasks=()
+declare -a selected_mcqa_stem_tasks=()
+declare -a selected_mcqa_non_stem_tasks=()
+declare -a selected_gen_tasks=()
+declare -a selected_math_tasks=()
+declare -a selected_non_exec_easy_qa_tasks=()
+declare -a selected_non_exec_easy_math_code_tasks=()
+declare -a selected_baseline_models=()
+declare -a selected_standard_baseline_models=()
+declare -a selected_qwen3_models=()
+declare -a selected_nemotron_nano_models=()
+declare -a selected_gemma_models=()
 
 filter_tasks selected_code_exec_tasks "${code_exec_tasks[@]}"
 filter_tasks selected_mcqa_stem_tasks "${mcqa_stem_tasks[@]}"
@@ -530,7 +530,7 @@ filter_tasks selected_non_exec_easy_math_code_tasks "${non_exec_easy_math_code_t
 filter_models selected_baseline_models "${baseline_models[@]}"
 filter_models selected_gemma_models "${gemma_models[@]}"
 
-for model in "${selected_baseline_models[@]-}"; do
+for model in ${selected_baseline_models[@]+"${selected_baseline_models[@]}"}; do
     if [[ "${model}" == "${NEMOTRON_NANO_MODEL}" ]]; then
         selected_nemotron_nano_models+=("${model}")
     elif [[ "${model}" == "${QWEN3_MODEL}" ]]; then
@@ -571,28 +571,21 @@ append_tasks() {
     done
 }
 
-save_current_cmd() {
-    local target=$1
-    eval "${target}=(\"\${current_cmd[@]}\")"
-}
-
 build_variant_cmd() {
-    local target=$1
-    local harness=$2
-    local launch_args_name=$3
-    local models_name=$4
-    local tasks_name=$5
-    local include_exec_only=${6:-false}
+    local harness=$1
+    local launch_args_name=$2
+    local models_name=$3
+    local tasks_name=$4
+    local include_exec_only=${5:-false}
 
     start_command "${harness}"
     eval "append_args \"\${${launch_args_name}[@]}\""
     if [[ "${include_exec_only}" == "true" ]]; then
         append_args "${exec_only_args[@]}"
     fi
-    eval "append_models \"\${${models_name}[@]-}\""
-    eval "append_tasks \"\${${tasks_name}[@]-}\""
+    eval "append_models \${${models_name}[@]+\"\${${models_name}[@]}\"}"
+    eval "append_tasks \${${tasks_name}[@]+\"\${${tasks_name}[@]}\"}"
     append_args "${common_tail_args[@]}"
-    save_current_cmd "${target}"
 }
 
 print_command() {
@@ -691,205 +684,127 @@ run_variant() {
     fi
 }
 
-declare -a baseline_exec_cmd
-declare -a baseline_mcqa_stem_cmd
-declare -a baseline_mcqa_non_stem_cmd
-declare -a baseline_gen_cmd
-declare -a baseline_math_cmd
-declare -a baseline_non_exec_easy_qa_cmd
-declare -a baseline_non_exec_easy_math_code_cmd
-declare -a qwen3_exec_cmd
-declare -a qwen3_mcqa_stem_cmd
-declare -a qwen3_mcqa_non_stem_cmd
-declare -a qwen3_gen_cmd
-declare -a qwen3_math_cmd
-declare -a qwen3_non_exec_easy_qa_cmd
-declare -a qwen3_non_exec_easy_math_code_cmd
-declare -a nemotron_exec_cmd
-declare -a nemotron_mcqa_stem_cmd
-declare -a nemotron_mcqa_non_stem_cmd
-declare -a nemotron_gen_cmd
-declare -a nemotron_math_cmd
-declare -a nemotron_non_exec_easy_qa_cmd
-declare -a nemotron_non_exec_easy_math_code_cmd
-declare -a gemma_exec_cmd
-declare -a gemma_mcqa_stem_cmd
-declare -a gemma_mcqa_non_stem_cmd
-declare -a gemma_gen_cmd
-declare -a gemma_math_cmd
-declare -a gemma_non_exec_easy_qa_cmd
-declare -a gemma_non_exec_easy_math_code_cmd
+group_specs=(
+    "code_exec|selected_code_exec_tasks|exec|true|code execution suites"
+    "mcqa_stem|selected_mcqa_stem_tasks|non_exec|false|MCQA stem suites"
+    "mcqa_non_stem|selected_mcqa_non_stem_tasks|non_exec|false|MCQA non-stem suites"
+    "gen|selected_gen_tasks|non_exec|false|generation suites"
+    "math|selected_math_tasks|non_exec|false|math suites"
+    "easy_qa|selected_non_exec_easy_qa_tasks|non_exec|false|easy QA suites"
+    "easy_math_code|selected_non_exec_easy_math_code_tasks|non_exec|false|easy math + easy code suites"
+)
 
-build_variant_cmd baseline_exec_cmd "${EXEC_HARNESS}" baseline_launch_args selected_standard_baseline_models selected_code_exec_tasks true
-build_variant_cmd baseline_mcqa_stem_cmd "${NON_EXEC_HARNESS}" baseline_launch_args selected_standard_baseline_models selected_mcqa_stem_tasks
-build_variant_cmd baseline_mcqa_non_stem_cmd "${NON_EXEC_HARNESS}" baseline_launch_args selected_standard_baseline_models selected_mcqa_non_stem_tasks
-build_variant_cmd baseline_gen_cmd "${NON_EXEC_HARNESS}" baseline_launch_args selected_standard_baseline_models selected_gen_tasks
-build_variant_cmd baseline_math_cmd "${NON_EXEC_HARNESS}" baseline_launch_args selected_standard_baseline_models selected_math_tasks
-build_variant_cmd baseline_non_exec_easy_qa_cmd "${NON_EXEC_HARNESS}" baseline_launch_args selected_standard_baseline_models selected_non_exec_easy_qa_tasks
-build_variant_cmd baseline_non_exec_easy_math_code_cmd "${NON_EXEC_HARNESS}" baseline_launch_args selected_standard_baseline_models selected_non_exec_easy_math_code_tasks
-build_variant_cmd qwen3_exec_cmd "${EXEC_HARNESS}" qwen3_launch_args selected_qwen3_models selected_code_exec_tasks true
-build_variant_cmd qwen3_mcqa_stem_cmd "${NON_EXEC_HARNESS}" qwen3_launch_args selected_qwen3_models selected_mcqa_stem_tasks
-build_variant_cmd qwen3_mcqa_non_stem_cmd "${NON_EXEC_HARNESS}" qwen3_launch_args selected_qwen3_models selected_mcqa_non_stem_tasks
-build_variant_cmd qwen3_gen_cmd "${NON_EXEC_HARNESS}" qwen3_launch_args selected_qwen3_models selected_gen_tasks
-build_variant_cmd qwen3_math_cmd "${NON_EXEC_HARNESS}" qwen3_launch_args selected_qwen3_models selected_math_tasks
-build_variant_cmd qwen3_non_exec_easy_qa_cmd "${NON_EXEC_HARNESS}" qwen3_launch_args selected_qwen3_models selected_non_exec_easy_qa_tasks
-build_variant_cmd qwen3_non_exec_easy_math_code_cmd "${NON_EXEC_HARNESS}" qwen3_launch_args selected_qwen3_models selected_non_exec_easy_math_code_tasks
-build_variant_cmd nemotron_exec_cmd "${EXEC_HARNESS}" nemotron_launch_args selected_nemotron_nano_models selected_code_exec_tasks true
-build_variant_cmd nemotron_mcqa_stem_cmd "${NON_EXEC_HARNESS}" nemotron_launch_args selected_nemotron_nano_models selected_mcqa_stem_tasks
-build_variant_cmd nemotron_mcqa_non_stem_cmd "${NON_EXEC_HARNESS}" nemotron_launch_args selected_nemotron_nano_models selected_mcqa_non_stem_tasks
-build_variant_cmd nemotron_gen_cmd "${NON_EXEC_HARNESS}" nemotron_launch_args selected_nemotron_nano_models selected_gen_tasks
-build_variant_cmd nemotron_math_cmd "${NON_EXEC_HARNESS}" nemotron_launch_args selected_nemotron_nano_models selected_math_tasks
-build_variant_cmd nemotron_non_exec_easy_qa_cmd "${NON_EXEC_HARNESS}" nemotron_launch_args selected_nemotron_nano_models selected_non_exec_easy_qa_tasks
-build_variant_cmd nemotron_non_exec_easy_math_code_cmd "${NON_EXEC_HARNESS}" nemotron_launch_args selected_nemotron_nano_models selected_non_exec_easy_math_code_tasks
-build_variant_cmd gemma_exec_cmd "${EXEC_HARNESS}" gemma_launch_args selected_gemma_models selected_code_exec_tasks true
-build_variant_cmd gemma_mcqa_stem_cmd "${NON_EXEC_HARNESS}" gemma_launch_args selected_gemma_models selected_mcqa_stem_tasks
-build_variant_cmd gemma_mcqa_non_stem_cmd "${NON_EXEC_HARNESS}" gemma_launch_args selected_gemma_models selected_mcqa_non_stem_tasks
-build_variant_cmd gemma_gen_cmd "${NON_EXEC_HARNESS}" gemma_launch_args selected_gemma_models selected_gen_tasks
-build_variant_cmd gemma_math_cmd "${NON_EXEC_HARNESS}" gemma_launch_args selected_gemma_models selected_math_tasks
-build_variant_cmd gemma_non_exec_easy_qa_cmd "${NON_EXEC_HARNESS}" gemma_launch_args selected_gemma_models selected_non_exec_easy_qa_tasks
-build_variant_cmd gemma_non_exec_easy_math_code_cmd "${NON_EXEC_HARNESS}" gemma_launch_args selected_gemma_models selected_non_exec_easy_math_code_tasks
+family_specs=(
+    "baseline|selected_standard_baseline_models|baseline_launch_args|Baseline models|false|"
+    "qwen3|selected_qwen3_models|qwen3_launch_args|Qwen3 Base|false|"
+    "nemotron|selected_nemotron_nano_models|nemotron_launch_args|Nemotron Nano|false| (prefix caching disabled)"
+    "gemma|selected_gemma_models|gemma_launch_args|Gemma|true|"
+)
+
+RESOLVED_TASKS_NAME=""
+RESOLVED_HARNESS_KIND=""
+RESOLVED_INCLUDE_EXEC_ONLY=""
+RESOLVED_GROUP_LABEL=""
+RESOLVED_MODELS_NAME=""
+RESOLVED_LAUNCH_ARGS_NAME=""
+RESOLVED_LABEL_PREFIX=""
+RESOLVED_ALLOW_WHEN_GEMMA_ONLY=""
+RESOLVED_FAMILY_LABEL_SUFFIX=""
+
+resolve_group_spec() {
+    local wanted=$1
+    local spec
+    local group_name
+    local tasks_name
+    local harness_kind
+    local include_exec_only
+    local group_label
+
+    for spec in "${group_specs[@]}"; do
+        IFS='|' read -r group_name tasks_name harness_kind include_exec_only group_label <<<"${spec}"
+        if [[ "${group_name}" == "${wanted}" ]]; then
+            RESOLVED_TASKS_NAME="${tasks_name}"
+            RESOLVED_HARNESS_KIND="${harness_kind}"
+            RESOLVED_INCLUDE_EXEC_ONLY="${include_exec_only}"
+            RESOLVED_GROUP_LABEL="${group_label}"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+resolve_family_spec() {
+    local wanted=$1
+    local spec
+    local family_name
+    local models_name
+    local launch_args_name
+    local label_prefix
+    local allow_when_gemma_only
+    local family_label_suffix
+
+    for spec in "${family_specs[@]}"; do
+        IFS='|' read -r family_name models_name launch_args_name label_prefix allow_when_gemma_only family_label_suffix <<<"${spec}"
+        if [[ "${family_name}" == "${wanted}" ]]; then
+            RESOLVED_MODELS_NAME="${models_name}"
+            RESOLVED_LAUNCH_ARGS_NAME="${launch_args_name}"
+            RESOLVED_LABEL_PREFIX="${label_prefix}"
+            RESOLVED_ALLOW_WHEN_GEMMA_ONLY="${allow_when_gemma_only}"
+            RESOLVED_FAMILY_LABEL_SUFFIX="${family_label_suffix}"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+variant_is_enabled() {
+    local family_name=$1
+    local group_name=$2
+    local model_count
+    local task_count
+
+    resolve_family_spec "${family_name}" || return 1
+    resolve_group_spec "${group_name}" || return 1
+
+    if [[ "${GEMMA_ONLY}" == "true" && "${RESOLVED_ALLOW_WHEN_GEMMA_ONLY}" != "true" ]]; then
+        return 1
+    fi
+
+    if ! group_is_selected "${group_name}"; then
+        return 1
+    fi
+
+    eval "model_count=\${#${RESOLVED_MODELS_NAME}[@]}"
+    eval "task_count=\${#${RESOLVED_TASKS_NAME}[@]}"
+
+    [[ "${model_count}" -gt 0 && "${task_count}" -gt 0 ]]
+}
+
+declare -a matched_variant_specs=()
+
+queue_variants_for_families() {
+    local group_spec
+    local family_name
+    local group_name
+
+    for group_spec in "${group_specs[@]}"; do
+        IFS='|' read -r group_name _ <<<"${group_spec}"
+        for family_name in "$@"; do
+            if variant_is_enabled "${family_name}" "${group_name}"; then
+                matched_variant_specs+=("${family_name}|${group_name}")
+                planned_variants=$((planned_variants + 1))
+            fi
+        done
+    done
+}
 
 planned_variants=0
 
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "code_exec" \
-    && [[ "${#selected_standard_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_code_exec_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "code_exec" \
-    && [[ "${#selected_qwen3_models[@]}" -gt 0 ]] && [[ "${#selected_code_exec_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "mcqa_stem" \
-    && [[ "${#selected_standard_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_mcqa_stem_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "mcqa_stem" \
-    && [[ "${#selected_qwen3_models[@]}" -gt 0 ]] && [[ "${#selected_mcqa_stem_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "mcqa_non_stem" \
-    && [[ "${#selected_standard_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_mcqa_non_stem_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "mcqa_non_stem" \
-    && [[ "${#selected_qwen3_models[@]}" -gt 0 ]] && [[ "${#selected_mcqa_non_stem_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "gen" \
-    && [[ "${#selected_standard_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_gen_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "gen" \
-    && [[ "${#selected_qwen3_models[@]}" -gt 0 ]] && [[ "${#selected_gen_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "math" \
-    && [[ "${#selected_standard_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_math_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "math" \
-    && [[ "${#selected_qwen3_models[@]}" -gt 0 ]] && [[ "${#selected_math_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_qa" \
-    && [[ "${#selected_standard_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_qa_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_qa" \
-    && [[ "${#selected_qwen3_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_qa_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_math_code" \
-    && [[ "${#selected_standard_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_math_code_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_math_code" \
-    && [[ "${#selected_qwen3_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_math_code_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "code_exec" \
-    && [[ "${#selected_nemotron_nano_models[@]}" -gt 0 ]] && [[ "${#selected_code_exec_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "mcqa_stem" \
-    && [[ "${#selected_nemotron_nano_models[@]}" -gt 0 ]] && [[ "${#selected_mcqa_stem_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "mcqa_non_stem" \
-    && [[ "${#selected_nemotron_nano_models[@]}" -gt 0 ]] && [[ "${#selected_mcqa_non_stem_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "gen" \
-    && [[ "${#selected_nemotron_nano_models[@]}" -gt 0 ]] && [[ "${#selected_gen_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "math" \
-    && [[ "${#selected_nemotron_nano_models[@]}" -gt 0 ]] && [[ "${#selected_math_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_qa" \
-    && [[ "${#selected_nemotron_nano_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_qa_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_math_code" \
-    && [[ "${#selected_nemotron_nano_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_math_code_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
-
-if group_is_selected "code_exec" \
-    && [[ "${#selected_gemma_models[@]}" -gt 0 ]] && [[ "${#selected_code_exec_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
-
-if group_is_selected "mcqa_stem" \
-    && [[ "${#selected_gemma_models[@]}" -gt 0 ]] && [[ "${#selected_mcqa_stem_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
-
-if group_is_selected "mcqa_non_stem" \
-    && [[ "${#selected_gemma_models[@]}" -gt 0 ]] && [[ "${#selected_mcqa_non_stem_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
-
-if group_is_selected "gen" \
-    && [[ "${#selected_gemma_models[@]}" -gt 0 ]] && [[ "${#selected_gen_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
-
-if group_is_selected "math" \
-    && [[ "${#selected_gemma_models[@]}" -gt 0 ]] && [[ "${#selected_math_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
-
-if group_is_selected "easy_qa" \
-    && [[ "${#selected_gemma_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_qa_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
-
-if group_is_selected "easy_math_code" \
-    && [[ "${#selected_gemma_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_math_code_tasks[@]}" -gt 0 ]]; then
-    planned_variants=$((planned_variants + 1))
-fi
+queue_variants_for_families baseline qwen3
+queue_variants_for_families nemotron
+queue_variants_for_families gemma
 
 if [[ "${planned_variants}" -eq 0 ]]; then
     echo "Error: No launch variants matched the selected groups, suites, and models." >&2
@@ -923,142 +838,24 @@ if [[ "${#SELECTED_MODELS[@]}" -gt 0 ]]; then
     echo ""
 fi
 
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "code_exec" \
-    && [[ "${#selected_standard_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_code_exec_tasks[@]}" -gt 0 ]]; then
-    run_variant "Baseline models: code execution suites" "${baseline_exec_cmd[@]}"
-fi
+for matched_variant_spec in "${matched_variant_specs[@]}"; do
+    IFS='|' read -r matched_family_name matched_group_name <<<"${matched_variant_spec}"
+    resolve_family_spec "${matched_family_name}"
+    resolve_group_spec "${matched_group_name}"
 
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "code_exec" \
-    && [[ "${#selected_qwen3_models[@]}" -gt 0 ]] && [[ "${#selected_code_exec_tasks[@]}" -gt 0 ]]; then
-    run_variant "Qwen3 Base: code execution suites" "${qwen3_exec_cmd[@]}"
-fi
+    if [[ "${RESOLVED_HARNESS_KIND}" == "exec" ]]; then
+        matched_harness="${EXEC_HARNESS}"
+    else
+        matched_harness="${NON_EXEC_HARNESS}"
+    fi
 
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "mcqa_stem" \
-    && [[ "${#selected_standard_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_mcqa_stem_tasks[@]}" -gt 0 ]]; then
-    run_variant "Baseline models: MCQA stem suites" "${baseline_mcqa_stem_cmd[@]}"
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "mcqa_stem" \
-    && [[ "${#selected_qwen3_models[@]}" -gt 0 ]] && [[ "${#selected_mcqa_stem_tasks[@]}" -gt 0 ]]; then
-    run_variant "Qwen3 Base: MCQA stem suites" "${qwen3_mcqa_stem_cmd[@]}"
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "mcqa_non_stem" \
-    && [[ "${#selected_standard_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_mcqa_non_stem_tasks[@]}" -gt 0 ]]; then
-    run_variant "Baseline models: MCQA non-stem suites" "${baseline_mcqa_non_stem_cmd[@]}"
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "mcqa_non_stem" \
-    && [[ "${#selected_qwen3_models[@]}" -gt 0 ]] && [[ "${#selected_mcqa_non_stem_tasks[@]}" -gt 0 ]]; then
-    run_variant "Qwen3 Base: MCQA non-stem suites" "${qwen3_mcqa_non_stem_cmd[@]}"
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "gen" \
-    && [[ "${#selected_standard_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_gen_tasks[@]}" -gt 0 ]]; then
-    run_variant "Baseline models: generation suites" "${baseline_gen_cmd[@]}"
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "gen" \
-    && [[ "${#selected_qwen3_models[@]}" -gt 0 ]] && [[ "${#selected_gen_tasks[@]}" -gt 0 ]]; then
-    run_variant "Qwen3 Base: generation suites" "${qwen3_gen_cmd[@]}"
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "math" \
-    && [[ "${#selected_standard_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_math_tasks[@]}" -gt 0 ]]; then
-    run_variant "Baseline models: math suites" "${baseline_math_cmd[@]}"
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "math" \
-    && [[ "${#selected_qwen3_models[@]}" -gt 0 ]] && [[ "${#selected_math_tasks[@]}" -gt 0 ]]; then
-    run_variant "Qwen3 Base: math suites" "${qwen3_math_cmd[@]}"
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_qa" \
-    && [[ "${#selected_standard_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_qa_tasks[@]}" -gt 0 ]]; then
-    run_variant "Baseline models: easy QA suites" "${baseline_non_exec_easy_qa_cmd[@]}"
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_qa" \
-    && [[ "${#selected_qwen3_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_qa_tasks[@]}" -gt 0 ]]; then
-    run_variant "Qwen3 Base: easy QA suites" "${qwen3_non_exec_easy_qa_cmd[@]}"
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_math_code" \
-    && [[ "${#selected_standard_baseline_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_math_code_tasks[@]}" -gt 0 ]]; then
-    run_variant "Baseline models: easy math + easy code suites" "${baseline_non_exec_easy_math_code_cmd[@]}"
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_math_code" \
-    && [[ "${#selected_qwen3_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_math_code_tasks[@]}" -gt 0 ]]; then
-    run_variant "Qwen3 Base: easy math + easy code suites" "${qwen3_non_exec_easy_math_code_cmd[@]}"
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "code_exec" \
-    && [[ "${#selected_nemotron_nano_models[@]}" -gt 0 ]] && [[ "${#selected_code_exec_tasks[@]}" -gt 0 ]]; then
-    run_variant "Nemotron Nano: code execution suites (prefix caching disabled)" "${nemotron_exec_cmd[@]}"
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "mcqa_stem" \
-    && [[ "${#selected_nemotron_nano_models[@]}" -gt 0 ]] && [[ "${#selected_mcqa_stem_tasks[@]}" -gt 0 ]]; then
-    run_variant "Nemotron Nano: MCQA stem suites (prefix caching disabled)" "${nemotron_mcqa_stem_cmd[@]}"
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "mcqa_non_stem" \
-    && [[ "${#selected_nemotron_nano_models[@]}" -gt 0 ]] && [[ "${#selected_mcqa_non_stem_tasks[@]}" -gt 0 ]]; then
-    run_variant "Nemotron Nano: MCQA non-stem suites (prefix caching disabled)" "${nemotron_mcqa_non_stem_cmd[@]}"
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "gen" \
-    && [[ "${#selected_nemotron_nano_models[@]}" -gt 0 ]] && [[ "${#selected_gen_tasks[@]}" -gt 0 ]]; then
-    run_variant "Nemotron Nano: generation suites (prefix caching disabled)" "${nemotron_gen_cmd[@]}"
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "math" \
-    && [[ "${#selected_nemotron_nano_models[@]}" -gt 0 ]] && [[ "${#selected_math_tasks[@]}" -gt 0 ]]; then
-    run_variant "Nemotron Nano: math suites (prefix caching disabled)" "${nemotron_math_cmd[@]}"
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_qa" \
-    && [[ "${#selected_nemotron_nano_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_qa_tasks[@]}" -gt 0 ]]; then
-    run_variant "Nemotron Nano: easy QA suites (prefix caching disabled)" "${nemotron_non_exec_easy_qa_cmd[@]}"
-fi
-
-if [[ "${GEMMA_ONLY}" == "false" ]] && group_is_selected "easy_math_code" \
-    && [[ "${#selected_nemotron_nano_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_math_code_tasks[@]}" -gt 0 ]]; then
-    run_variant "Nemotron Nano: easy math + easy code suites (prefix caching disabled)" "${nemotron_non_exec_easy_math_code_cmd[@]}"
-fi
-
-if group_is_selected "code_exec" \
-    && [[ "${#selected_gemma_models[@]}" -gt 0 ]] && [[ "${#selected_code_exec_tasks[@]}" -gt 0 ]]; then
-    run_variant "Gemma: code execution suites" "${gemma_exec_cmd[@]}"
-fi
-
-if group_is_selected "mcqa_stem" \
-    && [[ "${#selected_gemma_models[@]}" -gt 0 ]] && [[ "${#selected_mcqa_stem_tasks[@]}" -gt 0 ]]; then
-    run_variant "Gemma: MCQA stem suites" "${gemma_mcqa_stem_cmd[@]}"
-fi
-
-if group_is_selected "mcqa_non_stem" \
-    && [[ "${#selected_gemma_models[@]}" -gt 0 ]] && [[ "${#selected_mcqa_non_stem_tasks[@]}" -gt 0 ]]; then
-    run_variant "Gemma: MCQA non-stem suites" "${gemma_mcqa_non_stem_cmd[@]}"
-fi
-
-if group_is_selected "gen" \
-    && [[ "${#selected_gemma_models[@]}" -gt 0 ]] && [[ "${#selected_gen_tasks[@]}" -gt 0 ]]; then
-    run_variant "Gemma: generation suites" "${gemma_gen_cmd[@]}"
-fi
-
-if group_is_selected "math" \
-    && [[ "${#selected_gemma_models[@]}" -gt 0 ]] && [[ "${#selected_math_tasks[@]}" -gt 0 ]]; then
-    run_variant "Gemma: math suites" "${gemma_math_cmd[@]}"
-fi
-
-if group_is_selected "easy_qa" \
-    && [[ "${#selected_gemma_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_qa_tasks[@]}" -gt 0 ]]; then
-    run_variant "Gemma: easy QA suites" "${gemma_non_exec_easy_qa_cmd[@]}"
-fi
-
-if group_is_selected "easy_math_code" \
-    && [[ "${#selected_gemma_models[@]}" -gt 0 ]] && [[ "${#selected_non_exec_easy_math_code_tasks[@]}" -gt 0 ]]; then
-    run_variant "Gemma: easy math + easy code suites" "${gemma_non_exec_easy_math_code_cmd[@]}"
-fi
+    build_variant_cmd \
+        "${matched_harness}" \
+        "${RESOLVED_LAUNCH_ARGS_NAME}" \
+        "${RESOLVED_MODELS_NAME}" \
+        "${RESOLVED_TASKS_NAME}" \
+        "${RESOLVED_INCLUDE_EXEC_ONLY}"
+    run_variant \
+        "${RESOLVED_LABEL_PREFIX}: ${RESOLVED_GROUP_LABEL}${RESOLVED_FAMILY_LABEL_SUFFIX}" \
+        "${current_cmd[@]}"
+done
