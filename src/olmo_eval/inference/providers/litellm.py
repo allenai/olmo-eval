@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.debug import is_debug_provider
 from olmo_eval.common.logging import get_logger
-from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
+from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, SamplingParams, ToolCall
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.retry import retry_with_backoff
 from olmo_eval.inference.utils import run_async
@@ -133,7 +133,11 @@ class LiteLLMProvider(InferenceProvider):
         kwargs["temperature"] = params.temperature
         if params.stop_sequences:
             kwargs["stop"] = list(params.stop_sequences)[:_MAX_STOP_SEQUENCES]
-        # Always request logprobs for metrics computation
+
+        # Pass tools if provided in the request
+        if request.tools:
+            kwargs["tools"] = [tool.to_openai() for tool in request.tools]
+
         kwargs["logprobs"] = True
         kwargs["top_logprobs"] = (
             1  # NOTE: workaround for litellm proxy issue https://github.com/BerriAI/litellm/issues/21932
@@ -167,7 +171,33 @@ class LiteLLMProvider(InferenceProvider):
                     "num_tokens_all": num_tokens,
                 }
 
-            outputs.append(LMOutput(text=text, logprobs=logprob_entries, metadata=metadata))
+            # Extract tool calls from response
+            tool_calls: list[ToolCall] | None = None
+            message_tool_calls = getattr(choice.message, "tool_calls", None)
+            if message_tool_calls:
+                tool_calls = [ToolCall.from_openai(tc.model_dump()) for tc in message_tool_calls]
+
+            # Check for reasoning content (for reasoning models)
+            has_reasoning = False
+            message_content = getattr(choice.message, "content", None)
+            if message_content is not None:
+                if getattr(message_content, "reasoning", None):
+                    has_reasoning = True
+                if getattr(message_content, "reasoning_content", None):
+                    has_reasoning = True
+            # Also check directly on message for reasoning_content (some APIs use this)
+            if not has_reasoning and getattr(choice.message, "reasoning_content", None):
+                has_reasoning = True
+
+            outputs.append(
+                LMOutput(
+                    text=text,
+                    logprobs=logprob_entries,
+                    metadata=metadata,
+                    tool_calls=tool_calls,
+                    provider_extras={"has_reasoning": True} if has_reasoning else {},
+                )
+            )
 
         return outputs
 
