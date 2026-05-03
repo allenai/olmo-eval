@@ -134,7 +134,6 @@ class TestComputeModelHash:
             "max_concurrency": 64,
             "num_instances": 8,
             "required_secrets": ["API_KEY"],
-            "trust_remote_code": True,
         }
         config2 = {
             "kind": "vllm_server",
@@ -142,6 +141,20 @@ class TestComputeModelHash:
         }
 
         assert compute_model_hash(config1) == compute_model_hash(config2)
+
+    def test_trust_remote_code_changes_hash(self):
+        """Loader behavior can affect model identity and should split hashes."""
+        config1 = {
+            "kind": "vllm_server",
+            "model": "Qwen/Qwen3-8B",
+            "trust_remote_code": True,
+        }
+        config2 = {
+            "kind": "vllm_server",
+            "model": "Qwen/Qwen3-8B",
+        }
+
+        assert compute_model_hash(config1) != compute_model_hash(config2)
 
     def test_ignores_operational_provider_kwargs(self):
         """Parallelism and runtime tuning kwargs should not change the hash."""

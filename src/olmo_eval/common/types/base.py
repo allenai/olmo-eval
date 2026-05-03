@@ -24,8 +24,6 @@ _MODEL_HASH_IGNORED_PROVIDER_KEYS = frozenset(
         "max_concurrency",
         "num_instances",
         "required_secrets",
-        # Loader policy rather than model behavior.
-        "trust_remote_code",
     }
 )
 
@@ -111,7 +109,8 @@ def compute_model_hash(config: dict[str, Any] | None) -> str | None:
 
     Args:
         config: Model configuration dictionary. Operational provider fields such as
-            replica count, endpoint URLs, and concurrency limits are ignored.
+            replica count, endpoint URLs, concurrency limits, and auth metadata are
+            ignored.
 
     Returns:
         16-character hex string hash of the config, or None if config is None.
