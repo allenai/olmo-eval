@@ -716,14 +716,15 @@ class Task(ABC):
     def _aggregate_output_scores(self, scores: Sequence[float] | dict[int, float]) -> float:
         """Collapse per-output scorer values into one response-level score."""
         aggregation = self.config.output_score_aggregation
-        if isinstance(scores, dict):
-            if not scores:
-                return 0.0
-            ordered_scores = [score for _, score in sorted(scores.items())]
-        else:
+        ordered_scores: list[float]
+        if isinstance(scores, Sequence):
             ordered_scores = list(scores)
             if not ordered_scores:
                 return 0.0
+        else:
+            if not scores:
+                return 0.0
+            ordered_scores = [scores[index] for index in sorted(scores)]
 
         if aggregation == OutputScoreAggregation.MAX:
             return max(ordered_scores)
