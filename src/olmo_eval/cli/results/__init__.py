@@ -2,7 +2,6 @@
 
 import click
 
-from olmo_eval.cli.results.backfill import backfill_instance_metrics
 from olmo_eval.cli.results.discover import group, groups, suites
 from olmo_eval.cli.results.query import query
 from olmo_eval.cli.results.viewer import viewer
@@ -16,7 +15,6 @@ def results() -> None:
 
 results.add_command(query)
 results.add_command(viewer)
-results.add_command(backfill_instance_metrics)
 results.add_command(suites)
 results.add_command(groups)
 results.add_command(group)
@@ -25,7 +23,6 @@ __all__ = [
     "results",
     "query",
     "viewer",
-    "backfill_instance_metrics",
     "suites",
     "groups",
     "group",
