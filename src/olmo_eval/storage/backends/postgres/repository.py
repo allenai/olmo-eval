@@ -14,6 +14,7 @@ from sqlalchemy import and_, delete, exists, insert, or_, select
 from sqlalchemy.orm import Session, load_only, noload
 from sqlalchemy.sql.elements import ColumnElement
 
+from olmo_eval.common.metrics.predictions import normalize_prediction_instance_metrics
 from olmo_eval.common.types import EvalResult, StoredTaskResult
 from olmo_eval.storage.backends.postgres.models import Experiment, InstancePrediction, TaskResult
 
@@ -399,7 +400,7 @@ class InstancePredictionRepository:
             task_hash: Task configuration hash.
             instances: List of instance dicts with keys:
                 - native_id: Original dataset ID
-                - instance_metrics: Dict of metric names to values
+                - instance_metrics: Flat or nested per-instance metric values
             experiment_group: Experiment group for fast filtering (denormalized).
             chunk_size: Number of instances per bulk insert batch.
         """
@@ -412,7 +413,7 @@ class InstancePredictionRepository:
                 "experiment_pk": experiment_pk,
                 "task_hash": task_hash,
                 "native_id": inst_data["native_id"],
-                "instance_metrics": inst_data["instance_metrics"],
+                "instance_metrics": normalize_prediction_instance_metrics(inst_data),
                 "experiment_group": experiment_group,
             }
             for inst_data in instances

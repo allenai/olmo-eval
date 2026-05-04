@@ -7,7 +7,10 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from olmo_eval.common.metrics.predictions import augment_prediction_instance_metrics
+from olmo_eval.common.metrics.predictions import (
+    augment_prediction_instance_metrics,
+    normalize_prediction_instance_metrics,
+)
 from olmo_eval.common.types import EvalResult
 from olmo_eval.storage.backends.postgres.repository import (
     ExperimentRepository,
@@ -51,7 +54,7 @@ class QueryHelper:
             instances_by_task: Dict mapping task_name -> list of instance dicts.
                 Each instance dict should have:
                 - native_id: Original dataset ID
-                - instance_metrics: Dict of metric names to values
+                - instance_metrics: Flat or nested per-instance metric values
 
         Returns:
             The auto-increment id (PK) of the saved experiment.
@@ -80,9 +83,11 @@ class QueryHelper:
                     f"task_hash is required for task '{task_name}' instance predictions"
                 )
             metrics = task_metrics_lookup.get(task_name, ())
-            if metrics:
-                for instance in instances:
-                    augment_prediction_instance_metrics(instance, metrics)
+            for instance in instances:
+                normalize_prediction_instance_metrics(instance)
+                if not metrics:
+                    continue
+                augment_prediction_instance_metrics(instance, metrics)
             self.instance_repo.save_instances(
                 experiment_pk=experiment_pk,
                 task_hash=task_hash,

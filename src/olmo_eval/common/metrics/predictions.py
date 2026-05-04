@@ -72,6 +72,41 @@ def _default_metric_value(
     return None
 
 
+def normalize_prediction_instance_metrics(
+    prediction: dict[str, Any],
+) -> dict[str, dict[str, float]]:
+    """Canonicalize stored instance metrics to ``{metric: {scorer: value}}``.
+
+    Older payloads may store flat ``{metric: value}`` entries. We normalize those to
+    ``{metric: {metric: value}}`` so downstream code can rely on one consistent shape.
+    Non-numeric values are ignored.
+    """
+    raw_instance_metrics = prediction.get("instance_metrics")
+    if not isinstance(raw_instance_metrics, Mapping):
+        prediction["instance_metrics"] = {}
+        return prediction["instance_metrics"]
+
+    normalized_instance_metrics: dict[str, dict[str, float]] = {}
+    for raw_outer_key, raw_value in raw_instance_metrics.items():
+        outer_key = str(raw_outer_key)
+        if isinstance(raw_value, Mapping):
+            nested_scores = {
+                str(raw_inner_key): score
+                for raw_inner_key, inner_value in raw_value.items()
+                if (score := _to_float(inner_value)) is not None
+            }
+            if nested_scores:
+                normalized_instance_metrics[outer_key] = nested_scores
+            continue
+
+        scalar_score = _to_float(raw_value)
+        if scalar_score is not None:
+            normalized_instance_metrics[outer_key] = {outer_key: scalar_score}
+
+    prediction["instance_metrics"] = normalized_instance_metrics
+    return normalized_instance_metrics
+
+
 def _prediction_outputs(prediction: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     outputs = prediction.get("model_output")
     if not isinstance(outputs, list):
@@ -245,10 +280,7 @@ def augment_prediction_instance_metrics(
     payload, which still covers logprob-MC and other metrics derivable from the stored
     output summary.
     """
-    instance_metrics = prediction.get("instance_metrics")
-    if not isinstance(instance_metrics, dict):
-        instance_metrics = {}
-        prediction["instance_metrics"] = instance_metrics
+    instance_metrics = normalize_prediction_instance_metrics(prediction)
 
     for metric in metrics:
         scorer_name = _metric_scorer_name(metric)

@@ -221,6 +221,10 @@ class TestInstancePredictionRepository:
             saved = repo.get_instances(experiment_pk=experiment_pk)
 
         assert len(saved) == 2
+        assert {inst["native_id"]: inst["instance_metrics"] for inst in saved} == {
+            "doc_0": {"acc": {"acc": 1.0}},
+            "doc_1": {"acc": {"acc": 0.5}},
+        }
 
     @pytest.mark.integration
     def test_get_instances_by_task_name(self, postgres_backend, sample_eval_result):

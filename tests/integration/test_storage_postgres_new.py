@@ -72,7 +72,7 @@ class TestPostgresBackendWithInstances:
 
         assert len(instances) == 1
         assert instances[0]["native_id"] == "doc_0"
-        assert instances[0]["instance_metrics"] == {"acc": 1.0}
+        assert instances[0]["instance_metrics"] == {"acc": {"acc": 1.0}}
 
 
 class TestQueryHelpers:
@@ -280,14 +280,14 @@ class TestUserIsolation:
             # User 1's instances via experiment_pk
             user1_instances = repo.get_instances(experiment_pk=exp_pk_1)
             assert len(user1_instances) == 2
-            assert any(inst["instance_metrics"]["acc"] == 1.0 for inst in user1_instances)
-            assert any(inst["instance_metrics"]["acc"] == 0.5 for inst in user1_instances)
+            assert any(inst["instance_metrics"]["acc"]["acc"] == 1.0 for inst in user1_instances)
+            assert any(inst["instance_metrics"]["acc"]["acc"] == 0.5 for inst in user1_instances)
 
             # User 2's instances via experiment_pk
             user2_instances = repo.get_instances(experiment_pk=exp_pk_2)
             assert len(user2_instances) == 2
-            assert any(inst["instance_metrics"]["acc"] == 0.8 for inst in user2_instances)
-            assert any(inst["instance_metrics"]["acc"] == 0.6 for inst in user2_instances)
+            assert any(inst["instance_metrics"]["acc"]["acc"] == 0.8 for inst in user2_instances)
+            assert any(inst["instance_metrics"]["acc"]["acc"] == 0.6 for inst in user2_instances)
 
         # Query all instances for mmlu task (from all experiments)
         with postgres_backend.db.session() as session:
