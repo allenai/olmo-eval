@@ -1086,6 +1086,179 @@ def test_browser_exports_use_real_newlines_for_downloads() -> None:
     assert 'return /[,"\\\\n]/.test(text)' not in script
 
 
+def test_latest_only_exports_merge_source_rows_back_to_display_models() -> None:
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
+
+    compared_experiments = [
+        {
+            "experiment_pk": 10,
+            "model_name": "model-a",
+            "model_hash": "hash-a",
+            "timestamp": "2026-04-21T00:00:00+00:00",
+            "results_root": "s3://bucket/model-a/latest",
+            "display_rank": 1,
+            "display_label": "model-a (hash-a)",
+        },
+        {
+            "experiment_pk": 20,
+            "model_name": "model-b",
+            "model_hash": "hash-b",
+            "timestamp": "2026-04-21T01:00:00+00:00",
+            "results_root": "s3://bucket/model-b/latest",
+            "display_rank": 2,
+            "display_label": "model-b (hash-b)",
+        },
+    ]
+    source_experiments = [
+        SimpleNamespace(
+            id=10,
+            model_name="model-a",
+            model_hash="hash-a",
+            timestamp=datetime(2026, 4, 21, tzinfo=UTC),
+            s3_location="s3://bucket/model-a/latest",
+        ),
+        SimpleNamespace(
+            id=11,
+            model_name="model-a",
+            model_hash="hash-a",
+            timestamp=datetime(2026, 4, 20, tzinfo=UTC),
+            s3_location="s3://bucket/model-a/older",
+        ),
+        SimpleNamespace(
+            id=20,
+            model_name="model-b",
+            model_hash="hash-b",
+            timestamp=datetime(2026, 4, 21, 1, tzinfo=UTC),
+            s3_location="s3://bucket/model-b/latest",
+        ),
+        SimpleNamespace(
+            id=21,
+            model_name="model-b",
+            model_hash="hash-b",
+            timestamp=datetime(2026, 4, 20, 1, tzinfo=UTC),
+            s3_location="s3://bucket/model-b/older",
+        ),
+    ]
+    result = SimpleNamespace(
+        suite_name="olmobase:mcqa_non_stem",
+        task_name="olmobase:mcqa_non_stem",
+        task_names=("mmlu_history",),
+        task_hashes=("task-hash-1",),
+        metric="accuracy:exact_match",
+        score_display_format="percentage",
+        score_unit="proportion",
+        higher_is_better=True,
+    )
+    session = _SequentialExecuteSession(
+        [
+            _StaticExecuteResult(
+                [
+                    SimpleNamespace(
+                        experiment_pk=11,
+                        task_name="mmlu_history",
+                        task_hash="task-hash-1",
+                        num_instances=1,
+                        metrics={"accuracy": {"exact_match": 1.0}},
+                        primary_metric="accuracy:exact_match",
+                        s3_metrics_key="s3://bucket/model-a/task-metrics.json",
+                        s3_predictions_key="s3://bucket/model-a/predictions.jsonl",
+                        s3_requests_key="s3://bucket/model-a/requests.jsonl",
+                    ),
+                    SimpleNamespace(
+                        experiment_pk=21,
+                        task_name="mmlu_history",
+                        task_hash="task-hash-1",
+                        num_instances=1,
+                        metrics={"accuracy": {"exact_match": 0.0}},
+                        primary_metric="accuracy:exact_match",
+                        s3_metrics_key="s3://bucket/model-b/task-metrics.json",
+                        s3_predictions_key="s3://bucket/model-b/predictions.jsonl",
+                        s3_requests_key="s3://bucket/model-b/requests.jsonl",
+                    ),
+                ]
+            ),
+            _StaticExecuteResult(
+                [
+                    SimpleNamespace(
+                        experiment_pk=11,
+                        native_id="doc-1",
+                        task_hash="task-hash-1",
+                        raw_score=1.0,
+                    ),
+                    SimpleNamespace(
+                        experiment_pk=21,
+                        native_id="doc-1",
+                        task_hash="task-hash-1",
+                        raw_score=0.0,
+                    ),
+                ]
+            ),
+        ]
+    )
+
+    task_rows = viewer_server._load_compared_scope_task_rows(
+        session,
+        compared_experiments=compared_experiments,
+        source_experiments=source_experiments,
+        result=result,
+        keep_all=False,
+    )
+
+    assert task_rows == [
+        {
+            "experiment_pk": 10,
+            "task_name": "mmlu_history",
+            "task_hash": "task-hash-1",
+            "num_instances": 1,
+            "primary_metric": "accuracy:exact_match",
+            "task_metrics_file": "s3://bucket/model-a/task-metrics.json",
+            "predictions_file": "s3://bucket/model-a/predictions.jsonl",
+            "requests_file": "s3://bucket/model-a/requests.jsonl",
+        },
+        {
+            "experiment_pk": 20,
+            "task_name": "mmlu_history",
+            "task_hash": "task-hash-1",
+            "num_instances": 1,
+            "primary_metric": "accuracy:exact_match",
+            "task_metrics_file": "s3://bucket/model-b/task-metrics.json",
+            "predictions_file": "s3://bucket/model-b/predictions.jsonl",
+            "requests_file": "s3://bucket/model-b/requests.jsonl",
+        },
+    ]
+
+    metadata, rows = viewer_server._build_instance_results_export_data(
+        session,
+        group_name="my-group",
+        result=result,
+        compared_experiments=compared_experiments,
+        source_experiments=source_experiments,
+        task_rows=task_rows,
+        selected_metric=None,
+        keep_all=False,
+    )
+
+    assert metadata["shared_instance_count"] == 1
+    assert len(rows) == 2
+    assert [row["model_display_rank"] for row in rows] == [1, 2]
+    assert [row["native_id"] for row in rows] == ["doc-1", "doc-1"]
+    assert [row["raw_score"] for row in rows] == [1.0, 0.0]
+
+    _, stored_rows = viewer_server._build_stored_files_export_data(
+        group_name="my-group",
+        result=result,
+        compared_experiments=compared_experiments,
+        task_rows=task_rows,
+        selected_metric=None,
+    )
+
+    assert [row["model_display_rank"] for row in stored_rows] == [1, 2]
+    assert [row["predictions_file"] for row in stored_rows] == [
+        "s3://bucket/model-a/predictions.jsonl",
+        "s3://bucket/model-b/predictions.jsonl",
+    ]
+
+
 def test_render_results_viewer_page_renders_core_viewer_state_and_controls() -> None:
     """The browser page should expose core viewer state without CSS-level snapshot checks."""
     viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")

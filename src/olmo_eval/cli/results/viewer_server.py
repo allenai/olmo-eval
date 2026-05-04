@@ -11,10 +11,12 @@ import re
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from textwrap import dedent
 from threading import RLock
 from time import monotonic
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, TypeGuard
 from urllib.parse import parse_qs, urlparse
 
@@ -32,6 +34,8 @@ from olmo_eval.analysis.pairwise import (
     _build_pairwise_score_sql_expr,
     _comparison_score,
     _format_experiment_label,
+    _latest_source_experiment_pks_subquery,
+    _merge_latest_instance_score_rows,
     compute_pairwise,
     get_task_metric_profile,
 )
@@ -1800,15 +1804,228 @@ def _order_compared_experiments(
     ]
 
 
+def _export_display_experiments(
+    compared_experiments: Sequence[dict[str, Any]],
+) -> list[SimpleNamespace]:
+    display_experiments: list[SimpleNamespace] = []
+    for experiment in compared_experiments:
+        raw_timestamp = experiment.get("timestamp")
+        timestamp = None
+        if isinstance(raw_timestamp, str) and raw_timestamp:
+            try:
+                timestamp = datetime.fromisoformat(raw_timestamp)
+            except ValueError:
+                timestamp = None
+        display_experiments.append(
+            SimpleNamespace(
+                id=int(experiment["experiment_pk"]),
+                model_name=str(experiment.get("model_name") or ""),
+                model_hash=str(experiment.get("model_hash") or ""),
+                timestamp=timestamp,
+                s3_location=experiment.get("results_root"),
+            )
+        )
+    return display_experiments
+
+
+def _resolve_export_source_experiments(
+    session: Session,
+    *,
+    group_name: str,
+    compared_experiments: Sequence[dict[str, Any]],
+    keep_all: bool,
+) -> list[SimpleNamespace]:
+    from olmo_eval.storage.backends.postgres.models import Experiment
+
+    display_experiments = _export_display_experiments(compared_experiments)
+    if keep_all:
+        return display_experiments
+
+    compared_hashes = sorted(
+        {
+            str(experiment.get("model_hash") or "")
+            for experiment in compared_experiments
+            if experiment.get("model_hash")
+        }
+    )
+    if not compared_hashes:
+        return []
+
+    allowed_names_by_hash: dict[str, set[str]] = {}
+    for experiment in compared_experiments:
+        model_hash = str(experiment.get("model_hash") or "")
+        model_name = str(experiment.get("model_name") or "")
+        if model_hash and model_name:
+            allowed_names_by_hash.setdefault(model_hash, set()).add(model_name)
+
+    experiment_rows = session.execute(
+        select(
+            Experiment.id,
+            Experiment.model_name,
+            Experiment.model_hash,
+            Experiment.timestamp,
+            Experiment.s3_location,
+        )
+        .where(Experiment.experiment_group == group_name)
+        .where(Experiment.model_hash.in_(compared_hashes))
+    ).all()
+
+    source_experiments: list[SimpleNamespace] = []
+    for row in experiment_rows:
+        model_hash = str(row.model_hash or "")
+        allowed_names = allowed_names_by_hash.get(model_hash)
+        model_name = str(row.model_name or "")
+        if allowed_names and model_name not in allowed_names:
+            continue
+        source_experiments.append(
+            SimpleNamespace(
+                id=int(row.id),
+                model_name=model_name,
+                model_hash=model_hash,
+                timestamp=row.timestamp,
+                s3_location=row.s3_location,
+            )
+        )
+    return source_experiments
+
+
+def _merge_latest_export_task_rows(
+    task_rows: Sequence[Any],
+    *,
+    source_experiments: Sequence[Any],
+    display_experiments: Sequence[Any],
+) -> list[dict[str, Any]]:
+    from olmo_eval.analysis.latest_run_merge import merge_metric_values
+    from olmo_eval.runners.processing.utils import extract_score_from_metrics
+
+    source_experiment_by_pk = {
+        int(experiment.id): experiment
+        for experiment in source_experiments
+        if getattr(experiment, "id", None) is not None
+    }
+    display_experiment_by_hash = {
+        str(experiment.model_hash or ""): experiment
+        for experiment in display_experiments
+        if getattr(experiment, "model_hash", None)
+    }
+    display_order = {
+        int(experiment.id): index for index, experiment in enumerate(display_experiments)
+    }
+
+    enriched_rows: list[tuple[int, str, str, float, int, Any]] = []
+    for row in task_rows:
+        try:
+            source_pk = int(row.experiment_pk)
+        except (TypeError, ValueError):
+            continue
+        source_experiment = source_experiment_by_pk.get(source_pk)
+        if source_experiment is None:
+            continue
+        model_hash = str(getattr(source_experiment, "model_hash", "") or "")
+        display_experiment = display_experiment_by_hash.get(model_hash)
+        if display_experiment is None:
+            continue
+        source_timestamp = getattr(source_experiment, "timestamp", None)
+        timestamp_value = (
+            float(source_timestamp.timestamp()) if source_timestamp is not None else float("-inf")
+        )
+        enriched_rows.append(
+            (
+                int(display_experiment.id),
+                str(row.task_name or ""),
+                str(row.task_hash or ""),
+                -timestamp_value,
+                -source_pk,
+                row,
+            )
+        )
+
+    enriched_rows.sort()
+
+    merged_rows_by_key: dict[tuple[int, str], dict[str, Any]] = {}
+    for display_pk, task_name, task_hash, _, _, row in enriched_rows:
+        task_id = task_hash or task_name
+        merged_row = merged_rows_by_key.setdefault(
+            (display_pk, task_id),
+            {
+                "experiment_pk": display_pk,
+                "task_name": task_name,
+                "task_hash": task_hash,
+                "num_instances": 0,
+                "num_instances_seen": False,
+                "metrics": {},
+                "primary_metric_candidates": [],
+                "task_metrics_file": None,
+                "predictions_file": None,
+                "requests_file": None,
+            },
+        )
+        if getattr(row, "num_instances", None) is not None:
+            merged_row["num_instances"] = max(
+                int(merged_row["num_instances"]),
+                int(row.num_instances),
+            )
+            merged_row["num_instances_seen"] = True
+        merge_metric_values(merged_row["metrics"], getattr(row, "metrics", None))
+        primary_metric = str(getattr(row, "primary_metric", "") or "")
+        if primary_metric and primary_metric not in merged_row["primary_metric_candidates"]:
+            merged_row["primary_metric_candidates"].append(primary_metric)
+        if merged_row["task_metrics_file"] is None and getattr(row, "s3_metrics_key", None):
+            merged_row["task_metrics_file"] = row.s3_metrics_key
+        if merged_row["predictions_file"] is None and getattr(row, "s3_predictions_key", None):
+            merged_row["predictions_file"] = row.s3_predictions_key
+        if merged_row["requests_file"] is None and getattr(row, "s3_requests_key", None):
+            merged_row["requests_file"] = row.s3_requests_key
+
+    merged_rows: list[dict[str, Any]] = []
+    for merged_row in merged_rows_by_key.values():
+        merged_metrics = dict(merged_row["metrics"])
+        primary_metric_candidates = list(merged_row["primary_metric_candidates"])
+        primary_metric = next(
+            (
+                candidate
+                for candidate in primary_metric_candidates
+                if extract_score_from_metrics(merged_metrics, candidate) is not None
+            ),
+            primary_metric_candidates[0] if primary_metric_candidates else None,
+        )
+        merged_rows.append(
+            {
+                "experiment_pk": int(merged_row["experiment_pk"]),
+                "task_name": str(merged_row["task_name"]),
+                "task_hash": str(merged_row["task_hash"] or ""),
+                "num_instances": (
+                    int(merged_row["num_instances"]) if merged_row["num_instances_seen"] else None
+                ),
+                "primary_metric": primary_metric,
+                "task_metrics_file": merged_row["task_metrics_file"],
+                "predictions_file": merged_row["predictions_file"],
+                "requests_file": merged_row["requests_file"],
+            }
+        )
+
+    merged_rows.sort(
+        key=lambda row: (
+            display_order.get(int(row["experiment_pk"]), math.inf),
+            str(row["task_name"] or ""),
+            str(row["task_hash"] or ""),
+        )
+    )
+    return merged_rows
+
+
 def _load_compared_scope_task_rows(
     session: Session,
     *,
     compared_experiments: list[dict[str, Any]],
+    source_experiments: Sequence[Any],
     result: Any,
+    keep_all: bool,
 ) -> list[dict[str, Any]]:
     from olmo_eval.storage.backends.postgres.models import TaskResult
 
-    experiment_ids = [int(experiment["experiment_pk"]) for experiment in compared_experiments]
+    display_experiments = _export_display_experiments(compared_experiments)
+    experiment_ids = [int(experiment.id) for experiment in source_experiments]
     task_hashes = list(getattr(result, "task_hashes", ()) or ())
     task_names = list(result.task_names or ((result.task_name,) if result.task_name else ()))
     if not experiment_ids or (not task_hashes and not task_names):
@@ -1819,16 +2036,40 @@ def _load_compared_scope_task_rows(
         TaskResult.task_name,
         TaskResult.task_hash,
         TaskResult.num_instances,
+        TaskResult.metrics,
         TaskResult.primary_metric,
         TaskResult.s3_metrics_key,
         TaskResult.s3_predictions_key,
         TaskResult.s3_requests_key,
     ).where(TaskResult.experiment_pk.in_(experiment_ids))
+    scope_filters: list[Any] = []
     if task_hashes:
-        stmt = stmt.where(TaskResult.task_hash.in_(task_hashes))
+        task_hash_filter = TaskResult.task_hash.in_(task_hashes)
+        stmt = stmt.where(task_hash_filter)
+        scope_filters.append(task_hash_filter)
     elif task_names:
-        stmt = stmt.where(TaskResult.task_name.in_(task_names))
+        task_name_filter = TaskResult.task_name.in_(task_names)
+        stmt = stmt.where(task_name_filter)
+        scope_filters.append(task_name_filter)
+    if not keep_all and experiment_ids:
+        latest_tr_pairs = _latest_source_experiment_pks_subquery(
+            data_table=TaskResult,
+            source_pks=experiment_ids,
+            extra_filters=scope_filters,
+        )
+        stmt = stmt.join(
+            latest_tr_pairs,
+            (latest_tr_pairs.c.experiment_pk == TaskResult.experiment_pk)
+            & (latest_tr_pairs.c.task_hash == TaskResult.task_hash),
+        )
     task_rows = session.execute(stmt).all()
+
+    if not keep_all:
+        return _merge_latest_export_task_rows(
+            task_rows,
+            source_experiments=source_experiments,
+            display_experiments=display_experiments,
+        )
 
     return [
         {
@@ -1851,12 +2092,16 @@ def _build_instance_results_export_data(
     group_name: str,
     result: Any,
     compared_experiments: list[dict[str, Any]],
+    source_experiments: Sequence[Any],
     task_rows: list[dict[str, Any]],
     selected_metric: str | None,
+    keep_all: bool,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     from olmo_eval.storage.backends.postgres.models import InstancePrediction
 
+    display_experiments = _export_display_experiments(compared_experiments)
     experiment_ids = [int(experiment["experiment_pk"]) for experiment in compared_experiments]
+    source_experiment_ids = [int(experiment.id) for experiment in source_experiments]
     task_hash_to_metric: dict[str, str] = {}
     task_hash_to_name: dict[str, str] = {}
     task_profile_by_hash: dict[str, Any] = {}
@@ -1885,24 +2130,51 @@ def _build_instance_results_export_data(
         )
         return metadata, []
 
-    score_rows = session.execute(
+    task_hash_filter = InstancePrediction.task_hash.in_(list(task_hash_to_metric))
+    score_stmt = (
         select(
             InstancePrediction.experiment_pk,
             InstancePrediction.native_id,
             InstancePrediction.task_hash,
             score_expr,
         )
-        .where(InstancePrediction.experiment_pk.in_(experiment_ids))
-        .where(InstancePrediction.task_hash.in_(list(task_hash_to_metric)))
-    ).all()
+        .where(InstancePrediction.experiment_pk.in_(source_experiment_ids))
+        .where(task_hash_filter)
+    )
+    if not keep_all and source_experiment_ids:
+        latest_ip_pairs = _latest_source_experiment_pks_subquery(
+            data_table=InstancePrediction,
+            source_pks=source_experiment_ids,
+            extra_filters=[task_hash_filter],
+        )
+        score_stmt = score_stmt.join(
+            latest_ip_pairs,
+            (latest_ip_pairs.c.experiment_pk == InstancePrediction.experiment_pk)
+            & (latest_ip_pairs.c.task_hash == InstancePrediction.task_hash),
+        )
+    score_rows = session.execute(score_stmt).all()
+    if not keep_all:
+        score_rows = _merge_latest_instance_score_rows(
+            instance_rows=score_rows,
+            source_experiments=source_experiments,
+            display_experiments=display_experiments,
+        )
 
     raw_scores_by_pk = {experiment_id: {} for experiment_id in experiment_ids}
     comparison_scores_by_pk = {experiment_id: {} for experiment_id in experiment_ids}
 
-    for experiment_pk, native_id, task_hash, raw_score in score_rows:
+    for row in score_rows:
+        experiment_pk = int(row.experiment_pk)
+        native_id = str(row.native_id)
+        task_hash = str(row.task_hash)
+        raw_score = getattr(row, "raw_score", None)
+        if raw_score is None:
+            mapping = getattr(row, "_mapping", None)
+            if mapping is not None:
+                raw_score = mapping.get("raw_score", mapping.get("score"))
         if raw_score is None:
             continue
-        resolved_task_hash = str(task_hash)
+        resolved_task_hash = task_hash
         task_name = task_hash_to_name.get(resolved_task_hash)
         if not task_name:
             continue
@@ -2956,10 +3228,18 @@ def serve_results_viewer(
                             ),
                             requested_model_refs,
                         )
+                        source_experiments = _resolve_export_source_experiments(
+                            session,
+                            group_name=selected_group,
+                            compared_experiments=compared_experiments,
+                            keep_all=selected_keep_all,
+                        )
                         task_rows = _load_compared_scope_task_rows(
                             session,
                             compared_experiments=compared_experiments,
+                            source_experiments=source_experiments,
                             result=result,
+                            keep_all=selected_keep_all,
                         )
                         if requested_kind == "instance-results":
                             metadata, rows = _build_instance_results_export_data(
@@ -2967,8 +3247,10 @@ def serve_results_viewer(
                                 group_name=selected_group,
                                 result=result,
                                 compared_experiments=compared_experiments,
+                                source_experiments=source_experiments,
                                 task_rows=task_rows,
                                 selected_metric=selected_metric,
+                                keep_all=selected_keep_all,
                             )
                         else:
                             metadata, rows = _build_stored_files_export_data(
