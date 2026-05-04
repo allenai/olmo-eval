@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -295,6 +296,112 @@ def _filter_suite_task_names(
 
     excluded = set(exclude_task_names)
     return tuple(task_name for task_name in task_names if task_name not in excluded)
+
+
+@cache
+def _task_config_alias_signature(spec: str) -> str | None:
+    try:
+        import olmo_eval.evals.tasks  # noqa: F401  # ensure task registration side effects
+        from olmo_eval.evals.tasks.common.registry import get_task
+    except Exception:
+        return None
+
+    try:
+        config_dict = dict(get_task(spec).config.to_dict())
+    except Exception:
+        return None
+
+    config_dict.pop("name", None)
+    return json.dumps(config_dict, sort_keys=True, separators=(",", ":"))
+
+
+@cache
+def _equivalent_scope_task_names(spec: str) -> tuple[str, ...]:
+    try:
+        import olmo_eval.evals.tasks  # noqa: F401  # ensure task registration side effects
+        from olmo_eval.evals.tasks.common.registry import get_task, list_variants, task_exists
+    except Exception:
+        return (spec,)
+
+    target_signature = _task_config_alias_signature(spec)
+    if target_signature is None:
+        return (spec,)
+
+    try:
+        base_spec = str(get_task(spec).config.name or spec)
+    except Exception:
+        return (spec,)
+
+    equivalent_names: list[str] = [spec]
+    candidates = [base_spec]
+    candidates.extend(
+        f"{base_spec}:{variant}" for variant in list_variants(base_spec).get(base_spec, [])
+    )
+
+    for candidate in candidates:
+        if not candidate or candidate == spec or not task_exists(candidate):
+            continue
+        if _task_config_alias_signature(candidate) == target_signature:
+            equivalent_names.append(candidate)
+
+    return tuple(dict.fromkeys(equivalent_names))
+
+
+def _expand_equivalent_task_name_filters(task_names: list[str] | None) -> list[str] | None:
+    if not task_names:
+        return task_names
+
+    expanded: list[str] = []
+    for task_name in task_names:
+        for candidate in _equivalent_scope_task_names(task_name):
+            if candidate not in expanded:
+                expanded.append(candidate)
+    return expanded
+
+
+def _build_scope_task_alias_map(
+    task_names: tuple[str, ...],
+) -> tuple[tuple[str, ...], dict[str, str]]:
+    expanded_names: list[str] = []
+    alias_to_canonical: dict[str, str] = {}
+
+    for canonical_name in task_names:
+        for candidate in _equivalent_scope_task_names(canonical_name):
+            if candidate not in expanded_names:
+                expanded_names.append(candidate)
+            alias_to_canonical.setdefault(candidate, canonical_name)
+        alias_to_canonical.setdefault(canonical_name, canonical_name)
+
+    return tuple(expanded_names), alias_to_canonical
+
+
+def _canonicalize_scope_task_rows(
+    task_rows: Sequence[Any],
+    *,
+    alias_to_canonical: dict[str, str],
+) -> list[_PairwiseTaskRow]:
+    canonical_rows: list[_PairwiseTaskRow] = []
+    for row in task_rows:
+        canonical_rows.append(
+            _PairwiseTaskRow(
+                experiment_pk=int(row.experiment_pk),
+                task_name=alias_to_canonical.get(
+                    str(row.task_name or ""),
+                    str(row.task_name or ""),
+                ),
+                task_hash=str(row.task_hash or ""),
+                num_instances=(
+                    int(row.num_instances)
+                    if getattr(row, "num_instances", None) is not None
+                    else None
+                ),
+                metrics=dict(getattr(row, "metrics", {}) or {}),
+                primary_metric=(
+                    str(row.primary_metric) if getattr(row, "primary_metric", None) else None
+                ),
+            )
+        )
+    return canonical_rows
 
 
 def _timestamp_label(value: Any) -> str | None:
@@ -1467,7 +1574,9 @@ def compute_pairwise(
             "Provide exactly one of task_name, task_hash, or suite_name to scope the comparison"
         )
 
-    if task_name and _matches_exact(task_name, exclude_task_names):
+    expanded_exclude_task_names = _expand_equivalent_task_name_filters(exclude_task_names)
+
+    if task_name and _matches_exact(task_name, expanded_exclude_task_names):
         raise ValueError(
             f"Task '{task_name}' was excluded by --exclude-task. "
             "Remove the exclusion or choose a different scope."
@@ -1495,7 +1604,7 @@ def compute_pairwise(
             hint_str = f" Did you mean: {', '.join(hints)}?" if hints else ""
             raise ValueError(f"Suite '{suite_name}' not found.{hint_str}")
         suite_task_names = get_suite(suite_name).expand()
-        suite_task_names = _filter_suite_task_names(suite_task_names, exclude_task_names)
+        suite_task_names = _filter_suite_task_names(suite_task_names, expanded_exclude_task_names)
         if not suite_task_names:
             raise ValueError(
                 f"Suite '{suite_name}' resolved to zero tasks after applying --exclude-task "
@@ -1503,10 +1612,17 @@ def compute_pairwise(
             )
 
     task_names_filter: list[str] | None
+    scope_task_name_aliases: dict[str, str] = {}
     if suite_name:
-        task_names_filter = list(suite_task_names)
+        expanded_scope_task_names, scope_task_name_aliases = _build_scope_task_alias_map(
+            suite_task_names
+        )
+        task_names_filter = list(expanded_scope_task_names)
     elif task_name:
-        task_names_filter = [task_name]
+        expanded_scope_task_names, scope_task_name_aliases = _build_scope_task_alias_map(
+            (task_name,)
+        )
+        task_names_filter = list(expanded_scope_task_names)
     else:
         task_names_filter = None
     scope_label = suite_name or task_name or task_hash or ""
@@ -1641,10 +1757,8 @@ def compute_pairwise(
         TaskResult.primary_metric,
     ).where(TaskResult.experiment_pk.in_(source_pks))
     tr_scope_filters: list[Any] = []
-    if suite_name:
-        tr_scope_filters.append(TaskResult.task_name.in_(suite_task_names))
-    elif task_name:
-        tr_scope_filters.append(TaskResult.task_name == task_name)
+    if task_names_filter:
+        tr_scope_filters.append(TaskResult.task_name.in_(task_names_filter))
     elif task_hash:
         tr_scope_filters.append(TaskResult.task_hash.startswith(task_hash))
     for scope_filter in tr_scope_filters:
@@ -1667,10 +1781,15 @@ def compute_pairwise(
         if not _is_excluded_task(
             task_name=row.task_name,
             task_hash=row.task_hash,
-            exclude_task_names=exclude_task_names,
+            exclude_task_names=expanded_exclude_task_names,
             exclude_task_hashes=exclude_task_hashes,
         )
     ]
+    if scope_task_name_aliases:
+        task_rows = _canonicalize_scope_task_rows(
+            task_rows,
+            alias_to_canonical=scope_task_name_aliases,
+        )
     if not keep_all:
         task_rows = _merge_latest_task_rows(
             task_rows=task_rows,

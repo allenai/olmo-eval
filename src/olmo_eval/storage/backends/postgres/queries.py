@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from olmo_eval.common.metrics.predictions import augment_prediction_instance_metrics
 from olmo_eval.common.types import EvalResult
 from olmo_eval.storage.backends.postgres.repository import (
     ExperimentRepository,
@@ -66,6 +67,11 @@ class QueryHelper:
         for task in result.tasks:
             if task.task_hash:
                 task_hash_lookup[task.task_name] = task.task_hash
+        task_metrics_lookup = {
+            task.task_name: self._resolve_task_metrics(task.task_name)
+            for task in result.tasks
+            if task.task_name
+        }
 
         for task_name, instances in instances_by_task.items():
             task_hash = task_hash_lookup.get(task_name)
@@ -73,6 +79,10 @@ class QueryHelper:
                 raise ValueError(
                     f"task_hash is required for task '{task_name}' instance predictions"
                 )
+            metrics = task_metrics_lookup.get(task_name, ())
+            if metrics:
+                for instance in instances:
+                    augment_prediction_instance_metrics(instance, metrics)
             self.instance_repo.save_instances(
                 experiment_pk=experiment_pk,
                 task_hash=task_hash,
@@ -81,6 +91,16 @@ class QueryHelper:
             )
 
         return experiment_pk
+
+    @staticmethod
+    def _resolve_task_metrics(task_name: str):
+        """Resolve task metrics from the registered task spec when available."""
+        from olmo_eval.evals.tasks.common.registry import get_task
+
+        try:
+            return tuple(get_task(task_name).config.metrics)
+        except Exception:
+            return ()
 
     def get(self, experiment_pk: int) -> EvalResult | None:
         """Retrieve an evaluation result by experiment primary key.

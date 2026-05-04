@@ -179,6 +179,7 @@ class VLLMServerProvider(InferenceProvider):
         trust_remote_code: bool = False,
         log_dir: str | None = None,
         chat_template_kwargs: dict[str, Any] | None = None,
+        revision: str | None = None,
         **server_kwargs: Any,
     ) -> None:
         """Initialize the provider.
@@ -197,6 +198,8 @@ class VLLMServerProvider(InferenceProvider):
             trust_remote_code: Trust remote code for model loading (server mode).
             log_dir: Directory to write server logs to (server mode).
             chat_template_kwargs: Extra kwargs for chat template (e.g., {"enable_thinking": false}).
+            revision: HuggingFace revision/commit hash for managed server startup and
+                local tokenizer loading.
             **server_kwargs: Additional vLLM server arguments.
         """
         super().__init__(model_name)
@@ -205,6 +208,8 @@ class VLLMServerProvider(InferenceProvider):
         self.max_retries = max_retries
         self.chat_template_kwargs = chat_template_kwargs
         self._tokenizer_path = tokenizer or model_name
+        self._tokenizer_revision = revision
+        self._tokenizer_trust_remote_code = trust_remote_code
         self._client: AsyncOpenAI | None = None
         self._http_client: httpx.AsyncClient | None = None
         self._raw_http_client: httpx.AsyncClient | None = None
@@ -226,6 +231,8 @@ class VLLMServerProvider(InferenceProvider):
                 srv_kwargs["max_model_len"] = max_model_len
             if tokenizer:
                 srv_kwargs["tokenizer"] = tokenizer
+            if revision is not None:
+                srv_kwargs["revision"] = revision
             if enable_auto_tool_choice:
                 srv_kwargs["enable_auto_tool_choice"] = True
                 if tool_call_parser:
@@ -354,6 +361,15 @@ class VLLMServerProvider(InferenceProvider):
         assert client is not None, "AsyncOpenAI client creation failed"
         return client
 
+    def _get_local_tokenizer_load_kwargs(self) -> dict[str, Any]:
+        """Build kwargs for local HuggingFace tokenizer loads."""
+        tokenizer_kwargs: dict[str, Any] = {
+            "trust_remote_code": self._tokenizer_trust_remote_code,
+        }
+        if self._tokenizer_revision is not None:
+            tokenizer_kwargs["revision"] = self._tokenizer_revision
+        return tokenizer_kwargs
+
     def _get_tokenizer(self, *, require_local: bool = False) -> Any:
         """Get or create the tokenizer.
 
@@ -370,7 +386,10 @@ class VLLMServerProvider(InferenceProvider):
             if self._tokenizer is None or isinstance(self._tokenizer, RemoteTokenizer):
                 from transformers import AutoTokenizer
 
-                self._tokenizer = AutoTokenizer.from_pretrained(self._tokenizer_path)
+                self._tokenizer = AutoTokenizer.from_pretrained(
+                    self._tokenizer_path,
+                    **self._get_local_tokenizer_load_kwargs(),
+                )
             return self._tokenizer
 
         # Use remote tokenizer by default (no transformers dependency)

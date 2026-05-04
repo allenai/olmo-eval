@@ -6,14 +6,17 @@ import math
 from collections.abc import Sequence
 from typing import Any
 
+from olmo_eval.common.metrics import Metric
+from olmo_eval.common.metrics.predictions import augment_prediction_instance_metrics
 from olmo_eval.common.types import SamplingParams
 
 
-def build_predictions(scored: Sequence[Any]) -> list[dict]:
+def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> list[dict]:
     """Build per-instance predictions from scored responses.
 
     Args:
         scored: Sequence of scored Response objects
+        metrics: Task metrics used to materialize exact per-instance metric keys
 
     Returns:
         List of prediction dicts suitable for JSONL output
@@ -104,6 +107,9 @@ def build_predictions(scored: Sequence[Any]) -> list[dict]:
         # Add trajectory if present (multi-turn/agent tasks)
         if resp.trajectory is not None:
             prediction["trajectory"] = resp.trajectory.to_dict()
+
+        if metrics:
+            augment_prediction_instance_metrics(prediction, metrics, response=resp)
 
         predictions.append(prediction)
 

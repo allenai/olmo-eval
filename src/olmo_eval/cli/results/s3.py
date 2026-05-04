@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from olmo_eval.cli.utils import console
+from olmo_eval.storage.artifacts import candidate_predictions_uris, candidate_requests_uris
 
 
 def download_s3_files(
@@ -58,26 +59,33 @@ def download_s3_files(
             return None
         return parts[0], parts[1]
 
-    def download_file(s3_uri: str, label: str) -> str | None:
+    def download_file(
+        s3_uri: str,
+        label: str,
+        *,
+        candidates: tuple[str, ...] | None = None,
+    ) -> str | None:
         """Download a file from S3 URI."""
-        parsed = parse_s3_uri(s3_uri)
-        if not parsed:
-            console.print(f"[yellow]Warning:[/yellow] Invalid S3 URI for {label}: {s3_uri}")
-            return None
+        for candidate_uri in candidates or (s3_uri,):
+            parsed = parse_s3_uri(candidate_uri)
+            if not parsed:
+                continue
 
-        bucket, key = parsed
-        # Use just the filename for local path to avoid deeply nested directories
-        filename = Path(key).name
-        local_file = output_path / experiment.experiment_id / filename
-        local_file.parent.mkdir(parents=True, exist_ok=True)
+            bucket, key = parsed
+            # Use just the filename for local path to avoid deeply nested directories
+            filename = Path(key).name
+            local_file = output_path / experiment.experiment_id / filename
+            local_file.parent.mkdir(parents=True, exist_ok=True)
 
-        try:
-            s3_client.download_file(bucket, key, str(local_file))
-            console.print(f"[green]Downloaded:[/green] {local_file}")
-            return str(local_file)
-        except Exception as e:
-            console.print(f"[yellow]Warning:[/yellow] Failed to download {s3_uri}: {e}")
-            return None
+            try:
+                s3_client.download_file(bucket, key, str(local_file))
+                console.print(f"[green]Downloaded:[/green] {local_file}")
+                return str(local_file)
+            except Exception:
+                continue
+
+        console.print(f"[yellow]Warning:[/yellow] Failed to download {s3_uri}")
+        return None
 
     # Download metrics.json from experiment's s3_location
     if download_metrics and experiment.s3_location:
@@ -100,15 +108,44 @@ def download_s3_files(
 
     for task in tasks_to_download:
         if download_predictions and task.s3_predictions_key:
-            result = download_file(task.s3_predictions_key, f"{task.task_name} predictions")
+            result = download_file(
+                task.s3_predictions_key,
+                f"{task.task_name} predictions",
+                candidates=candidate_predictions_uris(
+                    task.s3_predictions_key,
+                    model_name=experiment.model_name,
+                    task_name=task.task_name,
+                    task_hash=task.task_hash,
+                ),
+            )
             if result:
                 downloaded_files.append(result)
 
-        # For requests, derive from predictions path (same directory, different filename)
-        if download_requests and task.s3_predictions_key:
-            # Replace predictions filename with requests filename
+        if download_requests and task.s3_requests_key:
+            result = download_file(
+                task.s3_requests_key,
+                f"{task.task_name} requests",
+                candidates=candidate_requests_uris(
+                    task.s3_requests_key,
+                    model_name=experiment.model_name,
+                    task_name=task.task_name,
+                    task_hash=task.task_hash,
+                ),
+            )
+            if result:
+                downloaded_files.append(result)
+        elif download_requests and task.s3_predictions_key:
             requests_uri = task.s3_predictions_key.replace("predictions.jsonl", "requests.jsonl")
-            result = download_file(requests_uri, f"{task.task_name} requests")
+            result = download_file(
+                requests_uri,
+                f"{task.task_name} requests",
+                candidates=candidate_requests_uris(
+                    requests_uri,
+                    model_name=experiment.model_name,
+                    task_name=task.task_name,
+                    task_hash=task.task_hash,
+                ),
+            )
             if result:
                 downloaded_files.append(result)
 

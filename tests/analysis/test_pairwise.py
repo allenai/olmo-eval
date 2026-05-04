@@ -16,7 +16,10 @@ from olmo_eval.analysis.pairwise import (
     PairwiseEligibilityError,
     PairwiseResult,
     _build_experiment_refetch_stmt,
+    _build_scope_task_alias_map,
+    _canonicalize_scope_task_rows,
     _compute_pairs,
+    _equivalent_scope_task_names,
     _extract_pairwise_instance_score,
     _merge_latest_instance_key_rows,
     _merge_latest_instance_score_rows,
@@ -92,6 +95,41 @@ class TestPairStats:
         p = PairStats(index_a=0, index_b=1, wins_a=90, wins_b=10, ties=0)
         assert p.prob_a_gt_b == 1.0
         assert 0.0 < p.p_value < 1e-20
+
+
+class TestScopeTaskAliases:
+    def test_noop_variant_aliases_expand_to_same_scope_leaf(self) -> None:
+        aliases = _equivalent_scope_task_names("lambada:olmo3base")
+
+        assert "lambada:olmo3base" in aliases
+        assert "lambada" in aliases
+
+    def test_non_equivalent_variant_does_not_alias_to_base_task(self) -> None:
+        aliases = _equivalent_scope_task_names("medmcqa:olmo3base")
+
+        assert "medmcqa:olmo3base" in aliases
+        assert "medmcqa" not in aliases
+
+    def test_canonicalize_scope_task_rows_maps_alias_rows_back_to_suite_leaf(self) -> None:
+        _expanded, alias_map = _build_scope_task_alias_map(("lambada:olmo3base",))
+
+        rows = _canonicalize_scope_task_rows(
+            [
+                SimpleNamespace(
+                    experiment_pk=17,
+                    task_name="lambada",
+                    task_hash="054bdcd6",
+                    num_instances=5153,
+                    metrics={"greedy_accuracy": {"greedy_accuracy": 0.5}},
+                    primary_metric="greedy_accuracy:greedy_accuracy",
+                )
+            ],
+            alias_to_canonical=alias_map,
+        )
+
+        assert len(rows) == 1
+        assert rows[0].task_name == "lambada:olmo3base"
+        assert rows[0].task_hash == "054bdcd6"
 
 
 class TestGetWinRate:

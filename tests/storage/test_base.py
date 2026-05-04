@@ -335,3 +335,35 @@ class TestConvertRunnerResults:
         assert len(eval_result.tasks) == 1
         assert eval_result.tasks[0].task_name == "gsm8k"
         assert eval_result.tasks[0].metrics == {"exact_match": {"exact_match": 0.58}}
+
+    def test_s3_artifact_keys_use_predictions_and_requests_subdirs(self):
+        """Task artifact URIs should match the uploaded S3 directory layout."""
+        results = {
+            "model": "nvidia/NVIDIA-Nemotron-Nano-9B-v2",
+            "provider": "hf",
+            "timestamp": "2024-06-20T14:00:00",
+            "tasks": {
+                "mmlu_astronomy:mc:olmo3base": {
+                    "metrics": {"accuracy": {"logprob": 0.5}},
+                    "task_hash": "abcdef123456",
+                },
+            },
+        }
+
+        eval_result = convert_runner_results(
+            results,
+            experiment_id="exp-789",
+            s3_location="s3://ai2-llm/olmo-eval/group/model_hash/exp-789",
+        )
+
+        task = eval_result.tasks[0]
+        assert (
+            task.s3_predictions_key == "s3://ai2-llm/olmo-eval/group/model_hash/exp-789/"
+            "predictions/nvidia_NVIDIA-Nemotron-Nano-9B-v2/"
+            "mmlu_astronomy_mc_olmo3base_123456-predictions.jsonl"
+        )
+        assert (
+            task.s3_requests_key == "s3://ai2-llm/olmo-eval/group/model_hash/exp-789/"
+            "requests/nvidia_NVIDIA-Nemotron-Nano-9B-v2/"
+            "mmlu_astronomy_mc_olmo3base_123456-requests.jsonl"
+        )

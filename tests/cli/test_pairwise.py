@@ -1060,7 +1060,30 @@ def test_serialize_viewer_export_supports_csv_and_json() -> None:
 
     assert filename == "my-group-my-scope-stored-files.json"
     assert content_type == "application/json; charset=utf-8"
-    assert '"predictions_file": "s3://bucket/predictions.jsonl"' in body.decode("utf-8")
+    decoded = body.decode("utf-8")
+    assert decoded.endswith("\n")
+    assert json.loads(decoded) == {
+        "metadata": {"group_name": "my-group"},
+        "rows": [
+            {
+                "model_display_rank": 1,
+                "task_name": "gsm8k:olmo3base",
+                "predictions_file": "s3://bucket/predictions.jsonl",
+            }
+        ],
+    }
+
+
+def test_browser_exports_use_real_newlines_for_downloads() -> None:
+    assets = importlib.import_module("olmo_eval.analysis.pairwise_viewer.assets")
+
+    script = assets.browser_js_text()
+
+    assert "function serializeJsonDownload(payload)" in script
+    assert "function serializeLineDownload(lines)" in script
+    assert 'join("\\\\n")' not in script
+    assert '+ "\\\\n"' not in script
+    assert 'return /[,"\\\\n]/.test(text)' not in script
 
 
 def test_render_results_viewer_page_renders_core_viewer_state_and_controls() -> None:

@@ -147,7 +147,7 @@ async def finalize_task(tracker: TaskTracker) -> TaskResult:
     metrics = tracker.task.compute_metrics(scored)
 
     # Build predictions
-    predictions = build_predictions(scored)
+    predictions = build_predictions(scored, metrics=tracker.task.config.metrics)
 
     # Get task config for serialization
     task_config = tracker.task.config
@@ -214,7 +214,7 @@ def compute_task_metrics(
     metrics = task.compute_metrics(scored_responses)
 
     # Build predictions
-    predictions = build_predictions(scored_responses)
+    predictions = build_predictions(scored_responses, metrics=task.config.metrics)
 
     # Extract metric metadata
     primary_metric = get_metric_metadata(task)

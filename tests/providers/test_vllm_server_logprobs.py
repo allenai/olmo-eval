@@ -1,5 +1,6 @@
 """Unit tests for VLLMServerProvider completion and logprobs behavior."""
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -9,6 +10,22 @@ from olmo_eval.common.types import LMRequest, RequestType, SamplingParams
 
 class TestVLLMServerProviderLogprobs:
     """Tests for VLLMServerProvider._logprobs_single_impl."""
+
+    def _make_provider(self, **kwargs):
+        """Create a real provider instance configured for an existing server."""
+        from olmo_eval.inference.providers.vllm_server import VLLMServerProvider
+
+        provider = VLLMServerProvider("test-model", base_url="http://localhost:8000/v1", **kwargs)
+        provider._max_length = 4096
+        return provider
+
+    def _make_fake_transformers(self, tokenizer):
+        """Build a stub transformers module for local tokenizer loads."""
+        from_pretrained = MagicMock(return_value=tokenizer)
+        fake_transformers = SimpleNamespace(
+            AutoTokenizer=SimpleNamespace(from_pretrained=from_pretrained)
+        )
+        return from_pretrained, fake_transformers
 
     @pytest.fixture
     def mock_tokenizer(self):
@@ -87,6 +104,27 @@ class TestVLLMServerProviderLogprobs:
 
         call_kwargs = client.completions.create.call_args.kwargs
         assert call_kwargs["stop"] == ["Question:", "</s>", "tok1"]
+
+    def test_completion_eos_uses_revision_for_local_tokenizer(self):
+        """EOS stop detection should respect the configured tokenizer revision."""
+        provider = self._make_provider(
+            tokenizer="custom-tokenizer",
+            revision="stage2-step47684",
+            trust_remote_code=True,
+        )
+        local_tokenizer = MagicMock()
+        local_tokenizer.eos_token_id = 1
+        local_tokenizer.decode.return_value = "</s>"
+        from_pretrained, fake_transformers = self._make_fake_transformers(local_tokenizer)
+
+        with patch.dict("sys.modules", {"transformers": fake_transformers}):
+            assert provider._get_completion_eos_stop() == "</s>"
+
+        from_pretrained.assert_called_once_with(
+            "custom-tokenizer",
+            revision="stage2-step47684",
+            trust_remote_code=True,
+        )
 
     @pytest.mark.anyio
     async def test_logprobs_extracts_continuation_tokens(self, provider, mock_tokenizer):
@@ -240,3 +278,44 @@ class TestVLLMServerProviderLogprobs:
             assert json_body["prompt_logprobs"] == 5
             assert json_body["max_tokens"] == 1
             assert json_body["add_special_tokens"] is False
+
+    @pytest.mark.anyio
+    async def test_logprobs_loads_local_tokenizer_with_revision(self):
+        """Prompt logprob tokenization should use the configured tokenizer revision."""
+        provider = self._make_provider(
+            tokenizer="custom-tokenizer",
+            revision="stage2-step47684",
+            trust_remote_code=True,
+        )
+        local_tokenizer = MagicMock()
+        from_pretrained, fake_transformers = self._make_fake_transformers(local_tokenizer)
+
+        prompt_logprobs = [
+            None,
+            {"1": {"logprob": -0.1, "decoded_token": "yes"}},
+        ]
+        mock_http = AsyncMock()
+        mock_http.post.return_value = self._make_vllm_response(prompt_logprobs)
+        provider._get_raw_http_client = MagicMock(return_value=mock_http)
+
+        with (
+            patch.dict("sys.modules", {"transformers": fake_transformers}),
+            patch(
+                "olmo_eval.inference.providers.vllm_server.encode_context_and_continuation"
+            ) as mock_encode,
+        ):
+            mock_encode.return_value = ([0], [1])
+            request = LMRequest(
+                request_type=RequestType.COMPLETION,
+                prompt="Test",
+                continuations=[" yes"],
+            )
+
+            outputs = await provider._logprobs_single_impl(request)
+
+        assert len(outputs) == 1
+        from_pretrained.assert_called_once_with(
+            "custom-tokenizer",
+            revision="stage2-step47684",
+            trust_remote_code=True,
+        )

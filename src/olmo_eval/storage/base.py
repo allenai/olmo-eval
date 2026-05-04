@@ -7,6 +7,8 @@ from datetime import datetime
 from typing import Any
 
 from olmo_eval.common.types import EvalResult, StoredTaskResult, compute_model_hash
+from olmo_eval.runners.processing.utils import sanitize_spec_for_filename
+from olmo_eval.storage.artifacts import build_predictions_uri, build_requests_uri
 
 __all__ = [
     "StorageBackend",
@@ -126,14 +128,21 @@ def convert_runner_results(
         s3_predictions_key = None
         s3_requests_key = None
         if s3_location:
-            from olmo_eval.runners.common.types import PREDICTIONS_SUFFIX, REQUESTS_SUFFIX
-            from olmo_eval.runners.processing.utils import sanitize_spec_for_filename
-
             base = s3_location.rstrip("/")
             sanitized_spec = sanitize_spec_for_filename(spec)
             s3_metrics_key = f"{base}/task-{task_idx:03d}-{sanitized_spec}-metrics.json"
-            s3_predictions_key = f"{base}/task-{task_idx:03d}-{sanitized_spec}{PREDICTIONS_SUFFIX}"
-            s3_requests_key = f"{base}/task-{task_idx:03d}-{sanitized_spec}{REQUESTS_SUFFIX}"
+            s3_predictions_key = build_predictions_uri(
+                base,
+                results["model"],
+                spec,
+                task_data.get("task_hash"),
+            )
+            s3_requests_key = build_requests_uri(
+                base,
+                results["model"],
+                spec,
+                task_data.get("task_hash"),
+            )
 
         # Get metrics and primary_metric (in "metric:scorer" format)
         metrics = task_data.get("metrics", {})

@@ -7,6 +7,7 @@
       const storageBase = "pairwise-browser:" +
         (pageData.group_data?.summary?.group_name || "root") +
         ":";
+      const DOWNLOAD_NEWLINE = "\n";
       const P_INTENSITY_FLOOR = 1e-12;
       const state = {
         view: loadState("view", "matrix"),
@@ -1978,9 +1979,22 @@
 
       function csvEscape(value) {
         const text = String(value ?? "");
-        return /[,"\\n]/.test(text)
+        return /[,"\n]/.test(text)
           ? '"' + text.replace(/"/g, '""') + '"'
           : text;
+      }
+
+      function withTrailingDownloadNewline(contents) {
+        const text = String(contents ?? "");
+        return text.endsWith(DOWNLOAD_NEWLINE) ? text : text + DOWNLOAD_NEWLINE;
+      }
+
+      function serializeJsonDownload(payload) {
+        return withTrailingDownloadNewline(JSON.stringify(payload, null, 2));
+      }
+
+      function serializeLineDownload(lines) {
+        return withTrailingDownloadNewline(lines.join(DOWNLOAD_NEWLINE));
       }
 
       function downloadText(filename, contents, type) {
@@ -2599,7 +2613,7 @@
         );
         downloadText(
           slugify(currentGroupName(), "results") + ".csv",
-          lines.join("\\n") + "\\n",
+          serializeLineDownload(lines),
           "text/csv;charset=utf-8"
         );
       }
@@ -2654,7 +2668,7 @@
         ])].map((row) => row.map((value) => csvEscape(value)).join(","));
         downloadText(
           pairwiseExportBase(pairwiseData) + ".csv",
-          lines.join("\\n") + "\\n",
+          serializeLineDownload(lines),
           "text/csv;charset=utf-8"
         );
       }
@@ -2665,7 +2679,7 @@
         const payload = buildPairwiseExportPayload(pairwiseData);
         downloadText(
           pairwiseExportBase(pairwiseData) + ".json",
-          JSON.stringify(payload, null, 2) + "\\n",
+          serializeJsonDownload(payload),
           "application/json;charset=utf-8"
         );
       }
@@ -2712,7 +2726,7 @@
           ]);
           downloadText(
             base + ".json",
-            JSON.stringify(buildPairwiseExportPayload(pairwiseData), null, 2) + "\\n",
+            serializeJsonDownload(buildPairwiseExportPayload(pairwiseData)),
             "application/json;charset=utf-8"
           );
           triggerBlobDownload(instanceResults.blob, instanceResults.filename);
