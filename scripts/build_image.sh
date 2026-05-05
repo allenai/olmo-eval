@@ -127,6 +127,9 @@ if [[ -z "$TAG" ]]; then
     echo "Auto-generated tag: ${TAG}"
 fi
 
+GIT_COMMIT="$(git -C "${REPO_ROOT}" rev-parse HEAD 2>/dev/null || echo unknown)"
+GIT_BRANCH="$(git -C "${REPO_ROOT}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+
 echo "Building Docker image..."
 echo "  Image:          ${IMAGE_NAME}:${TAG}"
 echo "  Target:         ${TARGET}"
@@ -134,6 +137,8 @@ echo "  CUDA version:   ${CUDA_VERSION}"
 echo "  Python version: ${PYTHON_VERSION}"
 echo "  Torch version:  ${TORCH_VERSION}"
 echo "  Platform:       ${PLATFORM}"
+echo "  Git commit:     ${GIT_COMMIT}"
+echo "  Git branch:     ${GIT_BRANCH}"
 echo ""
 
 docker build \
@@ -143,6 +148,8 @@ docker build \
     --build-arg CUDA_VERSION="${CUDA_VERSION}" \
     --build-arg TORCH_VERSION="${TORCH_VERSION}" \
     --build-arg PYTHON_VERSION="${PYTHON_VERSION}" \
+    --build-arg GIT_COMMIT="${GIT_COMMIT}" \
+    --build-arg GIT_BRANCH="${GIT_BRANCH}" \
     -t "${IMAGE_NAME}:${TAG}" \
     -f "${REPO_ROOT}/Dockerfile" \
     "${REPO_ROOT}"

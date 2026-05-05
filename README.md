@@ -11,8 +11,9 @@ Evaluation toolkit for OLMo and other language models.
 
 ## Quick Start
 
-To get started, sync the repo with `uv`, browse the available tasks and suites,
-and preview a run with the built-in `mock` provider.
+This project uses [uv](https://docs.astral.sh/uv/) with a checked-in `uv.lock`
+for reproducible builds. To get started, sync the repo with `uv`, browse the
+available tasks and suites, and preview a run with the built-in `mock` provider.
 
 ### Run Your First Eval
 
@@ -23,8 +24,24 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # Install Python 3.12 if your machine does not already have it
 uv python install 3.12
 
-# Sync the project environment
-uv sync
+# Install dependencies + the package (editable) from the lockfile.
+# The default groups (`dev` + `vllm`) are installed automatically, which
+# pulls in storage, beaker, hf, and the vLLM inference provider. vLLM
+# deps are marked Linux-only via PEP 508 markers, so this works on macOS
+# too — no extra flags needed.
+uv sync --frozen
+
+# Install pre-commit hooks
+make setup
+
+# To update the lockfile after changing pyproject.toml
+uv lock
+
+# Add an optional extra on top of the defaults (e.g. agents, litellm)
+uv sync --frozen --extra agents
+
+# `openhands` conflicts with vllm — opt out of the vllm group when using it
+uv sync --frozen --no-group vllm --extra openhands
 
 # Browse a few suites
 uv run olmo-eval suite inspect mmlu
@@ -981,10 +998,12 @@ olmo-eval includes built-in support for launching evaluation jobs on [Beaker](ht
 
 ### Installation
 
-Install with the Beaker extra:
+The `beaker` extra is included in the default `dev` group, so a plain
+`uv sync --frozen` is enough. If you previously opted out of the default
+groups, re-enable it with:
 
 ```bash
-uv sync --extra beaker
+uv sync --frozen --extra beaker
 ```
 
 ### CLI Usage
@@ -1528,22 +1547,29 @@ uv run olmo-eval beaker launch -n "eval" -m llama3.1-8b \
 
 ## Development
 
-```bash
-# Install hooks
-uv run pre-commit install
-
-# Run linter and formatter checks
-uv run ruff check src/ tests/
-uv run ruff format --check src/ tests/
-
-# Run type checks and unit tests
-uv run ty check src/ alembic/
-uv run pytest tests/ --ignore=tests/integration -v
-```
-
-Optional repo helpers:
+This repo uses `uv` with a checked-in `uv.lock` for reproducible installs.
+The default dependency groups (`dev` + `vllm`) are installed automatically,
+which covers storage, beaker, hf, and the vLLM inference provider.
 
 ```bash
-./scripts/fix.sh
-./scripts/verify.sh
+# Install dependencies from the lockfile
+uv sync --frozen
+
+# Install pre-commit hooks
+make setup
+
+# Run linter / formatter
+make lint
+make fix    # auto-fix
+
+# Run tests (and type checks)
+make test
+make verify
+
+# Update the lockfile after editing pyproject.toml
+uv lock
 ```
+
+CI runs `uv sync --frozen` and `uv run --frozen ...`, so any change to
+`pyproject.toml` must be accompanied by a refreshed `uv.lock`.
+

@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from olmo_eval.cli.utils import console
+from olmo_eval.common.console import console
 from olmo_eval.common.logging import get_logger
 from olmo_eval.runners.common.models import S3Config
 from olmo_eval.runners.io.formatting import build_s3_prefix

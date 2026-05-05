@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.constants.infrastructure import (
@@ -205,12 +206,12 @@ def assemble_external_eval_job(
     # Add eval_args
     if eval_args:
         for key, value in eval_args.items():
-            command.extend(["-a", f"{key}={value}"])
+            command.extend(["-a", f"{key}={json.dumps(value)}"])
 
     # Add provider_kwargs
     if provider_kwargs:
         for key, value in provider_kwargs.items():
-            command.extend(["-K", f"{key}={value}"])
+            command.extend(["-K", f"{key}={json.dumps(value)}"])
 
     # Add storage options (only when --store is enabled)
     if store:

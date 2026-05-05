@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from olmo_eval.cli.utils import console
+from olmo_eval.common.console import console
 from olmo_eval.common.logging import get_logger
 from olmo_eval.runners.common.models import (
     MetricsOutput,

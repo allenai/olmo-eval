@@ -64,8 +64,8 @@ class HuggingFaceProvider(InferenceProvider):
 
         super().__init__(model_name)
         tokenizer_path = tokenizer or model_name
-        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
-        self.model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
+        self.tokenizer: Any = AutoTokenizer.from_pretrained(tokenizer_path)
+        self.model: Any = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
         self.device = _get_device()
         self.model.to(self.device)
         self.model.eval()

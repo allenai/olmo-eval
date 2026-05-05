@@ -92,7 +92,7 @@ fi
 
 # Check dependencies
 if ! command -v beaker &> /dev/null; then
-    echo "Error: 'beaker' CLI not found. Install with: pip install beaker-py"
+    echo "Error: 'beaker' CLI not found. Run via 'uv run beaker ...' or activate the project venv (.venv/bin/activate) after 'uv sync --frozen'."
     exit 1
 fi
 

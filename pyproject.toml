@@ -40,12 +40,14 @@ Issues = "https://github.com/allenai/olmo-eval/issues"
 
 [project.optional-dependencies]
 hf = [
-    "transformers~=4.57.3",
+    "transformers>=5.4.0",
 ]
 vllm = [
-    "vllm[runai]==0.13.0",  # runai extras enable S3 model loading
-    "opencv-python-headless==4.13.0.92",  # Required to avoid libxcb import error
-    "torch-c-dlpack-ext",  # Required for TVM tensor allocation in vLLM
+    # vllm + its companions are Linux/CUDA-only; skip on macOS so the lockfile
+    # doesn't resolve GPU wheels for Darwin.
+    "vllm[runai]==0.19.0 ; platform_system != 'Darwin'",  # runai extras enable S3 model loading
+    "opencv-python-headless==4.13.0.92 ; platform_system != 'Darwin'",  # Required to avoid libxcb import error
+    "torch-c-dlpack-ext ; platform_system != 'Darwin'",  # Required for TVM tensor allocation in vLLM
 ]
 litellm = [
     "litellm~=1.80.11",
@@ -79,7 +81,7 @@ postgres = [
     "alembic>=1.18.1",
 ]
 gpu = [
-    "nvidia-ml-py>=12.560",
+    "nvidia-ml-py>=12.560 ; platform_system != 'Darwin'",
 ]
 clients = [
     "openai~=2.21.0",
@@ -93,7 +95,13 @@ olmo-eval = "olmo_eval.cli:main"
 
 [tool.uv]
 package = true
-# These extras have incompatible transitive dependencies and cannot be installed together
+override-dependencies = [
+    "transformers>=5.4.0",
+]
+# vllm is installed by default; openhands users must opt out via
+# `uv sync --no-group vllm --group openhands`.
+default-groups = ["dev", "vllm"]
+# These extras/groups have incompatible transitive dependencies and cannot be installed together
 conflicts = [
     [
         { extra = "agents" },
@@ -120,9 +128,15 @@ dev = [
     "ty==0.0.32",
     "pre-commit>=4.0.0",
     # Unit tests import analysis helpers directly, so dev installs need these extras too.
-    "olmo-eval-internal[storage,analysis]",
+    "olmo-eval-internal[storage,beaker,hf,analysis]",
     "jinja2>=3.1.6",
     "google-api-core>=2.0.0",
+    "parameterized>=0.9.0",
+]
+# Mirror of the `vllm` extra as a uv dependency group so it can be enabled by
+# default for GPU/CI workflows while still being installable via pip extras.
+vllm = [
+    "olmo-eval-internal[vllm]",
 ]
 
 [tool.ruff]
@@ -147,6 +161,8 @@ select = [
 "src/olmo_eval/common/constants/models.py" = ["E501"]
 # Verbatim prompt templates from asta-bench reference implementation
 "src/olmo_eval/evals/tasks/astabench_sqa.py" = ["E501"]
+# Verbatim prompt templates and gold snippets from scicode-bench reference implementation
+"src/olmo_eval/evals/external/benchmarks/scicode/prompts.py" = ["E501"]
 # Embedded fewshot data with long string literals
 "src/olmo_eval/evals/tasks/arc.py" = ["E501"]
 "src/olmo_eval/evals/tasks/csqa.py" = ["E501"]

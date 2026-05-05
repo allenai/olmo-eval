@@ -7,9 +7,9 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 import click
-from rich.console import Console
 
 from olmo_eval.common import types
+from olmo_eval.common.console import console
 
 if TYPE_CHECKING:
     from olmo_eval.evals.external.base import ExternalEval
@@ -17,9 +17,6 @@ if TYPE_CHECKING:
     from olmo_eval.harness import HarnessConfig
     from olmo_eval.inference.providers.config import ProviderConfig
     from olmo_eval.launch.beaker.launcher import BeakerJobConfig
-
-
-console = Console(force_terminal=True, width=120)
 
 
 @dataclass
@@ -241,14 +238,16 @@ def _coerce_value(value: str) -> Any:
 
     Handles booleans, integers, floats, JSON objects/arrays, and plain strings.
     """
-    # Booleans
+    # JSON scalar literals
     if value.lower() == "true":
         return True
     if value.lower() == "false":
         return False
+    if value == "null":
+        return None
 
-    # JSON objects and arrays
-    if value.startswith("{") or value.startswith("["):
+    # JSON objects, arrays, and quoted strings (so launcher round-trips survive)
+    if value.startswith(("{", "[", '"')):
         try:
             return json.loads(value)
         except json.JSONDecodeError:

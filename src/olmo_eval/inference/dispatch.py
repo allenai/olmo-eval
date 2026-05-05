@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -112,6 +115,7 @@ class ContinuousBatchDispatcher[T, R]:
             result = await self.process_fn(item)
             return (result, None)
         except Exception as e:
+            logger.warning("dispatch: process_fn raised %s: %s", type(e).__name__, e)
             return (None, e)
 
     @property

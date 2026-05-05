@@ -728,6 +728,11 @@ class BeakerLauncher:
         # vllm_server mode needs HuggingFace tokenizer for accurate logprobs boundary
         if use_isolated_vllm_venv and "hf" not in main_extras:
             main_extras.append("hf")
+
+        # Always install the beaker extra so BeakerStatusReporter can push progress
+        # updates to the workload description.
+        if "beaker" not in main_extras:
+            main_extras.append("beaker")
         if main_extras:
             extras_str = ",".join(main_extras)
             install_cmd = f"uv pip install -e '.[{extras_str}]' -c {constraints}"
@@ -799,6 +804,11 @@ class BeakerLauncher:
         env_secrets: list[tuple[str, str]] = [
             (secret.name, secret.secret) for secret in config.env_secrets
         ]
+
+        # Inject BEAKER_TOKEN so the running job can post status updates back to
+        # the workload description via BeakerStatusReporter.
+        if not any(name == "BEAKER_TOKEN" for name, _ in env_secrets):
+            env_secrets.append(("BEAKER_TOKEN", f"{self.beaker.user_name}_BEAKER_TOKEN"))
 
         # Inject AWS credentials if requested
         if config.inject_aws_credentials:

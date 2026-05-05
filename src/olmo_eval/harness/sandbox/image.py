@@ -16,14 +16,11 @@ logger = logging.getLogger(__name__)
 # when multiple executors share the same config.
 _resolved_images: dict[str, str] = {}
 
-# Python standalone URL for building derived images
-PYTHON_STANDALONE_URL = (
-    "https://github.com/indygreg/python-build-standalone/releases/download/"
-    "20240107/cpython-3.11.7+20240107-x86_64-unknown-linux-gnu-install_only.tar.gz"
-)
+# Pinned uv image used to bootstrap Python and install swe-rex in derived images
+UV_IMAGE = "ghcr.io/astral-sh/uv:0.11.7"
 
 # Version bump this when changing the Dockerfile to invalidate cached images
-SWEREX_IMAGE_VERSION = "20260304.1"
+SWEREX_IMAGE_VERSION = "20260429.1"
 
 
 def _remote_image_exists(container_runtime: str, image: str) -> bool:
@@ -89,7 +86,7 @@ def get_swerex_image(
     """
     # Deterministic tag from content inputs
     extra_hash = ":".join(dockerfile_extra) if dockerfile_extra else ""
-    hash_input = f"{base_image}:{PYTHON_STANDALONE_URL}:{SWEREX_IMAGE_VERSION}:{extra_hash}"
+    hash_input = f"{base_image}:{UV_IMAGE}:{SWEREX_IMAGE_VERSION}:{extra_hash}"
     tag_hash = hashlib.sha256(hash_input.encode()).hexdigest()[:12]
 
     if tag_hash in _resolved_images:
@@ -181,7 +178,7 @@ def _resolve_swerex_image(
             stderr = result.stderr.decode() if result.stderr else "unknown error"
             logger.warning(f"Registry pull failed for {registry_image}: {stderr}")
 
-    # Build the image with Python, swe-rex, curl, git, and uv
+    # Build the image with Python (via uv venv), swe-rex, curl, and git
     logger.info(f"Building swerex image from {base_image}...")
 
     extra_lines = "\n".join(dockerfile_extra) if dockerfile_extra else ""
@@ -194,12 +191,12 @@ RUN echo 'APT::Sandbox::User "root";' > /etc/apt/apt.conf.d/99-disable-sandbox
 RUN apt-get update && \\
     apt-get install -y --no-install-recommends curl git ca-certificates && \\
     rm -rf /var/lib/apt/lists/*
-ADD {PYTHON_STANDALONE_URL} /tmp/python.tar.gz
-RUN tar xzf /tmp/python.tar.gz -C /root && rm /tmp/python.tar.gz && \\
-    ln -sf /root/python/bin/python3 /root/python/bin/python && \\
-    /root/python/bin/pip install --no-cache-dir swe-rex uv
-ENV PATH="/root/python/bin:$PATH"
+COPY --from={UV_IMAGE} /uv /uvx /usr/local/bin/
+RUN uv venv /root/venv --python 3.12 && \\
+    uv pip install --python /root/venv/bin/python --no-cache-dir swe-rex
 {extra_lines}
+ENV VIRTUAL_ENV="/root/venv"
+ENV PATH="/root/venv/bin:$PATH"
 """
 
     result = subprocess.run(
@@ -240,7 +237,7 @@ ENV PATH="/root/python/bin:$PATH"
 def dependencies_to_dockerfile_extra(dependencies: tuple[str, ...]) -> tuple[str, ...]:
     """Convert package specs to Dockerfile RUN commands for sandbox images.
 
-    Uses /root/python/bin/uv which is pre-installed by get_swerex_image().
+    Installs into the /root/venv created by get_swerex_image() using uv.
 
     Args:
         dependencies: Package specs (e.g., ("numpy", "pandas>=2.0")).
@@ -251,6 +248,4 @@ def dependencies_to_dockerfile_extra(dependencies: tuple[str, ...]) -> tuple[str
     if not dependencies:
         return ()
     pkgs = " ".join(shlex.quote(dep) for dep in dependencies)
-    return (
-        f"RUN /root/python/bin/uv pip install --python /root/python/bin/python3 --no-cache {pkgs}",
-    )
+    return (f"RUN uv pip install --python /root/venv/bin/python --no-cache {pkgs}",)

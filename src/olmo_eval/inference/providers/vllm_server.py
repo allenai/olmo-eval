@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from olmo_eval.common.beaker_status import BeakerStatusReporter
 from olmo_eval.common.logging import get_logger
 from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
 from olmo_eval.common.types.tools import ToolCall
@@ -203,6 +204,7 @@ class VLLMServerProvider(InferenceProvider):
             **server_kwargs: Additional vLLM server arguments.
         """
         super().__init__(model_name)
+        self._beaker_reporter = BeakerStatusReporter()
         self.timeout = timeout
         self.max_concurrency = max_concurrency
         self.max_retries = max_retries
@@ -245,7 +247,12 @@ class VLLMServerProvider(InferenceProvider):
                 log_dir=log_dir,
                 **srv_kwargs,
             )
-            self._server.start()
+
+            def _on_startup(msg: str) -> None:
+                logger.info(msg)
+                self._beaker_reporter.update(msg)
+
+            self._server.start(progress_callback=_on_startup)
             self.base_url = self._server.base_url
 
     def close(self) -> None:
@@ -648,6 +655,7 @@ class VLLMServerProvider(InferenceProvider):
             process,
             max_in_flight=self.max_concurrency,
             max_retries=self.max_retries,
+            on_progress=self._beaker_reporter.progress_callback("vLLM gen", units="req/sec"),
         )
         return [r if r is not None else [] for r in results]
 

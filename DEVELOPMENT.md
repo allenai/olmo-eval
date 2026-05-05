@@ -13,8 +13,9 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # Install Python 3.12 if your machine does not already have it
 uv python install 3.12
 
-# Install dependencies and the package in editable mode
-uv sync
+# Install dependencies and the package in editable mode from the checked-in
+# lockfile so builds are reproducible. Run `uv lock` to update the lockfile.
+uv sync --frozen
 
 # Install git hooks
 uv run pre-commit install

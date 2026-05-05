@@ -1,4 +1,7 @@
-.PHONY: fix verify test lint type-check clean db-upgrade db-downgrade db-status
+.PHONY: setup fix verify test lint type-check clean db-upgrade db-downgrade db-status
+
+setup:
+	uv run --frozen pre-commit install
 
 # Auto-fix formatting and lint issues
 fix:

@@ -123,6 +123,14 @@ class InstrumentedProvider:
         """Forward unknown attributes to the underlying provider."""
         return getattr(self._provider, name)
 
+    @property
+    def base_provider(self) -> InferenceProvider:
+        """Return the underlying non-instrumented provider, unwrapping nested layers."""
+        provider: InferenceProvider = self._provider
+        while isinstance(provider, InstrumentedProvider):
+            provider = provider._provider
+        return provider
+
     def enable_gpu_monitoring(self, interval_s: float = 1.0) -> None:
         """Enable GPU metrics collection during inference.
 
