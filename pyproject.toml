@@ -84,7 +84,7 @@ gpu = [
     "nvidia-ml-py>=12.560 ; platform_system != 'Darwin'",
 ]
 clients = [
-    "openai~=2.21.0",
+    "openai>=2.21,<2.35",
 ]
 storage = [
     "olmo-eval-internal[s3,postgres]",
