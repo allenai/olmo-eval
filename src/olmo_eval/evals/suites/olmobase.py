@@ -232,6 +232,7 @@ make_suite(
         get_suite("basic_skills:rc:olmo3base"),
         "drop:gen:olmo3base",
         "jeopardy:gen:olmo3base",
+        "naturalqs:gen:olmo3base",
         "squad:gen:olmo3base",
         "coqa:gen:olmo3base",
     ),
