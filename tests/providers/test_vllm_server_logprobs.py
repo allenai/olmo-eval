@@ -99,6 +99,20 @@ class TestVLLMServerProviderLogprobs:
         call_kwargs = client.completions.create.call_args.kwargs
         assert call_kwargs["extra_body"]["add_special_tokens"] is False
 
+    def test_describe_request_includes_chat_template_kwargs(self):
+        """Chat traces should preserve template kwargs in generation metadata."""
+        provider = self._make_provider(chat_template_kwargs={"enable_thinking": False})
+        request = LMRequest(
+            request_type=RequestType.CHAT,
+            messages=[{"role": "user", "content": "Hello"}],
+        )
+        params = SamplingParams(max_tokens=32, temperature=0.6, top_p=0.6)
+
+        trace = provider.describe_request(request, params)
+
+        assert trace is not None
+        assert trace["generation_kwargs"]["chat_template_kwargs"] == {"enable_thinking": False}
+
     @pytest.mark.anyio
     async def test_generate_completion_appends_eos_to_stop_sequences(self, provider):
         """Completion payloads should include EOS in the stop list when available."""

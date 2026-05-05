@@ -527,7 +527,7 @@ class VLLMServerProvider(InferenceProvider):
 
         trace["provider"] = "VLLMServerProvider"
         trace["endpoint"] = "/chat/completions"
-        trace["generation_kwargs"] = {
+        generation_kwargs: dict[str, Any] = {
             "max_gen_toks": params.max_tokens,
             "do_sample": params.do_sample and params.temperature > 0,
             "temperature": params.temperature,
@@ -537,11 +537,12 @@ class VLLMServerProvider(InferenceProvider):
         }
         if params.do_sample and params.temperature > 0:
             if params.top_p is not None:
-                trace["generation_kwargs"]["top_p"] = params.top_p
+                generation_kwargs["top_p"] = params.top_p
             if params.top_k is not None:
-                trace["generation_kwargs"]["top_k"] = params.top_k
+                generation_kwargs["top_k"] = params.top_k
         if self.chat_template_kwargs:
-            trace["generation_kwargs"]["chat_template_kwargs"] = dict(self.chat_template_kwargs)
+            generation_kwargs["chat_template_kwargs"] = dict(self.chat_template_kwargs)
+        trace["generation_kwargs"] = generation_kwargs
         trace["stop_sequences"] = list(params.stop_sequences or ())
         trace["input_mode"] = "messages"
         return trace
