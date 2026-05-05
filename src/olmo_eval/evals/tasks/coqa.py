@@ -5,7 +5,14 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.metrics import SQuADF1Metric
-from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams, Split
+from olmo_eval.common.types import (
+    Instance,
+    LMOutput,
+    LMRequest,
+    RequestType,
+    SamplingParams,
+    Split,
+)
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 
@@ -99,6 +106,14 @@ class CoQA(Task):
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         multi = self._process_doc_to_multi(doc)
         return multi[0] if multi else None
+
+    def extract_answer(self, output: LMOutput) -> str:
+        text = output.text or ""
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped:
+                return stripped
+        return text.strip()
 
     def format_request(self, instance: Instance) -> LMRequest:
         return LMRequest(
