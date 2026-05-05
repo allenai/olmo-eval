@@ -20,7 +20,7 @@ _resolved_images: dict[str, str] = {}
 UV_IMAGE = "ghcr.io/astral-sh/uv:0.11.7"
 
 # Version bump this when changing the Dockerfile to invalidate cached images
-SWEREX_IMAGE_VERSION = "20260429.1"
+SWEREX_IMAGE_VERSION = "20260505.1"
 
 
 def _remote_image_exists(container_runtime: str, image: str) -> bool:
@@ -178,7 +178,9 @@ def _resolve_swerex_image(
             stderr = result.stderr.decode() if result.stderr else "unknown error"
             logger.warning(f"Registry pull failed for {registry_image}: {stderr}")
 
-    # Build the image with Python (via uv venv), swe-rex, curl, and git
+    # Build the image with Python (via uv venv), swe-rex, curl, and git.
+    # Seed pip into the venv because Modal adds a small builder layer on top of
+    # registry images and expects `python -m pip` to work inside the image.
     logger.info(f"Building swerex image from {base_image}...")
 
     extra_lines = "\n".join(dockerfile_extra) if dockerfile_extra else ""
@@ -192,7 +194,7 @@ RUN apt-get update && \\
     apt-get install -y --no-install-recommends curl git ca-certificates && \\
     rm -rf /var/lib/apt/lists/*
 COPY --from={UV_IMAGE} /uv /uvx /usr/local/bin/
-RUN uv venv /root/venv --python 3.12 && \\
+RUN uv venv /root/venv --python 3.12 --seed && \\
     uv pip install --python /root/venv/bin/python --no-cache-dir swe-rex
 {extra_lines}
 ENV VIRTUAL_ENV="/root/venv"
