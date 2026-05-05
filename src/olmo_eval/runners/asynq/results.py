@@ -79,6 +79,8 @@ async def process_results(
     model_name: str,
     save_predictions: bool,
     write_predictions_fn: Any,
+    save_requests: bool,
+    write_requests_fn: Any,
 ) -> dict[str, TaskResult]:
     """Process results from workers with inline async scoring.
 
@@ -152,6 +154,9 @@ async def process_results(
                 write_predictions_fn(
                     model_name, task_result.spec, task_result.predictions, task_hash
                 )
+            if save_requests and task_result.requests:
+                task_hash = compute_task_hash(task_result.config)
+                write_requests_fn(model_name, task_result.spec, task_result.requests, task_hash)
 
     async def score_and_store(
         spec: str,
@@ -263,6 +268,7 @@ async def process_results(
             request=result_item.request,
             outputs=result_item.outputs,
             trajectory=trajectory,
+            request_trace=result_item.request_trace,
         )
 
         # Score inline as an async task

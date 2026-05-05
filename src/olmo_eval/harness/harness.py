@@ -114,7 +114,11 @@ class Harness:
         transformed = [self._apply_config(r) for r in requests]
         return self.provider.generate(transformed, sampling_params)
 
-    def logprobs(self, requests: list[LMRequest]) -> list[list[LMOutput]]:
+    def logprobs(
+        self,
+        requests: list[LMRequest],
+        sampling_params: SamplingParams | None = None,
+    ) -> list[list[LMOutput]]:
         """Log probability computation.
 
         Args:
@@ -123,7 +127,8 @@ class Harness:
         Returns:
             List of output lists with logprobs populated.
         """
-        return self.provider.logprobs(requests)
+        transformed = [self._apply_config(r) for r in requests]
+        return self.provider.logprobs(transformed, sampling_params)
 
     async def agenerate(
         self,
@@ -134,9 +139,14 @@ class Harness:
         transformed = [self._apply_config(r) for r in requests]
         return await self.provider.agenerate(transformed, sampling_params)
 
-    async def alogprobs(self, requests: list[LMRequest]) -> list[list[LMOutput]]:
+    async def alogprobs(
+        self,
+        requests: list[LMRequest],
+        sampling_params: SamplingParams | None = None,
+    ) -> list[list[LMOutput]]:
         """Async log probability computation."""
-        return await self.provider.alogprobs(requests)
+        transformed = [self._apply_config(r) for r in requests]
+        return await self.provider.alogprobs(transformed, sampling_params)
 
     # ─────────────────────────────────────────────────────────
     # Multi-turn interface (delegates to scaffold)
@@ -325,8 +335,10 @@ class Harness:
             messages=messages,
             prompt=request.prompt,
             continuations=request.continuations,
+            continuation_prompts=request.continuation_prompts,
             tools=self.config.tool_schemas if self.config.has_tools else request.tools,
             system_prompt=self.config.system_prompt or request.system_prompt,
+            max_length=request.max_length,
         )
 
     def _inject_system_prompt(

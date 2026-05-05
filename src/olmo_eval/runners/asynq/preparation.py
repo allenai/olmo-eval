@@ -11,7 +11,7 @@ from olmo_eval.common.types import Response, SamplingParams
 from olmo_eval.evals.tasks.common import Task, get_task
 from olmo_eval.runners.asynq.types import QueueItem, TaskTracker
 from olmo_eval.runners.common.types import TaskResult
-from olmo_eval.runners.io.builders import build_predictions
+from olmo_eval.runners.io.builders import build_predictions, build_requests_from_responses
 from olmo_eval.runners.processing.utils import get_metric_metadata
 
 logger = get_logger(__name__)
@@ -148,6 +148,7 @@ async def finalize_task(tracker: TaskTracker) -> TaskResult:
 
     # Build predictions
     predictions = build_predictions(scored, metrics=tracker.task.config.metrics)
+    requests = build_requests_from_responses(scored, tracker.task.config.name)
 
     # Get task config for serialization
     task_config = tracker.task.config
@@ -171,6 +172,7 @@ async def finalize_task(tracker: TaskTracker) -> TaskResult:
         metrics=metrics,
         duration_seconds=duration,
         predictions=predictions,
+        requests=requests,
         primary_metric=primary_metric,
         # Only set error if ALL instances failed (partial failures are logged as warnings)
     )
@@ -215,6 +217,7 @@ def compute_task_metrics(
 
     # Build predictions
     predictions = build_predictions(scored_responses, metrics=task.config.metrics)
+    requests = build_requests_from_responses(scored_responses, task.config.name)
 
     # Extract metric metadata
     primary_metric = get_metric_metadata(task)
@@ -240,6 +243,7 @@ def compute_task_metrics(
         metrics=metrics,
         duration_seconds=duration_seconds,
         predictions=predictions,
+        requests=requests,
         primary_metric=primary_metric,
         # Only set error if ALL instances failed (partial failures are logged as warnings)
     )

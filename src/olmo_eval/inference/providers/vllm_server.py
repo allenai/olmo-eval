@@ -474,6 +474,78 @@ class VLLMServerProvider(InferenceProvider):
         else:
             return await self._generate_chat(client, request, params)
 
+    def describe_request(
+        self,
+        request: LMRequest,
+        sampling_params: SamplingParams | None = None,
+    ) -> dict[str, Any] | None:
+        params = self._default_sampling_params(sampling_params)
+        trace = super().describe_request(request, sampling_params)
+        if trace is None:
+            return None
+
+        if request.request_type == RequestType.LOGLIKELIHOOD:
+            trace["provider"] = "VLLMServerProvider"
+            trace["endpoint"] = "/completions"
+            trace["generation_kwargs"] = {
+                "max_gen_toks": 1,
+                "do_sample": False,
+                "temperature": params.temperature,
+                "prompt_logprobs": self._prompt_logprobs,
+                "add_special_tokens": False,
+            }
+            trace["stop_sequences"] = []
+            trace["input_mode"] = "prompt_token_ids"
+            return trace
+
+        use_completions = (
+            request.request_type == RequestType.COMPLETION
+            and not request.messages
+            and request.prompt
+        )
+        if use_completions:
+            trace["provider"] = "VLLMServerProvider"
+            trace["endpoint"] = "/completions"
+            trace["generation_kwargs"] = {
+                "max_gen_toks": params.max_tokens,
+                "do_sample": params.do_sample and params.temperature > 0,
+                "temperature": params.temperature,
+                "logprobs": 1,
+                "num_samples": params.num_samples,
+                "add_special_tokens": False,
+            }
+            if params.do_sample and params.temperature > 0:
+                if params.top_p is not None:
+                    trace["generation_kwargs"]["top_p"] = params.top_p
+                if params.top_k is not None:
+                    trace["generation_kwargs"]["top_k"] = params.top_k
+            trace["stop_sequences"] = self._get_completion_stop_sequences(params) or []
+            trace["input_mode"] = (
+                "prompt_token_ids" if self._completion_use_prompt_token_ids else "text"
+            )
+            return trace
+
+        trace["provider"] = "VLLMServerProvider"
+        trace["endpoint"] = "/chat/completions"
+        trace["generation_kwargs"] = {
+            "max_gen_toks": params.max_tokens,
+            "do_sample": params.do_sample and params.temperature > 0,
+            "temperature": params.temperature,
+            "logprobs": True,
+            "top_logprobs": 1,
+            "num_samples": params.num_samples,
+        }
+        if params.do_sample and params.temperature > 0:
+            if params.top_p is not None:
+                trace["generation_kwargs"]["top_p"] = params.top_p
+            if params.top_k is not None:
+                trace["generation_kwargs"]["top_k"] = params.top_k
+        if self.chat_template_kwargs:
+            trace["generation_kwargs"]["chat_template_kwargs"] = dict(self.chat_template_kwargs)
+        trace["stop_sequences"] = list(params.stop_sequences or ())
+        trace["input_mode"] = "messages"
+        return trace
+
     def _get_completion_eos_stop(self) -> str | None:
         """Best-effort EOS stop string for completion parity with oe-eval."""
         try:
@@ -810,7 +882,11 @@ class VLLMServerProvider(InferenceProvider):
         """
         return run_async(self.agenerate(requests, sampling_params))
 
-    async def _logprobs_single_impl(self, request: LMRequest) -> list[LMOutput]:
+    async def _logprobs_single_impl(
+        self,
+        request: LMRequest,
+        params: SamplingParams | None = None,
+    ) -> list[LMOutput]:
         """Compute logprobs for continuations using raw prompt_logprobs.
 
         Uses vLLM's prompt_logprobs feature with integer token ID keys
@@ -828,6 +904,7 @@ class VLLMServerProvider(InferenceProvider):
             tokenizer = self._get_tokenizer(require_local=False)
         if self._add_bos_token is not None:
             tokenizer = _TokenizerBosOverride(tokenizer, self._add_bos_token)
+        params = self._default_sampling_params(params)
 
         # Get the context/prompt text
         context = request.prompt
@@ -876,7 +953,7 @@ class VLLMServerProvider(InferenceProvider):
                     "model": self.model_name,
                     "prompt": full_tokens,
                     "max_tokens": 1,
-                    "temperature": 0.0,
+                    "temperature": params.temperature,
                     "prompt_logprobs": self._prompt_logprobs,
                     "add_special_tokens": False,
                 },
@@ -957,11 +1034,19 @@ class VLLMServerProvider(InferenceProvider):
 
         return outputs
 
-    async def _logprobs_single_async(self, request: LMRequest) -> list[LMOutput]:
+    async def _logprobs_single_async(
+        self,
+        request: LMRequest,
+        params: SamplingParams | None = None,
+    ) -> list[LMOutput]:
         """Compute logprobs for a single request."""
-        return await self._logprobs_single_impl(request)
+        return await self._logprobs_single_impl(request, params)
 
-    async def alogprobs(self, requests: list[LMRequest]) -> list[list[LMOutput]]:
+    async def alogprobs(
+        self,
+        requests: list[LMRequest],
+        sampling_params: SamplingParams | None = None,
+    ) -> list[list[LMOutput]]:
         """Async compute logprobs for continuations.
 
         Args:
@@ -972,9 +1057,10 @@ class VLLMServerProvider(InferenceProvider):
         """
         from olmo_eval.inference.dispatch import dispatch_concurrent
 
+        params = self._default_sampling_params(sampling_params)
         results = await dispatch_concurrent(
             requests,
-            self._logprobs_single_async,
+            lambda request: self._logprobs_single_async(request, params),
             max_in_flight=self.max_concurrency,
             max_retries=self.max_retries,
         )
@@ -984,7 +1070,7 @@ class VLLMServerProvider(InferenceProvider):
         if failed_count > 0:
             # Try to get the actual error by running one request directly
             try:
-                await self._logprobs_single_async(requests[0])
+                await self._logprobs_single_async(requests[0], params)
             except Exception as e:
                 logger.error(
                     f"alogprobs: {failed_count}/{len(requests)} requests failed. First error: {e!r}"
@@ -993,7 +1079,11 @@ class VLLMServerProvider(InferenceProvider):
         # Replace None with empty list for failed requests
         return [r if r is not None else [] for r in results]
 
-    def logprobs(self, requests: list[LMRequest]) -> list[list[LMOutput]]:
+    def logprobs(
+        self,
+        requests: list[LMRequest],
+        sampling_params: SamplingParams | None = None,
+    ) -> list[list[LMOutput]]:
         """Compute logprobs for continuations.
 
         Args:
@@ -1002,4 +1092,4 @@ class VLLMServerProvider(InferenceProvider):
         Returns:
             List of output lists with logprobs populated.
         """
-        return run_async(self.alogprobs(requests))
+        return run_async(self.alogprobs(requests, sampling_params))

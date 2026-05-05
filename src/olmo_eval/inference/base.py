@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
-from olmo_eval.common.types import LMOutput, LMRequest, SamplingParams
+from olmo_eval.common.types import LMOutput, LMRequest, RequestType, SamplingParams
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -51,11 +51,13 @@ class InferenceProvider(ABC):
     def logprobs(
         self,
         requests: list[LMRequest],
+        sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
         """Compute log probabilities for continuations.
 
         Args:
             requests: Batch of requests with continuations to score.
+            sampling_params: Optional sampling configuration used for scoring requests.
 
         Returns:
             List of output lists. Each inner list has one LMOutput per
@@ -85,11 +87,13 @@ class InferenceProvider(ABC):
     async def alogprobs(
         self,
         requests: list[LMRequest],
+        sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
         """Async version of logprobs.
 
         Args:
             requests: Batch of requests with continuations to score.
+            sampling_params: Optional sampling configuration used for scoring requests.
 
         Returns:
             List of output lists with logprobs populated.
@@ -98,6 +102,49 @@ class InferenceProvider(ABC):
             NotImplementedError: If provider doesn't support async logprobs.
         """
         raise NotImplementedError(f"{type(self).__name__} does not support async logprobs")
+
+    def describe_request(
+        self,
+        request: LMRequest,
+        sampling_params: SamplingParams | None = None,
+    ) -> dict[str, Any] | None:
+        """Describe the effective request parameters sent to the provider.
+
+        This trace is persisted into ``requests.jsonl`` so downstream overrides
+        applied by the provider can be replayed later.
+        """
+        params = self._default_sampling_params(sampling_params)
+        trace: dict[str, Any] = {
+            "provider": type(self).__name__,
+            "generation_kwargs": {},
+            "stop_sequences": [],
+        }
+
+        if request.request_type == RequestType.LOGLIKELIHOOD:
+            trace["mode"] = "logprobs"
+            trace["generation_kwargs"] = {
+                "temperature": params.temperature,
+            }
+            return trace
+
+        trace["mode"] = "generate"
+        generation_kwargs: dict[str, Any] = {
+            "max_gen_toks": params.max_tokens,
+            "do_sample": params.do_sample and params.temperature > 0,
+            "temperature": params.temperature,
+        }
+        if params.top_p is not None:
+            generation_kwargs["top_p"] = params.top_p
+        if params.top_k is not None:
+            generation_kwargs["top_k"] = params.top_k
+        if params.num_samples != 1:
+            generation_kwargs["num_samples"] = params.num_samples
+        if params.logprobs is not None:
+            generation_kwargs["logprobs"] = params.logprobs
+
+        trace["generation_kwargs"] = generation_kwargs
+        trace["stop_sequences"] = list(params.stop_sequences or ())
+        return trace
 
     def _default_sampling_params(self, sampling_params: SamplingParams | None) -> SamplingParams:
         """Return sampling params with defaults applied."""

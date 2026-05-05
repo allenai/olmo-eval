@@ -23,16 +23,13 @@ from olmo_eval.runners.asynq.monitoring import (
     wait_for_init_times,
     wait_for_workers_ready,
 )
-from olmo_eval.runners.asynq.preparation import (
-    build_requests_from_items,
-    prepare_task_items,
-)
+from olmo_eval.runners.asynq.preparation import prepare_task_items
 from olmo_eval.runners.asynq.results import aggregate_results, process_results
 from olmo_eval.runners.asynq.types import QueueItem, TaskTracker
 from olmo_eval.runners.common.base import BaseEvalRunner
 from olmo_eval.runners.common.mixins import RunnerResultsMixin
 from olmo_eval.runners.common.models import S3Config
-from olmo_eval.runners.processing.utils import compute_task_hash, generate_experiment_id
+from olmo_eval.runners.processing.utils import generate_experiment_id
 from olmo_eval.storage import StorageBackend
 
 if TYPE_CHECKING:
@@ -757,10 +754,6 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         for spec in expanded_tasks:
             tracker, task_items = prepared_results[spec]
             items.extend(task_items)
-            if not tracker.error and self.save_requests and task_items and tracker.task:
-                request_objects = build_requests_from_items(task_items, tracker.task.config.name)
-                task_hash = compute_task_hash(tracker.task.config.to_dict())
-                self._write_requests(self.model_name, spec, request_objects, task_hash)
 
         # Print task preparation summary table
         table = Table(title="Tasks")
@@ -891,6 +884,8 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             model_name=self.model_name,
             save_predictions=self.save_predictions,
             write_predictions_fn=self._write_predictions,
+            save_requests=self.save_requests,
+            write_requests_fn=self._write_requests,
         )
 
     def _aggregate_results(

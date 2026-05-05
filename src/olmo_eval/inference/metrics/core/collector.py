@@ -185,22 +185,30 @@ class InstrumentedProvider:
         self._collect_metrics(requests, outputs, t.elapsed_s)
         return outputs
 
-    def logprobs(self, requests: list[LMRequest]) -> list[list[LMOutput]]:
+    def logprobs(
+        self,
+        requests: list[LMRequest],
+        sampling_params: SamplingParams | None = None,
+    ) -> list[list[LMOutput]]:
         """Log probability computation with timing instrumentation."""
         self._start_gpu_monitor_if_needed()
 
         with Timer() as t:
-            outputs = self._provider.logprobs(requests)
+            outputs = self._provider.logprobs(requests, sampling_params)
 
         self._collect_metrics(requests, outputs, t.elapsed_s)
         return outputs
 
-    async def alogprobs(self, requests: list[LMRequest]) -> list[list[LMOutput]]:
+    async def alogprobs(
+        self,
+        requests: list[LMRequest],
+        sampling_params: SamplingParams | None = None,
+    ) -> list[list[LMOutput]]:
         """Async log probability computation with timing instrumentation."""
         self._start_gpu_monitor_if_needed()
 
         with Timer() as t:
-            outputs = await self._provider.alogprobs(requests)
+            outputs = await self._provider.alogprobs(requests, sampling_params)
 
         self._collect_metrics(requests, outputs, t.elapsed_s)
         return outputs
@@ -387,6 +395,24 @@ class InstrumentedHarness:
         """Async generate with timing instrumentation."""
         transformed = [self._harness._apply_config(r) for r in requests]
         return await self._provider.agenerate(transformed, sampling_params)
+
+    def logprobs(
+        self,
+        requests: list[LMRequest],
+        sampling_params: SamplingParams | None = None,
+    ) -> list[list[LMOutput]]:
+        """Logprobs with timing instrumentation."""
+        transformed = [self._harness._apply_config(r) for r in requests]
+        return self._provider.logprobs(transformed, sampling_params)
+
+    async def alogprobs(
+        self,
+        requests: list[LMRequest],
+        sampling_params: SamplingParams | None = None,
+    ) -> list[list[LMOutput]]:
+        """Async logprobs with timing instrumentation."""
+        transformed = [self._harness._apply_config(r) for r in requests]
+        return await self._provider.alogprobs(transformed, sampling_params)
 
     def get_metrics(self) -> list[RequestMetrics]:
         """Get collected metrics."""

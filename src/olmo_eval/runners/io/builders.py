@@ -8,7 +8,7 @@ from typing import Any
 
 from olmo_eval.common.metrics import Metric
 from olmo_eval.common.metrics.predictions import augment_prediction_instance_metrics
-from olmo_eval.common.types import SamplingParams
+from olmo_eval.common.types import Response, SamplingParams
 
 
 def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> list[dict]:
@@ -232,6 +232,104 @@ def build_requests(
                 "doc": doc,
                 "request": request_dict,
                 "idx": 0,  # For multi-sample, this would vary
+                "task_name": task_name,
+                "doc_id": idx,
+                "native_id": instance.metadata.get("id", f"doc_{idx}"),
+                "label": label,
+            }
+        )
+
+    return request_list
+
+
+def build_requests_from_responses(
+    responses: Sequence[Response],
+    task_name: str,
+) -> list[dict]:
+    """Build request objects from executed responses.
+
+    Unlike ``build_requests()``, this uses the transformed request that actually
+    reached the provider, plus the provider-authored request trace captured at
+    execution time. That makes the saved requests JSONL a replayable source of
+    truth rather than a prep-time approximation.
+    """
+    from olmo_eval.common.types import RequestType
+
+    request_list = []
+
+    for idx, response in enumerate(responses):
+        instance = response.instance
+        request = response.request
+
+        doc: dict[str, Any] = {
+            "query": instance.question,
+            **instance.metadata,
+        }
+
+        if instance.choices:
+            doc["choices"] = list(instance.choices)
+        elif request.continuations:
+            doc["choices"] = list(request.continuations)
+
+        request_dict: dict[str, Any] = {}
+        if request.request_type == RequestType.LOGLIKELIHOOD:
+            request_dict["context"] = request.prompt
+            request_dict["perplexity_context"] = request.prompt
+            if request.continuations:
+                request_dict["continuation"] = request.continuations[0]
+                request_dict["continuations"] = list(request.continuations)
+        elif request.request_type == RequestType.COMPLETION:
+            request_dict["context"] = request.prompt
+            if request.continuations:
+                request_dict["continuation"] = request.continuations[0]
+                request_dict["continuations"] = list(request.continuations)
+        elif request.request_type == RequestType.CHAT:
+            request_dict["context"] = list(request.messages)
+
+        if request.continuation_prompts:
+            request_dict["continuation_prompts"] = list(request.continuation_prompts)
+        if request.system_prompt is not None:
+            request_dict["system_prompt"] = request.system_prompt
+        if request.max_length is not None:
+            request_dict["max_length"] = request.max_length
+        if request.tools:
+            request_dict["tools"] = [tool.to_openai() for tool in request.tools]
+
+        request_trace = response.request_trace or {}
+        if request_trace:
+            request_dict["provider_request"] = request_trace
+
+        generation_kwargs = request_trace.get("generation_kwargs")
+        if generation_kwargs:
+            request_dict["generation_kwargs"] = dict(generation_kwargs)
+        else:
+            request_dict["generation_kwargs"] = {}
+
+        stop_sequences = request_trace.get("stop_sequences")
+        request_dict["stop_sequences"] = list(stop_sequences or [])
+
+        if request.request_type == RequestType.LOGLIKELIHOOD:
+            request_type_str = "loglikelihood"
+        elif request.request_type == RequestType.COMPLETION:
+            if request.continuations:
+                request_type_str = "generate_until_and_loglikelihood"
+            else:
+                request_type_str = "generate_until"
+        elif request.request_type == RequestType.CHAT:
+            request_type_str = "generate_until"
+        else:
+            request_type_str = "unknown"
+
+        label = instance.metadata.get("gold_idx")
+        if label is None and instance.gold_answer is not None:
+            label = instance.gold_answer
+
+        request_list.append(
+            {
+                "request_type": request_type_str,
+                "doc": doc,
+                "request": request_dict,
+                "idx": 0,
                 "task_name": task_name,
                 "doc_id": idx,
                 "native_id": instance.metadata.get("id", f"doc_{idx}"),

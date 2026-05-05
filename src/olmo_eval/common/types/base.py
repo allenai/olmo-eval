@@ -277,6 +277,7 @@ class Response:
     outputs: list[LMOutput] = field(default_factory=list)
     scores: dict[str, float] = field(default_factory=dict)
     trajectory: AgentTrajectory | None = None
+    request_trace: dict[str, Any] | None = None
 
 
 @dataclass

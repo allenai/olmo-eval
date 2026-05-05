@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, Response, SamplingParams
 
@@ -88,6 +88,7 @@ class ResultItem:
     outputs: list[LMOutput]
     error: str | None = None
     attempt: int = 0
+    request_trace: dict[str, Any] | None = None
 
 
 __all__ = [

@@ -213,6 +213,41 @@ class TestVLLMServerProviderLogprobs:
             assert output.metadata["num_tokens"] == 1
 
     @pytest.mark.anyio
+    async def test_logprobs_threads_sampling_temperature(self, provider):
+        """Logprob requests should honor the threaded sampling temperature."""
+        with patch(
+            "olmo_eval.inference.providers.vllm_server.encode_context_and_continuation"
+        ) as mock_encode:
+            mock_encode.return_value = ([0, 1], [2])
+
+            prompt_logprobs = [
+                None,
+                {"1": {"logprob": -0.2, "decoded_token": "ctx"}},
+                {"2": {"logprob": -0.1, "decoded_token": "choice"}},
+            ]
+
+            mock_http = AsyncMock()
+            mock_http.post.return_value = self._make_vllm_response(prompt_logprobs)
+            provider._get_raw_http_client = MagicMock(return_value=mock_http)
+
+            request = LMRequest(
+                request_type=RequestType.LOGLIKELIHOOD,
+                prompt="Prompt",
+                continuations=(" choice",),
+            )
+            params = SamplingParams(temperature=1.0)
+
+            await provider._logprobs_single_impl(request, params)
+
+            payload = mock_http.post.call_args.kwargs["json"]
+            assert payload["temperature"] == 1.0
+
+            trace = provider.describe_request(request, params)
+            assert trace is not None
+            assert trace["generation_kwargs"]["temperature"] == 1.0
+            assert trace["generation_kwargs"]["max_gen_toks"] == 1
+
+    @pytest.mark.anyio
     async def test_logprobs_multiple_continuations(self, provider, mock_tokenizer):
         """Test logprobs computation for multiple continuations."""
         call_count = [0]

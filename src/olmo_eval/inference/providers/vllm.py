@@ -8,7 +8,7 @@ import os
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.debug import is_debug_provider, is_debug_requests
-from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
+from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 
@@ -273,16 +273,59 @@ class VLLMProvider(InferenceProvider):
 
         return results
 
+    def describe_request(
+        self,
+        request: LMRequest,
+        sampling_params: SamplingParams | None = None,
+    ) -> dict[str, Any] | None:
+        params = self._default_sampling_params(sampling_params)
+        trace = super().describe_request(request, sampling_params)
+        if trace is None:
+            return None
+
+        if request.request_type == RequestType.LOGLIKELIHOOD:
+            trace["provider"] = "VLLMProvider"
+            trace["endpoint"] = "llm.generate"
+            trace["generation_kwargs"] = {
+                "max_gen_toks": 1,
+                "do_sample": False,
+                "temperature": params.temperature,
+                "prompt_logprobs": 1,
+            }
+            trace["stop_sequences"] = []
+            trace["input_mode"] = "prompt_token_ids"
+            return trace
+
+        vllm_params = self._build_sampling_params(params)
+        trace["provider"] = "VLLMProvider"
+        trace["endpoint"] = "llm.generate"
+        trace["generation_kwargs"] = {
+            "max_gen_toks": vllm_params.max_tokens,
+            "do_sample": params.do_sample and params.temperature > 0,
+            "temperature": getattr(vllm_params, "temperature", params.temperature),
+            "logprobs": getattr(vllm_params, "logprobs", None),
+            "num_samples": vllm_params.n,
+        }
+        if getattr(vllm_params, "top_p", None) is not None:
+            trace["generation_kwargs"]["top_p"] = vllm_params.top_p
+        if getattr(vllm_params, "top_k", None) is not None:
+            trace["generation_kwargs"]["top_k"] = vllm_params.top_k
+        trace["stop_sequences"] = list(params.stop_sequences or ())
+        trace["input_mode"] = "prompt_token_ids" if self._add_bos_token is False else "text"
+        return trace
+
     def logprobs(
         self,
         requests: list[LMRequest],
+        sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
         from vllm import SamplingParams as VLLMSamplingParams
 
+        params = self._default_sampling_params(sampling_params)
         vllm_params = VLLMSamplingParams(
             prompt_logprobs=1,
             max_tokens=1,
-            temperature=0.0,
+            temperature=params.temperature,
         )
 
         tokenizer = self.llm.get_tokenizer()
@@ -422,6 +465,7 @@ class VLLMProvider(InferenceProvider):
     async def alogprobs(
         self,
         requests: list[LMRequest],
+        sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
         """Async compute logprobs for continuations.
 
@@ -433,4 +477,4 @@ class VLLMProvider(InferenceProvider):
         Returns:
             List of output lists with logprobs populated.
         """
-        return await asyncio.to_thread(self.logprobs, requests)
+        return await asyncio.to_thread(self.logprobs, requests, sampling_params)

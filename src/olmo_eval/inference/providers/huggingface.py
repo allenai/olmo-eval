@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any
 
-from olmo_eval.common.types import LMOutput, LMRequest, SamplingParams
+from olmo_eval.common.types import LMOutput, LMRequest, RequestType, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 
@@ -173,9 +173,30 @@ class HuggingFaceProvider(InferenceProvider):
 
         return results
 
+    def describe_request(
+        self,
+        request: LMRequest,
+        sampling_params: SamplingParams | None = None,
+    ) -> dict[str, Any] | None:
+        params = self._default_sampling_params(sampling_params)
+        trace = super().describe_request(request, sampling_params)
+        if trace is None:
+            return None
+
+        if request.request_type != RequestType.LOGLIKELIHOOD:
+            trace["provider"] = "HuggingFaceProvider"
+            trace["endpoint"] = "transformers.generate"
+            trace["generation_kwargs"] = {
+                "max_gen_toks": params.max_tokens,
+                **self._build_generate_kwargs(params),
+            }
+            trace["stop_sequences"] = list(params.stop_sequences or ())
+        return trace
+
     def logprobs(
         self,
         requests: list[LMRequest],
+        sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
         import torch
 
@@ -247,6 +268,7 @@ class HuggingFaceProvider(InferenceProvider):
     async def alogprobs(
         self,
         requests: list[LMRequest],
+        sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
         """Async compute logprobs for continuations.
 
@@ -258,4 +280,4 @@ class HuggingFaceProvider(InferenceProvider):
         Returns:
             List of output lists with logprobs populated.
         """
-        return await asyncio.to_thread(self.logprobs, requests)
+        return await asyncio.to_thread(self.logprobs, requests, sampling_params)

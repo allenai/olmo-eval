@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.debug import is_debug_provider
 from olmo_eval.common.logging import get_logger
-from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, SamplingParams
+from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.retry import retry_with_backoff
 from olmo_eval.inference.utils import run_async
@@ -171,6 +171,44 @@ class LiteLLMProvider(InferenceProvider):
 
         return outputs
 
+    def describe_request(
+        self,
+        request: LMRequest,
+        sampling_params: SamplingParams | None = None,
+    ) -> dict[str, Any] | None:
+        params = self._default_sampling_params(sampling_params)
+        trace = super().describe_request(request, sampling_params)
+        if trace is None:
+            return None
+
+        if request.request_type == RequestType.LOGLIKELIHOOD:
+            trace["provider"] = "LiteLLMProvider"
+            trace["endpoint"] = "litellm.acompletion"
+            trace["generation_kwargs"] = {
+                "max_gen_toks": 50,
+                "do_sample": False,
+                "temperature": params.temperature,
+                "logprobs": True,
+                "top_logprobs": 1,
+            }
+            trace["stop_sequences"] = []
+            return trace
+
+        trace["provider"] = "LiteLLMProvider"
+        trace["endpoint"] = "litellm.acompletion"
+        trace["generation_kwargs"] = {
+            "max_gen_toks": params.max_tokens,
+            "do_sample": params.do_sample and params.temperature > 0,
+            "temperature": params.temperature,
+            "logprobs": True,
+            "top_logprobs": 1,
+            "num_samples": params.num_samples,
+        }
+        if params.top_p is not None:
+            trace["generation_kwargs"]["top_p"] = params.top_p
+        trace["stop_sequences"] = list(params.stop_sequences or ())[:_MAX_STOP_SEQUENCES]
+        return trace
+
     async def _generate_single_async(
         self, request: LMRequest, params: SamplingParams
     ) -> list[LMOutput]:
@@ -245,8 +283,13 @@ class LiteLLMProvider(InferenceProvider):
         """
         return run_async(self.agenerate(requests, sampling_params))
 
-    async def _logprobs_single_impl(self, request: LMRequest) -> list[LMOutput]:
+    async def _logprobs_single_impl(
+        self,
+        request: LMRequest,
+        params: SamplingParams | None = None,
+    ) -> list[LMOutput]:
         """Compute logprobs for a single request."""
+        params = self._default_sampling_params(params)
         if request.messages:
             default_content = request.messages[0].get("content", "") if request.messages else ""
         else:
@@ -262,7 +305,7 @@ class LiteLLMProvider(InferenceProvider):
                 model=self.model_name,
                 messages=[{"role": "user", "content": content}],
                 max_completion_tokens=50,
-                temperature=0.0,
+                temperature=params.temperature,
                 logprobs=True,
                 top_logprobs=1,  # NOTE: workaround for litellm proxy issue https://github.com/BerriAI/litellm/issues/21932
                 **self.api_kwargs,
@@ -293,10 +336,14 @@ class LiteLLMProvider(InferenceProvider):
 
         return outputs
 
-    async def _logprobs_single_async(self, request: LMRequest) -> list[LMOutput]:
+    async def _logprobs_single_async(
+        self,
+        request: LMRequest,
+        params: SamplingParams | None = None,
+    ) -> list[LMOutput]:
         """Compute logprobs for a single request."""
         return await retry_with_backoff(
-            lambda: self._logprobs_single_impl(request),
+            lambda: self._logprobs_single_impl(request, params),
             max_retries=self.max_retries,
             retry_delay=self.retry_delay,
             context=f"logprobs model={self.model_name}",
@@ -306,6 +353,7 @@ class LiteLLMProvider(InferenceProvider):
     async def alogprobs(
         self,
         requests: list[LMRequest],
+        sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
         """Async compute logprobs for continuations.
 
@@ -327,6 +375,7 @@ class LiteLLMProvider(InferenceProvider):
             f" with max_concurrency {self.max_concurrency}"
         )
 
+        params = self._default_sampling_params(sampling_params)
         progress = ProgressLogger(total=len(requests), desc="Logprobs", logger=logger)
 
         def on_progress(done: int, total: int) -> None:
@@ -334,7 +383,7 @@ class LiteLLMProvider(InferenceProvider):
 
         results = await dispatch_concurrent(
             requests,
-            self._logprobs_single_async,
+            lambda request: self._logprobs_single_async(request, params),
             max_in_flight=self.max_concurrency,
             max_retries=self.max_retries,
             on_progress=on_progress,
@@ -345,6 +394,7 @@ class LiteLLMProvider(InferenceProvider):
     def logprobs(
         self,
         requests: list[LMRequest],
+        sampling_params: SamplingParams | None = None,
     ) -> list[list[LMOutput]]:
         """Compute logprobs for continuations (sync wrapper).
 
@@ -360,4 +410,4 @@ class LiteLLMProvider(InferenceProvider):
         Returns:
             List of output lists with logprobs populated.
         """
-        return run_async(self.alogprobs(requests))
+        return run_async(self.alogprobs(requests, sampling_params))

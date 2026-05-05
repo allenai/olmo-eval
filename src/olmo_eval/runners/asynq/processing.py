@@ -96,6 +96,8 @@ async def process_chat_request(
         "instance_idx": item.instance_idx,
         "instance_id": item.instance.metadata.get("id", str(item.instance_idx)),
     }
+    prepared_request = harness._apply_config(item.request)
+    request_trace = harness.provider.describe_request(prepared_request, item.sampling_params)
 
     try:
         harness_result = await harness.run(
@@ -123,7 +125,8 @@ async def process_chat_request(
                 task_id=item.task_id,
                 instance_idx=item.instance_idx,
                 instance=item.instance,
-                request=item.request,
+                request=prepared_request,
+                request_trace=request_trace,
                 outputs=[output_with_metadata],
                 error=harness_result.error,
                 attempt=item.attempt,
@@ -143,7 +146,8 @@ async def process_chat_request(
                 task_id=item.task_id,
                 instance_idx=item.instance_idx,
                 instance=item.instance,
-                request=item.request,
+                request=prepared_request,
+                request_trace=request_trace,
                 outputs=[],
                 error=error_detail,
                 attempt=item.attempt,
@@ -160,7 +164,8 @@ async def process_batch(
     """Process a batch of COMPLETION or LOGLIKELIHOOD requests.
 
     All items must have the same request_type and sampling_params.
-    Calls harness.agenerate or harness.alogprobs once for the entire batch.
+    Calls the underlying provider once for the entire batch using the harness-
+    transformed requests.
 
     Args:
         items: List of queue items to process (same type and sampling_params).
@@ -178,22 +183,29 @@ async def process_batch(
     request_type = items[0].request.request_type
     sampling_params = items[0].sampling_params
     requests = [item.request for item in items]
+    prepared_requests = [harness._apply_config(request) for request in requests]
+    request_traces = [
+        harness.provider.describe_request(request, sampling_params) for request in prepared_requests
+    ]
 
     try:
         if request_type == RequestType.LOGLIKELIHOOD:
-            all_outputs = await harness.alogprobs(requests)
+            all_outputs = await harness.provider.alogprobs(prepared_requests, sampling_params)
         else:
-            all_outputs = await harness.agenerate(requests, sampling_params)
+            all_outputs = await harness.provider.agenerate(prepared_requests, sampling_params)
 
         # Map outputs back to individual items
-        for item, outputs in zip(items, all_outputs, strict=True):
+        for item, prepared_request, request_trace, outputs in zip(
+            items, prepared_requests, request_traces, all_outputs, strict=True
+        ):
             result_queue.put(
                 ResultItem(
                     model_name=item.model_name,
                     task_id=item.task_id,
                     instance_idx=item.instance_idx,
                     instance=item.instance,
-                    request=item.request,
+                    request=prepared_request,
+                    request_trace=request_trace,
                     outputs=outputs,
                     error=None,
                     attempt=item.attempt,
@@ -209,14 +221,17 @@ async def process_batch(
         error_detail = _format_error_detail(e)
         log.error(f"Batch error ({len(items)} items): {error_detail}")
 
-        for item in items:
+        for item, prepared_request, request_trace in zip(
+            items, prepared_requests, request_traces, strict=True
+        ):
             result_queue.put(
                 ResultItem(
                     model_name=item.model_name,
                     task_id=item.task_id,
                     instance_idx=item.instance_idx,
                     instance=item.instance,
-                    request=item.request,
+                    request=prepared_request,
+                    request_trace=request_trace,
                     outputs=[],
                     error=error_detail,
                     attempt=item.attempt,
