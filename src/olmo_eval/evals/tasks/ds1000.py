@@ -83,18 +83,11 @@ class DS1000(Task):
     sandbox_allocation_weight = 6.6
     sandbox_env = SandboxEnv(
         "ds1000",
-        (
-            "numpy==1.26.4",
-            "pandas==1.5.3",
-            "matplotlib==3.8.4",
-            "scipy==1.12.0",
-            "scikit-learn==1.4.0",
-            "seaborn==0.13.2",
-            "statsmodels==0.14.1",
-            "xgboost==2.0.3",
-            "gensim==4.3.2",
-        ),
         dockerfile_extra=(
+            # DS-1000 executes inside the legacy Python 3.10 runtime configured
+            # below. Keep these packages out of the default swe-rex Python 3.12
+            # venv; pandas 1.5.3 is only needed in the 3.10 environment and
+            # fails while building against 3.12.
             # Install Python 3.10 to match old oe-eval-internal Lambda environment.
             # swe-rex runs on Python 3.11 (/root/python/bin); test code runs on 3.10.
             f"ADD {_PY310_URL} /tmp/python310.tar.gz",
