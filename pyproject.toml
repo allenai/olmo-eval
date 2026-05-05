@@ -53,7 +53,7 @@ litellm = [
     "litellm~=1.80.11",
 ]
 agents = [
-    "openai-agents~=0.7.0",
+    "openai-agents>=0.7,<0.16",
     "httpx~=0.28.1",
 ]
 analysis = [
