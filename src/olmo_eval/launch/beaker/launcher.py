@@ -549,7 +549,7 @@ def build_install_command(
     Args:
         package: Package specifier with optional install flags.
         constraints: Optional constraints file path.
-        venv_path: Optional virtualenv path to target via VIRTUAL_ENV.
+        venv_path: Optional virtualenv path to target via `uv pip --python`.
 
     Returns:
         Complete uv pip install command string.
@@ -558,15 +558,14 @@ def build_install_command(
     normalized = normalize_provider_package(pkg_spec)
 
     cmd_parts = ["uv", "pip", "install"]
+    if venv_path:
+        cmd_parts.extend(["--python", f"{venv_path}/bin/python"])
     cmd_parts.extend(flags)
     cmd_parts.append(f"'{normalized}'")
     if constraints:
         cmd_parts.extend(["-c", constraints])
 
-    command = " ".join(cmd_parts)
-    if venv_path:
-        return f"VIRTUAL_ENV={venv_path} {command}"
-    return command
+    return " ".join(cmd_parts)
 
 
 def _parse_timeout(timeout: str) -> int:
@@ -726,7 +725,8 @@ class BeakerLauncher:
             # into the same isolated environment.
             if has_vllm:
                 steps.append(
-                    f"cd /gantry-runtime && VIRTUAL_ENV={vllm_venv} uv pip install "
+                    f"cd /gantry-runtime && uv pip install "
+                    f"--python {vllm_venv}/bin/python "
                     f"--cache-dir \"$UV_CACHE_DIR\" -e '.[vllm]'"
                 )
             # Set VLLM_PYTHON so VLLMServerProcess uses the isolated venv

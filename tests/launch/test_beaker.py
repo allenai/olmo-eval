@@ -587,7 +587,7 @@ class TestBuildCommandWithTaskPackages:
         )
 
         assert (
-            "VIRTUAL_ENV=/opt/vllm-venv uv pip install "
+            "uv pip install --python /opt/vllm-venv/bin/python "
             "'git+https://github.com/user/repo@v1.0' -c /tmp/cuda-constraints.txt"
         ) in install_cmd
 
@@ -605,12 +605,13 @@ class TestBuildCommandWithTaskPackages:
         )
 
         assert (
-            "VIRTUAL_ENV=/opt/vllm-venv uv pip install "
+            "uv pip install --python /opt/vllm-venv/bin/python "
             "'provider-dep==1.0' -c /tmp/cuda-constraints.txt"
         ) in install_cmd
         assert "uv pip install 'task-dep==1.0' -c /tmp/cuda-constraints.txt" in install_cmd
         assert (
-            "VIRTUAL_ENV=/opt/vllm-venv uv pip install 'task-dep==1.0' -c /tmp/cuda-constraints.txt"
+            "uv pip install --python /opt/vllm-venv/bin/python "
+            "'task-dep==1.0' -c /tmp/cuda-constraints.txt"
         ) not in install_cmd
 
     def test_provider_packages_can_enable_isolated_vllm_venv_without_vllm_extra(self):
@@ -628,11 +629,12 @@ class TestBuildCommandWithTaskPackages:
         assert "uv venv /opt/vllm-venv" in install_cmd
         assert "export VLLM_PYTHON=/opt/vllm-venv/bin/python" in install_cmd
         assert (
-            "cd /gantry-runtime && VIRTUAL_ENV=/opt/vllm-venv uv pip install "
+            "cd /gantry-runtime && uv pip install "
+            "--python /opt/vllm-venv/bin/python "
             "--cache-dir \"$UV_CACHE_DIR\" -e '.[vllm]'"
         ) not in install_cmd
         assert (
-            "VIRTUAL_ENV=/opt/vllm-venv uv pip install "
+            "uv pip install --python /opt/vllm-venv/bin/python "
             "'git+https://github.com/user/vllm@custom' -c /tmp/cuda-constraints.txt"
         ) in install_cmd
 
@@ -756,10 +758,10 @@ class TestBuildInstallCommand:
         assert cmd == "uv pip install 'vllm==0.14.0'"
 
     def test_virtualenv_target(self):
-        """Test targeting a specific virtualenv via VIRTUAL_ENV."""
+        """Test targeting a specific virtualenv via --python."""
         cmd = build_install_command("vllm==0.14.0", "/tmp/constraints.txt", "/opt/vllm-venv")
         assert (
-            cmd == "VIRTUAL_ENV=/opt/vllm-venv uv pip install 'vllm==0.14.0' "
+            cmd == "uv pip install --python /opt/vllm-venv/bin/python 'vllm==0.14.0' "
             "-c /tmp/constraints.txt"
         )
 
