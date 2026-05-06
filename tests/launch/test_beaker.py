@@ -588,7 +588,7 @@ class TestBuildCommandWithTaskPackages:
 
         assert (
             "uv pip install --python /opt/vllm-venv/bin/python "
-            "--refresh-package repo --reinstall-package repo "
+            "--refresh --refresh-package repo --reinstall-package repo "
             "'git+https://github.com/user/repo@v1.0' -c /tmp/cuda-constraints.txt"
         ) in install_cmd
         assert "[isolated-vllm-check] stage=after-vllm-extra" in install_cmd
@@ -641,7 +641,7 @@ class TestBuildCommandWithTaskPackages:
         ) not in install_cmd
         assert (
             "uv pip install --python /opt/vllm-venv/bin/python "
-            "--refresh-package vllm --reinstall-package vllm "
+            "--refresh --refresh-package vllm --reinstall-package vllm "
             "'git+https://github.com/user/vllm@custom' -c /tmp/cuda-constraints.txt"
         ) in install_cmd
         assert "[isolated-vllm-check] stage=after-vllm-extra" not in install_cmd
@@ -798,7 +798,7 @@ class TestBuildInstallCommand:
         )
         assert (
             cmd == "uv pip install --python /opt/vllm-venv/bin/python "
-            "--refresh-package transformers --reinstall-package transformers "
+            "--refresh --refresh-package transformers --reinstall-package transformers "
             "'git+https://github.com/user/transformers.git@custom-branch' "
             "-c /tmp/constraints.txt"
         )

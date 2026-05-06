@@ -576,6 +576,18 @@ def infer_install_target_name(package: str) -> str | None:
     return match.group(1) if match else None
 
 
+def is_direct_source_package(package: str) -> bool:
+    """Whether a package spec resolves from a direct source instead of an index."""
+    pkg_spec, _ = parse_install_spec(package)
+    normalized = normalize_provider_package(pkg_spec)
+    return (
+        normalized.startswith("git+")
+        or " @ " in normalized
+        or "://" in normalized
+        or normalized.startswith("/")
+    )
+
+
 def build_install_command(
     package: str,
     constraints: str | None = None,
@@ -610,6 +622,8 @@ def build_install_command(
         "--reinstall-package",
     }
     if force_reinstall and not any(flag in reinstall_flags for flag in flags):
+        if is_direct_source_package(normalized):
+            cmd_parts.append("--refresh")
         package_name = infer_install_target_name(normalized)
         if package_name:
             cmd_parts.extend(["--refresh-package", package_name])
