@@ -5,6 +5,7 @@ import pytest
 
 from olmo_eval.cli.utils import (
     FlaggedArg,
+    _format_transformers_runtime_rows,
     extract_priority_from_overrides,
     process_ordered_args,
     reconstruct_ordered_args,
@@ -253,3 +254,39 @@ class TestEndToEndOrdering:
             "gsm8k": [],
         }
         assert harness_overrides == []
+
+
+class TestFormatTransformersRuntimeRows:
+    """Tests for runtime summary formatting of transformers versions."""
+
+    def test_non_isolated_runtime_uses_single_transformers_row(self):
+        """Non-isolated runs should keep the compact single-row summary."""
+        rows = _format_transformers_runtime_rows("5.8.0", None, None)
+
+        assert rows == [("Transformers", "5.8.0")]
+
+    def test_isolated_runtime_shows_main_and_vllm_rows(self):
+        """Isolated vLLM runs should distinguish main and server environments."""
+        rows = _format_transformers_runtime_rows(
+            "5.8.0",
+            "5.0.0.dev0",
+            "/opt/vllm-venv/bin/python",
+        )
+
+        assert rows == [
+            ("Transformers (main)", "5.8.0"),
+            ("Transformers (vLLM)", "5.0.0.dev0"),
+        ]
+
+    def test_isolated_runtime_surfaces_missing_main_transformers(self):
+        """The summary should stay explicit even if only the isolated env has transformers."""
+        rows = _format_transformers_runtime_rows(
+            None,
+            "5.0.0.dev0",
+            "/opt/vllm-venv/bin/python",
+        )
+
+        assert rows == [
+            ("Transformers (main)", "[dim]NOT INSTALLED[/dim]"),
+            ("Transformers (vLLM)", "5.0.0.dev0"),
+        ]
