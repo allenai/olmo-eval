@@ -587,7 +587,7 @@ class TestBuildCommandWithTaskPackages:
         )
 
         assert (
-            "uv pip install --python /opt/vllm-venv/bin/python "
+            "uv --no-config --no-cache pip install --python /opt/vllm-venv/bin/python "
             "--refresh --refresh-package repo --reinstall-package repo "
             "'repo @ git+https://github.com/user/repo@v1.0' -c /tmp/cuda-constraints.txt"
         ) in install_cmd
@@ -640,7 +640,7 @@ class TestBuildCommandWithTaskPackages:
             "--cache-dir \"$UV_CACHE_DIR\" -e '.[vllm]'"
         ) not in install_cmd
         assert (
-            "uv pip install --python /opt/vllm-venv/bin/python "
+            "uv --no-config --no-cache pip install --python /opt/vllm-venv/bin/python "
             "--refresh --refresh-package vllm --reinstall-package vllm "
             "'vllm @ git+https://github.com/user/vllm@custom' -c /tmp/cuda-constraints.txt"
         ) in install_cmd
@@ -804,7 +804,7 @@ class TestBuildInstallCommand:
             force_reinstall=True,
         )
         assert (
-            cmd == "uv pip install --python /opt/vllm-venv/bin/python "
+            cmd == "uv --no-config --no-cache pip install --python /opt/vllm-venv/bin/python "
             "--refresh --refresh-package transformers --reinstall-package transformers "
             "'transformers @ git+https://github.com/user/transformers.git@custom-branch' "
             "-c /tmp/constraints.txt"

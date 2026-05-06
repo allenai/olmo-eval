@@ -645,7 +645,12 @@ def build_install_command(
         else normalize_provider_package(pkg_spec)
     )
 
-    cmd_parts = ["uv", "pip", "install"]
+    cmd_parts = ["uv"]
+    if force_reinstall and is_direct_source_package(normalized):
+        # Provider source overrides should not inherit the repo's uv config or
+        # a shared cache entry that can silently re-lay an old wheel.
+        cmd_parts.extend(["--no-config", "--no-cache"])
+    cmd_parts.extend(["pip", "install"])
     if venv_path:
         cmd_parts.extend(["--python", f"{venv_path}/bin/python"])
     reinstall_flags = {
@@ -680,16 +685,24 @@ def build_isolated_venv_probe_command(python_path: str, stage: str) -> str:
     and whether the expected OLMo 3.5 Hybrid config is registered.
     """
     script = (
-        "import importlib.util, transformers; "
+        "import importlib.metadata, importlib.util, pathlib, transformers; "
         "from transformers.models.auto.configuration_auto import CONFIG_MAPPING; "
         "spec = importlib.util.find_spec('transformers.models.olmo3_5_hybrid'); "
+        "dist = importlib.metadata.distribution('transformers'); "
+        "direct_url = dist.read_text('direct_url.json'); "
+        "config_auto = (pathlib.Path(transformers.__file__).resolve().parent "
+        "/ 'models' / 'auto' / 'configuration_auto.py'); "
         f"print('[isolated-vllm-check] stage={stage}'); "
         f"print('[isolated-vllm-check] python={python_path}'); "
         "print('[isolated-vllm-check] transformers=' + transformers.__version__ + "
         "' file=' + str(transformers.__file__)); "
         "print('[isolated-vllm-check] has_olmo3_5_hybrid=' + "
         "str('olmo3_5_hybrid' in CONFIG_MAPPING) + "
-        "' module=' + str(spec.origin if spec else None))"
+        "' module=' + str(spec.origin if spec else None)); "
+        "print((('[isolated-vllm-check] direct_url=' + str(direct_url).replace('\\n', ' ')) "
+        "if direct_url else '[isolated-vllm-check] direct_url=None')); "
+        "print('[isolated-vllm-check] config_auto_has_olmo3_5_hybrid=' + "
+        "str('olmo3_5_hybrid' in config_auto.read_text()))"
     )
     return f'{python_path} -c "{script}"'
 
