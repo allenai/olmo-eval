@@ -588,6 +588,7 @@ class TestBuildCommandWithTaskPackages:
 
         assert (
             "uv pip install --python /opt/vllm-venv/bin/python "
+            "--refresh-package repo --reinstall-package repo "
             "'git+https://github.com/user/repo@v1.0' -c /tmp/cuda-constraints.txt"
         ) in install_cmd
         assert "[isolated-vllm-check] stage=after-vllm-extra" in install_cmd
@@ -608,6 +609,7 @@ class TestBuildCommandWithTaskPackages:
 
         assert (
             "uv pip install --python /opt/vllm-venv/bin/python "
+            "--refresh-package provider-dep --reinstall-package provider-dep "
             "'provider-dep==1.0' -c /tmp/cuda-constraints.txt"
         ) in install_cmd
         assert "uv pip install 'task-dep==1.0' -c /tmp/cuda-constraints.txt" in install_cmd
@@ -639,6 +641,7 @@ class TestBuildCommandWithTaskPackages:
         ) not in install_cmd
         assert (
             "uv pip install --python /opt/vllm-venv/bin/python "
+            "--refresh-package vllm --reinstall-package vllm "
             "'git+https://github.com/user/vllm@custom' -c /tmp/cuda-constraints.txt"
         ) in install_cmd
         assert "[isolated-vllm-check] stage=after-vllm-extra" not in install_cmd
@@ -769,6 +772,49 @@ class TestBuildInstallCommand:
         assert (
             cmd == "uv pip install --python /opt/vllm-venv/bin/python 'vllm==0.14.0' "
             "-c /tmp/constraints.txt"
+        )
+
+    def test_force_reinstall_targets_named_package(self):
+        """Forced installs should target the overridden package by name."""
+        cmd = build_install_command(
+            "transformers==5.8.0",
+            "/tmp/constraints.txt",
+            "/opt/vllm-venv",
+            force_reinstall=True,
+        )
+        assert (
+            cmd == "uv pip install --python /opt/vllm-venv/bin/python "
+            "--refresh-package transformers --reinstall-package transformers "
+            "'transformers==5.8.0' -c /tmp/constraints.txt"
+        )
+
+    def test_force_reinstall_targets_git_repo_name(self):
+        """Forced git installs should infer the distribution name from the repo."""
+        cmd = build_install_command(
+            "git+https://github.com/user/transformers.git@custom-branch",
+            "/tmp/constraints.txt",
+            "/opt/vllm-venv",
+            force_reinstall=True,
+        )
+        assert (
+            cmd == "uv pip install --python /opt/vllm-venv/bin/python "
+            "--refresh-package transformers --reinstall-package transformers "
+            "'git+https://github.com/user/transformers.git@custom-branch' "
+            "-c /tmp/constraints.txt"
+        )
+
+    def test_force_reinstall_respects_existing_reinstall_flags(self):
+        """Explicit reinstall flags should not be duplicated."""
+        cmd = build_install_command(
+            "transformers==5.8.0 --reinstall-package transformers",
+            "/tmp/cuda-constraints.txt",
+            "/opt/vllm-venv",
+            force_reinstall=True,
+        )
+        assert (
+            cmd == "uv pip install --python /opt/vllm-venv/bin/python "
+            "--reinstall-package transformers "
+            "'transformers==5.8.0' -c /tmp/cuda-constraints.txt"
         )
 
 

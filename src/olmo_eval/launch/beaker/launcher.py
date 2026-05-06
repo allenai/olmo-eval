@@ -539,8 +539,48 @@ def normalize_provider_package(package: str) -> str:
     return pkg_spec
 
 
+def infer_install_target_name(package: str) -> str | None:
+    """Infer the distribution name for a package specifier.
+
+    This is used to target uv's package-specific reinstall flags when a runtime
+    dependency should override an already-installed distribution.
+
+    Args:
+        package: Package specifier with or without install flags.
+
+    Returns:
+        Best-effort inferred distribution name, or None if it cannot be derived.
+    """
+    pkg_spec, _ = parse_install_spec(package)
+    normalized = normalize_provider_package(pkg_spec)
+
+    # PEP 508 direct references: "name @ URL"
+    if " @ " in normalized:
+        return normalized.split(" @ ", 1)[0].strip() or None
+
+    # Direct URLs and local paths: prefer an explicit egg fragment, otherwise
+    # fall back to the trailing path component (e.g., transformers.git -> transformers).
+    if normalized.startswith("git+") or "://" in normalized or normalized.startswith("/"):
+        match = re.search(r"(?:[#&]egg=)([A-Za-z0-9_.-]+)", normalized)
+        if match:
+            return match.group(1)
+
+        path_part = normalized.split("#", 1)[0].rsplit("/", 1)[-1]
+        if "@" in path_part:
+            path_part = path_part.split("@", 1)[0]
+        if path_part.endswith(".git"):
+            path_part = path_part[:-4]
+        return path_part or None
+
+    match = re.match(r"^\s*([A-Za-z0-9_.-]+)", normalized)
+    return match.group(1) if match else None
+
+
 def build_install_command(
-    package: str, constraints: str | None = None, venv_path: str | None = None
+    package: str,
+    constraints: str | None = None,
+    venv_path: str | None = None,
+    force_reinstall: bool = False,
 ) -> str:
     """Build a uv pip install command for a package with optional flags.
 
@@ -550,6 +590,8 @@ def build_install_command(
         package: Package specifier with optional install flags.
         constraints: Optional constraints file path.
         venv_path: Optional virtualenv path to target via `uv pip --python`.
+        force_reinstall: Whether to force a provider override to replace an
+            existing installed distribution in the target environment.
 
     Returns:
         Complete uv pip install command string.
@@ -560,6 +602,20 @@ def build_install_command(
     cmd_parts = ["uv", "pip", "install"]
     if venv_path:
         cmd_parts.extend(["--python", f"{venv_path}/bin/python"])
+    reinstall_flags = {
+        "--force-reinstall",
+        "--refresh",
+        "--refresh-package",
+        "--reinstall",
+        "--reinstall-package",
+    }
+    if force_reinstall and not any(flag in reinstall_flags for flag in flags):
+        package_name = infer_install_target_name(normalized)
+        if package_name:
+            cmd_parts.extend(["--refresh-package", package_name])
+            cmd_parts.extend(["--reinstall-package", package_name])
+        else:
+            cmd_parts.extend(["--refresh", "--reinstall"])
     cmd_parts.extend(flags)
     cmd_parts.append(f"'{normalized}'")
     if constraints:
@@ -788,6 +844,7 @@ class BeakerLauncher:
                         pkg,
                         constraints,
                         venv_path=vllm_venv if use_isolated_vllm_venv else None,
+                        force_reinstall=True,
                     )
                 )
                 if use_isolated_vllm_venv and vllm_venv is not None:
