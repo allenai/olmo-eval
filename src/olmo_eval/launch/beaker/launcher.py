@@ -527,6 +527,12 @@ def normalize_provider_package(package: str) -> str:
     # Strip any install flags first
     pkg_spec, _ = parse_install_spec(package)
 
+    # Named direct references ("name @ url") should preserve the package name
+    # while still normalizing the URL/source portion.
+    if " @ " in pkg_spec:
+        name, source = pkg_spec.split(" @ ", 1)
+        return f"{name} @ {normalize_provider_package(source)}"
+
     # Already a git+ URL, return as-is
     if pkg_spec.startswith("git+"):
         return pkg_spec
@@ -539,20 +545,9 @@ def normalize_provider_package(package: str) -> str:
     return pkg_spec
 
 
-def infer_install_target_name(package: str) -> str | None:
-    """Infer the distribution name for a package specifier.
-
-    This is used to target uv's package-specific reinstall flags when a runtime
-    dependency should override an already-installed distribution.
-
-    Args:
-        package: Package specifier with or without install flags.
-
-    Returns:
-        Best-effort inferred distribution name, or None if it cannot be derived.
-    """
-    pkg_spec, _ = parse_install_spec(package)
-    normalized = normalize_provider_package(pkg_spec)
+def _infer_install_target_name_from_normalized(package: str) -> str | None:
+    """Infer a distribution name from an already-normalized package spec."""
+    normalized = package
 
     # PEP 508 direct references: "name @ URL"
     if " @ " in normalized:
@@ -574,6 +569,41 @@ def infer_install_target_name(package: str) -> str | None:
 
     match = re.match(r"^\s*([A-Za-z0-9_.-]+)", normalized)
     return match.group(1) if match else None
+
+
+def bind_direct_source_to_package(package: str) -> str:
+    """Attach a direct source URL/path to an inferred package name when possible.
+
+    uv's resolver pins URL dependencies when the URL is declared for a specific
+    package (for example, ``transformers @ git+https://...``). Provider overrides
+    are intended to replace an existing package, so we make that association
+    explicit for direct-source specs.
+    """
+    normalized = normalize_provider_package(package)
+    if " @ " in normalized or not is_direct_source_package(normalized):
+        return normalized
+
+    package_name = _infer_install_target_name_from_normalized(normalized)
+    if package_name:
+        return f"{package_name} @ {normalized}"
+    return normalized
+
+
+def infer_install_target_name(package: str) -> str | None:
+    """Infer the distribution name for a package specifier.
+
+    This is used to target uv's package-specific reinstall flags when a runtime
+    dependency should override an already-installed distribution.
+
+    Args:
+        package: Package specifier with or without install flags.
+
+    Returns:
+        Best-effort inferred distribution name, or None if it cannot be derived.
+    """
+    pkg_spec, _ = parse_install_spec(package)
+    normalized = bind_direct_source_to_package(pkg_spec)
+    return _infer_install_target_name_from_normalized(normalized)
 
 
 def is_direct_source_package(package: str) -> bool:
@@ -609,7 +639,11 @@ def build_install_command(
         Complete uv pip install command string.
     """
     pkg_spec, flags = parse_install_spec(package)
-    normalized = normalize_provider_package(pkg_spec)
+    normalized = (
+        bind_direct_source_to_package(pkg_spec)
+        if force_reinstall
+        else normalize_provider_package(pkg_spec)
+    )
 
     cmd_parts = ["uv", "pip", "install"]
     if venv_path:

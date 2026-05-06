@@ -589,7 +589,7 @@ class TestBuildCommandWithTaskPackages:
         assert (
             "uv pip install --python /opt/vllm-venv/bin/python "
             "--refresh --refresh-package repo --reinstall-package repo "
-            "'git+https://github.com/user/repo@v1.0' -c /tmp/cuda-constraints.txt"
+            "'repo @ git+https://github.com/user/repo@v1.0' -c /tmp/cuda-constraints.txt"
         ) in install_cmd
         assert "[isolated-vllm-check] stage=after-vllm-extra" in install_cmd
         assert "[isolated-vllm-check] stage=after-provider-package-1" in install_cmd
@@ -642,7 +642,7 @@ class TestBuildCommandWithTaskPackages:
         assert (
             "uv pip install --python /opt/vllm-venv/bin/python "
             "--refresh --refresh-package vllm --reinstall-package vllm "
-            "'git+https://github.com/user/vllm@custom' -c /tmp/cuda-constraints.txt"
+            "'vllm @ git+https://github.com/user/vllm@custom' -c /tmp/cuda-constraints.txt"
         ) in install_cmd
         assert "[isolated-vllm-check] stage=after-vllm-extra" not in install_cmd
         assert "[isolated-vllm-check] stage=after-provider-package-1" in install_cmd
@@ -670,6 +670,13 @@ class TestNormalizeProviderPackage:
         """Test git+ URL passes through unchanged."""
         result = normalize_provider_package("git+https://github.com/user/vllm@v0.14.0")
         assert result == "git+https://github.com/user/vllm@v0.14.0"
+
+    def test_named_direct_reference_preserved(self):
+        """Named direct references should keep the package name and normalize the source."""
+        result = normalize_provider_package(
+            "transformers @ https://github.com/user/transformers@main"
+        )
+        assert result == "transformers @ git+https://github.com/user/transformers@main"
 
     def test_pypi_version_unchanged(self):
         """Test PyPI version spec passes through unchanged."""
@@ -799,7 +806,7 @@ class TestBuildInstallCommand:
         assert (
             cmd == "uv pip install --python /opt/vllm-venv/bin/python "
             "--refresh --refresh-package transformers --reinstall-package transformers "
-            "'git+https://github.com/user/transformers.git@custom-branch' "
+            "'transformers @ git+https://github.com/user/transformers.git@custom-branch' "
             "-c /tmp/constraints.txt"
         )
 
