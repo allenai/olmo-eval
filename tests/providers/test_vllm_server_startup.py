@@ -129,6 +129,36 @@ class TestVLLMServerStartupTimeout:
             url = server.start()
             assert url in ("http://localhost:8000/v1", "http://127.0.0.1:8000/v1")
 
+    @pytest.mark.anyio
+    async def test_vllm_python_selects_interpreter_but_not_child_env(self):
+        """VLLM_PYTHON should steer our launcher without leaking into vLLM."""
+        from olmo_eval.inference.providers.vllm_server_utils import VLLMServerProcess
+
+        mock_process = MagicMock()
+        mock_process.pid = 12345
+        mock_process.poll.return_value = None
+
+        with (
+            patch.dict("os.environ", {"VLLM_PYTHON": "/opt/vllm-venv/bin/python"}),
+            patch("subprocess.Popen", return_value=mock_process) as mock_popen,
+            patch(
+                "olmo_eval.inference.providers.vllm_server_utils._wait_for_server",
+                return_value=(True, None, None),
+            ),
+            patch("atexit.register"),
+        ):
+            server = VLLMServerProcess(
+                model_name="test-model",
+                port=8000,
+            )
+
+            server.start()
+
+        cmd = mock_popen.call_args.args[0]
+        env = mock_popen.call_args.kwargs["env"]
+        assert cmd[0] == "/opt/vllm-venv/bin/python"
+        assert "VLLM_PYTHON" not in env
+
 
 class TestVLLMServerProviderStartup:
     """Tests for provider-side startup kwargs handling."""

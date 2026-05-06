@@ -430,6 +430,11 @@ class VLLMServerProcess:
 
         # Build environment for subprocess (child only, don't mutate parent)
         env = os.environ.copy()
+        # VLLM_PYTHON is our own steering variable for selecting which Python
+        # interpreter launches the server. Once the command is built, vLLM
+        # itself does not need to see it, and forwarding it triggers a warning
+        # because vLLM treats unknown VLLM_* variables as suspicious.
+        env.pop("VLLM_PYTHON", None)
         if self.gpu_ids:
             env["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in self.gpu_ids)
 

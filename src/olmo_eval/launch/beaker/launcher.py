@@ -568,6 +568,28 @@ def build_install_command(
     return " ".join(cmd_parts)
 
 
+def build_isolated_venv_probe_command(python_path: str, stage: str) -> str:
+    """Build a temporary probe command for the isolated vLLM environment.
+
+    This is intended for short-term debugging of runtime package resolution in
+    Beaker jobs. It prints which transformers build the isolated interpreter sees
+    and whether the expected OLMo 3.5 Hybrid config is registered.
+    """
+    script = (
+        "import importlib.util, transformers; "
+        "from transformers.models.auto.configuration_auto import CONFIG_MAPPING; "
+        "spec = importlib.util.find_spec('transformers.models.olmo3_5_hybrid'); "
+        f"print('[isolated-vllm-check] stage={stage}'); "
+        f"print('[isolated-vllm-check] python={python_path}'); "
+        "print('[isolated-vllm-check] transformers=' + transformers.__version__ + "
+        "' file=' + str(transformers.__file__)); "
+        "print('[isolated-vllm-check] has_olmo3_5_hybrid=' + "
+        "str('olmo3_5_hybrid' in CONFIG_MAPPING) + "
+        "' module=' + str(spec.origin if spec else None))"
+    )
+    return f'{python_path} -c "{script}"'
+
+
 def _parse_timeout(timeout: str) -> int:
     """Parse timeout string to nanoseconds.
 
@@ -729,6 +751,14 @@ class BeakerLauncher:
                     f"--python {vllm_venv}/bin/python "
                     f"--cache-dir \"$UV_CACHE_DIR\" -e '.[vllm]'"
                 )
+                # Temporary debug probe to show which transformers build the
+                # isolated vLLM environment resolves before provider overrides.
+                steps.append(
+                    build_isolated_venv_probe_command(
+                        f"{vllm_venv}/bin/python",
+                        "after-vllm-extra",
+                    )
+                )
             # Set VLLM_PYTHON so VLLMServerProcess uses the isolated venv
             steps.append(f"export VLLM_PYTHON={vllm_venv}/bin/python")
 
@@ -752,7 +782,7 @@ class BeakerLauncher:
 
         # Install provider-specific dependencies
         if provider_packages:
-            for pkg in provider_packages:
+            for index, pkg in enumerate(provider_packages, start=1):
                 steps.append(
                     build_install_command(
                         pkg,
@@ -760,6 +790,13 @@ class BeakerLauncher:
                         venv_path=vllm_venv if use_isolated_vllm_venv else None,
                     )
                 )
+                if use_isolated_vllm_venv and vllm_venv is not None:
+                    steps.append(
+                        build_isolated_venv_probe_command(
+                            f"{vllm_venv}/bin/python",
+                            f"after-provider-package-{index}",
+                        )
+                    )
 
         # Install task-specific dependencies
         if task_packages:

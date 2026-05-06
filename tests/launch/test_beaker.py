@@ -590,6 +590,8 @@ class TestBuildCommandWithTaskPackages:
             "uv pip install --python /opt/vllm-venv/bin/python "
             "'git+https://github.com/user/repo@v1.0' -c /tmp/cuda-constraints.txt"
         ) in install_cmd
+        assert "[isolated-vllm-check] stage=after-vllm-extra" in install_cmd
+        assert "[isolated-vllm-check] stage=after-provider-package-1" in install_cmd
 
     def test_task_packages_stay_in_main_env_with_isolated_vllm(self):
         """Task packages should continue installing in the main app environment."""
@@ -613,6 +615,8 @@ class TestBuildCommandWithTaskPackages:
             "uv pip install --python /opt/vllm-venv/bin/python "
             "'task-dep==1.0' -c /tmp/cuda-constraints.txt"
         ) not in install_cmd
+        assert "[isolated-vllm-check] stage=after-vllm-extra" in install_cmd
+        assert "[isolated-vllm-check] stage=after-provider-package-1" in install_cmd
 
     def test_provider_packages_can_enable_isolated_vllm_venv_without_vllm_extra(self):
         """A custom provider package should still use the isolated vLLM venv."""
@@ -637,6 +641,8 @@ class TestBuildCommandWithTaskPackages:
             "uv pip install --python /opt/vllm-venv/bin/python "
             "'git+https://github.com/user/vllm@custom' -c /tmp/cuda-constraints.txt"
         ) in install_cmd
+        assert "[isolated-vllm-check] stage=after-vllm-extra" not in install_cmd
+        assert "[isolated-vllm-check] stage=after-provider-package-1" in install_cmd
 
 
 class TestNormalizeProviderPackage:
