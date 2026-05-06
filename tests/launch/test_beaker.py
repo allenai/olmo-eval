@@ -574,6 +574,68 @@ class TestBuildCommandWithTaskPackages:
         # GitHub URL should get git+ prefix
         assert "uv pip install 'git+https://github.com/user/repo@v1.0'" in install_cmd
 
+    def test_provider_packages_use_isolated_vllm_venv(self):
+        """Provider packages should install into the isolated vLLM venv."""
+        from olmo_eval.launch import BeakerLauncher
+
+        launcher = BeakerLauncher()
+        install_cmd = launcher._build_install_cmd(
+            extras=["vllm", "clients"],
+            env_exports=None,
+            provider_packages=["git+https://github.com/user/repo@v1.0"],
+            vllm_isolated_venv=True,
+        )
+
+        assert (
+            "VIRTUAL_ENV=/opt/vllm-venv uv pip install "
+            "'git+https://github.com/user/repo@v1.0' -c /tmp/cuda-constraints.txt"
+        ) in install_cmd
+
+    def test_task_packages_stay_in_main_env_with_isolated_vllm(self):
+        """Task packages should continue installing in the main app environment."""
+        from olmo_eval.launch import BeakerLauncher
+
+        launcher = BeakerLauncher()
+        install_cmd = launcher._build_install_cmd(
+            extras=["vllm", "clients"],
+            env_exports=None,
+            provider_packages=["provider-dep==1.0"],
+            task_packages=["task-dep==1.0"],
+            vllm_isolated_venv=True,
+        )
+
+        assert (
+            "VIRTUAL_ENV=/opt/vllm-venv uv pip install "
+            "'provider-dep==1.0' -c /tmp/cuda-constraints.txt"
+        ) in install_cmd
+        assert "uv pip install 'task-dep==1.0' -c /tmp/cuda-constraints.txt" in install_cmd
+        assert (
+            "VIRTUAL_ENV=/opt/vllm-venv uv pip install 'task-dep==1.0' -c /tmp/cuda-constraints.txt"
+        ) not in install_cmd
+
+    def test_provider_packages_can_enable_isolated_vllm_venv_without_vllm_extra(self):
+        """A custom provider package should still use the isolated vLLM venv."""
+        from olmo_eval.launch import BeakerLauncher
+
+        launcher = BeakerLauncher()
+        install_cmd = launcher._build_install_cmd(
+            extras=["clients"],
+            env_exports=None,
+            provider_packages=["https://github.com/user/vllm@custom"],
+            vllm_isolated_venv=True,
+        )
+
+        assert "uv venv /opt/vllm-venv" in install_cmd
+        assert "export VLLM_PYTHON=/opt/vllm-venv/bin/python" in install_cmd
+        assert (
+            "cd /gantry-runtime && VIRTUAL_ENV=/opt/vllm-venv uv pip install "
+            "--cache-dir \"$UV_CACHE_DIR\" -e '.[vllm]'"
+        ) not in install_cmd
+        assert (
+            "VIRTUAL_ENV=/opt/vllm-venv uv pip install "
+            "'git+https://github.com/user/vllm@custom' -c /tmp/cuda-constraints.txt"
+        ) in install_cmd
+
 
 class TestNormalizeProviderPackage:
     """Tests for normalize_provider_package function."""
@@ -692,6 +754,14 @@ class TestBuildInstallCommand:
         """Test without constraints file."""
         cmd = build_install_command("vllm==0.14.0", None)
         assert cmd == "uv pip install 'vllm==0.14.0'"
+
+    def test_virtualenv_target(self):
+        """Test targeting a specific virtualenv via VIRTUAL_ENV."""
+        cmd = build_install_command("vllm==0.14.0", "/tmp/constraints.txt", "/opt/vllm-venv")
+        assert (
+            cmd == "VIRTUAL_ENV=/opt/vllm-venv uv pip install 'vllm==0.14.0' "
+            "-c /tmp/constraints.txt"
+        )
 
 
 class TestDetectGpuRequirement:

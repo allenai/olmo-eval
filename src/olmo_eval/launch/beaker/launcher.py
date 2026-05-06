@@ -539,7 +539,9 @@ def normalize_provider_package(package: str) -> str:
     return pkg_spec
 
 
-def build_install_command(package: str, constraints: str | None = None) -> str:
+def build_install_command(
+    package: str, constraints: str | None = None, venv_path: str | None = None
+) -> str:
     """Build a uv pip install command for a package with optional flags.
 
     Handles package specifiers that include install flags like --no-build-isolation.
@@ -547,6 +549,7 @@ def build_install_command(package: str, constraints: str | None = None) -> str:
     Args:
         package: Package specifier with optional install flags.
         constraints: Optional constraints file path.
+        venv_path: Optional virtualenv path to target via VIRTUAL_ENV.
 
     Returns:
         Complete uv pip install command string.
@@ -560,7 +563,10 @@ def build_install_command(package: str, constraints: str | None = None) -> str:
     if constraints:
         cmd_parts.extend(["-c", constraints])
 
-    return " ".join(cmd_parts)
+    command = " ".join(cmd_parts)
+    if venv_path:
+        return f"VIRTUAL_ENV={venv_path} {command}"
+    return command
 
 
 def _parse_timeout(timeout: str) -> int:
@@ -670,7 +676,8 @@ class BeakerLauncher:
             Shell command string for installation.
         """
         has_vllm = "vllm" in extras
-        use_isolated_vllm_venv = has_vllm and vllm_isolated_venv
+        use_isolated_vllm_venv = vllm_isolated_venv and (has_vllm or bool(provider_packages))
+        vllm_venv: str | None = None
 
         # Build the install steps
         # Export UV_PROJECT_ENVIRONMENT so all uv commands use Docker's /opt/venv
@@ -714,11 +721,14 @@ class BeakerLauncher:
                 f"/opt/venv/lib/python*/site-packages/nvidia*; do "
                 f'ln -sf "$pkg" {vllm_venv}/lib/python*/site-packages/; done'
             )
-            # Install vLLM extra from project (no torch constraint - it's symlinked)
-            steps.append(
-                f"cd /gantry-runtime && VIRTUAL_ENV={vllm_venv} uv pip install "
-                f"--cache-dir \"$UV_CACHE_DIR\" -e '.[vllm]'"
-            )
+            # Install the project's bundled vLLM dependency set when requested.
+            # Custom provider packages (e.g., a vLLM fork) are installed below
+            # into the same isolated environment.
+            if has_vllm:
+                steps.append(
+                    f"cd /gantry-runtime && VIRTUAL_ENV={vllm_venv} uv pip install "
+                    f"--cache-dir \"$UV_CACHE_DIR\" -e '.[vllm]'"
+                )
             # Set VLLM_PYTHON so VLLMServerProcess uses the isolated venv
             steps.append(f"export VLLM_PYTHON={vllm_venv}/bin/python")
 
@@ -743,7 +753,13 @@ class BeakerLauncher:
         # Install provider-specific dependencies
         if provider_packages:
             for pkg in provider_packages:
-                steps.append(build_install_command(pkg, constraints))
+                steps.append(
+                    build_install_command(
+                        pkg,
+                        constraints,
+                        venv_path=vllm_venv if use_isolated_vllm_venv else None,
+                    )
+                )
 
         # Install task-specific dependencies
         if task_packages:
