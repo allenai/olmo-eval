@@ -11,9 +11,17 @@ from typing import Any
 
 from datasets import load_dataset
 from datasets.config import HF_DATASETS_CACHE
+from datasets.utils import disable_progress_bars as disable_datasets_progress_bars
 from huggingface_hub import hf_hub_download
+from huggingface_hub.utils import disable_progress_bars as disable_hf_hub_progress_bars
 
 logger = logging.getLogger(__name__)
+
+
+def _disable_ruler_progress_bars() -> None:
+    """Avoid HF tqdm `_lock` failures in the RULER download/load path."""
+    disable_datasets_progress_bars()
+    disable_hf_hub_progress_bars()
 
 
 def download_ruler_data() -> str:
@@ -22,6 +30,8 @@ def download_ruler_data() -> str:
     Returns:
         Path to the extracted RULER data directory.
     """
+    _disable_ruler_progress_bars()
+
     root_dir = os.path.join(HF_DATASETS_CACHE, "allenai--RULER")
     data_dir = os.path.join(root_dir, "data")
 
@@ -142,6 +152,8 @@ def load_ruler_dataset(
             - user_template: User message template
             - system_template: System/assistant prefix template
     """
+    _disable_ruler_progress_bars()
+
     # Extract task type from task name (remove context size)
     task_type = re.findall(r"^(.*)__\d+$", task_name)[0]
 
