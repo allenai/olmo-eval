@@ -169,6 +169,18 @@ class TestProcessOrderedArgs:
         assert task_overrides == {}
         assert harness_overrides == ["max_turns=10"]
 
+    def test_harness_accepts_scoring_process_pool_override(self):
+        """Harness overrides should allow scoring_process_pools dotlist paths."""
+        ordered = [
+            FlaggedArg("h", "default"),
+            FlaggedArg("o", "scoring_process_pools.cpu.workers=8"),
+        ]
+
+        task_overrides, harness_overrides = process_ordered_args(ordered)
+
+        assert task_overrides == {}
+        assert harness_overrides == ["scoring_process_pools.cpu.workers=8"]
+
     def test_override_without_preceding_flag_raises(self):
         """Test that -o without preceding -t or --harness raises error."""
         ordered = [FlaggedArg("o", "gpus=4")]

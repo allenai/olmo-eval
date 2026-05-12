@@ -10,6 +10,7 @@ from .base import (
     MinervaMathScorer,
     MultipleChoiceScorer,
     PerplexityScorer,
+    ProcessScorer,
     Scorer,
     SQuADF1Scorer,
 )
@@ -53,6 +54,7 @@ __all__ = [
     "MultipleChoiceScorer",
     "MultiplEScorer",
     "PerplexityScorer",
+    "ProcessScorer",
     "RubricJudgeScorer",
     "SandboxRequiredError",
     "Scorer",

@@ -9,6 +9,7 @@ from olmo_eval.common.repr import hide_unset
 from olmo_eval.inference.providers.config import ProviderConfig
 
 if TYPE_CHECKING:
+    from olmo_eval.common.execution import ProcessScoringPoolConfig
     from olmo_eval.common.types import ToolSchema
     from olmo_eval.inference.metrics import MetricsConfig
     from olmo_eval.runners.asynq.batching import BatchConfig
@@ -42,6 +43,7 @@ class HarnessConfig:
     max_turns: int | None = None
     max_concurrency: int | None = None
     scoring_concurrency: int | None = None
+    scoring_process_pools: Mapping[str, ProcessScoringPoolConfig] = field(default_factory=dict)
     sandboxes: tuple[SandboxConfig, ...] = ()
     scaffold_kwargs: dict[str, Any] = field(default_factory=dict)
     sandbox_pool_instances: int | None = None
@@ -141,6 +143,10 @@ class HarnessConfig:
             d["max_concurrency"] = self.max_concurrency
         if self.scoring_concurrency is not None:
             d["scoring_concurrency"] = self.scoring_concurrency
+        if self.scoring_process_pools:
+            d["scoring_process_pools"] = {
+                name: config.to_dict() for name, config in self.scoring_process_pools.items()
+            }
         if self.sandboxes:
             d["sandboxes"] = [s.to_dict() for s in self.sandboxes]
         if self.scaffold_kwargs:
@@ -167,6 +173,7 @@ class HarnessConfig:
         Returns:
             A new HarnessConfig instance.
         """
+        from olmo_eval.common.execution import ProcessScoringPoolConfig
         from olmo_eval.inference.metrics import MetricsConfig
         from olmo_eval.runners.asynq.batching import BatchConfig
 
@@ -175,6 +182,10 @@ class HarnessConfig:
         provider_data = data.get("provider", {})
         sandboxes_data = data.get("sandboxes", [])
         sandboxes = tuple(SandboxConfig.from_dict(s) for s in sandboxes_data)
+        scoring_process_pools = {
+            name: ProcessScoringPoolConfig.from_dict(config)
+            for name, config in data.get("scoring_process_pools", {}).items()
+        }
 
         metrics_data = data.get("metrics")
         metrics = MetricsConfig.from_dict(metrics_data) if metrics_data else None
@@ -203,6 +214,7 @@ class HarnessConfig:
             max_turns=data.get("max_turns"),
             max_concurrency=data.get("max_concurrency"),
             scoring_concurrency=data.get("scoring_concurrency"),
+            scoring_process_pools=scoring_process_pools,
             sandboxes=sandboxes,
             sandbox_pool_instances=data.get("sandbox_pool_instances"),
             sandbox_pool_min_instances=data.get("sandbox_pool_min_instances"),
@@ -285,6 +297,7 @@ def harness_config(
     max_turns: int | None = None,
     max_concurrency: int | None = None,
     scoring_concurrency: int | None = None,
+    scoring_process_pools: Mapping[str, ProcessScoringPoolConfig] | None = None,
     sandboxes: Sequence[SandboxConfig] = (),
     scaffold_kwargs: dict[str, Any] | None = None,
     sandbox_pool_instances: int | None = None,
@@ -307,6 +320,7 @@ def harness_config(
         max_turns: Maximum turns for agent scaffolds (None = scaffold default).
         max_concurrency: Maximum concurrent tool executions for agent scaffolds.
         scoring_concurrency: Maximum concurrent scoring operations (default 8).
+        scoring_process_pools: Named process pools for CPU-heavy process scorers.
         sandboxes: Sandbox configurations for isolated tool execution.
         scaffold_kwargs: Scaffold-specific kwargs (e.g., enable_compaction for openai_agents).
         sandbox_pool_instances: Shared executor budget for auto-allocated sandboxes.
@@ -331,6 +345,7 @@ def harness_config(
         max_turns=max_turns,
         max_concurrency=max_concurrency,
         scoring_concurrency=scoring_concurrency,
+        scoring_process_pools=scoring_process_pools or {},
         sandboxes=tuple(sandboxes),
         scaffold_kwargs=scaffold_kwargs or {},
         sandbox_pool_instances=sandbox_pool_instances,

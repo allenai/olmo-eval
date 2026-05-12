@@ -18,8 +18,9 @@ class Scorer(ABC):
         - name: str class attribute identifying the scorer
         - score(): method to compute score for an instance/output pair
 
-    For scorers requiring async execution (e.g., sandboxed code execution),
-    extend ExecutionScorer instead and implement ascore().
+    For scorers requiring async execution or a special runtime (e.g., sandboxed
+    code execution or process-backed CPU work), extend the appropriate scorer
+    subclass instead of implementing `score()` directly.
     """
 
     name: ClassVar[str]
@@ -33,6 +34,25 @@ class Scorer(ABC):
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a dictionary."""
         return {"type": self.__class__.__name__, **asdict(self)}
+
+
+@dataclass(frozen=True)
+class ProcessScorer(Scorer):
+    """Base class for CPU-heavy scorers that should run in a subprocess."""
+
+    requires_async: ClassVar[bool] = True
+    process_pool_name: ClassVar[str] = "cpu"
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        raise RuntimeError(
+            f"{self.__class__.__name__} requires a process scoring runtime. "
+            "Ensure the task runner provides a ScoringContext with a process pool manager."
+        )
+
+    @abstractmethod
+    def process_score(self, instance: Instance, output: LMOutput) -> float:
+        """Score a single output in a subprocess."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -304,7 +324,7 @@ class ExactMatchFlexScorer(Scorer):
 
 
 @dataclass(frozen=True, slots=True)
-class MinervaMathScorer(Scorer):
+class MinervaMathScorer(ProcessScorer):
     """Flexible math equivalence: any extracted answer vs any gold, using sympy + Hendrycks.
 
     Matches oe-eval Minerva MATH behavior: try sympy (minerva_is_equiv) then
@@ -314,7 +334,7 @@ class MinervaMathScorer(Scorer):
 
     name: str = "minerva_math_flex"
 
-    def score(self, instance: Instance, output: LMOutput) -> float:
+    def process_score(self, instance: Instance, output: LMOutput) -> float:
         from olmo_eval.evals.extract.math import is_equiv
 
         all_gold = instance.metadata.get("all_gold_answers", [])

@@ -46,6 +46,25 @@ def _format_scoring_error(exc: Exception, *, phase: str) -> dict[str, str]:
     return error
 
 
+def _store_output_score(
+    output: LMOutput,
+    *,
+    scorer_name: str,
+    score: float,
+    scoring_error: dict[str, str] | None = None,
+) -> None:
+    """Store a per-output scorer result on output metadata."""
+    if output.metadata is None:
+        output.metadata = {}
+    output.metadata[f"score:{scorer_name}"] = score
+    if scoring_error is not None:
+        existing = output.metadata.get("scoring_errors")
+        if not isinstance(existing, dict):
+            existing = {}
+            output.metadata["scoring_errors"] = existing
+        existing[scorer_name] = scoring_error
+
+
 @dataclass(frozen=True, slots=True)
 class SandboxEnv:
     """Named sandbox environment with dependencies for code execution scoring.
@@ -501,7 +520,8 @@ class Task(ABC):
     def _has_async_scorers(self) -> bool:
         """Check if any configured scorers require async execution.
 
-        This includes ExecutionScorer (sandboxed code) and ContextScorer (LLM judges).
+        This includes ExecutionScorer (sandboxed code), ProcessScorer
+        (CPU-bound subprocess work), and ContextScorer (LLM judges).
         """
         if self._has_async_cache is None:
             from olmo_eval.common.scorers.execution import ContextScorer, ExecutionScorer
@@ -540,9 +560,10 @@ class Task(ABC):
         """Run all scorers with context and populate response.scores.
 
         ExecutionScorer subclasses are scored via ascore() with the execution
-        environment. ContextScorer subclasses (e.g., LLM judges) are scored via
-        ascore_with_context() with the full scoring context. Regular scorers
-        use score() synchronously.
+        environment. ProcessScorer subclasses are dispatched through the
+        process pool manager in the scoring context. ContextScorer subclasses
+        (e.g., LLM judges) are scored via ascore_with_context() with the full
+        scoring context. Regular scorers use score() synchronously.
 
         Args:
             responses: Responses to score.
@@ -552,6 +573,7 @@ class Task(ABC):
             SandboxRequiredError: If an ExecutionScorer is used without a valid
                 execution environment in the context.
         """
+        from olmo_eval.common.scorers.base import ProcessScorer
         from olmo_eval.common.scorers.execution import (
             ContextScorer,
             ExecutionScorer,
@@ -559,6 +581,9 @@ class Task(ABC):
         )
 
         execution_env = context.execution_env if context.has_execution_env else None
+        process_pool_manager = (
+            context.process_pool_manager if context.has_process_pool_manager else None
+        )
         scorers_by_name = self._get_scorers()
 
         # Route to task-specific sandbox if sandbox_env is configured
@@ -568,8 +593,9 @@ class Task(ABC):
         else:
             task_executor = execution_env
 
-        # Separate scorers by type: execution (sandbox), context (LLM judge), sync
+        # Separate scorers by type: execution (sandbox), process (CPU), context (LLM judge), sync
         execution_scorers: dict[str, ExecutionScorer] = {}
+        process_scorers: dict[str, ProcessScorer] = {}
         context_scorers: dict[str, ContextScorer] = {}
         sync_scorers: dict[str, Scorer] = {}
         for name, scorer in scorers_by_name.items():
@@ -580,6 +606,13 @@ class Task(ABC):
                         "Configure sandboxes in HarnessConfig."
                     )
                 execution_scorers[name] = scorer
+            elif isinstance(scorer, ProcessScorer):
+                if process_pool_manager is None:
+                    raise RuntimeError(
+                        f"{scorer.__class__.__name__} requires process scoring pools. "
+                        "Configure scoring process pools in HarnessConfig."
+                    )
+                process_scorers[name] = scorer
             elif isinstance(scorer, ContextScorer):
                 context_scorers[name] = scorer
             else:
@@ -591,13 +624,17 @@ class Task(ABC):
                 scores = [scorer.score(response.instance, o) for o in response.outputs]
                 # Store individual scores in output metadata for pass@k expansion
                 for i, output in enumerate(response.outputs):
-                    if output.metadata is None:
-                        output.metadata = {}
-                    output.metadata[f"score:{scorer.name}"] = scores[i] if i < len(scores) else 0.0
+                    _store_output_score(
+                        output,
+                        scorer_name=scorer.name,
+                        score=scores[i] if i < len(scores) else 0.0,
+                    )
                 response.scores[scorer.name] = self._aggregate_output_scores(scores)
 
-        # Apply async scorers (both execution and context) concurrently
-        async_scorers_exist = bool(execution_scorers) or bool(context_scorers)
+        # Apply async scorers (execution, process, and context) concurrently
+        async_scorers_exist = (
+            bool(execution_scorers) or bool(process_scorers) or bool(context_scorers)
+        )
         if async_scorers_exist:
             # Shared semaphore for sandbox execution — scoped by capability, sized
             # to max_concurrency * running_instances. Prevents overloading the pool.
@@ -617,7 +654,7 @@ class Task(ABC):
 
             async def score_execution(
                 resp_idx: int, scorer: ExecutionScorer, out_idx: int
-            ) -> tuple[int, str, int, float, dict[str, str] | None]:
+            ) -> tuple[str, int, str, int, float, dict[str, str] | None]:
                 response = responses[resp_idx]
                 output = response.outputs[out_idx]
                 try:
@@ -634,12 +671,12 @@ class Task(ABC):
                         scorer.name,
                         error.get("message", error["type"]),
                     )
-                    return (resp_idx, scorer.name, out_idx, 0.0, error)
-                return (resp_idx, scorer.name, out_idx, score, None)
+                    return ("output", resp_idx, scorer.name, out_idx, 0.0, error)
+                return ("output", resp_idx, scorer.name, out_idx, score, None)
 
             async def score_context(
                 resp_idx: int, scorer: ContextScorer, out_idx: int
-            ) -> tuple[int, str, int, float, dict[str, str] | None]:
+            ) -> tuple[str, int, str, int, float, dict[str, str] | None]:
                 response = responses[resp_idx]
                 output = response.outputs[out_idx]
                 try:
@@ -655,8 +692,33 @@ class Task(ABC):
                         scorer.name,
                         error.get("message", error["type"]),
                     )
-                    return (resp_idx, scorer.name, out_idx, 0.0, error)
-                return (resp_idx, scorer.name, out_idx, score, None)
+                    return ("output", resp_idx, scorer.name, out_idx, 0.0, error)
+                return ("output", resp_idx, scorer.name, out_idx, score, None)
+
+            async def score_process(
+                resp_idx: int,
+                scorer: ProcessScorer,
+            ) -> tuple[
+                str,
+                int,
+                str,
+                dict[int, float],
+                dict[int, dict[str, str]],
+            ]:
+                response = responses[resp_idx]
+                assert process_pool_manager is not None
+                results = await process_pool_manager.score_outputs(
+                    scorer,
+                    response.instance,
+                    list(response.outputs),
+                )
+                output_scores = {out_idx: result.score for out_idx, result in enumerate(results)}
+                output_errors = {
+                    out_idx: result.error
+                    for out_idx, result in enumerate(results)
+                    if result.error is not None
+                }
+                return ("response", resp_idx, scorer.name, output_scores, output_errors)
 
             tasks = []
             for resp_idx, response in enumerate(responses):
@@ -668,6 +730,9 @@ class Task(ABC):
                 for scorer in context_scorers.values():
                     for out_idx in range(len(response.outputs)):
                         tasks.append(score_context(resp_idx, scorer, out_idx))
+                # Add process scorer tasks (one job per response/scorer)
+                for scorer in process_scorers.values():
+                    tasks.append(score_process(resp_idx, scorer))
 
             # Run all scoring tasks concurrently
             results = await asyncio.gather(*tasks)
@@ -676,18 +741,35 @@ class Task(ABC):
             # Structure: {resp_idx: {scorer_name: {out_idx: score}}}
             scores_by_response: dict[int, dict[str, dict[int, float]]] = {}
             scoring_errors_by_response: dict[int, dict[int, dict[str, dict[str, str]]]] = {}
-            for resp_idx, scorer_name, out_idx, score, scoring_error in results:
-                if resp_idx not in scores_by_response:
-                    scores_by_response[resp_idx] = {}
-                if scorer_name not in scores_by_response[resp_idx]:
-                    scores_by_response[resp_idx][scorer_name] = {}
-                scores_by_response[resp_idx][scorer_name][out_idx] = score
-                if scoring_error is not None:
-                    if resp_idx not in scoring_errors_by_response:
-                        scoring_errors_by_response[resp_idx] = {}
-                    if out_idx not in scoring_errors_by_response[resp_idx]:
-                        scoring_errors_by_response[resp_idx][out_idx] = {}
-                    scoring_errors_by_response[resp_idx][out_idx][scorer_name] = scoring_error
+            for result in results:
+                kind = result[0]
+                if kind == "output":
+                    _, resp_idx, scorer_name, out_idx, score, scoring_error = result
+                    if resp_idx not in scores_by_response:
+                        scores_by_response[resp_idx] = {}
+                    if scorer_name not in scores_by_response[resp_idx]:
+                        scores_by_response[resp_idx][scorer_name] = {}
+                    scores_by_response[resp_idx][scorer_name][out_idx] = score
+                    if scoring_error is not None:
+                        if resp_idx not in scoring_errors_by_response:
+                            scoring_errors_by_response[resp_idx] = {}
+                        if out_idx not in scoring_errors_by_response[resp_idx]:
+                            scoring_errors_by_response[resp_idx][out_idx] = {}
+                        scoring_errors_by_response[resp_idx][out_idx][scorer_name] = scoring_error
+                else:
+                    _, resp_idx, scorer_name, output_scores, output_errors = result
+                    if resp_idx not in scores_by_response:
+                        scores_by_response[resp_idx] = {}
+                    scores_by_response[resp_idx][scorer_name] = dict(output_scores)
+                    if output_errors:
+                        if resp_idx not in scoring_errors_by_response:
+                            scoring_errors_by_response[resp_idx] = {}
+                        for out_idx, scoring_error in output_errors.items():
+                            if out_idx not in scoring_errors_by_response[resp_idx]:
+                                scoring_errors_by_response[resp_idx][out_idx] = {}
+                            scoring_errors_by_response[resp_idx][out_idx][scorer_name] = (
+                                scoring_error
+                            )
 
             # Store individual scores in output metadata and aggregate to response
             for resp_idx, scorer_scores in scores_by_response.items():
@@ -696,21 +778,21 @@ class Task(ABC):
                     # Store per-output scores in metadata
                     for out_idx, score in output_scores.items():
                         output = response.outputs[out_idx]
-                        if output.metadata is None:
-                            output.metadata = {}
-                        output.metadata[f"score:{scorer_name}"] = score
+                        scoring_error = None
                         if (
                             resp_idx in scoring_errors_by_response
                             and out_idx in scoring_errors_by_response[resp_idx]
                             and scorer_name in scoring_errors_by_response[resp_idx][out_idx]
                         ):
-                            existing = output.metadata.get("scoring_errors")
-                            if not isinstance(existing, dict):
-                                existing = {}
-                                output.metadata["scoring_errors"] = existing
-                            existing[scorer_name] = scoring_errors_by_response[resp_idx][out_idx][
+                            scoring_error = scoring_errors_by_response[resp_idx][out_idx][
                                 scorer_name
                             ]
+                        _store_output_score(
+                            output,
+                            scorer_name=scorer_name,
+                            score=score,
+                            scoring_error=scoring_error,
+                        )
                     response.scores[scorer_name] = self._aggregate_output_scores(output_scores)
 
     def _aggregate_output_scores(self, scores: Sequence[float] | dict[int, float]) -> float:

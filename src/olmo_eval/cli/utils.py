@@ -99,6 +99,7 @@ HARNESS_CONFIG_FIELDS = frozenset(
         "max_turns",
         "max_concurrency",
         "scoring_concurrency",
+        "scoring_process_pools",
         "sandboxes",
         "scaffold_kwargs",
         "sandbox_pool_instances",
