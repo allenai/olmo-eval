@@ -585,6 +585,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         # Queue for workers to report init times (replaces mp.Manager dict to
         # avoid a long-lived server process that can zombie and hang on shutdown)
         init_queue: mp.Queue = ctx.Queue()
+        start_event = ctx.Event()
 
         # Shuffle with seed for deterministic ordering (enables future checkpointing)
         rng = random.Random(self.shuffle_seed)
@@ -633,7 +634,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             provider_manager.add_poison_pills()
 
             # Start workers
-            workers = provider_manager.start(ctx, total_instances, init_queue)
+            workers = provider_manager.start(ctx, total_instances, init_queue, start_event)
 
             # Start auxiliary inference servers if configured
             registry_config: dict[str, list[dict[str, Any]]] | None = None
@@ -811,6 +812,16 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             provider_init_seconds = wait_for_init_times(
                 init_queue, num_inference_workers, workers=workers, result_queue=result_queue
             )
+            if len(provider_init_seconds) != num_inference_workers:
+                raise RuntimeError(
+                    f"Expected {num_inference_workers} inference worker(s) to initialize "
+                    f"before starting work, got {len(provider_init_seconds)}."
+                )
+
+            runner_logger.info(
+                f"All {num_inference_workers} inference worker(s) ready; starting queued work"
+            )
+            start_event.set()
 
             # Reset tracker start times now that workers are ready
             # This ensures task duration only measures actual processing time

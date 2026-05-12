@@ -27,6 +27,7 @@ def inference_worker(
     init_queue: mp.Queue | None = None,
     output_dir: str | None = None,
     num_workers: int = 1,
+    start_event: Any | None = None,
 ) -> None:
     """Worker process that initializes a harness and processes items.
 
@@ -44,6 +45,7 @@ def inference_worker(
         init_queue: Optional queue for reporting initialization times.
         output_dir: Output directory for persisting logs (e.g., vLLM server logs).
         num_workers: Number of parallel workers sharing the work.
+        start_event: Optional event used to hold all ready workers at a start gate.
     """
     import sys
 
@@ -137,9 +139,6 @@ def inference_worker(
         init_time = time.time() - init_start
         worker_logger.info(f"Provider ready ({init_time:.1f}s)")
 
-        if init_queue is not None:
-            init_queue.put((worker_id, init_time))
-
         try:
             # Configure agent trace output if using the openai_agents scaffold
             if harness_config.scaffold == "openai_agents" and output_dir:
@@ -169,6 +168,13 @@ def inference_worker(
                     f"Inference worker ready (strategy={batch_config.strategy}, "
                     f"chunk_size={batch_config.chunk_size})"
                 )
+
+            if init_queue is not None:
+                init_queue.put((worker_id, init_time))
+
+            if start_event is not None:
+                start_event.wait()
+
             asyncio.run(
                 strategy.run(
                     item_queue,

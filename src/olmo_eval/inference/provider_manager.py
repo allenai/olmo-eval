@@ -57,6 +57,7 @@ class ProviderManager:
         ctx: Any,
         total_instances: int,
         init_queue: mp.Queue,
+        start_event: Any | None = None,
     ) -> list[mp.process.BaseProcess]:
         """Start all provider instances as subprocesses.
 
@@ -69,6 +70,7 @@ class ProviderManager:
             ctx: Multiprocessing context (e.g., from mp.get_context("spawn")).
             total_instances: Total number of instances to process.
             init_queue: Queue for workers to report initialization times.
+            start_event: Optional event used to release all ready workers together.
 
         Returns:
             List of started worker processes.
@@ -96,6 +98,7 @@ class ProviderManager:
                     init_queue,
                     self._output_dir,
                     self._num_inference_workers,
+                    start_event,
                 ),
             )
             proc.start()

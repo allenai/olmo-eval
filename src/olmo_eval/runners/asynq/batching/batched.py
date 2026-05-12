@@ -57,8 +57,12 @@ class BatchedStrategy(BatchingStrategy):
                 current_batch += 1
                 batch_hash = _compute_batch_hash(batch)
                 batch_size = len(batch)
-                start_time = time.perf_counter()
 
+                worker_logger.info(
+                    f"Starting batch {current_batch}/{total_batches} ({batch_hash}) "
+                    f"with {batch_size} item(s)"
+                )
+                start_time = time.perf_counter()
                 await process_items(batch, harness, result_queue, max_concurrency, worker_logger)
 
                 elapsed = time.perf_counter() - start_time

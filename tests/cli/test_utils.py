@@ -267,6 +267,47 @@ class TestEndToEndOrdering:
         }
         assert harness_overrides == []
 
+    def test_worker_batching_launch_shape_resolves_harness_overrides(self):
+        """The async worker launch command should preserve worker and batch overrides."""
+        from olmo_eval.cli.run.config import RunConfigBuilder
+
+        args = [
+            "-H",
+            "default",
+            "-o",
+            "provider.kind=vllm_server",
+            "-o",
+            "provider.kwargs.reasoning_parser=qwen3",
+            "-o",
+            "provider.trust_remote_code=true",
+            "-o",
+            "provider.num_instances=8",
+            "-o",
+            "batching.chunk_size=2",
+            "-m",
+            "Qwen/Qwen3-4B-Thinking-2507",
+            "-t",
+            "hmmt_nov_2025:pass_at_32@urgent",
+        ]
+        ordered = reconstruct_ordered_args(args)
+        task_overrides, harness_overrides = process_ordered_args(ordered)
+
+        config = RunConfigBuilder(
+            model="Qwen/Qwen3-4B-Thinking-2507",
+            task=("hmmt_nov_2025:pass_at_32",),
+            output_dir="/tmp/results",
+            harness_preset="default",
+            cli_task_overrides=task_overrides,
+            cli_harness_overrides=harness_overrides,
+        ).build()
+
+        assert str(config.harness_config.provider.kind) == "vllm_server"
+        assert config.harness_config.provider.kwargs["reasoning_parser"] == "qwen3"
+        assert config.harness_config.provider.trust_remote_code is True
+        assert config.harness_config.provider.num_instances == 8
+        assert config.harness_config.batching is not None
+        assert config.harness_config.batching.chunk_size == 2
+
 
 class TestFormatTransformersRuntimeRows:
     """Tests for runtime summary formatting of transformers versions."""
