@@ -2829,6 +2829,10 @@
         setSearchSelectSummary(control, target);
         if (details) details.open = false;
         if (nextValue === previousValue) return;
+        if (hiddenInput.name === "group") {
+          const scopeInput = scopeForm.querySelector('input[type="hidden"][name="scope"]');
+          if (scopeInput) scopeInput.value = "";
+        }
         if (hiddenInput.name === "group" || hiddenInput.name === "scope") {
           const metricSelect = scopeForm.querySelector("#metric-select");
           if (metricSelect) metricSelect.value = "";
