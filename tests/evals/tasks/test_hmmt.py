@@ -13,6 +13,7 @@ def _setup_registry():
 
 _ALL_TASKS = ("hmmt_feb_2025", "hmmt_nov_2025", "hmmt_feb_2026")
 _ALL_VARIANTS = ("pass_at_32", "pass_at_32_rlzero")
+_SIXTEEN_K_TASKS = ("hmmt_nov_2025", "hmmt_feb_2026")
 _DATASETS_BY_TASK = {
     "hmmt_feb_2025": "MathArena/hmmt_feb_2025",
     "hmmt_nov_2025": "MathArena/hmmt_nov_2025",
@@ -37,6 +38,25 @@ class TestHMMTRegistration:
     def test_variants_registered(self, task_name, variant):
         task = get_task(f"{task_name}:{variant}")
         assert task is not None
+
+    @pytest.mark.parametrize("task_name", _SIXTEEN_K_TASKS)
+    def test_pass_at_32_16k_variant_overrides_only_max_tokens(self, task_name):
+        base = get_task(f"{task_name}:pass_at_32")
+        variant = get_task(f"{task_name}:pass_at_32:16k")
+
+        assert variant.config.formatter == base.config.formatter
+        assert variant.config.metrics == base.config.metrics
+        assert variant.config.primary_metric == base.config.primary_metric
+
+        base_sampling = base.config.sampling_params
+        variant_sampling = variant.config.sampling_params
+        assert base_sampling is not None
+        assert variant_sampling is not None
+        assert base_sampling.max_tokens == 32768
+        assert variant_sampling.max_tokens == 16384
+        assert variant_sampling.temperature == base_sampling.temperature == 0.6
+        assert variant_sampling.top_p == base_sampling.top_p == 0.95
+        assert variant_sampling.num_samples == base_sampling.num_samples == 32
 
     @pytest.mark.parametrize("task_name", _ALL_TASKS)
     def test_task_uses_matharena_dataset(self, task_name):

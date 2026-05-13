@@ -10,10 +10,10 @@ make_suite(
 make_suite(
     "math:posttrain:dev",
     (
-        "aime_2025:pass_at_32",
-        "aime_2026:pass_at_32",
-        "hmmt_nov_2025:pass_at_32",
-        "hmmt_feb_2026:pass_at_32",
+        "aime_2025:pass_at_32:16k",
+        "aime_2026:pass_at_32:16k",
+        "hmmt_nov_2025:pass_at_32:16k",
+        "hmmt_feb_2026:pass_at_32:16k",
     ),
     aggregation=AggregationStrategy.AVERAGE,
     description=(

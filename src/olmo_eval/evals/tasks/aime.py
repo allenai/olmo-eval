@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from dataclasses import replace
 from typing import Any
 
 from olmo_eval.common.formatters import ChatFormatter
@@ -24,6 +25,7 @@ _PASS_AT_32_SAMPLING = SamplingParams(
     top_p=0.95,
     num_samples=32,
 )
+_PASS_AT_32_16K_SAMPLING = replace(_PASS_AT_32_SAMPLING, max_tokens=16384)
 
 _COT_SUFFIX = "\nPlease reason step by step, and put your final answer within \\boxed{{}}."
 
@@ -142,4 +144,11 @@ for _year in (2024, 2025, 2026):
         metrics=tuple(_PASS_AT_32_METRICS.values()),
         primary_metric=_PASS_AT_32_METRICS["k1"],
         sampling_params=_RLZERO_SAMPLING,
+    )
+
+for _year in (2025, 2026):
+    register_variant(
+        f"aime_{_year}",
+        "16k",
+        sampling_params=_PASS_AT_32_16K_SAMPLING,
     )
