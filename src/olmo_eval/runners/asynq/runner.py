@@ -207,6 +207,17 @@ def _plan_process_scoring_pools(
     )
 
 
+def _shutdown_process_scoring_pools(process_pool_manager: Any) -> None:
+    runner_logger.info("Stopping process scoring pools...")
+    start_time = time.time()
+    try:
+        process_pool_manager.shutdown()
+    except Exception:
+        runner_logger.warning("Failed to stop process scoring pools", exc_info=True)
+    else:
+        runner_logger.info(f"Stopped process scoring pools in {time.time() - start_time:.1f}s")
+
+
 def _collect_sandbox_demand(
     trackers: Mapping[str, TaskTracker],
     expanded_tasks: Sequence[str] | None = None,
@@ -880,9 +891,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 with contextlib.suppress(Exception):
                     await sandbox_manager.stop()
             if process_pool_manager is not None:
-                runner_logger.info("Stopping process scoring pools...")
-                with contextlib.suppress(Exception):
-                    process_pool_manager.shutdown()
+                _shutdown_process_scoring_pools(process_pool_manager)
             if inference_manager is not None:
                 inference_manager.shutdown()
             for q in [item_queue, result_queue, init_queue]:

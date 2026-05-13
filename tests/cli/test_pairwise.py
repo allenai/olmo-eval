@@ -1086,6 +1086,16 @@ def test_browser_exports_use_real_newlines_for_downloads() -> None:
     assert 'return /[,"\\\\n]/.test(text)' not in script
 
 
+def test_browser_persists_hidden_column_filters() -> None:
+    assets = importlib.import_module("olmo_eval.analysis.pairwise_viewer.assets")
+
+    script = assets.browser_js_text()
+
+    assert 'hiddenCols: loadSetState("hiddenCols")' in script
+    assert 'storageBase + "hiddenCols"' in script
+    assert "function trimHiddenCols()" in script
+
+
 def test_latest_only_exports_merge_source_rows_back_to_display_models() -> None:
     viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
 

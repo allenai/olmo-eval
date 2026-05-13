@@ -3,6 +3,7 @@
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from typing import ClassVar
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -22,6 +23,7 @@ from olmo_eval.runners.asynq.runner import (
     _determine_scoring_limits,
     _plan_process_scoring_pools,
     _plan_sandbox_configs,
+    _shutdown_process_scoring_pools,
 )
 from olmo_eval.runners.asynq.types import TaskTracker
 from olmo_eval.runners.processing.utils import compute_task_hash
@@ -746,6 +748,46 @@ class TestProcessPoolPlanning:
 
         assert response_limit == 11
         assert context_limit == 4
+
+    def test_shutdown_logs_confirmation(self, monkeypatch):
+        class _Manager:
+            def __init__(self) -> None:
+                self.shutdown_called = False
+
+            def shutdown(self) -> None:
+                self.shutdown_called = True
+
+        import olmo_eval.runners.asynq.runner as runner_module
+
+        manager = _Manager()
+        fake_logger = MagicMock()
+        monkeypatch.setattr(runner_module, "runner_logger", fake_logger)
+
+        _shutdown_process_scoring_pools(manager)
+
+        assert manager.shutdown_called
+        fake_logger.info.assert_any_call("Stopping process scoring pools...")
+        messages = [call.args[0] for call in fake_logger.info.call_args_list]
+        assert any(message.startswith("Stopped process scoring pools in ") for message in messages)
+        fake_logger.warning.assert_not_called()
+
+    def test_shutdown_logs_warning_on_failure(self, monkeypatch):
+        class _Manager:
+            def shutdown(self) -> None:
+                raise RuntimeError("boom")
+
+        import olmo_eval.runners.asynq.runner as runner_module
+
+        fake_logger = MagicMock()
+        monkeypatch.setattr(runner_module, "runner_logger", fake_logger)
+
+        _shutdown_process_scoring_pools(_Manager())
+
+        fake_logger.info.assert_called_once_with("Stopping process scoring pools...")
+        fake_logger.warning.assert_called_once_with(
+            "Failed to stop process scoring pools",
+            exc_info=True,
+        )
 
 
 class TestTaskConfigSandboxAllocationWeight:
