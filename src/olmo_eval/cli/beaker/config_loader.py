@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+import beaker
 from rich.console import Console
 
 if TYPE_CHECKING:
@@ -233,6 +234,15 @@ class LaunchConfigLoader:
         if not workspace:
             console.print("[red]Error:[/red] --workspace/-w is required")
             raise SystemExit(1) from None
+        if not budget and not self._workspace_has_bound_budget(workspace):
+            console.print(
+                "[red]Error:[/red] --budget/-B is required when the workspace has no bound budget"
+            )
+            raise SystemExit(1) from None
+
+    def _workspace_has_bound_budget(self, workspace: str) -> bool:
+        client = beaker.Beaker.from_env(default_workspace=workspace)
+        return bool(client.workspace.get().budget_id)
 
     def _generate_experiment_name(self, model_specs: list[str], task_specs: list[str]) -> str:
         """Generate experiment name from model and task specs.
