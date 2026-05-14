@@ -483,7 +483,7 @@ class SafetyScorer(LLMJudgeScorer):
                 logger.warning("Failed to parse safety judge response: %s", response[:200])
                 error_meta: dict[str, Any] = {
                     "prompt_harmfulness": None,
-                    "response_compliance": None,
+                    "response_refusal": None,
                     "response_harmfulness": None,
                     "is_parsing_error": True,
                 }
@@ -498,7 +498,7 @@ class SafetyScorer(LLMJudgeScorer):
 
         judge_response: dict[str, Any] = {
             "prompt_harmfulness": q1_answer,
-            "response_compliance": q2_answer,
+            "response_refusal": q2_answer,
             "response_harmfulness": q3_answer,
             "is_parsing_error": parsing_error,
         }
