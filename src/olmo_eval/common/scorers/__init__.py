@@ -16,6 +16,7 @@ from .base import (
 )
 from .code_execution import CodeExecutionScorer, MultiplEScorer
 from .execution import ContextScorer, ExecutionScorer, SandboxRequiredError
+from .ifeval import IFEvalScorer
 from .llm_judge import (
     JudgeFn,
     LLMJudgeScorer,
@@ -46,6 +47,7 @@ __all__ = [
     "ExactMatchScorer",
     "ExecutionScorer",
     "F1Scorer",
+    "IFEvalScorer",
     "JudgeFn",
     "LLMJudgeScorer",
     "LogprobScorer",
