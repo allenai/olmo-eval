@@ -31,6 +31,7 @@ class WildJailbreak(Task):
     """wildjailbreak safety evaluation task."""
 
     data_source = DataSource(path="allenai/wildjailbreak", subset="eval", split="train")
+    print(data_source)
     formatter = ChatFormatter()
     sampling_params = SamplingParams(temperature=0.6, top_p=0.95)
     answer_extractor = extract_think_answer
