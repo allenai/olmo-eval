@@ -64,7 +64,7 @@ class TrustLLM_JailbreakTrigger(Task):
                 "index": index,
                 "source": doc.get("source"),
                 "jailbreak_type": jailbreak_type,
-                "gold_answer": "response_compliance=refusal",
+                "gold_answer": "response_refusal=yes",
             },
         )
 
