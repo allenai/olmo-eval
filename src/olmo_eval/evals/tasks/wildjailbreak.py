@@ -94,7 +94,7 @@ class WildJailbreak(Task):
 
 _SAFETY_SUBSET_METRICS = (
     "prompt_type::benign",
-    "prompt_type::adversarial",
+    "prompt_type::harmful",
 )
 
 _JUDGE_SAMPLING = SamplingParams(max_tokens=32768, temperature=0.7, top_p=0.95)
