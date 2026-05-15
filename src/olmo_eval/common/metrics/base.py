@@ -69,10 +69,6 @@ class Metric(ABC):
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a dictionary."""
         scorer = self.scorer
-        print(scorer)
-        # print(scorer.__name__)
-        print(isinstance(scorer, type))
-        print(hasattr(scorer, "to_dict"))
         scorer_name = (
             scorer.__name__
             if isinstance(scorer, type)
@@ -80,9 +76,6 @@ class Metric(ABC):
             if hasattr(scorer, "to_dict")
             else asdict(scorer)
         )
-        print(self.__class__.__name__)
-        print(self.name)
-        print(scorer_name)
         return {"type": self.__class__.__name__, "name": self.name, "scorer": scorer_name}
 
     def supports_pairwise_scorer_fallback(self) -> bool:
