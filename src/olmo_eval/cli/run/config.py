@@ -339,10 +339,16 @@ class RunConfigBuilder:
         for task_spec, cli_overrides in self.cli_task_overrides.items():
             if not cli_overrides:
                 continue
-            base_spec = task_spec.rsplit("@", 1)[0] if "@" in task_spec else task_spec
+            if "@" in task_spec:
+                base_spec, priority = task_spec.rsplit("@", 1)
+                priority_suffix = f"@{priority}"
+            else:
+                base_spec = task_spec
+                priority_suffix = ""
             if suite_exists(base_spec):
                 for child_spec in get_suite(base_spec).expand():
-                    resolved_cli_overrides.setdefault(child_spec, []).extend(cli_overrides)
+                    key = f"{child_spec}{priority_suffix}"
+                    resolved_cli_overrides.setdefault(key, []).extend(cli_overrides)
             else:
                 resolved_cli_overrides.setdefault(task_spec, []).extend(cli_overrides)
 
