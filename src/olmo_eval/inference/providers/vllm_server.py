@@ -247,6 +247,21 @@ class VLLMServerProvider(InferenceProvider):
         """
         super().__init__(model_name)
         self._beaker_reporter = BeakerStatusReporter()
+        benchmark = os.environ.get("OLMO_EVAL_BENCHMARK", "").strip()
+        model_basename = os.path.basename(model_name.rstrip("/")) if model_name else ""
+        label_parts = [p for p in (benchmark, model_basename) if p]
+        self._progress_label = " | ".join(label_parts) or "vLLM gen"
+        # If the runner exported a total generation count, configure an
+        # accumulating progress tracker so we report cumulative progress
+        # across batches instead of per-batch request counts.
+        total_gens_env = os.environ.get("OLMO_VLLM_GEN_TOTAL")
+        if total_gens_env:
+            try:
+                total_gens = int(total_gens_env)
+                if total_gens > 0:
+                    self._beaker_reporter.start_accumulator(self._progress_label, total_gens)
+            except ValueError:
+                pass
         self.timeout = timeout
         self.max_concurrency = max_concurrency
         self.max_retries = max_retries
@@ -856,12 +871,20 @@ class VLLMServerProvider(InferenceProvider):
         async def process(req: LMRequest) -> list[LMOutput]:
             return await self._generate_single_async(req, params)
 
+        if self._beaker_reporter.has_accumulator(self._progress_label):
+            on_progress = self._beaker_reporter.accumulating_callback(
+                self._progress_label, per_item=params.num_samples or 1
+            )
+        else:
+            on_progress = self._beaker_reporter.progress_callback(
+                self._progress_label, units="req/sec"
+            )
         results = await dispatch_concurrent(
             requests,
             process,
             max_in_flight=self.max_concurrency,
             max_retries=self.max_retries,
-            on_progress=self._beaker_reporter.progress_callback("vLLM gen", units="req/sec"),
+            on_progress=on_progress,
         )
         return [r if r is not None else [] for r in results]
 
