@@ -69,6 +69,10 @@ class Metric(ABC):
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a dictionary."""
         scorer = self.scorer
+        print(scorer)
+        print(scorer.__name__)
+        print(isinstance(scorer, type))
+        print(hasattr(scorer, "to_dict"))
         scorer_name = (
             scorer.__name__
             if isinstance(scorer, type)
