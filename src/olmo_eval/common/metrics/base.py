@@ -70,7 +70,7 @@ class Metric(ABC):
         """Serialize to a dictionary."""
         scorer = self.scorer
         print(scorer)
-        print(scorer.__name__)
+        # print(scorer.__name__)
         print(isinstance(scorer, type))
         print(hasattr(scorer, "to_dict"))
         scorer_name = (
