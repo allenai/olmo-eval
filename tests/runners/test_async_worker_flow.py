@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from inspect import signature
 from typing import Any
 
 from olmo_eval.harness.config import HarnessConfig, ProviderConfig
@@ -53,6 +54,8 @@ def test_provider_manager_passes_start_event_to_each_worker() -> None:
 
     assert processes == ctx.processes
     assert all(process.started for process in processes)
-    assert [process.args[-1] for process in processes] == [start_event, start_event]
-    assert [process.args[-2] for process in processes] == [2, 2]
-    assert [process.args[6] for process in processes] == [init_queue, init_queue]
+    for process in processes:
+        worker_args = dict(zip(signature(process.target).parameters, process.args, strict=False))
+        assert worker_args["init_queue"] is init_queue
+        assert worker_args["num_workers"] == 2
+        assert worker_args["start_event"] is start_event

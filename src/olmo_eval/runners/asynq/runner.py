@@ -33,6 +33,7 @@ from olmo_eval.runners.processing.utils import generate_experiment_id
 from olmo_eval.storage import StorageBackend
 
 if TYPE_CHECKING:
+    from olmo_eval.common.execution import ProcessScoringPoolConfig
     from olmo_eval.evals.tasks.common import SandboxEnv, Task
     from olmo_eval.harness.sandbox import SandboxConfig
 
@@ -82,7 +83,7 @@ class _ProcessPoolDemand:
 class _ProcessPoolPlan:
     """Resolved process pools and demand data for process-backed scorers."""
 
-    pools: dict[str, Any]
+    pools: dict[str, ProcessScoringPoolConfig]
     demand: dict[str, _ProcessPoolDemand]
     auto_created: frozenset[str]
 
@@ -161,7 +162,7 @@ def _collect_process_pool_demand(
 
 
 def _plan_process_scoring_pools(
-    configured_pools: Mapping[str, Any],
+    configured_pools: Mapping[str, ProcessScoringPoolConfig],
     expanded_tasks: Sequence[str],
     trackers: Mapping[str, TaskTracker],
     scoring_concurrency: int | None,

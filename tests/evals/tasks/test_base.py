@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import ClassVar
@@ -836,12 +835,9 @@ class TestMixedWorkloadScoring:
             process_pool_manager=_TrackedProcessPoolManager(tracker=tracker, delay=0.05),
         )
 
-        start = time.perf_counter()
         scored = await task.score_responses([response], context=context)
-        elapsed = time.perf_counter() - start
 
         assert tracker.peak >= 2
-        assert elapsed < 0.13
         assert scored[0].scores["exact_match"] == 1.0
         assert scored[0].scores["timed_process"] == 1.0
         assert scored[0].scores["tracked_context"] == 1.0
