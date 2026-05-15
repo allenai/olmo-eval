@@ -52,7 +52,7 @@ class AMC12Task(MinervaMathTask):
     formatter = ChatFormatter(user_template="{question}" + _COT_SUFFIX)
     metrics = (AccuracyMetric(scorer=MinervaMathScorer),)
     num_fewshot = 0
-    sampling_params = SamplingParams(max_tokens=32768, temperature=0.0)
+    sampling_params = SamplingParams(max_tokens=16384, temperature=0.0)
 
     years: tuple[int, ...] = AMC12_YEARS
 
