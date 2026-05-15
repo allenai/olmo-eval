@@ -48,8 +48,9 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
                 "sum_logits": sum_logits,
                 "num_tokens": num_tokens,
                 "num_tokens_all": meta.get("num_tokens_all", num_tokens),
-                "is_greedy": meta.get("is_greedy", False),
             }
+            if "is_greedy" in meta:
+                out_data["is_greedy"] = meta["is_greedy"]
 
             # Compute derived metrics (matching oe-eval format)
             if num_tokens > 0:

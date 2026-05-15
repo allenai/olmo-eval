@@ -135,6 +135,65 @@ def _cut_at_stop_sequence(text: str, stop_sequences: list[str] | None) -> str:
     return text[:smallest_idx]
 
 
+def _completion_logprob_value(value: Any) -> float | None:
+    """Extract a numeric logprob from OpenAI/vLLM completion logprob payloads."""
+    if isinstance(value, dict):
+        value = value.get("logprob", value.get("log_prob"))
+    else:
+        value = getattr(value, "logprob", value)
+
+    if value is None:
+        return None
+
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _completion_top_logprob_values(top_logprobs: Any) -> list[float]:
+    """Extract numeric top-logprob values for one generated token."""
+    if isinstance(top_logprobs, dict):
+        candidates = top_logprobs.values()
+    elif isinstance(top_logprobs, (list, tuple)):
+        candidates = top_logprobs
+    else:
+        return []
+
+    values: list[float] = []
+    for candidate in candidates:
+        if (logprob := _completion_logprob_value(candidate)) is not None:
+            values.append(logprob)
+    return values
+
+
+def _completion_is_greedy(
+    token_logprobs: list[float | None],
+    top_logprobs: list[Any] | None,
+) -> bool | None:
+    """Best-effort greedy check for completion responses.
+
+    Completion APIs expose generated-token logprobs rather than prompt_logprobs.
+    When top_logprobs are present, a token is greedy if its emitted-token logprob
+    is at least the highest returned top-logprob for that step.
+    """
+    if not token_logprobs or not top_logprobs:
+        return None
+
+    observed = False
+    for token_logprob, top_logprob in zip(token_logprobs, top_logprobs, strict=False):
+        chosen_logprob = _completion_logprob_value(token_logprob)
+        top_values = _completion_top_logprob_values(top_logprob)
+        if chosen_logprob is None or not top_values:
+            continue
+
+        observed = True
+        if chosen_logprob + 1e-6 < max(top_values):
+            return False
+
+    return True if observed else None
+
+
 # Enable with VLLM_DEBUG_REQUESTS=1
 _DEBUG_REQUESTS = os.environ.get("VLLM_DEBUG_REQUESTS", "").lower() in ("1", "true", "yes")
 
@@ -595,6 +654,7 @@ class VLLMServerProvider(InferenceProvider):
         *,
         tokens: list[str],
         token_logprobs: list[float | None],
+        top_logprobs: list[Any] | None,
         metadata: dict[str, Any],
     ) -> list[LogProbEntry] | None:
         """Convert completion logprob payload into standard entries and metadata."""
@@ -613,6 +673,8 @@ class VLLMServerProvider(InferenceProvider):
                     "num_tokens_all": num_tokens,
                 }
             )
+            if (is_greedy := _completion_is_greedy(token_logprobs, top_logprobs)) is not None:
+                metadata["is_greedy"] = is_greedy
             return logprob_entries
 
         return None
@@ -653,12 +715,15 @@ class VLLMServerProvider(InferenceProvider):
             if isinstance(logprobs_payload, dict):
                 tokens = logprobs_payload.get("tokens") or []
                 token_logprobs = logprobs_payload.get("token_logprobs") or []
+                top_logprobs = logprobs_payload.get("top_logprobs") or []
             else:
                 tokens = getattr(logprobs_payload, "tokens", None) or []
                 token_logprobs = getattr(logprobs_payload, "token_logprobs", None) or []
+                top_logprobs = getattr(logprobs_payload, "top_logprobs", None) or []
             logprob_entries = self._completion_metadata_from_logprobs(
                 tokens=tokens,
                 token_logprobs=token_logprobs,
+                top_logprobs=top_logprobs,
                 metadata=metadata,
             )
 
