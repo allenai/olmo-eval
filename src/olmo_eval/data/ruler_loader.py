@@ -3,25 +3,35 @@
 Ported from HELMET: https://github.com/princeton-nlp/HELMET
 """
 
+import json
 import logging
 import os
 import re
 import tarfile
 from typing import Any
 
-from datasets import load_dataset
-from datasets.config import HF_DATASETS_CACHE
-from datasets.utils import disable_progress_bars as disable_datasets_progress_bars
+import numpy as np
 from huggingface_hub import hf_hub_download
 from huggingface_hub.utils import disable_progress_bars as disable_hf_hub_progress_bars
+from huggingface_hub.utils import silent_tqdm
 
 logger = logging.getLogger(__name__)
 
 
 def _disable_ruler_progress_bars() -> None:
-    """Avoid HF tqdm `_lock` failures in the RULER download/load path."""
-    disable_datasets_progress_bars()
+    """Avoid HF tqdm `_lock` failures in the RULER download path."""
     disable_hf_hub_progress_bars()
+
+
+def _hf_datasets_cache() -> str:
+    cache_dir = os.environ.get("HF_DATASETS_CACHE")
+    if cache_dir:
+        return os.path.expanduser(cache_dir)
+
+    hf_home = os.environ.get("HF_HOME")
+    if hf_home is None:
+        hf_home = os.path.join(os.environ.get("XDG_CACHE_HOME", "~/.cache"), "huggingface")
+    return os.path.expanduser(os.path.join(hf_home, "datasets"))
 
 
 def download_ruler_data() -> str:
@@ -32,24 +42,46 @@ def download_ruler_data() -> str:
     """
     _disable_ruler_progress_bars()
 
-    root_dir = os.path.join(HF_DATASETS_CACHE, "allenai--RULER")
+    root_dir = os.path.join(_hf_datasets_cache(), "allenai--RULER")
     data_dir = os.path.join(root_dir, "data")
 
     if not os.path.exists(data_dir):
         logger.info(f"Local RULER data not found in {root_dir}, downloading...")
         my_file = hf_hub_download(
-            repo_id="allenai/ruler_data", filename="data_100_samples.tgz", repo_type="dataset"
+            repo_id="allenai/ruler_data",
+            filename="data_100_samples.tgz",
+            repo_type="dataset",
+            tqdm_class=silent_tqdm,
         )
         os.makedirs(root_dir, exist_ok=True)
         logger.info(f"Extracting RULER data to {root_dir}...")
         with tarfile.open(my_file) as tar:
-            tar.extractall(root_dir)
+            tar.extractall(root_dir, filter="data")
         if not os.path.exists(data_dir):
             raise RuntimeError(f"Extraction failed: {data_dir} does not exist")
     else:
         logger.info(f"Using cached RULER data in {root_dir}.")
 
     return root_dir
+
+
+def _load_jsonl(path: str) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    with open(path, encoding="utf-8") as f:
+        for line_num, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as err:
+                raise ValueError(f"Invalid JSONL in {path}:{line_num}: {err}") from err
+            if not isinstance(record, dict):
+                raise ValueError(
+                    f"Expected JSON object in {path}:{line_num}, got {type(record).__name__}"
+                )
+            records.append(record)
+    return records
 
 
 def get_ruler_templates(task_type: str) -> tuple[str, str, str]:
@@ -147,7 +179,7 @@ def load_ruler_dataset(
 
     Returns:
         Dictionary containing:
-            - data: HuggingFace Dataset
+            - data: list of processed records
             - prompt_template: Full prompt template
             - user_template: User message template
             - system_template: System/assistant prefix template
@@ -157,27 +189,29 @@ def load_ruler_dataset(
     # Extract task type from task name (remove context size)
     task_type = re.findall(r"^(.*)__\d+$", task_name)[0]
 
-    # Load dataset
-    data = load_dataset("json", data_files=data_path)["train"]
-
     # Get templates for this task type
     user_template, system_template, prompt_template = get_ruler_templates(task_type)
 
     # Process examples to standardize field names
     def process_example(example: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "question": (example.get("query") or example.get("question") or ""),
-            "example": (
-                example.get("example", "") + "\n\n" if example.get("example", "") != "" else ""
-            ),
-            "answer": example.get("answer") or example.get("outputs"),
-        }
+        processed = dict(example)
+        processed.update(
+            {
+                "question": (example.get("query") or example.get("question") or ""),
+                "example": (
+                    example.get("example", "") + "\n\n" if example.get("example", "") != "" else ""
+                ),
+                "answer": example.get("answer") or example.get("outputs"),
+            }
+        )
+        return processed
 
-    data = data.map(process_example)
+    data = [process_example(record) for record in _load_jsonl(data_path)]
 
     # Sample if requested
     if max_samples is not None:
-        data = data.shuffle(seed).select(range(min(len(data), max_samples)))
+        permutation = np.random.default_rng(seed).permutation(len(data))
+        data = [data[int(idx)] for idx in permutation[: min(len(data), max_samples)]]
 
     return {
         "data": data,

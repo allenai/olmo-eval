@@ -573,11 +573,10 @@ class VLLMServerProvider(InferenceProvider):
                 "num_samples": params.num_samples,
                 "add_special_tokens": False,
             }
-            if params.do_sample and params.temperature > 0:
-                if params.top_p is not None:
-                    trace["generation_kwargs"]["top_p"] = params.top_p
-                if params.top_k is not None:
-                    trace["generation_kwargs"]["top_k"] = params.top_k
+            if params.top_p is not None:
+                trace["generation_kwargs"]["top_p"] = params.top_p
+            if params.do_sample and params.temperature > 0 and params.top_k is not None:
+                trace["generation_kwargs"]["top_k"] = params.top_k
             trace["stop_sequences"] = self._get_completion_stop_sequences(params) or []
             trace["input_mode"] = (
                 "prompt_token_ids" if self._completion_use_prompt_token_ids else "text"
@@ -594,11 +593,10 @@ class VLLMServerProvider(InferenceProvider):
             "top_logprobs": 1,
             "num_samples": params.num_samples,
         }
-        if params.do_sample and params.temperature > 0:
-            if params.top_p is not None:
-                generation_kwargs["top_p"] = params.top_p
-            if params.top_k is not None:
-                generation_kwargs["top_k"] = params.top_k
+        if params.do_sample and params.temperature > 0 and params.top_k is not None:
+            generation_kwargs["top_k"] = params.top_k
+        if params.top_p is not None:
+            generation_kwargs["top_p"] = params.top_p
         if self.chat_template_kwargs:
             generation_kwargs["chat_template_kwargs"] = dict(self.chat_template_kwargs)
         trace["generation_kwargs"] = generation_kwargs
@@ -744,11 +742,10 @@ class VLLMServerProvider(InferenceProvider):
 
         # Always send temperature explicitly to avoid server defaults (OpenAI API defaults to 1.0)
         kwargs["temperature"] = params.temperature
-        if params.do_sample and params.temperature > 0:
-            if params.top_p is not None:
-                kwargs["top_p"] = params.top_p
-            if params.top_k is not None:
-                extra_body["top_k"] = params.top_k
+        if params.top_p is not None:
+            kwargs["top_p"] = params.top_p
+        if params.do_sample and params.temperature > 0 and params.top_k is not None:
+            extra_body["top_k"] = params.top_k
         stop_sequences = self._get_completion_stop_sequences(params)
         if stop_sequences:
             kwargs["stop"] = stop_sequences
@@ -815,12 +812,11 @@ class VLLMServerProvider(InferenceProvider):
 
         # Always send temperature explicitly to avoid server defaults (OpenAI API defaults to 1.0)
         kwargs["temperature"] = params.temperature
+        if params.top_p is not None:
+            kwargs["top_p"] = params.top_p
         extra_body: dict[str, Any] = {}
-        if params.do_sample and params.temperature > 0:
-            if params.top_p is not None:
-                kwargs["top_p"] = params.top_p
-            if params.top_k is not None:
-                extra_body["top_k"] = params.top_k
+        if params.do_sample and params.temperature > 0 and params.top_k is not None:
+            extra_body["top_k"] = params.top_k
         if params.stop_sequences:
             kwargs["stop"] = list(params.stop_sequences)
         if tools:
