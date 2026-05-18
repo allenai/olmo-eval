@@ -119,9 +119,6 @@ conflicts = [[
     { package = "olmo-eval-internal", extra = "openhands" },
 ]]
 
-[manifest]
-overrides = [{ name = "transformers", specifier = ">=5.4.0" }]
-
 [[package]]
 name = "absl-py"
 version = "2.4.0"
@@ -1324,7 +1321,7 @@ dependencies = [
     { name = "loguru", marker = "sys_platform != 'darwin'" },
     { name = "pydantic", marker = "sys_platform != 'darwin'" },
     { name = "torch", marker = "sys_platform != 'darwin'" },
-    { name = "transformers", marker = "sys_platform != 'darwin'" },
+    { name = "transformers", version = "5.5.3", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/41/1b/c3c4a98ec5f2727656336f07a0c35862195c310d8eb0b2fa5b4be6848680/compressed_tensors-0.15.0.1.tar.gz", hash = "sha256:a8e93054e8a5ec49c980b09ed36c4c1249b4a8ee167920a8e461c4da26e78d99", size = 229412, upload-time = "2026-04-10T14:23:54.708Z" }
 wheels = [
@@ -5384,7 +5381,8 @@ gpu = [
     { name = "nvidia-ml-py", marker = "sys_platform != 'darwin' or (extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-clients' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm')" },
 ]
 hf = [
-    { name = "transformers" },
+    { name = "transformers", version = "5.5.3", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'darwin' and extra == 'extra-18-olmo-eval-internal-vllm') or (extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-clients' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm')" },
+    { name = "transformers", version = "5.7.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or extra == 'extra-18-olmo-eval-internal-openhands' or extra != 'extra-18-olmo-eval-internal-vllm'" },
 ]
 litellm = [
     { name = "litellm" },
@@ -5414,7 +5412,7 @@ storage = [
 vllm = [
     { name = "opencv-python-headless", marker = "sys_platform != 'darwin'" },
     { name = "torch-c-dlpack-ext", marker = "sys_platform != 'darwin'" },
-    { name = "transformers" },
+    { name = "transformers", version = "5.5.3", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin'" },
     { name = "vllm", extra = ["runai"], marker = "(sys_platform != 'darwin' and extra == 'extra-18-olmo-eval-internal-vllm') or (extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-clients' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm')" },
 ]
 
@@ -12110,19 +12108,120 @@ wheels = [
 
 [[package]]
 name = "transformers"
+version = "5.5.3"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.14' and sys_platform == 'win32'",
+    "python_full_version >= '3.14' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.14' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32'",
+    "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
+    "python_full_version == '3.13.*' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version < '3.13' and sys_platform == 'win32'",
+    "python_full_version < '3.13' and sys_platform == 'emscripten'",
+    "python_full_version < '3.13' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+]
+dependencies = [
+    { name = "huggingface-hub", marker = "(sys_platform != 'darwin' and extra == 'extra-18-olmo-eval-internal-vllm') or (extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-clients' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm')" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'darwin' and extra == 'extra-18-olmo-eval-internal-vllm') or (extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-clients' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm')" },
+    { name = "packaging", marker = "(sys_platform != 'darwin' and extra == 'extra-18-olmo-eval-internal-vllm') or (extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-clients' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm')" },
+    { name = "pyyaml", marker = "(sys_platform != 'darwin' and extra == 'extra-18-olmo-eval-internal-vllm') or (extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-clients' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm')" },
+    { name = "regex", marker = "(sys_platform != 'darwin' and extra == 'extra-18-olmo-eval-internal-vllm') or (extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-clients' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm')" },
+    { name = "safetensors", marker = "(sys_platform != 'darwin' and extra == 'extra-18-olmo-eval-internal-vllm') or (extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-clients' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm')" },
+    { name = "tokenizers", marker = "(sys_platform != 'darwin' and extra == 'extra-18-olmo-eval-internal-vllm') or (extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-clients' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm')" },
+    { name = "tqdm", marker = "(sys_platform != 'darwin' and extra == 'extra-18-olmo-eval-internal-vllm') or (extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-clients' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm')" },
+    { name = "typer", marker = "(sys_platform != 'darwin' and extra == 'extra-18-olmo-eval-internal-vllm') or (extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-clients' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm')" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/af/35/cd5b0d1288e65d2c12db4ce84c1ec1074f7ee9bced040de6c9d69e70d620/transformers-5.5.3.tar.gz", hash = "sha256:3f60128e840b40d352655903552e1eed4f94ed49369a4d43e1bc067bd32d3f50", size = 8226047, upload-time = "2026-04-09T15:52:56.231Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a1/0b/f8524551ab2d896dfaca74ddb70a4453d515bbf4ab5451c100c7788ae155/transformers-5.5.3-py3-none-any.whl", hash = "sha256:e48f3ec31dd96505e96e66b63a1e43e1ad7a65749e108d9227caaf51051cdb02", size = 10236257, upload-time = "2026-04-09T15:52:52.866Z" },
+]
+
+[[package]]
+name = "transformers"
 version = "5.7.0"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra == 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version >= '3.14' and sys_platform == 'win32' and extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version >= '3.14' and sys_platform == 'win32' and extra == 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version >= '3.14' and sys_platform == 'win32' and extra != 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version >= '3.14' and sys_platform == 'emscripten' and extra != 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra == 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version >= '3.14' and sys_platform == 'emscripten' and extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version >= '3.14' and sys_platform == 'emscripten' and extra == 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version >= '3.14' and sys_platform == 'emscripten' and extra != 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version >= '3.14' and sys_platform == 'emscripten' and extra != 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra == 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version >= '3.14' and sys_platform == 'darwin' and extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version >= '3.14' and sys_platform == 'darwin' and extra == 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version >= '3.14' and sys_platform == 'darwin' and extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version >= '3.14' and sys_platform == 'darwin' and extra == 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version >= '3.14' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version >= '3.14' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version >= '3.14' and sys_platform == 'darwin' and extra != 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version >= '3.14' and sys_platform == 'darwin' and extra != 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version >= '3.14' and sys_platform == 'darwin' and extra != 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version >= '3.14' and sys_platform == 'darwin' and extra != 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version >= '3.14' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version >= '3.14' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra == 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra == 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version == '3.13.*' and sys_platform == 'emscripten' and extra != 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra == 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version == '3.13.*' and sys_platform == 'emscripten' and extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version == '3.13.*' and sys_platform == 'emscripten' and extra == 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version == '3.13.*' and sys_platform == 'emscripten' and extra != 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version == '3.13.*' and sys_platform == 'emscripten' and extra != 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra == 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version == '3.13.*' and sys_platform == 'darwin' and extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version == '3.13.*' and sys_platform == 'darwin' and extra == 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version == '3.13.*' and sys_platform == 'darwin' and extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version == '3.13.*' and sys_platform == 'darwin' and extra == 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version == '3.13.*' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version == '3.13.*' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version == '3.13.*' and sys_platform == 'darwin' and extra != 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version == '3.13.*' and sys_platform == 'darwin' and extra != 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version == '3.13.*' and sys_platform == 'darwin' and extra != 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version == '3.13.*' and sys_platform == 'darwin' and extra != 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version == '3.13.*' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version == '3.13.*' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version < '3.13' and sys_platform == 'win32' and extra != 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra == 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version < '3.13' and sys_platform == 'win32' and extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version < '3.13' and sys_platform == 'win32' and extra == 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version < '3.13' and sys_platform == 'win32' and extra != 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version < '3.13' and sys_platform == 'win32' and extra != 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version < '3.13' and sys_platform == 'emscripten' and extra != 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra == 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version < '3.13' and sys_platform == 'emscripten' and extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version < '3.13' and sys_platform == 'emscripten' and extra == 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version < '3.13' and sys_platform == 'emscripten' and extra != 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version < '3.13' and sys_platform == 'emscripten' and extra != 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra == 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version < '3.13' and sys_platform == 'darwin' and extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version < '3.13' and sys_platform == 'darwin' and extra == 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version < '3.13' and sys_platform == 'darwin' and extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version < '3.13' and sys_platform == 'darwin' and extra == 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version < '3.13' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version < '3.13' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version < '3.13' and sys_platform == 'darwin' and extra != 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version < '3.13' and sys_platform == 'darwin' and extra != 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version < '3.13' and sys_platform == 'darwin' and extra != 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version < '3.13' and sys_platform == 'darwin' and extra != 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version < '3.13' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+    "python_full_version < '3.13' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-18-olmo-eval-internal-agents' and extra != 'extra-18-olmo-eval-internal-clients' and extra != 'extra-18-olmo-eval-internal-openhands' and extra != 'extra-18-olmo-eval-internal-vllm'",
+]
 dependencies = [
-    { name = "huggingface-hub" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'darwin' and extra == 'extra-18-olmo-eval-internal-vllm') or (extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-clients' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm')" },
+    { name = "huggingface-hub", marker = "sys_platform == 'darwin' or extra == 'extra-18-olmo-eval-internal-openhands' or extra != 'extra-18-olmo-eval-internal-vllm'" },
     { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin' or extra == 'extra-18-olmo-eval-internal-openhands' or extra != 'extra-18-olmo-eval-internal-vllm'" },
-    { name = "packaging" },
-    { name = "pyyaml" },
-    { name = "regex" },
-    { name = "safetensors" },
-    { name = "tokenizers" },
-    { name = "tqdm" },
-    { name = "typer" },
+    { name = "packaging", marker = "sys_platform == 'darwin' or extra == 'extra-18-olmo-eval-internal-openhands' or extra != 'extra-18-olmo-eval-internal-vllm'" },
+    { name = "pyyaml", marker = "sys_platform == 'darwin' or extra == 'extra-18-olmo-eval-internal-openhands' or extra != 'extra-18-olmo-eval-internal-vllm'" },
+    { name = "regex", marker = "sys_platform == 'darwin' or extra == 'extra-18-olmo-eval-internal-openhands' or extra != 'extra-18-olmo-eval-internal-vllm'" },
+    { name = "safetensors", marker = "sys_platform == 'darwin' or extra == 'extra-18-olmo-eval-internal-openhands' or extra != 'extra-18-olmo-eval-internal-vllm'" },
+    { name = "tokenizers", marker = "sys_platform == 'darwin' or extra == 'extra-18-olmo-eval-internal-openhands' or extra != 'extra-18-olmo-eval-internal-vllm'" },
+    { name = "tqdm", marker = "sys_platform == 'darwin' or extra == 'extra-18-olmo-eval-internal-openhands' or extra != 'extra-18-olmo-eval-internal-vllm'" },
+    { name = "typer", marker = "sys_platform == 'darwin' or extra == 'extra-18-olmo-eval-internal-openhands' or extra != 'extra-18-olmo-eval-internal-vllm'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/4d/fe/7e84d20ac7d4d5d14bac2eab5976088d86342959fc2c0da54b4c2fc99856/transformers-5.7.0.tar.gz", hash = "sha256:a9d35cf39804e3456c1f9bc1a79ad5ffa878640a61f51f66f71c97f4b4e2ce10", size = 8401287, upload-time = "2026-04-28T18:30:09.75Z" }
 wheels = [
@@ -12587,7 +12686,7 @@ dependencies = [
     { name = "torchaudio", marker = "sys_platform != 'darwin'" },
     { name = "torchvision", marker = "sys_platform != 'darwin'" },
     { name = "tqdm", marker = "sys_platform != 'darwin'" },
-    { name = "transformers", marker = "sys_platform != 'darwin'" },
+    { name = "transformers", version = "5.5.3", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin'" },
     { name = "typing-extensions", marker = "sys_platform != 'darwin'" },
     { name = "watchfiles", marker = "sys_platform != 'darwin'" },
     { name = "xgrammar", marker = "(platform_machine == 'aarch64' and sys_platform != 'darwin') or (platform_machine == 'arm64' and sys_platform != 'darwin') or (platform_machine == 'ppc64le' and sys_platform != 'darwin') or (platform_machine == 's390x' and sys_platform != 'darwin') or (platform_machine == 'x86_64' and sys_platform != 'darwin')" },
@@ -12905,7 +13004,7 @@ dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin'" },
     { name = "pydantic", marker = "sys_platform != 'darwin'" },
     { name = "torch", marker = "sys_platform != 'darwin'" },
-    { name = "transformers", marker = "sys_platform != 'darwin'" },
+    { name = "transformers", version = "5.5.3", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin'" },
     { name = "triton", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "typing-extensions", marker = "sys_platform != 'darwin'" },
 ]
