@@ -923,7 +923,6 @@ class BeakerLauncher:
         env_exports: dict[str, str] = {}
         install_env_keys = (
             "UV_CACHE_DIR",
-            "UV_EXTRA_INDEX_URL",
             "OLMO_EVAL_RUNTIME_TORCH_VERSION",
             "OLMO_EVAL_RUNTIME_TORCH_INDEX_URL",
         )
