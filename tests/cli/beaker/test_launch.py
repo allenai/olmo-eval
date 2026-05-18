@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from olmo_eval.common.constants.infrastructure import BEAKER_UV_CACHE_DIR
 from olmo_eval.inference.providers.config import ProviderConfig
 
 
@@ -225,6 +226,51 @@ class TestHarnessOverridesProviderDependencies:
         )
 
         assert task_configs["bigcodebench:olmo3base"].sandbox_allocation_weight == 6.0
+
+
+class TestJobConfigAssemblerEnvironment:
+    """Tests for Beaker job environment assembly."""
+
+    def test_titan_cluster_gets_uv_cache_dir(self):
+        """Titan clusters should get Weka-backed UV cache env vars."""
+        from olmo_eval.cli.beaker.config_loader import LaunchConfig
+        from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan
+        from olmo_eval.cli.beaker.job_assembler import JobConfigAssembler
+
+        launch_config = LaunchConfig(
+            name="test",
+            model_specs=["test-model"],
+            task_specs=["humaneval"],
+            cluster="ai2/titan-cirrascale",
+            workspace="ai2/test",
+            budget="ai2/test",
+            uv_cache_dir=BEAKER_UV_CACHE_DIR,
+        )
+        exp = ExperimentPlan(
+            name="test",
+            model_spec="test-model",
+            priority="normal",
+            tasks=["humaneval"],
+            original_task_specs=["humaneval"],
+            total_expanded_tasks=1,
+            num_gpus=1,
+        )
+        assembler = JobConfigAssembler(
+            config=launch_config,
+            effective_image="test-image",
+            effective_groups=[],
+            beaker_username="test-user",
+            common_secrets=[],
+            store_secrets=[],
+            task_secrets=[],
+            inject_aws_credentials=False,
+            inject_gcs_credentials=False,
+        )
+
+        job_config = assembler.assemble(exp)
+
+        assert job_config.env_vars["UV_CACHE_DIR"] == BEAKER_UV_CACHE_DIR
+        assert job_config.env_vars["UV_LINK_MODE"] == "copy"
 
 
 class TestTaskExpansionInExperimentSummary:

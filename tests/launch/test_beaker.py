@@ -3,6 +3,7 @@
 import pytest
 
 from olmo_eval.cli.beaker.config_loader import LaunchConfigLoader
+from olmo_eval.common.constants.infrastructure import cluster_has_weka
 from olmo_eval.launch.beaker import (
     BeakerEnvSecret,
     BeakerJobConfig,
@@ -67,6 +68,22 @@ class TestResolveClustors:
         """Test that duplicate clusters are removed."""
         clusters = resolve_clusters(["h100", "ai2/jupiter"])
         assert clusters.count("ai2/jupiter") == 1
+
+
+class TestClusterWekaSupport:
+    """Tests for cluster Weka availability checks."""
+
+    @pytest.mark.parametrize(
+        "cluster",
+        [
+            "ai2/titan",
+            "ai2/titan-batch-b200-aus-ib",
+            "ai2/titan-cirrascale",
+        ],
+    )
+    def test_titan_clusters_have_weka(self, cluster):
+        """Titan clusters should receive Weka-backed cache environment variables."""
+        assert cluster_has_weka(cluster) is True
 
 
 class TestParseTimeout:
