@@ -824,6 +824,18 @@ class BeakerLauncher:
                 spec = f"{spec} --index-url {runtime_torch_index_url}"
             return spec
 
+        def provider_package_spec(package: str) -> str:
+            if not runtime_torch_index_url:
+                return package
+
+            _, flags = parse_install_spec(package)
+            extra_flags: list[str] = []
+            if "--index-url" not in flags and "--extra-index-url" not in flags:
+                extra_flags.extend(["--extra-index-url", runtime_torch_index_url])
+            if "--index-strategy" not in flags:
+                extra_flags.extend(["--index-strategy", "unsafe-best-match"])
+            return " ".join([package, *extra_flags]) if extra_flags else package
+
         # Optional runtime Torch override for provider forks that require a
         # different Torch build than the base image. This must happen before
         # constraints are generated so provider installs resolve against the
@@ -881,7 +893,7 @@ class BeakerLauncher:
             for pkg in provider_packages:
                 steps.append(
                     build_install_command(
-                        pkg,
+                        provider_package_spec(pkg),
                         constraints,
                         venv_path=vllm_venv if use_isolated_vllm_venv else None,
                         force_reinstall=True,
