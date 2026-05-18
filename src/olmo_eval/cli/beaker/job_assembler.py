@@ -412,13 +412,14 @@ class JobConfigAssembler:
         # Determine provider kind - prefer harness preset (with overrides) over model spec default
         provider_kind = harness_provider_kind or get_provider_kind(exp.model_spec)
         vllm_isolated_venv = provider_kind == "vllm_server"
+        model_provider_extras = get_provider_extras(exp.model_spec, default_kind=provider_kind)
 
-        # If provider.package is set, it overrides the default provider extra (e.g., vllm)
-        # In that case, skip provider extras and install the package separately
+        # If provider.package is set, it replaces the default vllm extra but
+        # keeps companion extras like clients for vllm_server.
         if harness_provider_package:
-            provider_extras: list[str] = []
+            provider_extras = [extra for extra in model_provider_extras if extra != "vllm"]
         else:
-            provider_extras = get_provider_extras(exp.model_spec)
+            provider_extras = model_provider_extras
 
         install_extras = collect_install_extras(
             store=self.config.store,

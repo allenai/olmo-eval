@@ -815,6 +815,23 @@ class BeakerLauncher:
             for key, value in env_exports.items():
                 steps.append(f"export {key}={value}")
 
+        runtime_torch_version = (env_exports or {}).get("OLMO_EVAL_RUNTIME_TORCH_VERSION")
+        runtime_torch_index_url = (env_exports or {}).get("OLMO_EVAL_RUNTIME_TORCH_INDEX_URL")
+
+        def runtime_torch_spec() -> str:
+            spec = f"torch=={runtime_torch_version}"
+            if runtime_torch_index_url:
+                spec = f"{spec} --index-url {runtime_torch_index_url}"
+            return spec
+
+        # Optional runtime Torch override for provider forks that require a
+        # different Torch build than the base image. This must happen before
+        # constraints are generated so provider installs resolve against the
+        # replacement Torch/CUDA package set. In isolated vLLM mode, the
+        # overridden packages are symlinked into /opt/vllm-venv below.
+        if runtime_torch_version:
+            steps.append(build_install_command(runtime_torch_spec(), force_reinstall=True))
+
         # Generate constraints from pre-installed CUDA packages to prevent uv from changing them
         constraints = "/tmp/cuda-constraints.txt"
         steps.append(f"uv pip freeze -q | grep -E '^(torch|nvidia-)' > {constraints}")
