@@ -100,9 +100,9 @@ olmo-eval = "olmo_eval.cli:main"
 
 [tool.uv]
 package = true
-override-dependencies = [
-    "transformers>=5.4.0",
-]
+# override-dependencies = [
+#     "transformers>=5.4.0",
+# ]
 # vllm is installed by default; openhands users must opt out via
 # `uv sync --no-group vllm --group openhands`.
 default-groups = ["dev", "vllm"]
