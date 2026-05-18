@@ -5414,6 +5414,7 @@ storage = [
 vllm = [
     { name = "opencv-python-headless", marker = "sys_platform != 'darwin'" },
     { name = "torch-c-dlpack-ext", marker = "sys_platform != 'darwin'" },
+    { name = "transformers" },
     { name = "vllm", extra = ["runai"], marker = "(sys_platform != 'darwin' and extra == 'extra-18-olmo-eval-internal-vllm') or (extra == 'extra-18-olmo-eval-internal-agents' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-clients' and extra == 'extra-18-olmo-eval-internal-openhands') or (extra == 'extra-18-olmo-eval-internal-openhands' and extra == 'extra-18-olmo-eval-internal-vllm')" },
 ]
 
@@ -5467,6 +5468,7 @@ requires-dist = [
     { name = "sympy", specifier = ">=1.12" },
     { name = "textual-plot", specifier = ">=0.10.1" },
     { name = "torch-c-dlpack-ext", marker = "sys_platform != 'darwin' and extra == 'vllm'" },
+    { name = "transformers", marker = "sys_platform != 'darwin' and extra == 'vllm'", specifier = "==5.5.3" },
     { name = "transformers", marker = "extra == 'hf'", specifier = ">=5.4.0" },
     { name = "tree-sitter", specifier = ">=0.24.0" },
     { name = "tree-sitter-python", specifier = ">=0.23.0,<0.26.0" },
