@@ -921,8 +921,14 @@ class BeakerLauncher:
 
         # Build env vars that need to be exported in the install command (before uv runs)
         env_exports: dict[str, str] = {}
-        if "UV_CACHE_DIR" in config.env_vars:
-            env_exports["UV_CACHE_DIR"] = config.env_vars["UV_CACHE_DIR"]
+        install_env_keys = (
+            "UV_CACHE_DIR",
+            "OLMO_EVAL_RUNTIME_TORCH_VERSION",
+            "OLMO_EVAL_RUNTIME_TORCH_INDEX_URL",
+        )
+        for key in install_env_keys:
+            if key in config.env_vars:
+                env_exports[key] = config.env_vars[key]
 
         # Build separate install command for gantry's install_cmd parameter
         install_cmd = self._build_install_cmd(
