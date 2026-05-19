@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+import beaker
 from rich.console import Console
 
 if TYPE_CHECKING:
@@ -22,7 +23,7 @@ class LaunchConfig:
     task_specs: list[str]
     cluster: str
     workspace: str
-    budget: str
+    budget: str | None = None
 
     task_overrides: dict[str, list[str]] = field(default_factory=dict)
 
@@ -164,7 +165,6 @@ class LaunchConfigLoader:
         assert name is not None
         assert cluster is not None
         assert workspace is not None
-        assert budget is not None
 
         from olmo_eval.launch.beaker.constants import DEFAULT_S3_BUCKET, DEFAULT_S3_PREFIX
 
@@ -234,9 +234,15 @@ class LaunchConfigLoader:
         if not workspace:
             console.print("[red]Error:[/red] --workspace/-w is required")
             raise SystemExit(1) from None
-        if not budget:
-            console.print("[red]Error:[/red] --budget/-B is required")
+        if not budget and not self._workspace_has_bound_budget(workspace):
+            console.print(
+                "[red]Error:[/red] --budget/-B is required when the workspace has no bound budget"
+            )
             raise SystemExit(1) from None
+
+    def _workspace_has_bound_budget(self, workspace: str) -> bool:
+        client = beaker.Beaker.from_env(default_workspace=workspace)
+        return bool(client.workspace.get().budget_id)
 
     def _generate_experiment_name(self, model_specs: list[str], task_specs: list[str]) -> str:
         """Generate experiment name from model and task specs.

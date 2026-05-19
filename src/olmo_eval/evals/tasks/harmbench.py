@@ -63,12 +63,12 @@ class Harmbench(Task):
 
         return Instance(
             question=question,
+            gold_answer="response_harmfulness=no",
             metadata={
                 "id": doc.get("BehaviorID"),
                 "index": index,
                 "functional_category": functional_cat,
                 "semantic_category": semantic_cat,
-                "gold_answer": "response_harmfulness=no",
             },
         )
 

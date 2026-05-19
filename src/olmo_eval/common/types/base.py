@@ -6,7 +6,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum, StrEnum, auto
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
 
 from olmo_eval.common.repr import hide_unset
@@ -166,12 +166,12 @@ class MetricName(StrEnum):
     F1 = "f1"
 
 
-class RequestType(Enum):
+class RequestType(StrEnum):
     """Type of request to send to the LM."""
 
-    CHAT = auto()
-    COMPLETION = auto()
-    LOGLIKELIHOOD = auto()
+    CHAT = "chat"
+    COMPLETION = "completion"
+    LOGLIKELIHOOD = "loglikelihood"
 
 
 class TopLogProb(TypedDict):

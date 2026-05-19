@@ -20,6 +20,12 @@ from .base import (
     SubsetAccuracyMetric,
     ToolAccuracyMetric,
 )
+from .ifeval import (
+    IFEvalInstLooseAccuracy,
+    IFEvalInstStrictAccuracy,
+    IFEvalPromptLooseAccuracy,
+    IFEvalPromptStrictAccuracy,
+)
 
 __all__ = [
     "AccuracyMetric",
@@ -28,6 +34,10 @@ __all__ = [
     "CorpusPerplexityMetric",
     "F1Metric",
     "GreedyAccuracyMetric",
+    "IFEvalInstLooseAccuracy",
+    "IFEvalInstStrictAccuracy",
+    "IFEvalPromptLooseAccuracy",
+    "IFEvalPromptStrictAccuracy",
     "LogprobMCAccuracyMetric",
     "LogprobPerCharMCAccuracyMetric",
     "LogprobPerTokenMCAccuracyMetric",

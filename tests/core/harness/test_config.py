@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
+from olmo_eval.common.execution import ProcessScoringPoolConfig
 from olmo_eval.harness import clear_registry, register_tool
 from olmo_eval.harness.config import HarnessConfig, harness_config
 from olmo_eval.harness.sandbox import SandboxConfig, SandboxMode
@@ -88,6 +89,9 @@ class TestHarnessConfig:
             scaffold="openai_agents",
             scaffold_kwargs={"enable_compaction": False},
             required_secrets=("API_KEY",),
+            scoring_process_pools={
+                "cpu": ProcessScoringPoolConfig(workers=6),
+            },
             sandbox_pool_instances=32,
             sandbox_pool_min_instances=12,
             sandboxes=(
@@ -115,6 +119,7 @@ class TestHarnessConfig:
         assert restored.scaffold == config.scaffold
         assert restored.scaffold_kwargs == config.scaffold_kwargs
         assert restored.required_secrets == config.required_secrets
+        assert restored.scoring_process_pools == config.scoring_process_pools
         assert restored.sandbox_pool_instances == 32
         assert restored.sandbox_pool_min_instances == 12
         assert len(restored.sandboxes) == 1
@@ -127,6 +132,9 @@ class TestHarnessConfig:
                 "name": "legacy",
                 "backend": "openai_agents",
                 "backend_kwargs": {"enable_compaction": False},
+                "scoring_process_pools": {
+                    "cpu": {"workers": 5, "start_method": "spawn", "max_tasks_per_child": 128}
+                },
                 "sandbox_pool_instances": 8,
                 "sandbox_pool_min_instances": 3,
             }
@@ -136,6 +144,13 @@ class TestHarnessConfig:
 
         assert restored.scaffold == "openai_agents"
         assert restored.scaffold_kwargs == {"enable_compaction": False}
+        assert restored.scoring_process_pools == {
+            "cpu": ProcessScoringPoolConfig(
+                workers=5,
+                start_method="spawn",
+                max_tasks_per_child=128,
+            )
+        }
         assert restored.sandbox_pool_instances == 8
         assert restored.sandbox_pool_min_instances == 3
         assert "backend" not in serialized
@@ -257,6 +272,7 @@ class TestHarnessConfigFactory:
             tool_choice="none",
             max_turns=15,
             max_concurrency=16,
+            scoring_process_pools={"cpu": ProcessScoringPoolConfig(workers=4)},
             scaffold="openai_agents",
             required_secrets=["SECRET"],
         )
@@ -266,5 +282,6 @@ class TestHarnessConfigFactory:
         assert config.tool_choice == "none"
         assert config.max_turns == 15
         assert config.max_concurrency == 16
+        assert config.scoring_process_pools == {"cpu": ProcessScoringPoolConfig(workers=4)}
         assert config.scaffold == "openai_agents"
         assert config.required_secrets == ("SECRET",)

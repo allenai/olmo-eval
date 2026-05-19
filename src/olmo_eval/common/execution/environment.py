@@ -9,6 +9,8 @@ if TYPE_CHECKING:
     from olmo_eval.inference.base import InferenceProvider
     from olmo_eval.inference.registry import ProviderLookup
 
+    from .process_pool import ProcessPoolManager
+
 
 @dataclass(frozen=True)
 class ExecutionResult:
@@ -45,6 +47,7 @@ class ScoringContext:
     execution_env: ExecutionEnvironment | None = None
     scoring_concurrency: int = 8
     inference_pool: ProviderLookup | None = None
+    process_pool_manager: ProcessPoolManager | None = None
 
     @property
     def has_execution_env(self) -> bool:
@@ -54,3 +57,7 @@ class ScoringContext:
         if self.inference_pool is None:
             raise RuntimeError("No inference pool configured.")
         return self.inference_pool.get(name)
+
+    @property
+    def has_process_pool_manager(self) -> bool:
+        return self.process_pool_manager is not None

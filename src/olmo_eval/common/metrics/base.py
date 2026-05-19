@@ -3,7 +3,7 @@
 import math
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, ClassVar
 
 from olmo_eval.common.scorers import (
@@ -69,7 +69,13 @@ class Metric(ABC):
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a dictionary."""
         scorer = self.scorer
-        scorer_name = scorer.__name__ if isinstance(scorer, type) else type(scorer).__name__
+        scorer_name = (
+            scorer.__name__
+            if isinstance(scorer, type)
+            else scorer.to_dict()
+            if hasattr(scorer, "to_dict")
+            else asdict(scorer)
+        )
         return {"type": self.__class__.__name__, "name": self.name, "scorer": scorer_name}
 
     def supports_pairwise_scorer_fallback(self) -> bool:

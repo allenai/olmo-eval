@@ -21,16 +21,20 @@ classifiers = [
 ]
 
 dependencies = [
+    "antlr4-python3-runtime>=4.11,<4.12",
     "click~=8.3.2",
     "datasets>=3.2.0",
     "numpy>=1.20.0",
-    "omegaconf~=2.3.0",
+    "omegaconf>=2.4.0.dev10,<2.5.0",
     "prometheus_client>=0.21.0",
     "rich~=14.3.4",
     "sympy>=1.12",
     "textual-plot>=0.10.1",
     "tree-sitter>=0.24.0",
     "tree-sitter-python>=0.23.0,<0.26.0",
+    "ifbench @ git+https://github.com/allenai/IFBench.git@finbarr/clean-install",
+    # syllapy (transitive via ifbench) imports pkg_resources, which setuptools>=81 removes.
+    "setuptools<81",
 ]
 
 [project.urls]
@@ -222,6 +226,8 @@ allowed-unresolved-imports = [
     "google.cloud.**",
     "matplotlib.**",
     "scipy.**",
+    "instructions_registry.**",
+    "instructions.**",
 ]
 
 [tool.gantry]

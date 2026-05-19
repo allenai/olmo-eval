@@ -3005,6 +3005,53 @@ def _build_pairwise_endpoint_bundle(
     )
 
 
+def _load_group_browser_data_for_request(
+    *,
+    session: Session,
+    selected_group: str | None,
+    requested_scope: str | None,
+    keep_all: bool,
+    require_full_coverage: bool,
+    group_browser_cache: _TimedValueCache,
+) -> tuple[dict[str, Any] | None, str | None, bool]:
+    """Load initial page group data while tolerating stale suite/task URLs."""
+    scope_task_names, scope_suite_name = _resolve_scope_filter(requested_scope)
+    scope_options_pending = scope_task_names is not None or scope_suite_name is not None
+    if selected_group is None:
+        return None, None, scope_options_pending
+
+    def load_group_data(
+        scoped_task_names: tuple[str, ...] | None,
+        scoped_suite_name: str | None,
+    ) -> dict[str, Any]:
+        return group_browser_cache.get_or_set(
+            (
+                selected_group,
+                keep_all,
+                require_full_coverage,
+                scoped_task_names,
+                scoped_suite_name,
+            ),
+            lambda: _build_group_browser_data(
+                session,
+                selected_group,
+                keep_all=keep_all,
+                require_full_coverage=require_full_coverage,
+                scope_task_names=scoped_task_names,
+                scope_suite_name=scoped_suite_name,
+            ),
+        )
+
+    group_data = load_group_data(scope_task_names, scope_suite_name)
+    selected_scope_key = _pick_scope(group_data, requested_scope)
+    if scope_options_pending and selected_scope_key is None:
+        group_data = load_group_data(None, None)
+        selected_scope_key = _pick_scope(group_data, requested_scope)
+        scope_options_pending = False
+
+    return group_data, selected_scope_key, scope_options_pending
+
+
 def _serialize_model_config_source(
     *,
     kind: str,
@@ -3413,38 +3460,21 @@ def serve_results_viewer(
                 default_keep_all=keep_all,
             )
 
-            scope_task_names, scope_suite_name = _resolve_scope_filter(requested_scope)
-            scope_options_pending = scope_task_names is not None or scope_suite_name is not None
-
             with db.session() as session:
                 groups = groups_cache.get_or_set(
                     ("groups", 500),
                     lambda: _list_groups(session),
                 )
                 selected_group = _pick_group(groups, requested_group)
-                group_data = (
-                    group_browser_cache.get_or_set(
-                        (
-                            selected_group,
-                            selected_keep_all,
-                            require_full_coverage,
-                            scope_task_names,
-                            scope_suite_name,
-                        ),
-                        lambda: _build_group_browser_data(
-                            session,
-                            selected_group,
-                            keep_all=selected_keep_all,
-                            require_full_coverage=require_full_coverage,
-                            scope_task_names=scope_task_names,
-                            scope_suite_name=scope_suite_name,
-                        ),
+                group_data, selected_scope_key, scope_options_pending = (
+                    _load_group_browser_data_for_request(
+                        session=session,
+                        selected_group=selected_group,
+                        requested_scope=requested_scope,
+                        keep_all=selected_keep_all,
+                        require_full_coverage=require_full_coverage,
+                        group_browser_cache=group_browser_cache,
                     )
-                    if selected_group is not None
-                    else None
-                )
-                selected_scope_key = (
-                    _pick_scope(group_data, requested_scope) if group_data is not None else None
                 )
                 selected_metric = _pick_metric_for_scope(
                     group_data,

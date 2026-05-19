@@ -1011,6 +1011,64 @@ def test_viewer_scope_pickers_require_explicit_selection() -> None:
     assert viewer_server._pick_scope(group_data, "suite::missing") is None
 
 
+def test_load_group_browser_data_for_request_falls_back_when_scope_is_stale(monkeypatch) -> None:
+    viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
+    calls: list[tuple[str, bool, bool, tuple[str, ...] | None, str | None]] = []
+
+    def fake_build_group_browser_data(
+        _session,
+        group_name,
+        *,
+        keep_all,
+        require_full_coverage,
+        scope_task_names=None,
+        scope_suite_name=None,
+    ):
+        calls.append(
+            (
+                group_name,
+                keep_all,
+                require_full_coverage,
+                scope_task_names,
+                scope_suite_name,
+            )
+        )
+        if scope_task_names == ("old-task",):
+            return {"scope_options": []}
+        return {
+            "scope_options": [
+                {
+                    "key": "task::new-task",
+                    "kind": "task",
+                    "label": "new-task",
+                    "value": "new-task",
+                    "task_ids": ["new-task"],
+                }
+            ]
+        }
+
+    monkeypatch.setattr(viewer_server, "_build_group_browser_data", fake_build_group_browser_data)
+
+    group_data, selected_scope_key, scope_options_pending = (
+        viewer_server._load_group_browser_data_for_request(
+            session=object(),
+            selected_group="new-group",
+            requested_scope="task::old-task",
+            keep_all=False,
+            require_full_coverage=True,
+            group_browser_cache=viewer_server._TimedValueCache(ttl_seconds=60.0),
+        )
+    )
+
+    assert calls == [
+        ("new-group", False, True, ("old-task",), None),
+        ("new-group", False, True, None, None),
+    ]
+    assert selected_scope_key is None
+    assert scope_options_pending is False
+    assert group_data["scope_options"][0]["key"] == "task::new-task"
+
+
 def test_serialize_viewer_export_supports_csv_and_json() -> None:
     viewer_server = importlib.import_module("olmo_eval.cli.results.viewer_server")
 
@@ -1084,6 +1142,16 @@ def test_browser_exports_use_real_newlines_for_downloads() -> None:
     assert 'join("\\\\n")' not in script
     assert '+ "\\\\n"' not in script
     assert 'return /[,"\\\\n]/.test(text)' not in script
+
+
+def test_browser_persists_hidden_column_filters() -> None:
+    assets = importlib.import_module("olmo_eval.analysis.pairwise_viewer.assets")
+
+    script = assets.browser_js_text()
+
+    assert 'hiddenCols: loadSetState("hiddenCols")' in script
+    assert 'storageBase + "hiddenCols"' in script
+    assert "function trimHiddenCols()" in script
 
 
 def test_latest_only_exports_merge_source_rows_back_to_display_models() -> None:
@@ -1406,6 +1474,7 @@ def test_render_results_viewer_page_renders_core_viewer_state_and_controls() -> 
     assert 'scopeForm?.addEventListener("submit"' in html
     assert 'document.body.classList.add("is-page-loading");' in html
     assert 'scopeForm.classList.add("is-loading");' in html
+    assert 'scopeInput.value = "";' in html
     assert 'id="run-mode-select"' in html
     assert 'name="runs"' in html
     assert '<option value="repeated" selected="selected">' in html

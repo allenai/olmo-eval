@@ -1,17 +1,30 @@
 """Tests for olmo_eval.runner module."""
 
-from dataclasses import replace
+from collections.abc import Iterator
+from dataclasses import dataclass, replace
+from typing import ClassVar
+from unittest.mock import MagicMock
 
 import pytest
 
 # Import to ensure tasks and suites are registered
 import olmo_eval.evals  # noqa: F401
 import olmo_eval.evals.tasks  # noqa: F401
-from olmo_eval.evals.tasks.common import TaskConfig, get_task
+from olmo_eval.common.execution import ProcessScoringPoolConfig, default_process_pool_workers
+from olmo_eval.common.metrics import AccuracyMetric
+from olmo_eval.common.scorers import ProcessScorer
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType
+from olmo_eval.evals.tasks.common import Task, TaskConfig, get_task
 from olmo_eval.harness.config import HarnessConfig, ProviderConfig
 from olmo_eval.harness.sandbox import SandboxConfig, SandboxMode
 from olmo_eval.runners import AsyncEvalRunner, ValidationError
-from olmo_eval.runners.asynq.runner import _DEFAULT_SANDBOX_ENV, _plan_sandbox_configs
+from olmo_eval.runners.asynq.runner import (
+    _DEFAULT_SANDBOX_ENV,
+    _determine_scoring_limits,
+    _plan_process_scoring_pools,
+    _plan_sandbox_configs,
+    _shutdown_process_scoring_pools,
+)
 from olmo_eval.runners.asynq.types import TaskTracker
 from olmo_eval.runners.processing.utils import compute_task_hash
 
@@ -21,6 +34,59 @@ def make_harness_config(model_name: str = "llama3.1-8b") -> HarnessConfig:
     return HarnessConfig(
         name="test",
         provider=ProviderConfig(model=model_name),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _DefaultProcessScorer(ProcessScorer):
+    name: str = "default_process"
+
+    def process_score(self, instance: Instance, output: LMOutput) -> float:
+        return 1.0
+
+
+@dataclass(frozen=True, slots=True)
+class _NamedProcessScorer(ProcessScorer):
+    name: str = "named_process"
+    process_pool_name: ClassVar[str] = "math"
+
+    def process_score(self, instance: Instance, output: LMOutput) -> float:
+        return 1.0
+
+
+class _ProcessTask(Task):
+    """Minimal task used for process-pool planning tests."""
+
+    @property
+    def instances(self) -> Iterator[Instance]:
+        yield Instance(question="q", gold_answer="a")
+
+    def format_request(self, instance: Instance) -> LMRequest:
+        return LMRequest(request_type=RequestType.COMPLETION, prompt=instance.question)
+
+    def extract_answer(self, output: LMOutput) -> str | None:
+        return output.text
+
+
+def _make_process_tracker(
+    spec: str,
+    scorer_cls: type[ProcessScorer],
+    *,
+    total_instances: int,
+) -> TaskTracker:
+    metric = AccuracyMetric(scorer=scorer_cls)
+    task = _ProcessTask(
+        TaskConfig(
+            name=spec.replace(":", "_"),
+            data_source="test/dataset",
+            metrics=(metric,),
+        )
+    )
+    return TaskTracker(
+        model_name="test-model",
+        spec=spec,
+        task=task,
+        total_instances=total_instances,
     )
 
 
@@ -491,6 +557,237 @@ class TestNamedSandboxPlanning:
             "ds1000": 33.0,
         }
         assert plan.allocated == {_DEFAULT_SANDBOX_ENV: 15, "bigcodebench": 24, "ds1000": 25}
+
+
+class TestProcessPoolPlanning:
+    """Tests for process-backed scoring pool planning."""
+
+    def test_auto_creates_default_cpu_pool(self):
+        trackers = {
+            "process:test": _make_process_tracker(
+                "process:test",
+                _DefaultProcessScorer,
+                total_instances=7,
+            )
+        }
+
+        plan = _plan_process_scoring_pools(
+            {},
+            ["process:test"],
+            trackers,
+            scoring_concurrency=6,
+        )
+
+        assert plan is not None
+        assert plan.auto_created == frozenset({"cpu"})
+        assert plan.pools == {"cpu": ProcessScoringPoolConfig(workers=6)}
+        assert plan.demand["cpu"].task_count == 1
+        assert plan.demand["cpu"].scorer_count == 1
+        assert plan.demand["cpu"].response_jobs == 7
+
+    def test_auto_created_cpu_pool_uses_default_worker_count_when_unset(self):
+        trackers = {
+            "process:test": _make_process_tracker(
+                "process:test",
+                _DefaultProcessScorer,
+                total_instances=2,
+            )
+        }
+
+        plan = _plan_process_scoring_pools(
+            {},
+            ["process:test"],
+            trackers,
+            scoring_concurrency=None,
+        )
+
+        assert plan is not None
+        assert plan.pools["cpu"] == ProcessScoringPoolConfig(workers=default_process_pool_workers())
+
+    def test_uses_explicit_named_process_pool(self):
+        trackers = {
+            "process:named": _make_process_tracker(
+                "process:named",
+                _NamedProcessScorer,
+                total_instances=4,
+            )
+        }
+        configured = {
+            "math": ProcessScoringPoolConfig(
+                workers=3,
+                start_method="spawn",
+                max_tasks_per_child=128,
+            )
+        }
+
+        plan = _plan_process_scoring_pools(
+            configured,
+            ["process:named"],
+            trackers,
+            scoring_concurrency=8,
+        )
+
+        assert plan is not None
+        assert plan.auto_created == frozenset()
+        assert plan.pools == configured
+        assert plan.demand["math"].response_jobs == 4
+
+    def test_rejects_missing_non_default_process_pool(self):
+        trackers = {
+            "process:named": _make_process_tracker(
+                "process:named",
+                _NamedProcessScorer,
+                total_instances=3,
+            )
+        }
+
+        with pytest.raises(ValueError, match="math"):
+            _plan_process_scoring_pools(
+                {},
+                ["process:named"],
+                trackers,
+                scoring_concurrency=8,
+            )
+
+    def test_rejects_missing_default_pool_when_explicit_pools_exist(self):
+        trackers = {
+            "process:test": _make_process_tracker(
+                "process:test",
+                _DefaultProcessScorer,
+                total_instances=3,
+            )
+        }
+
+        with pytest.raises(ValueError, match="cpu"):
+            _plan_process_scoring_pools(
+                {"math": ProcessScoringPoolConfig(workers=2)},
+                ["process:test"],
+                trackers,
+                scoring_concurrency=8,
+            )
+
+    def test_rejects_non_reconstructible_process_scorer_during_planning(self):
+        @dataclass(frozen=True, slots=True)
+        class _LocalProcessScorer(ProcessScorer):
+            name: str = "local_process"
+
+            def process_score(self, instance: Instance, output: LMOutput) -> float:
+                return 1.0
+
+        task = _ProcessTask(
+            TaskConfig(
+                name="process_bad",
+                data_source="test/dataset",
+                metrics=(AccuracyMetric(scorer=_LocalProcessScorer),),
+            )
+        )
+        trackers = {
+            "process:bad": TaskTracker(
+                model_name="test-model",
+                spec="process:bad",
+                task=task,
+                total_instances=1,
+            )
+        }
+
+        with pytest.raises(ValueError, match="module scope"):
+            _plan_process_scoring_pools(
+                {"cpu": ProcessScoringPoolConfig(workers=2)},
+                ["process:bad"],
+                trackers,
+                scoring_concurrency=8,
+            )
+
+    def test_default_response_limit_uses_largest_available_resource(self):
+        trackers = {
+            "process:test": _make_process_tracker(
+                "process:test",
+                _DefaultProcessScorer,
+                total_instances=3,
+            )
+        }
+        plan = _plan_process_scoring_pools(
+            {"cpu": ProcessScoringPoolConfig(workers=5)},
+            ["process:test"],
+            trackers,
+            scoring_concurrency=None,
+        )
+
+        response_limit, context_limit = _determine_scoring_limits(
+            HarnessConfig(name="test", provider=ProviderConfig(model="model")),
+            [{"instances": 2}],
+            plan,
+        )
+
+        assert (response_limit, context_limit) == (5, 5)
+
+    def test_explicit_context_limit_does_not_cap_other_resources(self):
+        trackers = {
+            "process:test": _make_process_tracker(
+                "process:test",
+                _DefaultProcessScorer,
+                total_instances=3,
+            )
+        }
+        plan = _plan_process_scoring_pools(
+            {"cpu": ProcessScoringPoolConfig(workers=6)},
+            ["process:test"],
+            trackers,
+            scoring_concurrency=4,
+        )
+
+        response_limit, context_limit = _determine_scoring_limits(
+            HarnessConfig(
+                name="test",
+                provider=ProviderConfig(model="model"),
+                scoring_concurrency=4,
+            ),
+            [{"instances": 9}, {"instances": 2}],
+            plan,
+        )
+
+        assert response_limit == 11
+        assert context_limit == 4
+
+    def test_shutdown_logs_confirmation(self, monkeypatch):
+        class _Manager:
+            def __init__(self) -> None:
+                self.shutdown_called = False
+
+            def shutdown(self) -> None:
+                self.shutdown_called = True
+
+        import olmo_eval.runners.asynq.runner as runner_module
+
+        manager = _Manager()
+        fake_logger = MagicMock()
+        monkeypatch.setattr(runner_module, "runner_logger", fake_logger)
+
+        _shutdown_process_scoring_pools(manager)
+
+        assert manager.shutdown_called
+        fake_logger.info.assert_any_call("Stopping process scoring pools...")
+        messages = [call.args[0] for call in fake_logger.info.call_args_list]
+        assert any(message.startswith("Stopped process scoring pools in ") for message in messages)
+        fake_logger.warning.assert_not_called()
+
+    def test_shutdown_logs_warning_on_failure(self, monkeypatch):
+        class _Manager:
+            def shutdown(self) -> None:
+                raise RuntimeError("boom")
+
+        import olmo_eval.runners.asynq.runner as runner_module
+
+        fake_logger = MagicMock()
+        monkeypatch.setattr(runner_module, "runner_logger", fake_logger)
+
+        _shutdown_process_scoring_pools(_Manager())
+
+        fake_logger.info.assert_called_once_with("Stopping process scoring pools...")
+        fake_logger.warning.assert_called_once_with(
+            "Failed to stop process scoring pools",
+            exc_info=True,
+        )
 
 
 class TestTaskConfigSandboxAllocationWeight:

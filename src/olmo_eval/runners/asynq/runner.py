@@ -33,6 +33,7 @@ from olmo_eval.runners.processing.utils import generate_experiment_id
 from olmo_eval.storage import StorageBackend
 
 if TYPE_CHECKING:
+    from olmo_eval.common.execution import ProcessScoringPoolConfig
     from olmo_eval.evals.tasks.common import SandboxEnv, Task
     from olmo_eval.harness.sandbox import SandboxConfig
 
@@ -41,6 +42,7 @@ runner_logger = configure_worker_logging("runner")
 console = Console(force_terminal=True, width=120)
 
 _DEFAULT_SANDBOX_ENV = "__default__"
+_DEFAULT_PROCESS_POOL = "cpu"
 
 
 @dataclass(frozen=True)
@@ -68,6 +70,24 @@ class _SandboxPlan:
     needs_default: bool
 
 
+@dataclass(frozen=True)
+class _ProcessPoolDemand:
+    """Observed process-scoring workload for a named process pool."""
+
+    task_count: int
+    scorer_count: int
+    response_jobs: int
+
+
+@dataclass(frozen=True)
+class _ProcessPoolPlan:
+    """Resolved process pools and demand data for process-backed scorers."""
+
+    pools: dict[str, ProcessScoringPoolConfig]
+    demand: dict[str, _ProcessPoolDemand]
+    auto_created: frozenset[str]
+
+
 def _materialize_sandbox_instances(sandboxes: Sequence[SandboxConfig]) -> list[SandboxConfig]:
     """Replace auto-managed sandbox instance counts with their runtime defaults."""
     return [
@@ -81,6 +101,122 @@ def _count_execution_scorers(task: Task) -> int:
     from olmo_eval.common.scorers.execution import ExecutionScorer
 
     return sum(1 for scorer in task._get_scorers().values() if isinstance(scorer, ExecutionScorer))
+
+
+def _count_process_scorers_by_pool(task: Task) -> dict[str, int]:
+    """Count unique process scorers per pool after task-level deduplication."""
+    from olmo_eval.common.execution import serialize_process_scorer
+    from olmo_eval.common.scorers import ProcessScorer
+
+    counts: dict[str, int] = {}
+    for scorer in task._get_scorers().values():
+        if isinstance(scorer, ProcessScorer):
+            spec = serialize_process_scorer(scorer)
+            pool_name = spec.pool_name
+            counts[pool_name] = counts.get(pool_name, 0) + 1
+    return counts
+
+
+def _collect_process_pool_demand(
+    trackers: Mapping[str, TaskTracker],
+    expanded_tasks: Sequence[str] | None = None,
+) -> dict[str, _ProcessPoolDemand]:
+    """Collect per-pool demand for process-backed scorers."""
+    from olmo_eval.common.execution import ProcessScoringConfigError
+
+    relevant_specs = set(expanded_tasks) if expanded_tasks else None
+    task_counts: dict[str, int] = {}
+    scorer_counts: dict[str, int] = {}
+    response_jobs: dict[str, int] = {}
+
+    for spec, tracker in trackers.items():
+        if relevant_specs is not None and spec not in relevant_specs:
+            continue
+        if tracker.task is None:
+            continue
+
+        try:
+            pool_counts = _count_process_scorers_by_pool(tracker.task)
+        except ProcessScoringConfigError as exc:
+            raise ValueError(
+                f"Task '{spec}' has invalid process scorer configuration: {exc}"
+            ) from exc
+        if not pool_counts:
+            continue
+
+        for pool_name, scorer_count in pool_counts.items():
+            task_counts[pool_name] = task_counts.get(pool_name, 0) + 1
+            scorer_counts[pool_name] = scorer_counts.get(pool_name, 0) + scorer_count
+            response_jobs[pool_name] = response_jobs.get(pool_name, 0) + (
+                tracker.total_instances * scorer_count
+            )
+
+    return {
+        pool_name: _ProcessPoolDemand(
+            task_count=task_counts[pool_name],
+            scorer_count=scorer_counts[pool_name],
+            response_jobs=response_jobs[pool_name],
+        )
+        for pool_name in task_counts
+    }
+
+
+def _plan_process_scoring_pools(
+    configured_pools: Mapping[str, ProcessScoringPoolConfig],
+    expanded_tasks: Sequence[str],
+    trackers: Mapping[str, TaskTracker],
+    scoring_concurrency: int | None,
+) -> _ProcessPoolPlan | None:
+    """Resolve the process pools needed by the selected tasks."""
+    from olmo_eval.common.execution import ProcessScoringPoolConfig, default_process_pool_workers
+
+    demand = _collect_process_pool_demand(trackers, expanded_tasks)
+    if not demand:
+        return None
+
+    referenced = set(demand)
+    explicit = dict(configured_pools)
+    auto_created: set[str] = set()
+
+    if not explicit:
+        non_default = sorted(name for name in referenced if name != _DEFAULT_PROCESS_POOL)
+        if non_default:
+            joined = ", ".join(non_default)
+            raise ValueError(
+                "Process scoring pool(s) "
+                f"{joined} are required by the selected tasks but no "
+                "scoring_process_pools were configured. Only the default "
+                f"'{_DEFAULT_PROCESS_POOL}' pool can be auto-created."
+            )
+        workers = scoring_concurrency or default_process_pool_workers()
+        explicit[_DEFAULT_PROCESS_POOL] = ProcessScoringPoolConfig(workers=workers)
+        auto_created.add(_DEFAULT_PROCESS_POOL)
+
+    missing = sorted(name for name in referenced if name not in explicit)
+    if missing:
+        joined = ", ".join(missing)
+        raise ValueError(
+            "Missing process scoring pool configuration for: "
+            f"{joined}. Add these under HarnessConfig.scoring_process_pools."
+        )
+
+    pools = {name: explicit[name] for name in sorted(referenced)}
+    return _ProcessPoolPlan(
+        pools=pools,
+        demand=demand,
+        auto_created=frozenset(auto_created),
+    )
+
+
+def _shutdown_process_scoring_pools(process_pool_manager: Any) -> None:
+    runner_logger.info("Stopping process scoring pools...")
+    start_time = time.time()
+    try:
+        process_pool_manager.shutdown()
+    except Exception:
+        runner_logger.warning("Failed to stop process scoring pools", exc_info=True)
+    else:
+        runner_logger.info(f"Stopped process scoring pools in {time.time() - start_time:.1f}s")
 
 
 def _collect_sandbox_demand(
@@ -304,6 +440,39 @@ def _plan_sandbox_configs(
     )
 
 
+def _determine_scoring_limits(
+    harness_config: HarnessConfig,
+    sandbox_configs_list: Sequence[dict[str, Any]] | None,
+    process_pool_plan: _ProcessPoolPlan | None,
+) -> tuple[int, int]:
+    """Return (response_concurrency, context_concurrency) for scoring."""
+    import os
+
+    sandbox_pool_size = (
+        sum((cfg.get("instances") or 1) for cfg in sandbox_configs_list)
+        if sandbox_configs_list is not None
+        else 0
+    )
+    process_pool_size = (
+        max((config.workers for config in process_pool_plan.pools.values()), default=0)
+        if process_pool_plan is not None
+        else 0
+    )
+    explicit = harness_config.scoring_concurrency
+
+    if explicit is not None:
+        context_concurrency = max(1, explicit)
+        response_concurrency = max(context_concurrency, sandbox_pool_size, process_pool_size)
+        return response_concurrency, context_concurrency
+
+    derived = max(sandbox_pool_size, process_pool_size)
+    if derived <= 0:
+        cpu_count = os.cpu_count() or 4
+        derived = max(1, int(cpu_count * 0.75))
+
+    return derived, derived
+
+
 @dataclass
 class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
     """Async evaluation runner with instance-level queuing.
@@ -428,6 +597,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         # Queue for workers to report init times (replaces mp.Manager dict to
         # avoid a long-lived server process that can zombie and hang on shutdown)
         init_queue: mp.Queue = ctx.Queue()
+        start_event = ctx.Event()
 
         # Shuffle with seed for deterministic ordering (enables future checkpointing)
         rng = random.Random(self.shuffle_seed)
@@ -438,6 +608,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         # Start workers
         workers: list[mp.process.BaseProcess] = []
         sandbox_manager = None
+        process_pool_manager = None
         inference_manager = None
 
         try:
@@ -475,7 +646,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             provider_manager.add_poison_pills()
 
             # Start workers
-            workers = provider_manager.start(ctx, total_instances, init_queue)
+            workers = provider_manager.start(ctx, total_instances, init_queue, start_event)
 
             # Start auxiliary inference servers if configured
             registry_config: dict[str, list[dict[str, Any]]] | None = None
@@ -586,21 +757,35 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
                 sandbox_configs_list = [s.to_dict() for s in sandboxes]
 
-            # Determine scoring concurrency
-            if self.harness_config.scoring_concurrency:
-                scoring_concurrency = self.harness_config.scoring_concurrency
-            elif sandbox_configs_list is not None:
-                # Match sandbox pool size (sum of instances across all configs)
-                sandbox_pool_size = sum((cfg.get("instances") or 1) for cfg in sandbox_configs_list)
-                scoring_concurrency = max(1, sandbox_pool_size)
-            else:
-                # CPU-bound scoring - use available cores
-                import os
+            process_pool_plan = _plan_process_scoring_pools(
+                self.harness_config.scoring_process_pools,
+                expanded_tasks,
+                trackers,
+                self.harness_config.scoring_concurrency,
+            )
+            if process_pool_plan is not None:
+                from olmo_eval.common.execution import ProcessPoolManager
 
-                cpu_count = os.cpu_count() or 4
-                scoring_concurrency = max(1, int(cpu_count * 0.75))
+                for pool_name in sorted(process_pool_plan.demand):
+                    config = process_pool_plan.pools[pool_name]
+                    demand = process_pool_plan.demand[pool_name]
+                    auto = " (auto-created)" if pool_name in process_pool_plan.auto_created else ""
+                    runner_logger.info(
+                        f"Process scoring pool '{pool_name}'{auto} "
+                        f"({config.workers} workers, start_method={config.start_method}, "
+                        f"max_tasks_per_child={config.max_tasks_per_child}, "
+                        f"{demand.response_jobs} response jobs across "
+                        f"{demand.task_count} task(s), {demand.scorer_count} scorer(s))"
+                    )
+                process_pool_manager = ProcessPoolManager(process_pool_plan.pools)
 
-            runner_logger.info(f"Scoring concurrency: {scoring_concurrency}")
+            response_scoring_concurrency, context_scoring_concurrency = _determine_scoring_limits(
+                self.harness_config,
+                sandbox_configs_list,
+                process_pool_plan,
+            )
+            runner_logger.info(f"Response scoring concurrency: {response_scoring_concurrency}")
+            runner_logger.info(f"Context scoring concurrency: {context_scoring_concurrency}")
 
             # Initialize sandbox manager inline (no separate scorer process)
             sandbox_manager = None
@@ -630,8 +815,9 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
             scoring_context = ScoringContext(
                 execution_env=sandbox_manager,
-                scoring_concurrency=scoring_concurrency,
+                scoring_concurrency=context_scoring_concurrency,
                 inference_pool=provider_registry,
+                process_pool_manager=process_pool_manager,
             )
 
             # Ensure inference workers are ready before dispatching
@@ -641,6 +827,16 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
             provider_init_seconds = wait_for_init_times(
                 init_queue, num_inference_workers, workers=workers, result_queue=result_queue
             )
+            if len(provider_init_seconds) != num_inference_workers:
+                raise RuntimeError(
+                    f"Expected {num_inference_workers} inference worker(s) to initialize "
+                    f"before starting work, got {len(provider_init_seconds)}."
+                )
+
+            runner_logger.info(
+                f"All {num_inference_workers} inference worker(s) ready; starting queued work"
+            )
+            start_event.set()
 
             # Reset tracker start times now that workers are ready
             # This ensures task duration only measures actual processing time
@@ -654,7 +850,7 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 result_queue,
                 workers,
                 scoring_context,
-                scoring_concurrency,
+                response_scoring_concurrency,
                 len(expanded_tasks),
                 total_instances,
             )
@@ -698,6 +894,8 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
                 runner_logger.info("Stopping sandbox manager...")
                 with contextlib.suppress(Exception):
                     await sandbox_manager.stop()
+            if process_pool_manager is not None:
+                _shutdown_process_scoring_pools(process_pool_manager)
             if inference_manager is not None:
                 inference_manager.shutdown()
             for q in [item_queue, result_queue, init_queue]:

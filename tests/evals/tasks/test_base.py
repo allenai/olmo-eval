@@ -9,10 +9,16 @@ from typing import ClassVar
 
 import pytest
 
+from olmo_eval.common.execution import (
+    ProcessOutputScore,
+    ProcessPoolManager,
+    ProcessScoringConfigError,
+    ProcessScoringPoolConfig,
+)
 from olmo_eval.common.execution.environment import ExecutionResult, ScoringContext
 from olmo_eval.common.metrics import AccuracyMetric, PassAtKMetric
-from olmo_eval.common.scorers import ExactMatchScorer
-from olmo_eval.common.scorers.execution import ExecutionScorer
+from olmo_eval.common.scorers import ExactMatchScorer, ProcessScorer
+from olmo_eval.common.scorers.execution import ContextScorer, ExecutionScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response, Split
 from olmo_eval.evals.tasks.common import OutputScoreAggregation, Task, TaskConfig
 
@@ -36,6 +42,41 @@ class ConcreteTask(Task):
 
     def extract_answer(self, output: LMOutput) -> str:
         return output.text.strip()
+
+
+@dataclass(frozen=True, slots=True)
+class _EchoProcessScorer(ProcessScorer):
+    """Simple process scorer that checks extracted answer equality."""
+
+    name: str = "echo_process"
+
+    def process_score(self, instance: Instance, output: LMOutput) -> float:
+        if output.extracted_answer is None or instance.gold_answer is None:
+            return 0.0
+        return 1.0 if str(output.extracted_answer) == str(instance.gold_answer) else 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class _FailingProcessScorer(ProcessScorer):
+    """Process scorer that fails for selected outputs."""
+
+    name: str = "failing_process"
+    fail_text: str = "boom"
+
+    def process_score(self, instance: Instance, output: LMOutput) -> float:
+        if output.text == self.fail_text:
+            raise RuntimeError("intentional process failure")
+        return 1.0
+
+
+@dataclass(frozen=True, slots=True)
+class _TimedProcessScorer(ProcessScorer):
+    """Process scorer used to verify mixed-workload overlap."""
+
+    name: str = "timed_process"
+
+    def process_score(self, instance: Instance, output: LMOutput) -> float:
+        return 1.0
 
 
 class TestTaskConfig:
@@ -243,6 +284,109 @@ class TestTaskScoring:
 
 
 @pytest.mark.anyio
+class TestProcessScoring:
+    """Tests for process-backed scorer execution."""
+
+    def _make_request(self, prompt: str) -> LMRequest:
+        return LMRequest(request_type=RequestType.COMPLETION, prompt=prompt)
+
+    async def test_process_scorer_requires_runtime(self):
+        metric = AccuracyMetric(scorer=_EchoProcessScorer)
+        task = ConcreteTask(TaskConfig(name="test", data_source="test/dataset", metrics=(metric,)))
+
+        response = Response(
+            instance=Instance(question="What is 2+2?", gold_answer="4"),
+            request=self._make_request("What is 2+2?"),
+            outputs=[LMOutput(text="4")],
+        )
+
+        with pytest.raises(RuntimeError, match="process scoring pools"):
+            await task.score_responses([response], context=ScoringContext(scoring_concurrency=8))
+
+    async def test_process_scorer_scores_outputs_with_real_pool(self):
+        metric = AccuracyMetric(scorer=_EchoProcessScorer)
+        task = ConcreteTask(TaskConfig(name="test", data_source="test/dataset", metrics=(metric,)))
+        manager = ProcessPoolManager({"cpu": ProcessScoringPoolConfig(workers=1)})
+
+        response = Response(
+            instance=Instance(question="What is 2+2?", gold_answer="4"),
+            request=self._make_request("What is 2+2?"),
+            outputs=[LMOutput(text="4"), LMOutput(text="5")],
+        )
+
+        try:
+            scored = await task.score_responses(
+                [response],
+                context=ScoringContext(
+                    scoring_concurrency=8,
+                    process_pool_manager=manager,
+                ),
+            )
+        finally:
+            manager.shutdown()
+
+        assert scored[0].scores["echo_process"] == 1.0
+        assert scored[0].outputs[0].metadata["score:echo_process"] == 1.0
+        assert scored[0].outputs[1].metadata["score:echo_process"] == 0.0
+
+    async def test_process_scorer_failure_becomes_zero_with_diagnostics(self):
+        metric = PassAtKMetric(k=1, scorer=_FailingProcessScorer)
+        task = ConcreteTask(TaskConfig(name="test", data_source="test/dataset", metrics=(metric,)))
+        manager = ProcessPoolManager({"cpu": ProcessScoringPoolConfig(workers=1)})
+
+        response = Response(
+            instance=Instance(question="Q", gold_answer="ok"),
+            request=self._make_request("Q"),
+            outputs=[LMOutput(text="ok"), LMOutput(text="boom")],
+        )
+
+        try:
+            scored = await task.score_responses(
+                [response],
+                context=ScoringContext(
+                    scoring_concurrency=8,
+                    process_pool_manager=manager,
+                ),
+            )
+        finally:
+            manager.shutdown()
+
+        assert scored[0].scores["failing_process"] == 1.0
+        assert scored[0].outputs[0].metadata["score:failing_process"] == 1.0
+        assert "scoring_errors" not in scored[0].outputs[0].metadata
+
+        failing_output = scored[0].outputs[1]
+        assert failing_output.metadata["score:failing_process"] == 0.0
+        assert failing_output.metadata["scoring_errors"] == {
+            "failing_process": {
+                "phase": "process",
+                "type": "RuntimeError",
+                "message": "intentional process failure",
+            }
+        }
+
+    async def test_process_scorer_rejects_local_non_reconstructible_class(self):
+        @dataclass(frozen=True, slots=True)
+        class _LocalProcessScorer(ProcessScorer):
+            name: str = "local_process"
+
+            def process_score(self, instance: Instance, output: LMOutput) -> float:
+                return 1.0
+
+        manager = ProcessPoolManager({"cpu": ProcessScoringPoolConfig(workers=1)})
+
+        try:
+            with pytest.raises(ProcessScoringConfigError, match="module scope"):
+                await manager.score_outputs(
+                    _LocalProcessScorer(),
+                    Instance(question="Q", gold_answer="A"),
+                    [LMOutput(text="A")],
+                )
+        finally:
+            manager.shutdown()
+
+
+@pytest.mark.anyio
 class TestTaskMetrics:
     """Tests for Task metrics computation."""
 
@@ -376,6 +520,25 @@ class _ConcurrencyTracker:
 
 
 @dataclass(frozen=True, slots=True)
+class _TrackedContextScorer(ContextScorer):
+    """Context scorer that tracks overlap with other async work."""
+
+    name: str = "tracked_context"
+    tracker: _ConcurrencyTracker | None = None
+    delay: float = 0.05
+
+    async def ascore_with_context(self, instance, output, context) -> float:
+        if self.tracker:
+            await self.tracker.enter()
+        try:
+            await asyncio.sleep(self.delay)
+            return 1.0
+        finally:
+            if self.tracker:
+                await self.tracker.exit()
+
+
+@dataclass(frozen=True, slots=True)
 class _MockExecutionScorer(ExecutionScorer):
     """ExecutionScorer that tracks concurrency and returns a fixed score."""
 
@@ -388,6 +551,26 @@ class _MockExecutionScorer(ExecutionScorer):
             await self.tracker.enter()
         try:
             await asyncio.sleep(0.01)  # force overlap
+            return 1.0
+        finally:
+            if self.tracker:
+                await self.tracker.exit()
+
+
+@dataclass(frozen=True, slots=True)
+class _TrackedExecutionScorer(ExecutionScorer):
+    """Execution scorer that tracks overlap with other async work."""
+
+    name: str = "tracked_exec"
+    tracker: _ConcurrencyTracker | None = None
+    delay: float = 0.05
+    requires_async: ClassVar[bool] = True
+
+    async def ascore(self, instance, output, execution_env) -> float:
+        if self.tracker:
+            await self.tracker.enter()
+        try:
+            await asyncio.sleep(self.delay)
             return 1.0
         finally:
             if self.tracker:
@@ -432,6 +615,41 @@ class _MockExecutionEnv:
 
     def get_execution_semaphore(self, required_capabilities):
         return self._semaphore
+
+
+class _TrackedProcessPoolManager:
+    """Minimal async process manager for overlap tests."""
+
+    def __init__(self, tracker: _ConcurrencyTracker, delay: float = 0.05) -> None:
+        self._tracker = tracker
+        self._delay = delay
+
+    async def score_outputs(
+        self,
+        scorer: ProcessScorer,
+        instance: Instance,
+        outputs: list[LMOutput],
+    ) -> list[ProcessOutputScore]:
+        await self._tracker.enter()
+        try:
+            await asyncio.sleep(self._delay)
+            results: list[ProcessOutputScore] = []
+            for output in outputs:
+                try:
+                    score = float(scorer.process_score(instance, output))
+                    results.append(ProcessOutputScore(score=score))
+                except Exception as exc:
+                    error = {
+                        "phase": "process",
+                        "type": type(exc).__qualname__,
+                    }
+                    message = str(exc).strip()
+                    if message:
+                        error["message"] = message
+                    results.append(ProcessOutputScore(score=0.0, error=error))
+            return results
+        finally:
+            await self._tracker.exit()
 
 
 def _make_responses(n_responses: int, n_outputs: int) -> list[Response]:
@@ -583,3 +801,48 @@ class TestAsyncScoringFailures:
         assert scored[0].outputs[1].metadata["scoring_errors"]["failing_exec"]["type"] == (
             "RuntimeError"
         )
+
+
+@pytest.mark.anyio
+class TestMixedWorkloadScoring:
+    """Tests that mixed scorer types can overlap without sequential blocking."""
+
+    def _make_request(self, prompt: str) -> LMRequest:
+        return LMRequest(request_type=RequestType.COMPLETION, prompt=prompt)
+
+    async def test_mixed_workloads_overlap(self):
+        tracker = _ConcurrencyTracker.create()
+        metric_sync = AccuracyMetric(scorer=ExactMatchScorer)
+        metric_process = PassAtKMetric(k=1, scorer=_TimedProcessScorer)
+        metric_context = PassAtKMetric(k=1, scorer=lambda: _TrackedContextScorer(tracker=tracker))
+        metric_exec = PassAtKMetric(k=1, scorer=lambda: _TrackedExecutionScorer(tracker=tracker))
+        task = ConcreteTask(
+            TaskConfig(
+                name="test",
+                data_source="test/dataset",
+                metrics=(metric_sync, metric_process, metric_context, metric_exec),
+            )
+        )
+
+        response = Response(
+            instance=Instance(question="What is 2+2?", gold_answer="4"),
+            request=self._make_request("What is 2+2?"),
+            outputs=[LMOutput(text="4")],
+        )
+        context = ScoringContext(
+            execution_env=_MockExecutionEnv(semaphore=None),
+            scoring_concurrency=8,
+            process_pool_manager=_TrackedProcessPoolManager(tracker=tracker, delay=0.05),
+        )
+
+        scored = await task.score_responses([response], context=context)
+
+        assert tracker.peak >= 2
+        assert scored[0].scores["exact_match"] == 1.0
+        assert scored[0].scores["timed_process"] == 1.0
+        assert scored[0].scores["tracked_context"] == 1.0
+        assert scored[0].scores["tracked_exec"] == 1.0
+        assert scored[0].outputs[0].metadata["score:exact_match"] == 1.0
+        assert scored[0].outputs[0].metadata["score:timed_process"] == 1.0
+        assert scored[0].outputs[0].metadata["score:tracked_context"] == 1.0
+        assert scored[0].outputs[0].metadata["score:tracked_exec"] == 1.0

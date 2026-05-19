@@ -336,7 +336,7 @@ class BeakerJobConfig:
         command: Command to run in the container (required).
         cluster: Cluster alias ("h100", "a100", "aus") or full name(s) (required).
         workspace: Beaker workspace (required).
-        budget: Beaker budget (required).
+        budget: Beaker budget. If None, gantry uses the workspace's bound budget.
         num_gpus: Number of GPUs to request.
         shared_memory: Shared memory size (e.g., "10GiB").
         priority: Job priority level.
@@ -357,7 +357,7 @@ class BeakerJobConfig:
     command: list[str]
     cluster: str | list[str]  # Cluster alias ("h100", "a100", "aus") or full name(s)
     workspace: str  # Beaker workspace
-    budget: str  # Beaker budget
+    budget: str | None = None  # Beaker budget; None uses the workspace's bound budget
 
     # Resources
     num_gpus: int = 0

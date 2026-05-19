@@ -18,7 +18,7 @@
         tableSortKey: "avg",
         tableSortDir: "desc",
         excludedModels: loadSetState("excludedModels"),
-        hiddenCols: new Set(),
+        hiddenCols: loadSetState("hiddenCols"),
         columnsMenuOpen: false,
         modelConfigModal: null,
       };
@@ -54,6 +54,10 @@
         window.localStorage.setItem(
           storageBase + "excludedModels",
           JSON.stringify(Array.from(state.excludedModels))
+        );
+        window.localStorage.setItem(
+          storageBase + "hiddenCols",
+          JSON.stringify(Array.from(state.hiddenCols))
         );
       }
 
@@ -405,6 +409,20 @@
         state.excludedModels.forEach((key) => {
           if (!validKeys.has(key)) {
             state.excludedModels.delete(key);
+            changed = true;
+          }
+        });
+        if (changed) persistState();
+      }
+
+      function trimHiddenCols() {
+        const resultsData = pageData.group_data?.results_table;
+        if (!resultsData || !Array.isArray(resultsData.task_columns)) return;
+        const validIds = new Set(resultsData.task_columns.map((column) => String(column.id)));
+        let changed = false;
+        state.hiddenCols.forEach((id) => {
+          if (!validIds.has(String(id))) {
+            state.hiddenCols.delete(id);
             changed = true;
           }
         });
@@ -2811,6 +2829,10 @@
         setSearchSelectSummary(control, target);
         if (details) details.open = false;
         if (nextValue === previousValue) return;
+        if (hiddenInput.name === "group") {
+          const scopeInput = scopeForm.querySelector('input[type="hidden"][name="scope"]');
+          if (scopeInput) scopeInput.value = "";
+        }
         if (hiddenInput.name === "group" || hiddenInput.name === "scope") {
           const metricSelect = scopeForm.querySelector("#metric-select");
           if (metricSelect) metricSelect.value = "";
@@ -2957,6 +2979,7 @@
           const id = target.dataset.id;
           if (state.hiddenCols.has(id)) state.hiddenCols.delete(id);
           else state.hiddenCols.add(id);
+          persistState();
           renderApp();
           return;
         }
@@ -2970,6 +2993,7 @@
               .map((column) => column.id)
               .filter((columnId) => columnId !== id)
           );
+          persistState();
           renderApp();
           return;
         }
@@ -2980,6 +3004,7 @@
           scopedTaskColumns(resultsData).forEach((column) => {
             state.hiddenCols.delete(column.id);
           });
+          persistState();
           renderApp();
           return;
         }
@@ -3051,6 +3076,7 @@
           state.columnsMenuOpen = true;
           if (target.checked) state.hiddenCols.delete(id);
           else state.hiddenCols.add(id);
+          persistState();
           renderApp();
         }
       });
@@ -3154,6 +3180,7 @@
       }
 
       trimExcludedModels();
+      trimHiddenCols();
       queueSearchSelectMenuWidthSync();
       renderApp();
       if (pageData.pairwise_pending) {

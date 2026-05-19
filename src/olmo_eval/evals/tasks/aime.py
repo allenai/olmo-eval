@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from dataclasses import replace
 from typing import Any
 
 from olmo_eval.common.formatters import ChatFormatter
@@ -24,6 +25,7 @@ _PASS_AT_32_SAMPLING = SamplingParams(
     top_p=0.95,
     num_samples=32,
 )
+_PASS_AT_32_16K_SAMPLING = replace(_PASS_AT_32_SAMPLING, max_tokens=16384)
 
 _COT_SUFFIX = "\nPlease reason step by step, and put your final answer within \\boxed{{}}."
 
@@ -32,8 +34,37 @@ _PASS_AT_32_FORMATTER = ChatFormatter(
 )
 
 
+def _normalize_gold_answer(answer: Any) -> str:
+    gold_answer = str(answer)
+    # AIME data stores some answers with leading zeros, strip them,
+    # fall back to 0 if the answer was just 0
+    return gold_answer.lstrip("0") or "0"
+
+
+def _build_aime_instance(
+    *,
+    question: str,
+    answer: Any,
+    identifier: Any,
+    year: int,
+    problem_number: Any,
+) -> Instance:
+    gold_normalized = _normalize_gold_answer(answer)
+
+    return Instance(
+        question=question,
+        gold_answer=gold_normalized,
+        metadata={
+            "id": identifier,
+            "year": year,
+            "problem_number": problem_number,
+            "all_gold_answers": [gold_normalized],
+        },
+    )
+
+
 class AIMETask(MinervaMathTask):
-    data_source = DataSource(path="allenai/aime-2021-2025")
+    data_source = DataSource(path="allenai/aime-2022-2025")
     split = Split.TRAIN  # HF dataset only has a train split
     formatter = ChatFormatter(user_template="{question}")
     metrics = (AccuracyMetric(scorer=MinervaMathScorer),)
@@ -51,22 +82,23 @@ class AIMETask(MinervaMathTask):
         if year not in self.years:
             return None
 
-        question = doc["problem"]
-        gold_answer = str(doc["answer"])
-        # AIME data stores answer with leading zeros, strip them,
-        # fall back to 0 if the answer was just 0
-        gold_normalized = gold_answer.lstrip("0") or "0"
-
-        return Instance(
-            question=question,
-            gold_answer=gold_normalized,
-            metadata={
-                "id": doc.get("id", index),
-                "year": year,
-                "problem_number": doc.get("problem_number"),
-                "all_gold_answers": [gold_normalized],
-            },
+        return _build_aime_instance(
+            question=doc["problem"],
+            answer=doc["answer"],
+            identifier=doc.get("id", index),
+            year=year,
+            problem_number=doc.get("problem_number"),
         )
+
+
+@register("aime_2022")
+class AIME2022Task(AIMETask):
+    years = (2022,)
+
+
+@register("aime_2023")
+class AIME2023Task(AIMETask):
+    years = (2023,)
 
 
 @register("aime_2024")
@@ -79,6 +111,22 @@ class AIME2025Task(AIMETask):
     years = (2025,)
 
 
+@register("aime_2026")
+class AIME2026Task(AIMETask):
+    data_source = DataSource(path="MathArena/aime_2026")
+    years = (2026,)
+
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
+        problem_idx = doc.get("problem_idx")
+        return _build_aime_instance(
+            question=doc["problem"],
+            answer=doc["answer"],
+            identifier=problem_idx if problem_idx is not None else index,
+            year=2026,
+            problem_number=problem_idx,
+        )
+
+
 # RL Zero uses slightly different defaults.
 _RLZERO_FORMATTER = ChatFormatter(user_template="{question}")
 
@@ -89,7 +137,7 @@ _RLZERO_SAMPLING = SamplingParams(
     num_samples=32,
 )
 
-for _year in (2024, 2025):
+for _year in (2022, 2023, 2024, 2025, 2026):
     register_variant(
         f"aime_{_year}",
         "pass_at_32",
@@ -106,4 +154,11 @@ for _year in (2024, 2025):
         metrics=tuple(_PASS_AT_32_METRICS.values()),
         primary_metric=_PASS_AT_32_METRICS["k1"],
         sampling_params=_RLZERO_SAMPLING,
+    )
+
+for _year in (2022, 2023, 2024, 2025, 2026):
+    register_variant(
+        f"aime_{_year}",
+        "16k",
+        sampling_params=_PASS_AT_32_16K_SAMPLING,
     )

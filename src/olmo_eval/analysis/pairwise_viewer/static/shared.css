@@ -640,9 +640,16 @@
 
     .row-hdr:hover .row-hdr-name,
     .row-hdr:focus-within .row-hdr-name {
-      overflow: visible;
-      text-overflow: clip;
+      flex: 0 1 auto;
+      max-width: calc(min(86vw, 1100px) - 58px);
+      margin-left: -4px;
+      padding: 2px 6px;
+      overflow: hidden;
+      text-overflow: ellipsis;
       white-space: nowrap;
+      background: color-mix(in oklch, var(--label-reveal-bg) 94%, transparent);
+      box-shadow: 0 0 0 4px color-mix(in oklch, var(--label-reveal-bg) 82%, transparent);
+      border-radius: var(--r-1);
     }
 
     .row-hdr:hover .row-hdr-main,
@@ -654,7 +661,7 @@
       z-index: 1;
       min-width: 100%;
       width: max-content;
-      max-width: min(72vw, 880px);
+      max-width: min(86vw, 1100px);
       padding: 0 12px 0 6px;
       background: var(--label-reveal-bg);
       box-shadow:
