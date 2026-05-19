@@ -15,7 +15,7 @@ import logging
 from collections.abc import Iterator
 from typing import Any
 
-from olmo_eval.common.formatters import ChatFormatter
+from olmo_eval.common.formatters import ChatFormatter, CompletionFormatter
 from olmo_eval.common.metrics import AccuracyMetric, SubsetAccuracyMetric
 from olmo_eval.common.scorers import SafetyScorer
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams
@@ -139,4 +139,14 @@ register_variant(
     primary_metric=AccuracyMetric(scorer=_WG_SCORER),
     sampling_params=_JUDGE_SAMPLING,
     answer_extractor=extract_think_answer_only,
+)
+
+register_variant(
+    "do_anything_now",
+    "base",
+    metrics=_safety_metrics(_WG_SCORER),
+    primary_metric=AccuracyMetric(scorer=_WG_SCORER),
+    sampling_params=_JUDGE_SAMPLING,
+    formatter=CompletionFormatter(),
+    judge_request_type=RequestType.COMPLETION,
 )

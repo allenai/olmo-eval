@@ -33,3 +33,10 @@ make_suite(
     aggregation=AggregationStrategy.AVERAGE,
     description="Safety evals for posttrained instruct models with an openai judge",
 )
+
+make_suite(
+    "safety_base",
+    tuple(f"{task}:base" for task in SAFETY_TASKS),
+    aggregation=AggregationStrategy.AVERAGE,
+    description="Safety evals for posttrained instruct models with an openai judge",
+)
