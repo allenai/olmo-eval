@@ -30,6 +30,32 @@ __all__ = [
 ]
 
 
+def _print_model_config(model_name: str) -> None:
+    """Print the model architecture/config when loading a model."""
+    try:
+        from rich.console import Console
+        from rich.panel import Panel
+        from rich.pretty import Pretty
+        from transformers import AutoConfig
+
+        console = Console()
+        config = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
+        architectures = getattr(config, "architectures", ["Unknown"])
+        config_dict = config.to_dict()
+
+        console.print(
+            Panel(
+                Pretty(config_dict),
+                title=f"[bold blue]Model Config: {model_name}[/bold blue]",
+                subtitle=f"[dim]Architecture: {architectures}[/dim]",
+            )
+        )
+    except Exception as e:
+        from rich import print as rprint
+
+        rprint(f"[yellow]Could not load model config for {model_name}: {e}[/yellow]")
+
+
 def create_provider(
     provider_kind: ProviderKind | str,
     model_name: str,
@@ -59,14 +85,17 @@ def create_provider(
         case "hf":
             from .providers.huggingface import HuggingFaceProvider
 
+            _print_model_config(model_name)
             return HuggingFaceProvider(model_name, **kwargs)
         case "vllm":
             from .providers.vllm import VLLMProvider
 
+            _print_model_config(model_name)
             return VLLMProvider(model_name, worker_id=worker_id, **kwargs)
         case "vllm_server":
             from .providers.vllm_server import VLLMServerProvider
 
+            _print_model_config(model_name)
             return VLLMServerProvider(model_name, **kwargs)
         case "litellm":
             from .providers.litellm import LiteLLMProvider
