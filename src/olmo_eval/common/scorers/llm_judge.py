@@ -13,7 +13,7 @@ from typing import Any, ClassVar, Literal
 
 from olmo_eval.common.execution import ScoringContext
 from olmo_eval.common.scorers.execution import ContextScorer
-from olmo_eval.common.types import Instance, LMOutput, RequestType
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
 
 logger = logging.getLogger(__name__)
 
@@ -200,8 +200,7 @@ class LLMJudgeScorer(ContextScorer):
         self,
         prompt: str,
         context: ScoringContext,
-        temperature: float = 0.0,
-        max_tokens: int = 10,
+        sampling_params: SamplingParams(temperature=0.0, max_tokens=10),
         request_type: RequestType = RequestType.CHAT,
     ) -> str:
         """Score using configured provider from inference pool."""
@@ -209,8 +208,6 @@ class LLMJudgeScorer(ContextScorer):
             raise RuntimeError("provider_name is required for provider-based scoring.")
         if context.inference_pool is None:
             raise RuntimeError("No inference pool configured.")
-
-        from olmo_eval.common.types import LMRequest, SamplingParams
 
         provider = context.get_provider(self.provider_name)
         if request_type == RequestType.COMPLETION:
@@ -220,7 +217,6 @@ class LLMJudgeScorer(ContextScorer):
                 request_type=RequestType.CHAT,
                 messages=({"role": "user", "content": prompt},),
             )
-        sampling_params = SamplingParams(temperature=temperature, max_tokens=max_tokens)
         results = await provider.agenerate([request], sampling_params)
         return results[0][0].text if results and results[0] else ""
 
@@ -521,12 +517,25 @@ class SafetyScorer(LLMJudgeScorer):
         prompt = self.format_judge_prompt(instance, output)
 
         if self.provider_name is not None:
-            response = await self._score_with_provider(
-                prompt,
-                context,
-                max_tokens=128,
-                request_type=self.judge_request_type,
-            )
+            if self.judge_format == "wildguard":
+                response = await self._score_with_provider(
+                    prompt,
+                    context,
+                    SamplingParams(
+                        temperature=0.0,
+                        max_tokens=128,
+                        truncate_prompt_tokens=32640,
+                        truncation_side="right",
+                    ),
+                    request_type=self.judge_request_type,
+                )
+            else:
+                response = await self._score_with_provider(
+                    prompt,
+                    context,
+                    SamplingParams(temperature=0.0, max_tokens=128),
+                    request_type=self.judge_request_type,
+                )
         else:
             response = await self._score_with_judge_fn(prompt)
 
