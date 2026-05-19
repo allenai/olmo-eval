@@ -34,7 +34,7 @@ dependencies = [
     "tree-sitter-python>=0.23.0,<0.26.0",
     "ifbench @ git+https://github.com/allenai/IFBench.git@finbarr/clean-install",
     # syllapy (transitive via ifbench) imports pkg_resources, which setuptools>=81 removes.
-    "setuptools<81",
+    "setuptools<83",
 ]
 
 [project.urls]
