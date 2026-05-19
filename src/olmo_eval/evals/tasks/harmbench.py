@@ -16,7 +16,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import ChatFormatter, CompletionFormatter
-from olmo_eval.common.metrics import AccuracyMetric, SubsetAccuracyMetric
+from olmo_eval.common.metrics import AccuracyMetric, SafetyErrorMetric, SubsetAccuracyMetric
 from olmo_eval.common.scorers import SafetyScorer
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
@@ -113,6 +113,7 @@ def _safety_metrics(scorer):
     """Build the full metric tuple for a safety judge scorer."""
     return (
         AccuracyMetric(scorer=scorer),
+        SafetyErrorMetric(scorer=scorer),
         *(SubsetAccuracyMetric(name=name, scorer=scorer) for name in _SAFETY_SUBSET_METRICS),
     )
 
