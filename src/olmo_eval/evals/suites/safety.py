@@ -5,11 +5,15 @@ Safety suites for thinking and instruct models, and wildguard vs openai models
 from olmo_eval.evals.suites.registry import AggregationStrategy, make_suite
 
 SAFETY_TASKS = [
+    # "bbq",
     "do_anything_now",
     "harmbench",
+    # "strongreject"
+    # "toxigen",
     "trustllm_jailbreaktrigger",
     "wildguardtest",
     "wildjailbreak",
+    # "wmdp",
     "xstest",
 ]
 
