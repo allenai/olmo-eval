@@ -168,7 +168,7 @@ register_variant(
 
 register_variant(
     "wildguardtest",
-    "base_model",
+    "base",
     metrics=_safety_metrics(_WG_SCORER),
     primary_metric=AccuracyMetric(scorer=_WG_SCORER),
     sampling_params=_JUDGE_SAMPLING,
