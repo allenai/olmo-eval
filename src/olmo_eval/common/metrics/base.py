@@ -876,6 +876,7 @@ class SafetyErrorMetric(Metric):
     """
 
     scorer: type[Scorer] | Scorer = SafetyScorer
+    name: str = "parsing_error"
 
     def compute(self, responses: Sequence[Response]) -> float:
         """Compute aggregate metric from scored responses."""
