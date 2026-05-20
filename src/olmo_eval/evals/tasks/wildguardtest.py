@@ -168,10 +168,9 @@ register_variant(
 
 register_variant(
     "wildguardtest",
-    "base",
+    "base_model",
     metrics=_safety_metrics(_WG_SCORER),
     primary_metric=AccuracyMetric(scorer=_WG_SCORER),
     sampling_params=_JUDGE_SAMPLING,
     formatter=CompletionFormatter(),
-    judge_request_type=RequestType.COMPLETION,
 )

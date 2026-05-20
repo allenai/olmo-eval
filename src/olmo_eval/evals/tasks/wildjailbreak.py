@@ -153,5 +153,4 @@ register_variant(
     primary_metric=AccuracyMetric(scorer=_WG_SCORER),
     sampling_params=_JUDGE_SAMPLING,
     formatter=CompletionFormatter(),
-    judge_request_type=RequestType.COMPLETION,
 )
