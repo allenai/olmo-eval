@@ -69,11 +69,11 @@ class WildGuardTest(Task):
 
         return Instance(
             question=question,
+            gold_answer="response_harmfulness=no",
             metadata={
                 "id": index,
                 "subcategory": subcategory,
                 "prompt_type": prompt_type,
-                "gold_answer": "response_harmfulness=no",
             },
         )
 

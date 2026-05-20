@@ -62,11 +62,11 @@ class XSTest(Task):
 
         return Instance(
             question=doc.get("prompt"),
+            gold_answer=gold_answer,
             metadata={
                 "id": index,
                 "prompt_type": prompt_type,
                 "subcategory": doc.get("type"),
-                "gold_answer": gold_answer,
             },
         )
 

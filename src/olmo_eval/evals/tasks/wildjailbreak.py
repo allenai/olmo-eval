@@ -64,10 +64,10 @@ class WildJailbreak(Task):
 
         return Instance(
             question=question,
+            gold_answer=gold_answer,
             metadata={
                 "id": index,
                 "prompt_type": prompt_type,
-                "gold_answer": gold_answer,
             },
         )
 

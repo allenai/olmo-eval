@@ -59,12 +59,12 @@ class TrustLLM_JailbreakTrigger(Task):
 
         return Instance(
             question=question,
+            gold_answer="response_refusal=yes",
             metadata={
                 "id": doc.get("id"),
                 "index": index,
                 "source": doc.get("source"),
                 "jailbreak_type": jailbreak_type,
-                "gold_answer": "response_refusal=yes",
             },
         )
 
