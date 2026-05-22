@@ -308,6 +308,19 @@ class TestEndToEndOrdering:
         assert config.harness_config.batching is not None
         assert config.harness_config.batching.chunk_size == 2
 
+    def test_run_config_builder_wires_force_download_model_flag(self):
+        """The CLI flag should become provider.force_download."""
+        from olmo_eval.cli.run.config import RunConfigBuilder
+
+        config = RunConfigBuilder(
+            model="Qwen/Qwen3-4B-Thinking-2507",
+            task=("hmmt_nov_2025:pass_at_32",),
+            output_dir="/tmp/results",
+            force_download_model=True,
+        ).build()
+
+        assert config.harness_config.provider.force_download is True
+
 
 class TestFormatTransformersRuntimeRows:
     """Tests for runtime summary formatting of transformers versions."""

@@ -272,6 +272,46 @@ class TestJobConfigAssemblerEnvironment:
         assert job_config.env_vars["UV_CACHE_DIR"] == BEAKER_UV_CACHE_DIR
         assert job_config.env_vars["UV_LINK_MODE"] == "copy"
 
+    def test_force_download_model_is_forwarded_to_run_command(self):
+        """Beaker task jobs should pass the cache-refresh flag into olmo-eval run."""
+        from olmo_eval.cli.beaker.config_loader import LaunchConfig
+        from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan
+        from olmo_eval.cli.beaker.job_assembler import JobConfigAssembler
+
+        launch_config = LaunchConfig(
+            name="test",
+            model_specs=["test-model"],
+            task_specs=["humaneval"],
+            cluster="h100",
+            workspace="ai2/test",
+            budget="ai2/test",
+            force_download_model=True,
+        )
+        exp = ExperimentPlan(
+            name="test",
+            model_spec="test-model",
+            priority="normal",
+            tasks=["humaneval"],
+            original_task_specs=["humaneval"],
+            total_expanded_tasks=1,
+            num_gpus=1,
+        )
+        assembler = JobConfigAssembler(
+            config=launch_config,
+            effective_image="test-image",
+            effective_groups=[],
+            beaker_username="test-user",
+            common_secrets=[],
+            store_secrets=[],
+            task_secrets=[],
+            inject_aws_credentials=False,
+            inject_gcs_credentials=False,
+        )
+
+        command = assembler._build_command(exp)
+
+        assert "--force-download-model" in command
+
 
 class TestTaskExpansionInExperimentSummary:
     """Tests for task expansion in _build_experiment_summary."""

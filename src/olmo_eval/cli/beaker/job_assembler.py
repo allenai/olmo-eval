@@ -157,6 +157,7 @@ def assemble_external_eval_job(
     provider_kind: str | None = None,
     base_url: str | None = None,
     user_env_vars: dict[str, str] | None = None,
+    force_download_model: bool = False,
 ) -> Any:
     """Assemble a BeakerJobConfig for running external evaluations.
 
@@ -201,6 +202,8 @@ def assemble_external_eval_job(
 
     if tensor_parallel_size > 1:
         command.extend(["--tp", str(tensor_parallel_size)])
+    if force_download_model:
+        command.append("--force-download-model")
 
     # Add eval_args
     if eval_args:
@@ -618,6 +621,8 @@ class JobConfigAssembler:
             command.append("--debug-requests")
         if self.config.debug_provider:
             command.append("--debug-provider")
+        if self.config.force_download_model:
+            command.append("--force-download-model")
         if not self.config.save_predictions:
             command.append("--no-save-predictions")
         if not self.config.save_requests:

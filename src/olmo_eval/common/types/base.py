@@ -21,6 +21,7 @@ _MODEL_HASH_IGNORED_PROVIDER_KEYS = frozenset(
         # Transport and auth metadata should not split a logical model identity.
         "api_base",
         "base_url",
+        "force_download",
         "max_concurrency",
         "num_instances",
         "required_secrets",
@@ -35,6 +36,7 @@ _MODEL_HASH_IGNORED_PROVIDER_KWARGS = frozenset(
         "attention_backend",
         "enable_expert_parallel",
         "enable_prefix_caching",
+        "force_download",
         "gpu_memory_utilization",
         "max_num_batched_tokens",
         "max_num_seqs",

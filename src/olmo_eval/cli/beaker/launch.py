@@ -145,6 +145,11 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     help="Enable verbose provider logging",
 )
 @click.option(
+    "--force-download-model",
+    is_flag=True,
+    help="Force-refresh Hugging Face model/tokenizer cache before loading",
+)
+@click.option(
     "--save-predictions/--no-save-predictions",
     "save_predictions",
     default=True,
@@ -271,6 +276,7 @@ def launch(
     store: bool,
     debug_requests: bool,
     debug_provider: bool,
+    force_download_model: bool,
     save_predictions: bool,
     save_requests: bool,
     inspect: bool,
@@ -386,6 +392,7 @@ def launch(
         "store": store,
         "debug_requests": debug_requests,
         "debug_provider": debug_provider,
+        "force_download_model": force_download_model,
         "save_predictions": save_predictions,
         "save_requests": save_requests,
         "inspect_instance": inspect_instance,
@@ -451,6 +458,7 @@ def launch(
             preemptible=preemptible,
             retries=retries,
             gpus=gpus,
+            force_download_model=force_download_model,
         )
         return
 
@@ -1052,6 +1060,7 @@ def _launch_external_evals(
     preemptible: bool | None = None,
     retries: int | None = None,
     gpus: int | None = None,
+    force_download_model: bool = False,
 ) -> None:
     """Launch external evaluation jobs on Beaker.
 
@@ -1190,9 +1199,10 @@ def _launch_external_evals(
             tensor_parallel_size = int(provider_kwargs["tensor_parallel_size"])
 
         # Update provider_config with tensor_parallel_size for display
-        display_provider_config = provider_config.with_overrides(
-            tensor_parallel_size=tensor_parallel_size
-        )
+        display_overrides: dict[str, object] = {"tensor_parallel_size": tensor_parallel_size}
+        if force_download_model:
+            display_overrides["force_download"] = True
+        display_provider_config = provider_config.with_overrides(**display_overrides)
 
         # Generate experiment name using shared utility
         short_name = get_model_short_name(model_spec, model_alias)
@@ -1236,6 +1246,7 @@ def _launch_external_evals(
             provider_kind=str(provider_config.kind),
             base_url=provider_config.base_url,
             user_env_vars=user_env_vars,
+            force_download_model=force_download_model,
         )
         job_configs.append(job_config)
 

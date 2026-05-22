@@ -282,6 +282,7 @@ class RunConfigBuilder:
         harness_preset: str | None = None,
         harness_config_path: str | None = None,
         cli_harness_overrides: list[str] | None = None,
+        force_download_model: bool = False,
     ):
         """Initialize the builder with raw CLI arguments.
 
@@ -293,6 +294,7 @@ class RunConfigBuilder:
             harness_preset: Name of a harness preset (e.g., "search").
             harness_config_path: Path to a harness config YAML/JSON file.
             cli_harness_overrides: Harness overrides from -o flags after --harness.
+            force_download_model: Force-refresh Hugging Face model/tokenizer cache before loading.
             ... (other standard args)
         """
         self.model = model
@@ -324,6 +326,7 @@ class RunConfigBuilder:
         self.harness_preset = harness_preset
         self.harness_config_path = harness_config_path
         self.cli_harness_overrides = cli_harness_overrides or []
+        self.force_download_model = force_download_model
 
     def build(self) -> RunConfig:
         """Parse inputs and build configuration.
@@ -436,5 +439,7 @@ class RunConfigBuilder:
 
         provider_config = get_provider_config(model_name)
         harness_config = harness_config.merge_provider(provider_config)
+        if self.force_download_model:
+            harness_config = harness_config.with_provider_overrides(force_download=True)
 
         return harness_config

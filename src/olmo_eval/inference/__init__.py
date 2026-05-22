@@ -30,7 +30,13 @@ __all__ = [
 ]
 
 
-def _print_model_config(model_name: str) -> None:
+def _print_model_config(
+    model_name: str,
+    *,
+    revision: str | None = None,
+    trust_remote_code: bool = True,
+    force_download: bool = False,
+) -> None:
     """Print the model architecture/config when loading a model."""
     try:
         from rich.console import Console
@@ -39,7 +45,12 @@ def _print_model_config(model_name: str) -> None:
         from transformers import AutoConfig
 
         console = Console()
-        config = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
+        config = AutoConfig.from_pretrained(
+            model_name,
+            revision=revision,
+            trust_remote_code=trust_remote_code,
+            force_download=force_download,
+        )
         architectures = getattr(config, "architectures", ["Unknown"])
         config_dict = config.to_dict()
 
@@ -78,6 +89,9 @@ def create_provider(
     """
     # Normalize to string for comparison (StrEnum compares equal to its value)
     kind_str = str(provider_kind)
+    revision = kwargs.get("revision")
+    trust_remote_code = kwargs.get("trust_remote_code", True)
+    force_download = bool(kwargs.get("force_download", False))
 
     match kind_str:
         case "mock":
@@ -85,17 +99,32 @@ def create_provider(
         case "hf":
             from .providers.huggingface import HuggingFaceProvider
 
-            _print_model_config(model_name)
+            _print_model_config(
+                model_name,
+                revision=revision,
+                trust_remote_code=trust_remote_code,
+                force_download=force_download,
+            )
             return HuggingFaceProvider(model_name, **kwargs)
         case "vllm":
             from .providers.vllm import VLLMProvider
 
-            _print_model_config(model_name)
+            _print_model_config(
+                model_name,
+                revision=revision,
+                trust_remote_code=trust_remote_code,
+                force_download=force_download,
+            )
             return VLLMProvider(model_name, worker_id=worker_id, **kwargs)
         case "vllm_server":
             from .providers.vllm_server import VLLMServerProvider
 
-            _print_model_config(model_name)
+            _print_model_config(
+                model_name,
+                revision=revision,
+                trust_remote_code=trust_remote_code,
+                force_download=force_download,
+            )
             return VLLMServerProvider(model_name, **kwargs)
         case "litellm":
             from .providers.litellm import LiteLLMProvider

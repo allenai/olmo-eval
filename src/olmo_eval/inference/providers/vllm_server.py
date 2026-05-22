@@ -12,6 +12,7 @@ from olmo_eval.common.logging import get_logger
 from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
 from olmo_eval.common.types.tools import ToolCall
 from olmo_eval.inference.base import InferenceProvider
+from olmo_eval.inference.hf_cache import refresh_hf_cache
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 from olmo_eval.inference.utils import run_async
 
@@ -266,6 +267,7 @@ class VLLMServerProvider(InferenceProvider):
         log_dir: str | None = None,
         chat_template_kwargs: dict[str, Any] | None = None,
         revision: str | None = None,
+        force_download: bool = False,
         add_bos_token: bool | None = None,
         prompt_logprobs: int | None = None,
         completion_use_prompt_token_ids: bool | None = None,
@@ -291,6 +293,8 @@ class VLLMServerProvider(InferenceProvider):
             chat_template_kwargs: Extra kwargs for chat template (e.g., {"enable_thinking": false}).
             revision: HuggingFace revision/commit hash for managed server startup and
                 local tokenizer loading.
+            force_download: Force-refresh Hugging Face model/tokenizer cache entries
+                before managed server startup and local tokenizer loads.
             add_bos_token: Optional provider-level BOS override for local tokenization paths.
                 This matches the old oe-eval-internal runtime behavior and is not forwarded
                 as a vLLM server CLI argument.
@@ -318,6 +322,7 @@ class VLLMServerProvider(InferenceProvider):
         self._tokenizer_path = tokenizer or model_name
         self._tokenizer_revision = revision
         self._tokenizer_trust_remote_code = trust_remote_code
+        self._force_download = force_download
         self._client: AsyncOpenAI | None = None
         self._http_client: httpx.AsyncClient | None = None
         self._raw_http_client: httpx.AsyncClient | None = None
@@ -335,6 +340,16 @@ class VLLMServerProvider(InferenceProvider):
 
             # Build server kwargs
             srv_kwargs: dict[str, Any] = dict(server_kwargs)
+            if force_download:
+                refresh_kwargs = {
+                    "revision": revision,
+                    "cache_dir": srv_kwargs.get("download_dir") or srv_kwargs.get("cache_dir"),
+                    "token": srv_kwargs.get("token"),
+                    "force_download": True,
+                }
+                refresh_hf_cache(model_name, **refresh_kwargs)
+                if tokenizer and tokenizer != model_name:
+                    refresh_hf_cache(tokenizer, **refresh_kwargs)
             if max_model_len:
                 srv_kwargs["max_model_len"] = max_model_len
             if tokenizer:
@@ -482,6 +497,8 @@ class VLLMServerProvider(InferenceProvider):
         }
         if self._tokenizer_revision is not None:
             tokenizer_kwargs["revision"] = self._tokenizer_revision
+        if self._force_download:
+            tokenizer_kwargs["force_download"] = True
         return tokenizer_kwargs
 
     def _get_tokenizer(self, *, require_local: bool = False) -> Any:

@@ -29,6 +29,8 @@ class ProviderConfig:
         base_url: Base URL for API-based providers (vllm_server, litellm).
         tokenizer: Tokenizer path/identifier (defaults to model if None).
         revision: Model revision/commit hash for HuggingFace models.
+        force_download: Force re-download of HuggingFace model/tokenizer files and refresh
+            the local cache before loading.
         trust_remote_code: Whether to trust remote code for HuggingFace models.
         dtype: Data type for model weights (auto, float16, bfloat16, float32).
         max_model_len: Maximum sequence length (overrides model default).
@@ -47,6 +49,7 @@ class ProviderConfig:
     api_base: str | None = None
     tokenizer: str | None = None
     revision: str | None = None
+    force_download: bool = False
     trust_remote_code: bool = False
     dtype: str = "auto"
     max_model_len: int | None = None
@@ -83,18 +86,26 @@ class ProviderConfig:
 
     # Config fields accepted by each provider kind (fields with non-default values are passed)
     _PROVIDER_FIELDS: ClassVar[dict[str, tuple[str, ...]]] = {
-        "vllm": ("tokenizer", "revision", "trust_remote_code", "dtype", "max_model_len"),
+        "vllm": (
+            "tokenizer",
+            "revision",
+            "force_download",
+            "trust_remote_code",
+            "dtype",
+            "max_model_len",
+        ),
         "vllm_server": (
             "base_url",
             "tokenizer",
             "revision",
+            "force_download",
             "trust_remote_code",
             "dtype",
             "max_concurrency",
             "max_model_len",
         ),
         "litellm": ("base_url", "api_base", "max_concurrency"),
-        "hf": ("tokenizer", "trust_remote_code", "dtype"),
+        "hf": ("tokenizer", "revision", "force_download", "trust_remote_code", "dtype"),
         "mock": (),
     }
 
@@ -161,6 +172,8 @@ class ProviderConfig:
             d["tokenizer"] = self.tokenizer
         if self.revision is not None:
             d["revision"] = self.revision
+        if self.force_download:
+            d["force_download"] = self.force_download
         if self.trust_remote_code:
             d["trust_remote_code"] = self.trust_remote_code
         if self.dtype != "auto":
@@ -207,6 +220,7 @@ class ProviderConfig:
             api_base=data.get("api_base"),
             tokenizer=data.get("tokenizer"),
             revision=data.get("revision"),
+            force_download=data.get("force_download", False),
             trust_remote_code=data.get("trust_remote_code", False),
             dtype=data.get("dtype", "auto"),
             max_model_len=data.get("max_model_len"),

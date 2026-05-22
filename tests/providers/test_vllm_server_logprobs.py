@@ -230,6 +230,29 @@ class TestVLLMServerProviderLogprobs:
             trust_remote_code=True,
         )
 
+    def test_local_tokenizer_load_uses_force_download(self):
+        """Local tokenizer loads should refresh cache when force_download is enabled."""
+        provider = self._make_provider(
+            tokenizer="custom-tokenizer",
+            revision="stage2-step47684",
+            trust_remote_code=True,
+            force_download=True,
+        )
+        local_tokenizer = MagicMock()
+        local_tokenizer.eos_token_id = 1
+        local_tokenizer.decode.return_value = "</s>"
+        from_pretrained, fake_transformers = self._make_fake_transformers(local_tokenizer)
+
+        with patch.dict("sys.modules", {"transformers": fake_transformers}):
+            assert provider._get_completion_eos_stop() == "</s>"
+
+        from_pretrained.assert_called_once_with(
+            "custom-tokenizer",
+            revision="stage2-step47684",
+            trust_remote_code=True,
+            force_download=True,
+        )
+
     @pytest.mark.anyio
     async def test_logprobs_extracts_continuation_tokens(self, provider, mock_tokenizer):
         """Test that logprobs are correctly extracted for continuation tokens only."""
