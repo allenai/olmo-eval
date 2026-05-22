@@ -138,6 +138,8 @@ class WMDP(Task):
             loader = DataLoader()
             source = self.config.get_data_source()
             data = loader.load(source)
+            print(type(data))
+            print(data)
             df = pd.concat(
                 data[cat].to_pandas().assign(category=cat)
                 for cat in ["wmdp-bio", "wmdp-chem", "wmdp-cyber"]
