@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import pandas as pd
+from datasets import Dataset
 
 from olmo_eval.common.formatters import MCQAChatFormatter, MultipleChoiceFormatter
 from olmo_eval.common.metrics import (
@@ -142,7 +143,7 @@ class WMDP(Task):
                 loader = DataLoader()
                 source = DataSource(path=self.data_source, subset=subset)
                 data = loader.load(source)
-                datasets.append(data.to_pandas().assign(category=subset))
+                datasets.append(Dataset.from_generator(data).to_pandas().assign(category=subset))
             df = pd.concat(datasets)
             full_df = df.drop(df[df.question.isin(MATCHES)].index)
             sample_df = df.groupby("category").sample(frac=0.2, random_state=42)
