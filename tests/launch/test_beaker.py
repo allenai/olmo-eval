@@ -693,6 +693,14 @@ class TestBuildInstallCommand:
         cmd = build_install_command("vllm==0.14.0", None)
         assert cmd == "uv pip install 'vllm==0.14.0'"
 
+    def test_package_can_skip_generated_constraints(self):
+        """Test launcher-only flag for packages that must resolve CUDA deps."""
+        cmd = build_install_command(
+            "vllm==0.19.1 --torch-backend=auto --no-constraints",
+            "/tmp/constraints.txt",
+        )
+        assert cmd == "uv pip install --torch-backend=auto 'vllm==0.19.1'"
+
 
 class TestDetectGpuRequirement:
     """Tests for GPU requirement detection in LaunchConfigLoader."""

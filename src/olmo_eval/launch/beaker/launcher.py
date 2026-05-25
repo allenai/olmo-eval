@@ -542,6 +542,8 @@ def build_install_command(package: str, constraints: str | None = None) -> str:
     """Build a uv pip install command for a package with optional flags.
 
     Handles package specifiers that include install flags like --no-build-isolation.
+    A package specifier may include the launcher-only flag --no-constraints to
+    skip applying the generated torch/nvidia constraints file for that install.
 
     Args:
         package: Package specifier with optional install flags.
@@ -552,11 +554,15 @@ def build_install_command(package: str, constraints: str | None = None) -> str:
     """
     pkg_spec, flags = parse_install_spec(package)
     normalized = normalize_provider_package(pkg_spec)
+    use_constraints = constraints is not None
+    if "--no-constraints" in flags:
+        flags = [flag for flag in flags if flag != "--no-constraints"]
+        use_constraints = False
 
     cmd_parts = ["uv", "pip", "install"]
     cmd_parts.extend(flags)
     cmd_parts.append(f"'{normalized}'")
-    if constraints:
+    if use_constraints:
         cmd_parts.extend(["-c", constraints])
 
     return " ".join(cmd_parts)
