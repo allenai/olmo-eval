@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import multiprocessing as mp
+import os
 import random
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -500,6 +501,13 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
 
     def _get_gpu_count(self) -> int:
         """Get total number of available GPUs."""
+        beaker_gpu_count = os.environ.get("BEAKER_ASSIGNED_GPU_COUNT")
+        if beaker_gpu_count:
+            try:
+                return int(beaker_gpu_count)
+            except ValueError:
+                runner_logger.warning("Invalid BEAKER_ASSIGNED_GPU_COUNT=%r", beaker_gpu_count)
+
         try:
             import torch  # type: ignore[ty:unresolved-import]
 
