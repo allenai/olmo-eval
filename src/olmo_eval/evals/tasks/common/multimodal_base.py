@@ -75,7 +75,7 @@ class MultimodalGenerationTask(Task):
         :param instance: The originating instance (provides ``gold_answer`` and
             any ``metadata`` the scorer needs).
         :returns: Mapping of metric name → scalar value, e.g.
-            ``{"token_f1": 0.72, "bleu4": 0.31}``.
+            ``{"cap_f1": 0.72, "recall": 0.78, "consistency": 0.66}``.
         """
         ...
 
