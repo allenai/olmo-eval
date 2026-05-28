@@ -106,7 +106,7 @@ class WMDP(Task):
             metadata={
                 "id": doc.get("id"),
                 "index": index,
-                "category": doc.get("category"),
+                "subcategory": doc.get("category"),
             },
         )
 
