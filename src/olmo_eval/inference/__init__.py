@@ -72,6 +72,46 @@ def _print_model_config(
         logger.warning("Could not load model config for %s: %s", model_name, e)
 
 
+def _print_tokenizer_config(
+    model_name: str,
+    *,
+    tokenizer_name: str | None = None,
+    revision: str | None = None,
+    trust_remote_code: bool = True,
+    force_download: bool = False,
+) -> None:
+    """Log resolved tokenizer details used at inference startup."""
+    effective_tokenizer = tokenizer_name or model_name
+    try:
+        from transformers import AutoTokenizer
+
+        tokenizer = AutoTokenizer.from_pretrained(
+            effective_tokenizer,
+            revision=revision,
+            trust_remote_code=trust_remote_code,
+            force_download=force_download,
+        )
+        chat_template = getattr(tokenizer, "chat_template", None)
+        has_chat_template = bool(chat_template)
+
+        logger.info(
+            "Tokenizer resolved | model=%s tokenizer=%s tokenizer_class=%s vocab_size=%s "
+            "model_max_length=%s bos_token_id=%s eos_token_id=%s pad_token_id=%s "
+            "has_chat_template=%s",
+            model_name,
+            effective_tokenizer,
+            tokenizer.__class__.__name__,
+            getattr(tokenizer, "vocab_size", None),
+            getattr(tokenizer, "model_max_length", None),
+            getattr(tokenizer, "bos_token_id", None),
+            getattr(tokenizer, "eos_token_id", None),
+            getattr(tokenizer, "pad_token_id", None),
+            has_chat_template,
+        )
+    except Exception as e:
+        logger.warning("Could not load tokenizer config for %s: %s", effective_tokenizer, e)
+
+
 def create_provider(
     provider_kind: ProviderKind | str,
     model_name: str,
@@ -97,6 +137,7 @@ def create_provider(
     revision = kwargs.get("revision")
     trust_remote_code = kwargs.get("trust_remote_code", True)
     force_download = bool(kwargs.get("force_download", False))
+    tokenizer_name = kwargs.get("tokenizer")
 
     match kind_str:
         case "mock":
@@ -106,6 +147,13 @@ def create_provider(
 
             _print_model_config(
                 model_name,
+                revision=revision,
+                trust_remote_code=trust_remote_code,
+                force_download=force_download,
+            )
+            _print_tokenizer_config(
+                model_name,
+                tokenizer_name=tokenizer_name,
                 revision=revision,
                 trust_remote_code=trust_remote_code,
                 force_download=force_download,
@@ -120,12 +168,26 @@ def create_provider(
                 trust_remote_code=trust_remote_code,
                 force_download=force_download,
             )
+            _print_tokenizer_config(
+                model_name,
+                tokenizer_name=tokenizer_name,
+                revision=revision,
+                trust_remote_code=trust_remote_code,
+                force_download=force_download,
+            )
             return VLLMProvider(model_name, worker_id=worker_id, **kwargs)
         case "vllm_server":
             from .providers.vllm_server import VLLMServerProvider
 
             _print_model_config(
                 model_name,
+                revision=revision,
+                trust_remote_code=trust_remote_code,
+                force_download=force_download,
+            )
+            _print_tokenizer_config(
+                model_name,
+                tokenizer_name=tokenizer_name,
                 revision=revision,
                 trust_remote_code=trust_remote_code,
                 force_download=force_download,
