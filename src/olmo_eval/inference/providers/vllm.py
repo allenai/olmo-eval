@@ -157,6 +157,34 @@ class VLLMProvider(InferenceProvider):
         self._add_bos_token: bool | None = engine_kwargs.pop("add_bos_token", None)
 
         self.llm: LLM = LLM(model=model_name, **engine_kwargs)
+        self._log_loaded_model_architecture(model_name=model_name, engine_kwargs=engine_kwargs)
+
+    def _log_loaded_model_architecture(self, model_name: str, engine_kwargs: dict[str, Any]) -> None:
+        """Log resolved model architecture/config actually loaded by vLLM."""
+        model_cfg = getattr(self.llm.llm_engine, "model_config", None)
+
+        hf_cfg = getattr(model_cfg, "hf_config", None)
+        hf_architectures = getattr(hf_cfg, "architectures", None)
+        hf_model_type = getattr(hf_cfg, "model_type", None)
+
+        vllm_model_arch = getattr(model_cfg, "model_arch", None)
+        vllm_model_impl = getattr(model_cfg, "model_impl", None)
+        vllm_max_len = getattr(model_cfg, "max_model_len", None)
+        vllm_dtype = getattr(model_cfg, "dtype", None)
+
+        logger.info(
+            "vLLM model architecture resolved | model=%s tokenizer=%s hf.model_type=%s "
+            "hf.architectures=%s vllm.model_arch=%s vllm.model_impl=%s "
+            "vllm.max_model_len=%s vllm.dtype=%s",
+            model_name,
+            engine_kwargs.get("tokenizer", model_name),
+            hf_model_type,
+            hf_architectures,
+            vllm_model_arch,
+            vllm_model_impl,
+            vllm_max_len,
+            vllm_dtype,
+        )
 
     @property
     def max_length(self) -> int:

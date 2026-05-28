@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.types import LMOutput, LMRequest, RequestType, SamplingParams
@@ -11,6 +12,9 @@ from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 
 if TYPE_CHECKING:
     import torch
+
+
+logger = logging.getLogger(__name__)
 
 
 def _get_device() -> torch.device:
@@ -69,6 +73,18 @@ class HuggingFaceProvider(InferenceProvider):
         self.device = _get_device()
         self.model.to(self.device)
         self.model.eval()
+
+        cfg = getattr(self.model, "config", None)
+        logger.info(
+            "Transformers model architecture resolved | model=%s tokenizer=%s model_type=%s "
+            "architectures=%s max_position_embeddings=%s torch_dtype=%s",
+            model_name,
+            tokenizer_path,
+            getattr(cfg, "model_type", None),
+            getattr(cfg, "architectures", None),
+            getattr(cfg, "max_position_embeddings", None),
+            getattr(cfg, "torch_dtype", None),
+        )
 
     def get_tokenizer(self) -> Any:
         """Get the tokenizer for this provider."""

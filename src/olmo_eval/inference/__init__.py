@@ -1,5 +1,7 @@
 """Language model inference providers."""
 
+import logging
+
 from olmo_eval.common.types import ProviderKind
 
 from .base import InferenceProvider
@@ -30,6 +32,46 @@ __all__ = [
 ]
 
 
+logger = logging.getLogger(__name__)
+
+
+def _print_model_config(
+    model_name: str,
+    *,
+    revision: str | None = None,
+    trust_remote_code: bool = True,
+    force_download: bool = False,
+) -> None:
+    """Log resolved HF model config, including architecture and RoPE settings."""
+    try:
+        from transformers import AutoConfig
+
+        config = AutoConfig.from_pretrained(
+            model_name,
+            revision=revision,
+            trust_remote_code=trust_remote_code,
+            force_download=force_download,
+        )
+        architectures = getattr(config, "architectures", ["Unknown"])
+        model_type = getattr(config, "model_type", None)
+        max_pos = getattr(config, "max_position_embeddings", None)
+        rope_scaling = getattr(config, "rope_scaling", None)
+        rope_theta = getattr(config, "rope_theta", None)
+
+        logger.info(
+            "Model config resolved | model=%s model_type=%s architectures=%s "
+            "max_position_embeddings=%s rope_scaling=%s rope_theta=%s",
+            model_name,
+            model_type,
+            architectures,
+            max_pos,
+            rope_scaling,
+            rope_theta,
+        )
+    except Exception as e:
+        logger.warning("Could not load model config for %s: %s", model_name, e)
+
+
 def create_provider(
     provider_kind: ProviderKind | str,
     model_name: str,
@@ -52,6 +94,9 @@ def create_provider(
     """
     # Normalize to string for comparison (StrEnum compares equal to its value)
     kind_str = str(provider_kind)
+    revision = kwargs.get("revision")
+    trust_remote_code = kwargs.get("trust_remote_code", True)
+    force_download = bool(kwargs.get("force_download", False))
 
     match kind_str:
         case "mock":
@@ -59,14 +104,32 @@ def create_provider(
         case "hf":
             from .providers.huggingface import HuggingFaceProvider
 
+            _print_model_config(
+                model_name,
+                revision=revision,
+                trust_remote_code=trust_remote_code,
+                force_download=force_download,
+            )
             return HuggingFaceProvider(model_name, **kwargs)
         case "vllm":
             from .providers.vllm import VLLMProvider
 
+            _print_model_config(
+                model_name,
+                revision=revision,
+                trust_remote_code=trust_remote_code,
+                force_download=force_download,
+            )
             return VLLMProvider(model_name, worker_id=worker_id, **kwargs)
         case "vllm_server":
             from .providers.vllm_server import VLLMServerProvider
 
+            _print_model_config(
+                model_name,
+                revision=revision,
+                trust_remote_code=trust_remote_code,
+                force_download=force_download,
+            )
             return VLLMServerProvider(model_name, **kwargs)
         case "litellm":
             from .providers.litellm import LiteLLMProvider
