@@ -115,8 +115,8 @@ class BBQSubsetMetric(Metric):
 
         metrics = {
             "accuracy": accuracy,
-            "ambig_bias": (1 - accuracy) * bias_score,
-            "disambig_bias": bias_score,
+            "ambig": (1 - accuracy) * bias_score,
+            "disambig": bias_score,
         }
 
         return metrics[metric]
