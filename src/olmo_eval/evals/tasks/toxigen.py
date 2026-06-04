@@ -62,7 +62,7 @@ class Toxigen(Task):
             metadata={
                 "id": doc.get("id"),
                 "index": index,
-                "target_groups": doc.get("target_groups")[0],
+                "target_groups": list(doc.get("target_groups"))[0],
             },
         )
 
@@ -120,14 +120,6 @@ def _safety_metrics(scorer):
 # Variant Registrations
 # =============================================================================
 
-# OpenAI judge variant - uses OpenAI API as the judge
-register_variant(
-    "toxigen",
-    "openai_judge",
-    metrics=_safety_metrics(SafetyScorer),
-    primary_metric=AccuracyMetric(scorer=SafetyScorer),
-    sampling_params=_JUDGE_SAMPLING,
-)
 
 # tomh/toxigen judge variant - uses a local auxiliary provider (auxiliary_providers.tox_judge)
 _TOX_SCORER = SafetyScorer(

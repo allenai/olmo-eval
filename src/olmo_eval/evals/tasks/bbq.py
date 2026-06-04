@@ -28,7 +28,7 @@ from olmo_eval.common.types import (
     SamplingParams,
 )
 from olmo_eval.data import DataLoader, DataSource
-from olmo_eval.evals.extract import extract_think_answer
+from olmo_eval.evals.extract import extract_mcq_answer
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 logger = logging.getLogger(__name__)
@@ -134,7 +134,7 @@ class BBQ(Task):
     data_source = DataSource(path="allenai/olmo-eval-bbq", split="test")
     formatter = MCQAChatFormatter()
     sampling_params = SamplingParams(temperature=0.6, top_p=0.95)
-    answer_extractor = extract_think_answer
+    answer_extractor = extract_mcq_answer
 
     @property
     def instances(self) -> Iterator[Instance]:

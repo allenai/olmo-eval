@@ -139,7 +139,7 @@ class WMDP(Task):
 
         question = _WMDP_FORMAT + doc.get("question")
         gold_letter = doc.get("gold_label")
-        gold_idx = ord(gold_letter) - ord("A")
+        gold_idx = ord(gold_letter) - ord("a")
 
         return Instance(
             question=question,
