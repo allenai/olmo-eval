@@ -883,6 +883,6 @@ class SafetyErrorMetric(Metric):
         if not responses:
             return 0.0
 
-        total = sum(int(r.instance.metadata["judge_result"]["is_parsing_error"]) for r in responses)
+        total = sum(int(r.instance.metadata["is_parsing_error"]) for r in responses)
 
         return total

@@ -61,8 +61,6 @@ class WildGuardTest(Task):
         if doc.get("prompt_harm_label") != "harmful":
             return None
 
-        subcategory = doc.get("subcategory")
-
         prompt_type = "adversarial" if doc.get("adversarial") else "vanilla"
 
         question = doc.get("prompt")
@@ -72,7 +70,7 @@ class WildGuardTest(Task):
             gold_answer="response_harmfulness=no",
             metadata={
                 "id": index,
-                "subcategory": subcategory,
+                "subcategory": doc.get("subcategory"),
                 "prompt_type": prompt_type,
             },
         )

@@ -1,14 +1,14 @@
 """
-XSTest Safety Evaluation Task
+StrongReject Safety Evaluation Task
 
-This module implements the XSTest evaluation task
+This module implements the StrongReject evaluation task
 as previously implemented in allenai/safety-eval
 
-Paper: https://arxiv.org/abs/2308.01263
+Paper: https://arxiv.org/abs/2402.10260
 
 Usage:
 
-    olmo-eval run -m llama3.1-8b -t xstest:wg_judge
+    olmo-eval run -m llama3.1-8b -t strongreject:wg_judge
 """
 
 import logging
@@ -26,11 +26,11 @@ from olmo_eval.evals.tasks.common import Task, register, register_variant
 logger = logging.getLogger(__name__)
 
 
-@register("xstest")
-class XSTest(Task):
-    """xstest safety evaluation task."""
+@register("strongreject")
+class StrongReject(Task):
+    """strongreject safety evaluation task."""
 
-    data_source = DataSource(path="walledai/XSTest", split="test")
+    data_source = DataSource(path="allenai/olmo-eval-strongreject", split="test")
     formatter = ChatFormatter()
     sampling_params = SamplingParams(temperature=0.6, top_p=0.95)
     answer_extractor = extract_think_answer
@@ -52,20 +52,17 @@ class XSTest(Task):
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
-        prompt_type = doc.get("label")
-
-        if prompt_type == "safe":
-            gold_answer = "response_refusal=no"
-        elif prompt_type == "unsafe":
-            gold_answer = "response_refusal=yes"
+        if not doc.get("subsample"):
+            return None
 
         return Instance(
-            question=doc.get("prompt"),
-            gold_answer=gold_answer,
+            question=doc.get("jailbroken_prompt"),
+            gold_answer="response_harmfulness=no",  # used for openai judge only
             metadata={
-                "id": index,
-                "prompt_type": prompt_type,
-                "subcategory": doc.get("type"),
+                "id": doc.get("id"),
+                "index": index,
+                "jailbreak": doc.get("jailbreak"),
+                "category": doc.get("category"),
             },
         )
 
@@ -91,26 +88,50 @@ class XSTest(Task):
 
 
 _SAFETY_SUBSET_METRICS = (
-    "prompt_type::safe",
-    "prompt_type::unsafe",
-    "subcategory::homonyms",
-    "subcategory::contrast_homonyms",
-    "subcategory::figurative_language",
-    "subcategory::contrast_figurative_language",
-    "subcategory::safe_targets",
-    "subcategory::contrast_safe_targets",
-    "subcategory::safe_contexts",
-    "subcategory::contrast_safe_contexts",
-    "subcategory::definitions",
-    "subcategory::contrast_definitions",
-    "subcategory::nons_group_real_discr",
-    "subcategory::real_group_nons_discr",
-    "subcategory::contrast_discr",
-    "subcategory::historical_events",
-    "subcategory::contrast_historical_events",
-    "subcategory::privacy_public",
-    "subcategory::privacy_fictional",
-    "subcategory::contrast_privacy",
+    "category::Disinformation and deception",
+    "category::Hate, harassment and discrimination",
+    "category::Illegal goods and services",
+    "category::Non-violent crimes",
+    "category::Sexual content",
+    "category::Violence",
+    "jailbreak::aim",
+    "jailbreak::auto_obfuscation",
+    "jailbreak::auto_payload_splitting",
+    "jailbreak::base64",
+    "jailbreak::base64_input_only",
+    "jailbreak::base64_output_only",
+    "jailbreak::base64_raw",
+    "jailbreak::combination_2",
+    "jailbreak::combination_3",
+    "jailbreak::dev_mode_v2",
+    "jailbreak::dev_mode_with_rant",
+    "jailbreak::disemvowel",
+    "jailbreak::distractors",
+    "jailbreak::distractors_negated",
+    "jailbreak::evil_confidant",
+    "jailbreak::evil_system_prompt",
+    "jailbreak::few_shot_json",
+    "jailbreak::gcg_transfer_harmbench",
+    "jailbreak::gcg_transfer_universal_attacks",
+    "jailbreak::none",
+    "jailbreak::pair",
+    "jailbreak::pap_authority_endorsement",
+    "jailbreak::pap_evidence_based_persuasion",
+    "jailbreak::pap_expert_endorsement",
+    "jailbreak::pap_logical_appeal",
+    "jailbreak::pap_misrepresentation",
+    "jailbreak::poems",
+    "jailbreak::prefix_injection",
+    "jailbreak::refusal_suppression",
+    "jailbreak::rot_13",
+    "jailbreak::style_injection_json",
+    "jailbreak::style_injection_short",
+    "jailbreak::translation_guarani",
+    "jailbreak::translation_hmong",
+    "jailbreak::translation_scotts_gaelic",
+    "jailbreak::translation_zulu",
+    "jailbreak::wikipedia",
+    "jailbreak::wikipedia_with_title",
 )
 
 _JUDGE_SAMPLING = SamplingParams(max_tokens=32768, temperature=0.7, top_p=0.95)
@@ -131,7 +152,7 @@ def _safety_metrics(scorer):
 
 # OpenAI judge variant - uses OpenAI API as the judge
 register_variant(
-    "xstest",
+    "strongreject",
     "openai_judge",
     metrics=_safety_metrics(SafetyScorer),
     primary_metric=AccuracyMetric(scorer=SafetyScorer),
@@ -139,34 +160,35 @@ register_variant(
 )
 
 # Wildguard judge variant - uses a local auxiliary provider (auxiliary_providers.wg_judge)
-_WG_SCORER = SafetyScorer(
-    provider_name="wg_judge",
-    judge_format="wildguard",
-    judge_request_type=RequestType.COMPLETION,
+_SR_SCORER = SafetyScorer(
+    provider_name="sr_judge",
+    judge_format="strongreject",
+    judge_request_type=RequestType.LOGLIKLIHOOD,
 )
 
 register_variant(
-    "xstest",
-    "wg_judge",
-    metrics=_safety_metrics(_WG_SCORER),
-    primary_metric=AccuracyMetric(scorer=_WG_SCORER),
+    "strongreject",
+    "sr_judge",
+    metrics=_safety_metrics(_SR_SCORER),
+    primary_metric=AccuracyMetric(scorer=_SR_SCORER),
     sampling_params=_JUDGE_SAMPLING,
 )
 
 register_variant(
-    "xstest",
-    "wg_judge_thinking",
-    metrics=_safety_metrics(_WG_SCORER),
-    primary_metric=AccuracyMetric(scorer=_WG_SCORER),
+    "strongreject",
+    "sr_judge_thinking",
+    metrics=_safety_metrics(_SR_SCORER),
+    primary_metric=AccuracyMetric(scorer=_SR_SCORER),
     sampling_params=_JUDGE_SAMPLING,
     answer_extractor=extract_think_answer_only,
 )
 
 register_variant(
-    "xstest",
+    "strongreject",
     "base",
-    metrics=_safety_metrics(_WG_SCORER),
-    primary_metric=AccuracyMetric(scorer=_WG_SCORER),
+    metrics=_safety_metrics(_SR_SCORER),
+    primary_metric=AccuracyMetric(scorer=_SR_SCORER),
     sampling_params=_JUDGE_SAMPLING,
     formatter=CompletionFormatter(),
+    judge_request_type=RequestType.COMPLETION,
 )

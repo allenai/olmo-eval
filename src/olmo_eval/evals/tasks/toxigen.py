@@ -1,14 +1,14 @@
 """
-XSTest Safety Evaluation Task
+Toxigen Safety Evaluation Task
 
-This module implements the XSTest evaluation task
+This module implements the toxigen evaluation task
 as previously implemented in allenai/safety-eval
 
-Paper: https://arxiv.org/abs/2308.01263
+Paper: https://arxiv.org/abs/2203.09509
 
 Usage:
 
-    olmo-eval run -m llama3.1-8b -t xstest:wg_judge
+    olmo-eval run -m llama3.1-8b -t toxigen:wg_judge
 """
 
 import logging
@@ -26,11 +26,11 @@ from olmo_eval.evals.tasks.common import Task, register, register_variant
 logger = logging.getLogger(__name__)
 
 
-@register("xstest")
-class XSTest(Task):
-    """xstest safety evaluation task."""
+@register("toxigen")
+class Toxigen(Task):
+    """toxigen safety evaluation task."""
 
-    data_source = DataSource(path="walledai/XSTest", split="test")
+    data_source = DataSource(path="allenai/olmo-eval-toxigen", split="test")
     formatter = ChatFormatter()
     sampling_params = SamplingParams(temperature=0.6, top_p=0.95)
     answer_extractor = extract_think_answer
@@ -52,20 +52,17 @@ class XSTest(Task):
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
-        prompt_type = doc.get("label")
 
-        if prompt_type == "safe":
-            gold_answer = "response_refusal=no"
-        elif prompt_type == "unsafe":
-            gold_answer = "response_refusal=yes"
+        if not doc.get("subsample"):
+            return None
 
         return Instance(
-            question=doc.get("prompt"),
-            gold_answer=gold_answer,
+            question=doc.get("instruction"),
+            gold_answer="response_harmfulness=no",  # used for openai varient not original judge
             metadata={
-                "id": index,
-                "prompt_type": prompt_type,
-                "subcategory": doc.get("type"),
+                "id": doc.get("id"),
+                "index": index,
+                "target_groups": doc.get("target_groups")[0],
             },
         )
 
@@ -90,30 +87,24 @@ class XSTest(Task):
         )
 
 
-_SAFETY_SUBSET_METRICS = (
-    "prompt_type::safe",
-    "prompt_type::unsafe",
-    "subcategory::homonyms",
-    "subcategory::contrast_homonyms",
-    "subcategory::figurative_language",
-    "subcategory::contrast_figurative_language",
-    "subcategory::safe_targets",
-    "subcategory::contrast_safe_targets",
-    "subcategory::safe_contexts",
-    "subcategory::contrast_safe_contexts",
-    "subcategory::definitions",
-    "subcategory::contrast_definitions",
-    "subcategory::nons_group_real_discr",
-    "subcategory::real_group_nons_discr",
-    "subcategory::contrast_discr",
-    "subcategory::historical_events",
-    "subcategory::contrast_historical_events",
-    "subcategory::privacy_public",
-    "subcategory::privacy_fictional",
-    "subcategory::contrast_privacy",
+_SAFETY_SUBSET_METRICS = (  ##TODO
+    "target_groups::asian",
+    "target_groups::black",
+    "target_groups::chinese",
+    "target_groups::jewish",
+    "target_groups::latino",
+    "target_groups::lgbtq",
+    "target_groups::mental_disability",
+    "target_groups::mexican",
+    "target_groups::middle_east",
+    "target_groups::muslim",
+    "target_groups::native_american",
+    "target_groups::physical_disability",
+    "target_groups::trans",
+    "target_groups::women",
 )
 
-_JUDGE_SAMPLING = SamplingParams(max_tokens=32768, temperature=0.7, top_p=0.95)
+_JUDGE_SAMPLING = SamplingParams(max_tokens=32768, temperature=0.6, top_p=0.95)
 
 
 def _safety_metrics(scorer):
@@ -131,42 +122,43 @@ def _safety_metrics(scorer):
 
 # OpenAI judge variant - uses OpenAI API as the judge
 register_variant(
-    "xstest",
+    "toxigen",
     "openai_judge",
     metrics=_safety_metrics(SafetyScorer),
     primary_metric=AccuracyMetric(scorer=SafetyScorer),
     sampling_params=_JUDGE_SAMPLING,
 )
 
-# Wildguard judge variant - uses a local auxiliary provider (auxiliary_providers.wg_judge)
-_WG_SCORER = SafetyScorer(
-    provider_name="wg_judge",
-    judge_format="wildguard",
-    judge_request_type=RequestType.COMPLETION,
+# tomh/toxigen judge variant - uses a local auxiliary provider (auxiliary_providers.tox_judge)
+_TOX_SCORER = SafetyScorer(
+    provider_name="tox_judge",
+    judge_format="toxigen",
+    judge_request_type=RequestType.LOGLIKLIHOOD,
 )
 
 register_variant(
-    "xstest",
-    "wg_judge",
-    metrics=_safety_metrics(_WG_SCORER),
-    primary_metric=AccuracyMetric(scorer=_WG_SCORER),
+    "toxigen",
+    "tox_judge",
+    metrics=_safety_metrics(_TOX_SCORER),
+    primary_metric=AccuracyMetric(scorer=_TOX_SCORER),
     sampling_params=_JUDGE_SAMPLING,
 )
 
 register_variant(
-    "xstest",
-    "wg_judge_thinking",
-    metrics=_safety_metrics(_WG_SCORER),
-    primary_metric=AccuracyMetric(scorer=_WG_SCORER),
+    "toxigen",
+    "tox_judge_thinking",
+    metrics=_safety_metrics(_TOX_SCORER),
+    primary_metric=AccuracyMetric(scorer=_TOX_SCORER),
     sampling_params=_JUDGE_SAMPLING,
     answer_extractor=extract_think_answer_only,
 )
 
 register_variant(
-    "xstest",
+    "toxigen",
     "base",
-    metrics=_safety_metrics(_WG_SCORER),
-    primary_metric=AccuracyMetric(scorer=_WG_SCORER),
+    metrics=_safety_metrics(_TOX_SCORER),
+    primary_metric=AccuracyMetric(scorer=_TOX_SCORER),
     sampling_params=_JUDGE_SAMPLING,
     formatter=CompletionFormatter(),
+    judge_request_type=RequestType.COMPLETION,
 )

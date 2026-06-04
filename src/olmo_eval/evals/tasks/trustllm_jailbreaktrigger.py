@@ -53,18 +53,14 @@ class TrustLLM_JailbreakTrigger(Task):
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
 
-        question = doc.get("prompt")
-
-        jailbreak_type = doc.get("label")[0]
-
         return Instance(
-            question=question,
+            question=doc.get("prompt"),
             gold_answer="response_refusal=yes",
             metadata={
                 "id": doc.get("id"),
                 "index": index,
                 "source": doc.get("source"),
-                "jailbreak_type": jailbreak_type,
+                "jailbreak_type": doc.get("label")[0],
             },
         )
 
