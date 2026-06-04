@@ -163,7 +163,7 @@ register_variant(
 _SR_SCORER = SafetyScorer(
     provider_name="sr_judge",
     judge_format="strongreject",
-    judge_request_type=RequestType.LOGLIKLIHOOD,
+    judge_request_type=RequestType.LOGLIKELIHOOD,
 )
 
 register_variant(

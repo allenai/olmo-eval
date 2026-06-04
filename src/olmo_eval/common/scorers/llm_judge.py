@@ -598,7 +598,7 @@ class SafetyClassificationScorer(LLMJudgeScorer):
 
     name: ClassVar[str] = "safety_classification_judge"
     judge_format: str = "standard"
-    judge_request_type: RequestType = RequestType.LOGLIKLIHOOD
+    judge_request_type: RequestType = RequestType.LOGLIKELIHOOD
     persist_judge_response: bool = True
 
     def format_judge_prompt(self, instance: Instance, output: LMOutput, **kwargs: Any) -> str:
@@ -695,8 +695,8 @@ class SafetyClassificationScorer(LLMJudgeScorer):
             raise RuntimeError("No inference pool configured.")
 
         provider = context.get_provider(self.provider_name)
-        if request_type == RequestType.LOGLIKLIHOOD:
-            # request = LMRequest(request_type=RequestType.LOGLIKLIHOOD, prompt=prompt)
+        if request_type == RequestType.LOGLIKELIHOOD:
+            # request = LMRequest(request_type=RequestType.LOGLIKELIHOOD, prompt=prompt)
             if self.judge_format == "toxigen":
                 results = await provider.aclassify([prompt], sampling_params)
                 print(results)

@@ -133,7 +133,7 @@ register_variant(
 _TOX_SCORER = SafetyScorer(
     provider_name="tox_judge",
     judge_format="toxigen",
-    judge_request_type=RequestType.LOGLIKLIHOOD,
+    judge_request_type=RequestType.LOGLIKELIHOOD,
 )
 
 register_variant(
