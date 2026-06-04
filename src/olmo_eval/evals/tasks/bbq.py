@@ -17,13 +17,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from olmo_eval.common.formatters import MCQAChatFormatter
-from olmo_eval.common.metrics import SafetyErrorMetric
+from olmo_eval.common.metrics import Metric, SafetyErrorMetric
 from olmo_eval.common.scorers import Scorer
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
     LMRequest,
-    Metric,
     RequestType,
     Response,
     SamplingParams,
