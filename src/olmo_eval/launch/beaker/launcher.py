@@ -815,6 +815,35 @@ class BeakerLauncher:
             for key, value in env_exports.items():
                 steps.append(f"export {key}={value}")
 
+        runtime_torch_version = (env_exports or {}).get("OLMO_EVAL_RUNTIME_TORCH_VERSION")
+        runtime_torch_index_url = (env_exports or {}).get("OLMO_EVAL_RUNTIME_TORCH_INDEX_URL")
+
+        def runtime_torch_spec() -> str:
+            spec = f"torch=={runtime_torch_version}"
+            if runtime_torch_index_url:
+                spec = f"{spec} --index-url {runtime_torch_index_url}"
+            return spec
+
+        def provider_package_spec(package: str) -> str:
+            if not runtime_torch_index_url:
+                return package
+
+            _, flags = parse_install_spec(package)
+            extra_flags: list[str] = []
+            if "--index-url" not in flags and "--extra-index-url" not in flags:
+                extra_flags.extend(["--extra-index-url", runtime_torch_index_url])
+            if "--index-strategy" not in flags:
+                extra_flags.extend(["--index-strategy", "unsafe-best-match"])
+            return " ".join([package, *extra_flags]) if extra_flags else package
+
+        # Optional runtime Torch override for provider forks that require a
+        # different Torch build than the base image. This must happen before
+        # constraints are generated so provider installs resolve against the
+        # replacement Torch/CUDA package set. In isolated vLLM mode, the
+        # overridden packages are symlinked into /opt/vllm-venv below.
+        if runtime_torch_version:
+            steps.append(build_install_command(runtime_torch_spec(), force_reinstall=True))
+
         # Generate constraints from pre-installed CUDA packages to prevent uv from changing them
         constraints = "/tmp/cuda-constraints.txt"
         steps.append(f"uv pip freeze -q | grep -E '^(torch|nvidia-)' > {constraints}")
@@ -864,7 +893,7 @@ class BeakerLauncher:
             for pkg in provider_packages:
                 steps.append(
                     build_install_command(
-                        pkg,
+                        provider_package_spec(pkg),
                         constraints,
                         venv_path=vllm_venv if use_isolated_vllm_venv else None,
                         force_reinstall=True,
@@ -904,8 +933,14 @@ class BeakerLauncher:
 
         # Build env vars that need to be exported in the install command (before uv runs)
         env_exports: dict[str, str] = {}
-        if "UV_CACHE_DIR" in config.env_vars:
-            env_exports["UV_CACHE_DIR"] = config.env_vars["UV_CACHE_DIR"]
+        install_env_keys = (
+            "UV_CACHE_DIR",
+            "OLMO_EVAL_RUNTIME_TORCH_VERSION",
+            "OLMO_EVAL_RUNTIME_TORCH_INDEX_URL",
+        )
+        for key in install_env_keys:
+            if key in config.env_vars:
+                env_exports[key] = config.env_vars[key]
 
         # Build separate install command for gantry's install_cmd parameter
         install_cmd = self._build_install_cmd(

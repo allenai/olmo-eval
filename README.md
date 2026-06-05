@@ -745,6 +745,9 @@ uv run olmo-eval run -m llama3.1-8b -t mmlu -t gsm8k -t arc_easy
 # Large models with multi-GPU tensor parallelism
 uv run olmo-eval run -m llama3.1-70b -t mmlu --num-gpus 4
 
+# Refresh Hugging Face cache before loading a remote model
+uv run olmo-eval run -m allenai/OLMo-2-1124-7B -t mmlu --force-download-model
+
 # Tool-augmented evaluation with harness
 uv run olmo-eval run -m llama3.1-8b -t simpleqa:judge --harness dr_tulu
 ```
@@ -1210,6 +1213,7 @@ budget: ai2/oe-base
 | `--external-eval` | `-E` | none | External evaluation name(s) to run instead of tasks |
 | `--eval-arg` | `-A` | none | Arguments for external evals (`key=value`) |
 | `--provider-kwarg` | `-K` | none | Provider kwargs for external evals (`key=value`) |
+| `--force-download-model` | | `false` | Refresh Hugging Face model/tokenizer cache before loading |
 | `--uv-cache-dir` | | default | UV cache directory for package downloads |
 | `--dry-run` | `-d` | `false` | Print spec without launching |
 | `--yes` | `-y` | `false` | Skip confirmation prompt |
@@ -1572,4 +1576,3 @@ uv lock
 
 CI runs `uv sync --frozen` and `uv run --frozen ...`, so any change to
 `pyproject.toml` must be accompanied by a refreshed `uv.lock`.
-
