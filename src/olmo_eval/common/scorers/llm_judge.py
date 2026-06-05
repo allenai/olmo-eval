@@ -9,7 +9,7 @@ import re
 from abc import abstractmethod
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Literal
+from typing import Any, Literal
 
 from olmo_eval.common.execution import ScoringContext
 from olmo_eval.common.scorers.execution import ContextScorer
@@ -155,7 +155,7 @@ class LLMJudgeScorer(ContextScorer):
     Subclasses must implement format_judge_prompt() and parse_judge_response().
     """
 
-    name: ClassVar[str] = "llm_judge"
+    name: str = "llm_judge"
     provider_name: str | None = None
     judge_fn: JudgeFn | None = None
 
@@ -275,7 +275,7 @@ class SimpleQAJudgeScorer(LLMJudgeScorer):
     Uses A/B/C response format.
     """
 
-    name: ClassVar[str] = "simpleqa_judge"
+    name: str = "simpleqa_judge"
     judge_fn: JudgeFn = field(
         default_factory=lambda: build_openai_judge_fn(scorer_name="SimpleQAJudgeScorer")
     )
@@ -333,7 +333,7 @@ class RubricJudgeScorer(LLMJudgeScorer):
     Allows defining custom evaluation rubrics and score patterns.
     """
 
-    name: ClassVar[str] = "rubric_judge"
+    name: str = "rubric_judge"
     judge_fn: JudgeFn = field(
         default_factory=lambda: build_openai_judge_fn(scorer_name="RubricJudgeScorer")
     )
@@ -406,7 +406,7 @@ class SafetyScorer(LLMJudgeScorer):
     environment variable to be set.
     """
 
-    name: ClassVar[str] = "safety_judge"
+    name: str = "safety_judge"
     judge_format: str = "standard"
     judge_request_type: RequestType = RequestType.CHAT
     persist_judge_response: bool = True

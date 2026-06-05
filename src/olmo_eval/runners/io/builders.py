@@ -32,6 +32,8 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
             num_chars = len(out.text) if out.text else 0
 
             # Use metadata values if available (from vLLM provider), else compute
+            sum_logits: float | None
+            num_tokens: int | None
             if "sum_logits" in meta:
                 sum_logits = meta["sum_logits"]
                 num_tokens = meta.get("num_tokens", len(out.logprobs) if out.logprobs else 0)
@@ -39,26 +41,31 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
                 sum_logits = sum(t.get("logprob", 0) for t in out.logprobs)
                 num_tokens = len(out.logprobs)
             else:
-                sum_logits = 0.0
-                num_tokens = 0
+                sum_logits = None
+                num_tokens = None
 
             out_data: dict[str, Any] = {
                 "text": out.text,
                 "extracted_answer": out.extracted_answer,
-                "sum_logits": sum_logits,
-                "num_tokens": num_tokens,
-                "num_tokens_all": meta.get("num_tokens_all", num_tokens),
             }
             if "is_greedy" in meta:
                 out_data["is_greedy"] = meta["is_greedy"]
 
-            # Compute derived metrics (matching oe-eval format)
-            if num_tokens > 0:
-                out_data["logits_per_token"] = sum_logits / num_tokens
-            if num_chars > 0:
-                out_data["logits_per_char"] = sum_logits / num_chars
-            if num_bytes > 0:
-                out_data["bits_per_byte"] = -sum_logits / (num_bytes * math.log(2))
+            # Logprob-derived fields are only meaningful when the backend returned
+            # logprobs; omit them otherwise so downstream code can distinguish
+            # "unavailable" from a genuine zero.
+            if sum_logits is not None:
+                out_data["sum_logits"] = sum_logits
+                out_data["num_tokens"] = num_tokens
+                out_data["num_tokens_all"] = meta.get("num_tokens_all", num_tokens)
+                out_data["is_greedy"] = meta.get("is_greedy", False)
+
+                if num_tokens:
+                    out_data["logits_per_token"] = sum_logits / num_tokens
+                if num_chars > 0:
+                    out_data["logits_per_char"] = sum_logits / num_chars
+                if num_bytes > 0:
+                    out_data["bits_per_byte"] = -sum_logits / (num_bytes * math.log(2))
 
             out_data["num_chars"] = num_chars
 

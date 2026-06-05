@@ -6,7 +6,7 @@ argument matching, and tool sequences.
 
 import json
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Any
 
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.types import Instance, LMOutput
@@ -93,7 +93,7 @@ class ToolCallScorer(Scorer):
     instance.expected_tool_calls.
     """
 
-    name: ClassVar[str] = "tool_call"
+    name: str = "tool_call"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         """Score tool call correctness.
@@ -136,7 +136,7 @@ class ToolArgumentScorer(Scorer):
     Compares the arguments of each tool call against expected arguments.
     """
 
-    name: ClassVar[str] = "tool_argument"
+    name: str = "tool_argument"
     case_sensitive: bool = False
 
     def score(self, instance: Instance, output: LMOutput) -> float:
@@ -201,7 +201,7 @@ class ToolSequenceScorer(Scorer):
     necessarily consecutively).
     """
 
-    name: ClassVar[str] = "tool_sequence"
+    name: str = "tool_sequence"
     strict_order: bool = True
 
     def score(self, instance: Instance, output: LMOutput) -> float:

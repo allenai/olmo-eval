@@ -6,7 +6,7 @@ including tool call sequences, state changes, and efficiency.
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, ClassVar
+from typing import Any
 
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.types import Instance, LMOutput, Response
@@ -33,7 +33,7 @@ class TrajectoryResponseScorer(Scorer):
     sequence in order.
     """
 
-    name: ClassVar[str] = "trajectory_response"
+    name: str = "trajectory_response"
     require_exact_match: bool = False
 
     def score(self, instance: Instance, output: LMOutput) -> float:
@@ -124,7 +124,7 @@ class TrajectoryStateScorer(Scorer):
     Evaluates whether the final state matches expected state.
     """
 
-    name: ClassVar[str] = "trajectory_state"
+    name: str = "trajectory_state"
     state_comparator: Callable[[dict[str, Any], dict[str, Any]], bool] = field(
         default=_default_state_comparator
     )
@@ -175,7 +175,7 @@ class TrajectoryEfficiencyScorer(Scorer):
     to the minimum required steps.
     """
 
-    name: ClassVar[str] = "trajectory_efficiency"
+    name: str = "trajectory_efficiency"
     minimal_steps: int = 1
 
     def score(self, instance: Instance, output: LMOutput) -> float:
@@ -244,7 +244,7 @@ class TrajectoryCombinedScorer(Scorer):
     returning 1.0 only if both pass.
     """
 
-    name: ClassVar[str] = "trajectory_combined"
+    name: str = "trajectory_combined"
     require_exact_sequence: bool = False
     state_comparator: Callable[[dict[str, Any], dict[str, Any]], bool] = field(
         default=_default_state_comparator

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import ClassVar
 
 from olmo_eval.common.metrics.base import Metric
 from olmo_eval.common.scorers import IFEvalScorer, Scorer
@@ -47,8 +46,8 @@ def _instruction_level(results: list[list[bool]]) -> float:
 class IFEvalPromptStrictAccuracy(Metric):
     """Fraction of prompts where every instruction passes under strict scoring."""
 
-    name: ClassVar[str] = "prompt_level_strict_acc"
-    scorer: ClassVar[type[Scorer]] = IFEvalScorer
+    name: str = "prompt_level_strict_acc"
+    scorer: type[Scorer] = IFEvalScorer
 
     def compute(self, responses: Sequence[Response]) -> float:
         return _prompt_level(_iter_results(responses, "strict"))
@@ -58,8 +57,8 @@ class IFEvalPromptStrictAccuracy(Metric):
 class IFEvalPromptLooseAccuracy(Metric):
     """Fraction of prompts where every instruction passes under loose scoring."""
 
-    name: ClassVar[str] = "prompt_level_loose_acc"
-    scorer: ClassVar[type[Scorer]] = IFEvalScorer
+    name: str = "prompt_level_loose_acc"
+    scorer: type[Scorer] = IFEvalScorer
 
     def compute(self, responses: Sequence[Response]) -> float:
         return _prompt_level(_iter_results(responses, "loose"))
@@ -69,8 +68,8 @@ class IFEvalPromptLooseAccuracy(Metric):
 class IFEvalInstStrictAccuracy(Metric):
     """Fraction of individual instructions passing under strict scoring."""
 
-    name: ClassVar[str] = "inst_level_strict_acc"
-    scorer: ClassVar[type[Scorer]] = IFEvalScorer
+    name: str = "inst_level_strict_acc"
+    scorer: type[Scorer] = IFEvalScorer
 
     def compute(self, responses: Sequence[Response]) -> float:
         return _instruction_level(_iter_results(responses, "strict"))
@@ -80,8 +79,8 @@ class IFEvalInstStrictAccuracy(Metric):
 class IFEvalInstLooseAccuracy(Metric):
     """Fraction of individual instructions passing under loose scoring."""
 
-    name: ClassVar[str] = "inst_level_loose_acc"
-    scorer: ClassVar[type[Scorer]] = IFEvalScorer
+    name: str = "inst_level_loose_acc"
+    scorer: type[Scorer] = IFEvalScorer
 
     def compute(self, responses: Sequence[Response]) -> float:
         return _instruction_level(_iter_results(responses, "loose"))

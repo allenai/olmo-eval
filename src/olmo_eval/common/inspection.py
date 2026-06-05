@@ -535,6 +535,7 @@ class SubprocessTokenizer:
         import sys
 
         timeout_seconds = 60
+        assert self._proc.stdout is not None
         if sys.platform != "win32" and hasattr(select, "select"):
             # Use select for timeout on Unix
             ready, _, _ = select.select([self._proc.stdout], [], [], timeout_seconds)
@@ -546,7 +547,7 @@ class SubprocessTokenizer:
                     "waiting for ready signal"
                 )
 
-        ready_line = self._proc.stdout.readline()  # type: ignore[ty:unresolved-attribute]
+        ready_line = self._proc.stdout.readline()
         if not ready_line:
             self._proc.kill()
             self._proc.wait()
