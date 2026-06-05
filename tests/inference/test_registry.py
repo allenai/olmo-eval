@@ -93,6 +93,20 @@ class TestProviderConfigRoundtrip:
         assert restored.kwargs.get("enable_prefix_caching") is True
         assert restored.kwargs.get("custom_field") == "value"
 
+    def test_force_download_survives_roundtrip(self):
+        """force_download is preserved as a provider field."""
+        config = ProviderConfig(
+            kind=ProviderKind.VLLM_SERVER,
+            model="test-model",
+            force_download=True,
+        )
+
+        serialized = config.to_dict()
+        restored = ProviderConfig.from_dict(serialized)
+
+        assert serialized["force_download"] is True
+        assert restored.force_download is True
+
 
 class TestReplicaSetRoundRobin:
     """Test ReplicaSet round-robin behavior."""

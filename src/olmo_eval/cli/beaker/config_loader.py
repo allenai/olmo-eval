@@ -45,6 +45,7 @@ class LaunchConfig:
     store: bool = False
     debug_requests: bool = False
     debug_provider: bool = False
+    force_download_model: bool = False
     save_predictions: bool = True
     save_requests: bool = True
     inspect_instance: bool = False
@@ -200,6 +201,7 @@ class LaunchConfigLoader:
             store=self.cli_args.get("store", False),
             debug_requests=self.cli_args.get("debug_requests", False),
             debug_provider=self.cli_args.get("debug_provider", False),
+            force_download_model=self.cli_args.get("force_download_model", False),
             save_predictions=self.cli_args.get("save_predictions", True),
             save_requests=self.cli_args.get("save_requests", True),
             inspect_instance=self.cli_args.get("inspect_instance", False),

@@ -195,3 +195,49 @@ class TestVLLMServerProviderStartup:
         assert "completion_use_prompt_token_ids" not in server_kwargs
         assert "completion_client_side_stop_trim" not in server_kwargs
         assert "completion_sentencepiece_cleanup" not in server_kwargs
+
+    def test_force_download_refreshes_cache_before_managed_server_startup(self):
+        """Managed server startup should refresh HF cache without a vLLM CLI arg."""
+        from unittest.mock import call
+
+        from olmo_eval.inference.providers.vllm_server import VLLMServerProvider
+
+        mock_server = MagicMock()
+        mock_server.base_url = "http://127.0.0.1:8000/v1"
+
+        with (
+            patch(
+                "olmo_eval.inference.providers.vllm_server_utils.VLLMServerProcess",
+                return_value=mock_server,
+            ) as mock_server_cls,
+            patch("olmo_eval.inference.providers.vllm_server.BeakerStatusReporter"),
+            patch("olmo_eval.inference.providers.vllm_server.refresh_hf_cache") as refresh,
+        ):
+            provider = VLLMServerProvider(
+                "org/model",
+                tokenizer="org/tokenizer",
+                revision="main",
+                force_download=True,
+                download_dir="/tmp/hf-cache",
+            )
+
+        assert provider.base_url == "http://127.0.0.1:8000/v1"
+        assert refresh.call_args_list == [
+            call(
+                "org/model",
+                revision="main",
+                cache_dir="/tmp/hf-cache",
+                token=None,
+                force_download=True,
+            ),
+            call(
+                "org/tokenizer",
+                revision="main",
+                cache_dir="/tmp/hf-cache",
+                token=None,
+                force_download=True,
+            ),
+        ]
+        server_kwargs = mock_server_cls.call_args.kwargs
+        assert server_kwargs["download_dir"] == "/tmp/hf-cache"
+        assert "force_download" not in server_kwargs

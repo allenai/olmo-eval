@@ -290,9 +290,12 @@ def _build_server_command(
         if parser == "olmo3" and patch_olmo3_tool_parser:
             cmd.extend(["--chat-template", _get_olmo3_tool_template_path()])
 
-    # Prefix caching (enabled by default for faster inference)
+    # Prefix caching. vLLM defaults can vary by version, so pass an explicit
+    # positive or negative flag instead of relying on omission semantics.
     if enable_prefix_caching:
         cmd.append("--enable-prefix-caching")
+    else:
+        cmd.append("--no-enable-prefix-caching")
 
     # Disable tqdm loading bar by default, enable with --debug-provider
     if is_debug_provider():

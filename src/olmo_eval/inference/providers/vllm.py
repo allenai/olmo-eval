@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from olmo_eval.common.debug import is_debug_provider, is_debug_requests
 from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
 from olmo_eval.inference.base import InferenceProvider
+from olmo_eval.inference.hf_cache import refresh_hf_cache
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 
 logger = logging.getLogger(__name__)
@@ -104,6 +105,7 @@ class VLLMProvider(InferenceProvider):
         tokenizer: str | None = None,
         attention_backend: str | None = None,
         worker_id: str | None = None,
+        force_download: bool = False,
         **engine_kwargs,
     ) -> None:
         """Initialize the provider.
@@ -115,6 +117,8 @@ class VLLMProvider(InferenceProvider):
                 If not specified, vLLM will auto-select based on available backends.
             worker_id: Optional worker identifier for logging. If provided, vLLM logs
                 will include this identifier.
+            force_download: Force-refresh Hugging Face model/tokenizer cache entries
+                before initializing vLLM.
             **engine_kwargs: Additional arguments passed to vLLM LLM engine.
         """
         # Set vLLM logging level - DEBUG if OLMO_EVAL_DEBUG_PROVIDER=1, otherwise WARNING
@@ -138,6 +142,27 @@ class VLLMProvider(InferenceProvider):
 
         super().__init__(model_name)
         self._worker_id = worker_id
+        if force_download:
+            model_revision = engine_kwargs.get("revision")
+            cache_dir = engine_kwargs.get("download_dir") or engine_kwargs.get("cache_dir")
+            token = engine_kwargs.get("token")
+            refresh_hf_cache(
+                model_name,
+                revision=model_revision,
+                cache_dir=cache_dir,
+                token=token,
+                force_download=True,
+            )
+            if tokenizer and tokenizer != model_name:
+                tokenizer_revision = engine_kwargs.get("tokenizer_revision") or model_revision
+                refresh_hf_cache(
+                    tokenizer,
+                    revision=tokenizer_revision,
+                    cache_dir=cache_dir,
+                    token=token,
+                    force_download=True,
+                )
+
         engine_kwargs.setdefault("gpu_memory_utilization", 0.8)
 
         # Configure attention backend if specified (e.g., FLASHINFER, FLASH_ATTN)

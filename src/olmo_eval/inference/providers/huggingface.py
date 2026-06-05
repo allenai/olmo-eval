@@ -42,6 +42,17 @@ class HuggingFaceProvider(InferenceProvider):
         }
     )
 
+    _TOKENIZER_KWARGS = frozenset(
+        {
+            "cache_dir",
+            "force_download",
+            "local_files_only",
+            "revision",
+            "token",
+            "trust_remote_code",
+        }
+    )
+
     def __init__(self, model_name: str, tokenizer: str | None = None, **model_kwargs) -> None:
         """Initialize the provider.
 
@@ -64,7 +75,10 @@ class HuggingFaceProvider(InferenceProvider):
 
         super().__init__(model_name)
         tokenizer_path = tokenizer or model_name
-        self.tokenizer: Any = AutoTokenizer.from_pretrained(tokenizer_path)
+        tokenizer_kwargs = {
+            key: value for key, value in model_kwargs.items() if key in self._TOKENIZER_KWARGS
+        }
+        self.tokenizer: Any = AutoTokenizer.from_pretrained(tokenizer_path, **tokenizer_kwargs)
         self.model: Any = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
         self.device = _get_device()
         self.model.to(self.device)

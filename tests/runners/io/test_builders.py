@@ -39,6 +39,7 @@ def test_build_predictions_includes_scoring_errors() -> None:
         }
     }
     assert predictions[0]["model_output"][0]["sample_metrics"] == {"code_exec": {"code_exec": 0.0}}
+    assert "is_greedy" not in predictions[0]["model_output"][0]
 
 
 def test_build_predictions_includes_sample_metrics_for_multiple_outputs() -> None:
@@ -91,6 +92,24 @@ def test_build_predictions_omits_logprob_fields_when_unavailable() -> None:
     ):
         assert field not in output, f"{field} should be omitted when logprobs unavailable"
     assert output["num_chars"] == len("hello")
+
+
+def test_build_predictions_includes_known_is_greedy() -> None:
+    response = Response(
+        instance=Instance(question="Q", gold_answer="A"),
+        request=LMRequest(request_type=RequestType.COMPLETION, prompt="Q"),
+        outputs=[
+            LMOutput(
+                text="out",
+                metadata={"is_greedy": True},
+            )
+        ],
+        scores={},
+    )
+
+    predictions = build_predictions([response])
+
+    assert predictions[0]["model_output"][0]["is_greedy"] is True
 
 
 def test_build_predictions_materializes_exact_mc_accuracy_metric_keys() -> None:

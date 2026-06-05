@@ -48,6 +48,8 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
                 "text": out.text,
                 "extracted_answer": out.extracted_answer,
             }
+            if "is_greedy" in meta:
+                out_data["is_greedy"] = meta["is_greedy"]
 
             # Logprob-derived fields are only meaningful when the backend returned
             # logprobs; omit them otherwise so downstream code can distinguish
