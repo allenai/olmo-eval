@@ -23,7 +23,7 @@ class Scorer(ABC):
     subclass instead of implementing `score()` directly.
     """
 
-    name: ClassVar[str]
+    name: str = ""
     requires_async: ClassVar[bool] = False
 
     def __call__(self) -> Scorer:

@@ -16,7 +16,7 @@ import re
 from abc import ABC
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Any
 
 from olmo_eval.common.metrics import Metric
 from olmo_eval.common.scorers.base import Scorer
@@ -462,7 +462,7 @@ class SQAJudgeScorer(Scorer):
     The score() method reads pre-computed scores from output metadata.
     """
 
-    name: ClassVar[str] = "sqa_judge"
+    name: str = "sqa_judge"
     score_key: str = "global_avg"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
@@ -472,7 +472,7 @@ class SQAJudgeScorer(Scorer):
 class _SQAMetricBase(Metric, ABC):
     """Base for SQA metrics that read from response.scores."""
 
-    scorer: ClassVar[type[Scorer]] = SQAJudgeScorer
+    scorer: type[Scorer] = SQAJudgeScorer
 
     def compute(self, responses: Sequence[Response]) -> float:
         if not responses:

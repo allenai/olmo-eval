@@ -5,7 +5,13 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any
 
-from olmo_eval.common.types import LMOutput, LMRequest, RequestType, SamplingParams
+from olmo_eval.common.types import (
+    LMOutput,
+    LMRequest,
+    LogProbEntry,
+    RequestType,
+    SamplingParams,
+)
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 
@@ -158,7 +164,7 @@ class HuggingFaceProvider(InferenceProvider):
                         logits = self.model(seq).logits
                     log_probs = torch.log_softmax(logits, dim=-1)[0]
 
-                    logprob_entries = []
+                    logprob_entries: list[LogProbEntry] = []
                     for i, tok in enumerate(gen_ids):
                         lp = log_probs[prompt_len + i - 1, tok].item()
                         token_str = self.tokenizer.decode(tok, skip_special_tokens=False)
@@ -235,7 +241,7 @@ class HuggingFaceProvider(InferenceProvider):
 
                 log_probs = torch.log_softmax(logits, dim=-1)[0]
 
-                logprob_entries = []
+                logprob_entries: list[LogProbEntry] = []
                 total = 0.0
                 for j, tok in enumerate(continuation_enc):
                     lp = log_probs[ctx_len + j - 1, tok].item()

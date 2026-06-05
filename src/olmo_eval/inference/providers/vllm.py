@@ -409,7 +409,7 @@ class VLLMProvider(InferenceProvider):
                 ctxlen, num_tokens_all, overflow = next(meta_iter)
                 inp = next(tokens_iter)
 
-                logprob_entries = []
+                logprob_entries: list[LogProbEntry] = []
                 total = 0.0
                 is_greedy = True
 
