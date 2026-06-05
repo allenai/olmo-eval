@@ -70,6 +70,29 @@ def test_build_predictions_includes_sample_metrics_for_multiple_outputs() -> Non
     }
 
 
+def test_build_predictions_omits_logprob_fields_when_unavailable() -> None:
+    response = Response(
+        instance=Instance(question="Q", gold_answer="A"),
+        request=LMRequest(request_type=RequestType.CHAT, prompt="Q"),
+        outputs=[LMOutput(text="hello", extracted_answer="hello")],
+        scores={},
+    )
+
+    output = build_predictions([response])[0]["model_output"][0]
+
+    for field in (
+        "sum_logits",
+        "num_tokens",
+        "num_tokens_all",
+        "is_greedy",
+        "logits_per_token",
+        "logits_per_char",
+        "bits_per_byte",
+    ):
+        assert field not in output, f"{field} should be omitted when logprobs unavailable"
+    assert output["num_chars"] == len("hello")
+
+
 def test_build_predictions_materializes_exact_mc_accuracy_metric_keys() -> None:
     response = Response(
         instance=Instance(
