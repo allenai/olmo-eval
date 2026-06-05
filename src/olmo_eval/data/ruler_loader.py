@@ -47,7 +47,7 @@ def download_ruler_data() -> str:
 
     if not os.path.exists(data_dir):
         logger.info(f"Local RULER data not found in {root_dir}, downloading...")
-        my_file = hf_hub_download(
+        my_file = hf_hub_download(  # ty: ignore[no-matching-overload]
             repo_id="allenai/ruler_data",
             filename="data_100_samples.tgz",
             repo_type="dataset",
