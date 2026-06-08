@@ -12,7 +12,7 @@ Usage:
 """
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,7 +26,6 @@ from olmo_eval.common.types import (
     RequestType,
     Response,
     SamplingParams,
-    Sequence,
 )
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.extract import extract_mcq_answer
