@@ -2,45 +2,51 @@
 Safety suites for thinking and instruct models, and wildguard vs openai models
 """
 
+from olmo_eval.common.metrics import AccuracyMetric, SafetyErrorMetric, SubsetAccuracyMetric
 from olmo_eval.evals.suites.registry import AggregationStrategy, make_suite
 
 SAFETY_TASKS = [
-    # "bbq",
     "do_anything_now",
     "harmbench",
-    # "strongreject"
-    # "toxigen",
     "trustllm_jailbreaktrigger",
     "wildguardtest",
     "wildjailbreak",
-    # "wmdp",
     "xstest",
 ]
 
 make_suite(
     "safety_thinking",
-    tuple(f"{task}:wg_judge_thinking" for task in SAFETY_TASKS),
+    (*(f"{task}:wg_judge_thinking" for task in SAFETY_TASKS), "bbq:mcq", "wmdp:mcq"),
     aggregation=AggregationStrategy.AVERAGE,
     description="Safety evals for posttrained reasoning models with a wildguard judge",
 )
 
 make_suite(
     "safety_instruct",
-    tuple(f"{task}:wg_judge" for task in SAFETY_TASKS),
+    (*(f"{task}:wg_judge" for task in SAFETY_TASKS), "bbq:mcq", "wmdp:mcq"),
     aggregation=AggregationStrategy.AVERAGE,
     description="Safety evals for posttrained instruct models with a wildguard judge",
 )
 
 make_suite(
     "safety_openai",
-    tuple(f"{task}:openai_judge" for task in SAFETY_TASKS),
+    (*(f"{task}:openai_judge" for task in SAFETY_TASKS), "bbq:mcq", "wmdp:mcq"),
     aggregation=AggregationStrategy.AVERAGE,
     description="Safety evals for posttrained instruct models with an openai judge",
 )
 
 make_suite(
     "safety_base",
-    tuple(f"{task}:base" for task in SAFETY_TASKS),
+    (*(f"{task}:base" for task in SAFETY_TASKS), "bbq:base", "wmdp:base"),
     aggregation=AggregationStrategy.AVERAGE,
-    description="Safety evals for posttrained instruct models with an openai judge",
+    description="Safety evals for pretrained models",
 )
+
+
+def safety_metrics(scorer, subsets):
+    """Build the full metric tuple for a safety judge scorer."""
+    return (
+        AccuracyMetric(scorer=scorer),
+        SafetyErrorMetric(scorer=scorer),
+        *(SubsetAccuracyMetric(name=name, scorer=scorer) for name in subsets),
+    )

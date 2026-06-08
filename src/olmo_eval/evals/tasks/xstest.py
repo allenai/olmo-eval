@@ -16,11 +16,12 @@ from collections.abc import Iterator
 from typing import Any
 
 from olmo_eval.common.formatters import ChatFormatter, CompletionFormatter
-from olmo_eval.common.metrics import AccuracyMetric, SafetyErrorMetric, SubsetAccuracyMetric
+from olmo_eval.common.metrics import AccuracyMetric
 from olmo_eval.common.scorers import SafetyScorer
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.extract import extract_think_answer, extract_think_answer_only
+from olmo_eval.evals.suites.safety import safety_metrics
 from olmo_eval.evals.tasks.common import Task, register, register_variant
 
 logger = logging.getLogger(__name__)
@@ -90,7 +91,7 @@ class XSTest(Task):
         )
 
 
-_SAFETY_SUBSET_METRICS = (
+_XSTEST_SUBSET_METRICS = (
     "prompt_type::safe",
     "prompt_type::unsafe",
     "subcategory::homonyms",
@@ -113,16 +114,7 @@ _SAFETY_SUBSET_METRICS = (
     "subcategory::contrast_privacy",
 )
 
-_JUDGE_SAMPLING = SamplingParams(max_tokens=32768, temperature=0.7, top_p=0.95)
-
-
-def _safety_metrics(scorer):
-    """Build the full metric tuple for a safety judge scorer."""
-    return (
-        AccuracyMetric(scorer=scorer),
-        SafetyErrorMetric(scorer=scorer),
-        *(SubsetAccuracyMetric(name=name, scorer=scorer) for name in _SAFETY_SUBSET_METRICS),
-    )
+_JUDGE_SAMPLING = SamplingParams(max_tokens=32768, temperature=0.6, top_p=0.95)
 
 
 # =============================================================================
@@ -133,7 +125,7 @@ def _safety_metrics(scorer):
 register_variant(
     "xstest",
     "openai_judge",
-    metrics=_safety_metrics(SafetyScorer),
+    metrics=safety_metrics(SafetyScorer, _XSTEST_SUBSET_METRICS),
     primary_metric=AccuracyMetric(scorer=SafetyScorer),
     sampling_params=_JUDGE_SAMPLING,
 )
@@ -148,7 +140,7 @@ _WG_SCORER = SafetyScorer(
 register_variant(
     "xstest",
     "wg_judge",
-    metrics=_safety_metrics(_WG_SCORER),
+    metrics=safety_metrics(_WG_SCORER, _XSTEST_SUBSET_METRICS),
     primary_metric=AccuracyMetric(scorer=_WG_SCORER),
     sampling_params=_JUDGE_SAMPLING,
 )
@@ -156,7 +148,7 @@ register_variant(
 register_variant(
     "xstest",
     "wg_judge_thinking",
-    metrics=_safety_metrics(_WG_SCORER),
+    metrics=safety_metrics(_WG_SCORER, _XSTEST_SUBSET_METRICS),
     primary_metric=AccuracyMetric(scorer=_WG_SCORER),
     sampling_params=_JUDGE_SAMPLING,
     answer_extractor=extract_think_answer_only,
@@ -165,7 +157,7 @@ register_variant(
 register_variant(
     "xstest",
     "base",
-    metrics=_safety_metrics(_WG_SCORER),
+    metrics=safety_metrics(_WG_SCORER, _XSTEST_SUBSET_METRICS),
     primary_metric=AccuracyMetric(scorer=_WG_SCORER),
     sampling_params=_JUDGE_SAMPLING,
     formatter=CompletionFormatter(),
