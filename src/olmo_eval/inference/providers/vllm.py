@@ -209,6 +209,10 @@ class VLLMProvider(InferenceProvider):
             kwargs["top_p"] = top_p
         if top_k is not None:
             kwargs["top_k"] = top_k
+        if params.truncate_prompt_tokens is not None:
+            kwargs["truncate_prompt_tokens"] = params.truncate_prompt_tokens
+        if params.truncation_side is not None:
+            kwargs["truncation_side"] = params.truncation_side
         if params.stop_sequences:
             kwargs["stop"] = list(params.stop_sequences)
         # Always request logprobs (default to 1) for metrics computation
@@ -223,6 +227,7 @@ class VLLMProvider(InferenceProvider):
     ) -> list[list[LMOutput]]:
         params = self._default_sampling_params(sampling_params)
         vllm_params = self._build_sampling_params(params)
+        print("generate", vllm_params)
 
         prompt_strs = [req.prompt for req in requests]
 
@@ -460,6 +465,7 @@ class VLLMProvider(InferenceProvider):
         Returns:
             List of output lists, one per request.
         """
+        print("agenerate", sampling_params)
         return await asyncio.to_thread(self.generate, requests, sampling_params)
 
     async def alogprobs(
