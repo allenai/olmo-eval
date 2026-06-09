@@ -5,7 +5,7 @@ Tasks are generated programmatically from base configurations.
 """
 
 # Context sizes to generate tasks for
-CONTEXT_SIZES = [4096, 8192, 16384, 32768, 65536, 131072]
+CONTEXT_SIZES = [4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576]
 
 # Default configuration values
 _DEFAULT_MAX_GEN_TOKS = 50
@@ -44,7 +44,17 @@ _BASE_TASKS = {
     # NIAH - Multi-value variant
     "niah_mv": {
         "data_template": "data/ruler/niah_multivalue/validation_{size}.jsonl",
-        "max_gen_toks": {4096: 300, 8192: 250, 16384: 250, 32768: 250, 65536: 250, 131072: 250},
+        "max_gen_toks": {
+            4096: 300,
+            8192: 250,
+            16384: 250,
+            32768: 250,
+            65536: 250,
+            131072: 250,
+            262144: 250,
+            524288: 250,
+            1048576: 250,
+        },
         "tag": "niah",
     },
     # NIAH - Multi-query variant
