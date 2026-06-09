@@ -9,7 +9,7 @@ from olmo_eval.data.ruler_tasks import RULER_TASKS
 from olmo_eval.evals.suites.registry import AggregationStrategy, Suite, register
 
 # Context sizes to create suites for
-CONTEXT_SIZES = [4096, 8192, 16384, 32768, 65536, 131072]
+CONTEXT_SIZES = [4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576]
 
 # Task categories (tags)
 CATEGORIES = ["niah", "multi_hop_tracing", "aggregation", "qa"]
