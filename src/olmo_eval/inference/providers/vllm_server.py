@@ -716,7 +716,6 @@ class VLLMServerProvider(InferenceProvider):
 
         if extra_body:
             kwargs["extra_body"] = extra_body
-        print("server", kwargs)
         response = await client.completions.create(**kwargs)
         usage = getattr(response, "usage", None)
         return [
