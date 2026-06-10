@@ -688,9 +688,9 @@ class VLLMServerProvider(InferenceProvider):
         if stop_sequences:
             kwargs["stop"] = stop_sequences
         if params.truncate_prompt_tokens is not None:
-            kwargs["truncate_prompt_tokens"] = params.truncate_prompt_tokens
+            extra_body["truncate_prompt_tokens"] = params.truncate_prompt_tokens
         if params.truncation_side is not None:
-            kwargs["truncation_side"] = params.truncation_side
+            extra_body["truncation_side"] = params.truncation_side
         if self._completion_use_prompt_token_ids:
             http_client = self._get_raw_http_client()
             response = await http_client.post(
