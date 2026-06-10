@@ -178,6 +178,9 @@ select = [
 "src/olmo_eval/evals/tasks/squad.py" = ["E501"]
 # Static fewshot data with long string literals
 "src/olmo_eval/evals/tasks/constants/*" = ["E501"]
+# Verbatim tables/templates vendored from the mm_olmo reference implementation
+"src/olmo_eval/common/image_qa/*" = ["E501"]
+"tests/core/test_image_qa_scorers.py" = ["E501"]
 [tool.ruff.format]
 docstring-code-format = true
 
