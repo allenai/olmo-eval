@@ -546,7 +546,7 @@ class SafetyScorer(LLMJudgeScorer):
                     SamplingParams(
                         temperature=0.0,
                         max_tokens=128,
-                        truncate_prompt_tokens=3600,
+                        truncate_prompt_tokens=32600,
                         truncation_side="right",
                     ),
                     request_type=self.judge_request_type,
