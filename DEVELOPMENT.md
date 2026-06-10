@@ -42,13 +42,3 @@ uv run pytest tests/ --ignore=tests/integration -v
 ./scripts/fix.sh
 ./scripts/verify.sh
 ```
-
-## Publishing to PyPI
-
-```bash
-# Set your PyPI token
-export PYPI_TOKEN="your-token-here"
-
-# Run the publish script
-./scripts/publish.sh
-```
