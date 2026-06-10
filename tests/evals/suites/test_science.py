@@ -57,16 +57,18 @@ def test_science_research_contains_literature_tasks():
     expanded = get_suite("science:research").expand()
     assert "qasper_yesno" in expanded
     assert "sciriff_yesno" in expanded
+    assert "expertqa" in expanded
     assert "astabench_scholarqa" in expanded
 
 
-def test_science_nojudge_excludes_judge_task():
+def test_science_nojudge_excludes_judge_tasks():
     expanded = get_suite("science:nojudge").expand()
     assert "qasper_yesno" in expanded
     assert "sciriff_yesno" in expanded
     assert "astabench_scholarqa" not in expanded
+    assert "expertqa" not in expanded
 
 
-def test_science_judge_contains_only_judge_task():
+def test_science_judge_contains_judge_tasks():
     expanded = get_suite("science:judge").expand()
-    assert expanded == ("astabench_scholarqa",)
+    assert set(expanded) == {"astabench_scholarqa", "expertqa"}

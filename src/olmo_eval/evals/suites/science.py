@@ -145,6 +145,7 @@ SCIENCE_RESEARCH = make_suite(
     (
         "qasper_yesno",
         "sciriff_yesno",
+        "expertqa",
         get_suite("astabench"),
     ),
     aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
@@ -182,7 +183,10 @@ SCIENCE_NOJUDGE = make_suite(
 
 SCIENCE_JUDGE = make_suite(
     "science:judge",
-    (get_suite("astabench"),),
+    (
+        "expertqa",
+        get_suite("astabench"),
+    ),
     aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
     description="Current science tasks that require external LLM-as-judge scoring.",
 )
