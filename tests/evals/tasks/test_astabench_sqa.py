@@ -4,22 +4,24 @@ import json
 
 import pytest
 
+from olmo_eval.common.scorers.citation import (
+    JUST_HAS_A_TITLE,
+    _filter_citation,
+    compute_citation_scores_from_groups,
+    extract_json_from_response,
+    score_citation_group,
+)
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
 from olmo_eval.evals.tasks.astabench_sqa import (
-    JUST_HAS_A_TITLE,
     AnswerPrecisionMetric,
     CitationPrecisionMetric,
     CitationRecallMetric,
     GlobalAvgMetric,
     IngredientRecallMetric,
-    _filter_citation,
-    compute_citation_scores_from_groups,
     compute_ingredient_score,
     compute_precision_score,
-    extract_json_from_response,
     format_report,
     normalize_agent_response_dict,
-    score_citation_group,
 )
 from olmo_eval.evals.tasks.common import get_task, list_tasks
 
