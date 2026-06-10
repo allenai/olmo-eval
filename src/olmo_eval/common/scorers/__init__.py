@@ -15,8 +15,22 @@ from .base import (
     SQuADF1Scorer,
 )
 from .code_execution import CodeExecutionScorer, MultiplEScorer
+from .dense_caption_judge import DenseCaptionJudgeScorer
 from .execution import ContextScorer, ExecutionScorer, SandboxRequiredError
 from .ifeval import IFEvalScorer
+from .image_qa import (
+    Ai2dScorer,
+    AnlsScorer,
+    EmScorer,
+    MathVistaGptScorer,
+    MathVistaOfflineScorer,
+    MmmuScorer,
+    PointCountScorer,
+    RealWorldQaScorer,
+    RelaxedCorrectnessScorer,
+    ScifiRelaxedScorer,
+    VqaScoreScorer,
+)
 from .llm_judge import (
     JudgeFn,
     LLMJudgeScorer,
@@ -40,12 +54,16 @@ from .trajectory import (
 )
 
 __all__ = [
+    "Ai2dScorer",
+    "AnlsScorer",
     "BitsPerByteScorer",
     "build_openai_judge_fn",
     "CodeExecutionScorer",
     "ContextScorer",
+    "DenseCaptionJudgeScorer",
     "ExactMatchFlexScorer",
     "ExactMatchScorer",
+    "EmScorer",
     "ExecutionScorer",
     "F1Scorer",
     "IFEvalScorer",
@@ -53,13 +71,20 @@ __all__ = [
     "LLMJudgeScorer",
     "LogprobScorer",
     "MathVerifyScorer",
+    "MathVistaGptScorer",
+    "MathVistaOfflineScorer",
+    "MmmuScorer",
     "MinervaMathScorer",
     "MultipleChoiceScorer",
     "MultiplEScorer",
     "PerplexityScorer",
+    "PointCountScorer",
     "ProcessScorer",
+    "RealWorldQaScorer",
+    "RelaxedCorrectnessScorer",
     "RubricJudgeScorer",
     "SafetyScorer",
+    "ScifiRelaxedScorer",
     "SandboxRequiredError",
     "Scorer",
     "SQuADF1Scorer",
@@ -73,4 +98,5 @@ __all__ = [
     "TrajectoryEfficiencyScorer",
     "TrajectoryResponseScorer",
     "TrajectoryStateScorer",
+    "VqaScoreScorer",
 ]
