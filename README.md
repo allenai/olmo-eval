@@ -1,13 +1,9 @@
 # olmo-eval
 
 [![CI](https://github.com/allenai/olmo-eval/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/allenai/olmo-eval/actions/workflows/ci.yml)
-![Alpha](https://img.shields.io/badge/status-alpha-orange)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/allenai/olmo-eval/blob/main/LICENSE)
 
 Evaluation toolkit for OLMo and other language models.
-
-> **Warning**
-> This project is in alpha. APIs may change without warning.
 
 ## Quick Start
 
