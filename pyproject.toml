@@ -1,6 +1,6 @@
 [project]
 name = "olmo-eval"
-version = "0.1.0"
+version = "1.0.0"
 description = "Evaluation toolkit for OLMo models"
 readme = "README.md"
 requires-python = ">=3.12"
