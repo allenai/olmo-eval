@@ -47,26 +47,39 @@ Design decisions locked:
   answers, so they cannot grade a fresh model answer. Factuality-vs-reference is
   deferred (see open items).
 
-### 3. LitSearch — agentic, low-lift — TODO
+### 3. LitSearch — agentic, low-lift — DONE
 
-Decision: agentic definition, not the published Recall@5/@20. The harness has no
-retrieval / embedding / ANN / Recall@k infrastructure, so the published metric
-would be a separate retriever sub-project. Deferred.
+`src/olmo_eval/evals/tasks/litsearch.py`, registered as `litsearch`. Agentic
+definition, not the published Recall@5/@20 (the harness has no retrieval / ANN /
+Recall@k infrastructure; that would be a separate retriever project).
 
-Plan:
-- Give the model the `semantic_scholar_snippet_search` tool; the task succeeds
-  if the gold paper surfaces in the returned results. Metric is a found@k /
-  hit-rate.
-- Confirm the harness's agentic/tool-use path first (the `AstaExternalEval` /
-  inspect_ai sandbox route is the likely vehicle; verify in-loop vs external).
-- Docstring + metric name must state plainly: this measures the S2 API + agent
-  loop, not the model's retrieval against gold corpus IDs. Not comparable to
-  published LitSearch numbers.
-- Wire into `science:research` (+ `science:judge` if tool/judge-dependent), with
-  the matching `test_science.py` update. Add task tests.
+- HF `princeton-nlp/LitSearch`, config `query`, split `full`, 597 queries. Gold
+  is Semantic Scholar `corpusids`.
+- The model is given the `semantic_scholar_snippet_search` tool and searches the
+  live S2 API. Scoring reads `response.trajectory`: parse corpus IDs from tool
+  results and intersect with the query's gold IDs. `found_rate` = queries with
+  >=1 gold ID surfaced; `gold_recall` = mean fraction of gold surfaced. Primary
+  is `found_rate`.
+- Exact ID matching (not title fuzzing): added `corpusId` to the S2 query
+  `fields` and a `Corpus ID:` line per result in `harness/tools/search.py`
+  (additive; the tool is shared by the `dr_tulu` preset etc., input schema
+  unchanged).
 
-Open before writing: gold-match criterion (S2 corpus-ID / arXiv-ID exact vs
-title fuzzy) and `k` (tool returns top-5).
+Constraints (stated in the task docstring):
+- Only produces signal under a tool-providing agentic harness (a scaffold that
+  executes tool calls, with `semantic_scholar_snippet_search` available, e.g.
+  `dr_tulu`). Run without tools, the trajectory is empty and every query scores
+  zero (logged as a warning).
+- Measures the live S2 API + agent loop, not retrieval over the fixed LitSearch
+  corpus. NOT comparable to published LitSearch numbers.
+
+Suite wiring: `science:research` only. Deliberately NOT in `science:judge` /
+`science:nojudge` / `science:all` — it needs tools, not a judge, so it does not
+fit the judge/nojudge execution split and would score zero in a routine
+`science:all` run.
+
+Tools are selected at the harness level (`HarnessConfig.tools`), not per-task, so
+the task cannot attach its own tool; the run must use a tool-providing harness.
 
 ### 4. DeepScholar-Bench — track, not hillclimb — TODO
 

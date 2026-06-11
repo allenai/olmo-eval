@@ -146,11 +146,17 @@ SCIENCE_RESEARCH = make_suite(
         "qasper_yesno",
         "sciriff_yesno",
         "expertqa",
+        "litsearch",
         get_suite("astabench"),
     ),
     aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
     description="Scientific literature understanding, evidence use, and scholarly synthesis.",
 )
+
+# Note: litsearch is intentionally only in science:research, not science:judge /
+# science:nojudge / science:all. It needs an agentic tool-providing harness
+# (semantic_scholar_snippet_search) rather than a judge, so it does not fit the
+# judge/nojudge execution split and would score zero in a routine science:all run.
 
 SCIENCE_MATH = make_suite(
     "science:math",

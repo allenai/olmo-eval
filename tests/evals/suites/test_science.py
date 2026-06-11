@@ -58,7 +58,16 @@ def test_science_research_contains_literature_tasks():
     assert "qasper_yesno" in expanded
     assert "sciriff_yesno" in expanded
     assert "expertqa" in expanded
+    assert "litsearch" in expanded
     assert "astabench_scholarqa" in expanded
+
+
+def test_litsearch_excluded_from_science_all():
+    # litsearch needs an agentic tool harness, so it stays out of the judge/nojudge
+    # execution split and the science:all umbrella.
+    assert "litsearch" not in get_suite("science:all").expand()
+    assert "litsearch" not in get_suite("science:judge").expand()
+    assert "litsearch" not in get_suite("science:nojudge").expand()
 
 
 def test_science_nojudge_excludes_judge_tasks():

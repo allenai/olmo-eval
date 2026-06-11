@@ -65,7 +65,7 @@ async def semantic_scholar_search(query: str) -> str:
             params={
                 "query": sanitized_query,
                 "limit": 5,
-                "fields": "title,abstract,url,year,authors",
+                "fields": "title,abstract,url,year,authors,corpusId",
             },
             headers=headers,
         )
@@ -96,6 +96,7 @@ async def semantic_scholar_search(query: str) -> str:
         abstract = paper.get("abstract", "No abstract available")
         url = paper.get("url", "")
         year = paper.get("year", "")
+        corpus_id = paper.get("corpusId")
         authors = paper.get("authors", [])
         author_names = ", ".join(a.get("name", "") for a in authors[:3])
         if len(authors) > 3:
@@ -104,6 +105,8 @@ async def semantic_scholar_search(query: str) -> str:
         result = f"**{title}**"
         if year:
             result += f" ({year})"
+        if corpus_id is not None:
+            result += f"\nCorpus ID: {corpus_id}"
         if author_names:
             result += f"\nAuthors: {author_names}"
         if abstract:
