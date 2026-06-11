@@ -109,6 +109,36 @@ Every mechanism-#2 task hardcodes a `gpt-4o-mini` judge. ExpertQA alone is
 run-to-run variance become a recurring tax. Make a deliberate call on judge model
 + response caching before three or four of these run together.
 
+## Scorer validation (the gate)
+
+The strategic review's top point: the shared scorer must not become an
+unvalidated oracle that rewards citation-shaped prose. Validating it against
+human citation-faithfulness labels is the gate before adding more judged tasks
+(source assessment, benchmark-review.md:328). First step shipped:
+
+- `src/olmo_eval/common/scorers/citation_validation.py` — adversarial cases
+  (supporting control, topical-but-non-supporting, title-only half-credit,
+  citation-stuffed, shuffled, uncited) with known-correct expected scores. Two
+  layers: a deterministic oracle-judge layer proving the scoring pipeline
+  penalizes bad citations GIVEN a correct judge (CI:
+  tests/core/test_citation_validation.py, includes a guard that an
+  over-permissive judge fails), and a real-judge kill test
+  (`python -m olmo_eval.common.scorers.citation_validation`, needs OPENAI_API_KEY)
+  testing whether gpt-4o-mini IS a correct judge on these cases.
+
+Still open (needs people / data):
+- Run the real-judge kill test and record where gpt-4o-mini mis-judges.
+- Human-agreement study: 50-100 labeled ScholarQA/ExpertQA outputs across 2-3
+  models; measure scorer-human agreement, ranking stability, judge variance.
+  Scaffolded (`LabeledCitationExample`, `AUDIT_SET`, `citation_scorer_agreement`)
+  but unpopulated.
+
+Review-driven hygiene (not yet done): stop hillclimbing on `global_avg` /
+geomean (report scorer tiers separately); relabel ExpertQA as
+attribution/on-topicness and agentic LitSearch as a retrieval smoke test.
+Deferred bigger items: fixed-corpus LitSearch Recall@k (clean C1), a non-MCQ
+physical-science / figure-table eval for breadth.
+
 ### Deferred: promote shared attributed-QA helpers (review item)
 
 `PRECISION_EVAL_PROMPT`, `compute_precision_score`, `format_report`, and the
