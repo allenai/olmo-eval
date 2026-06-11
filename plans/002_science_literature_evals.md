@@ -81,16 +81,24 @@ fit the judge/nojudge execution split and would score zero in a routine
 Tools are selected at the harness level (`HarnessConfig.tools`), not per-task, so
 the task cannot attach its own tool; the run must use a tool-providing harness.
 
-### 4. DeepScholar-Bench — track, not hillclimb — TODO
+### 4. DeepScholar-Bench — track, not hillclimb — SKELETON (unvalidated)
 
-External sandboxed eval (mechanism #3): vendor/port the retrieval + synthesis +
-verifiability harness, manage live arXiv-by-date-range refresh, parse results
-back. Weeks, not days. Cheaper now that the citation scorer exists.
+External sandboxed eval (mechanism #3). A registered skeleton is committed; full
+details and open items live in `plans/003_deepscholar_bench.md`.
 
-Caveats: live data is contamination-resistant but operationally
-non-reproducible (URL rot, no fixed snapshot). The ~31% geomean ceiling means
-floor effects for an early OLMo. Treat as a north-star tracker, not a gradient
-source, until the model clears the floor.
+- `src/olmo_eval/evals/external/benchmarks/deepscholar/` — `DeepScholarExternalEval`
+  (`SandboxedExternalEval`, modeled on tau2), registered as `deepscholar_bench`.
+- Pins the repo's shipped dataset snapshot rather than the live arXiv pipeline,
+  which resolves the reproducibility concern (no URL rot). Live refresh is out of
+  scope.
+- Model under test plugs in via the LOTUS generation config (litellm
+  `hosted_vllm/<model>` + api_base). Judge stays gpt-4o; needs OPENAI + TAVILY keys.
+
+NOT validated: never run end to end (no Docker/GPU/keys at authoring time). The
+LOTUS config schema, results.csv schema, eval/mode enums, and limit flag are all
+unconfirmed (see plan 003). Needs a beaker run to validate and iterate; not wired
+into any suite until then. Expect possible null signal for an early OLMo (may not
+drive the pipeline at all), consistent with track-not-hillclimb.
 
 ## Cross-cutting
 
