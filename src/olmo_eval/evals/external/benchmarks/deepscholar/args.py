@@ -41,7 +41,7 @@ class DeepScholarArgs:
 
     # Scope controls.
     num_queries: int | None = None  # limit number of queries for a smoke run
-    file_id: str | None = None  # run a single query by id
+    file_id: str | None = None  # eval-phase filter to a single file id
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DeepScholarArgs:

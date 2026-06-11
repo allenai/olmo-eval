@@ -108,7 +108,7 @@ class DeepScholarExternalEval(SandboxedExternalEval):
             "temperature": ("Temperature for the model under test", None),
             "max_model_len": ("Model context length for litellm registration", None),
             "num_queries": ("Limit number of queries (smoke run)", None),
-            "file_id": ("Run a single query by id", None),
+            "file_id": ("Restrict the eval phase to a single file id", None),
         }
 
     async def execute(
@@ -228,8 +228,6 @@ class DeepScholarExternalEval(SandboxedExternalEval):
         if ds_args.num_queries is not None:
             # TODO(unvalidated): confirm upstream supports a limit flag; name is a guess.
             parts.extend(["--num-queries", str(ds_args.num_queries)])
-        if ds_args.file_id:
-            parts.extend(["--file-id", shlex.quote(ds_args.file_id)])
         return " ".join(parts)
 
     def _build_eval_command(self, ds_args: DeepScholarArgs) -> str:
@@ -251,6 +249,9 @@ class DeepScholarExternalEval(SandboxedExternalEval):
             "--model-name",
             shlex.quote(ds_args.eval_model),
         ]
+        # file_id is an eval-phase filter (eval/argument_parser.py), not a generation arg.
+        if ds_args.file_id:
+            parts.extend(["--file-id", shlex.quote(ds_args.file_id)])
         return " ".join(parts)
 
     async def _extract_results(

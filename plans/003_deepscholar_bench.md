@@ -58,7 +58,9 @@ gpt-4o`), which writes `results.csv`.
    metric set (organization, nugget_coverage, reference_coverage, cite_p, and the
    rest) and that `all` is accepted.
 4. **Generation limit flag** (`--num-queries`). Guessed; confirm upstream supports
-   limiting queries for smoke runs, and the exact flag name.
+   limiting queries for smoke runs, and the exact flag name. (Note: `--file-id`
+   is confirmed to be an *eval*-phase filter in `eval/argument_parser.py`, not a
+   generation arg, and is wired into the eval command accordingly.)
 5. **Commit pin.** `DEEPSCHOLAR_REF = "main"`; pin to a specific commit once a run
    succeeds.
 6. **Install path.** Assumes `uv venv && uv pip install -r requirements.txt` on a
