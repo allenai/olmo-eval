@@ -1,5 +1,5 @@
 [project]
-name = "olmo-eval-internal"
+name = "olmo-eval"
 version = "0.1.0"
 description = "Evaluation toolkit for OLMo models"
 readme = "README.md"
@@ -91,7 +91,7 @@ clients = [
     "openai~=2.21.0",
 ]
 storage = [
-    "olmo-eval-internal[s3,postgres]",
+    "olmo-eval[s3,postgres]",
 ]
 
 [project.scripts]
@@ -132,7 +132,7 @@ dev = [
     "ty==0.0.39",
     "pre-commit>=4.0.0",
     # Unit tests import analysis helpers directly, so dev installs need these extras too.
-    "olmo-eval-internal[storage,beaker,hf,analysis]",
+    "olmo-eval[storage,beaker,hf,analysis]",
     "jinja2>=3.1.6",
     "google-api-core>=2.0.0",
     "parameterized>=0.9.0",
@@ -140,7 +140,7 @@ dev = [
 # Mirror of the `vllm` extra as a uv dependency group so it can be enabled by
 # default for GPU/CI workflows while still being installable via pip extras.
 vllm = [
-    "olmo-eval-internal[vllm]",
+    "olmo-eval[vllm]",
 ]
 
 [tool.ruff]

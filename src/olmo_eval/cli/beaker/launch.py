@@ -296,14 +296,14 @@ def launch(
 ) -> None:
     """Launch an evaluation job on Beaker.
 
-    Requires beaker-gantry to be installed: pip install 'olmo-eval-internal[beaker]'
+    Requires beaker-gantry to be installed: pip install 'olmo-eval[beaker]'
     """
     try:
         from olmo_eval.launch import BeakerLauncher, EvalConfig
     except ImportError:
         console.print(
             "[red]beaker-gantry is not installed.[/red]\n"
-            "Install with: pip install 'olmo-eval-internal[beaker]'"
+            "Install with: pip install 'olmo-eval[beaker]'"
         )
         raise SystemExit(1) from None
 

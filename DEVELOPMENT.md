@@ -4,8 +4,8 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/allenai/olmo-eval-internal.git
-cd olmo-eval-internal
+git clone https://github.com/allenai/olmo-eval.git
+cd olmo-eval
 
 # Install uv if not already installed
 curl -LsSf https://astral.sh/uv/install.sh | sh
