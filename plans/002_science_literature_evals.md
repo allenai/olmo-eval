@@ -126,8 +126,18 @@ human citation-faithfulness labels is the gate before adding more judged tasks
   (`python -m olmo_eval.common.scorers.citation_validation`, needs OPENAI_API_KEY)
   testing whether gpt-4o-mini IS a correct judge on these cases.
 
+Real-judge ladder run (--repeat 5) and the resulting decision:
+- gpt-4o-mini (the old hardcoded judge) FAILS the score-inflating cases
+  (topical_non_supporting, shuffled_citations) reliably -> retired.
+- gpt-5.5:medium is the cheapest config that passes all six cases 6/6 across 5
+  runs. Now the default judge, via `build_default_judge_fn` in llm_judge.py;
+  ExpertQA and AstaBench SQA use it. Override with `$OLMO_EVAL_JUDGE` (e.g.
+  `gpt-5-mini` for cheap iteration, reliable on the inflating cases and losing
+  only the conservative stuffed-recall edge; or `gpt-5.5:high`).
+- Pareto frontier and per-model notes are in citation_validation.py near
+  DEFAULT_JUDGE_LADDER.
+
 Still open (needs people / data):
-- Run the real-judge kill test and record where gpt-4o-mini mis-judges.
 - Human-agreement study: 50-100 labeled ScholarQA/ExpertQA outputs across 2-3
   models; measure scorer-human agreement, ranking stability, judge variance.
   Scaffolded (`LabeledCitationExample`, `AUDIT_SET`, `citation_scorer_agreement`)

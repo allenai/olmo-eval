@@ -28,7 +28,7 @@ from olmo_eval.common.scorers.citation import (
     extract_json_from_response,
     score_citations_for_sections,
 )
-from olmo_eval.common.scorers.llm_judge import JudgeFn, build_openai_judge_fn
+from olmo_eval.common.scorers.llm_judge import JudgeFn, build_default_judge_fn
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -126,12 +126,7 @@ class ExpertQA(Task):
         """Score responses for citation precision/recall and answer precision."""
         self._extract_answers(responses)
 
-        judge_fn = build_openai_judge_fn(
-            model="gpt-4o-mini",
-            scorer_name="ExpertQA",
-            max_tokens=4096,
-            temperature=0.5,
-        )
+        judge_fn = build_default_judge_fn(scorer_name="ExpertQA")
 
         for response in responses:
             response.scores.update(await self._score_single(response, judge_fn))

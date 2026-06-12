@@ -23,7 +23,7 @@ from olmo_eval.common.scorers.citation import (
     extract_json_from_response,
     score_citations_for_sections,
 )
-from olmo_eval.common.scorers.llm_judge import JudgeFn, build_openai_judge_fn
+from olmo_eval.common.scorers.llm_judge import JudgeFn, build_default_judge_fn
 from olmo_eval.common.types import (
     Instance,
     LMOutput,
@@ -426,12 +426,7 @@ class AstaBenchSQA(Task):
         """
         self._extract_answers(responses)
 
-        judge_fn = build_openai_judge_fn(
-            model="gpt-4o-mini",
-            scorer_name="AstaBenchSQA",
-            max_tokens=4096,
-            temperature=0.5,
-        )
+        judge_fn = build_default_judge_fn(scorer_name="AstaBenchSQA")
 
         for response in responses:
             scores = await self._score_single(response, judge_fn)

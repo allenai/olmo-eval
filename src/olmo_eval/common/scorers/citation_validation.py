@@ -12,8 +12,11 @@ them. It has two honest layers:
    tests/core/test_citation_validation.py.
 
 2. Judge layer (needs OPENAI_API_KEY, run manually): run the same cases through
-   the real judge (gpt-4o-mini) to test whether it IS a correct judge on these
-   adversarial cases. Run via `python -m olmo_eval.common.scorers.citation_validation`.
+   real judges to test whether they ARE correct judges on these adversarial
+   cases. Run `python -m olmo_eval.common.scorers.citation_validation` to sweep a
+   ladder of judges; pass rung specs as args (`model` or `model:effort`, e.g.
+   `gpt-5.5:low`) and `--repeat N` to average over runs (the gpt-5 series runs at
+   temperature 1, so single runs are noisy).
 
 The adversarial half needs no human labels (expected behavior is known by
 construction). The complementary human-agreement study (does the scorer agree
@@ -29,7 +32,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from olmo_eval.common.scorers.citation import score_citations_for_sections
-from olmo_eval.common.scorers.llm_judge import JudgeFn
+from olmo_eval.common.scorers.llm_judge import JudgeFn, build_openai_judge_fn
 
 # An expectation on a resulting metric: (metric_name, op, threshold), op in {">=", "<="}.
 Expectation = tuple[str, str, float]
@@ -302,6 +305,128 @@ def format_report(results: Sequence[CaseResult]) -> str:
 
 
 # =============================================================================
+# Judge ladder: run the kill test across a progression of judge models
+# =============================================================================
+
+# Default progression, cheapest -> most expensive (per OpenAI list pricing).
+# Override by passing rung specs as CLI args. A rung is "model" or "model:effort"
+# (reasoning effort for the gpt-5 series, e.g. "gpt-5.5:low"). Unavailable model
+# ids / unsupported efforts are reported as ERROR, not fatal, so it is safe to
+# include rungs you may not have. Suggested workflow: sweep models at default
+# effort to find the cheapest that passes, then effort-tune that winner.
+#
+# Judge selection, from this kill test at --repeat 5 (cases passing all 5 runs).
+# The score-INFLATING failure modes are topical_non_supporting and
+# shuffled_citations (judge accepts wrong/irrelevant evidence). title_only and
+# citation_stuffed are conservative: flakiness there under-credits, not inflates.
+#   gpt-4o-mini    2/6  both dangerous cases FAIL -> do NOT use for citation judging.
+#   gpt-5-nano     4/6  dangerous cases 5/5; flaky on half-credit + stuffed.
+#                       Cheapest "won't inflate", but noisy recall magnitudes.
+#   gpt-5-mini     5/6  dangerous cases 5/5, half-credit ok; only stuffed-recall
+#                       flaky. Best cheap default for frequent iteration.
+#   gpt-5.5:medium 6/6  only fully-clean config across 5 runs. Trustworthy
+#                       report-card ceiling.
+# Pareto frontier (cost -> reliability): gpt-5-nano -> gpt-5-mini -> gpt-5.5:medium.
+# (gpt-5.4, gpt-5.5:low are dominated by gpt-5-mini; gpt-5.4-mini fails a
+# dangerous case despite passing stuffed, so it is off the frontier.)
+DEFAULT_JUDGE_LADDER = [
+    "gpt-5-nano",
+    "gpt-5.4-nano",
+    "gpt-5-mini",
+    "gpt-5.4-mini",
+    "gpt-5",
+    "gpt-5.4",
+    "gpt-5.5",
+    "gpt-5.5-pro",
+]
+
+
+def _parse_rung(spec: str) -> tuple[str, str | None]:
+    """Parse a rung spec 'model' or 'model:effort' into (model, effort)."""
+    model, sep, effort = spec.partition(":")
+    return model, (effort if sep else None)
+
+
+@dataclass
+class RungReport:
+    """Results for one ladder rung (a model + optional reasoning effort), possibly
+    over multiple repeats so per-case pass rates capture run-to-run variance."""
+
+    label: str  # the rung spec, e.g. "gpt-5.5:low"
+    model: str
+    effort: str | None
+    runs: list[list[CaseResult]]  # one CaseResult list per repeat
+    error: str | None = None
+
+    @property
+    def total_cases(self) -> int:
+        return len(self.runs[0]) if self.runs else 0
+
+    def case_pass_counts(self) -> list[tuple[str, int, int]]:
+        """Per case: (name, runs_passed, runs_total), aggregated by case index."""
+        if not self.runs:
+            return []
+        n = len(self.runs)
+        return [
+            (self.runs[0][i].name, sum(run[i].passed for run in self.runs), n)
+            for i in range(self.total_cases)
+        ]
+
+    @property
+    def reliable(self) -> int:
+        """Cases that passed on every repeat."""
+        return sum(1 for _, passes, total in self.case_pass_counts() if passes == total)
+
+
+async def run_ladder(
+    specs: Sequence[str], repeat: int = 1, cases: list[AdversarialCase] | None = None
+) -> list[RungReport]:
+    """Run the kill test for each rung, `repeat` times. A rung that errors (e.g.
+    unavailable model) is recorded and does not abort the ladder."""
+    reports: list[RungReport] = []
+    for spec in specs:
+        model, effort = _parse_rung(spec)
+        judge = build_openai_judge_fn(
+            model=model,
+            reasoning_effort=effort,
+            scorer_name=f"citation_validation[{spec}]",
+            max_tokens=4096,
+        )
+        runs: list[list[CaseResult]] = []
+        error: str | None = None
+        try:
+            for _ in range(repeat):
+                runs.append(await run_validation(judge, cases=cases))
+        except Exception as e:  # surface API/model errors per rung, keep climbing
+            error = str(e)
+        reports.append(RungReport(spec, model, effort, runs, error))
+    return reports
+
+
+def format_ladder_report(reports: Sequence[RungReport]) -> str:
+    """Render per-rung, per-case pass rates plus a one-line summary."""
+    lines: list[str] = []
+    for rep in reports:
+        if rep.error is not None:
+            lines.append(f"=== {rep.label}: ERROR — {rep.error}")
+            continue
+        n = len(rep.runs)
+        lines.append(
+            f"=== {rep.label}: {rep.reliable}/{rep.total_cases} cases passed all {n} run(s)"
+        )
+        for name, passes, total in rep.case_pass_counts():
+            flag = "" if passes == total else "  <- flaky"
+            lines.append(f"  [{passes}/{total}] {name}{flag}")
+    summary = " | ".join(
+        f"{r.label} ERROR" if r.error is not None else f"{r.label} {r.reliable}/{r.total_cases}"
+        for r in reports
+    )
+    lines.append("")
+    lines.append(f"Ladder summary (cases passing every run): {summary}")
+    return "\n".join(lines)
+
+
+# =============================================================================
 # Human-agreement audit scaffold (needs labeled data; not yet populated)
 # =============================================================================
 
@@ -352,14 +477,21 @@ async def citation_scorer_agreement(
 
 if __name__ == "__main__":
     import asyncio
-
-    from olmo_eval.common.scorers.llm_judge import build_openai_judge_fn
+    import sys
 
     async def _main() -> None:
-        judge = build_openai_judge_fn(
-            model="gpt-4o-mini", scorer_name="citation_validation", max_tokens=4096
-        )
-        results = await run_validation(judge)
-        print(format_report(results))
+        argv = sys.argv[1:]
+        repeat = 1
+        specs: list[str] = []
+        i = 0
+        while i < len(argv):
+            if argv[i] in ("--repeat", "-r"):
+                repeat = int(argv[i + 1])
+                i += 2
+            else:
+                specs.append(argv[i])
+                i += 1
+        reports = await run_ladder(specs or DEFAULT_JUDGE_LADDER, repeat=repeat)
+        print(format_ladder_report(reports))
 
     asyncio.run(_main())
