@@ -11,8 +11,10 @@ Import the tool objects and use .name for HarnessConfig.tool_names.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import random
 
 import httpx
 
@@ -22,6 +24,12 @@ logger = logging.getLogger(__name__)
 
 # Module-level shared HTTP client for connection reuse
 _http_client: httpx.AsyncClient | None = None
+
+# Statuses worth retrying with backoff: rate limiting + transient server errors.
+_RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
+_MAX_RETRIES = 5
+_BASE_BACKOFF_S = 1.0
+_MAX_BACKOFF_S = 16.0
 
 
 def _get_http_client() -> httpx.AsyncClient:
@@ -34,6 +42,49 @@ def _get_http_client() -> httpx.AsyncClient:
     if _http_client is None or _http_client.is_closed:
         _http_client = httpx.AsyncClient(timeout=30.0)
     return _http_client
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    """Parse a Retry-After header value in seconds, ignoring HTTP-date form."""
+    if not value:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None  # HTTP-date form is rare here; fall back to exponential backoff
+
+
+async def _get_with_backoff(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    params: dict,
+    headers: dict,
+    max_retries: int = _MAX_RETRIES,
+) -> httpx.Response:
+    """GET with exponential backoff + jitter on 429/5xx, honoring Retry-After.
+
+    Retries transient failures (rate limits, 5xx, network errors). The Retry-After
+    header takes precedence over the computed backoff. Returns the final response
+    even if still failing after the last attempt; the caller handles its status.
+    """
+    delay = _BASE_BACKOFF_S
+    for attempt in range(max_retries + 1):
+        retry_after: float | None = None
+        try:
+            resp = await client.get(url, params=params, headers=headers)
+            if resp.status_code not in _RETRYABLE_STATUS or attempt == max_retries:
+                return resp
+            retry_after = _parse_retry_after(resp.headers.get("Retry-After"))
+        except httpx.RequestError:
+            if attempt == max_retries:
+                raise
+
+        wait = retry_after if retry_after is not None else delay + random.uniform(0, delay)
+        await asyncio.sleep(min(wait, _MAX_BACKOFF_S))
+        delay = min(delay * 2, _MAX_BACKOFF_S)
+
+    raise RuntimeError("unreachable: backoff loop exited without returning")
 
 
 @registered_tool(
@@ -60,7 +111,8 @@ async def semantic_scholar_search(query: str) -> str:
 
     client = _get_http_client()
     try:
-        resp = await client.get(
+        resp = await _get_with_backoff(
+            client,
             "https://api.semanticscholar.org/graph/v1/paper/search",
             params={
                 "query": sanitized_query,
@@ -71,7 +123,7 @@ async def semantic_scholar_search(query: str) -> str:
         )
         if resp.status_code != 200:
             logger.error(
-                f"Semantic Scholar API error: status={resp.status_code}, "
+                f"Semantic Scholar API error (after retries): status={resp.status_code}, "
                 f"query={sanitized_query!r}, response={resp.text[:500]}"
             )
         resp.raise_for_status()
