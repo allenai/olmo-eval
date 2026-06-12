@@ -15,6 +15,8 @@ import asyncio
 import logging
 import os
 import random
+import time
+from collections.abc import Awaitable, Callable
 
 import httpx
 
@@ -30,6 +32,28 @@ _RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 _MAX_RETRIES = 5
 _BASE_BACKOFF_S = 1.0
 _MAX_BACKOFF_S = 16.0
+
+# Semantic Scholar's introductory plan is 1 request/second cumulative across all
+# endpoints. With several concurrent agents this is blown instantly, so we gate
+# all S2 requests through a process-global minimum interval (proactive throttle),
+# leaving backoff to mop up the occasional 429 that still slips through.
+_S2_MIN_INTERVAL_S = 1.1  # slightly over 1s for margin
+_s2_rate_lock = asyncio.Lock()
+_s2_last_request_ts = 0.0  # time.monotonic() of the last dispatched S2 request
+
+
+async def _s2_rate_gate() -> None:
+    """Block until at least _S2_MIN_INTERVAL_S has elapsed since the last S2 call.
+
+    Serializes S2 requests across all concurrent agents in this process so the
+    cumulative rate stays under the 1 req/s limit.
+    """
+    global _s2_last_request_ts
+    async with _s2_rate_lock:
+        wait = _s2_last_request_ts + _S2_MIN_INTERVAL_S - time.monotonic()
+        if wait > 0:
+            await asyncio.sleep(wait)
+        _s2_last_request_ts = time.monotonic()
 
 
 def _get_http_client() -> httpx.AsyncClient:
@@ -61,17 +85,22 @@ async def _get_with_backoff(
     params: dict,
     headers: dict,
     max_retries: int = _MAX_RETRIES,
+    rate_gate: Callable[[], Awaitable[None]] | None = None,
 ) -> httpx.Response:
     """GET with exponential backoff + jitter on 429/5xx, honoring Retry-After.
 
     Retries transient failures (rate limits, 5xx, network errors). The Retry-After
     header takes precedence over the computed backoff. Returns the final response
     even if still failing after the last attempt; the caller handles its status.
+    If ``rate_gate`` is given it is awaited before every attempt (including
+    retries) to enforce a proactive request rate.
     """
     delay = _BASE_BACKOFF_S
     for attempt in range(max_retries + 1):
         retry_after: float | None = None
         try:
+            if rate_gate is not None:
+                await rate_gate()
             resp = await client.get(url, params=params, headers=headers)
             if resp.status_code not in _RETRYABLE_STATUS or attempt == max_retries:
                 return resp
@@ -120,6 +149,7 @@ async def semantic_scholar_search(query: str) -> str:
                 "fields": "title,abstract,url,year,authors,corpusId",
             },
             headers=headers,
+            rate_gate=_s2_rate_gate,
         )
         if resp.status_code != 200:
             logger.error(
