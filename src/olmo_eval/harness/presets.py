@@ -112,6 +112,30 @@ class HarnessPresets:
         )
 
     @lazy
+    def paper_search_agent(name: str) -> HarnessConfig:
+        """Agentic harness exposing only Semantic Scholar paper search.
+
+        For literature-search tasks (e.g. litsearch). Unlike dr_tulu it omits the
+        web-search tools and declares no required secrets, so it runs against the
+        public Semantic Scholar API keyless (rate-limited). For higher rate
+        limits, mount a key with `--secret-env <user>_S2_API_KEY:S2_API_KEY`.
+        """
+        from .tools.search import semantic_scholar_search
+
+        return HarnessConfig(
+            name=name,
+            provider=ProviderConfig(
+                kind=ProviderKind.VLLM_SERVER,
+                kwargs={"timeout": 120},
+            ),
+            tools=(semantic_scholar_search,),
+            max_turns=10,
+            max_concurrency=4,
+            scaffold="openai_agents",
+            batching=BatchConfig.streaming(),
+        )
+
+    @lazy
     def codex_universal(name: str) -> HarnessConfig:
         """Universal code execution preset with multiple capabilities."""
         from .sandbox import SandboxConfig, SandboxMode
