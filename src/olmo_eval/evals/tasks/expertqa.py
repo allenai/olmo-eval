@@ -74,8 +74,13 @@ class ExpertQA(Task):
     split = Split.TRAIN  # `main` config exposes a single train split
     data_source = DataSource(path=EXPERTQA_REPO, subset="main", split="train")
     metrics = EXPERTQA_METRICS
-    primary_metric = GlobalAvgMetric()
+    # citation_recall is the core attribution signal; report tiers separately
+    # rather than hillclimbing on the global_avg aggregate.
+    primary_metric = CitationRecallMetric()
     sampling_params = SamplingParams(temperature=0.0, max_tokens=4096)
+    # The LLM-judge scorer needs an OpenAI key at scoring time; the launcher
+    # mounts it as the user-scoped beaker secret roryd_OPENAI_API_KEY.
+    required_secrets = ("OPENAI_API_KEY",)
 
     @property
     def instances(self) -> Iterator[Instance]:

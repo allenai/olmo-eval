@@ -153,6 +153,14 @@ SCIENCE_RESEARCH = make_suite(
     description="Scientific literature understanding, evidence use, and scholarly synthesis.",
 )
 
+# What the members of science:research actually measure (read the metric tiers,
+# not a single aggregate):
+# - expertqa: attribution + on-topic precision of cited long-form answers
+#   (citation precision/recall + answer precision). NOT factual correctness vs a
+#   reference; a high score means well-cited, on-topic prose, not verified truth.
+# - litsearch: an AGENTIC retrieval smoke test (does a gold paper surface in live
+#   Semantic Scholar results), not the published fixed-corpus Recall@k.
+#
 # Note: litsearch is intentionally only in science:research, not science:judge /
 # science:nojudge / science:all. It needs an agentic tool-providing harness
 # (semantic_scholar_snippet_search) rather than a judge, so it does not fit the

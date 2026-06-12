@@ -68,6 +68,18 @@ def _get_http_client() -> httpx.AsyncClient:
     return _http_client
 
 
+def _s2_search_limit() -> int:
+    """Results per S2 search, overridable via S2_SEARCH_LIMIT (default 5).
+
+    Raising this widens coverage per query (closer to Recall@20-style behavior)
+    at the cost of longer tool output; set e.g. S2_SEARCH_LIMIT=20 in the run env.
+    """
+    try:
+        return max(1, int(os.getenv("S2_SEARCH_LIMIT", "5")))
+    except ValueError:
+        return 5
+
+
 def _parse_retry_after(value: str | None) -> float | None:
     """Parse a Retry-After header value in seconds, ignoring HTTP-date form."""
     if not value:
@@ -145,7 +157,7 @@ async def semantic_scholar_search(query: str) -> str:
             "https://api.semanticscholar.org/graph/v1/paper/search",
             params={
                 "query": sanitized_query,
-                "limit": 5,
+                "limit": _s2_search_limit(),
                 "fields": "title,abstract,url,year,authors,corpusId",
             },
             headers=headers,

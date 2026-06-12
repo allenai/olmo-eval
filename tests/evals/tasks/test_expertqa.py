@@ -32,7 +32,11 @@ class TestRegistration:
         }
 
     def test_primary_metric(self, task):
-        assert task.config.get_primary_metric().name == "global_avg"
+        # Primary is a citation tier, not the global_avg aggregate (report tiers).
+        assert task.config.get_primary_metric().name == "citation_recall"
+
+    def test_declares_judge_secret(self, task):
+        assert task.config.required_secrets == ("OPENAI_API_KEY",)
 
     def test_data_source(self, task):
         source = task.config.data_source
