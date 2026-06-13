@@ -203,12 +203,14 @@ class Instance:
 
     The base fields (question, gold_answer, choices, metadata) support
     traditional evaluation. The tool-related fields support agent and
-    tool calling evaluation.
+    tool calling evaluation. The ``images`` field supports multimodal tasks.
     """
 
     question: str
     gold_answer: str | None = None
     choices: tuple[str, ...] | None = None
+    images: tuple[Any, ...] | None = None
+    """PIL images (or file-path strings) for multimodal tasks. ``None`` for text-only."""
     metadata: dict[str, Any] = field(default_factory=dict)
     tools: tuple[ToolSchema, ...] | None = None
     expected_tool_calls: tuple[dict[str, Any], ...] | None = None

@@ -1,6 +1,8 @@
 """Core task framework - base classes, registry, and configuration."""
 
 from .base import OutputScoreAggregation, SandboxEnv, Task, TaskConfig
+from .cap_f1_judge import DEFAULT_JUDGE_MODEL, CapF1Judge, CapF1Score
+from .multimodal_base import MultimodalGenerationTask
 from .format_helpers import format_mc, format_rc
 from .registry import (
     clear_registry,
@@ -19,6 +21,10 @@ from .registry import (
 )
 
 __all__ = [
+    "DEFAULT_JUDGE_MODEL",
+    "CapF1Judge",
+    "CapF1Score",
+    "MultimodalGenerationTask",
     "OutputScoreAggregation",
     "SandboxEnv",
     "Task",
