@@ -122,7 +122,7 @@ def _bbq_metric_helper(
 
 
 def _bbq_logprob_metric_helper(
-    responses: Sequence[Response], subset: str, cat: str, metric: str, scorer: type[Scorer]
+    responses: Sequence[Response], subset: str, cat: str, metric: str, input_scorer: type[Scorer]
 ) -> dict[str, float]:
     """ """
     if not responses:
@@ -135,7 +135,7 @@ def _bbq_logprob_metric_helper(
     subset_nonunknown = []
     subset_accuracy = []
 
-    scorer = scorer()
+    scorer = input_scorer()
 
     for r in responses:
         if (subset == "any" or r.instance.metadata.get(subset) == cat) and (
