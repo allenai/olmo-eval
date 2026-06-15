@@ -44,6 +44,11 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             revision="stage2-step47684",
             kwargs={"gpu_memory_utilization": 0.7, "add_bos_token": False},
         ),
+        "bk/olmo7b-sft-75pct-step17312": ProviderConfig(
+            kind=ProviderKind.VLLM,
+            model="/weka/oe-training-default/ai2-llm/checkpoints/baileyk/olmo-sft/olmo-7b-base-75pct-mix/step17312-hf",
+            trust_remote_code=True,
+        ),
         "olmo-2-7b": ProviderConfig(
             kind=ProviderKind.VLLM,
             model="allenai/OLMo-2-1124-7B",
