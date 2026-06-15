@@ -43,7 +43,7 @@ _BBQ_FORMAT = """The following are multiple choice questions. \
 
 
 @dataclass(frozen=True)
-class BBQBiasScorer:
+class BBQBiasScorer(Scorer):
     """
     Scorer for the BBQ Task.
     Scores questions as correct, biased, and unknown
@@ -89,7 +89,7 @@ class BBQSubsetMetric(Metric):
     # defaults to all responses
     # expected format is subset_name::subset_value ie functional_category::copyright
     name: str = "any::any::accuracy"
-    scorer = BBQBiasScorer
+    scorer: type[Scorer] | Scorer = BBQBiasScorer
 
     def compute(self, responses: Sequence[Response]) -> float:
         """Compute aggregate metric from scored responses."""
