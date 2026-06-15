@@ -48,6 +48,8 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             kind=ProviderKind.VLLM_SERVER,
             model="/weka/oe-training-default/ai2-llm/checkpoints/baileyk/olmo-sft/olmo-7b-base-75pct-mix/step17312-hf",
             trust_remote_code=True,
+            max_model_len=4096,
+            kwargs={"gpu_memory_utilization": 0.7},
         ),
         "olmo-2-7b": ProviderConfig(
             kind=ProviderKind.VLLM,
