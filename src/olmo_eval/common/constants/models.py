@@ -45,7 +45,7 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             kwargs={"gpu_memory_utilization": 0.7, "add_bos_token": False},
         ),
         "bk/olmo7b-sft-75pct-step17312": ProviderConfig(
-            kind=ProviderKind.VLLM,
+            kind=ProviderKind.VLLM_SERVER,
             model="/weka/oe-training-default/ai2-llm/checkpoints/baileyk/olmo-sft/olmo-7b-base-75pct-mix/step17312-hf",
             trust_remote_code=True,
         ),
