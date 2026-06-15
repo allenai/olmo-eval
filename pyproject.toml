@@ -1,6 +1,6 @@
 [project]
-name = "olmo-eval-internal"
-version = "0.1.0"
+name = "olmo-eval"
+version = "1.0.0"
 description = "Evaluation toolkit for OLMo models"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -50,7 +50,7 @@ hf = [
 vllm = [
     # vllm + its companions are Linux/CUDA-only; skip on macOS so the lockfile
     # doesn't resolve GPU wheels for Darwin.
-    "vllm[runai]==0.19.0 ; platform_system != 'Darwin'",  # runai extras enable S3 model loading
+    "vllm[runai]==0.19.1 ; platform_system != 'Darwin'",  # runai extras enable S3 model loading
     "opencv-python-headless==4.13.0.92 ; platform_system != 'Darwin'",  # Required to avoid libxcb import error
     "torch-c-dlpack-ext ; platform_system != 'Darwin'",  # Required for TVM tensor allocation in vLLM
 ]
@@ -92,7 +92,7 @@ clients = [
     "openai~=2.21.0",
 ]
 storage = [
-    "olmo-eval-internal[s3,postgres]",
+    "olmo-eval[s3,postgres]",
 ]
 
 [project.scripts]
@@ -100,9 +100,9 @@ olmo-eval = "olmo_eval.cli:main"
 
 [tool.uv]
 package = true
-override-dependencies = [
-    "transformers>=5.4.0",
-]
+# override-dependencies = [
+#     "transformers>=5.4.0",
+# ]
 # vllm is installed by default; openhands users must opt out via
 # `uv sync --no-group vllm --group openhands`.
 default-groups = ["dev", "vllm"]
@@ -130,10 +130,10 @@ dev = [
     "pytest>=9.0.0",
     "pytest-cov>=6.0.0",
     "ruff>=0.14.0",
-    "ty==0.0.32",
+    "ty==0.0.39",
     "pre-commit>=4.0.0",
     # Unit tests import analysis helpers directly, so dev installs need these extras too.
-    "olmo-eval-internal[storage,beaker,hf,analysis]",
+    "olmo-eval[storage,beaker,hf,analysis]",
     "jinja2>=3.1.6",
     "google-api-core>=2.0.0",
     "parameterized>=0.9.0",
@@ -141,7 +141,7 @@ dev = [
 # Mirror of the `vllm` extra as a uv dependency group so it can be enabled by
 # default for GPU/CI workflows while still being installable via pip extras.
 vllm = [
-    "olmo-eval-internal[vllm]",
+    "olmo-eval[vllm]",
 ]
 
 [tool.ruff]

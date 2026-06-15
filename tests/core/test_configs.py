@@ -91,11 +91,13 @@ class TestGetProviderConfig:
             kind="hf",
             dtype="float16",
             revision="main",
+            force_download=True,
         )
 
         assert config.get_provider_name() == "hf"
         assert config.dtype == "float16"
         assert config.revision == "main"
+        assert config.force_download is True
 
     def test_get_unknown_model_with_overrides(self):
         """Test unknown model with overrides."""

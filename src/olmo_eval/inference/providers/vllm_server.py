@@ -12,6 +12,7 @@ from olmo_eval.common.logging import get_logger
 from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
 from olmo_eval.common.types.tools import ToolCall
 from olmo_eval.inference.base import InferenceProvider
+from olmo_eval.inference.hf_cache import refresh_hf_cache
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 from olmo_eval.inference.utils import run_async
 
@@ -135,6 +136,65 @@ def _cut_at_stop_sequence(text: str, stop_sequences: list[str] | None) -> str:
     return text[:smallest_idx]
 
 
+def _completion_logprob_value(value: Any) -> float | None:
+    """Extract a numeric logprob from OpenAI/vLLM completion logprob payloads."""
+    if isinstance(value, dict):
+        value = value.get("logprob", value.get("log_prob"))
+    else:
+        value = getattr(value, "logprob", value)
+
+    if value is None:
+        return None
+
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _completion_top_logprob_values(top_logprobs: Any) -> list[float]:
+    """Extract numeric top-logprob values for one generated token."""
+    if isinstance(top_logprobs, dict):
+        candidates = top_logprobs.values()
+    elif isinstance(top_logprobs, (list, tuple)):
+        candidates = top_logprobs
+    else:
+        return []
+
+    values: list[float] = []
+    for candidate in candidates:
+        if (logprob := _completion_logprob_value(candidate)) is not None:
+            values.append(logprob)
+    return values
+
+
+def _completion_is_greedy(
+    token_logprobs: list[float | None],
+    top_logprobs: list[Any] | None,
+) -> bool | None:
+    """Best-effort greedy check for completion responses.
+
+    Completion APIs expose generated-token logprobs rather than prompt_logprobs.
+    When top_logprobs are present, a token is greedy if its emitted-token logprob
+    is at least the highest returned top-logprob for that step.
+    """
+    if not token_logprobs or not top_logprobs:
+        return None
+
+    observed = False
+    for token_logprob, top_logprob in zip(token_logprobs, top_logprobs, strict=False):
+        chosen_logprob = _completion_logprob_value(token_logprob)
+        top_values = _completion_top_logprob_values(top_logprob)
+        if chosen_logprob is None or not top_values:
+            continue
+
+        observed = True
+        if chosen_logprob + 1e-6 < max(top_values):
+            return False
+
+    return True if observed else None
+
+
 # Enable with VLLM_DEBUG_REQUESTS=1
 _DEBUG_REQUESTS = os.environ.get("VLLM_DEBUG_REQUESTS", "").lower() in ("1", "true", "yes")
 
@@ -207,6 +267,7 @@ class VLLMServerProvider(InferenceProvider):
         log_dir: str | None = None,
         chat_template_kwargs: dict[str, Any] | None = None,
         revision: str | None = None,
+        force_download: bool = False,
         add_bos_token: bool | None = None,
         prompt_logprobs: int | None = None,
         completion_use_prompt_token_ids: bool | None = None,
@@ -232,6 +293,8 @@ class VLLMServerProvider(InferenceProvider):
             chat_template_kwargs: Extra kwargs for chat template (e.g., {"enable_thinking": false}).
             revision: HuggingFace revision/commit hash for managed server startup and
                 local tokenizer loading.
+            force_download: Force-refresh Hugging Face model/tokenizer cache entries
+                before managed server startup and local tokenizer loads.
             add_bos_token: Optional provider-level BOS override for local tokenization paths.
                 This matches the old oe-eval-internal runtime behavior and is not forwarded
                 as a vLLM server CLI argument.
@@ -259,6 +322,7 @@ class VLLMServerProvider(InferenceProvider):
         self._tokenizer_path = tokenizer or model_name
         self._tokenizer_revision = revision
         self._tokenizer_trust_remote_code = trust_remote_code
+        self._force_download = force_download
         self._client: AsyncOpenAI | None = None
         self._http_client: httpx.AsyncClient | None = None
         self._raw_http_client: httpx.AsyncClient | None = None
@@ -276,6 +340,16 @@ class VLLMServerProvider(InferenceProvider):
 
             # Build server kwargs
             srv_kwargs: dict[str, Any] = dict(server_kwargs)
+            if force_download:
+                refresh_kwargs = {
+                    "revision": revision,
+                    "cache_dir": srv_kwargs.get("download_dir") or srv_kwargs.get("cache_dir"),
+                    "token": srv_kwargs.get("token"),
+                    "force_download": True,
+                }
+                refresh_hf_cache(model_name, **refresh_kwargs)
+                if tokenizer and tokenizer != model_name:
+                    refresh_hf_cache(tokenizer, **refresh_kwargs)
             if max_model_len:
                 srv_kwargs["max_model_len"] = max_model_len
             if tokenizer:
@@ -423,6 +497,8 @@ class VLLMServerProvider(InferenceProvider):
         }
         if self._tokenizer_revision is not None:
             tokenizer_kwargs["revision"] = self._tokenizer_revision
+        if self._force_download:
+            tokenizer_kwargs["force_download"] = True
         return tokenizer_kwargs
 
     def _get_tokenizer(self, *, require_local: bool = False) -> Any:
@@ -514,11 +590,10 @@ class VLLMServerProvider(InferenceProvider):
                 "num_samples": params.num_samples,
                 "add_special_tokens": False,
             }
-            if params.do_sample and params.temperature > 0:
-                if params.top_p is not None:
-                    trace["generation_kwargs"]["top_p"] = params.top_p
-                if params.top_k is not None:
-                    trace["generation_kwargs"]["top_k"] = params.top_k
+            if params.top_p is not None:
+                trace["generation_kwargs"]["top_p"] = params.top_p
+            if params.do_sample and params.temperature > 0 and params.top_k is not None:
+                trace["generation_kwargs"]["top_k"] = params.top_k
             trace["stop_sequences"] = self._get_completion_stop_sequences(params) or []
             trace["input_mode"] = (
                 "prompt_token_ids" if self._completion_use_prompt_token_ids else "text"
@@ -535,11 +610,10 @@ class VLLMServerProvider(InferenceProvider):
             "top_logprobs": 1,
             "num_samples": params.num_samples,
         }
-        if params.do_sample and params.temperature > 0:
-            if params.top_p is not None:
-                generation_kwargs["top_p"] = params.top_p
-            if params.top_k is not None:
-                generation_kwargs["top_k"] = params.top_k
+        if params.do_sample and params.temperature > 0 and params.top_k is not None:
+            generation_kwargs["top_k"] = params.top_k
+        if params.top_p is not None:
+            generation_kwargs["top_p"] = params.top_p
         if self.chat_template_kwargs:
             generation_kwargs["chat_template_kwargs"] = dict(self.chat_template_kwargs)
         trace["generation_kwargs"] = generation_kwargs
@@ -595,6 +669,7 @@ class VLLMServerProvider(InferenceProvider):
         *,
         tokens: list[str],
         token_logprobs: list[float | None],
+        top_logprobs: list[Any] | None,
         metadata: dict[str, Any],
     ) -> list[LogProbEntry] | None:
         """Convert completion logprob payload into standard entries and metadata."""
@@ -613,6 +688,8 @@ class VLLMServerProvider(InferenceProvider):
                     "num_tokens_all": num_tokens,
                 }
             )
+            if (is_greedy := _completion_is_greedy(token_logprobs, top_logprobs)) is not None:
+                metadata["is_greedy"] = is_greedy
             return logprob_entries
 
         return None
@@ -653,12 +730,15 @@ class VLLMServerProvider(InferenceProvider):
             if isinstance(logprobs_payload, dict):
                 tokens = logprobs_payload.get("tokens") or []
                 token_logprobs = logprobs_payload.get("token_logprobs") or []
+                top_logprobs = logprobs_payload.get("top_logprobs") or []
             else:
                 tokens = getattr(logprobs_payload, "tokens", None) or []
                 token_logprobs = getattr(logprobs_payload, "token_logprobs", None) or []
+                top_logprobs = getattr(logprobs_payload, "top_logprobs", None) or []
             logprob_entries = self._completion_metadata_from_logprobs(
                 tokens=tokens,
                 token_logprobs=token_logprobs,
+                top_logprobs=top_logprobs,
                 metadata=metadata,
             )
 
@@ -679,11 +759,10 @@ class VLLMServerProvider(InferenceProvider):
 
         # Always send temperature explicitly to avoid server defaults (OpenAI API defaults to 1.0)
         kwargs["temperature"] = params.temperature
-        if params.do_sample and params.temperature > 0:
-            if params.top_p is not None:
-                kwargs["top_p"] = params.top_p
-            if params.top_k is not None:
-                extra_body["top_k"] = params.top_k
+        if params.top_p is not None:
+            kwargs["top_p"] = params.top_p
+        if params.do_sample and params.temperature > 0 and params.top_k is not None:
+            extra_body["top_k"] = params.top_k
         stop_sequences = self._get_completion_stop_sequences(params)
         if stop_sequences:
             kwargs["stop"] = stop_sequences
@@ -753,12 +832,11 @@ class VLLMServerProvider(InferenceProvider):
 
         # Always send temperature explicitly to avoid server defaults (OpenAI API defaults to 1.0)
         kwargs["temperature"] = params.temperature
+        if params.top_p is not None:
+            kwargs["top_p"] = params.top_p
         extra_body: dict[str, Any] = {}
-        if params.do_sample and params.temperature > 0:
-            if params.top_p is not None:
-                kwargs["top_p"] = params.top_p
-            if params.top_k is not None:
-                extra_body["top_k"] = params.top_k
+        if params.do_sample and params.temperature > 0 and params.top_k is not None:
+            extra_body["top_k"] = params.top_k
         if params.stop_sequences:
             kwargs["stop"] = list(params.stop_sequences)
         if tools:

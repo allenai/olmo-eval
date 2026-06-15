@@ -165,6 +165,50 @@ class TestVLLMServerProviderLogprobs:
         assert payload["add_special_tokens"] is False
         client.completions.create.assert_not_called()
 
+    def test_build_completion_output_sets_is_greedy_from_top_logprobs(self, provider):
+        """Completion metadata should expose greedy status when top logprobs are available."""
+        output = provider._build_completion_output(
+            text=" yes",
+            logprobs_payload={
+                "tokens": [" yes"],
+                "token_logprobs": [-0.1],
+                "top_logprobs": [{" yes": -0.1}],
+            },
+            usage=None,
+            stop_sequences=None,
+        )
+
+        assert output.metadata["is_greedy"] is True
+
+    def test_build_completion_output_detects_non_greedy_from_top_logprobs(self, provider):
+        """Completion metadata should mark sampled non-argmax tokens as non-greedy."""
+        output = provider._build_completion_output(
+            text=" no",
+            logprobs_payload={
+                "tokens": [" no"],
+                "token_logprobs": [-0.7],
+                "top_logprobs": [{" yes": -0.1}],
+            },
+            usage=None,
+            stop_sequences=None,
+        )
+
+        assert output.metadata["is_greedy"] is False
+
+    def test_build_completion_output_omits_unknown_is_greedy(self, provider):
+        """Completion metadata should not invent greedy status without top logprobs."""
+        output = provider._build_completion_output(
+            text=" yes",
+            logprobs_payload={
+                "tokens": [" yes"],
+                "token_logprobs": [-0.1],
+            },
+            usage=None,
+            stop_sequences=None,
+        )
+
+        assert "is_greedy" not in output.metadata
+
     def test_completion_eos_uses_revision_for_local_tokenizer(self):
         """EOS stop detection should respect the configured tokenizer revision."""
         provider = self._make_provider(
@@ -184,6 +228,29 @@ class TestVLLMServerProviderLogprobs:
             "custom-tokenizer",
             revision="stage2-step47684",
             trust_remote_code=True,
+        )
+
+    def test_local_tokenizer_load_uses_force_download(self):
+        """Local tokenizer loads should refresh cache when force_download is enabled."""
+        provider = self._make_provider(
+            tokenizer="custom-tokenizer",
+            revision="stage2-step47684",
+            trust_remote_code=True,
+            force_download=True,
+        )
+        local_tokenizer = MagicMock()
+        local_tokenizer.eos_token_id = 1
+        local_tokenizer.decode.return_value = "</s>"
+        from_pretrained, fake_transformers = self._make_fake_transformers(local_tokenizer)
+
+        with patch.dict("sys.modules", {"transformers": fake_transformers}):
+            assert provider._get_completion_eos_stop() == "</s>"
+
+        from_pretrained.assert_called_once_with(
+            "custom-tokenizer",
+            revision="stage2-step47684",
+            trust_remote_code=True,
+            force_download=True,
         )
 
     @pytest.mark.anyio

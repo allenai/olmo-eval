@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from olmo_eval.common.formatters import Formatter
 from olmo_eval.common.metrics import Metric
@@ -63,6 +63,25 @@ def _store_output_score(
             existing = {}
             output.metadata["scoring_errors"] = existing
         existing[scorer_name] = scoring_error
+
+
+class _OutputScore(NamedTuple):
+    """Scoring result for a single output (execution / context scorers)."""
+
+    resp_idx: int
+    scorer_name: str
+    out_idx: int
+    score: float
+    scoring_error: dict[str, str] | None
+
+
+class _ResponseScore(NamedTuple):
+    """Scoring result for a whole response (process scorers)."""
+
+    resp_idx: int
+    scorer_name: str
+    output_scores: dict[int, float]
+    output_errors: dict[int, dict[str, str]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -559,7 +578,9 @@ class Task(ABC):
                     if output.metadata is None:
                         output.metadata = {}
                     output.metadata[f"score:{scorer.name}"] = scores[i] if i < len(scores) else 0.0
-                response.scores[scorer.name] = self._aggregate_output_scores(scores)
+                response.scores[scorer.name] = self._aggregate_output_scores(
+                    dict(enumerate(scores))
+                )
 
     async def _apply_scorers_async(
         self,
@@ -638,7 +659,9 @@ class Task(ABC):
                         scorer_name=scorer.name,
                         score=scores[i] if i < len(scores) else 0.0,
                     )
-                response.scores[scorer.name] = self._aggregate_output_scores(scores)
+                response.scores[scorer.name] = self._aggregate_output_scores(
+                    dict(enumerate(scores))
+                )
 
         # Apply async scorers (execution, process, and context) concurrently
         async_scorers_exist = (
@@ -663,7 +686,7 @@ class Task(ABC):
 
             async def score_execution(
                 resp_idx: int, scorer: ExecutionScorer, out_idx: int
-            ) -> tuple[str, int, str, int, float, dict[str, str] | None]:
+            ) -> _OutputScore:
                 response = responses[resp_idx]
                 output = response.outputs[out_idx]
                 try:
@@ -680,12 +703,12 @@ class Task(ABC):
                         scorer.name,
                         error.get("message", error["type"]),
                     )
-                    return ("output", resp_idx, scorer.name, out_idx, 0.0, error)
-                return ("output", resp_idx, scorer.name, out_idx, score, None)
+                    return _OutputScore(resp_idx, scorer.name, out_idx, 0.0, error)
+                return _OutputScore(resp_idx, scorer.name, out_idx, score, None)
 
             async def score_context(
                 resp_idx: int, scorer: ContextScorer, out_idx: int
-            ) -> tuple[str, int, str, int, float, dict[str, str] | None]:
+            ) -> _OutputScore:
                 response = responses[resp_idx]
                 output = response.outputs[out_idx]
                 try:
@@ -701,19 +724,13 @@ class Task(ABC):
                         scorer.name,
                         error.get("message", error["type"]),
                     )
-                    return ("output", resp_idx, scorer.name, out_idx, 0.0, error)
-                return ("output", resp_idx, scorer.name, out_idx, score, None)
+                    return _OutputScore(resp_idx, scorer.name, out_idx, 0.0, error)
+                return _OutputScore(resp_idx, scorer.name, out_idx, score, None)
 
             async def score_process(
                 resp_idx: int,
                 scorer: ProcessScorer,
-            ) -> tuple[
-                str,
-                int,
-                str,
-                dict[int, float],
-                dict[int, dict[str, str]],
-            ]:
+            ) -> _ResponseScore:
                 response = responses[resp_idx]
                 assert process_pool_manager is not None
                 results = await process_pool_manager.score_outputs(
@@ -727,7 +744,7 @@ class Task(ABC):
                     for out_idx, result in enumerate(results)
                     if result.error is not None
                 }
-                return ("response", resp_idx, scorer.name, output_scores, output_errors)
+                return _ResponseScore(resp_idx, scorer.name, output_scores, output_errors)
 
             tasks = []
             for resp_idx, response in enumerate(responses):
@@ -751,9 +768,8 @@ class Task(ABC):
             scores_by_response: dict[int, dict[str, dict[int, float]]] = {}
             scoring_errors_by_response: dict[int, dict[int, dict[str, dict[str, str]]]] = {}
             for result in results:
-                kind = result[0]
-                if kind == "output":
-                    _, resp_idx, scorer_name, out_idx, score, scoring_error = result
+                if isinstance(result, _OutputScore):
+                    resp_idx, scorer_name, out_idx, score, scoring_error = result
                     if resp_idx not in scores_by_response:
                         scores_by_response[resp_idx] = {}
                     if scorer_name not in scores_by_response[resp_idx]:
@@ -766,7 +782,7 @@ class Task(ABC):
                             scoring_errors_by_response[resp_idx][out_idx] = {}
                         scoring_errors_by_response[resp_idx][out_idx][scorer_name] = scoring_error
                 else:
-                    _, resp_idx, scorer_name, output_scores, output_errors = result
+                    resp_idx, scorer_name, output_scores, output_errors = result
                     if resp_idx not in scores_by_response:
                         scores_by_response[resp_idx] = {}
                     scores_by_response[resp_idx][scorer_name] = dict(output_scores)
@@ -804,19 +820,13 @@ class Task(ABC):
                         )
                     response.scores[scorer_name] = self._aggregate_output_scores(output_scores)
 
-    def _aggregate_output_scores(self, scores: Sequence[float] | dict[int, float]) -> float:
+    def _aggregate_output_scores(self, scores: dict[int, float]) -> float:
         """Collapse per-output scorer values into one response-level score."""
-        aggregation = self.config.output_score_aggregation
-        ordered_scores: list[float]
-        if isinstance(scores, Sequence):
-            ordered_scores = list(scores)
-            if not ordered_scores:
-                return 0.0
-        else:
-            if not scores:
-                return 0.0
-            ordered_scores = [scores[index] for index in sorted(scores)]
+        if not scores:
+            return 0.0
+        ordered_scores = [scores[index] for index in sorted(scores)]
 
+        aggregation = self.config.output_score_aggregation
         if aggregation == OutputScoreAggregation.MAX:
             return max(ordered_scores)
         if aggregation == OutputScoreAggregation.FIRST:

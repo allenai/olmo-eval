@@ -532,7 +532,7 @@ def _create_action_class_for_tool(tool: HarnessTool) -> type[Action]:
     OpenHands generates tool schemas from Action class fields, so we need
     action classes with the correct parameter names and types.
     """
-    from pydantic import Field, create_model  # type: ignore[ty:unresolved-import]
+    from pydantic import Field, create_model
 
     field_definitions: dict[str, Any] = {}
     properties = tool.parameters.get("properties", {})

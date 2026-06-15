@@ -4,8 +4,8 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/allenai/olmo-eval-internal.git
-cd olmo-eval-internal
+git clone https://github.com/allenai/olmo-eval.git
+cd olmo-eval
 
 # Install uv if not already installed
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -41,14 +41,4 @@ uv run pytest tests/ --ignore=tests/integration -v
 # Optional helper scripts
 ./scripts/fix.sh
 ./scripts/verify.sh
-```
-
-## Publishing to PyPI
-
-```bash
-# Set your PyPI token
-export PYPI_TOKEN="your-token-here"
-
-# Run the publish script
-./scripts/publish.sh
 ```

@@ -1,3 +1,3 @@
-"""olmo-eval-internal package."""
+"""olmo-eval package."""
 
 __version__ = "0.1.0"

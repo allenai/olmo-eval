@@ -4,7 +4,7 @@ import math
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
-from typing import Any, ClassVar
+from typing import Any
 
 from olmo_eval.common.scorers import (
     BitsPerByteScorer,
@@ -32,8 +32,8 @@ class Metric(ABC):
         - compute(): method to aggregate scores from responses
     """
 
-    name: ClassVar[str]
-    scorer: ClassVar[type[Scorer] | Scorer]
+    name: str = ""
+    scorer: type[Scorer] | Scorer = ExactMatchScorer
 
     @abstractmethod
     def compute(self, responses: Sequence[Response]) -> float:

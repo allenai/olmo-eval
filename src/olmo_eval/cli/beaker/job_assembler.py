@@ -157,6 +157,7 @@ def assemble_external_eval_job(
     provider_kind: str | None = None,
     base_url: str | None = None,
     user_env_vars: dict[str, str] | None = None,
+    force_download_model: bool = False,
 ) -> Any:
     """Assemble a BeakerJobConfig for running external evaluations.
 
@@ -201,6 +202,8 @@ def assemble_external_eval_job(
 
     if tensor_parallel_size > 1:
         command.extend(["--tp", str(tensor_parallel_size)])
+    if force_download_model:
+        command.append("--force-download-model")
 
     # Add eval_args
     if eval_args:
@@ -412,13 +415,14 @@ class JobConfigAssembler:
         # Determine provider kind - prefer harness preset (with overrides) over model spec default
         provider_kind = harness_provider_kind or get_provider_kind(exp.model_spec)
         vllm_isolated_venv = provider_kind == "vllm_server"
+        model_provider_extras = get_provider_extras(exp.model_spec, default_kind=provider_kind)
 
-        # If provider.package is set, it overrides the default provider extra (e.g., vllm)
-        # In that case, skip provider extras and install the package separately
+        # If provider.package is set, it replaces the default vllm extra but
+        # keeps companion extras like clients for vllm_server.
         if harness_provider_package:
-            provider_extras: list[str] = []
+            provider_extras = [extra for extra in model_provider_extras if extra != "vllm"]
         else:
-            provider_extras = get_provider_extras(exp.model_spec)
+            provider_extras = model_provider_extras
 
         install_extras = collect_install_extras(
             store=self.config.store,
@@ -617,6 +621,8 @@ class JobConfigAssembler:
             command.append("--debug-requests")
         if self.config.debug_provider:
             command.append("--debug-provider")
+        if self.config.force_download_model:
+            command.append("--force-download-model")
         if not self.config.save_predictions:
             command.append("--no-save-predictions")
         if not self.config.save_requests:

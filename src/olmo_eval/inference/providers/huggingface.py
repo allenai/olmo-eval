@@ -5,7 +5,13 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any
 
-from olmo_eval.common.types import LMOutput, LMRequest, RequestType, SamplingParams
+from olmo_eval.common.types import (
+    LMOutput,
+    LMRequest,
+    LogProbEntry,
+    RequestType,
+    SamplingParams,
+)
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 
@@ -42,6 +48,17 @@ class HuggingFaceProvider(InferenceProvider):
         }
     )
 
+    _TOKENIZER_KWARGS = frozenset(
+        {
+            "cache_dir",
+            "force_download",
+            "local_files_only",
+            "revision",
+            "token",
+            "trust_remote_code",
+        }
+    )
+
     def __init__(self, model_name: str, tokenizer: str | None = None, **model_kwargs) -> None:
         """Initialize the provider.
 
@@ -64,7 +81,10 @@ class HuggingFaceProvider(InferenceProvider):
 
         super().__init__(model_name)
         tokenizer_path = tokenizer or model_name
-        self.tokenizer: Any = AutoTokenizer.from_pretrained(tokenizer_path)
+        tokenizer_kwargs = {
+            key: value for key, value in model_kwargs.items() if key in self._TOKENIZER_KWARGS
+        }
+        self.tokenizer: Any = AutoTokenizer.from_pretrained(tokenizer_path, **tokenizer_kwargs)
         self.model: Any = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
         self.device = _get_device()
         self.model.to(self.device)
@@ -144,7 +164,7 @@ class HuggingFaceProvider(InferenceProvider):
                         logits = self.model(seq).logits
                     log_probs = torch.log_softmax(logits, dim=-1)[0]
 
-                    logprob_entries = []
+                    logprob_entries: list[LogProbEntry] = []
                     for i, tok in enumerate(gen_ids):
                         lp = log_probs[prompt_len + i - 1, tok].item()
                         token_str = self.tokenizer.decode(tok, skip_special_tokens=False)
@@ -221,7 +241,7 @@ class HuggingFaceProvider(InferenceProvider):
 
                 log_probs = torch.log_softmax(logits, dim=-1)[0]
 
-                logprob_entries = []
+                logprob_entries: list[LogProbEntry] = []
                 total = 0.0
                 for j, tok in enumerate(continuation_enc):
                     lp = log_probs[ctx_len + j - 1, tok].item()
