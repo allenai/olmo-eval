@@ -122,7 +122,7 @@ def _bbq_metric_helper(
 
 
 def _bbq_logprob_metric_helper(
-    responses: Sequence[Response], subset: str, cat: str, metric: str, scorer: type[Scorer] | Scorer
+    responses: Sequence[Response], subset: str, cat: str, metric: str, scorer: type[Scorer]
 ) -> dict[str, float]:
     """ """
     if not responses:
