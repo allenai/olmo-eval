@@ -200,7 +200,10 @@ class LLMJudgeScorer(ContextScorer):
         self,
         prompt: str,
         context: ScoringContext,
-        sampling_params: SamplingParams(temperature=0.0, max_tokens=10),
+        temperature=0.0,
+        max_tokens=10,
+        truncate_prompt_tokens=None,
+        truncation_side=None,
         request_type: RequestType = RequestType.CHAT,
     ) -> str:
         """Score using configured provider from inference pool."""
@@ -208,6 +211,13 @@ class LLMJudgeScorer(ContextScorer):
             raise RuntimeError("provider_name is required for provider-based scoring.")
         if context.inference_pool is None:
             raise RuntimeError("No inference pool configured.")
+
+        sampling_params = SamplingParams(
+            temperature=temperature,
+            max_tokens=max_tokens,
+            truncate_prompt_tokens=truncate_prompt_tokens,
+            truncation_side=truncation_side,
+        )
 
         provider = context.get_provider(self.provider_name)
 
@@ -493,7 +503,7 @@ class SafetyScorer(LLMJudgeScorer):
                 if self.persist_judge_response:
                     error_meta["raw_judge_response"] = response
                 instance.metadata["judge_result"] = error_meta
-                instance.metadata["is_parsing_error"]: True
+                instance.metadata["is_parsing_error"] = True
                 return 0
 
             allowed_answers = {
@@ -540,19 +550,18 @@ class SafetyScorer(LLMJudgeScorer):
                 response = await self._score_with_provider(
                     prompt,
                     context,
-                    SamplingParams(
-                        temperature=0.0,
-                        max_tokens=128,
-                        truncate_prompt_tokens=32600,
-                        truncation_side="right",
-                    ),
+                    temperature=0.0,
+                    max_tokens=128,
+                    truncate_prompt_tokens=32600,
+                    truncation_side="right",
                     request_type=self.judge_request_type,
                 )
             else:
                 response = await self._score_with_provider(
                     prompt,
                     context,
-                    SamplingParams(temperature=0.0, max_tokens=128),
+                    temperature=0.0,
+                    max_tokens=128,
                     request_type=self.judge_request_type,
                 )
         else:

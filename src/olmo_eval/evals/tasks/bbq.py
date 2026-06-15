@@ -215,28 +215,28 @@ class BBQ(Task):
 
         yield from self._instances_cache
 
-    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         """Convert a dataset document to an Instance."""
         if not doc.get("subsample"):
             return None
 
-        gold_letter = doc.get("gold_label")
-        bias_letter = doc.get("bias_label")
-        unknown_letter = doc.get("unknown_label")
+        gold_letter = str(doc.get("gold_label"))
+        bias_letter = str(doc.get("bias_label"))
+        unknown_letter = str(doc.get("unknown_label"))
         gold_idx = ord(gold_letter) - ord("A")
         bias_idx = ord(bias_letter) - ord("A")
         unknown_idx = ord(unknown_letter) - ord("A")
 
         return Instance(
-            question=_BBQ_FORMAT + doc.get("question"),
+            question=_BBQ_FORMAT + str(doc.get("question")),
             choices=list(doc.get("choices")),
             gold_answer=gold_letter,
             metadata={
-                "id": doc.get("id"),
+                "id": str(doc.get("id")),
                 "index": index,
-                "question_polarity": doc.get("question_polarity"),
-                "context_condition": doc.get("context_condition"),
-                "category": doc.get("category"),
+                "question_polarity": str(doc.get("question_polarity")),
+                "context_condition": str(doc.get("context_condition")),
+                "category": str(doc.get("category")),
                 "bias_label": bias_letter,
                 "unknown_label": unknown_letter,
                 "gold_idx": gold_idx,
