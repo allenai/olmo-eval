@@ -862,10 +862,28 @@ class BeakerLauncher:
             # Custom provider packages (e.g., a vLLM fork) are installed below
             # into the same isolated environment.
             if has_vllm:
+                # Derive web-stack constraints from uv.lock so the isolated
+                # vLLM install doesn't re-resolve starlette/fastapi/etc. to
+                # latest PyPI, which breaks vLLM's Prometheus middleware. Strip
+                # torch/nvidia- and VCS requirements: vLLM pulls its own torch
+                # (which the lock resolves to a newer build than the base image
+                # provides), so torch must stay unconstrained here, and VCS
+                # specifiers are illegal in a constraints file. We deliberately
+                # do NOT pass cuda-constraints here, unlike the main-venv
+                # install: pinning torch to the base-image build conflicts with
+                # vLLM's torch requirement.
+                vllm_lock_constraints = "/tmp/vllm-lock-constraints.txt"
+                steps.append(
+                    f"cd /gantry-runtime && uv export --extra vllm "
+                    f"--no-hashes --no-emit-project --frozen 2>/dev/null "
+                    f"| grep -vE '^(torch|nvidia-)' | grep -vE ' @ ' "
+                    f"> {vllm_lock_constraints}"
+                )
                 steps.append(
                     f"cd /gantry-runtime && uv pip install "
                     f"--python {vllm_venv}/bin/python "
-                    f"--cache-dir \"$UV_CACHE_DIR\" -e '.[vllm]'"
+                    f'--cache-dir "$UV_CACHE_DIR" '
+                    f"-c {vllm_lock_constraints} -e '.[vllm]'"
                 )
             # Set VLLM_PYTHON so VLLMServerProcess uses the isolated venv
             steps.append(f"export VLLM_PYTHON={vllm_venv}/bin/python")
