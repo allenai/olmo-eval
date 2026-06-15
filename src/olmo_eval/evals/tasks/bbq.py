@@ -81,8 +81,8 @@ class BBQBiasScorer(Scorer):
 
 
 def _bbq_metric_helper(
-    self, responses: Sequence[Response], subset: str, cat: str, metric: str
-) -> dict[float]:
+    responses: Sequence[Response], subset: str, cat: str, metric: str, scorer_name: str
+) -> dict[str, float]:
     """ """
     if not responses:
         return {
@@ -90,9 +90,7 @@ def _bbq_metric_helper(
             "ambig": 0.0,
             "disambig": 0.0,
         }
-    scorer_name = self.scorer().name
 
-    subset, cat = self.name.split("::")
     subset_bias = []
     subset_nonunknown = []
     subset_accuracy = []
@@ -124,8 +122,8 @@ def _bbq_metric_helper(
 
 
 def _bbq_logprob_metric_helper(
-    self, responses: Sequence[Response], subset: str, cat: str, metric: str
-) -> dict[float]:
+    responses: Sequence[Response], subset: str, cat: str, metric: str, scorer: type[Scorer] | Scorer
+) -> dict[str, float]:
     """ """
     if not responses:
         return {
@@ -133,7 +131,6 @@ def _bbq_logprob_metric_helper(
             "ambig": 0.0,
             "disambig": 0.0,
         }
-    scorer = self.scorer()
     subset_bias = []
     subset_nonunknown = []
     subset_accuracy = []
@@ -192,7 +189,7 @@ class BBQSubsetAccuracyMetric(Metric):
     def compute(self, responses: Sequence[Response]) -> float:
         """Compute aggregate metric from scored responses."""
         subset, cat = self.name.split("::")
-        metrics = self._bbq_metric_helper(responses, subset, cat, "accuracy")
+        metrics = _bbq_metric_helper(responses, subset, cat, "accuracy", self.scorer().name)
 
         return metrics["accuracy"]
 
@@ -209,7 +206,7 @@ class BBQSubsetAmbigBiasMetric(Metric):
     def compute(self, responses: Sequence[Response]) -> float:
         """Compute aggregate metric from scored responses."""
         subset, cat = self.name.split("::")
-        metrics = self._bbq_metric_helper(responses, subset, cat, "ambig")
+        metrics = _bbq_metric_helper(responses, subset, cat, "ambig", self.scorer().name)
 
         return metrics["ambig"]
 
@@ -226,7 +223,7 @@ class BBQSubsetDisambigBiasMetric(Metric):
     def compute(self, responses: Sequence[Response]) -> float:
         """Compute aggregate metric from scored responses."""
         subset, cat = self.name.split("::")
-        metrics = self._bbq_metric_helper(responses, subset, cat, "disambig")
+        metrics = _bbq_metric_helper(responses, subset, cat, "disambig", self.scorer().name)
 
         return metrics["disambig"]
 
@@ -245,7 +242,7 @@ class BBQLogprobMCAccuracyMetric(Metric):
     def compute(self, responses: Sequence[Response]) -> float:
         """Compute aggregate metric from scored responses."""
         subset, cat = self.name.split("::")
-        metrics = self._bbq_logprob_metric_helper(responses, subset, cat, "accuracy")
+        metrics = _bbq_logprob_metric_helper(responses, subset, cat, "accuracy", self.scorer())
 
         return metrics["accuracy"]
 
@@ -264,7 +261,7 @@ class BBQLogprobMCAmbigBiasMetric(Metric):
     def compute(self, responses: Sequence[Response]) -> float:
         """Compute aggregate metric from scored responses."""
         subset, cat = self.name.split("::")
-        metrics = self._bbq_logprob_metric_helper(responses, subset, cat, "ambig")
+        metrics = _bbq_logprob_metric_helper(responses, subset, cat, "ambig", self.scorer())
 
         return metrics["ambig"]
 
@@ -283,7 +280,7 @@ class BBQLogprobMCDisambigBiasMetric(Metric):
     def compute(self, responses: Sequence[Response]) -> float:
         """Compute aggregate metric from scored responses."""
         subset, cat = self.name.split("::")
-        metrics = self._bbq_logprob_metric_helper(responses, subset, cat, "disambig")
+        metrics = _bbq_logprob_metric_helper(responses, subset, cat, "disambig", self.scorer())
 
         return metrics["disambig"]
 
