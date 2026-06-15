@@ -128,24 +128,24 @@ class WMDP(Task):
 
         yield from self._instances_cache
 
-    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         """Convert a dataset document to an Instance."""
 
-        if not doc.get("subsample"):
+        if not doc["subsample"]:
             return None
 
-        question = _WMDP_FORMAT + doc.get("question")
-        gold_letter = doc.get("gold_label")
+        question = _WMDP_FORMAT + doc["question"]
+        gold_letter = doc["gold_label"]
         gold_idx = ord(gold_letter) - ord("a")
 
         return Instance(
             question=question,
-            choices=list(doc.get("choices")),
+            choices=list(doc["choices"]),
             gold_answer=gold_letter,
             metadata={
-                "id": doc.get("id"),
+                "id": doc["id"],
                 "index": index,
-                "subcategory": doc.get("category"),
+                "subcategory": doc["category"],
                 "gold_idx": gold_idx,
             },
         )

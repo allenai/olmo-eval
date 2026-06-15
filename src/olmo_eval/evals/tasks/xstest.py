@@ -51,9 +51,9 @@ class XSTest(Task):
 
         yield from self._instances_cache
 
-    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         """Convert a dataset document to an Instance."""
-        prompt_type = doc.get("label")
+        prompt_type = doc["label"]
 
         if prompt_type == "safe":
             gold_answer = "response_refusal=no"
@@ -61,12 +61,12 @@ class XSTest(Task):
             gold_answer = "response_refusal=yes"
 
         return Instance(
-            question=doc.get("prompt"),
+            question=doc["prompt"],
             gold_answer=gold_answer,
             metadata={
                 "id": index,
                 "prompt_type": prompt_type,
-                "subcategory": doc.get("type"),
+                "subcategory": doc["type"],
             },
         )
 

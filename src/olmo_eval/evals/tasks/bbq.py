@@ -334,8 +334,8 @@ register_variant(
 register_variant(
     "bbq",
     "base",
-    metrics=_safety_metrics_base(LogprobScorer()),
-    primary_metric=BBQLogprobMCAccuracyMetric(name="any::any::accuracy", scorer=LogprobScorer()),
+    metrics=_safety_metrics_base(LogprobScorer),
+    primary_metric=BBQLogprobMCAccuracyMetric(name="any::any::accuracy", scorer=LogprobScorer),
     sampling_params=_JUDGE_SAMPLING,
     formatter=MultipleChoiceFormatter(),
 )

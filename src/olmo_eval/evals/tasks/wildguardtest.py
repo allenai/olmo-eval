@@ -51,27 +51,27 @@ class WildGuardTest(Task):
 
         yield from self._instances_cache
 
-    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         """Convert a dataset document to an Instance."""
 
         # Drop the instance if prompt_harm_label or response_harm_label is NA
-        if doc.get("prompt_harm_label") is None or doc.get("response_harm_label") is None:
+        if doc["prompt_harm_label"] is None or doc["response_harm_label"] is None:
             return None
 
         # Drop examples where the prompt label is not harmful
-        if doc.get("prompt_harm_label") != "harmful":
+        if doc["prompt_harm_label"] != "harmful":
             return None
 
-        prompt_type = "adversarial" if doc.get("adversarial") else "vanilla"
+        prompt_type = "adversarial" if doc["adversarial"] else "vanilla"
 
-        question = doc.get("prompt")
+        question = doc["prompt"]
 
         return Instance(
             question=question,
             gold_answer="response_harmfulness=no",
             metadata={
                 "id": index,
-                "subcategory": doc.get("subcategory"),
+                "subcategory": doc["subcategory"],
                 "prompt_type": prompt_type,
             },
         )

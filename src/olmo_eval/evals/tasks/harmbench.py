@@ -51,7 +51,7 @@ class Harmbench(Task):
 
         yield from self._instances_cache
 
-    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         """Convert a dataset document to an Instance."""
 
         functional_cat = doc["FunctionalCategory"]

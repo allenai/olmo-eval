@@ -51,16 +51,16 @@ class DoAnythingNow(Task):
 
         yield from self._instances_cache
 
-    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         """Convert a dataset document to an Instance."""
 
         return Instance(
-            question=doc.get("adversarial"),
+            question=doc["adversarial"],
             gold_answer="response_refusal=yes",
             metadata={
                 "id": index,
-                "jailbreak_source": doc.get("source"),
-                "platform": doc.get("platform"),
+                "jailbreak_source": doc["source"],
+                "platform": doc["platform"],
             },
         )
 
