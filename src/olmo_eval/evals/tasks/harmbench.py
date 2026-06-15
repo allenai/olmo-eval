@@ -54,19 +54,19 @@ class Harmbench(Task):
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
         """Convert a dataset document to an Instance."""
 
-        functional_cat = doc.get("FunctionalCategory")
-        semantic_cat = doc.get("SemanticCategory")
+        functional_cat = doc["FunctionalCategory"]
+        semantic_cat = doc["SemanticCategory"]
 
         if functional_cat == "contextual":
-            question = str(doc.get("ContextString")) + "\n\n---\n\n" + str(doc.get("Behavior"))
+            question = doc["ContextString"] + "\n\n---\n\n" + doc["Behavior"]
         else:
-            question = str(doc.get("Behavior"))
+            question = doc["Behavior"]
 
         return Instance(
             question=question,
             gold_answer="response_harmfulness=no",
             metadata={
-                "id": doc.get("BehaviorID"),
+                "id": doc["BehaviorID"],
                 "index": index,
                 "functional_category": functional_cat,
                 "semantic_category": semantic_cat,

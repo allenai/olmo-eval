@@ -220,23 +220,23 @@ class BBQ(Task):
         if not doc.get("subsample"):
             return None
 
-        gold_letter = str(doc.get("gold_label"))
-        bias_letter = str(doc.get("bias_label"))
-        unknown_letter = str(doc.get("unknown_label"))
+        gold_letter = doc["gold_label"]
+        bias_letter = doc["bias_label"]
+        unknown_letter = doc["unknown_label"]
         gold_idx = ord(gold_letter) - ord("A")
         bias_idx = ord(bias_letter) - ord("A")
         unknown_idx = ord(unknown_letter) - ord("A")
 
         return Instance(
-            question=_BBQ_FORMAT + str(doc.get("question")),
-            choices=list(doc.get("choices")),
+            question=_BBQ_FORMAT + doc["question"],
+            choices=list(doc["choices"]),
             gold_answer=gold_letter,
             metadata={
-                "id": str(doc.get("id")),
+                "id": doc["id"],
                 "index": index,
-                "question_polarity": str(doc.get("question_polarity")),
-                "context_condition": str(doc.get("context_condition")),
-                "category": str(doc.get("category")),
+                "question_polarity": doc["question_polarity"],
+                "context_condition": doc["context_condition"],
+                "category": doc["category"],
                 "bias_label": bias_letter,
                 "unknown_label": unknown_letter,
                 "gold_idx": gold_idx,
