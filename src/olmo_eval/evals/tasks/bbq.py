@@ -45,7 +45,7 @@ _BBQ_FORMAT = """The following are multiple choice questions. \
 @dataclass(frozen=True)
 class BBQBiasScorer(Scorer):
     """
-    Scorer for the BBQ Task.
+    Scorer for the BBQ Task for chat instances.
     Scores questions as correct, biased, and unknown
     """
 
@@ -83,7 +83,10 @@ class BBQBiasScorer(Scorer):
 def _bbq_metric_helper(
     responses: Sequence[Response], subset: str, cat: str, metric: str, scorer_name: str
 ) -> dict[str, float]:
-    """ """
+    """
+    Helper function for the metrics of the chat BBQ instances.
+    Returns accuracy, disambiguous bias, and ambiguous bias for a given subset
+    """
     if not responses:
         return {
             "accuracy": 0.0,
@@ -124,7 +127,10 @@ def _bbq_metric_helper(
 def _bbq_logprob_metric_helper(
     responses: Sequence[Response], subset: str, cat: str, metric: str, input_scorer: type[Scorer]
 ) -> dict[str, float]:
-    """ """
+    """
+    Helper function for the metrics of the logprob BBQ instances.
+    Returns accuracy, disambiguous bias, and ambiguous bias for a given subset
+    """
     if not responses:
         return {
             "accuracy": 0.0,
@@ -182,7 +188,7 @@ def _bbq_logprob_metric_helper(
 @dataclass(frozen=True, slots=True)
 class BBQSubsetAccuracyMetric(Metric):
     """
-    Calculate the total accuracy for the BBQ Task
+    Calculate the accuracy for the chat formatted BBQ Task
     """
 
     name: str = "any::any"
@@ -199,7 +205,7 @@ class BBQSubsetAccuracyMetric(Metric):
 @dataclass(frozen=True, slots=True)
 class BBQSubsetAmbigBiasMetric(Metric):
     """
-    Calculate the total accuracy for the BBQ Task
+    Calculate the ambiguous bias score for the chat formatted BBQ Task
     """
 
     name: str = "any::any"
@@ -216,7 +222,7 @@ class BBQSubsetAmbigBiasMetric(Metric):
 @dataclass(frozen=True, slots=True)
 class BBQSubsetDisambigBiasMetric(Metric):
     """
-    Calculate the total accuracy for the BBQ Task
+    Calculate the disambiguous bias score for the chat formatted BBQ Task
     """
 
     name: str = "any::any"
@@ -232,10 +238,8 @@ class BBQSubsetDisambigBiasMetric(Metric):
 
 @dataclass(frozen=True, slots=True)
 class BBQLogprobMCAccuracyMetric(Metric):
-    """Multiple-choice accuracy via logprob argmax.
-
-    Picks the continuation with the highest total logprob and checks whether
-    its index matches ``instance.metadata["gold_idx"]``, returns False if so.
+    """
+    Calculate the accuracy for the logprob formatted BBQ Task
     """
 
     name: str = "any::any"
@@ -251,10 +255,8 @@ class BBQLogprobMCAccuracyMetric(Metric):
 
 @dataclass(frozen=True, slots=True)
 class BBQLogprobMCAmbigBiasMetric(Metric):
-    """Multiple-choice accuracy via logprob argmax.
-
-    Picks the continuation with the highest total logprob and checks whether
-    its index matches ``instance.metadata["gold_idx"]``, returns False if so.
+    """
+    Calculate the ambiguous bias for the logprob formatted BBQ Task
     """
 
     name: str = "any::any"
@@ -270,10 +272,8 @@ class BBQLogprobMCAmbigBiasMetric(Metric):
 
 @dataclass(frozen=True, slots=True)
 class BBQLogprobMCDisambigBiasMetric(Metric):
-    """Multiple-choice accuracy via logprob argmax.
-
-    Picks the continuation with the highest total logprob and checks whether
-    its index matches ``instance.metadata["gold_idx"]``, returns False if so.
+    """
+    Calculate the disambiguous bias for the logprob formatted BBQ Task
     """
 
     name: str = "any::any"
