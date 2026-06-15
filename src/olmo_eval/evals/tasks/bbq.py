@@ -217,7 +217,7 @@ class BBQ(Task):
 
     def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance | None:
         """Convert a dataset document to an Instance."""
-        if not doc.get("subsample"):
+        if not doc["subsample"]:
             return None
 
         gold_letter = doc["gold_label"]
@@ -229,7 +229,7 @@ class BBQ(Task):
 
         return Instance(
             question=_BBQ_FORMAT + doc["question"],
-            choices=list(doc["choices"]),
+            choices=tuple(doc["choices"]),
             gold_answer=gold_letter,
             metadata={
                 "id": doc["id"],

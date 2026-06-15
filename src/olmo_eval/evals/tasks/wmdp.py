@@ -140,7 +140,7 @@ class WMDP(Task):
 
         return Instance(
             question=question,
-            choices=list(doc["choices"]),
+            choices=tuple(doc["choices"]),
             gold_answer=gold_letter,
             metadata={
                 "id": doc["id"],
