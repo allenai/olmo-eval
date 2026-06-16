@@ -25,8 +25,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_MAX_LENGTH = 2048
-_UNSET_TOKENIZER_MODEL_MAX_LENGTH = 1000000000000000019884624838656
+# Transformers uses int(1e30) as a sentinel when tokenizer.model_max_length is unset.
+_TRANSFORMERS_UNSET_MODEL_MAX_LENGTH = int(1e30)
 _EXPECTED_CHECKPOINT_FORMAT = (
     "expected a raw OLMo-core checkpoint with config.json containing 'model' and "
     "'dataset.tokenizer', plus distributed checkpoint metadata at either "
@@ -36,7 +36,7 @@ _EXPECTED_CHECKPOINT_FORMAT = (
 
 
 @dataclass(frozen=True)
-class _OlmoCoreImports:
+class OlmoCoreImports:
     AutoTokenizer: Any
     AttentionBackendName: Any
     GenerationConfig: Any
@@ -49,13 +49,13 @@ class _OlmoCoreImports:
 
 
 @dataclass(frozen=True)
-class _CheckpointInfo:
+class CheckpointInfo:
     config: dict[str, Any]
     tokenizer_config: Any
     metadata_dir: str | None = None
 
 
-def _import_olmo_core() -> _OlmoCoreImports:
+def _import_olmo_core() -> OlmoCoreImports:
     try:
         import torch
         from cached_path import cached_path
@@ -74,7 +74,7 @@ def _import_olmo_core() -> _OlmoCoreImports:
             "Install with: pip install 'olmo-eval[olmo_core]'"
         ) from e
 
-    return _OlmoCoreImports(
+    return OlmoCoreImports(
         AutoTokenizer=AutoTokenizer,
         AttentionBackendName=AttentionBackendName,
         GenerationConfig=GenerationConfig,
@@ -151,6 +151,26 @@ def _validate_token_ids(
     return pad_token_id, eos_token_id
 
 
+def _tokenizer_config_from_checkpoint_config(
+    checkpoint_dir: str,
+    config: dict[str, Any],
+    *,
+    TokenizerConfig: Any,
+) -> Any:
+    try:
+        return TokenizerConfig.from_dict(config["dataset"]["tokenizer"])
+    except KeyError as e:
+        raise _checkpoint_value_error(
+            checkpoint_dir,
+            f"config.json missing required field {e}",
+        ) from e
+    except Exception as e:
+        raise _checkpoint_value_error(
+            checkpoint_dir,
+            f"config.json field 'dataset.tokenizer' is not a valid OLMo-core TokenizerConfig: {e}",
+        ) from e
+
+
 def _validate_olmo_core_checkpoint(
     checkpoint_dir: str,
     *,
@@ -158,11 +178,10 @@ def _validate_olmo_core_checkpoint(
     TokenizerConfig: Any,
     get_checkpoint_metadata: Callable[[str], Any],
     cached_path: Callable[[str], Any] | None = None,
-) -> _CheckpointInfo:
+) -> CheckpointInfo:
     config = _read_checkpoint_config(checkpoint_dir, cached_path=cached_path)
     try:
         model_config = config["model"]
-        tokenizer_config_dict = config["dataset"]["tokenizer"]
     except KeyError as e:
         raise _checkpoint_value_error(
             checkpoint_dir,
@@ -177,13 +196,11 @@ def _validate_olmo_core_checkpoint(
             f"config.json field 'model' is not a valid OLMo-core TransformerConfig: {e}",
         ) from e
 
-    try:
-        tokenizer_config = TokenizerConfig.from_dict(tokenizer_config_dict)
-    except Exception as e:
-        raise _checkpoint_value_error(
-            checkpoint_dir,
-            f"config.json field 'dataset.tokenizer' is not a valid OLMo-core TokenizerConfig: {e}",
-        ) from e
+    tokenizer_config = _tokenizer_config_from_checkpoint_config(
+        checkpoint_dir,
+        config,
+        TokenizerConfig=TokenizerConfig,
+    )
 
     _validate_token_ids(
         checkpoint_dir=checkpoint_dir,
@@ -224,39 +241,42 @@ def _validate_olmo_core_checkpoint(
             "distributed checkpoint metadata does not contain model state keys",
         )
 
-    return _CheckpointInfo(
+    return CheckpointInfo(
         config=config,
         tokenizer_config=tokenizer_config,
         metadata_dir=metadata_dir,
     )
 
 
-def _load_tokenizer_config_from_checkpoint(
+def _load_checkpoint_config_and_tokenizer_config(
     checkpoint_dir: str,
     *,
     TokenizerConfig: Any,
     cached_path: Callable[[str], Any] | None = None,
-) -> Any:
+) -> tuple[dict[str, Any], Any]:
     config = _read_checkpoint_config(checkpoint_dir, cached_path=cached_path)
-    try:
-        return TokenizerConfig.from_dict(config["dataset"]["tokenizer"])
-    except KeyError as e:
-        raise _checkpoint_value_error(
-            checkpoint_dir,
-            f"config.json missing required field {e}",
-        ) from e
-    except Exception as e:
-        raise _checkpoint_value_error(
-            checkpoint_dir,
-            f"config.json field 'dataset.tokenizer' is not a valid OLMo-core TokenizerConfig: {e}",
-        ) from e
+    return config, _tokenizer_config_from_checkpoint_config(
+        checkpoint_dir,
+        config,
+        TokenizerConfig=TokenizerConfig,
+    )
 
 
-def _infer_max_length(
+def _valid_tokenizer_model_max_length(tokenizer: Any) -> int | None:
+    model_max_length = getattr(tokenizer, "model_max_length", None)
+    if not isinstance(model_max_length, int) or model_max_length <= 0:
+        return None
+    if model_max_length >= _TRANSFORMERS_UNSET_MODEL_MAX_LENGTH:
+        return None
+    return model_max_length
+
+
+def _resolve_max_length(
     *,
     explicit_max_length: int | None,
     tokenizer: Any,
     checkpoint_config: dict[str, Any] | None,
+    checkpoint_dir: str,
 ) -> int:
     if explicit_max_length is not None:
         return explicit_max_length
@@ -267,15 +287,16 @@ def _infer_max_length(
         if isinstance(value, int) and value > 0:
             return value
 
-    model_max_length = getattr(tokenizer, "model_max_length", None)
-    if (
-        isinstance(model_max_length, int)
-        and model_max_length > 0
-        and model_max_length != _UNSET_TOKENIZER_MODEL_MAX_LENGTH
-    ):
-        return model_max_length
+    tokenizer_model_max_length = _valid_tokenizer_model_max_length(tokenizer)
+    if tokenizer_model_max_length is not None:
+        return tokenizer_model_max_length
 
-    return _DEFAULT_MAX_LENGTH
+    raise ValueError(
+        "Could not determine OLMo-core max_model_len for checkpoint "
+        f"{checkpoint_dir!r}: pass max_model_len explicitly, set one of "
+        "model.max_sequence_length, model.max_seq_len, or model.max_position_embeddings "
+        "in config.json, or use a tokenizer with a real model_max_length."
+    )
 
 
 class OlmoCoreProvider(InferenceProvider):
@@ -342,7 +363,9 @@ class OlmoCoreProvider(InferenceProvider):
         imports = _import_olmo_core()
         super().__init__(model_name)
 
-        checkpoint_info: _CheckpointInfo | None = None
+        checkpoint_info: CheckpointInfo | None = None
+        checkpoint_config: dict[str, Any] | None = None
+        tokenizer_config: Any | None = None
         if validate_checkpoint:
             checkpoint_info = _validate_olmo_core_checkpoint(
                 model_name,
@@ -351,11 +374,12 @@ class OlmoCoreProvider(InferenceProvider):
                 get_checkpoint_metadata=imports.get_checkpoint_metadata,
                 cached_path=imports.cached_path,
             )
+            checkpoint_config = checkpoint_info.config
+            tokenizer_config = checkpoint_info.tokenizer_config
 
-        tokenizer_config = checkpoint_info.tokenizer_config if checkpoint_info else None
         if tokenizer_config is None:
             try:
-                tokenizer_config = _load_tokenizer_config_from_checkpoint(
+                checkpoint_config, tokenizer_config = _load_checkpoint_config_and_tokenizer_config(
                     model_name,
                     TokenizerConfig=imports.TokenizerConfig,
                     cached_path=imports.cached_path,
@@ -413,10 +437,11 @@ class OlmoCoreProvider(InferenceProvider):
         self.use_cache = use_cache
         self.batch_size = batch_size
         self.chat_template = chat_template
-        self.max_length = _infer_max_length(
+        self.max_length = _resolve_max_length(
             explicit_max_length=max_model_len,
             tokenizer=self.tokenizer,
-            checkpoint_config=checkpoint_info.config if checkpoint_info else None,
+            checkpoint_config=checkpoint_config,
+            checkpoint_dir=model_name,
         )
 
         self.device = imports.torch.device(

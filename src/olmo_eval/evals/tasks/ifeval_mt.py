@@ -44,7 +44,7 @@ _SAMPLING_PARAMS = SamplingParams(
 )
 
 
-class _IFEvalMTBase(Task):
+class IFEvalMTBase(Task):
     split = Split.TEST
     metrics = (
         IFEvalPromptStrictAccuracy(),
@@ -93,12 +93,12 @@ class _IFEvalMTBase(Task):
 
 
 @register("ifeval_mt_wildchat_unused_withRewrite")
-class IFEvalMTWildchatUnusedWithRewrite(_IFEvalMTBase):
+class IFEvalMTWildchatUnusedWithRewrite(IFEvalMTBase):
     data_source = DataSource(path=_DATASET_PATH, subset="wildchat_unused_withRewrite", split="test")
 
 
 @register("ifeval_mt_ood_wildchat_unused_withRewrite")
-class IFEvalMTOODWildchatUnusedWithRewrite(_IFEvalMTBase):
+class IFEvalMTOODWildchatUnusedWithRewrite(IFEvalMTBase):
     data_source = DataSource(
         path=_DATASET_PATH, subset="ood_wildchat_unused_withRewrite", split="test"
     )

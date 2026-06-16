@@ -89,7 +89,7 @@ def _format_rc(question: str, answer: str | None = None) -> str:
     return prompt
 
 
-class _SquadMCBase(Task):
+class SquadMCBase(Task):
     metrics = (LogprobMCAccuracyMetric(),)
     num_fewshot = 5
     fewshot_split = "train"
@@ -141,7 +141,7 @@ class _SquadMCBase(Task):
 
 
 @register("squad:mc")
-class SquadMC(_SquadMCBase):
+class SquadMC(SquadMCBase):
     data_source = DataSource(path="allenai/squad_mc", split="validation")
     split = Split.VALIDATION
     formatter = MultipleChoiceFormatter()
@@ -149,7 +149,7 @@ class SquadMC(_SquadMCBase):
 
 
 @register("squad:rc")
-class SquadRC(_SquadMCBase):
+class SquadRC(SquadMCBase):
     data_source = DataSource(path="allenai/squad_mc", split="validation")
     split = Split.VALIDATION
     metrics = (LogprobPerCharMCAccuracyMetric(),)
@@ -174,7 +174,7 @@ register_variant(
 
 
 @register("squad:bpb")
-class SquadBPB(_SquadMCBase):
+class SquadBPB(SquadMCBase):
     data_source = DataSource(path="allenai/squad_mc", split="validation")
     split = Split.VALIDATION
     metrics = (BPBMetricInstanceAvg(),)

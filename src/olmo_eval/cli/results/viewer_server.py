@@ -73,20 +73,20 @@ _VIEWER_ERROR_EMPTY_COLLECTION_FIELDS = (
 
 
 @dataclass(slots=True)
-class _TimedCacheEntry:
+class TimedCacheEntry:
     created_at: float
     value: Any
 
 
 @dataclass(slots=True, frozen=True)
-class _ScopeTarget:
+class ScopeTarget:
     task_name: str | None = None
     task_hash: str | None = None
     suite_name: str | None = None
 
 
 @dataclass(slots=True)
-class _TaskColumnState:
+class TaskColumnState:
     task_name: str
     task_hash: str | None
     metric: str | None = None
@@ -99,7 +99,7 @@ class _TaskColumnState:
         return str(self.task_hash or self.task_name)
 
 
-class _TimedValueCache:
+class TimedValueCache:
     """Small in-process TTL cache for browser response building."""
 
     def __init__(
@@ -112,7 +112,7 @@ class _TimedValueCache:
         self._ttl_seconds = ttl_seconds
         self._max_entries = max_entries
         self._clock = clock
-        self._entries: dict[Any, _TimedCacheEntry] = {}
+        self._entries: dict[Any, TimedCacheEntry] = {}
         self._lock = RLock()
 
     def get_or_set(self, key: Any, factory: Any) -> Any:
@@ -125,7 +125,7 @@ class _TimedValueCache:
         value = factory()
 
         with self._lock:
-            self._entries[key] = _TimedCacheEntry(created_at=self._clock(), value=value)
+            self._entries[key] = TimedCacheEntry(created_at=self._clock(), value=value)
             self._prune_locked()
             return value
 
@@ -206,8 +206,8 @@ def _pluralized_label(count: int, singular: str, plural: str | None = None) -> s
     return singular if count == 1 else (plural or f"{singular}s")
 
 
-def _scope_target(scope_kind: str | None, scope_value: str | None) -> _ScopeTarget:
-    return _ScopeTarget(
+def _scope_target(scope_kind: str | None, scope_value: str | None) -> ScopeTarget:
+    return ScopeTarget(
         task_name=scope_value if scope_kind == "task" else None,
         task_hash=scope_value if scope_kind == "task-hash" else None,
         suite_name=scope_value if scope_kind == "suite" else None,
@@ -376,19 +376,19 @@ def _task_scope_id(task_name: Any, task_hash: Any) -> str:
 
 
 def _record_task_column_state(
-    task_states_by_id: dict[str, _TaskColumnState],
+    task_states_by_id: dict[str, TaskColumnState],
     *,
     task_name: Any,
     task_hash: Any,
     metrics: Any,
     primary_metric: Any,
-) -> _TaskColumnState:
+) -> TaskColumnState:
     resolved_name = str(task_name or "")
     resolved_hash = str(task_hash) if task_hash else None
     task_id = _task_scope_id(resolved_name, resolved_hash)
     task_state = task_states_by_id.setdefault(
         task_id,
-        _TaskColumnState(task_name=resolved_name, task_hash=resolved_hash),
+        TaskColumnState(task_name=resolved_name, task_hash=resolved_hash),
     )
 
     metric_key = str(primary_metric) if primary_metric else None
@@ -404,8 +404,8 @@ def _record_task_column_state(
 
 
 def _ordered_task_columns(
-    task_states: list[_TaskColumnState],
-) -> list[tuple[_TaskColumnState, TaskDisplayEntry]]:
+    task_states: list[TaskColumnState],
+) -> list[tuple[TaskColumnState, TaskDisplayEntry]]:
     ordered_states = sorted(
         task_states,
         key=lambda task_state: (task_state.task_name, task_state.task_hash or ""),
@@ -418,7 +418,7 @@ def _ordered_task_columns(
 
 
 def _serialize_task_column(
-    task_state: _TaskColumnState,
+    task_state: TaskColumnState,
     task_entry: TaskDisplayEntry,
 ) -> dict[str, Any]:
     profile = task_state.profile
@@ -524,7 +524,7 @@ def _build_results_table(
             for experiment in display_experiments
         }
 
-    task_states_by_id: dict[str, _TaskColumnState] = {}
+    task_states_by_id: dict[str, TaskColumnState] = {}
     task_scores_by_pk: dict[int, dict[str, float | None]] = {pk: {} for pk in selected_pks}
     for experiment_pk, task_name, task_hash, metrics, primary_metric in task_rows:
         task_state = _record_task_column_state(
@@ -2898,7 +2898,7 @@ def _build_scope_options_endpoint_bundle(
     requested_scope: str | None,
     keep_all: bool,
     require_full_coverage: bool,
-    group_browser_cache: _TimedValueCache,
+    group_browser_cache: TimedValueCache,
 ) -> dict[str, Any]:
     """Compute the JSON payload for the deferred ``/scope-options`` endpoint."""
     empty: dict[str, Any] = {
@@ -2949,8 +2949,8 @@ def _build_pairwise_endpoint_bundle(
     keep_all: bool,
     margin: float,
     require_full_coverage: bool,
-    group_browser_cache: _TimedValueCache,
-    pairwise_cache: _TimedValueCache,
+    group_browser_cache: TimedValueCache,
+    pairwise_cache: TimedValueCache,
 ) -> dict[str, Any]:
     """Compute the JSON payload for the deferred ``/pairwise`` endpoint."""
     empty: dict[str, Any] = {
@@ -3012,7 +3012,7 @@ def _load_group_browser_data_for_request(
     requested_scope: str | None,
     keep_all: bool,
     require_full_coverage: bool,
-    group_browser_cache: _TimedValueCache,
+    group_browser_cache: TimedValueCache,
 ) -> tuple[dict[str, Any] | None, str | None, bool]:
     """Load initial page group data while tolerating stale suite/task URLs."""
     scope_task_names, scope_suite_name = _resolve_scope_filter(requested_scope)
@@ -3168,12 +3168,12 @@ def serve_results_viewer(
     require_full_coverage: bool,
 ) -> int:
     """Start the local results viewer server and block until interrupted."""
-    groups_cache = _TimedValueCache(ttl_seconds=_GROUP_LIST_CACHE_TTL_SECONDS, max_entries=1)
-    group_browser_cache = _TimedValueCache(
+    groups_cache = TimedValueCache(ttl_seconds=_GROUP_LIST_CACHE_TTL_SECONDS, max_entries=1)
+    group_browser_cache = TimedValueCache(
         ttl_seconds=_GROUP_BROWSER_CACHE_TTL_SECONDS,
         max_entries=_GROUP_BROWSER_CACHE_MAX_ENTRIES,
     )
-    pairwise_cache = _TimedValueCache(
+    pairwise_cache = TimedValueCache(
         ttl_seconds=_PAIRWISE_CACHE_TTL_SECONDS,
         max_entries=_PAIRWISE_CACHE_MAX_ENTRIES,
     )

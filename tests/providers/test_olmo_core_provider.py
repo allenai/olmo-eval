@@ -8,11 +8,14 @@ from typing import Any
 
 import pytest
 
+import olmo_eval.inference.providers.olmo_core as olmo_core_module
 from olmo_eval.common.constants.infrastructure import BACKEND_OPTIONAL_GROUPS
 from olmo_eval.common.types import LMRequest, ProviderKind, RequestType, SamplingParams
 from olmo_eval.inference.providers.config import ProviderConfig
 from olmo_eval.inference.providers.olmo_core import (
+    _TRANSFORMERS_UNSET_MODEL_MAX_LENGTH,
     OlmoCoreProvider,
+    _resolve_max_length,
     _validate_olmo_core_checkpoint,
 )
 from olmo_eval.runners.asynq.batching.config import BatchConfig, BatchStrategy
@@ -185,6 +188,32 @@ def test_olmo_core_is_sequential_only() -> None:
         BatchConfig(strategy=BatchStrategy.STREAMING).validate_for_provider("olmo_core")
 
 
+def test_resolve_max_length_raises_for_unset_tokenizer_length() -> None:
+    tokenizer = SimpleNamespace(model_max_length=_TRANSFORMERS_UNSET_MODEL_MAX_LENGTH)
+
+    with pytest.raises(ValueError, match="pass max_model_len explicitly"):
+        _resolve_max_length(
+            explicit_max_length=None,
+            tokenizer=tokenizer,
+            checkpoint_config={"model": {}},
+            checkpoint_dir="fake-checkpoint",
+        )
+
+
+def test_resolve_max_length_prefers_checkpoint_config() -> None:
+    tokenizer = SimpleNamespace(model_max_length=_TRANSFORMERS_UNSET_MODEL_MAX_LENGTH)
+
+    assert (
+        _resolve_max_length(
+            explicit_max_length=None,
+            tokenizer=tokenizer,
+            checkpoint_config={"model": {"max_sequence_length": 4096}},
+            checkpoint_dir="fake-checkpoint",
+        )
+        == 4096
+    )
+
+
 class FakeTokenizer:
     pad_token_id = 0
     eos_token_id = 2
@@ -245,6 +274,11 @@ class FakeGenerationModule:
         self.forward_calls: list[Any] = []
         self.free_calls = 0
 
+    @classmethod
+    def from_checkpoint(cls, **kwargs: Any):
+        del kwargs
+        return cls()
+
     def generate_batch(self, **kwargs: Any):
         torch = pytest.importorskip("torch")
 
@@ -275,6 +309,43 @@ class FakeGenerationModule:
 
     def free_inference_cache(self) -> None:
         self.free_calls += 1
+
+
+def test_provider_uses_checkpoint_max_length_without_validation(tmp_path, monkeypatch) -> None:
+    checkpoint_dir = tmp_path / "step1000"
+    _write_olmo_config(
+        checkpoint_dir,
+        model={"d_model": 8, "max_sequence_length": 4096},
+    )
+
+    class FakeAutoTokenizer:
+        @classmethod
+        def from_pretrained(cls, tokenizer_path: str, **kwargs: Any) -> FakeTokenizer:
+            del cls, kwargs
+            assert tokenizer_path == "fake-tokenizer"
+            tokenizer = FakeTokenizer()
+            tokenizer.model_max_length = _TRANSFORMERS_UNSET_MODEL_MAX_LENGTH
+            return tokenizer
+
+    fake_imports = SimpleNamespace(
+        AutoTokenizer=FakeAutoTokenizer,
+        AttentionBackendName=str,
+        GenerationConfig=lambda **kwargs: SimpleNamespace(**kwargs),
+        TokenizerConfig=FakeTokenizerConfig,
+        TransformerConfig=FakeTransformerConfig,
+        TransformerGenerationModule=FakeGenerationModule,
+        cached_path=None,
+        get_checkpoint_metadata=_metadata_reader,
+        torch=SimpleNamespace(
+            cuda=SimpleNamespace(is_available=lambda: False),
+            device=lambda device: device,
+        ),
+    )
+    monkeypatch.setattr(olmo_core_module, "_import_olmo_core", lambda: fake_imports)
+
+    provider = OlmoCoreProvider(str(checkpoint_dir), validate_checkpoint=False)
+
+    assert provider.max_length == 4096
 
 
 @pytest.fixture

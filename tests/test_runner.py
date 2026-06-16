@@ -38,7 +38,7 @@ def make_harness_config(model_name: str = "llama3.1-8b") -> HarnessConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class _DefaultProcessScorer(ProcessScorer):
+class DefaultProcessScorer(ProcessScorer):
     name: str = "default_process"
 
     def process_score(self, instance: Instance, output: LMOutput) -> float:
@@ -46,7 +46,7 @@ class _DefaultProcessScorer(ProcessScorer):
 
 
 @dataclass(frozen=True, slots=True)
-class _NamedProcessScorer(ProcessScorer):
+class NamedProcessScorer(ProcessScorer):
     name: str = "named_process"
     process_pool_name: ClassVar[str] = "math"
 
@@ -54,7 +54,7 @@ class _NamedProcessScorer(ProcessScorer):
         return 1.0
 
 
-class _ProcessTask(Task):
+class ProcessTask(Task):
     """Minimal task used for process-pool planning tests."""
 
     @property
@@ -75,7 +75,7 @@ def _make_process_tracker(
     total_instances: int,
 ) -> TaskTracker:
     metric = AccuracyMetric(scorer=scorer_cls)
-    task = _ProcessTask(
+    task = ProcessTask(
         TaskConfig(
             name=spec.replace(":", "_"),
             data_source="test/dataset",
@@ -566,7 +566,7 @@ class TestProcessPoolPlanning:
         trackers = {
             "process:test": _make_process_tracker(
                 "process:test",
-                _DefaultProcessScorer,
+                DefaultProcessScorer,
                 total_instances=7,
             )
         }
@@ -589,7 +589,7 @@ class TestProcessPoolPlanning:
         trackers = {
             "process:test": _make_process_tracker(
                 "process:test",
-                _DefaultProcessScorer,
+                DefaultProcessScorer,
                 total_instances=2,
             )
         }
@@ -608,7 +608,7 @@ class TestProcessPoolPlanning:
         trackers = {
             "process:named": _make_process_tracker(
                 "process:named",
-                _NamedProcessScorer,
+                NamedProcessScorer,
                 total_instances=4,
             )
         }
@@ -636,7 +636,7 @@ class TestProcessPoolPlanning:
         trackers = {
             "process:named": _make_process_tracker(
                 "process:named",
-                _NamedProcessScorer,
+                NamedProcessScorer,
                 total_instances=3,
             )
         }
@@ -653,7 +653,7 @@ class TestProcessPoolPlanning:
         trackers = {
             "process:test": _make_process_tracker(
                 "process:test",
-                _DefaultProcessScorer,
+                DefaultProcessScorer,
                 total_instances=3,
             )
         }
@@ -674,7 +674,7 @@ class TestProcessPoolPlanning:
             def process_score(self, instance: Instance, output: LMOutput) -> float:
                 return 1.0
 
-        task = _ProcessTask(
+        task = ProcessTask(
             TaskConfig(
                 name="process_bad",
                 data_source="test/dataset",
@@ -702,7 +702,7 @@ class TestProcessPoolPlanning:
         trackers = {
             "process:test": _make_process_tracker(
                 "process:test",
-                _DefaultProcessScorer,
+                DefaultProcessScorer,
                 total_instances=3,
             )
         }
@@ -725,7 +725,7 @@ class TestProcessPoolPlanning:
         trackers = {
             "process:test": _make_process_tracker(
                 "process:test",
-                _DefaultProcessScorer,
+                DefaultProcessScorer,
                 total_instances=3,
             )
         }
