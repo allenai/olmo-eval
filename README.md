@@ -1,13 +1,20 @@
 # olmo-eval
 
-[![CI](https://github.com/allenai/olmo-eval-internal/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/allenai/olmo-eval-internal/actions/workflows/ci.yml)
-![Alpha](https://img.shields.io/badge/status-alpha-orange)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/allenai/olmo-eval-internal/blob/main/LICENSE)
+[![CI](https://github.com/allenai/olmo-eval/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/allenai/olmo-eval/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/allenai/olmo-eval/blob/main/LICENSE)
 
-Evaluation toolkit for OLMo and other language models.
+## Overview
+This project provides a unified workbench for evaluating language models throughout the model development loop.
 
-> **Warning**
-> This project is in alpha. APIs may change without warning.
+Features:
+
+- Registry of benchmark tasks and composable suites, with named variants for few-shot settings, formatting, and scoring (e.g. humaneval:3shot:bpb).
+- Support for inference via vLLM, LiteLLM for commercial APIs, and a mock provider for dry runs and debugging.
+- Harness abstraction that separates execution policy from task definition, so any task can be run baseline or tool-augmented without modification.
+- Multi-turn agentic evaluation with tool calling, scaffolds, and sandboxed environments via Docker, Podman, or Modal.
+- LLM-as-judge scoring with auxiliary providers, including locally served judge models.
+- Aggregate and instance-level prediction storage.
+- Inspection tooling for viewing instances, formatted prompts, token arrays, and model responses.
 
 ## Quick Start
 

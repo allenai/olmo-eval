@@ -26,8 +26,7 @@ def watch(experiment: str, tail: bool) -> None:
         from olmo_eval.launch import BeakerLauncher
     except ImportError:
         console.print(
-            "[red]beaker-py is not installed.[/red]\n"
-            "Install with: pip install 'olmo-eval-internal[beaker]'"
+            "[red]beaker-py is not installed.[/red]\nInstall with: pip install 'olmo-eval[beaker]'"
         )
         raise SystemExit(1) from None
 
