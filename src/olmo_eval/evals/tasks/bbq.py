@@ -302,7 +302,7 @@ class BBQ(Task):
 
 
 _BBQ_SUBSET = (
-    "any::any:",
+    "any::any",
     "category::Race_ethnicity",
     "category::Gender_identity",
     "category::Sexual_orientation",
