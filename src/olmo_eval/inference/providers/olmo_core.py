@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import importlib
 import json
 import logging
 from collections.abc import Callable
@@ -271,6 +272,32 @@ def _valid_tokenizer_model_max_length(tokenizer: Any) -> int | None:
     return model_max_length
 
 
+def _flash_attention_3_available(torch: Any) -> bool:
+    if not torch.cuda.is_available():
+        return False
+    try:
+        importlib.import_module("flash_attn_interface")
+    except Exception:
+        return False
+    with suppress(Exception):
+        major, minor = torch.cuda.get_device_capability()
+        return (9, 0) <= (major, minor) < (10, 0)
+    return False
+
+
+def _resolve_attention_backend(
+    attention_backend: str | None,
+    *,
+    AttentionBackendName: Any,
+    torch: Any,
+) -> Any:
+    if attention_backend is not None:
+        return AttentionBackendName(attention_backend)
+    if _flash_attention_3_available(torch):
+        return AttentionBackendName("flash_3")
+    return AttentionBackendName("torch")
+
+
 def _resolve_max_length(
     *,
     explicit_max_length: int | None,
@@ -447,8 +474,10 @@ class OlmoCoreProvider(InferenceProvider):
         self.device = imports.torch.device(
             device or ("cuda" if imports.torch.cuda.is_available() else "cpu")
         )
-        attention_backend_value = (
-            imports.AttentionBackendName(attention_backend) if attention_backend else None
+        attention_backend_value = _resolve_attention_backend(
+            attention_backend,
+            AttentionBackendName=imports.AttentionBackendName,
+            torch=imports.torch,
         )
 
         self.generation_config = imports.GenerationConfig(

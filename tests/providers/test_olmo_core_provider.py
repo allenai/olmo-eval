@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -65,13 +66,8 @@ def _write_olmo_config(
     )
 
 
-def _metadata_reader(path: str) -> SimpleNamespace:
-    if (path if hasattr(path, "exists") else None) is not None:
-        path_obj = path
-    else:
-        from pathlib import Path
-
-        path_obj = Path(path)
+def _metadata_reader(path: str | Path) -> SimpleNamespace:
+    path_obj = path if isinstance(path, Path) else Path(path)
     if (path_obj / ".metadata").exists():
         return SimpleNamespace(state_dict_metadata={"model.transformer.wte.weight": object()})
     raise FileNotFoundError(path)
@@ -272,12 +268,14 @@ class FakeGenerationModule:
     def __init__(self) -> None:
         self.generate_calls: list[dict[str, Any]] = []
         self.forward_calls: list[Any] = []
+        self.checkpoint_kwargs: dict[str, Any] = {}
         self.free_calls = 0
 
     @classmethod
-    def from_checkpoint(cls, **kwargs: Any):
-        del kwargs
-        return cls()
+    def from_checkpoint(cls, **kwargs: Any) -> FakeGenerationModule:
+        module = cls()
+        module.checkpoint_kwargs = kwargs
+        return module
 
     def generate_batch(self, **kwargs: Any):
         torch = pytest.importorskip("torch")
@@ -311,23 +309,18 @@ class FakeGenerationModule:
         self.free_calls += 1
 
 
-def test_provider_uses_checkpoint_max_length_without_validation(tmp_path, monkeypatch) -> None:
-    checkpoint_dir = tmp_path / "step1000"
-    _write_olmo_config(
-        checkpoint_dir,
-        model={"d_model": 8, "max_sequence_length": 4096},
-    )
+class FakeAutoTokenizer:
+    @classmethod
+    def from_pretrained(cls, tokenizer_path: str, **kwargs: Any) -> FakeTokenizer:
+        del cls, kwargs
+        assert tokenizer_path == "fake-tokenizer"
+        tokenizer = FakeTokenizer()
+        tokenizer.model_max_length = _TRANSFORMERS_UNSET_MODEL_MAX_LENGTH
+        return tokenizer
 
-    class FakeAutoTokenizer:
-        @classmethod
-        def from_pretrained(cls, tokenizer_path: str, **kwargs: Any) -> FakeTokenizer:
-            del cls, kwargs
-            assert tokenizer_path == "fake-tokenizer"
-            tokenizer = FakeTokenizer()
-            tokenizer.model_max_length = _TRANSFORMERS_UNSET_MODEL_MAX_LENGTH
-            return tokenizer
 
-    fake_imports = SimpleNamespace(
+def _fake_olmo_core_imports(*, cuda_available: bool = False) -> SimpleNamespace:
+    return SimpleNamespace(
         AutoTokenizer=FakeAutoTokenizer,
         AttentionBackendName=str,
         GenerationConfig=lambda **kwargs: SimpleNamespace(**kwargs),
@@ -337,15 +330,74 @@ def test_provider_uses_checkpoint_max_length_without_validation(tmp_path, monkey
         cached_path=None,
         get_checkpoint_metadata=_metadata_reader,
         torch=SimpleNamespace(
-            cuda=SimpleNamespace(is_available=lambda: False),
+            cuda=SimpleNamespace(
+                get_device_capability=lambda: (9, 0),
+                is_available=lambda: cuda_available,
+            ),
             device=lambda device: device,
         ),
     )
-    monkeypatch.setattr(olmo_core_module, "_import_olmo_core", lambda: fake_imports)
+
+
+def test_provider_uses_checkpoint_max_length_without_validation(tmp_path, monkeypatch) -> None:
+    checkpoint_dir = tmp_path / "step1000"
+    _write_olmo_config(
+        checkpoint_dir,
+        model={"d_model": 8, "max_sequence_length": 4096},
+    )
+
+    monkeypatch.setattr(
+        olmo_core_module,
+        "_import_olmo_core",
+        lambda: _fake_olmo_core_imports(cuda_available=False),
+    )
 
     provider = OlmoCoreProvider(str(checkpoint_dir), validate_checkpoint=False)
 
     assert provider.max_length == 4096
+    assert provider.generation_module.checkpoint_kwargs["attention_backend"] == "torch"
+
+
+def test_provider_prefers_flash_attention_3_when_available(tmp_path, monkeypatch) -> None:
+    checkpoint_dir = tmp_path / "step1000"
+    _write_olmo_config(
+        checkpoint_dir,
+        model={"d_model": 8, "max_sequence_length": 4096},
+    )
+
+    monkeypatch.setattr(
+        olmo_core_module,
+        "_import_olmo_core",
+        lambda: _fake_olmo_core_imports(cuda_available=True),
+    )
+    monkeypatch.setattr(olmo_core_module, "_flash_attention_3_available", lambda _torch: True)
+
+    provider = OlmoCoreProvider(str(checkpoint_dir), validate_checkpoint=False)
+
+    assert provider.generation_module.checkpoint_kwargs["attention_backend"] == "flash_3"
+
+
+def test_provider_attention_backend_override_wins(tmp_path, monkeypatch) -> None:
+    checkpoint_dir = tmp_path / "step1000"
+    _write_olmo_config(
+        checkpoint_dir,
+        model={"d_model": 8, "max_sequence_length": 4096},
+    )
+
+    monkeypatch.setattr(
+        olmo_core_module,
+        "_import_olmo_core",
+        lambda: _fake_olmo_core_imports(cuda_available=True),
+    )
+    monkeypatch.setattr(olmo_core_module, "_flash_attention_3_available", lambda _torch: True)
+
+    provider = OlmoCoreProvider(
+        str(checkpoint_dir),
+        attention_backend="torch",
+        validate_checkpoint=False,
+    )
+
+    assert provider.generation_module.checkpoint_kwargs["attention_backend"] == "torch"
 
 
 @pytest.fixture

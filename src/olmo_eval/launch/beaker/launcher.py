@@ -565,6 +565,19 @@ def _strip_package_extras(package_name: str) -> str:
     return package_name.split("[", 1)[0].strip()
 
 
+def _normalize_distribution_name(package_name: str) -> str:
+    """Return a PEP 503-normalized distribution name."""
+    return re.sub(r"[-_.]+", "-", package_name).lower()
+
+
+def _infer_wheel_distribution_name(filename: str) -> str | None:
+    """Infer the distribution name from a wheel filename."""
+    if not filename.lower().endswith(".whl"):
+        return None
+    distribution = filename[:-4].split("-", 1)[0]
+    return _normalize_distribution_name(distribution) if distribution else None
+
+
 def _infer_install_target_name_from_normalized(package: str) -> str | None:
     """Infer a distribution name from an already-normalized package spec."""
     normalized = package
@@ -583,6 +596,9 @@ def _infer_install_target_name_from_normalized(package: str) -> str | None:
         path_part = normalized.split("#", 1)[0].rsplit("/", 1)[-1]
         if "@" in path_part:
             path_part = path_part.split("@", 1)[0]
+        wheel_distribution = _infer_wheel_distribution_name(path_part)
+        if wheel_distribution:
+            return wheel_distribution
         if path_part.endswith(".git"):
             path_part = path_part[:-4]
         return _strip_package_extras(path_part) or None
@@ -913,16 +929,9 @@ class BeakerLauncher:
         # updates to the workload description.
         if "beaker" not in main_extras:
             main_extras.append("beaker")
-        main_install_flags: list[str] = []
-        if "olmo_core" in main_extras:
-            main_install_flags.extend(["--no-build-isolation-package", "flash-attn"])
-        main_install_flag_str = " ".join(main_install_flags)
-        main_install_flag_str = f" {main_install_flag_str}" if main_install_flag_str else ""
         if main_extras:
             extras_str = ",".join(main_extras)
-            install_cmd = (
-                f"uv pip install{main_install_flag_str} -e '.[{extras_str}]' -c {constraints}"
-            )
+            install_cmd = f"uv pip install -e '.[{extras_str}]' -c {constraints}"
             steps.append(f"cd /gantry-runtime && {install_cmd}")
         else:
             steps.append(f"cd /gantry-runtime && uv pip install -e . -c {constraints}")

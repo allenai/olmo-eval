@@ -669,6 +669,20 @@ class TestBuildCommandWithTaskPackages:
         ) in install_cmd
         assert "[isolated-vllm-check]" not in install_cmd
 
+    def test_olmo_core_extra_does_not_try_to_build_flash_attention(self):
+        """Default OLMo-core jobs must not compile flash-attn at startup."""
+        from olmo_eval.launch import BeakerLauncher
+
+        launcher = BeakerLauncher()
+        install_cmd = launcher._build_install_cmd(
+            extras=["olmo_core"],
+            env_exports=None,
+        )
+
+        assert "uv pip install -e '.[olmo_core,beaker]' -c /tmp/cuda-constraints.txt" in install_cmd
+        assert "flash-attn" not in install_cmd
+        assert "--no-build-isolation-package" not in install_cmd
+
 
 class TestNormalizeProviderPackage:
     """Tests for normalize_provider_package function."""
@@ -845,6 +859,22 @@ class TestBuildInstallCommand:
             "--refresh-package ai2-olmo-core --reinstall-package ai2-olmo-core "
             "'ai2-olmo-core[torchao,transformers] @ "
             "git+https://github.com/allenai/OLMo-core.git@feature-branch' "
+            "-c /tmp/constraints.txt"
+        )
+
+    def test_force_reinstall_targets_wheel_distribution_name(self):
+        """Forced wheel installs should target the distribution, not the wheel filename."""
+        cmd = build_install_command(
+            "https://example.org/wheels/flash_attn_interface-3.0.0-cp312-cp312-linux_x86_64.whl",
+            "/tmp/constraints.txt",
+            force_reinstall=True,
+        )
+        assert (
+            cmd == "uv --no-config --no-cache pip install --refresh "
+            "--refresh-package flash-attn-interface "
+            "--reinstall-package flash-attn-interface "
+            "'flash-attn-interface @ https://example.org/wheels/"
+            "flash_attn_interface-3.0.0-cp312-cp312-linux_x86_64.whl' "
             "-c /tmp/constraints.txt"
         )
 

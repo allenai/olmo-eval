@@ -48,7 +48,6 @@ hf = [
 ]
 olmo_core = [
     "ai2-olmo-core[torchao,transformers]==2.4.0",
-    "flash-attn>=2.8.0 ; platform_system != 'Darwin'",
 ]
 vllm = [
     # vllm + its companions are Linux/CUDA-only; skip on macOS so the lockfile

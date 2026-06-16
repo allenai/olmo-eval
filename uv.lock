@@ -2204,16 +2204,6 @@ wheels = [
 ]
 
 [[package]]
-name = "flash-attn"
-version = "2.8.3.post1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "einops" },
-    { name = "torch" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/01/7a/92a46e7cd6bbb4d7b2855a457c3b855df54a97af5656d98fc92e58e61065/flash_attn-2.8.3.post1.tar.gz", hash = "sha256:55d5103ed846da8b56e0797acf4bde07dee4b1c7e8907fcfc6699c203030c348", size = 8451657, upload-time = "2026-06-11T04:35:21.318Z" }
-
-[[package]]
 name = "flashinfer-cubin"
 version = "0.6.6"
 source = { registry = "https://pypi.org/simple" }
@@ -5259,7 +5249,6 @@ litellm = [
 ]
 olmo-core = [
     { name = "ai2-olmo-core", extra = ["torchao", "transformers"], marker = "extra == 'extra-9-olmo-eval-olmo-core' or (extra == 'extra-9-olmo-eval-agents' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-clients' and extra == 'extra-9-olmo-eval-openhands') or (extra == 'extra-9-olmo-eval-openhands' and extra == 'extra-9-olmo-eval-vllm')" },
-    { name = "flash-attn", marker = "sys_platform != 'darwin'" },
 ]
 openhands = [
     { name = "openhands-ai" },
@@ -5316,7 +5305,6 @@ requires-dist = [
     { name = "boto3", marker = "extra == 's3'", specifier = ">=1.34.0" },
     { name = "click", specifier = "~=8.3.2" },
     { name = "datasets", specifier = ">=3.2.0" },
-    { name = "flash-attn", marker = "sys_platform != 'darwin' and extra == 'olmo-core'", specifier = ">=2.8.0" },
     { name = "httpx", marker = "extra == 'agents'", specifier = "~=0.28.1" },
     { name = "ifbench", git = "https://github.com/allenai/IFBench.git?rev=finbarr%2Fclean-install" },
     { name = "litellm", marker = "extra == 'litellm'", specifier = "~=1.80.11" },
