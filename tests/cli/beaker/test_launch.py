@@ -194,8 +194,8 @@ class TestHarnessOverridesProviderDependencies:
         assert job_config.provider_packages is not None
         assert "https://github.com/user/vllm@custom" in job_config.provider_packages
 
-    def test_olmo_core_provider_package_keeps_olmo_core_extra(self):
-        """OLMo-core package overrides should keep the olmo_core extra installed."""
+    def test_olmo_core_provider_package_replaces_olmo_core_extra(self):
+        """OLMo-core package overrides should replace the bundled olmo_core extra."""
         from unittest.mock import patch
 
         from olmo_eval.cli.beaker.config_loader import LaunchConfig
@@ -240,7 +240,7 @@ class TestHarnessOverridesProviderDependencies:
         with patch("olmo_eval.cli.beaker.job_assembler.cluster_has_weka", return_value=False):
             job_config = assembler.assemble(exp)
 
-        assert "olmo_core" in job_config.extras
+        assert "olmo_core" not in job_config.extras
         assert "vllm" not in job_config.extras
         assert job_config.provider_packages == [package]
 
@@ -290,7 +290,7 @@ class TestHarnessOverridesProviderDependencies:
         with patch("olmo_eval.cli.beaker.job_assembler.cluster_has_weka", return_value=False):
             job_config = assembler.assemble(exp)
 
-        assert "olmo_core" in job_config.extras
+        assert "olmo_core" not in job_config.extras
         assert job_config.provider_packages == [
             "ai2-olmo-core[torchao,transformers] @ "
             "git+https://github.com/allenai/OLMo-core.git@feature-branch"

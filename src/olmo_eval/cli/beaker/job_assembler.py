@@ -471,11 +471,17 @@ class JobConfigAssembler:
         vllm_isolated_venv = provider_kind == "vllm_server"
         model_provider_extras = get_provider_extras(exp.model_spec, default_kind=provider_kind)
 
-        # If provider.package is set for vLLM, it replaces the bundled vLLM extra
-        # while keeping companion extras like clients for vllm_server. Other
-        # providers keep their extras and install provider.package as an override.
-        if harness_provider_package and provider_kind in {"vllm", "vllm_server"}:
-            provider_extras = [extra for extra in model_provider_extras if extra != "vllm"]
+        # If provider.package is set, it replaces the provider's bundled extra.
+        # Keep companion extras like clients for vllm_server.
+        provider_extra_override = {
+            "olmo_core": "olmo_core",
+            "vllm": "vllm",
+            "vllm_server": "vllm",
+        }.get(provider_kind)
+        if harness_provider_package and provider_extra_override:
+            provider_extras = [
+                extra for extra in model_provider_extras if extra != provider_extra_override
+            ]
         else:
             provider_extras = model_provider_extras
 
