@@ -34,7 +34,7 @@ import logging
 import os
 import tempfile
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 from olmo_eval.common.image_qa import (
     anls_metric,
@@ -82,7 +82,7 @@ def _answers(instance: Instance) -> list[str]:
 class VqaScoreScorer(Scorer):
     """Official VQA v2 accuracy against the reference answer list."""
 
-    name: ClassVar[str] = "vqa_score"
+    name: str = "vqa_score"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         pred = clean_prediction(_response_text(output))
@@ -93,7 +93,7 @@ class VqaScoreScorer(Scorer):
 class AnlsScorer(Scorer):
     """ANLS (DocVQA / InfographicVQA), max over reference answers."""
 
-    name: ClassVar[str] = "ansl"
+    name: str = "ansl"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         pred = clean_prediction(_response_text(output))
@@ -107,7 +107,7 @@ class AnlsScorer(Scorer):
 class EmScorer(Scorer):
     """Case-insensitive exact match against any reference answer."""
 
-    name: ClassVar[str] = "em"
+    name: str = "em"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         pred = clean_prediction(_response_text(output))
@@ -118,7 +118,7 @@ class EmScorer(Scorer):
 class RelaxedCorrectnessScorer(Scorer):
     """ChartQA relaxed accuracy, max over reference answers."""
 
-    name: ClassVar[str] = "relaxed_correctness"
+    name: str = "relaxed_correctness"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         pred = clean_prediction(_response_text(output))
@@ -132,7 +132,7 @@ class RelaxedCorrectnessScorer(Scorer):
 class ScifiRelaxedScorer(Scorer):
     """Lenient ChartQA relaxed accuracy, max over reference answers."""
 
-    name: ClassVar[str] = "scifi_relaxed_correctness"
+    name: str = "scifi_relaxed_correctness"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         pred = clean_prediction(_response_text(output))
@@ -146,7 +146,7 @@ class ScifiRelaxedScorer(Scorer):
 class MmmuScorer(Scorer):
     """Official MMMU scoring (multiple-choice parsing or open matching)."""
 
-    name: ClassVar[str] = "mmmu_score"
+    name: str = "mmmu_score"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         pred = clean_prediction(_response_text(output))
@@ -164,7 +164,7 @@ class MmmuScorer(Scorer):
 class RealWorldQaScorer(Scorer):
     """RealWorldQA: A–D letter match for MC, normalized EM otherwise."""
 
-    name: ClassVar[str] = "real_world_qa_score"
+    name: str = "real_world_qa_score"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         pred = clean_prediction(_response_text(output))
@@ -176,7 +176,7 @@ class RealWorldQaScorer(Scorer):
 class MathVistaOfflineScorer(Scorer):
     """MathVista scoring with offline (no-GPT) answer extraction."""
 
-    name: ClassVar[str] = "score"
+    name: str = "score"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         pred = _response_text(output).strip()
@@ -207,7 +207,7 @@ class PointCountScorer(Scorer):
     returns ``correct``.
     """
 
-    name: ClassVar[str] = "point_count"
+    name: str = "point_count"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         gt = int(instance.metadata["count"])
@@ -233,7 +233,7 @@ class Ai2dScorer(Scorer):
     abc-label question to exactly one of the opaque/transparent variants.
     """
 
-    name: ClassVar[str] = "mc_ai2d"
+    name: str = "mc_ai2d"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         pred = clean_prediction(_response_text(output))
@@ -254,7 +254,7 @@ class Ai2dScorer(Scorer):
 _PROCESS_GPT_CACHE_DIR: list[str] = []
 
 
-def _default_gpt_cache_dir() -> str | None:
+def _default_gpt_cache_dir() -> str:
     """Per-run GPT cache dir: env override or a fresh process-local temp dir.
 
     Never defaults to any pre-existing shared cache; the shared mm_olmo
@@ -279,7 +279,7 @@ class MathVistaGptScorer(ContextScorer):
     caches are never touched.
     """
 
-    name: ClassVar[str] = "score"
+    name: str = "score"
 
     model: str = "gpt-4-0613"
     cache_dir: str | None = field(default_factory=_default_gpt_cache_dir)

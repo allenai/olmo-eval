@@ -16,7 +16,7 @@ import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar
+from typing import Any
 
 from olmo_eval.common.execution import ScoringContext
 from olmo_eval.common.scorers.execution import ContextScorer
@@ -28,12 +28,32 @@ _DEFAULT_CACHE_DIR = "/weka/oe-training-default/mm-olmo/dense_caption_eval/gpt4-
 
 # Labels that GPT returns instead of Consistent/Inconsistent; skip them silently.
 _UNKNOWN_CONSISTENCY_LABELS = [
-    "not specified", "cannot determine", "not determinable", "no verification",
-    "n/a", "not confirmed", "neither", "not stated", "no judgement",
-    "unable to determine", "inconclusive", "undetermined", "insufficient information",
-    "no relevant information", "no conclusion", "not clear", "unknown", "uncertain",
-    "ambiguous", "not addressed", "not enough information", "not mentioned",
-    "not enough info", "no information", "not verifiable", "not applicable",
+    "not specified",
+    "cannot determine",
+    "not determinable",
+    "no verification",
+    "n/a",
+    "not confirmed",
+    "neither",
+    "not stated",
+    "no judgement",
+    "unable to determine",
+    "inconclusive",
+    "undetermined",
+    "insufficient information",
+    "no relevant information",
+    "no conclusion",
+    "not clear",
+    "unknown",
+    "uncertain",
+    "ambiguous",
+    "not addressed",
+    "not enough information",
+    "not mentioned",
+    "not enough info",
+    "no information",
+    "not verifiable",
+    "not applicable",
 ]
 _UNKNOWN_PATTERN = re.compile(
     r".*\b(" + "|".join(re.escape(s) for s in _UNKNOWN_CONSISTENCY_LABELS) + r").*$",
@@ -41,12 +61,13 @@ _UNKNOWN_PATTERN = re.compile(
 )
 
 # Module-level lazy async clients, keyed by model name.
-_ASYNC_CLIENTS: dict[str, object] = {}
+_ASYNC_CLIENTS: dict[str, Any] = {}
 
 
 # ---------------------------------------------------------------------------
 # Cache helpers (identical semantics to legacy Gpt4WithCache)
 # ---------------------------------------------------------------------------
+
 
 def _compute_hash(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
@@ -92,13 +113,11 @@ async def _cached_gpt_call(
         try:
             from openai import AsyncOpenAI
         except ImportError:
-            raise ImportError(
-                "openai package required: pip install openai"
-            ) from None
+            raise ImportError("openai package required: pip install openai") from None
         _ASYNC_CLIENTS[model] = AsyncOpenAI(api_key=api_key)
 
     client = _ASYNC_CLIENTS[model]
-    response = await client.chat.completions.create(  # type: ignore[union-attr]
+    response = await client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
         temperature=0,
@@ -106,9 +125,7 @@ async def _cached_gpt_call(
     completion = response.model_dump()
 
     # Atomic write: tmp → rename, identical to legacy Gpt4WithCache.
-    fd, tmp = tempfile.mkstemp(
-        ".tmp", prefix=f"{key}-v1.json", text=True, dir=cache_dir
-    )
+    fd, tmp = tempfile.mkstemp(".tmp", prefix=f"{key}-v1.json", text=True, dir=cache_dir)
     os.close(fd)
     with open(tmp, "w") as f:
         json.dump(completion, f)
@@ -121,16 +138,17 @@ async def _cached_gpt_call(
 # GPT prompt builders (verbatim from gpt_dense_caption_eval.py)
 # ---------------------------------------------------------------------------
 
+
 def _recall_prompt(mturk_statements: str, caption: str) -> str:
     return (
         "Here are statements that annotators gave for an image.\n\n"
         + mturk_statements.strip()
         + (
-            '\n\nNext, consider the following caption of the image. For each statement above,'
+            "\n\nNext, consider the following caption of the image. For each statement above,"
             ' state whether the fact is "Stated" or "Not Stated" in the caption.'
-            ' The output should be in the form\n\n1. Stated\n2. Not Stated\n3. Stated\n\n'
-            'Do not output anything other than an ordered list of Stated and Not Stated.\n\n'
-            ' Here is the caption: '
+            " The output should be in the form\n\n1. Stated\n2. Not Stated\n3. Stated\n\n"
+            "Do not output anything other than an ordered list of Stated and Not Stated.\n\n"
+            " Here is the caption: "
         )
         + (caption.strip() if caption else "No caption provided.")
     )
@@ -152,11 +170,11 @@ def _consistency_prompt(num_transcripts: int, transcripts_str: str, statements_s
         f"Here are {num_transcripts} captions people gave for an image using their voice.\n\n"
         + transcripts_str
         + (
-            '\n\nHere are statements that a captioning model made about the image.'
+            "\n\nHere are statements that a captioning model made about the image."
             ' For each statement, state whether it\'s "Consistent" or "Inconsistent"'
-            ' with the statements provided above. The output should be in the form\n\n'
-            '1. Consistent\n2. Inconsistent\n3. Consistent\n\n'
-            'Do not output anything other than an ordered list of Consistent and Inconsistent.\n\n'
+            " with the statements provided above. The output should be in the form\n\n"
+            "1. Consistent\n2. Inconsistent\n3. Consistent\n\n"
+            "Do not output anything other than an ordered list of Consistent and Inconsistent.\n\n"
         )
         + statements_str
     )
@@ -165,6 +183,7 @@ def _consistency_prompt(num_transcripts: int, transcripts_str: str, statements_s
 # ---------------------------------------------------------------------------
 # Parse helpers (verbatim logic from gpt_dense_caption_eval.py)
 # ---------------------------------------------------------------------------
+
 
 def parse_recall_output(text: str) -> tuple[int, int]:
     """Parse GPT stated/not-stated output.
@@ -205,10 +224,8 @@ def parse_consistency_output(text: str) -> tuple[int, int]:
             line,
             flags=re.IGNORECASE,
         ):
-            if inconsistent:
-                inconsistent = None  # both matched — treat as ambiguous
-            else:
-                inconsistent = False
+            # both matched — treat as ambiguous (None); otherwise consistent (False)
+            inconsistent = None if inconsistent else False
         if inconsistent is None:
             if not _UNKNOWN_PATTERN.match(line):
                 logger.warning("Unexpected consistency label: %r", line)
@@ -221,6 +238,7 @@ def parse_consistency_output(text: str) -> tuple[int, int]:
 # ---------------------------------------------------------------------------
 # Scorer
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class DenseCaptionJudgeScorer(ContextScorer):
@@ -243,7 +261,7 @@ class DenseCaptionJudgeScorer(ContextScorer):
           key, from ``final-data.json``.
     """
 
-    name: ClassVar[str] = "dense_caption_judge"
+    name: str = "dense_caption_judge"
 
     model: str = "gpt-4o-2024-05-13"
     cache_dir: str = _DEFAULT_CACHE_DIR
@@ -285,10 +303,17 @@ class DenseCaptionJudgeScorer(ContextScorer):
                 result["num_covered"] = num_covered
                 result["recall_valid"] = recall_valid
             except Exception as exc:
-                logger.warning("Recall scoring failed for %s: %s", instance.metadata.get("url", "?"), exc)
+                logger.warning(
+                    "Recall scoring failed for %s: %s",
+                    instance.metadata.get("url", "?"),
+                    exc,
+                )
                 result.update(
-                    recall=0.0, recall_at_10=0.0,
-                    num_statements=0, num_covered=0, recall_valid=False,
+                    recall=0.0,
+                    recall_at_10=0.0,
+                    num_statements=0,
+                    num_covered=0,
+                    recall_valid=False,
                 )
 
         if "consistency" in self.target_metrics:
@@ -313,7 +338,11 @@ class DenseCaptionJudgeScorer(ContextScorer):
                 result["num_consistent"] = num_consistent
                 result["consistency_valid"] = consistency_valid
             except Exception as exc:
-                logger.warning("Consistency scoring failed for %s: %s", instance.metadata.get("url", "?"), exc)
+                logger.warning(
+                    "Consistency scoring failed for %s: %s",
+                    instance.metadata.get("url", "?"),
+                    exc,
+                )
                 result.update(consistency=0.0, num_consistent=0, consistency_valid=False)
 
         if output.metadata is None:
