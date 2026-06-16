@@ -24,6 +24,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import UTC
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 from rich.console import Console
 from rich.panel import Panel
@@ -60,6 +61,8 @@ __all__ = [
 
 # Rich console for pretty printing
 _console = Console()
+
+_DIRECT_URL_ARTIFACT_SUFFIXES = (".whl", ".zip", ".tar.gz", ".tar.bz2", ".tar.xz", ".tgz")
 
 
 def print_experiment_config(
@@ -504,6 +507,13 @@ def parse_install_spec(package: str) -> tuple[str, list[str]]:
     return " ".join(pkg_parts), flags
 
 
+def _is_direct_url_artifact(package: str) -> bool:
+    if "://" not in package:
+        return False
+    path = urlsplit(package).path.lower()
+    return path.endswith(_DIRECT_URL_ARTIFACT_SUFFIXES)
+
+
 def normalize_provider_package(package: str) -> str:
     """Normalize a provider package specifier for pip installation.
 
@@ -535,6 +545,11 @@ def normalize_provider_package(package: str) -> str:
 
     # Already a git+ URL, return as-is
     if pkg_spec.startswith("git+"):
+        return pkg_spec
+
+    # GitHub release assets and other direct wheel/archive URLs are installable
+    # artifacts, not Git repositories.
+    if _is_direct_url_artifact(pkg_spec):
         return pkg_spec
 
     # GitHub or GitLab URLs need git+ prefix

@@ -367,7 +367,7 @@ class TestProcessScoring:
 
     async def test_process_scorer_rejects_local_non_reconstructible_class(self):
         @dataclass(frozen=True, slots=True)
-        class _LocalProcessScorer(ProcessScorer):
+        class LocalProcessScorer(ProcessScorer):
             name: str = "local_process"
 
             def process_score(self, instance: Instance, output: LMOutput) -> float:
@@ -378,7 +378,7 @@ class TestProcessScoring:
         try:
             with pytest.raises(ProcessScoringConfigError, match="module scope"):
                 await manager.score_outputs(
-                    _LocalProcessScorer(),
+                    LocalProcessScorer(),
                     Instance(question="Q", gold_answer="A"),
                     [LMOutput(text="A")],
                 )
@@ -719,7 +719,7 @@ class TestExecutionConcurrency:
     async def test_env_without_get_execution_semaphore(self):
         """Execution env that lacks get_execution_semaphore method still works."""
 
-        class _BareEnv:
+        class BareEnv:
             """Env without semaphore support."""
 
             is_running = True
@@ -733,7 +733,7 @@ class TestExecutionConcurrency:
             async def execute_code(self, code, language="python", timeout=None):
                 return ExecutionResult(success=True)
 
-        env = _BareEnv()
+        env = BareEnv()
         scorer = MockExecutionScorer()
         metric = PassAtKMetric(k=1, scorer=lambda: scorer)
         config = TaskConfig(name="test", data_source="test/dataset", metrics=(metric,))

@@ -668,7 +668,7 @@ class TestProcessPoolPlanning:
 
     def test_rejects_non_reconstructible_process_scorer_during_planning(self):
         @dataclass(frozen=True, slots=True)
-        class _LocalProcessScorer(ProcessScorer):
+        class LocalProcessScorer(ProcessScorer):
             name: str = "local_process"
 
             def process_score(self, instance: Instance, output: LMOutput) -> float:
@@ -678,7 +678,7 @@ class TestProcessPoolPlanning:
             TaskConfig(
                 name="process_bad",
                 data_source="test/dataset",
-                metrics=(AccuracyMetric(scorer=_LocalProcessScorer),),
+                metrics=(AccuracyMetric(scorer=LocalProcessScorer),),
             )
         )
         trackers = {
@@ -750,7 +750,7 @@ class TestProcessPoolPlanning:
         assert context_limit == 4
 
     def test_shutdown_logs_confirmation(self, monkeypatch):
-        class _Manager:
+        class Manager:
             def __init__(self) -> None:
                 self.shutdown_called = False
 
@@ -759,7 +759,7 @@ class TestProcessPoolPlanning:
 
         import olmo_eval.runners.asynq.runner as runner_module
 
-        manager = _Manager()
+        manager = Manager()
         fake_logger = MagicMock()
         monkeypatch.setattr(runner_module, "runner_logger", fake_logger)
 
@@ -772,7 +772,7 @@ class TestProcessPoolPlanning:
         fake_logger.warning.assert_not_called()
 
     def test_shutdown_logs_warning_on_failure(self, monkeypatch):
-        class _Manager:
+        class Manager:
             def shutdown(self) -> None:
                 raise RuntimeError("boom")
 
@@ -781,7 +781,7 @@ class TestProcessPoolPlanning:
         fake_logger = MagicMock()
         monkeypatch.setattr(runner_module, "runner_logger", fake_logger)
 
-        _shutdown_process_scoring_pools(_Manager())
+        _shutdown_process_scoring_pools(Manager())
 
         fake_logger.info.assert_called_once_with("Stopping process scoring pools...")
         fake_logger.warning.assert_called_once_with(
