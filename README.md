@@ -1533,6 +1533,38 @@ uv run olmo-eval beaker launch -n "eval" \
 uv pip install -e '.[vllm]'  # includes vllm[runai]
 ```
 
+For raw OLMo-core checkpoints, force the provider kind through the harness and
+use `provider.package` when you need a specific `ai2-olmo-core` install:
+
+```bash
+# Pin the PyPI package version
+uv run olmo-eval beaker launch -n "eval" \
+    --harness default \
+    -o provider.kind=olmo_core \
+    -o provider.package=2.3.0 \
+    -m /weka/path/to/raw-olmo-core-checkpoint \
+    -t mmlu \
+    --cluster h100 \
+    -w "ai2/olmo-eval-debug" \
+    -B "ai2/oe-base"
+
+# Override ai2-olmo-core from a GitHub branch
+uv run olmo-eval beaker launch -n "eval" \
+    --harness default \
+    -o provider.kind=olmo_core \
+    -o provider.package=https://github.com/allenai/OLMo-core.git@my-branch \
+    -m /weka/path/to/raw-olmo-core-checkpoint \
+    -t mmlu \
+    --cluster h100 \
+    -w "ai2/olmo-eval-debug" \
+    -B "ai2/oe-base"
+```
+
+The OLMo-core source URL is normalized to install the
+`ai2-olmo-core[torchao,transformers]` distribution, so branch overrides replace
+the bundled OLMo-core dependency instead of installing a separate repo-named
+package.
+
 ### Task-Specific Dependencies
 
 Tasks can declare runtime dependencies that are installed at job startup (see [Tasks](#tasks)). Dependencies are automatically merged, deduplicated, and installed after the inference provider.

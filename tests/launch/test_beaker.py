@@ -832,6 +832,22 @@ class TestBuildInstallCommand:
             "-c /tmp/constraints.txt"
         )
 
+    def test_force_reinstall_strips_extras_from_named_direct_ref_target(self):
+        """Reinstall flags should use the base distribution name, not extras."""
+        cmd = build_install_command(
+            "ai2-olmo-core[torchao,transformers] @ "
+            "git+https://github.com/allenai/OLMo-core.git@feature-branch",
+            "/tmp/constraints.txt",
+            force_reinstall=True,
+        )
+        assert (
+            cmd == "uv --no-config --no-cache pip install --refresh "
+            "--refresh-package ai2-olmo-core --reinstall-package ai2-olmo-core "
+            "'ai2-olmo-core[torchao,transformers] @ "
+            "git+https://github.com/allenai/OLMo-core.git@feature-branch' "
+            "-c /tmp/constraints.txt"
+        )
+
     def test_force_reinstall_respects_existing_reinstall_flags(self):
         """Explicit reinstall flags should not be duplicated."""
         cmd = build_install_command(

@@ -545,27 +545,32 @@ def normalize_provider_package(package: str) -> str:
     return pkg_spec
 
 
+def _strip_package_extras(package_name: str) -> str:
+    """Return the base distribution name from a package name with optional extras."""
+    return package_name.split("[", 1)[0].strip()
+
+
 def _infer_install_target_name_from_normalized(package: str) -> str | None:
     """Infer a distribution name from an already-normalized package spec."""
     normalized = package
 
     # PEP 508 direct references: "name @ URL"
     if " @ " in normalized:
-        return normalized.split(" @ ", 1)[0].strip() or None
+        return _strip_package_extras(normalized.split(" @ ", 1)[0].strip()) or None
 
     # Direct URLs and local paths: prefer an explicit egg fragment, otherwise
     # fall back to the trailing path component (e.g., transformers.git -> transformers).
     if normalized.startswith("git+") or "://" in normalized or normalized.startswith("/"):
         match = re.search(r"(?:[#&]egg=)([A-Za-z0-9_.-]+)", normalized)
         if match:
-            return match.group(1)
+            return _strip_package_extras(match.group(1))
 
         path_part = normalized.split("#", 1)[0].rsplit("/", 1)[-1]
         if "@" in path_part:
             path_part = path_part.split("@", 1)[0]
         if path_part.endswith(".git"):
             path_part = path_part[:-4]
-        return path_part or None
+        return _strip_package_extras(path_part) or None
 
     match = re.match(r"^\s*([A-Za-z0-9_.-]+)", normalized)
     return match.group(1) if match else None
