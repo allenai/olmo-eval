@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from collections.abc import Sequence
 
 # ---------------------------------------------------------------------------
 # Official VQA v2 normalization tables (verbatim)
@@ -251,7 +252,7 @@ def levenshtein(a: str, b: str) -> int:
     return prev[-1]
 
 
-def _argmin(values: list[int | float]) -> int:
+def _argmin(values: Sequence[float]) -> int:
     """Index of the minimum value, first occurrence (matches np.argmin)."""
     best_ix = 0
     for ix in range(1, len(values)):
@@ -400,9 +401,9 @@ def scifi_relaxed_correctness(
         for word, num in word_to_num.items():
             prediction = prediction.replace(word, str(num))
 
-        try:
-            prediction_float = _to_float(re.search(r"[-+]?\d*\.\d+|\d+", prediction).group())
-        except Exception:
+        match = re.search(r"[-+]?\d*\.\d+|\d+", prediction)
+        prediction_float = _to_float(match.group()) if match else None
+        if prediction_float is None:
             return False
 
         relative_change = compute_relative_change(target_float, prediction_float)

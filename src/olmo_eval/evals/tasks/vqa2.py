@@ -81,7 +81,9 @@ class Vqa2Task(ImageQATask):
                         "question_id": q["question_id"],
                     }
                 )
-        np.random.RandomState(_SAMPLE_SEED).shuffle(flattened)
+        # shuffle the list of dicts in place; the seeded RandomState ordering must
+        # match mm_olmo exactly for dump parity, so keep np shuffle (not random.shuffle).
+        np.random.RandomState(_SAMPLE_SEED).shuffle(flattened)  # ty: ignore[invalid-argument-type]
         flattened = flattened[:_SAMPLE_SIZE]
 
         for ex in flattened:
