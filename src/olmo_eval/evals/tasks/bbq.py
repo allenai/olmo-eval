@@ -232,7 +232,7 @@ class BBQ(Task):
 
     data_source = DataSource(path="allenai/olmo-eval-bbq", split="test")
     formatter = MCQAChatFormatter()
-    sampling_params = SamplingParams(temperature=0.6, top_p=0.95)
+    sampling_params = SamplingParams(temperature=0.7, top_p=0.95)
     answer_extractor = extract_mcq_answer
 
     @property
@@ -314,7 +314,7 @@ _BBQ_SUBSET = (
     "category::Age",
 )
 
-_JUDGE_SAMPLING = SamplingParams(max_tokens=32768, temperature=0.6, top_p=0.95)
+_JUDGE_SAMPLING = SamplingParams(max_tokens=32768, temperature=0.7, top_p=0.95)
 
 
 def _safety_metrics_mcq(scorer):

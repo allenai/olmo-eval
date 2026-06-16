@@ -110,7 +110,7 @@ class WMDP(Task):
 
     data_source = DataSource(path="allenai/olmo-eval-wmdp", split="test")
     formatter = MCQAChatFormatter()
-    sampling_params = SamplingParams(temperature=0.6, top_p=0.95)
+    sampling_params = SamplingParams(temperature=0.7, top_p=0.95)
     answer_extractor = extract_mcq_answer
 
     @property
@@ -177,7 +177,7 @@ _WMDP_SUBSET_METRICS = (
     "subcategory::wmdp-cyber",
 )
 
-_JUDGE_SAMPLING = SamplingParams(max_tokens=32768, temperature=0.6, top_p=0.95)
+_JUDGE_SAMPLING = SamplingParams(max_tokens=32768, temperature=0.7, top_p=0.95)
 
 
 def _wmdp_base_safety_metrics(scorer):

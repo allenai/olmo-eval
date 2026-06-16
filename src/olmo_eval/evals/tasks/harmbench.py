@@ -33,7 +33,7 @@ class Harmbench(Task):
 
     data_source = DataSource("allenai/tulu-3-harmbench-eval")
     formatter = ChatFormatter()
-    sampling_params = SamplingParams(temperature=0.6, top_p=0.95)
+    sampling_params = SamplingParams(temperature=0.7, top_p=0.95)
     answer_extractor = extract_think_answer
 
     @property
@@ -107,7 +107,13 @@ _HARMBENCH_SUBSET_METRICS = (
     "semantic_category::harassment_bullying",
 )
 
-_JUDGE_SAMPLING = SamplingParams(max_tokens=32768, temperature=0.6, top_p=0.95)
+_JUDGE_SAMPLING = SamplingParams(max_tokens=32768, temperature=0.7, top_p=0.95)
+_BASE_SAMPLING = SamplingParams(
+    max_tokens=1024,
+    temperature=0.6,
+    top_p=0.6,
+    stop_sequences=("Question:", "</s>", "<|im_end|>", "\n\n"),
+)
 
 
 # =============================================================================
@@ -152,6 +158,6 @@ register_variant(
     "base",
     metrics=safety_metrics(_WG_SCORER, _HARMBENCH_SUBSET_METRICS),
     primary_metric=AccuracyMetric(scorer=_WG_SCORER),
-    sampling_params=_JUDGE_SAMPLING,
-    formatter=CompletionFormatter(),
+    sampling_params=_BASE_SAMPLING,
+    formatter=CompletionFormatter(template="Question: {question}\nAnswer:"),
 )
