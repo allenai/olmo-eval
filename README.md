@@ -1469,7 +1469,7 @@ Images are tagged with CUDA and PyTorch versions: `cu{version}-trc{version}-{arc
 ./scripts/build_image.sh
 
 # Specific CUDA + PyTorch version
-./scripts/build_image.sh --cuda-version 12.8.1 --torch-version 2.9.0
+./scripts/build_image.sh --cuda-version 12.8.1 --torch-version 2.11.0
 
 # Production build
 ./scripts/build_image.sh --platform linux/amd64
@@ -1492,7 +1492,7 @@ Images are tagged with CUDA and PyTorch versions: `cu{version}-trc{version}-{arc
 ./scripts/beaker/push_beaker_image.sh --dry-run
 ```
 
-The script auto-detects the image name from the tag (e.g., `olmo-eval-cu128-trc291-amd64`)
+The script auto-detects the image name from the tag (e.g., `olmo-eval-cu1281-trc2110-amd64`)
 
 ### What's in the Image
 
