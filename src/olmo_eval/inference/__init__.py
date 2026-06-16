@@ -18,6 +18,7 @@ __all__ = [
     "HuggingFaceProvider",
     "VLLMProvider",
     "VLLMServerProvider",
+    "OlmoCoreProvider",
     "LiteLLMProvider",
     "create_provider",
     # Tokenizer utilities
@@ -126,6 +127,10 @@ def create_provider(
                 force_download=force_download,
             )
             return VLLMServerProvider(model_name, **kwargs)
+        case "olmo_core":
+            from .providers.olmo_core import OlmoCoreProvider
+
+            return OlmoCoreProvider(model_name, **kwargs)
         case "litellm":
             from .providers.litellm import LiteLLMProvider
 
@@ -148,6 +153,10 @@ def __getattr__(name: str):
         from .providers.vllm_server import VLLMServerProvider
 
         return VLLMServerProvider
+    if name == "OlmoCoreProvider":
+        from .providers.olmo_core import OlmoCoreProvider
+
+        return OlmoCoreProvider
     if name == "LiteLLMProvider":
         from .providers.litellm import LiteLLMProvider
 

@@ -10,11 +10,12 @@ class ProviderKind(StrEnum):
     VLLM = "vllm"
     VLLM_SERVER = "vllm_server"
     HF = "hf"
+    OLMO_CORE = "olmo_core"
     MOCK = "mock"
     LITELLM = "litellm"
 
 
-ProviderLiteral = Literal["vllm", "vllm_server", "hf", "mock", "litellm"]
+ProviderLiteral = Literal["vllm", "vllm_server", "hf", "olmo_core", "mock", "litellm"]
 DtypeLiteral = Literal["auto", "float16", "bfloat16", "float32"]
 PriorityLiteral = Literal["low", "normal", "high", "urgent"]
 LoadFormatLiteral = Literal[

@@ -192,6 +192,7 @@ BACKEND_OPTIONAL_GROUPS: dict[str, str | None] = {
     "vllm": "vllm",
     "vllm_server": "vllm",
     "hf": "hf",
+    "olmo_core": "olmo_core",
     "litellm": "litellm",
     "mock": None,
 }
