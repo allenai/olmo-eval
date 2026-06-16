@@ -186,105 +186,39 @@ def _bbq_logprob_metric_helper(
 
 
 @dataclass(frozen=True, slots=True)
-class BBQSubsetAccuracyMetric(Metric):
+class BBQMCQMetric(Metric):
     """
-    Calculate the accuracy for the chat formatted BBQ Task
+    Calculate the given metric for the given subset
+    for the chat formatted BBQ Task
     """
 
-    name: str = "any::any"
+    name: str = "any::any::accuracy"
     scorer: type[Scorer] | Scorer = BBQBiasScorer
 
     def compute(self, responses: Sequence[Response]) -> float:
         """Compute aggregate metric from scored responses."""
-        subset, cat = self.name.split("::")
-        metrics = _bbq_metric_helper(responses, subset, cat, "accuracy", self.scorer().name)
+        subset, cat, metric = self.name.split("::")
+        metrics = _bbq_metric_helper(responses, subset, cat, metric, self.scorer().name)
 
-        return metrics["accuracy"]
-
-
-@dataclass(frozen=True, slots=True)
-class BBQSubsetAmbigBiasMetric(Metric):
-    """
-    Calculate the ambiguous bias score for the chat formatted BBQ Task
-    """
-
-    name: str = "any::any"
-    scorer: type[Scorer] | Scorer = BBQBiasScorer
-
-    def compute(self, responses: Sequence[Response]) -> float:
-        """Compute aggregate metric from scored responses."""
-        subset, cat = self.name.split("::")
-        metrics = _bbq_metric_helper(responses, subset, cat, "ambig", self.scorer().name)
-
-        return metrics["ambig"]
+        return metrics[metric]
 
 
 @dataclass(frozen=True, slots=True)
-class BBQSubsetDisambigBiasMetric(Metric):
+class BBQLogprobMetric(Metric):
     """
-    Calculate the disambiguous bias score for the chat formatted BBQ Task
-    """
-
-    name: str = "any::any"
-    scorer: type[Scorer] | Scorer = BBQBiasScorer
-
-    def compute(self, responses: Sequence[Response]) -> float:
-        """Compute aggregate metric from scored responses."""
-        subset, cat = self.name.split("::")
-        metrics = _bbq_metric_helper(responses, subset, cat, "disambig", self.scorer().name)
-
-        return metrics["disambig"]
-
-
-@dataclass(frozen=True, slots=True)
-class BBQLogprobMCAccuracyMetric(Metric):
-    """
-    Calculate the accuracy for the logprob formatted BBQ Task
+    Calculate the given metric for the given subset
+    for the logprob formatted BBQ Task
     """
 
-    name: str = "any::any"
+    name: str = "any::any::accuracy"
     scorer: type[Scorer] = LogprobScorer
 
     def compute(self, responses: Sequence[Response]) -> float:
         """Compute aggregate metric from scored responses."""
-        subset, cat = self.name.split("::")
-        metrics = _bbq_logprob_metric_helper(responses, subset, cat, "accuracy", self.scorer)
+        subset, cat, metric = self.name.split("::")
+        metrics = _bbq_logprob_metric_helper(responses, subset, cat, metric, self.scorer)
 
-        return metrics["accuracy"]
-
-
-@dataclass(frozen=True, slots=True)
-class BBQLogprobMCAmbigBiasMetric(Metric):
-    """
-    Calculate the ambiguous bias for the logprob formatted BBQ Task
-    """
-
-    name: str = "any::any"
-    scorer: type[Scorer] = LogprobScorer
-
-    def compute(self, responses: Sequence[Response]) -> float:
-        """Compute aggregate metric from scored responses."""
-        subset, cat = self.name.split("::")
-        metrics = _bbq_logprob_metric_helper(responses, subset, cat, "ambig", self.scorer)
-
-        return metrics["ambig"]
-
-
-@dataclass(frozen=True, slots=True)
-class BBQLogprobMCDisambigBiasMetric(Metric):
-    """
-    Calculate the disambiguous bias for the logprob formatted BBQ Task
-    """
-
-    name: str = "any::any"
-    scorer: type[Scorer] = LogprobScorer
-
-    def compute(self, responses: Sequence[Response]) -> float:
-        """Compute aggregate metric from scored responses."""
-        subset, cat = self.name.split("::")
-        metrics = _bbq_logprob_metric_helper(responses, subset, cat, "disambig", self.scorer)
-
-        return metrics["disambig"]
+        return metrics[metric]
 
 
 # =============================================================================
@@ -367,7 +301,8 @@ class BBQ(Task):
         )
 
 
-_BBQ_SUBSET_METRICS = (
+_BBQ_SUBSET = (
+    "any::any:",
     "category::Race_ethnicity",
     "category::Gender_identity",
     "category::Sexual_orientation",
@@ -385,25 +320,19 @@ _JUDGE_SAMPLING = SamplingParams(max_tokens=32768, temperature=0.6, top_p=0.95)
 def _safety_metrics_mcq(scorer):
     """Build the full metric tuple for a safety judge scorer."""
     return (
-        BBQSubsetAccuracyMetric(name="any::any", scorer=scorer),
-        BBQSubsetAmbigBiasMetric(name="any::any", scorer=scorer),
-        BBQSubsetDisambigBiasMetric(name="any::any", scorer=scorer),
+        *(BBQMCQMetric(name=name + "::accuracy", scorer=scorer) for name in _BBQ_SUBSET),
+        *(BBQMCQMetric(name=name + "::ambig", scorer=scorer) for name in _BBQ_SUBSET),
+        *(BBQMCQMetric(name=name + "::disambig", scorer=scorer) for name in _BBQ_SUBSET),
         SafetyErrorMetric(scorer=scorer),
-        *(BBQSubsetAccuracyMetric(name=name, scorer=scorer) for name in _BBQ_SUBSET_METRICS),
-        *(BBQSubsetAmbigBiasMetric(name=name, scorer=scorer) for name in _BBQ_SUBSET_METRICS),
-        *(BBQSubsetDisambigBiasMetric(name=name, scorer=scorer) for name in _BBQ_SUBSET_METRICS),
     )
 
 
 def _safety_metrics_base(scorer):
     """Build the full metric tuple for a safety judge scorer for base models."""
     return (
-        BBQLogprobMCAccuracyMetric(name="any::any", scorer=scorer),
-        BBQLogprobMCAmbigBiasMetric(name="any::any", scorer=scorer),
-        BBQLogprobMCDisambigBiasMetric(name="any::any", scorer=scorer),
-        *(BBQLogprobMCAccuracyMetric(name=name, scorer=scorer) for name in _BBQ_SUBSET_METRICS),
-        *(BBQLogprobMCAmbigBiasMetric(name=name, scorer=scorer) for name in _BBQ_SUBSET_METRICS),
-        *(BBQLogprobMCDisambigBiasMetric(name=name, scorer=scorer) for name in _BBQ_SUBSET_METRICS),
+        *(BBQLogprobMetric(name=name + "::accuracy", scorer=scorer) for name in _BBQ_SUBSET),
+        *(BBQLogprobMetric(name=name + "::ambig", scorer=scorer) for name in _BBQ_SUBSET),
+        *(BBQLogprobMetric(name=name + "::disambig", scorer=scorer) for name in _BBQ_SUBSET),
     )
 
 
@@ -418,7 +347,7 @@ register_variant(
     "bbq",
     "mcq",
     metrics=_safety_metrics_mcq(_BBQ_SCORER),
-    primary_metric=BBQSubsetAccuracyMetric(name="any::any", scorer=_BBQ_SCORER),
+    primary_metric=BBQMCQMetric(name="any::any::accuracy", scorer=_BBQ_SCORER),
     sampling_params=_JUDGE_SAMPLING,
     formatter=MCQAChatFormatter(),
 )
@@ -427,7 +356,7 @@ register_variant(
     "bbq",
     "base",
     metrics=_safety_metrics_base(LogprobScorer),
-    primary_metric=BBQLogprobMCAccuracyMetric(name="any::any", scorer=LogprobScorer),
+    primary_metric=BBQLogprobMetric(name="any::any::accuracy", scorer=LogprobScorer),
     sampling_params=_JUDGE_SAMPLING,
     formatter=MultipleChoiceFormatter(),
 )
