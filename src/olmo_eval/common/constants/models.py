@@ -44,6 +44,13 @@ def get_model_presets() -> dict[str, ProviderConfig]:
             revision="stage2-step47684",
             kwargs={"gpu_memory_utilization": 0.7, "add_bos_token": False},
         ),
+        "bk/olmo7b-sft-coding-heavy-step17075": ProviderConfig(
+            kind=ProviderKind.VLLM_SERVER,
+            model="/weka/oe-training-default/ai2-llm/checkpoints/baileyk/olmo-sft/olmo-7b-base-coding-heavy-mix/step17075-hf",
+            trust_remote_code=True,
+            max_model_len=4096,
+            kwargs={"gpu_memory_utilization": 0.7},
+        ),
         "bk/olmo7b-sft-75pct-step17312": ProviderConfig(
             kind=ProviderKind.VLLM_SERVER,
             model="/weka/oe-training-default/ai2-llm/checkpoints/baileyk/olmo-sft/olmo-7b-base-75pct-mix/step17312-hf",
