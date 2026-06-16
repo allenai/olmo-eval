@@ -604,6 +604,14 @@ class TestBuildCommandWithTaskPackages:
         )
 
         assert (
+            "cd /gantry-runtime && uv export --extra vllm "
+            "--no-default-groups --no-hashes --no-emit-project "
+            "--no-header --no-annotate --frozen 2>/dev/null "
+            "| grep -vE '^(torch|nvidia-)' | grep -vE ' @ ' "
+            "> /tmp/vllm-lock-constraints.txt"
+        ) in install_cmd
+        assert "-c /tmp/vllm-lock-constraints.txt -e '.[vllm]'" in install_cmd
+        assert (
             "uv --no-config --no-cache pip install --python /opt/vllm-venv/bin/python "
             "--refresh --refresh-package repo --reinstall-package repo "
             "'repo @ git+https://github.com/user/repo@v1.0' -c /tmp/cuda-constraints.txt"
