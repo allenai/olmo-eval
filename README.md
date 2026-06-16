@@ -1,13 +1,20 @@
 # olmo-eval
 
-[![CI](https://github.com/allenai/olmo-eval-internal/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/allenai/olmo-eval-internal/actions/workflows/ci.yml)
-![Alpha](https://img.shields.io/badge/status-alpha-orange)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/allenai/olmo-eval-internal/blob/main/LICENSE)
+[![CI](https://github.com/allenai/olmo-eval/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/allenai/olmo-eval/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/allenai/olmo-eval/blob/main/LICENSE)
 
-Evaluation toolkit for OLMo and other language models.
+## Overview
+This project provides a unified workbench for evaluating language models throughout the model development loop.
 
-> **Warning**
-> This project is in alpha. APIs may change without warning.
+Features:
+
+- Registry of benchmark tasks and composable suites, with named variants for few-shot settings, formatting, and scoring (e.g. humaneval:3shot:bpb).
+- Support for inference via vLLM, LiteLLM for commercial APIs, and a mock provider for dry runs and debugging.
+- Harness abstraction that separates execution policy from task definition, so any task can be run baseline or tool-augmented without modification.
+- Multi-turn agentic evaluation with tool calling, scaffolds, and sandboxed environments via Docker, Podman, or Modal.
+- LLM-as-judge scoring with auxiliary providers, including locally served judge models.
+- Aggregate and instance-level prediction storage.
+- Inspection tooling for viewing instances, formatted prompts, token arrays, and model responses.
 
 ## Quick Start
 
@@ -745,6 +752,9 @@ uv run olmo-eval run -m llama3.1-8b -t mmlu -t gsm8k -t arc_easy
 # Large models with multi-GPU tensor parallelism
 uv run olmo-eval run -m llama3.1-70b -t mmlu --num-gpus 4
 
+# Refresh Hugging Face cache before loading a remote model
+uv run olmo-eval run -m allenai/OLMo-2-1124-7B -t mmlu --force-download-model
+
 # Tool-augmented evaluation with harness
 uv run olmo-eval run -m llama3.1-8b -t simpleqa:judge --harness dr_tulu
 ```
@@ -1210,6 +1220,7 @@ budget: ai2/oe-base
 | `--external-eval` | `-E` | none | External evaluation name(s) to run instead of tasks |
 | `--eval-arg` | `-A` | none | Arguments for external evals (`key=value`) |
 | `--provider-kwarg` | `-K` | none | Provider kwargs for external evals (`key=value`) |
+| `--force-download-model` | | `false` | Refresh Hugging Face model/tokenizer cache before loading |
 | `--uv-cache-dir` | | default | UV cache directory for package downloads |
 | `--dry-run` | `-d` | `false` | Print spec without launching |
 | `--yes` | `-y` | `false` | Skip confirmation prompt |
@@ -1572,4 +1583,3 @@ uv lock
 
 CI runs `uv sync --frozen` and `uv run --frozen ...`, so any change to
 `pyproject.toml` must be accompanied by a refreshed `uv.lock`.
-

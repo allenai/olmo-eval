@@ -63,7 +63,7 @@ ARG PYTHON_VERSION
 ARG GIT_COMMIT
 ARG GIT_BRANCH
 
-LABEL org.opencontainers.image.source="https://github.com/allenai/olmo-eval-internal"
+LABEL org.opencontainers.image.source="https://github.com/allenai/olmo-eval"
 LABEL org.opencontainers.image.description="OLMo evaluation framework"
 LABEL cuda_version="${CUDA_VERSION}"
 LABEL torch_version="${TORCH_VERSION}"

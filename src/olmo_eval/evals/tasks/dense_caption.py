@@ -17,13 +17,12 @@ import hashlib
 import json
 import logging
 import os
-from abc import abstractmethod
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar
 
 from olmo_eval.common.metrics.base import Metric
+from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.scorers.dense_caption_judge import DenseCaptionJudgeScorer
 from olmo_eval.common.types import Instance, LMRequest, RequestType, Response, SamplingParams
 from olmo_eval.evals.tasks.common import Task, register, register_variant
@@ -42,12 +41,13 @@ _JUDGE = DenseCaptionJudgeScorer()
 # Metric definitions
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True, slots=True)
 class DenseCaptionRecallMetric(Metric):
     """Mean recall (×100) over valid examples."""
 
-    name: ClassVar[str] = "recall"
-    scorer: ClassVar[DenseCaptionJudgeScorer] = _JUDGE  # type: ignore[assignment]
+    name: str = "recall"
+    scorer: type[Scorer] | Scorer = _JUDGE
 
     def compute(self, responses: Sequence[Response]) -> float:
         vals = [
@@ -65,8 +65,8 @@ class DenseCaptionRecallMetric(Metric):
 class DenseCaptionConsistencyMetric(Metric):
     """Mean consistency (×100) over valid examples."""
 
-    name: ClassVar[str] = "consistency"
-    scorer: ClassVar[DenseCaptionJudgeScorer] = _JUDGE  # type: ignore[assignment]
+    name: str = "consistency"
+    scorer: type[Scorer] | Scorer = _JUDGE
 
     def compute(self, responses: Sequence[Response]) -> float:
         vals = [
@@ -84,8 +84,8 @@ class DenseCaptionConsistencyMetric(Metric):
 class DenseCaptionRecallAt10Metric(Metric):
     """Mean recall-at-10 (×100) over valid examples."""
 
-    name: ClassVar[str] = "recall_at_10"
-    scorer: ClassVar[DenseCaptionJudgeScorer] = _JUDGE  # type: ignore[assignment]
+    name: str = "recall_at_10"
+    scorer: type[Scorer] | Scorer = _JUDGE
 
     def compute(self, responses: Sequence[Response]) -> float:
         vals = [
@@ -103,8 +103,8 @@ class DenseCaptionRecallAt10Metric(Metric):
 class DenseCaptionNumStatementsMetric(Metric):
     """Mean number of mturk statements per valid example (raw, not ×100)."""
 
-    name: ClassVar[str] = "num_statements"
-    scorer: ClassVar[DenseCaptionJudgeScorer] = _JUDGE  # type: ignore[assignment]
+    name: str = "num_statements"
+    scorer: type[Scorer] | Scorer = _JUDGE
 
     def compute(self, responses: Sequence[Response]) -> float:
         vals = [
@@ -122,8 +122,8 @@ class DenseCaptionNumStatementsMetric(Metric):
 class DenseCaptionAvgMetric(Metric):
     """Primary metric: (mean_recall + mean_consistency) / 2 × 100."""
 
-    name: ClassVar[str] = "avg"
-    scorer: ClassVar[DenseCaptionJudgeScorer] = _JUDGE  # type: ignore[assignment]
+    name: str = "avg"
+    scorer: type[Scorer] | Scorer = _JUDGE
 
     def compute(self, responses: Sequence[Response]) -> float:
         results = [
@@ -152,6 +152,7 @@ _AVG_METRIC = DenseCaptionAvgMetric()
 # ---------------------------------------------------------------------------
 # Task
 # ---------------------------------------------------------------------------
+
 
 def _sha256(s: str) -> str:
     return hashlib.sha256(s.encode()).hexdigest()

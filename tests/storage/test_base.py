@@ -161,9 +161,11 @@ class TestComputeModelHash:
         config1 = {
             "kind": "vllm_server",
             "model": "Qwen/Qwen3-8B",
+            "force_download": True,
             "kwargs": {
                 "enable_expert_parallel": True,
                 "enable_prefix_caching": False,
+                "force_download": True,
                 "gpu_memory_utilization": 0.6,
                 "max_num_batched_tokens": 8192,
                 "max_num_seqs": 32,

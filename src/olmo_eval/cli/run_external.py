@@ -79,6 +79,11 @@ class ExternalRunConfig:
     help="Print configuration without running",
 )
 @click.option(
+    "--force-download-model",
+    is_flag=True,
+    help="Force-refresh Hugging Face model/tokenizer cache before loading",
+)
+@click.option(
     "--arg",
     "-a",
     "eval_args",
@@ -154,6 +159,7 @@ def run_external(
     port: int,
     runtime: str,
     dry_run: bool,
+    force_download_model: bool,
     eval_args: tuple[str, ...],
     provider_kwargs: tuple[str, ...],
     store: bool,
@@ -221,13 +227,18 @@ def run_external(
         console.print(f"[red]Error:[/red] Invalid provider kwarg: {e}")
         raise SystemExit(1) from None
 
+    force_download_override = bool(parsed_provider_kwargs.pop("force_download", False))
+
     # Apply overrides
-    provider_config = provider_config.with_overrides(
-        kind=provider,
-        base_url=base_url,
-        tensor_parallel_size=tensor_parallel_size,
+    provider_overrides: dict[str, Any] = {
+        "kind": provider,
+        "base_url": base_url,
+        "tensor_parallel_size": tensor_parallel_size,
         **parsed_provider_kwargs,
-    )
+    }
+    if force_download_model or force_download_override:
+        provider_overrides["force_download"] = True
+    provider_config = provider_config.with_overrides(**provider_overrides)
 
     # Parse eval_args (supports both key=value and JSON dict format)
     try:

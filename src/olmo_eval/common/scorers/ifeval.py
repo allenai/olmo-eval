@@ -12,7 +12,7 @@ both strict and loose pass/fail lists for each instruction into
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Any
 
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.types import Instance, LMOutput
@@ -65,7 +65,7 @@ class IFEvalScorer(Scorer):
     so the four metric classes can derive prompt/inst × strict/loose figures.
     """
 
-    name: ClassVar[str] = "ifeval"
+    name: str = "ifeval"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         instruction_ids: list[str] = instance.metadata.get("instruction_id_list", [])

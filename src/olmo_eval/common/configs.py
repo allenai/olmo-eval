@@ -176,6 +176,7 @@ def get_provider_config(name: str, **overrides: Any) -> ProviderConfig:
                 base_url=filtered_overrides.get("base_url", base.base_url),
                 tokenizer=filtered_overrides.get("tokenizer", base.tokenizer),
                 revision=filtered_overrides.get("revision", base.revision),
+                force_download=filtered_overrides.get("force_download", base.force_download),
                 trust_remote_code=filtered_overrides.get(
                     "trust_remote_code", base.trust_remote_code
                 ),

@@ -21,8 +21,7 @@ def _get_launcher() -> BeakerLauncher:
         from olmo_eval.launch import BeakerLauncher
     except ImportError:
         console.print(
-            "[red]beaker-py is not installed.[/red]\n"
-            "Install with: pip install 'olmo-eval-internal[beaker]'"
+            "[red]beaker-py is not installed.[/red]\nInstall with: pip install 'olmo-eval[beaker]'"
         )
         raise SystemExit(1) from None
     return BeakerLauncher()

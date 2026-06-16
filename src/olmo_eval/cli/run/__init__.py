@@ -56,6 +56,11 @@ from olmo_eval.cli.utils import (
     help="Override for preceding --task or --harness (e.g., -o limit=100)",
 )
 @click.option("--config", "-c", type=click.Path(exists=True), help="YAML config file")
+@click.option(
+    "--force-download-model",
+    is_flag=True,
+    help="Force-refresh Hugging Face model/tokenizer cache before loading",
+)
 # Grouped options via decorators
 @harness_options
 @parallelism_options
@@ -69,6 +74,7 @@ def run(
     task: tuple[str, ...],
     cli_override: tuple[str, ...],
     config: str | None,
+    force_download_model: bool,
     # Harness options
     harness_preset: str | None,
     harness_config: str | None,
@@ -177,6 +183,7 @@ def run(
         harness_preset=harness_preset,
         harness_config_path=harness_config,
         cli_harness_overrides=harness_overrides,
+        force_download_model=force_download_model,
     )
 
     from rich.panel import Panel

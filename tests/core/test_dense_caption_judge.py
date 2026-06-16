@@ -10,9 +10,6 @@ Two levels:
 
 from __future__ import annotations
 
-import asyncio
-import json
-from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
@@ -33,11 +30,10 @@ from olmo_eval.evals.tasks.dense_caption import (
     DenseCaptionRecallMetric,
 )
 
-
-
 # ---------------------------------------------------------------------------
 # 1. Unit tests — parse_recall_output
 # ---------------------------------------------------------------------------
+
 
 class TestParseRecallOutput:
     def test_basic_stated_not_stated(self):
@@ -89,6 +85,7 @@ class TestParseRecallOutput:
 # 2. Unit tests — parse_consistency_output
 # ---------------------------------------------------------------------------
 
+
 class TestParseConsistencyOutput:
     def test_basic_consistent_inconsistent(self):
         text = "1. Consistent\n2. Inconsistent\n3. Consistent"
@@ -124,6 +121,7 @@ class TestParseConsistencyOutput:
 # 3. Metric aggregation tests
 # ---------------------------------------------------------------------------
 
+
 def _make_response(result: dict) -> Response:
     """Build a synthetic Response with a pre-filled dense_caption_result."""
     instance = Instance(question="Describe this image.", gold_answer=None, metadata={})
@@ -134,9 +132,13 @@ def _make_response(result: dict) -> Response:
 
 class TestDenseCaptionMetrics:
     def _valid_result(
-        self, recall: float = 0.5, consistency: float = 0.8,
-        num_covered: int = 5, num_statements: int = 10,
-        num_consistent: int = 8, consistency_valid: bool = True,
+        self,
+        recall: float = 0.5,
+        consistency: float = 0.8,
+        num_covered: int = 5,
+        num_statements: int = 10,
+        num_consistent: int = 8,
+        consistency_valid: bool = True,
     ) -> dict:
         return dict(
             recall=recall,
@@ -150,22 +152,33 @@ class TestDenseCaptionMetrics:
         )
 
     def test_recall_metric_valid(self):
-        responses = [_make_response(self._valid_result(recall=0.4)),
-                     _make_response(self._valid_result(recall=0.6))]
+        responses = [
+            _make_response(self._valid_result(recall=0.4)),
+            _make_response(self._valid_result(recall=0.6)),
+        ]
         score = DenseCaptionRecallMetric().compute(responses)
         assert abs(score - 50.0) < 1e-6
 
     def test_recall_metric_filters_invalid(self):
-        invalid = dict(recall=0.0, recall_valid=False, consistency=0.0, consistency_valid=False,
-                       num_statements=0, num_covered=0, recall_at_10=0.0, num_consistent=0)
-        responses = [_make_response(self._valid_result(recall=0.6)),
-                     _make_response(invalid)]
+        invalid = dict(
+            recall=0.0,
+            recall_valid=False,
+            consistency=0.0,
+            consistency_valid=False,
+            num_statements=0,
+            num_covered=0,
+            recall_at_10=0.0,
+            num_consistent=0,
+        )
+        responses = [_make_response(self._valid_result(recall=0.6)), _make_response(invalid)]
         score = DenseCaptionRecallMetric().compute(responses)
         assert abs(score - 60.0) < 1e-6
 
     def test_consistency_metric(self):
-        responses = [_make_response(self._valid_result(consistency=0.7)),
-                     _make_response(self._valid_result(consistency=0.9))]
+        responses = [
+            _make_response(self._valid_result(consistency=0.7)),
+            _make_response(self._valid_result(consistency=0.9)),
+        ]
         score = DenseCaptionConsistencyMetric().compute(responses)
         assert abs(score - 80.0) < 1e-6
 
@@ -177,28 +190,37 @@ class TestDenseCaptionMetrics:
         assert abs(score - 80.0) < 1e-6
 
     def test_num_statements_not_scaled(self):
-        responses = [_make_response(self._valid_result(num_statements=20)),
-                     _make_response(self._valid_result(num_statements=10))]
+        responses = [
+            _make_response(self._valid_result(num_statements=20)),
+            _make_response(self._valid_result(num_statements=10)),
+        ]
         score = DenseCaptionNumStatementsMetric().compute(responses)
         assert abs(score - 15.0) < 1e-6
 
     def test_avg_metric(self):
-        responses = [_make_response(self._valid_result(recall=0.4, consistency=0.6)),
-                     _make_response(self._valid_result(recall=0.6, consistency=0.8))]
+        responses = [
+            _make_response(self._valid_result(recall=0.4, consistency=0.6)),
+            _make_response(self._valid_result(recall=0.6, consistency=0.8)),
+        ]
         # mean_recall=0.5, mean_cons=0.7, avg=(0.5+0.7)/2*100=60
         score = DenseCaptionAvgMetric().compute(responses)
         assert abs(score - 60.0) < 1e-6
 
     def test_empty_responses(self):
-        for metric in [DenseCaptionRecallMetric(), DenseCaptionConsistencyMetric(),
-                       DenseCaptionRecallAt10Metric(), DenseCaptionNumStatementsMetric(),
-                       DenseCaptionAvgMetric()]:
+        for metric in [
+            DenseCaptionRecallMetric(),
+            DenseCaptionConsistencyMetric(),
+            DenseCaptionRecallAt10Metric(),
+            DenseCaptionNumStatementsMetric(),
+            DenseCaptionAvgMetric(),
+        ]:
             assert metric.compute([]) == 0.0
 
 
 # ---------------------------------------------------------------------------
 # 4. Scorer unit test with mocked GPT calls
 # ---------------------------------------------------------------------------
+
 
 class TestDenseCaptionJudgeScorerMocked:
     @pytest.mark.anyio
@@ -223,9 +245,9 @@ class TestDenseCaptionJudgeScorerMocked:
         # GPT canonical response: "1. Sky is blue.\n2. Tree is present."
         # GPT consistency response: "1. Consistent\n2. Consistent"
         call_responses = [
-            "1. Stated\n2. Stated",                  # recall check
+            "1. Stated\n2. Stated",  # recall check
             "1. Sky is blue.\n2. Tree is present.",  # canonical statements
-            "1. Consistent\n2. Consistent",           # consistency check
+            "1. Consistent\n2. Consistent",  # consistency check
         ]
         call_iter = iter(call_responses)
 
@@ -274,5 +296,3 @@ class TestDenseCaptionJudgeScorerMocked:
         assert score == 0.0
         result = output.metadata["dense_caption_result"]
         assert result["recall_valid"] is False
-
-

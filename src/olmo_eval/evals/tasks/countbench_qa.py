@@ -44,7 +44,7 @@ class CountBenchQaTask(ImageQATask):
         for idx in range(len(ds_nodecode)):
             ex = ds_nodecode[idx]
             yield Instance(
-                question=ex["question"],
+                question=str(ex["question"]),
                 gold_answer=str(ex["count"]),
                 metadata={
                     "count": ex["count"],
