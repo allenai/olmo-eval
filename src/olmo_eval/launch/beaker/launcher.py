@@ -898,9 +898,16 @@ class BeakerLauncher:
         # updates to the workload description.
         if "beaker" not in main_extras:
             main_extras.append("beaker")
+        main_install_flags: list[str] = []
+        if "olmo_core" in main_extras:
+            main_install_flags.extend(["--no-build-isolation-package", "flash-attn"])
+        main_install_flag_str = " ".join(main_install_flags)
+        main_install_flag_str = f" {main_install_flag_str}" if main_install_flag_str else ""
         if main_extras:
             extras_str = ",".join(main_extras)
-            install_cmd = f"uv pip install -e '.[{extras_str}]' -c {constraints}"
+            install_cmd = (
+                f"uv pip install{main_install_flag_str} -e '.[{extras_str}]' -c {constraints}"
+            )
             steps.append(f"cd /gantry-runtime && {install_cmd}")
         else:
             steps.append(f"cd /gantry-runtime && uv pip install -e . -c {constraints}")
