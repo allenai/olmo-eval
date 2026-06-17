@@ -166,5 +166,5 @@ register_variant(
     metrics=safety_metrics(_WG_SCORER, _XSTEST_SUBSET_METRICS),
     primary_metric=AccuracyMetric(scorer=_WG_SCORER),
     sampling_params=_BASE_SAMPLING,
-    formatter=CompletionFormatter(),
+    formatter=CompletionFormatter(template="Question: {question}\nAnswer:"),
 )
