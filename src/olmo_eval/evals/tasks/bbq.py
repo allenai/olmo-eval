@@ -100,7 +100,7 @@ def _bbq_metric_helper(
     for r in responses:
         if subset == "any" or r.instance.metadata.get(subset) == cat:
             subset_accuracy.append(r.scores.get(scorer_name))
-            if r.instance.metadata.get("context_condition") == metric:
+            if r.instance.metadata.get("context_condition") == metric or metric == "accuracy":
                 if r.instance.metadata.get("bias") is not None:
                     subset_bias.append(r.instance.metadata.get("bias"))
                 if r.instance.metadata.get("nonunknown") is not None:
@@ -156,7 +156,7 @@ def _bbq_logprob_metric_helper(
             accuracy = pred == gold_idx
             subset_accuracy.append(accuracy)
 
-            if r.instance.metadata.get("context_condition") == metric:
+            if r.instance.metadata.get("context_condition") == metric or metric == "accuracy":
                 if r.instance.metadata.get("question_polarity") == "neg":
                     bias_score = pred == bias_idx
                 elif r.instance.metadata.get("question_polarity") == "nonneg":
