@@ -45,6 +45,10 @@ Issues = "https://github.com/allenai/olmo-eval/issues"
 [project.optional-dependencies]
 hf = [
     "transformers>=5.4.0",
+    # Required by the released Molmo2 remote code (image_processing_molmo2.py imports both at
+    # module top); not pulled transitively, so declare them here for the HF multimodal path.
+    "einops",
+    "torchvision ; platform_system != 'Darwin'",  # GPU-coupled; skip on macOS like the vllm extra
 ]
 vllm = [
     # vllm + its companions are Linux/CUDA-only; skip on macOS so the lockfile

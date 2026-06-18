@@ -341,6 +341,7 @@ class Harness:
             tools=self.config.tool_schemas if self.config.has_tools else request.tools,
             system_prompt=self.config.system_prompt or request.system_prompt,
             max_length=request.max_length,
+            images=request.images,
         )
 
     def _inject_system_prompt(

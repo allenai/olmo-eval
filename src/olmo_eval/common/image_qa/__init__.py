@@ -29,7 +29,9 @@ from olmo_eval.common.image_qa.mmmu_parsing import (
 )
 from olmo_eval.common.image_qa.prompt_templates import (
     EVAL_LOADER_SEED,
+    LONG_CAPTION_TEMPLATES,
     POINT_COUNT_TEMPLATES,
+    dense_caption_question,
     format_mc_question,
     pixmo_count_question,
 )
@@ -48,11 +50,13 @@ from olmo_eval.common.image_qa.vqa_normalization import (
 __all__ = [
     "DEMO_PROMPT",
     "EVAL_LOADER_SEED",
+    "LONG_CAPTION_TEMPLATES",
     "POINT_COUNT_TEMPLATES",
     "WORD_TO_NUM",
     "anls_metric",
     "clean_prediction",
     "create_test_prompt",
+    "dense_caption_question",
     "eval_multi_choice",
     "eval_open",
     "extract_answer_offline",
