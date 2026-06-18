@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import multiprocessing as mp
+import os
 import random
 import time
 from collections.abc import Mapping, Sequence
@@ -584,6 +585,18 @@ class AsyncEvalRunner(RunnerResultsMixin, BaseEvalRunner):
         expanded_tasks, trackers, items = self._prepare_tasks()
         total_instances = len(items)
         runner_logger.info(f"Total instances: {total_instances}")
+
+        total_generations = 0
+        for tracker in trackers.values():
+            if tracker.task is None:
+                continue
+            tcfg = tracker.task.config
+            ns = tcfg.sampling_params.num_samples if tcfg.sampling_params else 1
+            total_generations += tracker.total_instances * (ns or 1)
+        if total_generations > 0:
+            os.environ["OLMO_VLLM_GEN_TOTAL"] = str(total_generations)
+        if self.experiment_name:
+            os.environ["OLMO_EVAL_BENCHMARK"] = self.experiment_name
 
         # Update harness metrics config with experiment metadata before starting workers
         self._update_metrics_config(experiment_id)
