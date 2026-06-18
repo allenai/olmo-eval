@@ -29,6 +29,8 @@ logger = logging.getLogger(__name__)
 # Default timeout for server startup
 DEFAULT_STARTUP_TIMEOUT = 300  # 5 minutes for large models
 DEFAULT_HEALTH_CHECK_INTERVAL = 2  # seconds
+_DISTRIBUTED_INIT_HOST = "127.0.0.1"
+_DISTRIBUTED_INIT_PORT_RANGE = (20000, 32767)
 
 
 def _find_free_port() -> int:
@@ -37,6 +39,23 @@ def _find_free_port() -> int:
         s.bind(("", 0))
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         return s.getsockname()[1]
+
+
+def _find_free_distributed_port() -> int:
+    """Find a local port for torch distributed outside the ephemeral range."""
+    import random
+
+    start, end = _DISTRIBUTED_INIT_PORT_RANGE
+    for port in random.sample(range(start, end + 1), end - start + 1):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.bind((_DISTRIBUTED_INIT_HOST, port))
+            except OSError:
+                continue
+            return port
+
+    return _find_free_port()
 
 
 ProgressCallback = Callable[[str], None]
@@ -359,6 +378,9 @@ class VLLMServerProcess:
         self.log_dir = log_dir
         self.owner = owner or get_current_worker_id()
         self.server_kwargs = kwargs
+        if self.server_kwargs.get("distributed_init_method") is None:
+            port = _find_free_distributed_port()
+            self.server_kwargs["distributed_init_method"] = f"tcp://{_DISTRIBUTED_INIT_HOST}:{port}"
         self._process: subprocess.Popen | None = None
         self._log_file: Any | None = None
         self._log_path: Any | None = None
