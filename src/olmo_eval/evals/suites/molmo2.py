@@ -31,3 +31,17 @@ make_suite(
     aggregation=AggregationStrategy.DISPLAY_ONLY,
     description="Molmo2's 11 image-QA benchmarks plus PixMo-Cap dense caption (GPT judge).",
 )
+
+# Image-pointing benchmarks — a separate family from the image-QA tasks above
+# (point-in-mask precision/recall/f1, not VQA-style answers).
+MOLMO2_POINTING_TASKS = (
+    "pixmo_points_eval",
+    "sa_co_gold_subset",
+)
+
+make_suite(
+    "molmo2_pointing",
+    MOLMO2_POINTING_TASKS,
+    aggregation=AggregationStrategy.AVERAGE,
+    description="Molmo2's image-pointing benchmarks (primary metric is f1, 0-1).",
+)
